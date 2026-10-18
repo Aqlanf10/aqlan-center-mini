@@ -1,3 +1,4 @@
+import {CURRENCY_READ_TEMP_SCHEMA} from "./_currency-read-temp-schema";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { assertRealPostgresUrl } from "./_setup";
@@ -61,6 +62,7 @@ beforeAll(async () => {
     CREATE TEMP TABLE expense_payable_allocations (id integer PRIMARY KEY, expense_id integer,
       payable_id integer, paid_minor bigint, payable_currency text, settled_minor bigint);
   `);
+  await client.query(CURRENCY_READ_TEMP_SCHEMA);
 });
 beforeEach(async () => {
   await client.query(`TRUNCATE pg_temp.patients,pg_temp.parties,pg_temp.planned_visits,pg_temp.visits,

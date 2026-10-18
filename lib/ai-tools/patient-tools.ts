@@ -169,7 +169,8 @@ export async function getPatientSummary(
       toCurrencyPaymentLikes(
         patientId,
         ledger.payments.map((payment) => ({
-          amountMinor: payment.amountMinor,
+          settlementAllocation: payment.settlementAllocation,
+        amountMinor: payment.amountMinor,
           currency: payment.currency,
           exchangeRate: payment.exchangeRate,
           baseAmountMinor: payment.baseAmountMinor,

@@ -1,0 +1,3 @@
+{"category":"migrationCatalog","key":"aqlan_reclassification_follow_refund()","sha256":"273166a6d2034278cad975e5bde554dd4e2bb2075f544ab8df1a11fc03f328d0","insertStatement":true,"otherSensitiveMatch":false}
+{"category":"runtimeCatalog","key":"aqlan_reclassification_follow_refund()","sha256":"273166a6d2034278cad975e5bde554dd4e2bb2075f544ab8df1a11fc03f328d0","insertStatement":true,"otherSensitiveMatch":false}
+{"characterizationOk":true,"unexpectedDifferences":0}

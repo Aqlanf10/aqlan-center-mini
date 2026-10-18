@@ -1,3 +1,6 @@
+import {withFinancialReadSnapshot} from "./financial-read-snapshot";
+import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
+import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
 /**
  * محرك التقارير — كل الحساب يجري هنا على الخادم.
  *
@@ -237,6 +240,7 @@ export interface ReportVisit {
  * المسجَّل بسعر يومها إن كانت بعملة أخرى عن فاتورةٍ أساسية — العقد القائم نفسه.
  */
 interface MovementPayment {
+  allocation?:import("./invoice-currency-evidence").SettlementReclassification;
   id: number; date: string; kind: string; amountMinor: number; currency: Currency;
   /** (RPT-SPEC) لحظة الدفعة (ISO) — لنسبة المواد السارية وقت الحدث. */
   at?: string;
@@ -256,6 +260,7 @@ interface MovementPlan {
 }
 
 interface PatientMovement {
+  currencyCorrections?:{invoiceId:number;invoiceNumber:string;issuedDate:string;date:string;minor:number}[];
   patientId: number; patientNumber: string; name: string; phone: string | null;
   createdDate: string | null; lastVisitDate: string | null;
   status: keyof typeof PATIENT_STATUS_LABEL;
@@ -270,12 +275,14 @@ interface PatientMovement {
 }
 
 async function loadMovements(opts: {
+  asOf?:string;
   patientId?: number | null;
   patientStatus?: PatientStatusFilter;
 }): Promise<PatientMovement[]> {
   await ensureSchema();
-  const pool = getPool();
-
+  return withFinancialReadSnapshot(getPool(),runner=>loadMovementsInSnapshot(opts,runner),usesSharedLocalDatabaseConnection());
+}
+async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],pool:DbClient|DbPool):Promise<PatientMovement[]>{
   // حالة المريض مشتقّة: آخر خطة علاج، فإن لم توجد فحداثة آخر زيارة.
   const statusExpr = `
     COALESCE(
@@ -323,8 +330,9 @@ async function loadMovements(opts: {
               (SELECT COALESCE(json_agg(DISTINCT it.description) FILTER (WHERE it.description IS NOT NULL), '[]'::json)
                  FROM invoice_items it WHERE it.invoice_id = i.id) AS items
          FROM invoices i
-        WHERE i.status <> 'cancelled' AND i.patient_id = ANY($2::int[])`,
-      [CLINIC_TIME_ZONE, ids],
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections c JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+          WHERE c.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $1)::date>$3::date)) AND i.patient_id = ANY($2::int[])`,
+      [CLINIC_TIME_ZONE, ids,opts.asOf??clinicTodayISO()],
     ),
     pool.query<{
       id: number; patient_id: number; date: string; kind: string; amount: string; currency: string;
@@ -385,9 +393,12 @@ async function loadMovements(opts: {
          FROM invoice_items it
          JOIN invoices i ON i.id = it.invoice_id
          LEFT JOIN services s ON s.id = it.service_id
-        WHERE i.status <> 'cancelled' AND i.patient_id = ANY($1::int[])
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections c
+          JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+          WHERE c.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $3)::date>$2::date))
+          AND i.patient_id = ANY($1::int[])
         ORDER BY it.invoice_id, it.id`,
-      [ids],
+      [ids,opts.asOf??clinicTodayISO(),CLINIC_TIME_ZONE],
     ),
   ]);
 
@@ -511,6 +522,10 @@ async function loadMovements(opts: {
     });
   }
 
+  const currencyAllocations=new Map<number,import("./invoice-currency-evidence").SettlementReclassification>();
+  for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool)},ids)){
+    if(clinicTodayISO(new Date(event.createdAt))<=(opts.asOf??clinicTodayISO()))currencyAllocations.set(event.paymentId,event);
+  }
   for (const patient of byId.values()) {
     const planById = new Map(patient.plans.map((plan) => [plan.id, plan]));
     for (const payment of patient.payments) {
@@ -556,6 +571,8 @@ async function loadMovements(opts: {
           null,
         );
       }
+      const allocation=currencyAllocations.get(payment.id);
+      if(allocation){target=allocation.targetCurrency;payment.allocation=allocation;}
       payment.settlementCurrency = target;
       /* (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة
        * الهدف، وبمكافئها الأساسي المسجَّل إن كان الهدف الأساس — والعابر بين
@@ -566,6 +583,13 @@ async function loadMovements(opts: {
       );
     }
   }
+
+  const {rows:currencyCorrections}=await pool.query<{patient_id:number;invoice_id:number;invoice_number:string;issued_date:string;date:string;minor:string}>(`
+    SELECT d.patient_id,i.id AS invoice_id,i.invoice_number,(i.created_at AT TIME ZONE $1)::date::text AS issued_date,
+      (d.created_at AT TIME ZONE $1)::date::text AS date,(i.total_minor-i.discount_minor)::text AS minor
+    FROM invoice_settlement_reclassifications d JOIN invoice_corrections c ON c.id=d.correction_id JOIN invoices i ON i.id=c.original_invoice_id
+    WHERE d.patient_id=ANY($2::int[]) AND (d.created_at AT TIME ZONE $1)::date<=$3::date`,[CLINIC_TIME_ZONE,ids,opts.asOf??clinicTodayISO()]);
+  for(const row of currencyCorrections){const patient=byId.get(row.patient_id);if(patient)(patient.currencyCorrections??=[]).push({invoiceId:row.invoice_id,invoiceNumber:row.invoice_number,issuedDate:row.issued_date,date:row.date,minor:num(row.minor)});}
 
   // مدفوعات الخطة: الدفعة المرتبطة بالخطة مباشرة أو بفاتورة من الخطة — بعملة
   // الخطة نفسها (P-01/D-1): تقدُّم الخطة يُقاس بعملة اتفاقها لا بمكافئ الدفاتر.
@@ -604,10 +628,11 @@ async function loadMovements(opts: {
  * العملة الأساسية وحده. لا يجمع الرصيد بين الدلاء أبدًا.
  */
 export interface CurrencyAwareMovement {
+  currencyCorrections?:{invoiceId:number;issuedDate:string;date:string;minor:number}[];
   /** (P1-5ب) الرصيد الافتتاحي بدلو عملته. */
   openings: OpeningsByCurrency;
   invoices: { date: string; netMinor: number; currency: Currency }[];
-  payments: { date: string; settlementCurrency: Currency; settlementMinor: number; kind: string }[];
+  payments: { date: string; settlementCurrency: Currency; settlementMinor: number; kind: string;allocation?:import("./invoice-currency-evidence").SettlementReclassification }[];
 }
 
 /**
@@ -748,7 +773,7 @@ export async function executiveFinancialReadModels(
   billingByCurrency: ExecutiveBillingRow[];
   receivableByCurrency: ExecutiveReceivableRow[];
 }> {
-  const movements = await loadMovements({});
+  const movements = await loadMovements({asOf:to});
   const gross = emptyCurrencyRecord();
   const discount = emptyCurrencyRecord();
   const net = emptyCurrencyRecord();
@@ -797,8 +822,12 @@ export function balancesByCurrencyAt(m: CurrencyAwareMovement, date: string): Re
     if (invoice.date <= date) balances[invoice.currency] += invoice.netMinor;
   }
   for (const payment of m.payments) {
-    if (payment.date <= date) balances[payment.settlementCurrency] -= signedSettlement(payment);
+    if (payment.date <= date) {
+      const prior=payment.allocation&&clinicTodayISO(new Date(payment.allocation.createdAt))>date;
+      balances[prior?payment.allocation!.sourceCurrency:payment.settlementCurrency]-=(payment.kind==="refund"?-1:1)*(prior?payment.allocation!.sourceMinor:payment.settlementMinor);
+    }
   }
+  for(const correction of m.currencyCorrections??[])if(correction.issuedDate<=date&&date<correction.date)balances.YER+=correction.minor;
   return balances;
 }
 
@@ -809,9 +838,13 @@ export function oldestUnpaidByCurrency(
 ): Record<Currency, { date: string | null; ageDays: number }> {
   const result = {} as Record<Currency, { date: string | null; ageDays: number }>;
   for (const currency of CURRENCIES) {
-    const paidUpTo = m.payments
-      .filter((p) => p.date <= asOf && p.settlementCurrency === currency)
-      .reduce((sum, p) => sum + signedSettlement(p), 0);
+    const paidUpTo = m.payments.reduce((sum,p)=>{
+      if(p.date>asOf)return sum;
+      const prior=p.allocation&&clinicTodayISO(new Date(p.allocation.createdAt))>asOf;
+      const target=prior?p.allocation!.sourceCurrency:p.settlementCurrency;
+      const amount=prior?p.allocation!.sourceMinor:p.settlementMinor;
+      return target===currency?sum+(p.kind==="refund"?-amount:amount):sum;
+    },0);
 
     const debts: { date: string; amount: number }[] = [];
     const opening = m.openings[currency];
@@ -822,6 +855,9 @@ export function oldestUnpaidByCurrency(
       if (invoice.currency === currency && invoice.date <= asOf && invoice.netMinor > 0) {
         debts.push({ date: invoice.date, amount: invoice.netMinor });
       }
+    }
+    if(currency==="YER")for(const correction of m.currencyCorrections??[]){
+      if(correction.issuedDate<=asOf&&asOf<correction.date&&correction.minor>0)debts.push({date:correction.issuedDate,amount:correction.minor});
     }
     debts.sort((a, b) => (a.date < b.date ? -1 : 1));
 
@@ -1072,7 +1108,7 @@ async function loadContext(
   }));
 
   const movements = needMovements
-    ? await loadMovements({ patientId: filters.patientId, patientStatus: filters.patientStatus })
+    ? await loadMovements({ patientId: filters.patientId, patientStatus: filters.patientStatus,asOf:filters.to })
     : [];
   const visits = needMovements ? await loadVisits(filters) : [];
 
@@ -4156,7 +4192,18 @@ export function patientStatementReport(ctx: ReportContext): ReportResult {
       credit: 0,
     });
   }
+  for(const correction of patient.currencyCorrections??[]){
+    events.push({date:correction.issuedDate,description:`الفاتورة الأصلية ${correction.invoiceNumber}`,currency:"YER",debit:correction.minor,credit:0});
+    events.push({date:correction.date,description:`إبطال عملة الفاتورة ${correction.invoiceNumber}`,currency:"YER",debit:0,credit:correction.minor});
+  }
   for (const payment of payments) {
+    if(payment.allocation){
+      const a=payment.allocation,refund=payment.kind==="refund",date=clinicTodayISO(new Date(a.createdAt));
+      events.push({date:payment.date,description:`${refund?"استرداد":"سند"} #${payment.id}: ${formatMoney(payment.amountMinor,payment.currency)} — تسوية الأصل`,currency:"YER",debit:refund?a.sourceMinor:0,credit:refund?0:a.sourceMinor});
+      events.push({date,description:`إعادة تصنيف تسوية السند #${payment.id} — عكس الأثر اليمني دون نقد`,currency:"YER",debit:refund?0:a.sourceMinor,credit:refund?a.sourceMinor:0});
+      events.push({date,description:`إعادة تصنيف تسوية السند #${payment.id} — الأثر السعودي دون نقد`,currency:"SAR",debit:refund?a.targetMinor:0,credit:refund?0:a.targetMinor});
+      continue;
+    }
     if (payment.kind === "refund") {
       events.push({
         date: payment.date, description: `استرداد ${formatMoney(payment.amountMinor, payment.currency)}`,

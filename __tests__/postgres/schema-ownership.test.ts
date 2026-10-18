@@ -11,6 +11,7 @@ import {
   stubPostgresEnv,
 } from "./_setup";
 import {
+  artifactContainsSensitiveText,
   assertPostgres18VersionNum,
   initializeGeneratedRuntimeSchema,
   OPEN_FINDINGS_MANIFEST_PATH,
@@ -287,13 +288,22 @@ describe("PG18 schema ownership characterization", () => {
     const report = await runSchemaOwnershipCharacterization(process.env);
 
     expect(report.postgres.major).toBe(18);
+    // Exercise the same serialization gate as the CLI, not just schema equality.
+    expect(artifactContainsSensitiveText(JSON.stringify(report))).toBe(false);
+    for (const catalog of [report.migrationCatalog, report.runtimeCatalog]) {
+      const refund = catalog.functions.find(entry => entry.key === "aqlan_reclassification_follow_refund()");
+      expect(JSON.parse(refund!.value)).toEqual({
+        reviewedDefinitionSha256: "273166a6d2034278cad975e5bde554dd4e2bb2075f544ab8df1a11fc03f328d0",
+        source: "migrations/0063_invoice_currency_reclassification.sql",
+      });
+    }
     expect(report.migrationProvenance.map((item) => item.version)).toEqual([
       "0001", "0002", "0003", "0004", "0005", "0006",
       "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043",
-      '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061',
+      '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063',
     ]);
     expect(report.migrationRegistry.present).toBe(true);
-    expect(report.migrationRegistry.rows).toHaveLength(56);
+    expect(report.migrationRegistry.rows).toHaveLength(57);
     expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
 
     const migrationApplicationTables = report.migrationCatalog.tables
@@ -301,8 +311,8 @@ describe("PG18 schema ownership characterization", () => {
     const runtimeApplicationTables = report.runtimeCatalog.tables
       .filter((entry) => entry.table !== "schema_migrations");
 
-    expect(migrationApplicationTables).toHaveLength(121);
-    expect(runtimeApplicationTables).toHaveLength(121);
+    expect(migrationApplicationTables).toHaveLength(123);
+    expect(runtimeApplicationTables).toHaveLength(123);
     for (const table of ["ortho_strategy_revisions", "ortho_assessment_revisions"]) {
       expect(migrationApplicationTables.some(entry => entry.table === table)).toBe(true);
       expect(runtimeApplicationTables.some(entry => entry.table === table)).toBe(true);
@@ -312,7 +322,7 @@ describe("PG18 schema ownership characterization", () => {
       expect(runtimeApplicationTables.some(entry=>entry.table===table)).toBe(true);
     }
     expect(report.runtimeCatalog.registry.present).toBe(true);
-    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058'].includes(row.version)));
+    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063'].includes(row.version)));
 
     expect(report.comparison.characterizationOk).toBe(true);
     expect(report.comparison.applicationSchemaEqual).toBe(false);

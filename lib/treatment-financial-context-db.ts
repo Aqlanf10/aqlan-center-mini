@@ -1,3 +1,4 @@
+import {attachCurrencyReclassifications} from "./invoice-currency-evidence";
 import {
   ensureSchema, getPool, PLAN_ITEM_FINANCIAL_REVIEW_SQL, PLAN_ITEM_INVOICE_LINEAGE_SQL,
   PLAN_ITEM_LEGACY_LINEAGE_SQL, PLAN_ITEM_LEGACY_CONTEXT_SQL,
@@ -110,7 +111,7 @@ export async function listTreatmentFinancialReferences(patientId: number) {
         totalMinor: minor(row.total_minor), discountMinor: minor(row.discount_minor), status: invoiceStatus(row.status) })),
       lines: lines.map((row) => ({ id: row.id, invoiceId: row.invoice_id, planItemId: row.plan_item_id,
         sourceType: row.source_type, sourceId: row.source_id === null ? null : minor(row.source_id), totalMinor: minor(row.total_minor) })),
-      receipts: normalizedReceipts,
+      receipts: await attachCurrencyReclassifications(client,normalizedReceipts),
       legacyAgreements: agreements.map((row) => ({ id: row.id, patientId: row.patient_id, planItemId: row.plan_item_id,
         clinicalCaseId: row.case_id, currency: requireCurrency(row.currency, "اتفاق تاريخي", row.id),
         agreedMinor: minor(row.agreed_minor), previouslyPaidMinor: minor(row.previously_paid_minor),

@@ -115,12 +115,28 @@ describe("outstanding debt uses one inclusive clinic-date cutoff", () => {
     const pid = await patient();
     await invoice(pid, "YER", 100);
     const pool = getPool();
-    const original = pool.query.bind(pool);
-    const spy = vi.spyOn(pool, "query").mockImplementation((...args: Parameters<typeof pool.query>) => {
-      if (String(args[0]).includes("FROM payments WHERE")) return Promise.reject(new Error("synthetic payment read failed"));
-      return original(...args);
+    let injectedFailures = 0;
+    const withFailure = (query: typeof pool.query): typeof pool.query => ((...args: Parameters<typeof pool.query>) => {
+      if (String(args[0]).includes("FROM payments WHERE")) {
+        injectedFailures += 1;
+        return Promise.reject(new Error("synthetic payment read failed"));
+      }
+      return query(...args);
+    }) as typeof pool.query;
+    // PGlite uses the shared runner; PostgreSQL reads through its snapshot client.
+    const connect = pool.connect.bind(pool);
+    const query = pool.query.bind(pool);
+    const querySpy = vi.spyOn(pool, "query").mockImplementation(withFailure(query));
+    const connectSpy = vi.spyOn(pool, "connect").mockImplementation((...args: unknown[]) => {
+      // Native pg pool.query also calls connect(callback); preserve that overload.
+      if (args.length) return Reflect.apply(connect, pool, args);
+      return connect().then(client => ({
+        query: withFailure(client.query.bind(client)), release: client.release.bind(client),
+      }));
     });
-    try { await expect(report(pid)).rejects.toThrow("synthetic payment read failed"); }
-    finally { spy.mockRestore(); }
+    try {
+      await expect(report(pid)).rejects.toThrow("synthetic payment read failed");
+      expect(injectedFailures).toBe(1);
+    } finally { querySpy.mockRestore(); connectSpy.mockRestore(); }
   });
 });

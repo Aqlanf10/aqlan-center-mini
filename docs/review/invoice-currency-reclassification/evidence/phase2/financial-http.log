@@ -1,0 +1,20 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/invoice-currency-recovery-ui.test.ts __tests__/security-http/invoice-revision-recovery-ui.test.ts __tests__/security-http/money-durable-recovery-ui.test.ts __tests__/security-http/receipt-correction-http.test.ts __tests__/security-http/commission-detail-http.test.ts __tests__/security-http/commission-config-http.test.ts __tests__/security-http/multi-currency-ledger-http.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-currency-continuation
+
+[security-http] الخادم جاهز على http://127.0.0.1:3218 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  7 passed (7)
+      Tests  29 passed (29)
+   Start at  23:06:41
+   Duration  21.94s (transform 61ms, setup 0ms, import 273ms, tests 19.64s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

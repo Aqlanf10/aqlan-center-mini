@@ -7,6 +7,11 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if(files.length===57&&files[56].version==="0063"&&files[56].filename==="0063_invoice_currency_reclassification.sql"){
+    periodontalCandidateMigrationVersion(files.slice(0,56));
+    // Isolated fixture sentinel, not an allocated production migration number.
+    return "9000";
+  }
   if (files.length === 56) {
     const ortho = files.filter(file => file.version === "0051" || file.version === "0052");
     if (ortho.length !== 2 || ortho[0].filename !== "0051_ortho_treatment_strategy.sql" || ortho[1].filename !== "0052_ortho_assessment.sql") {

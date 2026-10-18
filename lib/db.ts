@@ -1,3 +1,6 @@
+import {withFinancialReadSnapshot} from "./financial-read-snapshot";
+import {currencyReclassificationJournal} from "./invoice-currency-journal";
+import {attachCurrencyReclassifications,readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
 import type {InvoiceIdentityAmendment} from "./invoice-identity-amendments";
 import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { HR_STAFF_SQL } from "./hr-schema";
@@ -65,7 +68,7 @@ import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
 import { LEGACY_TREATMENT_COVERAGE_SQL } from "./legacy-treatment-coverage-schema";
 import { DEBT_INSTALLMENTS_SQL } from "./debt-installments-schema";
 import { LEGACY_TREATMENT_DOCUMENT_SQL } from "./legacy-treatment-document-schema";
-import { INVOICE_CORRECTION_SQL } from "./invoice-correction-schema";
+import {ensureInvoiceCurrencySchema} from "./invoice-currency-runtime";
 import { INVOICE_CORRECTION_COVERAGE_SQL } from "./invoice-correction-coverage";
 import { legacyCoverageContains, legacyCoverageOverlaps, legacyCoverageStateFromContext, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { LEGACY_ITEM_COVERAGE_CONTEXT_SQL } from "./legacy-treatment-coverage-db";
@@ -167,7 +170,7 @@ export interface QueryResult<T = any> {
 
 export interface DbClient {
   query<T = any>(sql: string, values?: any[]): Promise<QueryResult<T>>;
-  release(): void;
+  release(destroy?: boolean): void;
 }
 
 export interface DbPool {
@@ -178,6 +181,7 @@ export interface DbPool {
 
 let pool: DbPool | null = null;
 let pgliteInstance: PGlite | null = null;
+export function usesSharedLocalDatabaseConnection():boolean{return pgliteInstance!==null;}
 
 function getPgliteInstance(): PGlite {
   if (!pgliteInstance) {
@@ -2070,7 +2074,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(LEGACY_TREATMENT_COVERAGE_SQL);
     await getPool().query(DEBT_INSTALLMENTS_SQL);
     await getPool().query(LEGACY_TREATMENT_DOCUMENT_SQL);
-    await getPool().query(INVOICE_CORRECTION_SQL);
+    await ensureInvoiceCurrencySchema(getPool());
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -8888,6 +8892,7 @@ export interface Invoice {
 }
 
 export interface Payment {
+  settlementAllocation?: import("./money").SettlementAllocation;
   id: number;
   receiptNumber: string;
   patientId: number;
@@ -9235,7 +9240,7 @@ export interface InvoiceCorrectionWrite {
 
 /** Transaction-owned existing reversal/replacement writer. The revision option
  * is internal; callers must validate current authority, locks and intent first. */
-export async function correctInvoiceInTransaction(client: DbClient, input: InvoiceCorrectionWrite, revision?: { discountMinor: number; amendments?: Map<number,InvoiceIdentityAmendment> }) {
+export async function correctInvoiceInTransaction(client: DbClient, input: InvoiceCorrectionWrite, revision?: { discountMinor: number; currency?:Currency; amendments?: Map<number,InvoiceIdentityAmendment> }) {
     await lockPlanItemsBilledBy(client, input.invoiceId);
     const { rows: [original] } = await client.query<{
       id: number; invoice_number: string; patient_id: number; status: string; total_minor: string;
@@ -9272,9 +9277,9 @@ export async function correctInvoiceInTransaction(client: DbClient, input: Invoi
        VALUES (${documentNumberSql("invoice")}, $1, $2, $3, $4, $5::text, $6, $7::int, $8, $9)
        RETURNING id, invoice_number`,
       [
-        original.patient_id, plan.totalMinor, plan.discountMinor, original.base_currency,
+        original.patient_id, plan.totalMinor, plan.discountMinor, revision?.currency??original.base_currency,
         `تصحيح للفاتورة ${original.invoice_number} — ${input.reason}`.slice(0, 500),
-        input.actor, original.plan_id, original.created_at,
+        input.actor, original.plan_id, revision?.currency&&revision.currency!==original.base_currency?new Date():original.created_at,
         /* مسدّدةٌ خُفّضت تبقى مسدّدة: دفعتها على الأصل تغطّي الأقل، ولا تُعرض المصحَّحة
            هدفَ تحصيلٍ من جديد (قسط الخطة يصدر مسدّدًا مع سنده). */
         original.status === "paid" ? "paid" : "open",
@@ -9349,12 +9354,12 @@ export async function correctInvoice(input: InvoiceCorrectionWrite): Promise<Inv
   return { ok: true, original: original!, corrected: corrected! };
 }
 
-export async function listPatientPayments(patientId: number, client?: DbClient): Promise<Payment[]> {
-  if (!client) await ensureSchema();
-  const { rows } = await (client ?? getPool()).query<PaymentRow>(
+export async function listPatientPayments(patientId: number, client?: DbClient | DbPool): Promise<Payment[]> {
+  if(!client){await ensureSchema();return withFinancialReadSnapshot(getPool(),runner=>listPatientPayments(patientId,runner),pgliteInstance!==null);}
+  const { rows } = await client.query<PaymentRow>(
     `${PAYMENT_SELECT} WHERE y.patient_id = $1 ORDER BY y.created_at DESC, y.id DESC`, [patientId],
   );
-  return rows.map(toPayment);
+  return attachCurrencyReclassifications(client,rows.map(toPayment));
 }
 
 export async function getPayment(id: number): Promise<Payment | null> {
@@ -9617,6 +9622,20 @@ export async function correctPayment(input: {
         }
         : { ...next.target, inherited: false };
 
+    let reclassifiedTargetIds:number[]=[];
+    if(target?.inherited&&origin.invoice_id!==null){
+      const proof=(await readCurrencyReclassificationEvidence(client,origin.patient_id)).find(row=>row.paymentId===origin.id);
+      if(proof){
+        const {rows:descendants}=await client.query<{id:number;status:string}>(`WITH RECURSIVE descendants(id) AS (
+          SELECT corrected_invoice_id FROM invoice_corrections WHERE id=$1 UNION
+          SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN descendants d ON c.original_invoice_id=d.id)
+          SELECT i.id,i.status FROM invoices i JOIN descendants d ON d.id=i.id WHERE i.patient_id=$2 AND i.base_currency='SAR' ORDER BY i.id`,[proof.correctionId,origin.patient_id]);
+        reclassifiedTargetIds=descendants.map(row=>row.id);
+        const active=descendants.filter(row=>row.status!=="cancelled");
+        if(active.length!==1){await client.query("ROLLBACK");return {reason:"invalid_invoice"};}
+        target.invoiceId=active[0].id;
+      }
+    }
     if (key !== null) {
       const { rows: keyed } = await client.query<{
         id: number; kind: string; patient_id: number; reversal_of_id: number | null; note: string | null;
@@ -9645,7 +9664,7 @@ export async function correctPayment(input: {
           same = hit.kind === "payment" && hit.patient_id === origin.patient_id && hit.note === replacementNote
             && hit.created_by === input.actor && toMinor(hit.amount_minor) === next.amountMinor && hit.currency === next.currency
             && hit.method === next.method && Number(hit.exchange_rate) === next.exchangeRate
-            && hit.invoice_id === target.invoiceId && hit.plan_id === target.planId
+            && (hit.invoice_id === target.invoiceId || next.target.kind==="original"&&hit.invoice_id!==null&&reclassifiedTargetIds.includes(hit.invoice_id)) && hit.plan_id === target.planId
             && (hit.opening_currency ?? null) === (target.openingCurrency ?? null);
           if (same) {
             const { rows: pair } = await client.query<{ id: number }>(
@@ -10471,7 +10490,8 @@ export async function patientReceiptRemainders(patientId: number): Promise<Recor
 /** يحوّل صفوف الدفعات إلى الشكل الذي تفهمه حسابات `lib/money`. */
 export function asPaymentLikes(payments: Payment[]): PaymentLike[] {
   return payments.map((payment) => ({
-    amountMinor: payment.amountMinor,
+    settlementAllocation: payment.settlementAllocation,
+        amountMinor: payment.amountMinor,
     currency: payment.currency,
     exchangeRate: payment.exchangeRate,
     baseAmountMinor: payment.baseAmountMinor,
@@ -12725,6 +12745,7 @@ export async function commissionReport(
   queryRunner?: DbClient | DbPool,
 ): Promise<CommissionRow[]> {
   await ensureSchema();
+  if(!queryRunner)return withFinancialReadSnapshot(getPool(),runner=>commissionReport(from,to,detail,runner),pgliteInstance!==null);
   const pool = queryRunner ?? getPool();
 
   const [{ rows: doctorRows }, { rows: invoiceRows }, { rows: paidRows }] = await Promise.all([
@@ -12732,7 +12753,7 @@ export async function commissionReport(
       `SELECT id, name, commission_percent FROM parties WHERE kind = 'doctor'`,
     ),
     pool.query<{
-      patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string;
+      patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string; issued_at: Date; issued_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
       case_id: number | null; plan_id: number | null;
@@ -12741,7 +12762,8 @@ export async function commissionReport(
               i.id AS invoice_id,
               GREATEST(0, i.total_minor - i.discount_minor) AS net_minor,
               i.base_currency,
-              i.created_at, to_char(i.created_at, 'US') AS created_at_us,
+              i.created_at AS issued_at, to_char(i.created_at, 'US') AS issued_at_us,
+              COALESCE(currency_origin.created_at,i.created_at) AS created_at, to_char(COALESCE(currency_origin.created_at,i.created_at), 'US') AS created_at_us,
               (i.created_at AT TIME ZONE $1)::date AS clinic_date,
               it.doctor_id,
               it.service_id,
@@ -12752,19 +12774,30 @@ export async function commissionReport(
               COALESCE(pi.plan_id, i.plan_id) AS plan_id,
               COALESCE(SUM(it.total_minor), 0) AS share_minor
          FROM invoices i
+         LEFT JOIN LATERAL (
+           WITH RECURSIVE lineage(id) AS (SELECT i.id UNION
+             SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id=l.id)
+           SELECT original.created_at FROM invoice_corrections c
+           JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+           JOIN invoices original ON original.id=c.original_invoice_id
+           WHERE c.corrected_invoice_id IN(SELECT id FROM lineage) ORDER BY d.id LIMIT 1
+         ) currency_origin ON TRUE
          LEFT JOIN invoice_items it ON it.invoice_id = i.id
          LEFT JOIN services s ON s.id = it.service_id
          /* (COMM-DETAIL-1) الحالة والخطة مشتقتان لا منسوختان: بند الفاتورة ← إجراء الزيارة ← بند الخطة. */
          LEFT JOIN visit_procedures vp ON it.source_type = 'visit_procedure' AND vp.id = it.source_id
          LEFT JOIN plan_items pi ON pi.id = COALESCE(it.plan_item_id,
            CASE WHEN it.source_type = 'plan_item' THEN it.source_id END, vp.plan_item_id)
-        WHERE i.status <> 'cancelled'
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
+          WHERE correction.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
+          AND (currency_origin.created_at IS NULL OR (i.created_at AT TIME ZONE $1)::date <= $3::date)
           AND i.patient_id IN (
-                SELECT patient_id FROM invoices
-                 WHERE status <> 'cancelled'
-                   AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+                SELECT historical.patient_id FROM invoices historical
+                 WHERE (historical.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
+                   WHERE correction.original_invoice_id=historical.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
+                   AND (historical.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
-        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, COALESCE(pi.plan_id, i.plan_id)`,
+        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, currency_origin.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, COALESCE(pi.plan_id, i.plan_id)`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     // (P-01 owner review — تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها (سجلُّ
@@ -12790,7 +12823,10 @@ export async function commissionReport(
   // تجميع الفواتير لكل مريض مع حصص الأطباء فيها — بعملة كل فاتورة (تصحيح ٢).
   const byPatient = new Map<number, Map<number, CommissionInvoice>>();
   const clinicDateOfInvoice = new Map<number, string>();
+  const allocationTimeOfInvoice = new Map<number, string>();
   for (const row of invoiceRows) {
+    // Policy time may remain the original YER issue; allocation starts at the actual issue.
+    allocationTimeOfInvoice.set(row.invoice_id, commissionTimestampIso(row.issued_at, row.issued_at_us));
     clinicDateOfInvoice.set(row.invoice_id, dateText(row.clinic_date));
     const patientInvoices = byPatient.get(row.patient_id) ?? new Map<number, CommissionInvoice>();
     const invoice = patientInvoices.get(row.invoice_id) ?? {
@@ -12840,6 +12876,7 @@ export async function commissionReport(
     settlementMinor: number;
     effectiveMinor: number;
     createdAt: string;
+    allocatedInvoiceId?:number;
   };
   const paymentsByPatient = new Map<number, SettledPayment[]>();
   /* (المراجعة النهائية ٣) الردود الحرة بدلو عملة هدفها — لا scalar يُخصم من
@@ -12870,9 +12907,20 @@ export async function commissionReport(
       /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
        * الملغاة معها كما يفعل تقرير المديونية: الدفعة واقعة تاريخية، وهدفها
        * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
-      pool.query<{ id: number; patient_id: number; base_currency: string }>(
-        `SELECT id, patient_id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
-        [patientIds],
+      pool.query<{ id: number; patient_id: number; base_currency: string; settlement_leaf_id:number|null; reclassified_at_cutoff:boolean }>(
+        `SELECT i.id, i.patient_id, i.base_currency,
+          EXISTS(SELECT 1 FROM invoice_settlement_reclassifications d
+            JOIN invoice_corrections c ON c.id=d.correction_id
+            WHERE c.corrected_invoice_id=i.id AND d.patient_id=i.patient_id AND d.target_currency=i.base_currency
+              AND (d.created_at AT TIME ZONE $2)::date <= $3::date) AS reclassified_at_cutoff,
+          (WITH RECURSIVE successors(id) AS (SELECT i.id UNION
+            SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN successors s ON c.original_invoice_id=s.id
+              JOIN invoices n ON n.id=c.corrected_invoice_id
+              WHERE c.patient_id=i.patient_id AND n.patient_id=i.patient_id AND n.base_currency=i.base_currency
+                AND COALESCE(c.original_currency,c.currency)=i.base_currency AND c.currency=i.base_currency)
+           SELECT s.id FROM successors s WHERE NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=s.id)) AS settlement_leaf_id
+         FROM invoices i WHERE i.patient_id = ANY($1::int[])`,
+        [patientIds, CLINIC_TIME_ZONE, to],
       ),
     ]);
     /* (المراجعة النهائية للمال ٢) المراجع يحمل مالكه: خرائط مجموعة مرضى قد تحلّ خطة/فاتورة مريضٍ آخر داخل
@@ -12892,6 +12940,21 @@ export async function commissionReport(
       });
     }
 
+    const currencyEvidence=new Map<number,import("./invoice-currency-evidence").SettlementReclassification>();
+    for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool)},patientIds)){
+      if(clinicDateString(new Date(event.createdAt),CLINIC_TIME_ZONE)<=to)currencyEvidence.set(event.paymentId,event);
+    }
+    // The evidence reader above validates every document, including zero-event
+    // corrections. Their owned same-currency successor chain exists before any receipt.
+    const reclassifiedTargets=new Set(invoiceCurrencyRows.rows
+      .filter(invoice=>invoice.reclassified_at_cutoff&&invoice.settlement_leaf_id!==null)
+      .map(invoice=>invoice.settlement_leaf_id!));
+    // New SAR receipts keep their historical invoice ID through later ordinary
+    // corrections; reserve them for the proven reclassified chain's live leaf.
+    const reclassifiedReceiptTargets=new Map<number,number>();
+    for(const invoice of invoiceCurrencyRows.rows)if(invoice.settlement_leaf_id!==null&&reclassifiedTargets.has(invoice.settlement_leaf_id)){
+      reclassifiedReceiptTargets.set(invoice.id,invoice.settlement_leaf_id);
+    }
     for (const row of paymentRows.rows) {
       const currency = requireCurrency(row.currency, "دفعة", row.id);
       /* (المراجعة النهائية ٢) هدف التسوية من الخريطة المرجعية الشاملة — لا من
@@ -12944,6 +13007,8 @@ export async function commissionReport(
       } else {
         target = settlementTargetCurrency({ kind: row.kind, currency }, null);
       }
+      const allocation=currencyEvidence.get(row.id);
+      if(allocation)target=allocation.targetCurrency;
       /* (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة
        * الهدف، وبمكافئها الأساسي المسجّل إن كان الهدف الأساس — والعابر
        * بين أجنبيين يُقال (fail-closed) لا يُخمّن مكافئه. */
@@ -12961,6 +13026,7 @@ export async function commissionReport(
           settlementMinor: value,
           effectiveMinor: value,
           createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
+          allocatedInvoiceId:allocation?.targetInvoiceId??(row.invoice_id!==null?reclassifiedReceiptTargets.get(row.invoice_id):undefined),
         });
         paymentsByPatient.set(row.patient_id, list);
         continue;
@@ -12986,17 +13052,17 @@ export async function commissionReport(
   // أقدم من كل فاتورة في هذا النظام. فما دخل منه على دَينٍ سابق **لا عمولة
   // عليه**: عمله تمّ قبل النظام وعمولته صُرفت في حينها، وصرفها ثانية دفعٌ
   // مرتين عن عمل واحد. (يُستهلك أوّل طاقةٍ في دلو الأساس — انظر الأجزاء أدناه.)
-  const openingByPatient = await openingBalanceAmounts(patientIds);
+  const openingByPatient = await openingBalanceAmounts(patientIds,pool);
 
   /* (P0-1) سياسات الأطباء من سجلّها الزمني — لا من القيمة الحيّة. كل طبيبٍ
      مستقل: إعدادٌ متقدّم لطبيبٍ لا يمسّ غيره، ومن لا إعداد له على نسبة جهته. */
   const policies = await loadCommissionPolicyTimelines(queryRunner);
   /* (COMM-DETAIL-1 · F-5) القواعد القديمة المخزَّنة بالاسم تُحلّ إلى معرّف الخدمة مرّةً
      هنا (في الذاكرة) — والملتبس وغير المحلول يُقال في التفصيل ولا يُخمَّن. */
-  const serviceRateFindings = await resolveLegacyServiceRatesInPolicies(policies);
+  const serviceRateFindings = await resolveLegacyServiceRatesInPolicies(policies,pool);
   const policyAt = commissionPolicyResolver(policies);
   /* (F-11) النسب الخاصة بالحالات — تُحلّ داخل المحرّك وقت كل حدث. */
-  const overrideAt = buildCaseOverrideResolver(await loadCaseOverrideRows());
+  const overrideAt = buildCaseOverrideResolver(await loadCaseOverrideRows(pool));
 
   /* (P0-1) تكلفة المختبر — تُخصم من حصة الطبيب **في الفاتورة التي جاء منها عمله**،
    * مرّةً واحدة، وبعملتها حصرًا. الربط صريح في المخطط لا تخمين:
@@ -13068,7 +13134,7 @@ export async function commissionReport(
   /* (COMM-DETAIL-1 · F-4) تكلفة المواد الفعلية لكل حصة — من حركات صرف الزيارة مقوَّمةً
      بإعادة تشغيل خطّ متوسّط كل بند (لا `unit_cost_minor` على الصرف). وما لا يُنسب إلى
      حصةٍ واحدة بيقين يُقال «غير منسوب» ولا يُخمَّن. */
-  const unallocatedMaterials = await attributeInventoryMaterials(invoiceById, inRange);
+  const unallocatedMaterials = await attributeInventoryMaterials(invoiceById, inRange,pool);
   /* تُملأ في حلقة أجزاء التحصيل أدناه: كل جزءٍ بطابع دفعته الأصلية. */
   const perPatient: Array<ReturnType<typeof commissionForPatientAtEventTime>> = [];
 
@@ -13101,7 +13167,7 @@ export async function commissionReport(
    *  ٥) ما فاض عن كل طاقة دلوٍ (افتتاحي + فواتيره) = رصيد مريض في عملته لا
    *     يُنسب لفاتورة ولا عمولة عليه.
    */
-  const rateTimeline = await materialRateTimeline();
+  const rateTimeline = await materialRateTimeline(pool);
   const coveredByDoctorRate = new Map<number, Map<Currency, Map<string | null, Map<number | null, number>>>>();
   for (const [patientId, invoices] of byPatient) {
     const payments = paymentsByPatient.get(patientId) ?? [];
@@ -13118,7 +13184,7 @@ export async function commissionReport(
     for (const currency of CURRENCIES) {
       const ordered = [...invoices.values()]
         .filter((invoice) => invoice.currency === currency)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        .sort((a, b) => allocationTimeOfInvoice.get(a.id)!.localeCompare(allocationTimeOfInvoice.get(b.id)!));
       for (const invoice of ordered) {
         const net = Math.max(0, invoice.netMinor);
         if (net > 0) capacitiesByCurrency.get(currency)!.push({ invoiceId: invoice.id, remaining: net });
@@ -13131,8 +13197,17 @@ export async function commissionReport(
       invoiceId: number; amount: number; currency: Currency;
       sourcePaymentId: number; sourceTime: string;
     }> = [];
-    for (const payment of payments) {
+    // Proven invoice allocations reserve their own capacity before legacy FIFO.
+    // Any excess stays patient credit; it cannot earn on another treatment.
+    const orderedPayments=[...payments.filter(payment=>payment.allocatedInvoiceId!==undefined),...payments.filter(payment=>payment.allocatedInvoiceId===undefined)];
+    for (const payment of orderedPayments) {
       let amount = payment.effectiveMinor;
+      if(payment.allocatedInvoiceId!==undefined){
+        const capacity=capacitiesByCurrency.get(payment.target)!.find(row=>row.invoiceId===payment.allocatedInvoiceId);
+        const take=Math.min(amount,capacity?.remaining??0);
+        if(capacity&&take>0){capacity.remaining-=take;chunks.push({invoiceId:payment.allocatedInvoiceId,amount:take,currency:payment.target,sourcePaymentId:payment.id,sourceTime:payment.createdAt});}
+        continue;
+      }
       const capacities = capacitiesByCurrency.get(payment.target)!;
       let capIndex = capIndexByCurrency.get(payment.target) ?? 0;
       while (amount > 0 && capIndex < capacities.length) {
@@ -13215,7 +13290,7 @@ export async function commissionReport(
       }
     }
   }
-  const settings = await getSettings();
+  const settings = await readSettings(pool);
   const materialRateApplied = settings["finance.commission_material_rate"] === "on";
   if (detail) {
     detail.unallocatedMaterials.push(...unallocatedMaterials);
@@ -13283,9 +13358,9 @@ export async function commissionReport(
 
 
 /** (P1-FIX-6) سجل النسب كخط زمني لكل فئة — للقراءة وقت الحدث في تقرير العمولة. */
-export async function materialRateTimeline(): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
+export async function materialRateTimeline(queryRunner?:Pick<DbClient,"query">): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ category: string; rate_bp: number; effective_from: Date }>(
+  const { rows } = await (queryRunner??getPool()).query<{ category: string; rate_bp: number; effective_from: Date }>(
     /* الترتيب بالمعرّف عند تساوي السريان: تغييران في اللحظة نفسها — الأحدث إدراجًا هو الساري. */
     `SELECT category, rate_bp, effective_from FROM material_rate_history ORDER BY category, effective_from, id`,
   );
@@ -13373,19 +13448,32 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
  */
 export async function computeDebtRows(patientIds: readonly number[] | null, includeNonPositive = false): Promise<DebtRow[]> {
   await ensureSchema();
-  const pool = getPool();
   const scope = patientIds === null ? null : [...patientIds];
   if (scope !== null && scope.length === 0) return [];
+  const debtPool=getPool();
+  if(pgliteInstance!==null)return computeDebtRowsInSnapshot(scope,includeNonPositive,debtPool);
+  const client=await debtPool.connect();let destroy=false;
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const rows=await computeDebtRowsInSnapshot(scope,includeNonPositive,client);
+    await client.query("COMMIT");return rows;
+  }catch(error){
+    try{await client.query("ROLLBACK");}catch{destroy=true;}
+    throw error;
+  }finally{client.release(destroy);}
+}
 
+/** Caller owns the snapshot for debt inputs and reclassification evidence. */
+async function computeDebtRowsInSnapshot(scope: number[] | null, includeNonPositive: boolean, client: Pick<DbClient,"query">): Promise<DebtRow[]> {
   // حملة واحدة لكل الجداول — نفس الجداول التي مسحها الاستعلام القديم، لكن
   // بعملة الفاتورة معها ليُحسب الرصيد بالمرجع الكانوني لا بـSQL مزدوج.
   const [patientsRes, invoicesRes, invoiceCurrenciesRes, paymentsRes, openingRes, planCurrenciesRes] =
-    await Promise.all([
-      pool.query<{ id: number; full_name: string; phone: string | null }>(
+    [
+      await client.query<{ id: number; full_name: string; phone: string | null }>(
         `SELECT id, full_name, phone FROM patients WHERE ($1::int[] IS NULL OR id = ANY($1::int[])) ORDER BY id`,
         [scope],
       ),
-      pool.query<{ id: number; patient_id: number; net_minor: string; base_currency: string; created_at: Date }>(
+      await client.query<{ id: number; patient_id: number; net_minor: string; base_currency: string; created_at: Date }>(
         `SELECT id, patient_id, GREATEST(0, total_minor - discount_minor) AS net_minor,
                 base_currency, created_at
            FROM invoices WHERE status <> 'cancelled' AND ($1::int[] IS NULL OR patient_id = ANY($1::int[]))
@@ -13394,11 +13482,11 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
       ),
       // عملة كل فاتورة (المحكومة وغير المحكومة معًا): هدف تسوية الدفعة المرتبطة
       // بها يُقرأ من الفاتورة نفسها وإن أُلغيت لاحقًا — الدفعة واقعة تاريخية.
-      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+      await client.query<{ id: number; patient_id: number; base_currency: string }>(
         `SELECT id, patient_id, base_currency FROM invoices WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
         [scope],
       ),
-      pool.query<{
+      await client.query<{
         id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
         opening_currency: string | null;
         kind: string; amount_minor: string; currency: string; exchange_rate: string;
@@ -13409,7 +13497,7 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
            FROM payments WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[])) ORDER BY created_at, id`,
         [scope],
       ),
-      pool.query<{ patient_id: number; currency: string; amount_minor: string; as_of_date: Date }>(
+      await client.query<{ patient_id: number; currency: string; amount_minor: string; as_of_date: Date }>(
         `SELECT patient_id, currency, amount_minor, as_of_date FROM patient_opening_balances
           WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
         [scope],
@@ -13418,12 +13506,14 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
       // دلو عملة الخطة — الخريطة الهدف الكانوني للدفعات المقدَّمة قبل الفوترة.
       // (P-01 owner review — تصحيح ٣) بلا COALESCE: عملة الخطة الفاسدة تُقال
       // لا تُوسَم يمنيًّا بصمت.
-      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+      await client.query<{ id: number; patient_id: number; base_currency: string }>(
         `SELECT id, patient_id, base_currency FROM treatment_plans WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
         [scope],
       ),
-    ]);
+    ] as const;
 
+  const allocations=new Map<number,import("./invoice-currency-evidence").SettlementReclassification>();
+  for(const row of await readCurrencyReclassificationEvidence(client,patientsRes.rows.map(patient=>patient.id)))allocations.set(row.paymentId,row);
   const patientNameById = new Map(patientsRes.rows.map((row) => [row.id, row.full_name]));
   const patientPhoneById = new Map(patientsRes.rows.map((row) => [row.id, row.phone]));
   // (P-01 owner review — تصحيح ٣) كل عملة تُتحقَّق قبل الدخول — fail-closed:
@@ -13479,6 +13569,7 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
     const payment: PaymentLike & {
       invoiceId: number | null; planId: number | null; id: number | null; openingCurrency: Currency | null;
     } = {
+      settlementAllocation:allocations.get(row.id),
       amountMinor: toMinor(row.amount_minor),
       currency: requireCurrency(row.currency, "دفعة", row.id),
       exchangeRate: Number(row.exchange_rate),
@@ -14842,16 +14933,17 @@ function clinicDayOf(iso: string): string {
  * الدفاتر والمستندات، ولا ترحيل خلفي للبيانات القائمة، ولا قيد يتيم. وما لا يُشتقّ
  * من مستند — التسويات وإعادة التقييم — يأتي من `journal_manual` ويُدمج هنا.
  */
-export async function journalEntries(from: string, to: string): Promise<JournalEntry[]> {
+export async function journalEntries(from: string, to: string, queryRunner?:DbClient|DbPool): Promise<JournalEntry[]> {
   await ensureSchema();
-  const pool = getPool();
+  if(!queryRunner)return withFinancialReadSnapshot(getPool(),runner=>journalEntries(from,to,runner),pgliteInstance!==null);
+  const pool = queryRunner;
 
   const [invoices, payments, expenses, allocations, payables, shifts, manual, openings, partyOpenings, partyAdvances] = await Promise.all([
     pool.query<{
       invoice_number: string; created_at: Date; full_name: string; base_currency: string;
-      total_minor: string; discount_minor: string; status: string;
+      total_minor: string; discount_minor: string; status: string; currency_corrected:boolean;
     }>(
-      `SELECT i.invoice_number, i.created_at, p.full_name, i.base_currency, i.total_minor, i.discount_minor, i.status
+      `SELECT i.invoice_number, i.created_at, p.full_name, i.base_currency, i.total_minor, i.discount_minor, i.status, EXISTS(SELECT 1 FROM invoice_corrections c JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id WHERE c.original_invoice_id=i.id) AS currency_corrected
          FROM invoices i JOIN patients p ON p.id = i.patient_id
         WHERE (i.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
@@ -14966,7 +15058,7 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
     ),
   ]);
 
-  const entries: (JournalEntry | null)[] = [];
+  const entries: (JournalEntry | null)[] = await currencyReclassificationJournal({query:pool.query.bind(pool),release(){}},from,to,CLINIC_TIME_ZONE);
 
   for (const row of invoices.rows) {
     entries.push(invoiceEntry({
@@ -14976,7 +15068,7 @@ export async function journalEntries(from: string, to: string): Promise<JournalE
       currency: requireCurrency(row.base_currency, "فاتورة", row.invoice_number),
       totalMinor: toMinor(row.total_minor),
       discountMinor: toMinor(row.discount_minor),
-      cancelled: row.status === "cancelled",
+      cancelled: row.status === "cancelled"&&!row.currency_corrected,
     }));
   }
 
@@ -15463,6 +15555,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     if (row.child === "patient_families" && row.parent === "patients") continue;
     dependsOn.get(row.child)?.add(row.parent);
   }
+  // Restore historical receipts before their allocation document. Otherwise
+  // the refund-follow trigger would generate events already present in backup.
+  if(dependsOn.has("invoice_settlement_reclassifications"))
+    dependsOn.get("invoice_settlement_reclassifications")!.add("payments");
   //0060 seals a complete clinical snapshot on revision INSERT. These trigger
   // dependencies are additional to declared foreign keys and must survive restore.
   if(dependsOn.has("legacy_treatment_document_revisions")) {
@@ -18667,6 +18763,7 @@ export function ledgerBalancesByCurrency(
     toCurrencyPaymentLikes(
       patientId,
       ledger.payments.map((payment) => ({
+        settlementAllocation: payment.settlementAllocation,
         amountMinor: payment.amountMinor,
         currency: payment.currency,
         exchangeRate: payment.exchangeRate,
@@ -18697,10 +18794,10 @@ export async function listOpeningBalances(): Promise<OpeningBalance[]> {
  * (P1-5ب) بعملاتها: مستهلكها (العمولات) يضع كل رصيدٍ سابق أولًا في دلو عملته، فما
  * غطّاه التحصيل منه لا يُنسب لفاتورة ولا عمولة عليه.
  */
-export async function openingBalanceAmounts(patientIds: number[]): Promise<Map<number, OpeningByCurrency>> {
+export async function openingBalanceAmounts(patientIds: number[],queryRunner?:Pick<DbClient,"query">): Promise<Map<number, OpeningByCurrency>> {
   if (patientIds.length === 0) return new Map();
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number; currency: string; amount_minor: string }>(
+  const { rows } = await (queryRunner??getPool()).query<{ patient_id: number; currency: string; amount_minor: string }>(
     `SELECT patient_id, currency, amount_minor FROM patient_opening_balances WHERE patient_id = ANY($1::int[])`,
     [patientIds],
   );
@@ -20784,6 +20881,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     toCurrencyPaymentLikes(
       patientId,
       financial.payments.map((payment) => ({
+        settlementAllocation: payment.settlementAllocation,
         amountMinor: payment.amountMinor, currency: payment.currency,
         exchangeRate: payment.exchangeRate, baseAmountMinor: payment.baseAmountMinor,
         kind: payment.kind, invoiceId: payment.invoiceId, planId: payment.planId,
@@ -26957,8 +27055,8 @@ export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], 
 async function resolveLegacyServiceRatesInPolicies(policies: {
   timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
-}): Promise<ServiceRateFinding[]> {
-  const { rows: catalog } = await getPool().query<{ id: number; name: string }>(`SELECT id, name FROM services`);
+},queryRunner?:Pick<DbClient,"query">): Promise<ServiceRateFinding[]> {
+  const { rows: catalog } = await (queryRunner??getPool()).query<{ id: number; name: string }>(`SELECT id, name FROM services`);
   const findings: ServiceRateFinding[] = [];
   const seen = new Set<string>();
   const collect = (doctorId: number, config: DoctorCommissionConfig | null): DoctorCommissionConfig | null => {
@@ -26983,8 +27081,8 @@ async function resolveLegacyServiceRatesInPolicies(policies: {
 }
 
 /** (F-11) سجل النسب الخاصة كاملًا — جدولٌ صغير يُقرأ مرّة لكل تقرير. */
-async function loadCaseOverrideRows(): Promise<CaseOverrideRow[]> {
-  const { rows } = await getPool().query<{
+async function loadCaseOverrideRows(queryRunner?:Pick<DbClient,"query">): Promise<CaseOverrideRow[]> {
+  const { rows } = await (queryRunner??getPool()).query<{
     id: number; doctor_id: number; case_id: number | null; plan_id: number | null;
     percent: string | null; action: "set" | "void"; effective_from: Date;
   }>(
@@ -27014,10 +27112,11 @@ async function loadCaseOverrideRows(): Promise<CaseOverrideRow[]> {
 async function attributeInventoryMaterials(
   invoiceById: Map<number, CommissionInvoice>,
   inRange: (invoiceId: number) => boolean,
+  queryRunner?:Pick<DbClient,"query">,
 ): Promise<UnallocatedMaterial[]> {
   const invoiceIds = [...invoiceById.keys()].filter(inRange);
   if (invoiceIds.length === 0) return [];
-  const pool = getPool();
+  const pool = queryRunner??getPool();
   const { rows: moves } = await pool.query<{
     id: number; item_id: number; visit_id: number; invoice_id: number; patient_id: number | null; item_name: string;
   }>(
@@ -28544,6 +28643,7 @@ async function visitWalkoutInSnapshot(pool: DbClient, visitId: number): Promise<
       .filter((payment) => clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day)
       .map((payment) => ({
         receiptNumber: payment.receiptNumber, kind: payment.kind,
+        settlementAllocation: payment.settlementAllocation,
         amountMinor: payment.amountMinor, currency: payment.currency,
       }));
     const byCurrency = ledgerBalancesByCurrency(visit.patient_id, ledger, planCurrencies);

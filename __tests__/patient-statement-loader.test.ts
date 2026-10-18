@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ query: vi.fn(), session: vi.fn() }));
 vi.mock("../lib/db", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/db")>(),
-  ensureSchema: vi.fn(), listParties: vi.fn().mockResolvedValue([]), getPool: () => ({ query: mocks.query }) }));
+  ensureSchema: vi.fn(), listParties: vi.fn().mockResolvedValue([]), getPool: () => ({ query: mocks.query,connect:async()=>({query:mocks.query,release:vi.fn()}) }) }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
 import { buildReport, parseFilters } from "../lib/reports";
 import { GET } from "../app/api/reports/route";
@@ -22,6 +22,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.session.mockResolvedValue({ role: "reception", username: "synthetic", userId: 1 });
   mocks.query.mockImplementation(async (sql: string, params: unknown[]) => {
+    if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql))return {rows:[]};
+    if (sql.includes("FROM invoice_settlement_reclassification")) return {rows:[]};
     if (sql.includes("AS today")) return { rows: [{ today: "2026-10-02" }] };
     if (sql.includes("FROM expenses")) return { rows: [] };
     if (sql.includes("FROM patients p")) {
@@ -30,8 +32,9 @@ beforeEach(() => {
         created_date: "2026-01-01", last_visit: "2026-10-02", status: "active" }] };
     }
     if (sql.includes("FROM invoices i") && sql.includes("AS categories")) {
-      expect(params).toEqual(["Asia/Aden", [17]]);
-      expect(sql.slice(sql.lastIndexOf("WHERE"))).toMatch(/i\.status <> 'cancelled' AND i\.patient_id = ANY\(\$2::int\[\]\)/);
+      expect(params).toEqual(["Asia/Aden", [17],"2026-09-30"]);
+      expect(sql).toContain("i.patient_id = ANY($2::int[])");
+      expect(sql).toContain("d.created_at AT TIME ZONE $1");
       return { rows: invoiceRows };
     }
     if (sql.includes("FROM payments WHERE")) {

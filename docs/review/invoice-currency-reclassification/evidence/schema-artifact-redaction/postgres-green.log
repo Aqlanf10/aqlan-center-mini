@@ -1,0 +1,15 @@
+
+ RUN  v4.1.11 /workspace/aqlan-currency-continuation
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  00:12:42
+   Duration  4.46s (transform 995ms, setup 0ms, import 174ms, tests 3.98s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

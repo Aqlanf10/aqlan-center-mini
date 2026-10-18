@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6",
+  "generatedOnServerVersion": "18.6 (Debian 18.6-1.pgdg13+2)",
   "counts": {
-    "tables": 122,
-    "columns": 1576,
-    "constraints": 1721,
-    "indexes": 383,
-    "triggers": 55
+    "tables": 124,
+    "columns": 1592,
+    "constraints": 1753,
+    "indexes": 389,
+    "triggers": 59
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -6328,6 +6328,10 @@
           "type": "text",
           "nullable": false
         },
+        "original_currency": {
+          "type": "text",
+          "nullable": true
+        },
         "original_invoice_id": {
           "type": "int4",
           "nullable": false
@@ -6364,6 +6368,7 @@
         "invoice_corrections_created_by_check",
         "invoice_corrections_currency_check",
         "invoice_corrections_idempotency_key_check",
+        "invoice_corrections_original_currency_check",
         "invoice_corrections_reason_check",
         "invoice_corrections_request_hash_check"
       ],
@@ -6435,6 +6440,12 @@
             "INSERT",
             "DELETE",
             "UPDATE"
+          ]
+        },
+        "invoice_reclassification_complete": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT"
           ]
         }
       }
@@ -6563,6 +6574,201 @@
         }
       },
       "triggers": {}
+    },
+    "invoice_settlement_reclassification_events": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "direction": {
+          "type": "int2",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "payment_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "payment_snapshot": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "reclassification_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "source_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "target_minor": {
+          "type": "int8",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "payment_id"
+        ]
+      ],
+      "checks": [
+        "invoice_settlement_reclassification_even_payment_snapshot_check",
+        "invoice_settlement_reclassification_events_direction_check",
+        "invoice_settlement_reclassification_events_source_minor_check",
+        "invoice_settlement_reclassification_events_target_minor_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "reclassification_id"
+          ],
+          "refTable": "invoice_settlement_reclassifications",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "payment_id"
+          ],
+          "refTable": "payments",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_reclassification_event_document_idx": {
+          "columns": [
+            "reclassification_id"
+          ],
+          "unique": false
+        },
+        "invoice_settlement_reclassification_events_payment_id_key": {
+          "columns": [
+            "payment_id"
+          ],
+          "unique": true
+        },
+        "invoice_settlement_reclassification_events_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "invoice_reclassification_event_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "invoice_settlement_reclassifications": {
+      "columns": {
+        "correction_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "source_currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "source_invoice_ids": {
+          "type": "_int4",
+          "nullable": false
+        },
+        "target_currency": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "correction_id"
+        ]
+      ],
+      "checks": [
+        "invoice_settlement_reclassifications_source_currency_check",
+        "invoice_settlement_reclassifications_source_invoice_ids_check",
+        "invoice_settlement_reclassifications_target_currency_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "correction_id"
+          ],
+          "refTable": "invoice_corrections",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_reclassification_patient_idx": {
+          "columns": [
+            "patient_id"
+          ],
+          "unique": false
+        },
+        "invoice_settlement_reclassifications_correction_id_key": {
+          "columns": [
+            "correction_id"
+          ],
+          "unique": true
+        },
+        "invoice_settlement_reclassifications_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "invoice_reclassification_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "invoices": {
       "columns": {
@@ -11621,6 +11827,12 @@
         }
       },
       "triggers": {
+        "invoice_reclassification_follow_refund": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT"
+          ]
+        },
         "payments_append_only": {
           "timing": "BEFORE",
           "events": [

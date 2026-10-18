@@ -34,7 +34,7 @@ beforeEach(async () => {
   boundary.end.mockResolvedValue(undefined);
   await resetPoolForTesting();
   boundary.poolQuery.mockResolvedValue({ rows: [] });
-  boundary.query.mockResolvedValue({ rows: [] });
+  boundary.query.mockImplementation(async(sql:string)=>({rows:sql.includes("AS present")?[{present:false}]:[]}));
   boundary.connect.mockResolvedValue({ query: boundary.query, release: boundary.release });
   await ensureSchema();
   // The real additive bootstrap now reserves a migration connection. Start

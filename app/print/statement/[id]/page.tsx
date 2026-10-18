@@ -151,6 +151,7 @@ export default async function StatementPage({ params, searchParams }: {
                   {payment.kind === "refund" ? "استرداد " : ""}
                   {formatMoney(payment.amountMinor, payment.currency)}
                   {payment.currency !== base ? ` (سعر ${payment.exchangeRate})` : ""}
+                  {payment.settlementAllocation?<small> — تسوية مصححة {formatMoney(payment.settlementAllocation.targetMinor,payment.settlementAllocation.targetCurrency)}، دون نقد جديد</small>:null}
                 </td>
                 <td className="num">
                   {payment.kind === "refund" ? "− " : ""}{formatMoney(payment.baseAmountMinor, base)}

@@ -1,0 +1,57 @@
+
+ RUN  v4.1.11 /workspace/aqlan-currency-continuation
+
+[security-http] الخادم جاهز على http://127.0.0.1:3227 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts (1 test | 1 failed) 4641ms
+     × both entrypoints omit patient identity, isolate print, keep only the QR reference, and preserve internal records 3660ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/lab-dispatch-privacy-ui.test.ts > lab dispatch privacy on actual built browser and PDF outputs > both entrypoints omit patient identity, isolate print, keep only the QR reference, and preserve internal records
+Error: PDF service label must occur in exactly one field block
+ ❯ only __tests__/helpers/lab-dispatch-pdf-fields.ts:12:34
+     10|   .replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+     11| const only = <T>(values: T[], description: string): T => {
+     12|   if (values.length !== 1) throw new Error(`PDF ${description} must oc…
+       |                                  ^
+     13|   return values[0];
+     14| };
+ ❯ assertLabDispatchPdfFields __tests__/helpers/lab-dispatch-pdf-fields.ts:68:24
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:455:11
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:347:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/lab-dispatch-privacy-ui.test.ts > lab dispatch privacy on actual built browser and PDF outputs > both entrypoints omit patient identity, isolate print, keep only the QR reference, and preserve internal records
+AssertionError: expected '' to match /^\d{1,24}$/
+
+- Expected:
+/^\d{1,24}$/
+
++ Received:
+""
+
+ ❯ emitDiagnosticPdf __tests__/security-http/lab-dispatch-privacy-ui.test.ts:291:17
+    289|   const runId = process.env.GITHUB_RUN_ID ?? "", runAttempt = process.…
+    290|   const checkoutSha = execFileSync("git", ["rev-parse", "HEAD"], { enc…
+    291|   expect(runId).toMatch(/^\d{1,24}$/); expect(runAttempt).toMatch(/^\d…
+       |                 ^
+    292|   expect(checkoutSha).toMatch(/^[a-f0-9]{40}$/); expect(checkoutSha).t…
+    293|   const eventPath = process.env.GITHUB_EVENT_PATH;
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:479:11
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:347:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 7 passed (8)
+      Tests  1 failed | 50 passed (51)
+   Start at  23:18:43
+   Duration  83.59s (transform 328ms, setup 0ms, import 594ms, tests 80.28s, environment 0ms)
+
+
+::error file=/workspace/aqlan-currency-continuation/__tests__/helpers/lab-dispatch-pdf-fields.ts,title=__tests__/security-http/lab-dispatch-privacy-ui.test.ts > lab dispatch privacy on actual built browser and PDF outputs > both entrypoints omit patient identity%2C isolate print%2C keep only the QR reference%2C and preserve internal records,line=12,column=34::Error: PDF service label must occur in exactly one field block%0A ❯ only __tests__/helpers/lab-dispatch-pdf-fields.ts:12:34%0A ❯ assertLabDispatchPdfFields __tests__/helpers/lab-dispatch-pdf-fields.ts:68:24%0A ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:455:11%0A ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13%0A ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:347:5%0A%0A
+
+::error file=/workspace/aqlan-currency-continuation/__tests__/security-http/lab-dispatch-privacy-ui.test.ts,title=__tests__/security-http/lab-dispatch-privacy-ui.test.ts > lab dispatch privacy on actual built browser and PDF outputs > both entrypoints omit patient identity%2C isolate print%2C keep only the QR reference%2C and preserve internal records,line=291,column=17::AssertionError: expected '' to match /^\d{1,24}$/%0A%0A- Expected:%0A/^\d{1,24}$/%0A%0A+ Received:%0A""%0A%0A ❯ emitDiagnosticPdf __tests__/security-http/lab-dispatch-privacy-ui.test.ts:291:17%0A ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:479:11%0A ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:347:5%0A%0A
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

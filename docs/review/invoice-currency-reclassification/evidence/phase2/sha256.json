@@ -1,0 +1,127 @@
+{
+  "synthetic": true,
+  "productCommit": "ed42591853fd0d713e1f7e02c989fea3a53b2af9",
+  "fixtureCommit": "128831ce1fa69f5604c1e5e3fc4326a21be0bbaa",
+  "files": [
+    {
+      "file": "arabic-paper-bounds-http.log",
+      "bytes": 779,
+      "sha256": "d6a3f3200970181495724117a8ec84ce3d6133b8f4f5c5764a8cc412c3998b8d"
+    },
+    {
+      "file": "baseline-lab-pdf-http.log",
+      "bytes": 4283,
+      "sha256": "e5659cb7071a105239b15ef1088757997c918d477c361b8b08be21681376e772"
+    },
+    {
+      "file": "baseline-pdf-http.log",
+      "bytes": 2280,
+      "sha256": "c77bd395734c6a49333444699c38c259de3c92afdb2522976ec85317058a4d35"
+    },
+    {
+      "file": "build.log",
+      "bytes": 12699,
+      "sha256": "600cce2ae72374855611bc3499b3b05e2fdfa792f7300bfa1d68c93c60708a0c"
+    },
+    {
+      "file": "correction-1280-before.png",
+      "bytes": 317284,
+      "sha256": "b95b68d1706b44332cbb0c8baf84705b5c40c3930346bafdf29c4ae2013a7d0f"
+    },
+    {
+      "file": "correction-1280-saved.png",
+      "bytes": 223163,
+      "sha256": "2d0c111ae9e77d64a6fbd7f0c261d4e9b3caecf05601de8b7127085c61305703"
+    },
+    {
+      "file": "correction-390-before.png",
+      "bytes": 270290,
+      "sha256": "5e28f5e23ebf3b6ada2332ba07fce2fb4349ad7733868011662e596160e89d0f"
+    },
+    {
+      "file": "correction-390-saved.png",
+      "bytes": 176922,
+      "sha256": "a193ee158ab401baf7feb2e27734823112e530d513ba2379c6f6899d5cbde616"
+    },
+    {
+      "file": "final-financial-and-hr-http.log",
+      "bytes": 632,
+      "sha256": "472b31559a7e40ead2075ee248dfd2e52868486e00187b6a4326425ed2236845"
+    },
+    {
+      "file": "final-http-rechecks.log",
+      "bytes": 4322,
+      "sha256": "27061e319726f435f233f758e2d0af491d85274c96f0c59eec678ea738fdfaea"
+    },
+    {
+      "file": "final-review-postgres.log",
+      "bytes": 1150,
+      "sha256": "25413cc00d3237543cab854eaae29e5b4eab6812a3b0f434bafcb332d494f977"
+    },
+    {
+      "file": "financial-http.log",
+      "bytes": 1127,
+      "sha256": "309d21c27b4fc9b700d36e050bd3d883ed727f7bbfa63add11dc341156480b07"
+    },
+    {
+      "file": "full-http-initial.log",
+      "bytes": 11200,
+      "sha256": "093f745ae7a8c078d526b8ee7f57d5771c7886af72ff3c36f23f29c8834c3568"
+    },
+    {
+      "file": "lint.log",
+      "bytes": 58983,
+      "sha256": "481717e62cb570f535c23ad225a9b5f10edd2601a2fdd860b13d694922fdbd90"
+    },
+    {
+      "file": "money-scan.log",
+      "bytes": 2080,
+      "sha256": "3e876b5e832b0dcbaff4afed10dda120fb2c5a01933943215efcfb32914ded8b"
+    },
+    {
+      "file": "payroll-fence-before.log",
+      "bytes": 1809,
+      "sha256": "53f44839261593df9d2e6879e4d95dfdb3a846f310833d0ccbe689f225143f47"
+    },
+    {
+      "file": "pdf-baseline-comparison.json",
+      "bytes": 1222,
+      "sha256": "6bc013299a7ce8782fa0ba968f216f71b53ea7b408db23f3e229049728fe3386"
+    },
+    {
+      "file": "postgres.log",
+      "bytes": 14927,
+      "sha256": "82bdc06ae494793743606fcade2487b4570570d6802812f0a57e53c76dd31aaa"
+    },
+    {
+      "file": "rollback-restore.log",
+      "bytes": 1040,
+      "sha256": "ec9183967e90ec79f1f7add2029b98a6c8317b3204fa4a333e561949ba254181"
+    },
+    {
+      "file": "statement-1280.png",
+      "bytes": 86110,
+      "sha256": "fd941d26e34cacff28cd681f2ecf9f1df6cac5b312d90101ae769de83eb4924b"
+    },
+    {
+      "file": "statement-390.png",
+      "bytes": 78143,
+      "sha256": "2ae46de952950f6197969378822d7282544e2d4b7275b0ea521f767da6b86201"
+    },
+    {
+      "file": "successor-regression-before.log",
+      "bytes": 1851,
+      "sha256": "44fb61db7f17384a590a2281f062f3d6f1dfe0f4560900534be7179c0a427847"
+    },
+    {
+      "file": "typecheck.log",
+      "bytes": 256,
+      "sha256": "abbbc5e1595eb05f5d213af2183ca9842e35bc698e6a81f7f6536b42a2f23060"
+    },
+    {
+      "file": "unit.log",
+      "bytes": 1289,
+      "sha256": "acbfc41b0e70d0981305a5006ac4ac80c704fef29cb2f213eb4f0a40ef0a38f9"
+    }
+  ]
+}

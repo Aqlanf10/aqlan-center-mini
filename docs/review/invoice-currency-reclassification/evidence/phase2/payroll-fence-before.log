@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /workspace/aqlan-currency-continuation
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/invoice-settlement-position.test.ts (24 tests | 1 failed | 23 skipped) 5601ms
+   × waits for a new payroll calculation before it can read and store pre-correction commissions 5040ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/invoice-settlement-position.test.ts > waits for a new payroll calculation before it can read and store pre-correction commissions
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ vi.waitFor.timeout __tests__/postgres/invoice-settlement-position.test.ts:261:162
+    259|     pending=revision.reviseInvoice(original.id,command,session);
+    260|     // Observe a real PostgreSQL lock wait, not a timing-only assertio…
+    261|     await vi.waitFor(async()=>expect((await q("SELECT 1 FROM pg_locks …
+       |                                                                                                                                                                  ^
+    262|     expect(await q("SELECT id FROM invoice_corrections WHERE patient_i…
+    263|     await calculator.query("ROLLBACK");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 23 skipped (24)
+   Start at  23:13:48
+   Duration  8.58s (transform 1.86s, setup 0ms, import 2.32s, tests 5.60s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

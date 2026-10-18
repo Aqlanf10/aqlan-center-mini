@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { formatMoney, parseAmount, toInputAmount } from "@/lib/money";
+import { formatMoney, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
@@ -21,6 +21,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
   financialRecovery:FinancialRecoveryControl;onDone:(message:string)=>void;onCancel:()=>void;
 }){
   const session=useSession();
+  const [currency,setCurrency]=useState<Currency>("YER");
   const [view,setView]=useState<InvoiceRevisionView|null>(null);
   const [drafts,setDrafts]=useState<Record<number,Draft>>({});
   const [discount,setDiscount]=useState("0"),[discountReason,setDiscountReason]=useState("");
@@ -37,17 +38,19 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       const payload:unknown=await response.json();if(!lifetime.current.active||generation!==lifetime.current.generation)return;
       const next=response.ok?readInvoiceRevisionView(payload,patientId,invoiceId):null;
       if(!next||next.invoice.status==="cancelled")throw new Error(revisionRecord(payload)&&typeof payload.message==="string"?payload.message:"تعذّر قراءة الفاتورة الحالية. حدّث الحساب.");
-      setView(next);setError(null);setDiscount(toInputAmount(next.invoice.discountMinor,next.invoice.baseCurrency));
+      setView(next);setCurrency(next.invoice.baseCurrency);setError(null);setDiscount(toInputAmount(next.invoice.discountMinor,next.invoice.baseCurrency));
       setDrafts(Object.fromEntries(next.invoice.items.map(item=>[item.id,{keep:true,quantity:String(item.quantity),price:toInputAmount(item.unitPriceMinor,next.invoice.baseCurrency),serviceId:String(item.serviceId??""),doctorId:String(item.doctorId??""),tooth:String(item.toothCode??""),surfaces:item.surfaces??""}])));
       // Existing terms can include already settled rows. Require deliberate redistribution when their sum differs.
       setTerms({mode:next.repaymentTerms.mode,rows:next.repaymentTerms.installments.map((row,index)=>({key:String(index),dueDate:row.dueDate,kind:row.kind,amount:toInputAmount(row.amountMinor,next.invoice.baseCurrency)}))});
     }catch(problem){if(lifetime.current.active&&generation===lifetime.current.generation){setView(null);setError(problem instanceof Error?problem.message:"تعذّر قراءة الفاتورة.");}}
   },[invoiceId,patientId]);
   useEffect(()=>{if(!initialRecovery.current)void load();},[load]); // Restored original intent does not depend on a fresh mutable snapshot.
+  const changingCurrency=!!view&&currency!==view.invoice.baseCurrency;
+  const settledMinor=changingCurrency?view?.currencyCorrection?.settledMinor??0:view?.settledMinor??0;
   const preview=useMemo(()=>{
     if(!view)return null;const lines=[];let total=0;
     for(const item of view.invoice.items){const draft=drafts[item.id];if(!draft?.keep)continue;
-      const quantity=Number(draft.quantity),unitPriceMinor=parseAmount(draft.price,view.invoice.baseCurrency);
+      const quantity=Number(draft.quantity),unitPriceMinor=parseAmount(draft.price,currency);
       if(!Number.isSafeInteger(quantity)||quantity<1||unitPriceMinor===null)return null;
       const totalMinor=quantity*unitPriceMinor;total+=totalMinor;if(!Number.isSafeInteger(total))return null;
       const serviceId=draft.serviceId?Number(draft.serviceId):null,doctorId=draft.doctorId?Number(draft.doctorId):null;
@@ -61,12 +64,12 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       if(site&&!site.ok)return null;
       lines.push({...item,quantity,unitPriceMinor,totalMinor,serviceId,doctorId,description:serviceId!==item.serviceId?service?.name??item.description:item.description,
         toothCode:site?.ok?site.site.toothCode:item.toothCode,surfaces:site?.ok?site.site.surfaces:item.surfaces});}
-    const discountMinor=parseAmount(discount,view.invoice.baseCurrency);if(!lines.length||discountMinor===null||discountMinor>total)return null;
-    const after=total-discountMinor,remaining=Math.max(0,after-view.settledMinor);
-    return {lines,total,discountMinor,after,remaining,credit:Math.max(0,view.settledMinor-after),before:view.invoice.totalMinor-view.invoice.discountMinor};
-  },[view,drafts,discount]);
+    const discountMinor=parseAmount(discount,currency);if(!lines.length||discountMinor===null||discountMinor>total)return null;
+    const after=total-discountMinor,remaining=Math.max(0,after-settledMinor);
+    return {lines,total,discountMinor,after,remaining,credit:Math.max(0,settledMinor-after),before:view.invoice.totalMinor-view.invoice.discountMinor};
+  },[view,drafts,discount,currency,settledMinor]);
   const allowed=financialRecovery.ready&&session?.role==="admin";
-  const checked=preview?readDebtRepaymentDraft(terms,view!.invoice.baseCurrency,preview.remaining):null;
+  const checked=preview?readDebtRepaymentDraft(terms,currency,preview.remaining):null;
   const send=async(command:InvoiceRevisionCommand)=>{
     if(!allowed||pending.current||!lifetime.current.active||command.actor!==session.username||command.patientId!==patientId||command.invoiceId!==invoiceId)return;
     pending.current=true;setBusy(true);setError(null);onRecoveryChange({...command,outcome:"pending",message:"جارٍ حفظ التصحيح…"});
@@ -86,11 +89,24 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
   const submit=()=>{
     if(!view||!preview||!checked?.ok||recovery||!allowed||pending.current||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3)return;
     const key=newIdempotencyKey();draftRevision.current=financialRecovery.revision;
-    const body={idempotencyKey:key,expectedSourceHash:view.sourceHash,reason:reason.trim(),lines:preview.lines.map(item=>({itemId:item.id,quantity:item.quantity,unitPrice:toInputAmount(item.unitPriceMinor,view.invoice.baseCurrency),serviceId:item.serviceId,doctorId:item.doctorId,toothCode:item.toothCode??null,surfaces:item.surfaces??null})),
-      discount:toInputAmount(preview.discountMinor,view.invoice.baseCurrency),discountReason:discountReason.trim()||null,repaymentTerms:checked.value,expectedRemainingMinor:preview.remaining};
-    void send({key,actor:session.username,patientId,invoiceId,body:JSON.stringify(body),expected:{original:view.invoice,lines:preview.lines,discountMinor:preview.discountMinor,settledMinor:view.settledMinor,accountDueMinor:view.accountDueMinor,terms:checked.value},outcome:"pending",message:""});
+    const body={...(changingCurrency?{currency}:{}),idempotencyKey:key,expectedSourceHash:view.sourceHash,reason:reason.trim(),lines:preview.lines.map(item=>({itemId:item.id,quantity:item.quantity,unitPrice:toInputAmount(item.unitPriceMinor,currency),serviceId:item.serviceId,doctorId:item.doctorId,toothCode:item.toothCode??null,surfaces:item.surfaces??null})),
+      discount:toInputAmount(preview.discountMinor,currency),discountReason:discountReason.trim()||null,repaymentTerms:checked.value,expectedRemainingMinor:preview.remaining};
+    void send({key,actor:session.username,patientId,invoiceId,body:JSON.stringify(body),expected:{...(changingCurrency?{currency}:{}),original:view.invoice,lines:preview.lines,discountMinor:preview.discountMinor,settledMinor,accountDueMinor:changingCurrency?view.currencyCorrection!.accountDueMinor:view.accountDueMinor,terms:checked.value},outcome:"pending",message:""});
   };
   const clearRefused=async()=>{if(!recovery||recovery.outcome!=="refused"||busy)return;try{await financialRecovery.acknowledge(durableInvoiceRevision(recovery));if(lifetime.current.active){onRecoveryChange(null);setReason("");await load();}}catch{setError("تعذّر إغلاق الطلب المرفوض بأمان؛ أعد المحاولة.");}};
+  const changeCurrency=(next:Currency)=>{
+    if(!view)return;
+    if(next!==view.invoice.baseCurrency&&view.invoice.items.some(item=>{
+      const draft=drafts[item.id];
+      return !draft?.keep||Number(draft.quantity)!==item.quantity
+        ||draft.serviceId!==String(item.serviceId??"")||draft.doctorId!==String(item.doctorId??"")
+        ||draft.tooth!==String(item.toothCode??"")||draft.surfaces!==(item.surfaces??"");
+    })){
+      setError("لتصحيح العملة، أعد البنود المحذوفة والكمية وهوية العلاج إلى قيمها الأصلية أولًا. بقيت تعديلاتك محفوظة دون تغيير.");
+      return;
+    }
+    setError(null);setCurrency(next);setTerms({mode:"full",rows:[]});
+  };
   const locked=busy||!!recovery||!allowed;
   const invoice=view?.invoice??recovery?.expected.original;
   return <section aria-label="تصحيح الفاتورة" data-testid="invoice-correction-editor" dir="rtl" className="my-4 min-w-0 space-y-4 rounded-2xl border border-amber-300 bg-white p-4">
@@ -105,17 +121,23 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       {recovery.outcome==="refused"?<button type="button" className={button} disabled={busy} onClick={()=>void clearRefused()}>مراجعة التصحيح بعد الرفض</button>:null}
     </div>:null}
     {view?<><fieldset disabled={locked} className="space-y-3">
+      <label className="block text-sm font-bold">عملة الفاتورة المصححة<select aria-label="عملة الفاتورة المصححة" className={input} value={currency} onChange={event=>changeCurrency(event.target.value as Currency)}>
+        <option value={view.invoice.baseCurrency}>{view.invoice.baseCurrency}</option>
+        {view.invoice.baseCurrency==="YER"&&view.currencyCorrection?.available?<option value="SAR">SAR — تصحيح العملة مع إعادة تصنيف التسوية</option>:null}
+      </select></label>
+      {view.currencyCorrection?<p className="text-sm leading-7">{view.currencyCorrection.message}</p>:null}
+      {changingCurrency?<p role="status" className="text-sm leading-7">تسوية مثبتة {formatMoney(settledMinor,currency)}. لا تُنشأ حركة نقدية، وتبقى أرقام السندات ومبالغها وأسعار صرفها الأصلية محفوظة.</p>:null}
       {view.invoice.items.map((item,index)=>{const draft=drafts[item.id];const work=view.work.find(row=>row.id===item.planItemId),clinical=work?.clinical_locked;
-        const canAmend=!locked&&view.identityAmendmentAvailable===true&&!clinical&&!!view.identityCatalog;
+        const canAmend=!locked&&!changingCurrency&&view.identityAmendmentAvailable===true&&!clinical&&!!view.identityCatalog;
         const oldCategory=work?.category??view.identityCatalog?.services.find(row=>row.id===item.serviceId)?.category??null;
         const choices=view.identityCatalog?.services.filter(row=>work?row.category===oldCategory:lineLinkage({serviceId:row.id,category:row.category}).kind==="financial")??[];
         const change=(patch:Partial<Draft>)=>setDrafts(current=>({...current,[item.id]:{...current[item.id],...patch}}));
         return <div key={item.id} className="grid min-w-0 gap-3 rounded-xl border p-3 sm:grid-cols-3">
         <div className="text-sm"><strong>{item.description}</strong>{item.toothCode?<span> · سن {item.toothCode}</span>:null}
-          <label className="mt-2 flex min-h-11 items-center gap-2"><input type="checkbox" checked={draft?.keep??false} disabled={locked||clinical} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],keep:event.target.checked}}))}/>إبقاء البند</label>
+          <label className="mt-2 flex min-h-11 items-center gap-2"><input type="checkbox" checked={draft?.keep??false} disabled={locked||clinical||changingCurrency} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],keep:event.target.checked}}))}/>إبقاء البند</label>
           {clinical?<p className="text-xs leading-6 text-amber-900">له عمل أو مسودة سريرية؛ تبقى هويته وكميته محفوظتين.</p>:null}</div>
-        <label className="min-w-0 text-xs font-bold">الكمية<input aria-label={`كمية التصحيح ${index+1}`} className={input} inputMode="numeric" disabled={locked||clinical} value={draft?.quantity??""} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],quantity:event.target.value}}))}/></label>
-        <label className="min-w-0 text-xs font-bold">السعر ({view.invoice.baseCurrency})<input aria-label={`سعر التصحيح ${index+1}`} className={input} inputMode="decimal" dir="ltr" value={draft?.price??""} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],price:event.target.value}}))}/></label>
+        <label className="min-w-0 text-xs font-bold">الكمية<input aria-label={`كمية التصحيح ${index+1}`} className={input} inputMode="numeric" disabled={locked||clinical||changingCurrency} value={draft?.quantity??""} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],quantity:event.target.value}}))}/></label>
+        <label className="min-w-0 text-xs font-bold">السعر ({currency})<input aria-label={`سعر التصحيح ${index+1}`} className={input} inputMode="decimal" dir="ltr" value={draft?.price??""} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],price:event.target.value}}))}/></label>
         <details className="min-w-0 text-xs sm:col-span-3"><summary className="min-h-11 cursor-pointer py-3 font-bold">تصحيح الخدمة والطبيب والموضع</summary>
           <p className="mb-2 leading-6">تُقبل قبل بدء العمل فقط. التحصيل أو المسودة السريرية أو العمولة المعتمدة يحفظ الهوية الأصلية؛ التصحيح المالي يبقى متاحًا.</p>
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
@@ -135,10 +157,10 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
         <label className="text-xs font-bold">سبب الخصم<input aria-label="سبب خصم التصحيح" className={input} value={discountReason} maxLength={300} onChange={event=>setDiscountReason(event.target.value)}/></label></div>
       <label className="block text-xs font-bold">سبب التصحيح المطلوب<textarea aria-label="سبب التصحيح" className={input} value={reason} maxLength={300} onChange={event=>setReason(event.target.value)}/></label>
     </fieldset>
-    {preview?<><div aria-live="polite" className="grid gap-2 rounded-xl bg-slate-50 p-3 text-sm sm:grid-cols-2"><p>قبل التصحيح: {formatMoney(preview.before,view.invoice.baseCurrency)}</p><p>بعد التصحيح: <strong>{formatMoney(preview.after,view.invoice.baseCurrency)}</strong></p>
-      <p>المحصّل المثبت: {formatMoney(view.settledMinor,view.invoice.baseCurrency)}</p><p>المتبقي للتحصيل: <strong>{formatMoney(preview.remaining,view.invoice.baseCurrency)}</strong></p>
-      {preview.credit>0?<p className="font-bold text-sky-900">رصيد لصالح المريض {formatMoney(preview.credit,view.invoice.baseCurrency)}. صرفه يحتاج إجراء ردّ مستقل.</p>:null}</div>
-      <DebtRepaymentEditor value={terms} onChange={setTerms} currency={view.invoice.baseCurrency} remainingMinor={preview.remaining} today={clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)} disabled={locked}/></>:null}
+    {preview?<><div aria-live="polite" className="grid gap-2 rounded-xl bg-slate-50 p-3 text-sm sm:grid-cols-2"><p>قبل التصحيح: {formatMoney(preview.before,view.invoice.baseCurrency)}</p><p>بعد التصحيح: <strong>{formatMoney(preview.after,currency)}</strong></p>
+      <p>المحصّل المثبت: {formatMoney(settledMinor,currency)}</p><p>المتبقي للتحصيل: <strong>{formatMoney(preview.remaining,currency)}</strong></p>
+      {preview.credit>0?<p className="font-bold text-sky-900">رصيد لصالح المريض {formatMoney(preview.credit,currency)}. صرفه يحتاج إجراء ردّ مستقل.</p>:null}</div>
+      <DebtRepaymentEditor value={terms} onChange={setTerms} currency={currency} remainingMinor={preview.remaining} today={clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)} disabled={locked}/></>:null}
     <button type="button" className={button+" bg-navy-800 text-white"} disabled={locked||!preview||!checked?.ok||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3} onClick={submit}>تأكيد تصحيح الفاتورة</button>
     </>:null}
   </section>;

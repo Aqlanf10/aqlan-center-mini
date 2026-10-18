@@ -355,6 +355,7 @@ ${listText}
     toCurrencyPaymentLikes(
       patientId,
       ledger.payments.map((payment) => ({
+        settlementAllocation: payment.settlementAllocation,
         amountMinor: payment.amountMinor,
         currency: payment.currency,
         exchangeRate: payment.exchangeRate,

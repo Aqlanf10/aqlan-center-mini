@@ -1,3 +1,4 @@
+import {CURRENCY_READ_TEMP_SCHEMA} from "./_currency-read-temp-schema";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
@@ -23,6 +24,8 @@ vi.mock("../../lib/db", async (importOriginal) => {
     },
   };
 });
+
+vi.mock("../../lib/financial-read-snapshot",()=>({withFinancialReadSnapshot:async(pool:unknown,read:(runner:unknown)=>Promise<unknown>)=>read(pool)}));
 
 const connectionString = assertLocalExpenseComparisonUrl(assertRealPostgresUrl());
 stubPostgresEnv();
@@ -80,6 +83,7 @@ beforeAll(async () => {
       patient_id integer, currency text, as_of_date date, amount_minor bigint
     );
   `);
+  await client.query(CURRENCY_READ_TEMP_SCHEMA);
 });
 
 beforeEach(async () => {

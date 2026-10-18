@@ -497,3 +497,11 @@ name. Property hashes localize reviewed structural differences; `WITHHELD`
 localizes only the affected known object/property and requires a separately
 reviewed next step. Neither outcome permits adoption or runtime-DDL retirement.
 This implementation and its tests perform **no Production drilldown execution**.
+
+### 0063_invoice_currency_reclassification.sql
+
+إعادة تصنيف تسوية فاتورة من YER إلى SAR بسجل غير نقدي وإثبات مستقل لكل سند.
+لا يغيّر النقد أو أرقام السندات أو مبالغها أو أسعار صرفها. يُسجّل العقد في
+مسار التهيئة المضاف تحت قفل الترحيلات نفسه. لا يتطلب HR 0062. ترحيل محلي قيد
+التحقق؛ لم يُطبّق على قاعدة حية. استعادة البيانات تُدرج السندات أولًا، ثم وثيقة
+إعادة التصنيف وأحداثها، وتتحقق من اكتمال التغطية عند الالتزام.

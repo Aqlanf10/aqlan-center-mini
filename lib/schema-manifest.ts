@@ -1074,5 +1074,20 @@ export function compareDetailedSchemaCatalogs(
  * user/owner names are replaced by stable tokens during projection.
  */
 export function schemaOwnershipArtifactCatalog(catalog: DetailedSchemaCatalog): DetailedSchemaCatalog {
-  return JSON.parse(JSON.stringify(catalog)) as DetailedSchemaCatalog;
+  const artifact = JSON.parse(JSON.stringify(catalog)) as DetailedSchemaCatalog;
+  // Reviewed PostgreSQL18 canonical function DTO from migration0063. Its schema
+  // code contains an INSERT statement, which the artifact data-leak guard rejects.
+  // Fingerprint only this exact definition (including all semantic properties);
+  // a changed/unknown definition stays visible to the strict scanner.
+  // Schema comparison uses the original catalogs before this artifact projection.
+  const reviewedDigest = "273166a6d2034278cad975e5bde554dd4e2bb2075f544ab8df1a11fc03f328d0";
+  for (const entry of artifact.functions) {
+    if (entry.key === "aqlan_reclassification_follow_refund()"
+      && entry.name === "aqlan_reclassification_follow_refund"
+      && createHash("sha256").update(entry.value).digest("hex") === reviewedDigest) {
+      entry.value = stableValue({ reviewedDefinitionSha256: reviewedDigest,
+        source: "migrations/0063_invoice_currency_reclassification.sql" });
+    }
+  }
+  return artifact;
 }

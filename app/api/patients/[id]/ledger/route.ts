@@ -72,7 +72,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       toCurrencyPaymentLikes(
         id,
         payments.map((payment) => ({
-          amountMinor: payment.amountMinor,
+          settlementAllocation: payment.settlementAllocation,
+        amountMinor: payment.amountMinor,
           currency: payment.currency,
           exchangeRate: payment.exchangeRate,
           baseAmountMinor: payment.baseAmountMinor,

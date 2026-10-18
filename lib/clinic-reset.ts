@@ -92,6 +92,8 @@ export const RESET_WIPE_TABLES = [
   "payable_adjustments",
   "party_opening_advances",
   "payables",
+  "invoice_settlement_reclassification_events",
+  "invoice_settlement_reclassifications",
   "payments",
   "invoice_correction_lines",
   "invoice_correction_receipts",

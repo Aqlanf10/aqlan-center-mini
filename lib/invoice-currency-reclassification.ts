@@ -1,7 +1,7 @@
 import {isCurrency, toBaseAmount, type Currency} from "./money";
 
-/** Design-stage arithmetic only. No route/writer consumes this until the
- * append-only evidence schema and ALL settlement readers are integrated. */
+/** Arithmetic for the guarded writer. Ownership, complete lineage and locking
+ * are proved separately by the database adapter before this planner is called. */
 export interface ReclassificationPayment {
   id: number; patientId: number; invoiceId: number | null;
   kind: "payment" | "refund"; reversalOfId: number | null;
@@ -17,6 +17,7 @@ export class ReclassificationProofError extends Error {
 }
 const fail=():never=>{throw new ReclassificationProofError();};
 const positiveId=(value:number)=>Number.isSafeInteger(value)&&value>0;
+const signed=(value:number)=>{if(!Number.isSafeInteger(value))fail();return value;};
 const safe=(value:number)=>{if(!Number.isSafeInteger(value)||value<0)fail();return value;};
 
 /** Only YER -> the recorded receipt currency is supported initially. Receipts
@@ -52,8 +53,8 @@ export function planCurrencyReclassification(input:{
   const evidence:ReclassificationEvidence[]=originals.map(row=>{
     const refunds=payments.filter(refund=>refund.kind==="refund"&&refund.reversalOfId===row.id);
     let source=row.baseAmountMinor,target=row.amountMinor;
-    for(const refund of refunds){source=safe(source-refund.baseAmountMinor);target=safe(target-refund.amountMinor);}
-    sourceMinor=safe(sourceMinor+source);targetMinor=safe(targetMinor+target);
+    for(const refund of refunds){source=signed(source-refund.baseAmountMinor);target=safe(target-refund.amountMinor);}
+    sourceMinor=signed(sourceMinor+source);targetMinor=safe(targetMinor+target);
     return {paymentId:row.id,refundIds:refunds.map(refund=>refund.id),sourceMinor:source,targetMinor:target};
   });
   // Settlement deltas reverse the old credit and apply the new credit. Cash

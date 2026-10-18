@@ -152,6 +152,14 @@ export const CRITICAL_SCHEMA_TABLES = [
 /** أعمدة ما بعد خط الأساس: وجودها دليل أن هجرتها طُبِّقت فعلًا. absence = انحراف فقط
  *  إذا كانت الهجرة المسجَّلة مطبَّقة؛ أما وهي ناقصة (pending) فغيابها متوقَّع لا انحراف. */
 export const CRITICAL_SCHEMA_COLUMNS: Array<{ table: string; column: string; sinceVersion: string }> = [
+  ...[
+    ["invoice_corrections","original_currency"],
+    ["invoice_settlement_reclassifications","correction_id"],["invoice_settlement_reclassifications","source_invoice_ids"],
+    ["invoice_settlement_reclassifications","patient_id"],["invoice_settlement_reclassifications","source_currency"],["invoice_settlement_reclassifications","target_currency"],
+    ["invoice_settlement_reclassification_events","payment_id"],["invoice_settlement_reclassification_events","reclassification_id"],
+    ["invoice_settlement_reclassification_events","source_minor"],["invoice_settlement_reclassification_events","target_minor"],
+    ["invoice_settlement_reclassification_events","direction"],["invoice_settlement_reclassification_events","payment_snapshot"],
+  ].map(([table,column])=>({table,column,sinceVersion:"0063"})),
   { table: "payments", column: "idempotency_key", sinceVersion: "0003" },
   { table: "payments", column: "reversal_of_id", sinceVersion: "0003" },
 ];

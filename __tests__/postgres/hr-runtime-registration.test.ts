@@ -1,3 +1,4 @@
+import {INVOICE_CURRENCY_MIGRATION} from "../../lib/invoice-currency-runtime";
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
@@ -24,7 +25,7 @@ afterAll(async () => {
 });
 it('runtime registers exact additive contracts without fabricating facts, receipts, or old migration ownership', async () => {
   const registered = (await fixture.source.query('SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version')).rows;
-  expect(registered).toEqual([...ortho, ...bundled].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
+  expect(registered).toEqual([...ortho, ...bundled,INVOICE_CURRENCY_MIGRATION].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);
   }

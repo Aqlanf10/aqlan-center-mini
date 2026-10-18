@@ -1,3 +1,4 @@
+import {prepareInvoiceCurrencyChange,writeInvoiceCurrencyEvidence} from "./invoice-currency-plan";
 import {invoiceQuantityAllowed} from "./invoice-clinical-linkage";
 import {invoiceIdentityCatalog,validateInvoiceIdentityAmendments} from "./invoice-identity-amendments";
 import type { SessionPayload } from "./auth";
@@ -54,31 +55,37 @@ async function contextInTx(client: DbClient, invoiceId: number) {
   const identityCatalog=await invoiceIdentityCatalog(client);
   const {rows:[bound]}=await client.query<{bound:boolean}>("SELECT EXISTS(SELECT 1 FROM invoice_items WHERE invoice_id=$1 AND (source_type IS NOT NULL OR source_id IS NOT NULL) AND source_type IS DISTINCT FROM 'plan_item') AS bound",[invoiceId]);
   const identityAmendmentAvailable=Array.isArray(position.sourceSnapshot.payments)&&position.sourceSnapshot.payments.length===0&&!bound.bound;
-  const facts = { invoice, work,identityCatalog,identityAmendmentAvailable, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
+  let currencyCorrection:{available:boolean;targetCurrency:"SAR";settledMinor:number;accountDueMinor:number;message:string} | undefined;
+  if(invoice.baseCurrency==="YER"){
+    try{const planned=await prepareInvoiceCurrencyChange(client,invoice,0);
+      currencyCorrection={available:true,targetCurrency:"SAR",settledMinor:planned.settledMinor,accountDueMinor:(await debtAccountDue(client,invoice.patientId,"SAR")).due,message:"تُنقل تسوية السندات السعودية المثبتة دون حركة نقدية."};
+    }catch(error){currencyCorrection={available:false,targetCurrency:"SAR",settledMinor:0,accountDueMinor:0,message:error instanceof Error?error.message:"تعذر إثبات تسوية العملة."};}
+  }
+  const facts = { ...(currencyCorrection?{currencyCorrection}:{}), invoice, work,identityCatalog,identityAmendmentAvailable, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
     accountDueMinor,settlementProofHash:position.settlementProofHash, repaymentVersion: schedule?.version ?? 0, repaymentTerms: schedule?.status === "active" ? schedule.terms : { mode: "full", installments: [] } };
   return { ...facts, sourceHash: debtRequestHash(facts), schedule, target };
 }
 
 export async function readInvoiceRevision(invoiceId: number, session: SessionPayload) {
-  await ensureSchema(); const client = await getPool().connect();
+  await ensureSchema(); const client = await getPool().connect(); let destroy=false;
   try {
     // Current authority is checked before the strictly read-only snapshot.
     await authority(client,session); await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const result = await contextInTx(client,invoiceId); await client.query("COMMIT"); return result;
-  } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+  } catch (error) { try{await client.query("ROLLBACK");}catch{destroy=true;} throw error; } finally { client.release(destroy); }
 }
 
 /** One transaction owns replacement, settlement lineage, dated repayment terms
  * and the exact immutable acknowledgement. It creates no payment or refund. */
 export async function reviseInvoice(invoiceId: number, source: Record<string, unknown>, session: SessionPayload) {
   if (!Number.isSafeInteger(invoiceId) || invoiceId <= 0 || session.role !== "admin") bad("تصحيح الفاتورة للمدير وحده.", "unauthorized");
-  if (Object.keys(source).some(key => !["idempotencyKey","expectedSourceHash","reason","lines","discount","discountReason","repaymentTerms","expectedRemainingMinor"].includes(key))) bad("حقول التصحيح غير مدعومة.");
+  if (Object.keys(source).some(key => !["idempotencyKey","expectedSourceHash","reason","lines","discount","discountReason","repaymentTerms","expectedRemainingMinor","currency"].includes(key))) bad("حقول التصحيح غير مدعومة.");
   if (typeof source.idempotencyKey !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/.test(source.idempotencyKey)
     || typeof source.expectedSourceHash !== "string" || !/^[a-f0-9]{64}$/.test(source.expectedSourceHash)
     || typeof source.reason !== "string" || source.reason.trim().length < 3 || source.reason.trim().length > 300) bad("راجع مفتاح الطلب والنسخة وسبب التصحيح.");
   const reason = source.reason.trim(), key = source.idempotencyKey;
   const hash = debtRequestHash({ purpose: "invoice-revision-v1", invoiceId, source, actor: { userId: session.userId, username: session.username, role: session.role } });
-  await ensureSchema(); const client = await getPool().connect();
+  await ensureSchema(); const client = await getPool().connect(); let destroy=false;
   try {
     await client.query("BEGIN"); await authority(client,session);
     const replay = async () => {
@@ -94,10 +101,24 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     if (early) { await authority(client,session); await client.query("COMMIT"); return { ...early, replayed: true }; }
     const { rows: [owner] } = await client.query<{ patient_id: number }>("SELECT patient_id FROM invoices WHERE id=$1", [invoiceId]);
     if (!owner) bad("الفاتورة غير موجودة.", "missing");
+    // Payroll/commission writers can need shift locks; fence them before holding
+    // patient, receipt or shift locks to avoid reversing their lock order.
+    // Calculation writes its run before reading commissions and inserting items.
+    // Fence that first write too, including a run with no items yet.
+    if(source.currency==="SAR")await client.query("LOCK TABLE expenses,hr_payroll_runs,hr_payroll_items IN SHARE MODE");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [owner.patient_id]);
-    // Cash writers take shift before invoice/plan locks. We never take a receipt
-    // row lock or alter a closed shift; existing cash remains immutable.
+    // Event foreign keys need receipt KEY SHARE locks. Refunds/corrections lock
+    // their original receipt before shift, so acquire these compatible read-only
+    // fences in the same order, never implicitly through an FK after shift.
+    const receiptFenceSql=`WITH RECURSIVE lineage(id) AS (SELECT $1::int UNION
+      SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id=l.id)
+      SELECT p.id FROM payments p WHERE p.invoice_id IN(SELECT id FROM lineage) AND p.patient_id=$2 ORDER BY p.id`;
+    const receiptFence=source.currency==="SAR"?(await client.query<{id:number}>(receiptFenceSql+" FOR KEY SHARE OF p",[invoiceId,owner.patient_id])).rows:null;
     await client.query("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id FOR UPDATE");
+    // A new receipt may commit between the receipt scan and shift acquisition.
+    // Never take its receipt lock after shift: require a fresh preview instead.
+    if(receiptFence){const current=(await client.query<{id:number}>(receiptFenceSql,[invoiceId,owner.patient_id])).rows;
+      if(JSON.stringify(current)!==JSON.stringify(receiptFence))bad("تغيّرت السندات أثناء تثبيت التصحيح؛ حدّث المعاينة.","stale");}
     // The canonical correction relinks these exact visits. Fence them before
     // plans/invoices so checkout cannot hold visit and wait on our invoice.
     await client.query("SELECT id FROM visits WHERE invoice_id=$1 ORDER BY id FOR UPDATE",[invoiceId]);
@@ -118,23 +139,30 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     const date = clinicDateString(new Date(before.invoice.createdAt),CLINIC_TIME_ZONE);
     if (settings["finance.locked_before"]?.trim() && date < settings["finance.locked_before"].trim()) bad("الفاتورة في فترة مقفلة؛ يلزم تصحيح معتمد في فترة مفتوحة.", "conflict");
     if (!Array.isArray(source.lines) || source.lines.length > 200 || !source.lines.every(record)) bad("بنود التصحيح غير صالحة.");
+    const currency=source.currency===undefined?before.invoice.baseCurrency:source.currency;
+    if(currency!==before.invoice.baseCurrency&&!(before.invoice.baseCurrency==="YER"&&currency==="SAR"))bad("انتقال العملة غير مدعوم.");
+    const changingCurrency=currency!==before.invoice.baseCurrency;
+    const currencyPlan=changingCurrency?await prepareInvoiceCurrencyChange(client,before.invoice,0):null;
+    const settledMinor=currencyPlan?.settledMinor??before.settledMinor;
+    if(changingCurrency&&(source.lines.length!==before.invoice.items.length||source.lines.some(line=>before.invoice.items.find(item=>item.id===line.itemId)?.quantity!==line.quantity)))bad("عند تصحيح العملة يجب إبقاء جميع بنود العلاج وكمياتها.");
     const lines = source.lines.map(line => {
       if (Object.keys(line).some(key => !["itemId","quantity","unitPrice","serviceId","doctorId","toothCode","surfaces"].includes(key))) bad("حقول بند التصحيح غير مدعومة.");
-      const unitPriceMinor = typeof line.unitPrice === "string" ? parseAmount(line.unitPrice,before.invoice.baseCurrency) : null;
+      const unitPriceMinor = typeof line.unitPrice === "string" ? parseAmount(line.unitPrice,currency as "YER"|"SAR"|"USD") : null;
       if (unitPriceMinor === null || typeof line.itemId !== "number" || typeof line.quantity !== "number") bad("السعر والكمية وهوية البند مطلوبة.");
       return { itemId: line.itemId, quantity: line.quantity, unitPriceMinor };
     });
     const amendments=await validateInvoiceIdentityAmendments(client,before.invoice,source.lines,before.work,before.identityAmendmentAvailable);
-    const discountMinor = typeof source.discount === "string" ? parseAmount(source.discount,before.invoice.baseCurrency) : null;
+    if(changingCurrency&&amendments.size)bad("تصحيح العملة لا يغيّر هوية العلاج أو الطبيب أو السن؛ استخدم مسار تصحيح العلاج المستقل.");
+    const discountMinor = typeof source.discount === "string" ? parseAmount(source.discount,currency as "YER"|"SAR"|"USD") : null;
     if (discountMinor === null) bad("الخصم غير صالح.");
     const discountReason = typeof source.discountReason === "string" ? source.discountReason.trim() : "";
     if (discountMinor > 0 && (discountReason.length < 3 || discountReason.length > 300)) bad("اكتب سبب الخصم.");
     const planned = planInvoiceRevision(before.invoice.items,lines,discountMinor); if (!planned.ok) bad(planned.message);
     const netMinor = planned.totalMinor - planned.discountMinor;
-    const remainingMinor = Math.max(0,netMinor-before.settledMinor);
+    const remainingMinor = Math.max(0,netMinor-settledMinor);
     const terms = validateDebtRepaymentTerms(source.repaymentTerms,remainingMinor); if (!terms.ok) bad(terms.message);
     if (source.expectedRemainingMinor !== remainingMinor) bad("توزيع الأقساط لا يطابق المتبقي بعد التصحيح.", "stale");
-    const afterDueMinor = before.accountDueMinor + netMinor - (before.invoice.totalMinor-before.invoice.discountMinor);
+    const afterDueMinor = changingCurrency?(await debtAccountDue(client,owner.patient_id,"SAR")).due+netMinor-settledMinor:before.accountDueMinor + netMinor - (before.invoice.totalMinor-before.invoice.discountMinor);
     if (remainingMinor > Math.max(0,afterDueMinor)) bad("توجد تسويات أخرى على الحساب؛ راجع تخصيص السندات قبل جدولة تحصيل إضافي.", "conflict");
     for (const work of before.work) {
       const original = before.invoice.items.find(item=>item.planItemId===work.id);
@@ -148,12 +176,14 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       await writeDebtRepaymentInTransaction(client,{target:before.target,terms:{mode:"full",installments:[]},expectedVersion:before.repaymentVersion,
         expectedRemainingMinor:before.remainingMinor,cancel:true,reason,idempotencyKey:`invoice-revision:${hash}:old-terms`,session});
     }
-    const result = await correctInvoiceInTransaction(client,{invoiceId,lines,reason,actor:session.username,actorRole:session.role},{discountMinor,amendments});
+    const result = await correctInvoiceInTransaction(client,{invoiceId,lines,reason,actor:session.username,actorRole:session.role},{discountMinor,amendments,...(changingCurrency?{currency:"SAR" as const}: {})});
     if (!result.ok) bad(result.message,result.reason === "not_found" ? "missing" : "conflict");
     const { rows: [revision] } = await client.query<{ id: number }>(
-      `INSERT INTO invoice_corrections(patient_id,currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [owner.patient_id,before.invoice.baseCurrency,invoiceId,result.correctedId,key,hash,reason,session.username]);
+      `INSERT INTO invoice_corrections(patient_id,currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by,original_currency)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [owner.patient_id,currency,invoiceId,result.correctedId,key,hash,reason,session.username,changingCurrency?before.invoice.baseCurrency:null]);
+    const reclassificationId=currencyPlan?await writeInvoiceCurrencyEvidence(client,revision.id,owner.patient_id,currencyPlan.lineageInvoiceIds):null;
+    if(currencyPlan?.planIds.length)await client.query("UPDATE treatment_plans SET base_currency='SAR' WHERE id=ANY($1::int[])",[currencyPlan.planIds]);
     const affectedPlans = new Set<number>();
     for (const work of before.work) {
       const original = before.invoice.items.find(item=>item.planItemId===work.id)!;
@@ -179,16 +209,16 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     // Paid status follows actual immutable settlement, including original receipts.
     await client.query("UPDATE invoices SET status=$2 WHERE id=$1", [result.correctedId,remainingMinor === 0 ? "paid" : "open"]);
     const repayment = remainingMinor > 0 ? await writeDebtRepaymentInTransaction(client,{
-      target:{...before.target,invoiceId:result.correctedId},terms:terms.value,expectedVersion:0,expectedRemainingMinor:remainingMinor,
+      target:{...before.target,currency:currency as "YER"|"SAR"|"USD",invoiceId:result.correctedId},terms:terms.value,expectedVersion:0,expectedRemainingMinor:remainingMinor,
       reason,idempotencyKey:`invoice-revision:${hash}:new-terms`,session }) : null;
     const corrected = await getInvoice(result.correctedId,client), original = {...before.invoice,status:"cancelled" as const};
-    const receipt = { original, corrected, patientId:owner.patient_id,currency:before.invoice.baseCurrency,idempotencyKey:key,createdBy:session.username,
-      beforeMinor:before.invoice.totalMinor-before.invoice.discountMinor,afterMinor:netMinor,settledMinor:before.settledMinor,remainingMinor,
-      creditMinor:Math.max(0,before.settledMinor-netMinor),accountCreditMinor:Math.max(0,-afterDueMinor),accountDueMinor:afterDueMinor,repayment };
+    const receipt = { ...(reclassificationId?{reclassificationId,originalCurrency:before.invoice.baseCurrency}:{}), original, corrected, patientId:owner.patient_id,currency,idempotencyKey:key,createdBy:session.username,
+      beforeMinor:before.invoice.totalMinor-before.invoice.discountMinor,afterMinor:netMinor,settledMinor,remainingMinor,
+      creditMinor:Math.max(0,settledMinor-netMinor),accountCreditMinor:Math.max(0,-afterDueMinor),accountDueMinor:afterDueMinor,repayment };
     await client.query("INSERT INTO invoice_correction_receipts(correction_id,receipt) VALUES($1,$2::jsonb)",[revision.id,JSON.stringify(receipt)]);
     await insertAuditRow(client,{action:"invoice.correct",entity:"invoice",entityId:invoiceId,actor:session.username,actorRole:session.role,
-      details:{correctionId:revision.id,correctedInvoiceId:result.correctedId,reason,discountReason,settledMinor:before.settledMinor,remainingMinor,
+      details:{correctionId:revision.id,correctedInvoiceId:result.correctedId,reason,discountReason,settledMinor,remainingMinor,
         creditMinor:receipt.creditMinor,identityAmendments:[...amendments].map(([itemId,after])=>({itemId,before:before.invoice.items.find(item=>item.id===itemId),after})),repayment,receiptsPreserved:true,cashMovement:0,idempotencyKey:key}});
     await authority(client,session); await client.query("COMMIT"); return { ...receipt, replayed:false };
-  } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+  } catch (error) { try{await client.query("ROLLBACK");}catch{destroy=true;} throw error; } finally { client.release(destroy); }
 }

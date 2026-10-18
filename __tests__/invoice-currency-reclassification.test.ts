@@ -3,7 +3,7 @@ import {planCurrencyReclassification,ReclassificationProofError,type Reclassific
 const payment=(id:number,amountMinor:number,baseAmountMinor:number):ReclassificationPayment=>({id,patientId:101,invoiceId:201,kind:"payment",reversalOfId:null,currency:"SAR",amountMinor,baseCurrency:"YER",baseAmountMinor,exchangeRate:410});
 const rows=[payment(1,70000,287000),payment(2,10000,41000),payment(3,10000,41000)];
 const input={patientId:101,lineageInvoiceIds:[201],fromCurrency:"YER" as const,toCurrency:"SAR" as const,principalMinor:250000,payments:rows};
-describe("currency reclassification design arithmetic (not a deployed writer)",()=>{
+describe("currency reclassification recorded-receipt arithmetic",()=>{
   it("proves each receipt, settles 900 SAR, leaves 1600 SAR and never changes cash",()=>{
     const before=structuredClone(rows),unallocated={...payment(4,100,100),invoiceId:null,currency:"YER",exchangeRate:1};
     const result=planCurrencyReclassification(input);
@@ -36,4 +36,10 @@ describe("currency reclassification design arithmetic (not a deployed writer)",(
     expect(()=>planCurrencyReclassification({...input,payments:[...rows,refund]})).toThrow(ReclassificationProofError);
     expect(()=>planCurrencyReclassification({...input,lineageInvoiceIds:[201,202],payments:[...rows,{...refund,invoiceId:202}]})).toThrow(ReclassificationProofError);
   });
+});
+
+it("preserves independently rounded historical YER reversals without inventing a residual SAR debt",()=>{
+ const original={...payment(10,3,14),exchangeRate:450};
+ const refunds=[11,12,13].map(id=>({...payment(id,1,5),exchangeRate:450,kind:"refund" as const,reversalOfId:10}));
+ expect(planCurrencyReclassification({...input,payments:[original,...refunds]})).toMatchObject({sourceMinor:-1,settledMinor:0});
 });

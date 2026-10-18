@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   compareDetailedSchemaCatalogs,
+  schemaOwnershipArtifactCatalog,
   type DetailedSchemaCatalog,
   type DetailedCatalogEntry,
 } from "../lib/schema-manifest";
@@ -302,6 +303,29 @@ describe("schema ownership harness safety", () => {
     expect(artifactContainsSensitiveText('{"x":"RAILWAY_SERVICE_ID"}')).toBe(true);
     expect(artifactContainsSensitiveText('{"x":"INSERT INTO patients"}')).toBe(true);
     expect(artifactContainsSensitiveText('{"format":"safe","owner":"$CURRENT_USER"}')).toBe(false);
+  });
+
+  it.each(["password", "expectedUsername", "host", "port"])("detects nested JSON credential key %s", key => {
+    let encoded = JSON.stringify({ [key]: "synthetic-only" });
+    for (let depth = 0; depth < 3; depth += 1) {
+      expect(artifactContainsSensitiveText(encoded)).toBe(true);
+      encoded = JSON.stringify({ value: encoded });
+    }
+  });
+
+  it.each([
+    { body: "INSERT INTO patients VALUES ('synthetic-only')" },
+    { body: "SELECT 1", password: "synthetic-secret" },
+    { body: "SELECT 1", connection: "postgresql://synthetic:synthetic@localhost/test" },
+    { body: "INSERT INTO invoice_settlement_reclassification_events SELECT 1", username: "synthetic-person" },
+  ])("does not hide unreviewed function text behind a reviewed function name: %j", (value) => {
+    const source = catalog({ functions: [{ key: "aqlan_reclassification_follow_refund()",
+      name: "aqlan_reclassification_follow_refund", value: JSON.stringify(value) }] });
+    const before = JSON.stringify(source);
+    const artifact = schemaOwnershipArtifactCatalog(source);
+    expect(JSON.stringify(source)).toBe(before);
+    expect(artifact.functions).toEqual(source.functions);
+    expect(artifactContainsSensitiveText(JSON.stringify(artifact))).toBe(true);
   });
 
   it("rejects every CLI shape except no args or one output pair", () => {

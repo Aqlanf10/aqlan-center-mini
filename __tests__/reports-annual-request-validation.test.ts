@@ -13,7 +13,7 @@ vi.mock("../lib/db", async (importOriginal) => {
     ...actual,
     ensureSchema: harness.ensureSchema,
     listParties: harness.listParties,
-    getPool: () => ({ query: harness.query }),
+    getPool: () => ({ query: harness.query,connect:async()=>({query:harness.query,release:vi.fn()}) }),
   };
 });
 vi.mock("../lib/session", () => ({
