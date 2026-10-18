@@ -33,7 +33,7 @@ const { buildReport, parseFilters } = await import("../../lib/reports");
 const { CLINIC_TIME_ZONE } = await import("../../lib/db");
 const client = new Client({ connectionString, ssl: false });
 const fixtureTables = [
-  "expenses", "payments", "patient_opening_balances", "invoice_items", "invoices",
+  "approved_agreement_principals", "expenses", "payments", "patient_opening_balances", "invoice_items", "invoices",
   "visits", "plan_items", "treatment_plans", "services", "patients",
 ] as const;
 
@@ -43,6 +43,10 @@ beforeAll(async () => {
   // An omitted fixture table must fail, never fall through to a public table.
   await client.query("SET search_path TO pg_temp");
   await client.query(`
+    CREATE TEMP TABLE approved_agreement_principals (
+      plan_id integer, patient_id integer, invoice_id integer, opening_currency text,
+      historical_paid_minor bigint, currency text
+    );
     CREATE TEMP TABLE expenses (
       id integer PRIMARY KEY, created_at timestamptz, base_amount_minor bigint,
       category text DEFAULT 'synthetic', payee_text text DEFAULT 'synthetic recipient',
