@@ -1,3 +1,4 @@
+import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
 import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
@@ -593,17 +594,24 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
 
   // Explicit approved sources affect current reference progress only, never add
   // a second ledger principal. Opening history is already net of prior cash.
-  const { rows: approvedSources } = await pool.query<{plan_id:number;patient_id:number;invoice_id:number|null;opening_currency:string|null;historical_paid_minor:string}>(
-    "SELECT plan_id,patient_id,invoice_id,opening_currency,historical_paid_minor::text FROM approved_agreement_principals WHERE patient_id=ANY($1::int[])",[ids]);
+  const { rows: approvedSources } = await pool.query<{plan_id:number;patient_id:number;invoice_id:number|null;opening_currency:string|null;historical_paid_minor:string;currency:Currency}>(
+    "SELECT plan_id,patient_id,invoice_id,opening_currency,historical_paid_minor::text,currency FROM approved_agreement_principals WHERE patient_id=ANY($1::int[])",[ids]);
   // مدفوعات الخطة: الدفعة المرتبطة بالخطة مباشرة أو بفاتورة من الخطة — بعملة
   // الخطة نفسها (P-01/D-1): تقدُّم الخطة يُقاس بعملة اتفاقها لا بمكافئ الدفاتر.
   for (const patient of byId.values()) {
     const planById = new Map(patient.plans.map((plan) => [plan.id, plan]));
     const approved = approvedSources.filter(source=>source.patient_id===patient.patientId);
-    for(const source of approved){const plan=planById.get(source.plan_id);if(plan)plan.paidMinor=num(source.historical_paid_minor);}
+    const approvedInvoicePlans=new Map<number,number>();
+    for(const source of approved){
+      const plan=planById.get(source.plan_id);if(plan)plan.paidMinor=num(source.historical_paid_minor);
+      if(source.invoice_id!==null)for(const invoiceId of await invoiceSettlementLineage(pool,source.invoice_id,patient.patientId,source.currency)){
+        if(approvedInvoicePlans.has(invoiceId))throw new Error("Overlapping approved invoice lineage");
+        approvedInvoicePlans.set(invoiceId,source.plan_id);
+      }
+    }
     for (const payment of patient.payments) {
       const allocation=approved.find(source=>source.invoice_id!==null?source.invoice_id===payment.invoiceId:source.opening_currency===payment.openingCurrency);
-      let targetPlanId = allocation?.plan_id ?? payment.planId;
+      let targetPlanId = (payment.invoiceId!==null?approvedInvoicePlans.get(payment.invoiceId):undefined) ?? allocation?.plan_id ?? payment.planId;
       if (targetPlanId == null && payment.invoiceId != null) {
         targetPlanId = patient.invoices.find((inv) => inv.id === payment.invoiceId)?.planId ?? null;
       }

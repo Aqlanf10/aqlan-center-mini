@@ -21,11 +21,11 @@ export async function debtAccountDue(client: DbClient, patientId: number, curren
 }
 
 /** Caller already owns the patient financial fence. Acquire in canonical order. */
-export async function lockDebtAccountForSchedule(client:DbClient,patientId:number) {
+export async function lockDebtAccountForSchedule(client:DbClient,patientId:number,includeUnbilledVisits=false) {
   await client.query("SELECT id FROM cashier_shifts WHERE status='open' FOR UPDATE");
   // Signing/checkout owns visit before invoice. Schedule changes must wait at
   // that same fence, including visits relinked by an invoice correction.
-  await client.query("SELECT id FROM visits WHERE patient_id=$1 AND invoice_id IS NOT NULL ORDER BY id FOR UPDATE",[patientId]);
+  await client.query(`SELECT id FROM visits WHERE patient_id=$1 ${includeUnbilledVisits?"":"AND invoice_id IS NOT NULL"} ORDER BY id FOR UPDATE`,[patientId]);
   await client.query("LOCK TABLE patient_opening_balances IN SHARE MODE");
   await client.query("SELECT id FROM invoices WHERE patient_id=$1 ORDER BY id FOR UPDATE",[patientId]);
   await client.query("SELECT id FROM treatment_plans WHERE patient_id=$1 ORDER BY id FOR SHARE",[patientId]);

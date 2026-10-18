@@ -51,3 +51,43 @@ it("general payment endpoint allocates to the approved source and does not bill 
  expect(response.status,await response.clone().text()).toBe(201);const receipt=await response.json();expect(receipt.invoiceId).toBeGreaterThan(0);
  expect((await db.query("SELECT count(*)::int AS count FROM invoices WHERE patient_id=$1",[patientId])).rows[0].count).toBe(1);
 });
+it.each([390,1280].flatMap(width=>["active","completed"].map(status=>({width,status}))))("real collection at $width on $status survives lost reply, refusal and reload with one receipt",async({width,status})=>{
+ const {patientId,planId}=await fixture();
+ const approval=await authedMutation(`/api/plans/${planId}/financial-approval`,h.sessions.admin,"POST",JSON.stringify({expectedTotalMinor:150000,currency:"USD",source:{kind:"new"},reason:"Synthetic recovery approval"}),{"Idempotency-Key":`recovery-approval-${planId}`});expect(approval.status).toBe(201);
+ await db.query("UPDATE treatment_plans SET status=$2 WHERE id=$1",[planId,status]);
+ const context=await browser.newContext({viewport:{width,height:1000},locale:"ar-YE",serviceWorkers:"block"});const [name,...value]=h.sessions.admin.cookie.split("=");await context.addCookies([{name,value:value.join("="),url:baseUrl}]);
+ const page=await context.newPage();page.on("dialog",dialog=>void dialog.accept());const requests:{key:string;body:string}[]=[];
+ try{
+  await page.route("**/api/**",async route=>{
+   const request=route.request();if(request.method()!=="POST"||![/\/api\/payments$/,new RegExp(`/api/plans/${planId}$`)].some(pattern=>pattern.test(request.url())))return route.continue();
+   requests.push({key:request.headers()["idempotency-key"],body:request.postData()!});
+   if(requests.length===2)return route.fulfill({status:409,contentType:"application/json",body:JSON.stringify({message:"Synthetic uncertain retry refusal"})});
+   const response=await route.fetch();expect(response.ok(),await response.text()).toBe(true);
+   if(requests.length===1)return route.abort("failed");return route.fulfill({response});
+  });
+  await page.goto(`${baseUrl}/patients/${patientId}?tab=plans`,{waitUntil:"domcontentloaded"});
+  const collect=page.getByRole("button",{name:"تحصيل قسط",exact:true});await collect.waitFor({timeout:5000});await expect.poll(()=>collect.isEnabled()).toBe(true);await collect.click();
+  await page.getByLabel("مبلغ القسط",{exact:true}).fill("500");await page.getByRole("button",{name:"سجّل القسط واطبع السند",exact:true}).click();
+  const retry=page.getByRole("button",{name:"إعادة التحقق من العملية السابقة",exact:true});await retry.waitFor();
+  expect(await page.getByLabel("مبلغ القسط",{exact:true}).isDisabled()).toBe(true);
+  expect((await db.query("SELECT count(*)::int AS count FROM payments WHERE patient_id=$1",[patientId])).rows[0].count).toBe(1);
+  await page.reload({waitUntil:"domcontentloaded"});await retry.waitFor({timeout:5000});expect(await collect.isDisabled()).toBe(true);
+  await retry.click();await expect.poll(()=>page.getByRole("alert").filter({hasText:"Synthetic uncertain retry refusal"}).isVisible()).toBe(true);
+  expect(await collect.isDisabled()).toBe(true);await page.reload({waitUntil:"domcontentloaded"});await retry.waitFor();expect(requests).toHaveLength(2);
+  await retry.click();await expect.poll(()=>retry.count()).toBe(0);await expect.poll(()=>collect.isEnabled()).toBe(true);
+  expect(requests).toHaveLength(3);expect(requests[1]).toEqual(requests[0]);expect(requests[2]).toEqual(requests[0]);
+  expect((await db.query("SELECT amount_minor::text FROM payments WHERE patient_id=$1",[patientId])).rows).toEqual([{amount_minor:"50000"}]);
+  expect((await db.query("SELECT count(*)::int AS count FROM invoices WHERE patient_id=$1",[patientId])).rows[0].count).toBe(1);
+  await page.screenshot({path:`.settings-ui-artifacts/agreement-recovery-${status}-${width}.png`,fullPage:true});
+ }finally{await context.close();}
+});
+it.each(["invoice","opening"] as const)("direct approved %s HTTP targets reject missing keys and amounts above 300SAR",async kind=>{
+ const {patientId,planId}=await fixture();await db.query("UPDATE treatment_plans SET total_minor=30000,base_currency='SAR' WHERE id=$1",[planId]);await db.query("UPDATE plan_installments SET amount_minor=15000 WHERE plan_id=$1",[planId]);
+ if(kind==="opening")await db.query("INSERT INTO patient_opening_balances(patient_id,currency,amount_minor,as_of_date) VALUES($1,'SAR',30000,'2026-09-01')",[patientId]);
+ const approval=await authedMutation(`/api/plans/${planId}/financial-approval`,h.sessions.admin,"POST",JSON.stringify({expectedTotalMinor:30000,currency:"SAR",source:kind==="invoice"?{kind:"new"}:{kind:"opening",historicalPaidMinor:0},reason:"Synthetic direct source review"}),{"Idempotency-Key":`direct-source-${planId}`});expect(approval.status,await approval.clone().text()).toBe(201);
+ const source=(await db.query("SELECT invoice_id,opening_currency FROM approved_agreement_principals WHERE plan_id=$1",[planId])).rows[0];
+ const body=(amount:string)=>JSON.stringify({patientId,invoiceId:source.invoice_id,openingCurrency:source.opening_currency,kind:"payment",amount,currency:"SAR",method:"cash"});
+ const missing=await Promise.all([authedMutation("/api/payments",h.sessions.cashier,"POST",body("100")),authedMutation("/api/payments",h.sessions.cashier,"POST",body("100"))]);expect(missing.map(r=>r.status)).toEqual([400,400]);
+ const over=await authedMutation("/api/payments",h.sessions.cashier,"POST",body("301"),{"Idempotency-Key":`direct-over-${planId}`});expect(over.status).toBe(400);
+ expect((await db.query("SELECT count(*)::int AS count FROM payments WHERE patient_id=$1",[patientId])).rows[0].count).toBe(0);
+});

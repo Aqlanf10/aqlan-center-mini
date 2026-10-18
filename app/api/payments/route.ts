@@ -327,7 +327,8 @@ export async function POST(request: Request) {
     }
     // replay = نفس العملية المالية التي نجحت قبل قليل، فيُعاد السند نفسه بلا 201.
     return NextResponse.json({ ...payment, idempotencyKey }, { status: replayed ? 200 : 201 });
-  } catch {
+  } catch (error) {
+    if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة." }, { status: 500 });
   }
 }

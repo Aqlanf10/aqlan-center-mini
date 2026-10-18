@@ -63,7 +63,7 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
     const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[input.planId])).rows[0];
     if(!owner)throw new DebtRepaymentError("missing","الخطة غير موجودة.");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[owner.patient_id]);
-    await lockDebtAccountForSchedule(client,owner.patient_id);
+    await lockDebtAccountForSchedule(client,owner.patient_id,true);
     const again=await replay();if(again)return {agreement:again,replayed:true};
     const p=(await client.query<{patient_id:number;total_minor:string;base_currency:Currency;status:string;consent_at:Date|null;title:string;primary_doctor_id:number|null}>(
       "SELECT patient_id,total_minor::text,base_currency,status,consent_at,title,primary_doctor_id FROM treatment_plans WHERE id=$1 FOR UPDATE",[input.planId])).rows[0];
@@ -77,7 +77,15 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
     if(input.source.kind==="new") {
       const history=(await client.query(`SELECT 1 FROM invoices WHERE plan_id=$1 UNION ALL SELECT 1 FROM payments WHERE plan_id=$1
         UNION ALL SELECT 1 FROM patient_opening_balances WHERE patient_id=$2 AND currency=$3 LIMIT 1`,[input.planId,p.patient_id,p.base_currency])).rows;
-      if(history.length||items.some(i=>i.historical))fail("للخطة أو العملة أصل سابق؛ استخدم مطابقة المصدر أو المراجعة المالية. لم يُضف دين.");
+      const clinicalHistory=(await client.query(`SELECT 1 FROM plan_items pi
+        WHERE pi.plan_id=$1 AND (
+          EXISTS(SELECT 1 FROM invoice_items ii LEFT JOIN visit_procedures vp
+            ON ii.source_type='visit_procedure' AND ii.source_id=vp.id
+            WHERE ii.plan_item_id=pi.id OR (ii.source_type='plan_item' AND ii.source_id=pi.id) OR vp.plan_item_id=pi.id)
+          OR EXISTS(SELECT 1 FROM treatment_sessions ts JOIN visits v ON v.id=ts.visit_id
+            WHERE ts.plan_item_id=pi.id AND (v.invoice_id IS NOT NULL OR EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=v.invoice_id)))
+        ) LIMIT 1`,[input.planId])).rows;
+      if(history.length||clinicalHistory.length||items.some(i=>i.historical))fail("للخطة أو العملة أصل سابق؛ استخدم مطابقة المصدر أو المراجعة المالية. لم يُضف دين.");
       invoiceId=(await client.query<{id:number}>(`INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency,plan_id,note,created_by)
         VALUES(${documentNumberSql("invoice")},$1,$2,0,$3,$4,$5,$6) RETURNING id`,[p.patient_id,p.total_minor,p.base_currency,input.planId,input.reason,input.session.username])).rows[0].id;
       const primary=(await client.query<{id:number}>("SELECT id FROM parties WHERE id=$1 AND kind='doctor'",[p.primary_doctor_id])).rows[0]?.id??null;
@@ -155,4 +163,21 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
     return {paymentId:result.paymentId,replayed:result.kind==="replay"};
   });
   return {...receipt,payment:await getPayment(receipt.paymentId)};
+}
+
+/** Invoked after the canonical shift lock, before any settlement-target lock.
+ * All receipt writers (including correction/recovery adapters) share this fence.
+ * Unapproved sources retain their existing policy. */
+export async function fenceApprovedReceiptSource(client:DbClient,patientId:number,invoiceId:number|null,openingCurrency:Currency|null) {
+  const approval=(await client.query<ApprovedAgreement>(`SELECT * FROM approved_agreement_principals
+    WHERE patient_id=$1 AND (invoice_id=$2 OR ($2::int IS NULL AND opening_currency=$3))`,[patientId,invoiceId,openingCurrency])).rows[0];
+  if(approval)await lockDebtAccountForSchedule(client,patientId);
+  return approval??null;
+}
+export async function assertApprovedReceiptLimit(client:DbClient,a:ApprovedAgreement,amountMinor:number,currency:Currency,baseAmountMinor:number,key:string|null) {
+  if(!key||!validKey(key))fail("التحصيل من أصل معتمد يتطلب مفتاح إعادة ثابتًا.");
+  const position=await readDebtPosition(client,target(a),true);
+  if(!position.available||!approvedSourceMatches(position.sourceSnapshot,a.source_snapshot))throw new DebtRepaymentError("stale","تغير مصدر الاتفاق؛ يلزم مراجعة مالية.");
+  const settlement=settlePaymentMinor({amountMinor,currency,baseAmountMinor},a.currency);
+  if(!positive(settlement)||settlement>position.remainingMinor||settlement>(await debtAccountDue(client,a.patient_id,a.currency)).due)fail("المبلغ يتجاوز متبقي المصدر أو الحساب.");
 }

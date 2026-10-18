@@ -179,3 +179,47 @@ it("uses inclusive due dates and propagates settlement read errors instead of sh
  });
  try{await expect(approvedAgreementPosition(f.planId,"2026-10-18")).rejects.toThrow("synthetic receipt read unavailable");}finally{restore?.();spy.mockRestore();}
 });
+
+it.each(["invoice","opening"] as const)("all writers guard approved %s source and mixed-target concurrency",async kind=>{
+ const f=await fixture("SAR",30000);
+ if(kind==="opening")await db.setPatientOpeningBalance({patientId:f.patientId,currency:"SAR",amountMinor:30000,asOfDate:"2026-09-01",note:null,createdBy:session.username,reason:"Synthetic source"});
+ const {agreement}=await approveAgreement({...approval(f),source:kind==="opening"?{kind:"opening",historicalPaidMinor:0}:{kind:"new"}});
+ const direct=(amountMinor:number,key?:string)=>db.recordPayment({patientId:f.patientId,invoiceId:agreement.invoice_id,planId:null,openingCurrency:agreement.opening_currency,kind:"payment",amountMinor,currency:"SAR",baseCurrency:"YER",exchangeRate:140,method:"cash",note:null,createdBy:session.username,idempotencyKey:key});
+ await expect.soft(direct(10000)).rejects.toThrow(/مفتاح/);
+ await expect.soft(direct(31000,`over-review-${++serial}`)).rejects.toThrow(/يتجاوز/);
+ const results=await Promise.allSettled([collectApprovedAgreement(collection(f,20000)),direct(20000,`mixed-review-${++serial}`)]);
+ expect(results.filter(r=>r.status==="fulfilled")).toHaveLength(1);
+ expect((await approvedAgreementPosition(f.planId,"2026-10-18"))?.remainingMinor).toBe(10000);
+});
+
+it("refuses new principal for a plan session already billed through clinical signing",async()=>{
+ const f=await fixture("YER",300000,false);await q("DELETE FROM plan_installments WHERE plan_id=$1",[f.planId]);
+ const doctor=(await q("INSERT INTO parties(kind,name) VALUES('doctor','Synthetic prior performer') RETURNING id")).rows[0].id;
+ const service=(await q("INSERT INTO services(name,price_minor,is_active,price_configured) VALUES('Synthetic prior session',300000,TRUE,TRUE) RETURNING id")).rows[0].id;
+ const item=(await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,doctor_id,billing_rule,session_count) VALUES($1,$2,'Synthetic prior session',1,300000,$3,'per_session',3) RETURNING id",[f.planId,service,doctor])).rows[0].id;
+ await q("INSERT INTO treatment_sessions(plan_item_id,sequence) SELECT $1,n FROM generate_series(1,3) AS n",[item]);
+ await db.recordPlanConsent({planId:f.planId,actor:session.username,note:null});
+ const visit=await db.addVisit({patientName:"Synthetic",patientPhone:null,note:null,patientId:f.patientId});await q("UPDATE visits SET doctor_id=$2,diagnosis='Synthetic prior treatment' WHERE id=$1",[visit.id,doctor]);
+ await db.setVisitProcedures({visitId:visit.id,procedures:[{serviceId:service,toothCode:null,surfaces:null,quantity:1,unitPriceMinor:100000,priceReason:null,doctorId:doctor,note:null,planItemId:item}]});
+ const signed=await db.signClinicalVisit({visitId:visit.id,baseCurrency:"YER",signedBy:"doctor"});expect(signed.invoiceId).toBeGreaterThan(0);
+ await expect(approveAgreement(approval(f))).rejects.toThrow(/سابق|مطابقة/);
+ expect((await db.patientLedger(f.patientId)).invoices).toHaveLength(1);
+});
+it("matches corrected invoice lineage in plan, ledger and report without counting ancestor receipt twice",async()=>{
+ const f=await fixture("USD",150000);
+ const inv=(await q("INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency) VALUES($1,$2,160000,'USD') RETURNING id",[`ANCESTOR-${++serial}`,f.patientId])).rows[0].id;
+ const line=(await q("INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor) VALUES($1,'Synthetic original',1,160000,160000) RETURNING id",[inv])).rows[0].id;
+ await db.recordPayment({patientId:f.patientId,invoiceId:inv,planId:null,openingCurrency:null,kind:"payment",amountMinor:50000,currency:"USD",baseCurrency:"YER",exchangeRate:530,method:"cash",note:null,createdBy:session.username});
+ const revision=await import("../../lib/invoice-revision-db");const view=await revision.readInvoiceRevision(inv,session);
+ const correction=await revision.reviseInvoice(inv,{idempotencyKey:`lineage-review-${++serial}`,expectedSourceHash:view.sourceHash,reason:"Synthetic price correction",lines:[{itemId:line,quantity:1,unitPrice:"1500"}],discount:"0",discountReason:null,repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:100000},session);
+ if(!("corrected" in correction)||!correction.corrected)throw new Error("correction failed");
+ await approveAgreement({...approval(f),source:{kind:"invoice",invoiceId:correction.corrected.id}});
+ expect(await approvedAgreementPosition(f.planId,"2026-10-18")).toMatchObject({paidMinor:50000,remainingMinor:100000});
+ expect((await db.computeDebtRows([f.patientId])).find(r=>r.currency==="USD")?.dueMinor).toBe(100000);
+ const {buildReport,parseFilters}=await import("../../lib/reports");const result=await buildReport("debt",parseFilters(new URLSearchParams({preset:"custom",from:"2026-01-01",to:"2099-12-31",patientId:String(f.patientId)})));
+ expect(result.rows).toEqual([expect.objectContaining({currency:"USD",balanceMinor:100000,paidMinor:50000,planPaidMinor:50000})]);
+ const statement=await buildReport("patient-statement",parseFilters(new URLSearchParams({preset:"custom",from:"2026-01-01",to:"2099-12-31",patientId:String(f.patientId)})));
+ expect(statement.kpis.find(k=>k.key==="balance-USD")?.minor).toBe(100000);
+ const before=await buildReport("patient-statement",parseFilters(new URLSearchParams({preset:"custom",from:"2025-01-01",to:"2025-12-31",patientId:String(f.patientId)})));
+ expect(before.rows??[]).toHaveLength(0);
+});

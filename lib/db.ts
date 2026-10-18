@@ -9904,6 +9904,9 @@ async function runPaymentTransaction(
     const effectivePlanId = refundSnapshot ? refundSnapshot.planId : (input.planId ?? null);
     const effectiveOpeningCurrency = refundSnapshot ? refundSnapshot.openingCurrency : input.openingCurrency;
     const isRefund = input.kind === "refund";
+    const approvedReceiptSource = !isRefund
+      ? await (await import("./approved-agreements")).fenceApprovedReceiptSource(client,input.patientId,effectiveInvoiceId,effectiveOpeningCurrency)
+      : null;
     let inactivePlanTarget = false;
     let historicalPlanTarget = false;
     let lockedInvoicePlanId: number | null = null;
@@ -10037,6 +10040,10 @@ async function runPaymentTransaction(
         return { kind: "reason", reason: "idempotency_conflict" };
       }
     }
+
+    // Replay above must precede the remaining-balance check, including a fully paid source.
+    if(approvedReceiptSource)await (await import("./approved-agreements")).assertApprovedReceiptLimit(
+      client,approvedReceiptSource,input.amountMinor,input.currency,baseAmount,prepared.idempotencyKey);
 
     // A successful retry remains a retry after plan closure. Only a genuinely
     // new plan-only receipt is refused, before any financial write.
