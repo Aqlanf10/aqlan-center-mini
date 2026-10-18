@@ -265,3 +265,23 @@ it("matches corrected invoice lineage in plan, ledger and report without countin
  const before=await buildReport("patient-statement",parseFilters(new URLSearchParams({preset:"custom",from:"2025-01-01",to:"2025-12-31",patientId:String(f.patientId)})));
  expect(before.rows??[]).toHaveLength(0);
 });
+
+it.each(["approved", "direct_installments"] as const)("refuses unlinked single-session work already covered by %s", async (funding) => {
+ const f=await fixture("SAR",150000,false);
+ if(funding==="approved") await q("DELETE FROM plan_installments WHERE plan_id=$1",[f.planId]);
+ const doctor=(await q("INSERT INTO parties(kind,name) VALUES('doctor','Synthetic single-session doctor') RETURNING id")).rows[0].id;
+ const service=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES('Synthetic single-session service',150000,TRUE,TRUE,'general') RETURNING id")).rows[0].id;
+ const item=(await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,doctor_id,billing_rule,session_count) VALUES($1,$2,'Synthetic single-session service',1,150000,$3,'per_session',1) RETURNING id",[f.planId,service,doctor])).rows[0].id;
+ await db.recordPlanConsent({planId:f.planId,actor:session.username,note:null});
+ if(funding==="approved") await approveAgreement(approval(f));
+ const visit=await db.addVisit({patientName:"Synthetic",patientPhone:null,note:null,patientId:f.patientId});
+ await q("UPDATE visits SET doctor_id=$2,diagnosis='Synthetic single-session',billing_currency='SAR' WHERE id=$1",[visit.id,doctor]);
+ await db.setVisitProcedures({visitId:visit.id,procedures:[{serviceId:service,toothCode:null,surfaces:null,quantity:1,unitPriceMinor:150000,priceReason:null,doctorId:doctor,note:null,planItemId:null}]});
+ const before=await db.patientLedger(f.patientId);
+ const result=await db.signClinicalVisit({visitId:visit.id,baseCurrency:"SAR",signedBy:session.username});
+ const after=await db.patientLedger(f.patientId);
+ const state=(await q("SELECT status,billing_status FROM plan_items WHERE id=$1",[item])).rows[0];
+ expect(result.reason).toBe("plan_session_unlinked");
+ expect(after.invoices).toEqual(before.invoices);
+ expect(state.status).toBe("planned");
+});

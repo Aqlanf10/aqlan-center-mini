@@ -16619,13 +16619,16 @@ async function unlinkedPlanSessionConflicts(
 ): Promise<string[]> {
   const unlinked = procedures.filter((line) => line.planItemId === null);
   if (!patientId || unlinked.length === 0) return [];
+  // Agreement coverage belongs to the plan, not an invoice item. Preserve it
+  // even after completion; same-service work needs an explicit separate identity.
   // Project both current and immutable identities so later same-service matching retains drifted history.
   // A moved item's current clinical label belongs to its new patient; warnings use the original agreement label.
   const { rows } = await db.query<{
     id: number; service_id: number | null; tooth_code: number | null; service_name: string;
-    status: string; session_count: number; done_sessions: string; billing_status: BillingStatus; has_invoice_lineage: boolean; has_legacy_lineage: boolean; legacy_context: unknown; case_site: string | null; financial_review: boolean;
+    status: string; session_count: number; done_sessions: string; billing_status: BillingStatus; has_invoice_lineage: boolean; has_legacy_lineage: boolean; legacy_context: unknown; case_site: string | null; financial_review: boolean; funded_by_agreement: boolean;
   }>(
     `SELECT i.id, work_identity.service_id, i.tooth_code, work_identity.service_name, i.status, i.session_count, i.billing_status, c.site AS case_site, ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review,
+            ${PLAN_FUNDED_BY_AGREEMENT_SQL} AS funded_by_agreement,
             (i.billed_invoice_id IS NOT NULL OR i.origin_invoice_id IS NOT NULL OR EXISTS (
               SELECT 1 FROM invoice_items ii WHERE ii.plan_item_id = i.id
                 OR (ii.source_type = 'plan_item' AND ii.source_id = i.id))) AS has_invoice_lineage,
@@ -16640,14 +16643,15 @@ async function unlinkedPlanSessionConflicts(
          WHERE legacy_identity.patient_id = $1
        ) work_identity ON work_identity.id = i.id
       WHERE ((t.status = 'active' AND i.status IN ('planned', 'in_progress'))
-        OR ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_FINANCIAL_REVIEW_SQL})
+        OR ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_FINANCIAL_REVIEW_SQL}
+        OR ${PLAN_FUNDED_BY_AGREEMENT_SQL})
       ORDER BY i.id`,
     [patientId],
   );
   return unlinkedSessionConflicts(
     rows.map((row) => ({
       id: row.id, serviceId: row.service_id, toothCode: row.tooth_code, serviceName: row.service_name,
-      status: row.status, billingStatus: row.financial_review ? "needs_financial_review" : row.billing_status, hasInvoiceLineage: row.has_invoice_lineage, hasLegacyLineage: row.has_legacy_lineage, legacyCoverage: legacyCoverageStateFromContext(row.legacy_context), caseSite: row.case_site, sessionCount: row.session_count, doneSessions: Number(row.done_sessions),
+      status: row.status, billingStatus: row.financial_review ? "needs_financial_review" : row.billing_status, hasInvoiceLineage: row.has_invoice_lineage, fundedByAgreement: row.funded_by_agreement, hasLegacyLineage: row.has_legacy_lineage, legacyCoverage: legacyCoverageStateFromContext(row.legacy_context), caseSite: row.case_site, sessionCount: row.session_count, doneSessions: Number(row.done_sessions),
     })),
     unlinked.map((line) => ({ serviceId: line.serviceId, toothCode: line.toothCode })),
   );

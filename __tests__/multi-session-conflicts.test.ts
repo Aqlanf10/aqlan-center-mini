@@ -34,4 +34,14 @@ describe("(P1-D) unlinkedSessionConflicts", () => {
     expect(unlinkedSessionConflicts([crown, singleCrown], [{ serviceId: 20, toothCode: 21 }, { serviceId: 20, toothCode: 21 }]))
       .toEqual([expect.stringMatching(/جلسة 1 من 2/)]);
   });
+  it("funded single-session identity refuses even after completion and outranks an unfunded match", () => {
+    const funded = { ...scaling, fundedByAgreement: true };
+    for (const status of ["planned", "done", "cancelled"]) {
+      expect(unlinkedSessionConflicts([{ ...scaling, id: 99 }, { ...funded, status }], [{ serviceId: 30, toothCode: null }]))
+        .toEqual([expect.stringMatching(/سجل مالي قائم/)]);
+    }
+    expect(unlinkedSessionConflicts([funded], [{ serviceId: 31, toothCode: null }])).toEqual([]);
+    expect(unlinkedSessionConflicts([{ ...funded, fundedByAgreement: false }], [{ serviceId: 30, toothCode: null }])).toEqual([]);
+  });
+
 });

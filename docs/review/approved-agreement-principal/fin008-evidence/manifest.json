@@ -1,0 +1,30 @@
+{
+  "baseline": "e34080e53ae4286c0df56175b1d20373107af58e",
+  "files": {
+    "postgres-red.log": "0d9709adbd5dff6e33e682902095e87dd92ad7120b0c6d1be5410c341828d14e",
+    "http-red.log": "b5ca1d2a138087844c45a0b8e1428b8feff0876228add5107829305090b230a9",
+    "postgres-green.log": "8da9264c5ba3437220411c82f0d6ee753a6b074228d8bfb20b0a9512c243aa3c",
+    "postgres-related.log": "9f76a18c98e060a796e2b8ed0e3d7288d3b4831a4bca1179de997261f88ffa0c",
+    "postgres-history.log": "f2ef288405f19f23dd27e3f6281948e63c3239fb3046244a865589963b4e5e80",
+    "unit.log": "1a767a42872286106af36c9200c5998d4e73d482c9da67ae212477d821640086",
+    "http-green.log": "5d18bf5e9b1db936befac8966c5ae931909b3ea00428731e8bd9ba748a397972",
+    "build.log": "7900d423ee57c70d439d871f69404d7139469144c444a58c7315599a9eb77a34",
+    "lint.log": "c05a83777d1cdd3e7cf175f0400c08d1fc8109f03071e8736ad817314dd31818",
+    "typecheck.log": "494c5900ca50ac372426c03ff676bd53571e0b70b3e4fe8eed6ce84138fd526d",
+    "money.log": "b87785432b92d1bda430efc2d8fa1b33e5aa488d3c1eb6419cbad9e152f9a102"
+  },
+  "encoding": "gzip; decompress to verify the original log SHA-256",
+  "compressed_files": {
+    "build.log.gz": "ca2d8c6fb559818c3b04e9e4bbc37c8de535d964eede44a1f282eebce17c627f",
+    "http-green.log.gz": "a37990483453b4c96ae8f8cc47f933b600b192ac953946c994b662def357f417",
+    "http-red.log.gz": "cd862e58532bdef1931f9e6289f12724b4900e5bdc2afb5b9ee27266d283378f",
+    "lint.log.gz": "4d32ced59d5bb07b76b99f186bd3a5147071896689b5a7ac5d7145c0c92d9771",
+    "money.log.gz": "341ac446ddec8a0ec7b2d8a2a696cb0d6a790947fa9db8bff707cecbaae81d40",
+    "postgres-green.log.gz": "9599e9e061a091c1308a0fa413e43e8d199393744cc3a36d97d3b2b7eb9205f6",
+    "postgres-history.log.gz": "c66ad7ab0a51e19345fabf32e41cacf35c5df4ab819d1d7af061d4c4e5921b77",
+    "postgres-red.log.gz": "26f411a361ceee878792bc56817e1c715342456599a333a8b2b87c2a27d3ff08",
+    "postgres-related.log.gz": "c2c7c19f57929df13902c48df3be4caefda686e4776de13f832cfa68f860628c",
+    "typecheck.log.gz": "629f5b67408750e6fb651c33279633eda90e7b35eb5351aa63e4125290211411",
+    "unit.log.gz": "782cf56e093e881a115165a1b7c3dd6a6cdf7533cc225c74ba6b846ea0f2272d"
+  }
+}
