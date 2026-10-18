@@ -1,4 +1,5 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { getAccessibleCephPatientId } from "@/lib/ceph-page-access";
 import { getPatient } from "@/lib/db";
 import { CephCompareView } from "@/components/CephCompareView";
 import { requireSession } from "@/lib/session";
@@ -23,10 +24,10 @@ export default async function CephComparePage({
   const params = await searchParams;
   const first = Number(params.first);
   const second = Number(params.second);
-  const patientId = Number(params.patient);
+  const requestedPatientId = params.patient === undefined ? undefined : Number(params.patient);
 
-  if (!Number.isInteger(first) || first <= 0
-      || !Number.isInteger(second) || second <= 0
+  if (!Number.isSafeInteger(first) || first <= 0
+      || !Number.isSafeInteger(second) || second <= 0
       || first === second) {
     return (
       <p className="p-6 text-sm font-bold text-rose-700">
@@ -35,9 +36,17 @@ export default async function CephComparePage({
     );
   }
 
-  const patient = Number.isInteger(patientId) && patientId > 0
-    ? await getPatient(patientId)
-    : null;
+  if (requestedPatientId !== undefined
+      && (!Number.isSafeInteger(requestedPatientId) || requestedPatientId <= 0)) notFound();
+
+  const [patientId, secondPatientId] = await Promise.all([
+    getAccessibleCephPatientId(session, first),
+    getAccessibleCephPatientId(session, second),
+  ]);
+  if (patientId === null || patientId !== secondPatientId
+      || (requestedPatientId !== undefined && requestedPatientId !== patientId)) notFound();
+
+  const patient = await getPatient(patientId);
 
   return (
     <div className="mx-auto max-w-[1200px] p-4">
