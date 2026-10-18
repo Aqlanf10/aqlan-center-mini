@@ -9833,6 +9833,10 @@ async function runPaymentTransaction(
       return { kind: "reason", reason: "multiple_payment_targets" };
     }
 
+    // Opening addOnly writers take patient FOR UPDATE before inserting. Fence
+    // the receipt FK before shift/account locks, never while holding table SHARE.
+    await client.query("SELECT id FROM patients WHERE id = $1 FOR KEY SHARE", [input.patientId]);
+
     /* (TD-05 owner review — Finding 4) الأصل يُقفل أولًا: الردّ يقرأ هدف
        تسويّته (invoice_id / plan_id) من صف سنده الأصلي تحت القفل نفسه — فلا
        يُؤتمن المتصل على إعادة ذكره. هدفٌ صريحٌ من المتصل يخالف هدف الأصل
@@ -18854,6 +18858,11 @@ export interface OpeningBalanceHistoryEntry {
 
 /** (P2-5) الرصيد الافتتاحي الحالي تحت قفل — «قبل» في التعديل والمسح. */
 async function lockedOpeningBalance(client: DbClient, patientId: number, currency: Currency, addOnly = false) {
+  // Refuse an existing row without waiting behind a receipt's patient fence.
+  // Absence here never authorizes insertion: recheck below after taking the lock.
+  if (addOnly && (await client.query(
+    "SELECT 1 FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2", [patientId, currency],
+  )).rows.length) throw new OpeningBalanceExists();
   // Serialize even an absent currency row, before touching the opening table.
   // Corrections must remain compatible with the patient FK KEY SHARE acquired by
   // a payment that already holds the opening row. Reception keeps its add fence.

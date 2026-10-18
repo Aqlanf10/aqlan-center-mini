@@ -192,6 +192,48 @@ it.each(["invoice","opening"] as const)("all writers guard approved %s source an
  expect((await approvedAgreementPosition(f.planId,"2026-10-18"))?.remainingMinor).toBe(10000);
 });
 
+it("serializes direct approved SAR collection with addOnly USD opening before the FK/table lock cycle",async()=>{
+ const f=await fixture("SAR",30000);const {agreement}=await approveAgreement(approval(f));
+ const pool=db.getPool(),connect=pool.connect.bind(pool);
+ let openingLocked=false,receiptReached=false,releaseOpening!:()=>void;
+ const openingGate=new Promise<void>(resolve=>{releaseOpening=resolve;});
+ const restores=new Map<object,()=>void>();const writes:Promise<unknown>[]=[];
+ const hookConnection=async()=>{
+  const client=await connect();
+  const query=client.query.bind(client);
+  const hooked=vi.spyOn(client,"query").mockImplementation(async(sql,values)=>{
+   const text=String(sql);
+   if(text.includes("FROM patients WHERE id = $1 FOR UPDATE")&&values?.[0]===f.patientId){
+    const result=await query(sql,values);openingLocked=true;await openingGate;return result;
+   }
+   // Old code reaches INSERT with opening-table SHARE held. Fixed code waits
+   // at the patient fence before acquiring the shift or opening-table locks.
+   if((/FROM patients WHERE id = \$1 FOR KEY SHARE/.test(text)||/INSERT INTO payments\s*\(/.test(text))&&values?.[0]===f.patientId)receiptReached=true;
+   return query(sql,values);
+  });
+  const release=client.release.bind(client);
+  const released=vi.spyOn(client,"release").mockImplementation(()=>{hooked.mockRestore();released.mockRestore();release();});
+  restores.set(client,()=>{hooked.mockRestore();released.mockRestore();});return client;
+ };
+ const spy=vi.spyOn(pool,"connect").mockImplementationOnce(hookConnection).mockImplementationOnce(hookConnection);
+ try{
+  writes.push(db.setPatientOpeningBalance({patientId:f.patientId,currency:"USD",amountMinor:7000,asOfDate:"2026-10-01",note:null,createdBy:session.username,addOnly:true,expectedBefore:null}));
+  void writes[0].catch(()=>{});
+  await expect.poll(()=>openingLocked,{timeout:5000}).toBe(true);
+  writes.push(db.recordPayment({patientId:f.patientId,invoiceId:agreement.invoice_id,planId:null,openingCurrency:null,kind:"payment",amountMinor:10000,currency:"SAR",baseCurrency:"YER",exchangeRate:140,method:"cash",note:null,createdBy:session.username,idempotencyKey:`opening-race-${++serial}`}));
+  void writes[1].catch(()=>{});
+  await expect.poll(()=>receiptReached,{timeout:5000}).toBe(true);
+  releaseOpening();
+  const results=await Promise.allSettled(writes);
+  expect(results.filter(r=>r.status==="rejected").map(r=>({code:r.reason.code,message:r.reason.message}))).toEqual([]);
+  expect(results.map(r=>r.status)).toEqual(["fulfilled","fulfilled"]);
+  expect(results[1]).toMatchObject({status:"fulfilled",value:{reason:null}});
+ }finally{releaseOpening();await Promise.allSettled(writes);for(const restore of restores.values())restore();spy.mockRestore();}
+ expect(await db.getPatientOpeningBalance(f.patientId,"USD")).toMatchObject({amountMinor:7000});
+ expect((await approvedAgreementPosition(f.planId,"2026-10-18"))?.remainingMinor).toBe(20000);
+ expect((await q("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n).toBe(1);
+});
+
 it("refuses new principal for a plan session already billed through clinical signing",async()=>{
  const f=await fixture("YER",300000,false);await q("DELETE FROM plan_installments WHERE plan_id=$1",[f.planId]);
  const doctor=(await q("INSERT INTO parties(kind,name) VALUES('doctor','Synthetic prior performer') RETURNING id")).rows[0].id;
