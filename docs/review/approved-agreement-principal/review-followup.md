@@ -34,3 +34,13 @@ env -u DATABASE_URL -u DATABASE_PUBLIC_URL -u PGHOST -u PGPASSWORD npm run build
 The deterministic new concurrency test covers direct approved SAR invoice collection versus adding an absent USD opening for the same patient. It is not exhaustive proof of every writer interleaving. Approval-versus-collection and fully-paid direct-source replay received source review, but this follow-up does not claim dedicated new tests for those two cases. Existing refund/correction suites passed; they do not establish support for every post-approval amendment.
 
 Post-approval discount/cancellation credits and multi-source historical reconciliation remain unsupported and fail closed. Proposed plans and clinical consent alone do not create ledger debt. No real-patient cause has been established. No live data, production migration, merge or deployment was performed. Original untracked decision-review files remain untouched.
+
+## CI lifecycle fixture repair after 09cab8ad
+
+The two CI failures were reproduced locally: 2 failed / 27 passed in `patient-plans-visibility-lifecycle.test.tsx`. The Node hook fixture supplied neither IndexedDB/journal nor `window.dispatchEvent`. Production correctly failed closed with `ready=false`. The fixture also expected synchronous POST to the old plan endpoint and an ID-only response. The durable flow first reserves the command asynchronously, posts `/api/payments`, and requires a full actor/patient/target/key-bound receipt.
+
+The repair changes only this fixture: an isolated actor/patient journal boundary, browser event dispatch, explicit microtask/render flushing, readiness assertions and a complete receipt for the original actor. The real durable hook, serializer, acknowledgment validator and identity fences remain in use. The later-principal test still requires exactly one POST, no extra read and no success publication, and now also explicitly rejects a leaked receipt link. Two added tests cover pending journal readiness and fail-closed storage failure, including direct invocation of disabled handlers. No production code, permission, financial calculation or identity protection changed.
+
+Targeted unit run: 48 passed across lifecycle, durable-money-command and money-attempt. Real Chromium HTTP/recovery run: 34 passed across approved-agreement-principal-ui, money-durable-recovery-ui, money-attempt-real-react and financial-command-journal-browser. Typecheck and focused ESLint passed. The browser checks used the existing production build because this repair changes no application source.
+
+Complete `npm test` after the fixture repair: **566 files passed; 10074 tests passed; 1 pre-existing repository skip** (10075 total, 302.14s). No test was skipped or weakened by this repair.
