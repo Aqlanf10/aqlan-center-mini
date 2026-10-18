@@ -44,3 +44,41 @@ The repair changes only this fixture: an isolated actor/patient journal boundary
 Targeted unit run: 48 passed across lifecycle, durable-money-command and money-attempt. Real Chromium HTTP/recovery run: 34 passed across approved-agreement-principal-ui, money-durable-recovery-ui, money-attempt-real-react and financial-command-journal-browser. Typecheck and focused ESLint passed. The browser checks used the existing production build because this repair changes no application source.
 
 Complete `npm test` after the fixture repair: **566 files passed; 10074 tests passed; 1 pre-existing repository skip** (10075 total, 302.14s). No test was skipped or weakened by this repair.
+
+## PostgreSQL integration contract repair after a59edb31
+
+Reproduced the six failing files: 12 failed / 28 passed, with 7 periodontal restore cases unable to start because their chain guard did not recognize0064. The fix updates test contracts only, plus the source-generated disclosure allowlist. It does not change production schema, migrations, reports, financial calculations, HR behaviour or restore logic.
+
+- Runtime registry remains an exact equality assertion, including0064 name/checksum/adopted=false. Its numbered SQL is checked byte-for-byte against runtime SQL and against reviewed SHA-256 `aefc040a29c8b887a8eeca073103ce4268a8851b89e0025b406941e48f247655`. Debt storage now expects the actual last registered version0064.
+- The periodontal fixture recognizes only the exact58-entry chain ending `0064_approved_agreement_principal.sql`, recursively validates the existing57-entry chain and retains test-only sentinel9000. Unknown suffix/count/gap refusal remains; the added unit test checks modified suffixes, internal omissions and an unknown future version. No periodontal feature is activated.
+- Both report fixtures retain `search_path=pg_temp` and mocked schema bootstrap. The empty approved-source relation includes all six queried columns and participates in fixture truncation/nonmutation snapshots. No public-table fallback or swallowed read error was added.
+
+Disclosure policy was generated using the unchanged guarded `scripts/generate-preflight-disclosure.ts` on pristine template0 PostgreSQL18.6 numbered-migration/runtime databases. Every new hash was independently mapped back to the corresponding detailed source catalogs using the generator's pg_catalog search path. All87 additions belong to approved-agreement objects; no old hash was removed:
+
+| Section | Added identities | Added text hashes |
+| --- | ---: | --- |
+| columns | 15 | 0 |
+| constraints | 31 | columns4, definition10 |
+| internal FK triggers | 12 | constraint3, definition12 |
+
+Policy SHA-256 changed from `ab54ef23198db0cc58f0465c5841c2920a935c238ca1b3c0ef4252475d6969a3` to `455b718f2e959199f4a5ad18bdb32fd14c749ba225d994737b2e3eb2d1b06084`. The frozen baseline manifest, current schema contract, discrepancy classifications, template1 canary and unknown-name WITHHELD assertions were not edited. Ownership verification returned0 unexpected differences and the existing16 open convergence findings; global application-schema equality remains false.
+
+Targeted rerun: all47 PostgreSQL cases passed, including real restore and all10 fingerprint cases. Candidate-chain unit tests:8 passed. Full PostgreSQL verification uses a clean tracked checkout, matching CI; the original untracked decision-review files remain untouched in the authoring workspace.
+
+Final verification of test/schema fix `4b4cf3cf37966c20dbee64df2397dbd70d32187f`:
+
+- Complete unit suite:566 files passed,10075 tests passed,1 pre-existing skip. Typecheck, focused ESLint and diff check passed.
+- Full PostgreSQL invocation on the clean checkout ran all221 tracked files:220 passed /2365 tests passed. The preflight-artifact suite could not initialize its3 cases because this verification checkout symlinked node_modules to the authoring checkout; the unchanged esbuild allowlist correctly rejected dependency paths outside its own root. This was a harness failure, not a green full invocation.
+- Re-running the unchanged preflight-artifact file from the authoring checkout with local dependency paths passed all3 cases in1.88s. No guard was relaxed and no source fix was needed. Combined coverage is2368 passing PostgreSQL cases; fresh CI must confirm a single complete green run with its normal local npm installation.
+
+[Full PostgreSQL log](evidence/integration-full-postgres.log) · [Preflight artifact rerun](evidence/integration-preflight-rerun.log) · [Full unit log](evidence/integration-full-unit.log)
+
+```sh
+# Disposable local PostgreSQL18 only, with TEST_DATABASE_URL and SESSION_SECRET set.
+CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE=1 MANUAL_CASH_CI_DISPOSABLE_FIXTURE=1 npm run test:postgres
+npm run test:postgres -- __tests__/postgres/preflight-artifact.test.ts
+npm test
+npm run typecheck
+npm run schema:ownership:verify -- --output /tmp/pr346-schema-ownership.json
+npx --no-install tsx scripts/generate-preflight-disclosure.ts > /tmp/pr346-disclosure-candidate.json
+```
