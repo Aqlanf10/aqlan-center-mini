@@ -1,0 +1,14 @@
+
+> aqlan-center@0.1.0 schema:ownership:verify
+> tsx scripts/verify-schema-ownership.ts --output /tmp/currency-ownership-green.json
+
+Schema ownership characterization written: /tmp/currency-ownership-green.json
+Unexpected differences: 0
+Known differences: 0
+Open convergence findings: 16
+Application schema equal: false
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

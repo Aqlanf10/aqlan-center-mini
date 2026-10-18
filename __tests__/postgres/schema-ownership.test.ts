@@ -11,6 +11,7 @@ import {
   stubPostgresEnv,
 } from "./_setup";
 import {
+  artifactContainsSensitiveText,
   assertPostgres18VersionNum,
   initializeGeneratedRuntimeSchema,
   OPEN_FINDINGS_MANIFEST_PATH,
@@ -287,6 +288,15 @@ describe("PG18 schema ownership characterization", () => {
     const report = await runSchemaOwnershipCharacterization(process.env);
 
     expect(report.postgres.major).toBe(18);
+    // Exercise the same serialization gate as the CLI, not just schema equality.
+    expect(artifactContainsSensitiveText(JSON.stringify(report))).toBe(false);
+    for (const catalog of [report.migrationCatalog, report.runtimeCatalog]) {
+      const refund = catalog.functions.find(entry => entry.key === "aqlan_reclassification_follow_refund()");
+      expect(JSON.parse(refund!.value)).toEqual({
+        reviewedDefinitionSha256: "273166a6d2034278cad975e5bde554dd4e2bb2075f544ab8df1a11fc03f328d0",
+        source: "migrations/0063_invoice_currency_reclassification.sql",
+      });
+    }
     expect(report.migrationProvenance.map((item) => item.version)).toEqual([
       "0001", "0002", "0003", "0004", "0005", "0006",
       "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043",

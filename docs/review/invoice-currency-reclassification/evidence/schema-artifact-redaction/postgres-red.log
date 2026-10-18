@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /workspace/aqlan-currency-continuation
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/schema-ownership.test.ts (6 tests | 1 failed) 4198ms
+     × builds migrations and ensureSchema independently, compares them, and leaves no generated databases 2670ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/schema-ownership.test.ts > PG18 schema ownership characterization > builds migrations and ensureSchema independently, compares them, and leaves no generated databases
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ __tests__/postgres/schema-ownership.test.ts:292:67
+    290|     expect(report.postgres.major).toBe(18);
+    291|     // Exercise the same serialization gate as the CLI, not just schem…
+    292|     expect(artifactContainsSensitiveText(JSON.stringify(report))).toBe…
+       |                                                                   ^
+    293|     expect(report.migrationProvenance.map((item) => item.version)).toE…
+    294|       "0001", "0002", "0003", "0004", "0005", "0006",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  00:12:06
+   Duration  4.70s (transform 829ms, setup 0ms, import 175ms, tests 4.20s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
