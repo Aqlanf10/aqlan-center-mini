@@ -56,3 +56,7 @@ It does not implement post-approval discount/cancellation credits or multi-sourc
 legacy reconciliation; those operations fail closed and need a separately
 specified, reviewed adjustment workflow. It does not establish the cause of any
 reported real-patient discrepancy. Parent review and CI are required before merge.
+
+## Subsequent review fixes
+
+See [review follow-up and red/green logs](review-followup.md) for product heads, lock-order regression, recovery coverage and limits.
