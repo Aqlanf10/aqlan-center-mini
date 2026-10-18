@@ -1,3 +1,5 @@
+import { collectApprovedAgreement } from "@/lib/approved-agreements";
+import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -179,6 +181,10 @@ export async function POST(request: Request) {
       if (await isPlanFundedByAgreement(planId, patientId)) {
         const plan = await getPlan(planId, clinicDateString(new Date(), CLINIC_TIME_ZONE));
         if (plan && plan.patientId === patientId) {
+          if(plan.approvedAgreement) {
+            const result=await collectApprovedAgreement({planId,amountMinor,currency,method:method==="transfer"?"transfer":"cash",note,idempotencyKey:idempotencyKey??"",session});
+            return NextResponse.json({...result.payment,idempotencyKey},{status:result.replayed?200:201});
+          }
           const installmentNumber = Math.min(plan.progress.paidCount + 1, plan.installments.length || 1);
           const result = await recordPlanInstallment({
             planId, patientId, installmentNumber, planTitle: plan.title,
@@ -202,7 +208,8 @@ export async function POST(request: Request) {
           return NextResponse.json({ ...payment, idempotencyKey }, { status: result.replayed ? 200 : 201 });
         }
       }
-    } catch {
+    } catch (error) {
+      if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
       return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
     }
   }

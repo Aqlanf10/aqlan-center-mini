@@ -1,3 +1,5 @@
+import { APPROVED_AGREEMENT_SQL } from "./approved-agreement-schema";
+import { checksumOf } from "./migration-files";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {currencyReclassificationJournal} from "./invoice-currency-journal";
 import {attachCurrencyReclassifications,readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
@@ -2075,6 +2077,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(DEBT_INSTALLMENTS_SQL);
     await getPool().query(LEGACY_TREATMENT_DOCUMENT_SQL);
     await ensureInvoiceCurrencySchema(getPool());
+    await applyRuntimeMigrationFiles(getPool(), [{version:"0064",name:"approved_agreement_principal",filename:"0064_approved_agreement_principal.sql",sql:APPROVED_AGREEMENT_SQL,checksum:checksumOf(APPROVED_AGREEMENT_SQL)}]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -9958,7 +9961,7 @@ async function runPaymentTransaction(
         const { rows: [historical] } = await client.query(
           `SELECT 1 FROM legacy_treatment_agreements la JOIN plan_items li ON li.id = la.plan_item_id
             WHERE li.plan_id = $1 LIMIT 1`, [effectivePlanId]);
-        historicalPlanTarget = Boolean(historical);
+        historicalPlanTarget = Boolean(historical) || (await client.query("SELECT 1 FROM approved_agreement_principals WHERE plan_id=$1",[effectivePlanId])).rows.length>0;
       }
       const planCurrency = rows[0].base_currency as Currency;
       if (input.currency !== planCurrency && planCurrency !== CLINIC_BASE_CURRENCY) {
@@ -10079,6 +10082,7 @@ async function runPaymentTransaction(
       const { rows: [signal] } = await client.query<{ possible: boolean }>(
         `SELECT EXISTS (SELECT 1 FROM invoices i WHERE i.patient_id = $1 AND i.plan_id IS NOT NULL
            AND i.status <> 'cancelled' AND ${targetPredicate}
+           AND NOT EXISTS (SELECT 1 FROM approved_agreement_principals ap WHERE ap.invoice_id=i.id)
            AND EXISTS (SELECT 1 FROM payments p WHERE p.invoice_id = i.id
              AND (p.kind = 'refund' OR p.reversal_of_id IS NOT NULL
                OR EXISTS (SELECT 1 FROM payments r WHERE r.reversal_of_id = p.id)))) AS possible`,
@@ -15550,6 +15554,8 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     // A patient's optional photo points back to a document owned by that patient.
     // Restore patients first with this one column null, then restore the link below.
     if (row.child === "patients" && row.parent === "patient_documents") continue;
+    // Completed plan items link back to visits that themselves depend on plans/items.
+    if (row.child === "plan_items" && row.parent === "visits") continue;
     // A family may name a patient as guarantor while the patient belongs to that family.
     // Insert the family without the guarantor, then restore that link after all patients.
     if (row.child === "patient_families" && row.parent === "patients") continue;
@@ -15567,6 +15573,8 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   }
   if(dependsOn.has("debt_repayment_arrangements"))
     dependsOn.get("debt_repayment_arrangements")!.add("patient_opening_balance_history");
+  for (const dependency of ["plan_items", "plan_installments", "invoice_items", "patient_opening_balances"])
+    dependsOn.get("approved_agreement_principals")?.add(dependency);
   const ordered = insertionOrder(
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
@@ -15582,6 +15590,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   const withSerialId: string[] = [];
   const patientPhotoLinks: { patientId: number; documentId: number }[] = [];
   const familyGuarantorLinks: { familyId: number; patientId: number }[] = [];
+  const planVisitLinks: { itemId: number; visitId: number }[] = [];
 
   for (const table of ordered) {
     const { rows: columnRows } = (await pool.query(
@@ -15612,7 +15621,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"${restoreOrder}`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
-      if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
+      if (table === "plan_items" && typeof row.id === "number" && typeof row.visit_id === "number") {
+        planVisitLinks.push({itemId:row.id,visitId:row.visit_id});
+        yield `${insertStatement(table, columns, {...row,visit_id:null}, columnType, identityInsert)}\n`;
+      } else if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
         familyGuarantorLinks.push({ familyId: row.id, patientId: row.guarantor_patient_id });
         yield `${insertStatement(table, columns, { ...row, guarantor_patient_id: null }, columnType, identityInsert)}\n`;
       } else if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
@@ -15625,6 +15637,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   }
 
   yield `\n`;
+  for (const link of planVisitLinks) yield `UPDATE plan_items SET visit_id = ${link.visitId} WHERE id = ${link.itemId};\n`;
   for (const link of patientPhotoLinks) {
     yield `UPDATE patients SET photo_document_id = ${link.documentId} WHERE id = ${link.patientId};\n`;
   }
@@ -17250,7 +17263,7 @@ function conflictsWithFinancialWork(
 }
 
 export const PLAN_FUNDED_BY_AGREEMENT_SQL =
-  `EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id)`;
+  `(EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id) OR EXISTS (SELECT 1 FROM approved_agreement_principals ap WHERE ap.plan_id = t.id))`;
 
 /**
  * (BILL-1 — قرار المالك R-P0-1: «القسط وحده يفوتر») هل الخطة ممولة باتفاق أقساط؟ بابُ القبض العام
@@ -19017,6 +19030,7 @@ import {
 } from "./plans";
 
 export interface TreatmentPlan {
+  approvedAgreement?: Awaited<ReturnType<typeof import("./approved-agreements").approvedAgreementPosition>>;
   id: number;
   patientId: number;
   patientName: string;
@@ -19132,12 +19146,15 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
     byPlan.set(row.plan_id, list);
   }
 
-  return rows.map((row) => {
+  const approvedIds = new Set((await getPool().query<{plan_id:number}>("SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])",[rows.map(r=>r.id)])).rows.map(r=>r.plan_id));
+  return Promise.all(rows.map(async (row) => {
+    const approvedAgreement = approvedIds.has(row.id) ? await (await import("./approved-agreements")).approvedAgreementPosition(row.id,today) : null;
     const installments = byPlan.get(row.id) ?? [];
     const items = itemsByPlan.get(row.id) ?? [];
-    const paidMinor = toMinor(row.paid_minor);
+    const paidMinor = approvedAgreement?.paidMinor ?? toMinor(row.paid_minor);
     const lastReminderAt = row.last_reminder_at ? row.last_reminder_at.toISOString() : null;
     return {
+      approvedAgreement,
       id: row.id,
       patientId: row.patient_id,
       patientName: row.full_name,
@@ -19166,7 +19183,7 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
       consentBy: row.consent_by,
       consentNote: row.consent_note,
     };
-  });
+  }));
 }
 
 interface PlanItemRow {
@@ -20083,6 +20100,7 @@ async function runPlanInstallmentTransaction(
   if (planRow.status !== "active") {
     return { reason: "inactive_plan" };
   }
+  if ((await client.query("SELECT 1 FROM approved_agreement_principals WHERE plan_id=$1", [input.planId])).rows.length) return { reason: "plan_financial_history_requires_review" };
   // The plan lock serializes adding legacy/invoice-backed work. Replays above stay valid.
   // Do not manufacture an installment invoice or allocate a provider share from historical agreement values.
   const { rows: [financialHistory] } = await client.query(

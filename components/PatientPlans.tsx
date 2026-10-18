@@ -1,6 +1,7 @@
 "use client";
 
 import TreatmentFinancialContext from "./TreatmentFinancialContext";
+import { ApprovedAgreementPanel } from "./ApprovedAgreementPanel";
 import { INITIAL_PLAN_ITEM_DRAFT, planItemDraftChanged, type PlanItemDraftSnapshot } from "@/lib/plan-item-draft-navigation";
 import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 
@@ -52,6 +53,7 @@ interface PlanItem extends HistoricalPlanItem {
   legacyAgreementStatus?: "live" | "void";
 }
 interface Plan {
+  approvedAgreement?: Awaited<ReturnType<typeof import("@/lib/approved-agreements").approvedAgreementPosition>>;
   id: number; title: string; totalMinor: number; baseCurrency: Currency;
   status: PlanStatus; startDate: string; note: string | null;
   items: PlanItem[];
@@ -291,6 +293,8 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </span>
               </div>
 
+              {canSeeFinancial ? <ApprovedAgreementPanel planId={plan.id} totalMinor={plan.totalMinor} currency={plan.baseCurrency}
+                position={plan.approvedAgreement??null} canApprove={currentConsent&&plan.status==="active"&&["admin","reception"].includes(session?.role??"")} isAdmin={session?.role==="admin"} onChanged={load}/> : null}
               <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{formatMoney(plan.totalMinor, plan.baseCurrency)}</p>
@@ -298,7 +302,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                     {hasHistory ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
                   </p>
                 </div>
-                {plan.installments.length > 0 && canSeeFinancial && plan.progress ? (
+                {(plan.installments.length > 0 || plan.approvedAgreement) && canSeeFinancial && plan.progress ? (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
                       <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</p>
@@ -330,7 +334,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </p>
               ) : null}
 
-              {plan.installments.length > 0 && canSeeFinancial && plan.progress ? (
+              {(plan.installments.length > 0 || plan.approvedAgreement) && canSeeFinancial && plan.progress ? (
                 <>
                   <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                     <div className="h-full bg-emerald-500"
@@ -342,7 +346,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                     {" · "}
                     <a href={`?tab=account`}
                       className="font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
-                      سنداتها فواتير ودفعات في كشف الحساب
+                      {plan.approvedAgreement ? "التحصيل إيصالات على الأصل المعتمد" : "سنداتها فواتير ودفعات في كشف الحساب"}
                     </a>
                   </p>
                 </>
@@ -354,7 +358,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </p>
               ) : null}
 
-              {!hasHistory && canSeeFinancial && plan.progress && plan.status === "active" && plan.installments.length > 0 ? (
+              {(!hasHistory || plan.approvedAgreement) && canSeeFinancial && plan.progress && plan.status === "active" && (plan.installments.length > 0 || plan.approvedAgreement) ? (
                 payFor === plan.id ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex flex-wrap gap-2">

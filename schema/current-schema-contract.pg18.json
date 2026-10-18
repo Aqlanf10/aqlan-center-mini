@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6 (Debian 18.6-1.pgdg13+2)",
+  "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 124,
-    "columns": 1592,
-    "constraints": 1753,
-    "indexes": 389,
-    "triggers": 59
+    "tables": 125,
+    "columns": 1607,
+    "constraints": 1784,
+    "indexes": 393,
+    "triggers": 66
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -657,6 +657,161 @@
         }
       },
       "triggers": {}
+    },
+    "approved_agreement_principals": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "historical_paid_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "invoice_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "opening_currency": {
+          "type": "text",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "source_kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "source_snapshot": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "terms": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "total_minor": {
+          "type": "int8",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "plan_id"
+      ],
+      "unique": [
+        [
+          "idempotency_key"
+        ],
+        [
+          "invoice_id"
+        ]
+      ],
+      "checks": [
+        "approved_agreement_principals_check",
+        "approved_agreement_principals_check1",
+        "approved_agreement_principals_currency_check",
+        "approved_agreement_principals_historical_paid_minor_check",
+        "approved_agreement_principals_idempotency_key_check",
+        "approved_agreement_principals_opening_currency_check",
+        "approved_agreement_principals_reason_check",
+        "approved_agreement_principals_request_hash_check",
+        "approved_agreement_principals_source_kind_check",
+        "approved_agreement_principals_source_snapshot_check",
+        "approved_agreement_principals_terms_check",
+        "approved_agreement_principals_total_minor_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_id"
+          ],
+          "refTable": "treatment_plans",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "approved_agreement_opening_unique": {
+          "columns": [
+            "patient_id",
+            "opening_currency"
+          ],
+          "unique": true
+        },
+        "approved_agreement_principals_idempotency_key_key": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "approved_agreement_principals_invoice_id_key": {
+          "columns": [
+            "invoice_id"
+          ],
+          "unique": true
+        },
+        "approved_agreement_principals_pkey": {
+          "columns": [
+            "plan_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "approved_agreement_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "audit_log": {
       "columns": {
@@ -6573,7 +6728,16 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "approved_invoice_items_source_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "invoice_settlement_reclassification_events": {
       "columns": {
@@ -6890,7 +7054,16 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "approved_invoice_source_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "journal_manual": {
       "columns": {
@@ -10732,7 +10905,15 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "approved_opening_source_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "patient_problems": {
       "columns": {
@@ -11911,7 +12092,16 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "approved_installments_source_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "plan_item_dependencies": {
       "columns": {
@@ -12205,7 +12395,16 @@
           "unique": false
         }
       },
-      "triggers": {}
+      "triggers": {
+        "approved_item_terms_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "planned_visits": {
       "columns": {
@@ -13087,7 +13286,15 @@
           "unique": false
         }
       },
-      "triggers": {}
+      "triggers": {
+        "approved_plan_terms_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "treatment_sessions": {
       "columns": {

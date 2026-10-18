@@ -591,12 +591,19 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
     WHERE d.patient_id=ANY($2::int[]) AND (d.created_at AT TIME ZONE $1)::date<=$3::date`,[CLINIC_TIME_ZONE,ids,opts.asOf??clinicTodayISO()]);
   for(const row of currencyCorrections){const patient=byId.get(row.patient_id);if(patient)(patient.currencyCorrections??=[]).push({invoiceId:row.invoice_id,invoiceNumber:row.invoice_number,issuedDate:row.issued_date,date:row.date,minor:num(row.minor)});}
 
+  // Explicit approved sources affect current reference progress only, never add
+  // a second ledger principal. Opening history is already net of prior cash.
+  const { rows: approvedSources } = await pool.query<{plan_id:number;patient_id:number;invoice_id:number|null;opening_currency:string|null;historical_paid_minor:string}>(
+    "SELECT plan_id,patient_id,invoice_id,opening_currency,historical_paid_minor::text FROM approved_agreement_principals WHERE patient_id=ANY($1::int[])",[ids]);
   // مدفوعات الخطة: الدفعة المرتبطة بالخطة مباشرة أو بفاتورة من الخطة — بعملة
   // الخطة نفسها (P-01/D-1): تقدُّم الخطة يُقاس بعملة اتفاقها لا بمكافئ الدفاتر.
   for (const patient of byId.values()) {
     const planById = new Map(patient.plans.map((plan) => [plan.id, plan]));
+    const approved = approvedSources.filter(source=>source.patient_id===patient.patientId);
+    for(const source of approved){const plan=planById.get(source.plan_id);if(plan)plan.paidMinor=num(source.historical_paid_minor);}
     for (const payment of patient.payments) {
-      let targetPlanId = payment.planId;
+      const allocation=approved.find(source=>source.invoice_id!==null?source.invoice_id===payment.invoiceId:source.opening_currency===payment.openingCurrency);
+      let targetPlanId = allocation?.plan_id ?? payment.planId;
       if (targetPlanId == null && payment.invoiceId != null) {
         targetPlanId = patient.invoices.find((inv) => inv.id === payment.invoiceId)?.planId ?? null;
       }
