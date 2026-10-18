@@ -311,3 +311,28 @@ it("reserves a later receipt for an unpaid currency correction instead of an old
   expect(report.find(row=>row.doctorId===correctedDoctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(3000);
   expect(await footprint(owner)).toEqual(receipts);
 });
+
+it("composes report component cutoffs with currency proof, future movements and a later refund",async()=>{
+  const owner=await patient();
+  const [original]=await q("INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by,created_at) VALUES($1,$2,2500,0,'YER',$3,'2020-01-10T09:00:00Z') RETURNING id",[`MERGED-CUTOFF-${++serial}`,owner,session.username]);
+  const [item]=await q("INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor) VALUES($1,'Synthetic merged cutoff',1,2500,2500) RETURNING id",[original.id]);
+  const [future]=await q("INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by,created_at) VALUES($1,$2,10000,0,'SAR',$3,'2099-01-01T09:00:00Z') RETURNING id",[`MERGED-FUTURE-${++serial}`,owner,session.username]);
+  const shift=(await q("SELECT id FROM cashier_shifts WHERE status='open' LIMIT 1"))[0].id;
+  const [paid]=await q("INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by,created_at) VALUES($1,$2,$3,$4,'payment',100,'SAR',410,410,'YER','cash',$5,'2020-01-11T09:00:00Z') RETURNING id",[`MERGED-PAID-${++serial}`,owner,original.id,shift,session.username]);
+  await q("INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by,created_at) VALUES($1,$2,$3,$4,'payment',1000,'SAR',410,4100,'YER','cash',$5,'2099-01-02T09:00:00Z')",[`MERGED-FUTURE-P-${++serial}`,owner,future.id,shift,session.username]);
+  const reports=await import("../../lib/reports"),{clinicDateString}=await import("../../lib/schedule");
+  const today=clinicDateString(new Date(),db.CLINIC_TIME_ZONE);
+  const report=(to:string)=>reports.buildReport("debt",reports.parseFilters(new URLSearchParams({patientId:String(owner),preset:"custom",from:"2020-01-01",to}),to));
+  const before=await report("2020-01-31");
+  expect(before.rows).toHaveLength(1);expect(before.rows![0]).toMatchObject({currency:"YER",billedMinor:2500,paidMinor:410,balanceMinor:2090});
+  const receipts=await footprint(owner),view=await revision.readInvoiceRevision(original.id,session);
+  await revision.reviseInvoice(original.id,{idempotencyKey:`merged-currency-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic merged report cutoff",lines:[{itemId:item.id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:249900},session);
+  expect(await footprint(owner)).toEqual(receipts);
+  expect((await report("2020-01-31")).rows).toEqual(before.rows);
+  expect((await report("2020-01-10")).rows![0]).toMatchObject({currency:"YER",billedMinor:2500,paidMinor:0,balanceMinor:2500});
+  const current=await report(today);expect(current.rows).toHaveLength(1);
+  expect(current.rows![0]).toMatchObject({currency:"SAR",billedMinor:250000,paidMinor:100,balanceMinor:249900});
+  expect((await db.recordPayment({patientId:owner,invoiceId:original.id,kind:"refund",amountMinor:25,currency:"SAR",baseCurrency:"YER",exchangeRate:410,method:"cash",note:null,createdBy:session.username,reversalOfId:paid.id,idempotencyKey:`merged-refund-${++serial}`})).reason).toBeNull();
+  expect((await report("2020-01-31")).rows).toEqual(before.rows);
+  expect((await report(today)).rows![0]).toMatchObject({currency:"SAR",billedMinor:250000,paidMinor:75,balanceMinor:249925});
+});
