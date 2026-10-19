@@ -294,3 +294,41 @@ it.each([false,true])("currency correction preserves clinical identity; shared p
   }
   expect(await q("SELECT to_jsonb(c) AS value FROM clinical_cases c WHERE patient_id=$1",[patientId])).toEqual(cases);
 });
+
+it.each(["visit_procedure", "synthetic_external", null] as const)(
+  "unsupported source %s remains guarded across successive same-currency replacements",
+  async sourceType => {
+    const invoice = await fixture();
+    const payment = await db.recordPayment({patientId:invoice.patientId,invoiceId:invoice.id,
+      kind:"payment",amountMinor:1000,currency:"SAR",baseCurrency:"YER",exchangeRate:410,
+      method:"cash",note:null,createdBy:session.username,idempotencyKey:`source-family-payment-${++serial}`});
+    expect(payment.reason).toBeNull();
+    await q("UPDATE invoice_items SET source_type=$2,source_id=$3 WHERE invoice_id=$1",
+      [invoice.id, sourceType, 900000 + serial]);
+    let currentId = invoice.id;
+    for (const amount of [12000, 14000]) {
+      const result = await revision.reviseInvoice(currentId, await command(currentId, amount), session);
+      currentId = (result as {corrected:{id:number}}).corrected.id;
+      // Source uniqueness belongs to the original line; corrections must not copy it.
+      expect(await q("SELECT source_type,source_id FROM invoice_items WHERE invoice_id=$1",[currentId]))
+        .toEqual([{source_type:null,source_id:null}]);
+      const view = await revision.readInvoiceRevision(currentId,session);
+      expect(view.currencyCorrection).toMatchObject({available:false,reasonCodes:["INDEPENDENT_ITEM_SOURCE"]});
+      const beforeInvoices = await q("SELECT to_jsonb(i) AS row FROM invoices i WHERE patient_id=$1 ORDER BY id",[invoice.patientId]);
+      const beforePayments = await q("SELECT to_jsonb(p) AS row FROM payments p WHERE patient_id=$1 ORDER BY id",[invoice.patientId]);
+      const beforeCorrections = await q("SELECT to_jsonb(c) AS row FROM invoice_corrections c WHERE patient_id=$1 ORDER BY id",[invoice.patientId]);
+      const remaining = amount - 1000;
+      const attempt = revision.reviseInvoice(currentId,{
+        idempotencyKey:`source-family-currency-${++serial}`,expectedSourceHash:view.sourceHash,
+        currency:"SAR",reason:"Synthetic unsupported lineage must remain blocked",
+        lines:view.invoice.items.map(item=>({itemId:item.id,quantity:1,unitPrice:toInputAmount(amount,"SAR")})),
+        discount:"0",repaymentTerms:terms(remaining),expectedRemainingMinor:remaining,
+      },session);
+      await expect(attempt).rejects.toMatchObject({code:"conflict",reasonCodes:["INDEPENDENT_ITEM_SOURCE"]});
+      expect(await q("SELECT to_jsonb(i) AS row FROM invoices i WHERE patient_id=$1 ORDER BY id",[invoice.patientId])).toEqual(beforeInvoices);
+      expect(await q("SELECT to_jsonb(p) AS row FROM payments p WHERE patient_id=$1 ORDER BY id",[invoice.patientId])).toEqual(beforePayments);
+      expect(await q("SELECT to_jsonb(c) AS row FROM invoice_corrections c WHERE patient_id=$1 ORDER BY id",[invoice.patientId])).toEqual(beforeCorrections);
+      expect(await q("SELECT id FROM invoice_settlement_reclassifications WHERE patient_id=$1",[invoice.patientId])).toEqual([]);
+    }
+  },
+);
