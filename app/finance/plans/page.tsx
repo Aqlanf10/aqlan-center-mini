@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CLINIC_BASE_CURRENCY, formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { CURRENCIES, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { installmentReminderText, type PlanStatus } from "@/lib/plans";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { friendlyDateLong, toWhatsAppNumber } from "@/lib/reminders";
@@ -17,6 +17,8 @@ import { useSession } from "@/components/SessionProvider";
  */
 
 interface Plan {
+  baseCurrency: Currency;
+  invoiceFinancial?: {kind: string; message: string | null};
   id: number;
   patientId: number;
   patientName: string;
@@ -83,13 +85,11 @@ export default function PlansPage() {
   const session = useSession();
   const canSendReminders = session?.role !== "cashier" && session?.role !== "accountant";
   // (TD-05) الأساس دستوري من الكود.
-  const baseSetting = CLINIC_BASE_CURRENCY;
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
 
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [base, setBase] = useState<Currency>(baseSetting);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("overdue");
@@ -111,8 +111,8 @@ export default function PlansPage() {
       const response = await fetch("/api/plans", { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      if (!Array.isArray(payload.plans) || payload.plans.some((plan: Plan) => !isCurrency(plan.baseCurrency))) throw new Error("عملة الخطة غير صالحة؛ راجع الربط المالي.");
       setPlans(payload.plans as Plan[]);
-      if (isCurrency(payload.baseCurrency)) setBase(payload.baseCurrency);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
@@ -164,7 +164,7 @@ export default function PlansPage() {
     const dueDate = overdue ? today : plan.progress.nextDueDate ?? today;
     const text = installmentReminderText({
       patientName: plan.patientName,
-      amountText: formatMoney(amount, base),
+      amountText: formatMoney(amount, plan.baseCurrency),
       dueDateText: friendlyDateLong(dueDate),
       overdue,
       clinicName,
@@ -208,13 +208,15 @@ export default function PlansPage() {
   }, [plans, filter, today, searchQuery]);
 
   const overdueList = useMemo(() => {
-    return plans.filter((p) => p.progress.overdueMinor > 0 && toWhatsAppNumber(p.patientPhone));
+    return plans.filter((p) => p.invoiceFinancial?.kind!=="review_required" && !p.invoiceFinancial?.message && p.progress.overdueMinor > 0 && toWhatsAppNumber(p.patientPhone));
   }, [plans]);
 
   const totals = useMemo(
     () => ({
-      overdue: plans.reduce((sum, plan) => sum + plan.progress.overdueMinor, 0),
-      remaining: plans.reduce((sum, plan) => sum + plan.progress.remainingMinor, 0),
+      byCurrency: CURRENCIES.map(currency => ({currency,
+        overdue: plans.filter(p=>p.baseCurrency===currency && p.invoiceFinancial?.kind!=="review_required").reduce((sum,p)=>sum+p.progress.overdueMinor,0),
+        remaining: plans.filter(p=>p.baseCurrency===currency && p.invoiceFinancial?.kind!=="review_required").reduce((sum,p)=>sum+p.progress.remainingMinor,0),
+      })).filter(bucket=>plans.some(p=>p.baseCurrency===bucket.currency)),
       count: plans.length,
       overdueCount: plans.filter((p) => p.progress.overdueMinor > 0).length,
     }),
@@ -264,7 +266,7 @@ export default function PlansPage() {
       if (number) {
         const text = installmentReminderText({
           patientName: plan.patientName,
-          amountText: formatMoney(plan.progress.overdueMinor, base),
+          amountText: formatMoney(plan.progress.overdueMinor, plan.baseCurrency),
           dueDateText: friendlyDateLong(today),
           overdue: true,
           clinicName,
@@ -347,11 +349,14 @@ export default function PlansPage() {
         </p>
       ) : null}
 
+      {plans.some(plan=>plan.invoiceFinancial?.message) ? <p role="alert" className="mb-4 rounded-xl border border-amber-300 p-3 text-sm">
+        توجد خطط تحتاج مراجعة مصادر الدين في حساب المريض؛ المبالغ غير المثبتة مستبعدة من المجاميع والتذكيرات.
+      </p> : null}
       {/* Metric Cards */}
       <section className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
         <div className="rounded-2xl border border-red-200 bg-red-50/80 p-3.5 shadow-2xs">
           <p className="text-base font-black text-red-700 font-mono">
-            {formatMoney(totals.overdue, base)}
+            {totals.byCurrency.map(bucket=><span className="block" key={bucket.currency}>{formatMoney(bucket.overdue,bucket.currency)}</span>)}
           </p>
           <p className="text-[11px] font-bold text-red-600 mt-0.5">
             إجمالي الأقساط المتأخرة ({totals.overdueCount})
@@ -359,9 +364,9 @@ export default function PlansPage() {
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <p className="text-base font-black text-slate-800 font-mono">
-            {formatMoney(totals.remaining, base)}
+            {totals.byCurrency.map(bucket=><span className="block" key={bucket.currency}>{formatMoney(bucket.remaining,bucket.currency)}</span>)}
           </p>
-          <p className="text-[11px] font-bold text-slate-500 mt-0.5">باقٍ على كل الخطط</p>
+          <p className="text-[11px] font-bold text-slate-500 mt-0.5">المتبقي على الخطط المثبتة</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
           <p className="text-base font-black text-slate-800 font-mono">{totals.count}</p>
@@ -491,10 +496,10 @@ export default function PlansPage() {
                             overdue ? "text-red-700 text-sm" : "text-slate-800"
                           }`}
                         >
-                          {formatMoney(amount, base)}
+                          {plan.invoiceFinancial?.kind === "review_required" ? "يحتاج مراجعة مالية" : formatMoney(amount, plan.baseCurrency)}
                         </div>
                         <div className="text-[10px] text-slate-400">
-                          باقٍ {formatMoney(plan.progress.remainingMinor, base)}
+                          {plan.invoiceFinancial?.kind === "review_required" ? "راجع مصادر الدين في حساب المريض" : `باقٍ ${formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}`}
                         </div>
                       </td>
 
@@ -533,7 +538,7 @@ export default function PlansPage() {
                             <span>📄</span>
                             <span>عقد</span>
                           </a>}
-                          {canSendReminders && number ? (
+                          {canSendReminders && number && !plan.invoiceFinancial?.message ? (
                             <button
                               id={`plan-reminder-btn-${plan.id}`}
                               type="button"
@@ -674,7 +679,7 @@ export default function PlansPage() {
                       </div>
                       <div className="text-left">
                         <span className="font-black text-red-700 font-mono block">
-                          {formatMoney(plan.progress.overdueMinor, base)}
+                          {formatMoney(plan.progress.overdueMinor, plan.baseCurrency)}
                         </span>
                         <span className="text-[10px] text-slate-500 block">
                           آخر تذكير: {reminderInfo.text}

@@ -1,0 +1,12 @@
+Command: npm test
+Full-suite run before final review-required display guard. The final guard is separately covered by final-component.log.
+ Test Files  568 passed (568)
+      Tests  10079 passed | 1 skipped (10080)
+   Start at  00:12:26
+   Duration  340.81s (transform 14.57s, setup 0ms, import 59.67s, tests 203.92s, environment 73ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

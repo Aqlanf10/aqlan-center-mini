@@ -150,6 +150,19 @@ beforeEach(() => {
 afterEach(() => { retire(); vi.unstubAllGlobals(); });
 
 describe("actual PatientPlans financial-read lifetime", () => {
+  it("shows review instructions without legacy financial totals or collection for unproven invoice ownership", async () => {
+    read = async () => response({ ...payload(), plans: [{ ...plan(), invoiceFinancial: {
+      kind: "review_required", message: "ربط الخطة يحتاج مراجعة مالية", schedules: [],
+    } }] });
+    await mount();
+    const content = text(render());
+    expect(content).toContain("ربط الخطة يحتاج مراجعة مالية");
+    expect(content).not.toContain("المدفوع");
+    expect(content).not.toContain("جدول الأقساط");
+    expect(button("تحصيل قسط")).toBeUndefined();
+    expect(writes()).toEqual([]);
+  });
+
   it("keeps collection disabled until the durable journal read completes", async () => {
     const pending = deferred<FinancialJournal>(); journal.read.mockImplementation(() => pending.promise);
     await mount(); expect(button("تحصيل قسط")?.props.disabled).toBe(true); expect(writes()).toEqual([]);

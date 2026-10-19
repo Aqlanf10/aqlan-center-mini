@@ -70,6 +70,7 @@ export async function GET(request: Request) {
       installments: plan.installments,
       paidMinor: plan.paidMinor,
       progress: plan.progress,
+      invoiceFinancial: plan.invoiceFinancial,
     })) : canSeeFinancial ? plans : plans.map((plan) => withoutPlanPayments(plan, true));
     return NextResponse.json({ plans: result, today, baseCurrency: CLINIC_BASE_CURRENCY, canSeeFinancial });
   } catch {

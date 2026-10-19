@@ -117,8 +117,11 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
   });
 }
 
-export async function approvedAgreementPosition(planId:number,today:string) {
-  return transaction(async reader=>{
+export async function approvedAgreementPosition(planId:number,today:string, reader?:DbClient):Promise<{
+  planId:number;currency:Currency;totalMinor:number;paidMinor:number;remainingMinor:number;dueNowMinor:number;
+  invoiceId:number|null;openingCurrency:Currency|null;sourceKind:string;available:boolean;
+}|null> {
+  if(!reader)return transaction(client=>approvedAgreementPosition(planId,today,client),true);
   const a=await readApprovedAgreement(reader,planId);if(!a)return null;
   const position=await readDebtPosition(reader,target(a));
   const paid=Number(a.historical_paid_minor)+position.settledMinor;
@@ -126,7 +129,6 @@ export async function approvedAgreementPosition(planId:number,today:string) {
   return {planId,currency:a.currency,totalMinor:Number(a.total_minor),paidMinor:paid,remainingMinor:position.remainingMinor,
     dueNowMinor:Math.min(position.remainingMinor,Math.max(0,due-paid)),invoiceId:a.invoice_id,openingCurrency:a.opening_currency,sourceKind:a.source_kind,
     available:position.available&&approvedSourceMatches(position.sourceSnapshot,a.source_snapshot)};
-  },true);
 }
 
 async function assertCollectionSession(client:DbClient,session:SessionPayload) {

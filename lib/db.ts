@@ -19050,6 +19050,7 @@ import {
 } from "./plans";
 
 export interface TreatmentPlan {
+  invoiceFinancial?: import("./plan-financial-position").PlanInvoiceFinancialPosition | null;
   approvedAgreement?: Awaited<ReturnType<typeof import("./approved-agreements").approvedAgreementPosition>>;
   id: number;
   patientId: number;
@@ -19133,9 +19134,9 @@ const PLAN_SELECT = `
                      FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor
     FROM treatment_plans t JOIN patients p ON p.id = t.patient_id`;
 
-async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPlan[]> {
+async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): Promise<TreatmentPlan[]> {
   if (rows.length === 0) return [];
-  const { rows: installmentRows } = await getPool().query<{
+  const { rows: installmentRows } = await reader.query<{
     id: number; plan_id: number; number: number; due_date: Date; amount_minor: string;
     last_reminder_at: Date | null;
   }>(
@@ -19144,7 +19145,7 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
     [rows.map((row) => row.id)],
   );
 
-  const { rows: itemRows } = await getPool().query<PlanItemRow & { plan_id: number }>(
+  const { rows: itemRows } = await reader.query<PlanItemRow & { plan_id: number }>(
     `${PLAN_ITEM_SELECT} WHERE pi.plan_id = ANY($1::int[]) ORDER BY pi.plan_id, pi.sort_order, pi.id`,
     [rows.map((row) => row.id)],
   );
@@ -19166,15 +19167,16 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
     byPlan.set(row.plan_id, list);
   }
 
-  const approvedIds = new Set((await getPool().query<{plan_id:number}>("SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])",[rows.map(r=>r.id)])).rows.map(r=>r.plan_id));
+  const approvedIds = new Set((await reader.query<{plan_id:number}>("SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])",[rows.map(r=>r.id)])).rows.map(r=>r.plan_id));
   return Promise.all(rows.map(async (row) => {
-    const approvedAgreement = approvedIds.has(row.id) ? await (await import("./approved-agreements")).approvedAgreementPosition(row.id,today) : null;
+    const approvedAgreement = approvedIds.has(row.id) ? await (await import("./approved-agreements")).approvedAgreementPosition(row.id,today,reader) : null;
+    const invoiceFinancial = approvedAgreement ? null : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
     const installments = byPlan.get(row.id) ?? [];
     const items = itemsByPlan.get(row.id) ?? [];
-    const paidMinor = approvedAgreement?.paidMinor ?? toMinor(row.paid_minor);
+    const paidMinor = approvedAgreement?.paidMinor ?? (invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.paidMinor : toMinor(row.paid_minor));
     const lastReminderAt = row.last_reminder_at ? row.last_reminder_at.toISOString() : null;
     return {
-      approvedAgreement,
+      approvedAgreement, invoiceFinancial,
       id: row.id,
       patientId: row.patient_id,
       patientName: row.full_name,
@@ -19191,7 +19193,7 @@ async function hydratePlans(rows: PlanRow[], today: string): Promise<TreatmentPl
       lastReminderAt,
       installments,
       paidMinor,
-      progress: planProgress(
+      progress: invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.progress : planProgress(
         { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments, lastReminderAt },
         paidMinor,
         today,
@@ -19274,28 +19276,22 @@ function toPlanItem(row: PlanItemRow): PlanItem {
   };
 }
 
-export async function listPatientPlans(patientId: number, today: string): Promise<TreatmentPlan[]> {
+async function readPlans(where:string,params:unknown[],today:string):Promise<TreatmentPlan[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<PlanRow>(
-    `${PLAN_SELECT} WHERE t.patient_id = $1 ORDER BY t.created_at DESC`, [patientId],
-  );
-  return hydratePlans(rows, today);
+  return withFinancialReadSnapshot(getPool(),async runner=>{
+    const reader=runner as DbClient;
+    const {rows}=await reader.query<PlanRow>(`${PLAN_SELECT} ${where}`,params);
+    return hydratePlans(rows,today,reader);
+  },usesSharedLocalDatabaseConnection());
 }
-
-export async function getPlan(id: number, today: string): Promise<TreatmentPlan | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PlanRow>(`${PLAN_SELECT} WHERE t.id = $1`, [id]);
-  const plans = await hydratePlans(rows, today);
-  return plans[0] ?? null;
+export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
+  return readPlans("WHERE t.patient_id=$1 ORDER BY t.created_at DESC",[patientId],today);
 }
-
-/** الخطط الجارية — لقائمة الأقساط المستحقة والمتأخرة. */
-export async function listActivePlans(today: string): Promise<TreatmentPlan[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PlanRow>(
-    `${PLAN_SELECT} WHERE t.status = 'active' ORDER BY t.created_at DESC LIMIT 300`,
-  );
-  return hydratePlans(rows, today);
+export async function getPlan(id:number,today:string):Promise<TreatmentPlan|null> {
+  return (await readPlans("WHERE t.id=$1",[id],today))[0]??null;
+}
+export async function listActivePlans(today:string):Promise<TreatmentPlan[]> {
+  return readPlans("WHERE t.status='active' ORDER BY t.created_at DESC LIMIT 300",[],today);
 }
 
 /** (P1-E) عرض علاج (خطة سارية) لم يوافق عليه المريض بعد — لقائمة متابعة الاستشارات. */

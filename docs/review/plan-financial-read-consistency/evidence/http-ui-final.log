@@ -1,0 +1,20 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/plan-financial-read-http-ui.test.ts __tests__/security-http/plan-payment-visibility-http.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-plan-finance
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Start at  00:20:22
+   Duration  56.37s (transform 1.56s, setup 0ms, import 636ms, tests 51.46s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
