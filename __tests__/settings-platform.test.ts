@@ -237,3 +237,32 @@ describe("المستهلكون يقرأون الإعداد فعلًا", () => {
       .toBe(validateBookingRequest({ ...base, preferredDate: "2026-10-20" }, today, MAX_DAYS_AHEAD).ok);
   });
 });
+
+
+
+describe("FIN011 explicit default persistence audit", () => {
+  it.each(["finance.rate.SAR", "finance.rate.USD"] as const)("marks the first save of %s", (key) => {
+    const value = SETTING_DEFAULTS[key];
+    const details = settingAuditDetails({ definition: settingDefinition(key)!, before: value,
+      after: value, previouslyStored: false, reason: "Explicit FX confirmation" });
+    expect(details).toMatchObject({ firstPersist: true, previousSource: "default", قبل: value, بعد: value });
+    expect(settingAuditDetails({ definition: settingDefinition(key)!, before: value,
+      after: value, previouslyStored: true })).not.toHaveProperty("firstPersist");
+  });
+
+  it.each(["", " ", "0", "-1", "NaN", "Infinity", "invalid", "1000001"])("keeps invalid FX value %s rejected", (value) => {
+    for (const key of ["finance.rate.SAR", "finance.rate.USD"]) {
+      expect(validateTypedSetting(key, value)).not.toBeNull();
+    }
+  });
+});
+
+
+it("FIN011 first-persistence provenance never exposes secret values", () => {
+  const definition = { ...settingDefinition("ops.late_tolerance_minutes")!, sensitivity: "secret" as const };
+  const details = settingAuditDetails({ definition, before: "", after: "synthetic-secret-value", previouslyStored: false });
+  expect(details).toMatchObject({ firstPersist: true, previousSource: "default", الحالة: "CONFIGURED" });
+  expect(details).not.toHaveProperty("قبل");
+  expect(details).not.toHaveProperty("بعد");
+  expect(JSON.stringify(details)).not.toContain("synthetic-secret-value");
+});

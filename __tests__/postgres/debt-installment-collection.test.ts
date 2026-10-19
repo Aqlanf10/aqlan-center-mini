@@ -125,3 +125,34 @@ describe("bounded collection against existing debt",()=>{
     }finally{await q("UPDATE users SET is_active=TRUE WHERE id=$1",[session.userId]);}
   });
 });
+
+
+describe("FIN011 explicit default FX save enables canonical installment collection", () => {
+  it.each([["SAR", "140"], ["USD", "530"]] as const)("uses explicitly saved %s without rewriting earlier receipts", async (currency, defaultValue) => {
+    const key = `finance.rate.${currency}`;
+    const saved = await q("SELECT key, value, updated_at FROM settings WHERE key = $1", [key]);
+    try {
+      const oldRate = Number(defaultValue) + 10;
+      await q("INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", [key, String(oldRate)]);
+      const { target, write } = await debt(100000, "YER");
+      const schedule = await schedules.saveDebtRepayment(write);
+      const first = await collect(target.patientId, schedule.arrangementId, 100, `fin011-old-${currency}`, currency);
+      expect(first.payment?.exchangeRate).toBe(oldRate);
+      const historical = await q("SELECT to_jsonb(p) AS receipt FROM payments p WHERE id=$1", [first.payment!.id]);
+      await q("DELETE FROM settings WHERE key=$1", [key]);
+      await expect(collect(target.patientId, schedule.arrangementId, 100, `fin011-missing-${currency}`, currency))
+        .rejects.toMatchObject({ code: "invalid" });
+      expect((await q("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1", [target.patientId]))[0].n).toBe(1);
+      expect(await db.saveSettingsAudited({ values: { [key]: defaultValue }, expected: { [key]: null },
+        actor: session.username, actorRole: "admin" })).toMatchObject({ ok: true, changed: [key] });
+      const second = await collect(target.patientId, schedule.arrangementId, 100, `fin011-new-${currency}`, currency);
+      expect(second.payment).toMatchObject({ exchangeRate: Number(defaultValue), baseAmountMinor: Number(defaultValue) });
+      expect(await q("SELECT to_jsonb(p) AS receipt FROM payments p WHERE id=$1", [first.payment!.id])).toEqual(historical);
+      expect((await collect(target.patientId, schedule.arrangementId, 100, `fin011-old-${currency}`, currency)).payment?.exchangeRate).toBe(oldRate);
+      expect((await q("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1", [target.patientId]))[0].n).toBe(2);
+    } finally {
+      await q("DELETE FROM settings WHERE key=$1", [key]);
+      for (const row of saved) await q("INSERT INTO settings(key,value,updated_at) VALUES($1,$2,$3)", [row.key, row.value, row.updated_at]);
+    }
+  });
+});

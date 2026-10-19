@@ -1,3 +1,4 @@
+import { isInvoiceCurrencyScopeReason, type InvoiceCurrencyScopeReason } from "./invoice-currency-scope";
 import type { Invoice, InvoiceItem } from "./db";
 import { isCurrency, parseAmount } from "./money";
 import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
@@ -27,7 +28,7 @@ export interface InvoiceRevisionView {
   invoice: Invoice; sourceHash: string; settledMinor: number; remainingMinor: number; accountDueMinor: number;
   repaymentVersion: number; repaymentTerms: DebtRepaymentTerms;
   work: { id:number; clinical_locked:boolean; category?:string|null; case_site?:string|null }[];
-  currencyCorrection?:{available:boolean;targetCurrency:"SAR";settledMinor:number;accountDueMinor:number;message:string};
+  currencyCorrection?:{available:boolean;targetCurrency:"SAR";settledMinor:number;accountDueMinor:number;message:string;reasonCodes?:InvoiceCurrencyScopeReason[]};
   identityAmendmentAvailable?:boolean;
   identityCatalog?:{services:{id:number;name:string;category:string|null}[];doctors:{id:number;name:string}[]};
 }
@@ -37,6 +38,7 @@ export function readInvoiceRevisionView(value: unknown, patientId: number, invoi
     || !minor(value.remainingMinor) || !integer(value.accountDueMinor) || !minor(value.repaymentVersion)
     || !Array.isArray(value.work) || !value.work.every(row=>revisionRecord(row)&&id(row.id)&&typeof row.clinical_locked==="boolean")) return null;
   if(value.currencyCorrection!==undefined&&(!revisionRecord(value.currencyCorrection)||typeof value.currencyCorrection.available!=="boolean"||value.currencyCorrection.targetCurrency!=="SAR"||!integer(value.currencyCorrection.settledMinor)||!integer(value.currencyCorrection.accountDueMinor)||typeof value.currencyCorrection.message!=="string"))return null;
+  if(revisionRecord(value.currencyCorrection)&&value.currencyCorrection.reasonCodes!==undefined&&(!Array.isArray(value.currencyCorrection.reasonCodes)||!value.currencyCorrection.reasonCodes.every(isInvoiceCurrencyScopeReason)))return null;
   if(value.identityAmendmentAvailable!==undefined&&typeof value.identityAmendmentAvailable!=="boolean")return null;
   if(value.identityCatalog!==undefined&&(!revisionRecord(value.identityCatalog)||!Array.isArray(value.identityCatalog.services)||!Array.isArray(value.identityCatalog.doctors)
     ||!value.identityCatalog.services.every(row=>revisionRecord(row)&&id(row.id)&&typeof row.name==="string"&&(row.category===null||typeof row.category==="string"))

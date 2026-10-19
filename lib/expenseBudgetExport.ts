@@ -1,6 +1,6 @@
 import { clinicDateString } from "@/lib/schedule";
 import { formatMoney, MINOR_UNITS, type Currency } from "@/lib/money";
-import type { ExpenseCategoryDTO, ExpenseBudgetSummary } from "@/lib/db";
+import type { ExpenseCategoryDTO } from "@/lib/db";
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 
 export interface ExpenseBudgetExportParams {
@@ -9,7 +9,6 @@ export interface ExpenseBudgetExportParams {
   clinicAddress?: string;
   baseCurrency: Currency;
   categories: ExpenseCategoryDTO[];
-  summary: ExpenseBudgetSummary;
   month: string;
   generatedDate?: string;
 }
@@ -36,7 +35,23 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
     second: "2-digit",
   }).format(new Date());
 
-  const { categories, summary, clinicName, month, baseCurrency } = params;
+  const { categories, clinicName, month, baseCurrency } = params;
+  // The workbook's rows define its scope, including any exported inactive rows.
+  // Keep amounts in the supplied base currency's minor units until formatting.
+  const totalMonthlyBudgetMinor = categories.reduce((sum, row) => sum + row.monthlyBudgetMinor, 0);
+  const totalActualSpentMinor = categories.reduce((sum, row) => sum + row.actualSpentMinor, 0);
+  const summary = {
+    totalMonthlyBudgetMinor,
+    totalActualSpentMinor,
+    totalVarianceMinor: totalMonthlyBudgetMinor - totalActualSpentMinor,
+    totalExpensesCount: categories.reduce((sum, row) => sum + row.expensesCount, 0),
+    overBudgetCount: categories.filter((row) => row.isOverBudget).length,
+    overallConsumptionPercent: totalMonthlyBudgetMinor > 0
+      ? Math.round((totalActualSpentMinor / totalMonthlyBudgetMinor) * 100) : 0,
+    overallVariancePercent: totalMonthlyBudgetMinor > 0
+      ? Math.round(((totalActualSpentMinor - totalMonthlyBudgetMinor) / totalMonthlyBudgetMinor) * 100)
+      : totalActualSpentMinor > 0 ? 100 : 0,
+  };
 
   let rowsXml = "";
   categories.forEach((cat, idx) => {
@@ -337,7 +352,7 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
     <Cell ss:MergeAcross="2" ss:StyleID="KpiVal"><Data ss:Type="String">${formatMoney(summary.totalActualSpentMinor, baseCurrency)}</Data></Cell>
     <Cell ss:MergeAcross="2" ss:StyleID="KpiVal"><Data ss:Type="String">${formatMoney(summary.totalVarianceMinor, baseCurrency)}</Data></Cell>
     <Cell ss:MergeAcross="2" ss:StyleID="KpiVal"><Data ss:Type="String">${summary.overallConsumptionPercent}%</Data></Cell>
-    <Cell ss:MergeAcross="2" ss:StyleID="KpiVal"><Data ss:Type="String">${summary.overBudgetCount} من أصل ${summary.activeCategories}</Data></Cell>
+    <Cell ss:MergeAcross="2" ss:StyleID="KpiVal"><Data ss:Type="String">${summary.overBudgetCount} من أصل ${categories.length}</Data></Cell>
    </Row>
 
    <Row ss:Height="12"/>
@@ -367,7 +382,7 @@ export function exportExpenseBudgetToExcel(params: ExpenseBudgetExportParams) {
 
    <!-- سطر الإجماليات -->
    <Row ss:Height="26">
-    <Cell ss:MergeAcross="5" ss:StyleID="TotalHeader"><Data ss:Type="String">الإجمالي العام لجميع البنود (${categories.length} بنداً)</Data></Cell>
+    <Cell ss:MergeAcross="5" ss:StyleID="TotalHeader"><Data ss:Type="String">الإجمالي العام للبنود المصدّرة (${categories.length} بنداً)</Data></Cell>
     <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalMonthlyBudgetMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
     <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalActualSpentMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
     <Cell ss:StyleID="TotalMoney"><Data ss:Type="Number">${(summary.totalVarianceMinor / MINOR_UNITS[baseCurrency]).toFixed(2)}</Data></Cell>
