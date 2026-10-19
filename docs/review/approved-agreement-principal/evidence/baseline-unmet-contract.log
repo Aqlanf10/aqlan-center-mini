@@ -1,0 +1,63 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/agreement-principal-decision.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/agreement-principal-decision.test.ts (14 tests | 2 failed) 1151ms
+     × NEW CONTRACT unmet: 'USD' approved total less receipt must be patient debt 23ms
+     × NEW CONTRACT unmet: 'SAR' approved total less receipt must be patient debt 18ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/agreement-principal-decision.test.ts > agreement principal decision evidence > NEW CONTRACT unmet: 'USD' approved total less receipt must be patient debt
+AssertionError: expected +0 to be 100000 // Object.is equality
+
+- Expected
++ Received
+
+- 100000
++ 0
+
+ ❯ __tests__/postgres/agreement-principal-decision.test.ts:59:41
+     57|     const f = await fixture(currency,total);
+     58|     await collect(f,paid);
+     59|     expect((await balance(f)).dueMinor).toBe(total-paid);
+       |                                         ^
+     60|   });
+     61|   it("unapproved active proposed treatment is not principal", async ()…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/postgres/agreement-principal-decision.test.ts > agreement principal decision evidence > NEW CONTRACT unmet: 'SAR' approved total less receipt must be patient debt
+AssertionError: expected +0 to be 16000 // Object.is equality
+
+- Expected
++ Received
+
+- 16000
++ 0
+
+ ❯ __tests__/postgres/agreement-principal-decision.test.ts:59:41
+     57|     const f = await fixture(currency,total);
+     58|     await collect(f,paid);
+     59|     expect((await balance(f)).dueMinor).toBe(total-paid);
+       |                                         ^
+     60|   });
+     61|   it("unapproved active proposed treatment is not principal", async ()…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 12 passed (14)
+   Start at  02:28:37
+   Duration  3.04s (transform 1.09s, setup 0ms, import 1.43s, tests 1.15s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

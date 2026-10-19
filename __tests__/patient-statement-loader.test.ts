@@ -25,6 +25,7 @@ beforeEach(() => {
     if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql))return {rows:[]};
     if (sql.includes("FROM invoice_settlement_reclassification")) return {rows:[]};
     if (sql.includes("AS today")) return { rows: [{ today: "2026-10-02" }] };
+    if (sql.includes("FROM approved_agreement_principals")) return {rows:[]};
     if (sql.includes("FROM expenses")) return { rows: [] };
     if (sql.includes("FROM patients p")) {
       expect(params).toEqual(["Asia/Aden", 17, null]);

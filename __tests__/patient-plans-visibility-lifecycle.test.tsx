@@ -2,17 +2,25 @@ import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientPlans } from "../components/PatientPlans";
 import { LegacyOrthoPlanContext } from "../components/LegacyOrthoPlanContext";
+import type { FinancialCommand, FinancialCommandScope, FinancialJournal } from "../lib/financial-command-journal";
 import type { SessionInfo } from "../components/SessionProvider";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
 
 // Execute the actual wrapper, keyed content and read/write handlers with the
-// repository's lightweight hook driver. Transport/session alone are synthetic;
-// no browser, database or source-text stand-in is used for these regressions.
+// repository's lightweight hook driver. Transport/session are synthetic.
+// Browser storage is isolated below; actual journal durability has Chromium coverage.
+// Production command validation and owner fencing remain active.
 const hooks = vi.hoisted(() => ({
   values: [] as unknown[], cursor: 0, changed: false,
   effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
   memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
   pending: [] as Array<() => void>, session: null as SessionInfo | null,
+}));
+const journal = vi.hoisted(() => ({ read: vi.fn(), reserve: vi.fn(), acknowledge: vi.fn() }));
+vi.mock("../lib/financial-command-journal", async original => ({
+  ...await original<typeof import("../lib/financial-command-journal")>(),
+  readFinancialJournal: journal.read, reserveFinancialCommand: journal.reserve,
+  acknowledgeFinancialCommand: journal.acknowledge,
 }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("react", async (original) => {
@@ -71,7 +79,8 @@ let patientId = 201;
 let key: string | null = null;
 let events: Map<string, Set<() => void>>;
 let read: () => Promise<MockResponse>;
-let write: () => Promise<MockResponse>;
+let write: (options: RequestInit) => Promise<MockResponse>;
+let ownerSequence = 0;
 const fetchMock = vi.fn();
 const openTreatmentEntry = vi.fn();
 function retire() { hooks.effects.forEach((effect) => effect.cleanup?.()); hooks.effects.clear(); }
@@ -95,25 +104,68 @@ const find = (predicate: (node: Element) => boolean) => elements(render()).find(
 const button = (label: string) => find((node) => node.type === "button" && text(node).trim() === label);
 function click(node: Element | undefined) { expect(node).toBeDefined(); return (node!.props.onClick as () => void | Promise<void>)(); }
 function focus() { events.get("focus")?.forEach((handler) => handler()); }
+// The hook driver samples external-store snapshots on render; explicitly drain
+// journal/transport microtasks and render before observing readiness or a POST.
 async function flush() { for (let pass = 0; pass < 5; pass += 1) { for (let i = 0; i < 15; i += 1) await Promise.resolve(); render(); } }
 async function mount() { render(); await flush(); }
 const writes = () => fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
+function receipt(options: RequestInit, actor: string) {
+  const body = JSON.parse(String(options.body));
+  return { id: 601, receiptNumber: "SYN-601", patientId: body.patientId, createdBy: actor,
+    invoiceId: 501, planId: body.planId, openingCurrency: null, kind: "payment",
+    amountMinor: 14000, currency: "SAR", method: "cash", note: null, shiftId: 1,
+    exchangeRate: 140, baseCurrency: "YER", baseAmountMinor: 19600,
+    createdAt: "2026-10-18T12:00:00Z", idempotencyKey: (options.headers as Record<string, string>)["Idempotency-Key"] };
+}
 
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
-  hooks.session = { username: "synthetic-a", role: "doctor", permissions: { ...DEFAULT_DOCTOR_PERMISSIONS, canViewPatientPayments: true } };
+  // Isolate the real durable hook's module-level actor/patient cache per test.
+  hooks.session = { username: `synthetic-a-${++ownerSequence}`, role: "doctor", permissions: { ...DEFAULT_DOCTOR_PERMISSIONS, canViewPatientPayments: true } };
   patientId = 201; key = null; events = new Map(); vi.clearAllMocks();
+  const saved = new Map<string, FinancialJournal>();
+  const scopeKey = (scope: FinancialCommandScope) => JSON.stringify([scope.actor, scope.patientId]);
+  journal.read.mockImplementation(async (scope: FinancialCommandScope) => saved.get(scopeKey(scope)) ?? { revision: 0, command: null });
+  journal.reserve.mockImplementation(async (scope: FinancialCommandScope, revision: number, command: FinancialCommand) => {
+    const current = await journal.read(scope);
+    expect(current.revision).toBe(revision);
+    expect(current.command).toBeNull();
+    const next = { revision, command }; saved.set(scopeKey(scope), next); return next;
+  });
+  journal.acknowledge.mockImplementation(async (scope: FinancialCommandScope, command: FinancialCommand) => {
+    const current = saved.get(scopeKey(scope))!;
+    expect(current.command?.key).toBe(command.key);
+    expect(current.command?.original).toBe(command.original);
+    const next = { revision: current.revision + 1, command: null }; saved.set(scopeKey(scope), next); return next;
+  });
   const add = (name: string, handler: () => void) => { if (!events.has(name)) events.set(name, new Set()); events.get(name)!.add(handler); };
   const remove = (name: string, handler: () => void) => events.get(name)?.delete(handler);
-  vi.stubGlobal("window", { addEventListener: add, removeEventListener: remove });
+  vi.stubGlobal("window", { addEventListener: add, removeEventListener: remove,
+    dispatchEvent: (event: Event) => { events.get(event.type)?.forEach(handler => handler()); return true; } });
   vi.stubGlobal("document", { visibilityState: "visible", addEventListener: add, removeEventListener: remove });
-  read = async () => response(payload()); write = async () => response({ paymentId: 601 });
-  fetchMock.mockImplementation((_url: string, options?: RequestInit) => options?.method === "POST" ? write() : read());
+  read = async () => response(payload()); write = async options => response(receipt(options, hooks.session!.username));
+  fetchMock.mockImplementation((_url: string, options?: RequestInit) => options?.method === "POST" ? write(options) : read());
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => { retire(); vi.unstubAllGlobals(); });
 
 describe("actual PatientPlans financial-read lifetime", () => {
+  it("keeps collection disabled until the durable journal read completes", async () => {
+    const pending = deferred<FinancialJournal>(); journal.read.mockImplementation(() => pending.promise);
+    await mount(); expect(button("تحصيل قسط")?.props.disabled).toBe(true); expect(writes()).toEqual([]);
+    pending.resolve({ revision: 0, command: null }); await flush();
+    expect(button("تحصيل قسط")?.props.disabled).toBe(false); expect(writes()).toEqual([]);
+  });
+  it("journal read failure disables collection and even a stale handler cannot send", async () => {
+    journal.read.mockRejectedValue(new Error("Synthetic storage unavailable"));
+    await mount(); expect(button("تحصيل قسط")?.props.disabled).toBe(true);
+    // Deliberately invoke disabled callbacks to verify the writer's own guard too.
+    await click(button("تحصيل قسط"));
+    const submit = button("سجّل القسط واطبع السند"); expect(submit?.props.disabled).toBe(true);
+    await click(submit); await flush();
+    expect(journal.reserve).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+    expect(text(render())).not.toContain("سُجّلت الدفعة.");
+  });
   it("starts hidden and preserves the authorized server values only after a current read", async () => {
     expect(text(render())).not.toContain("المدفوع"); await flush();
     expect(text(render())).toContain("المدفوع"); expect(button("تحصيل قسط")).toBeDefined(); expect(writes()).toEqual([]);
@@ -174,7 +226,7 @@ describe("actual PatientPlans financial-read lifetime", () => {
     expect(find((node) => node.type === LegacyOrthoPlanContext)).toBeDefined();
   });
   it("a current-owner collection draft survives an authorized refresh but is retired by masking", async () => {
-    await mount(); await click(button("تحصيل قسط"));
+    await mount(); expect(button("تحصيل قسط")?.props.disabled).toBe(false); await click(button("تحصيل قسط"));
     const amount = () => find((node) => node.type === "input" && node.props["aria-label"] === "مبلغ القسط");
     (amount()!.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "55" } });
     const pending = deferred<MockResponse>(); read = () => pending.promise; focus(); render();
@@ -186,12 +238,12 @@ describe("actual PatientPlans financial-read lifetime", () => {
     expect(amount()).toBeUndefined(); expect(button("تحصيل قسط")).toBeDefined(); expect(writes()).toEqual([]);
   });
   it("a successful current-owner collection keeps its receipt after the authorized reload", async () => {
-    await mount(); await click(button("تحصيل قسط"));
+    await mount(); expect(button("تحصيل قسط")?.props.disabled).toBe(false); await click(button("تحصيل قسط"));
     const amount = find((node) => node.type === "input" && node.props["aria-label"] === "مبلغ القسط")!;
     (amount.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "140" } });
     await click(button("سجّل القسط واطبع السند")); await flush();
     expect(writes()).toHaveLength(1);
-    expect(text(render())).toContain("سُجّل القسط.");
+    expect(text(render())).toContain("سُجّلت الدفعة.");
     expect(find((node) => node.type === "a" && node.props.href === "/print/receipt/601")).toBeDefined();
     const pending = deferred<MockResponse>(); read = () => pending.promise; focus(); render();
     expect(find((node) => node.type === "a" && node.props.href === "/print/receipt/601")).toBeUndefined();
@@ -245,18 +297,22 @@ describe("actual PatientPlans financial-read lifetime", () => {
     expect(JSON.stringify(hooks.values)).not.toContain("Synthetic plan"); expect(writes()).toEqual([]);
   });
   it("a sent original-owner collection cannot refresh or publish into a later principal", async () => {
-    await mount(); await click(button("تحصيل قسط"));
+    await mount(); expect(button("تحصيل قسط")?.props.disabled).toBe(false); await click(button("تحصيل قسط"));
     const amount = find((node) => node.type === "input" && node.props["aria-label"] === "مبلغ القسط")!;
     (amount.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "140" } });
     const pending = deferred<MockResponse>(); write = () => pending.promise;
     void click(button("سجّل القسط واطبع السند"));
-    expect(writes()).toHaveLength(1); expect(writes()[0][0]).toBe("/api/plans/301");
+    await flush();
+    expect(writes()).toHaveLength(1); expect(writes()[0][0]).toBe("/api/payments");
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ patientId: 201, planId: 301, kind: "payment", amount: "140", currency: "SAR" });
+    const originalActor = hooks.session!.username;
     expect(writes()[0][1].headers["Idempotency-Key"]).toBeTruthy();
     hooks.session = { ...hooks.session!, username: "synthetic-b" }; read = async () => response({}, 403); render(); await flush();
     const readsBefore = fetchMock.mock.calls.filter(([, options]) => !options?.method).length;
-    pending.resolve(response({ paymentId: 601 })); await flush();
+    pending.resolve(response(receipt(writes()[0][1], originalActor))); await flush();
     expect(fetchMock.mock.calls.filter(([, options]) => !options?.method)).toHaveLength(readsBefore);
-    expect(text(render())).not.toContain("سُجّل القسط."); expect(text(render())).not.toContain("المدفوع");
+    expect(text(render())).not.toContain("سُجّلت الدفعة."); expect(text(render())).not.toContain("المدفوع");
+    expect(find(node => node.type === "a" && node.props.href === "/print/receipt/601")).toBeUndefined();
     expect(writes()).toHaveLength(1);
   });
 });

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPlan, getSettingsSafe } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getPlan, getSettingsSafe } from "@/lib/db";
 import { formatMoney, isCurrency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader } from "@/components/PrintHeader";
@@ -10,7 +10,6 @@ import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { clinicDateString } from "@/lib/schedule";
 import { buildInstallmentPlanAgreement } from "@/lib/plans";
-import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { DebtRepaymentAgreementPrint } from "@/components/DebtRepaymentAgreementPrint";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +28,7 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const query = await searchParams;
   if (query?.source === "debt-repayment") return <DebtRepaymentAgreementPrint id={id} version={Number(query.version)} today={today} />;
   if (query?.source !== undefined || query?.version !== undefined) notFound();
@@ -37,6 +36,11 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
   if (!plan) notFound();
 
   const base = isCurrency(plan.baseCurrency) ? plan.baseCurrency : "YER";
+  const approvedSummary = plan.approvedAgreement ? <section data-testid="approved-agreement-print">
+          <p>التزام مالي معتمد — المصدر: {plan.approvedAgreement.invoiceId ? `فاتورة #${plan.approvedAgreement.invoiceId}` : `رصيد افتتاحي ${base}`}</p>
+          <div className="line"><span>كامل المتبقي</span><span>{formatMoney(plan.approvedAgreement.remainingMinor,base)}</span></div>
+          <div className="line"><span>المستحق حتى اليوم</span><span>{formatMoney(plan.approvedAgreement.dueNowMinor,base)}</span></div>
+        </section> : null;
   // Historical provenance cannot become a new collectible plan contract or invented remaining work.
   // Preserve the ordinary agreement below exactly; history prints as an explicitly read-only reference.
   if (plan.items.some(hasLegacyHistory)) return (
@@ -45,6 +49,7 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
       <div className="sheet sheet-a4">
         <PrintHeader settings={settings} title="مرجع خطة تشمل علاجًا تاريخيًّا" />
         <LegacyPlanPrintSummary plan={plan} currency={base} />
+        {approvedSummary}
       </div>
     </>
   );
@@ -107,13 +112,14 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
           </div>
         </div>
 
+        {approvedSummary}
         <h3 style={{ fontSize: "11pt", fontWeight: 700, margin: "4mm 0 2mm" }}>
           جدول الأقساط والمواعيد الاستحقاقية ({agreement.installments.length} أقساط)
         </h3>
 
         {agreement.installments.length === 0 ? (
           <p style={{ textAlign: "center", color: "#64748b", margin: "4mm 0" }}>
-            خطة بنود وإجراءات (تُفوتر وتسدد حسب الجلسات المنجزة).
+            {plan.approvedAgreement ? "كامل الالتزام مستحق؛ لا يوجد جدول أقساط مؤجلة." : "خطة بنود وإجراءات (تُفوتر وتسدد حسب الجلسات المنجزة)."}
           </p>
         ) : (
           <table className="items" style={{ width: "100%", borderCollapse: "collapse" }}>

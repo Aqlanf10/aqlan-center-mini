@@ -1,0 +1,292 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/approved-agreement-principal.test.ts
+
+
+ RUN  v4.1.11 /workspace/reviews/pr346-baseline9258
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+(node:17116) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/approved-agreement-principal.test.ts (24 tests | 4 failed) 4447ms
+   × all writers guard approved invoice source and mixed-target concurrency 66ms
+   × all writers guard approved opening source and mixed-target concurrency 48ms
+   × refuses new principal for a plan session already billed through clinical signing 165ms
+   × matches corrected invoice lineage in plan, ledger and report without counting ancestor receipt twice 138ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/approved-agreement-principal.test.ts > all writers guard approved invoice source and mixed-target concurrency
+AssertionError: promise resolved "{ payment: { id: 21, …(17) }, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "payment": {
++     "amountMinor": 10000,
++     "baseAmountMinor": 14000,
++     "baseCurrency": "YER",
++     "createdAt": "2026-10-18T19:48:36.361Z",
++     "createdBy": "agreement-admin",
++     "currency": "SAR",
++     "exchangeRate": 140,
++     "id": 21,
++     "invoiceId": 20,
++     "kind": "payment",
++     "method": "cash",
++     "note": null,
++     "openingCurrency": null,
++     "patientId": 21,
++     "patientName": "Synthetic agreement",
++     "planId": null,
++     "receiptNumber": "R-00022",
++     "shiftId": 1,
++   },
++   "reason": null,
+  }
+
+ ❯ __tests__/postgres/approved-agreement-principal.test.ts:188:34
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  __tests__/postgres/approved-agreement-principal.test.ts > all writers guard approved invoice source and mixed-target concurrency
+AssertionError: promise resolved "{ payment: { id: 22, …(17) }, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "payment": {
++     "amountMinor": 31000,
++     "baseAmountMinor": 43400,
++     "baseCurrency": "YER",
++     "createdAt": "2026-10-18T19:48:36.373Z",
++     "createdBy": "agreement-admin",
++     "currency": "SAR",
++     "exchangeRate": 140,
++     "id": 22,
++     "invoiceId": 20,
++     "kind": "payment",
++     "method": "cash",
++     "note": null,
++     "openingCurrency": null,
++     "patientId": 21,
++     "patientName": "Synthetic agreement",
++     "planId": null,
++     "receiptNumber": "R-00023",
++     "shiftId": 1,
++   },
++   "reason": null,
+  }
+
+ ❯ __tests__/postgres/approved-agreement-principal.test.ts:189:60
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  __tests__/postgres/approved-agreement-principal.test.ts > all writers guard approved invoice source and mixed-target concurrency
+ FAIL  __tests__/postgres/approved-agreement-principal.test.ts > all writers guard approved opening source and mixed-target concurrency
+AssertionError: expected +0 to be 10000 // Object.is equality
+
+- Expected
++ Received
+
+- 10000
++ 0
+
+ ❯ __tests__/postgres/approved-agreement-principal.test.ts:192:83
+    190|  const results=await Promise.allSettled([collectApprovedAgreement(coll…
+    191|  expect(results.filter(r=>r.status==="fulfilled")).toHaveLength(1);
+    192|  expect((await approvedAgreementPosition(f.planId,"2026-10-18"))?.rema…
+       |                                                                                   ^
+    193| });
+    194|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  __tests__/postgres/approved-agreement-principal.test.ts > all writers guard approved opening source and mixed-target concurrency
+AssertionError: promise resolved "{ payment: { id: 24, …(17) }, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "payment": {
++     "amountMinor": 10000,
++     "baseAmountMinor": 14000,
++     "baseCurrency": "YER",
++     "createdAt": "2026-10-18T19:48:36.428Z",
++     "createdBy": "agreement-admin",
++     "currency": "SAR",
++     "exchangeRate": 140,
++     "id": 24,
++     "invoiceId": null,
++     "kind": "payment",
++     "method": "cash",
++     "note": null,
++     "openingCurrency": "SAR",
++     "patientId": 22,
++     "patientName": "Synthetic agreement",
++     "planId": null,
++     "receiptNumber": "R-00025",
++     "shiftId": 1,
++   },
++   "reason": null,
+  }
+
+ ❯ __tests__/postgres/approved-agreement-principal.test.ts:188:34
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  __tests__/postgres/approved-agreement-principal.test.ts > all writers guard approved opening source and mixed-target concurrency
+AssertionError: promise resolved "{ payment: { id: 25, …(17) }, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "payment": {
++     "amountMinor": 31000,
++     "baseAmountMinor": 43400,
++     "baseCurrency": "YER",
++     "createdAt": "2026-10-18T19:48:36.432Z",
++     "createdBy": "agreement-admin",
++     "currency": "SAR",
++     "exchangeRate": 140,
++     "id": 25,
++     "invoiceId": null,
++     "kind": "payment",
++     "method": "cash",
++     "note": null,
++     "openingCurrency": "SAR",
++     "patientId": 22,
++     "patientName": "Synthetic agreement",
++     "planId": null,
++     "receiptNumber": "R-00026",
++     "shiftId": 1,
++   },
++   "reason": null,
+  }
+
+ ❯ __tests__/postgres/approved-agreement-principal.test.ts:189:60
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  __tests__/postgres/approved-agreement-principal.test.ts > refuses new principal for a plan session already billed through clinical signing
+AssertionError: promise resolved "{ …(2) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "agreement": {
++     "created_at": 2026-10-18T19:48:36.616Z,
++     "created_by": "agreement-admin",
++     "currency": "YER",
++     "historical_paid_minor": "0",
++     "idempotency_key": "approve-80",
++     "invoice_id": 22,
++     "opening_currency": null,
++     "patient_id": 23,
++     "plan_id": 26,
++     "reason": "Synthetic financial confirmation",
++     "request_hash": "b54f4ea6608145e56713f70a46b48b57354f03b3882599a169289d1f8184fb65",
++     "source_kind": "new",
++     "source_snapshot": {
++       "cancelled": false,
++       "corrections": [],
++       "currency": "YER",
++       "discountMinor": 0,
++       "invoiceId": 22,
++       "lineage": [
++         {
++           "currency": "YER",
++           "discountMinor": 0,
++           "id": 22,
++           "patientId": 23,
++           "status": "open",
++           "totalMinor": 300000,
++         },
++       ],
++       "patientId": 23,
++       "payments": [],
++       "totalMinor": 300000,
++     },
++     "terms": {
++       "installments": [],
++       "itemIds": [
++         3,
++       ],
++       "title": "Synthetic agreement",
++     },
++     "total_minor": "300000",
++   },
++   "replayed": false,
+  }
+
+ ❯ __tests__/postgres/approved-agreement-principal.test.ts:205:45
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  __tests__/postgres/approved-agreement-principal.test.ts > matches corrected invoice lineage in plan, ledger and report without counting ancestor receipt twice
+AssertionError: expected [ { patientId: 24, …(18) } ] to deeply equal [ ObjectContaining{…} ]
+
+- Expected
++ Received
+
+  [
+    {
++     "ageDays": 26737,
+      "balanceMinor": 100000,
++     "billedMinor": 150000,
+      "currency": "USD",
++     "doctorName": "—",
++     "lastPaymentDate": "18/10/2026",
++     "oldestDate": "18/10/2026",
+      "paidMinor": 50000,
+-     "planPaidMinor": 50000,
++     "patientId": 24,
++     "patientName": "Synthetic agreement",
++     "patientNumber": "APP-81",
++     "phone": "—",
++     "planCurrency": "USD",
++     "planPaidMinor": 0,
++     "planStart": "01/10/2026",
++     "planTitle": "Synthetic agreement",
++     "planTotalMinor": 150000,
++     "specialtyLabel": "عام",
++     "statusLabel": "نشط",
+    },
+  ]
+
+ ❯ __tests__/postgres/approved-agreement-principal.test.ts:220:22
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 20 passed (24)
+   Start at  19:48:28
+   Duration  8.30s (transform 1.80s, setup 0ms, import 3.50s, tests 4.45s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

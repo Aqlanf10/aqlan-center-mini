@@ -7,6 +7,9 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if(files.length===58&&files[57].version==="0064"&&files[57].filename==="0064_approved_agreement_principal.sql"){
+    return periodontalCandidateMigrationVersion(files.slice(0,57));
+  }
   if(files.length===57&&files[56].version==="0063"&&files[56].filename==="0063_invoice_currency_reclassification.sql"){
     periodontalCandidateMigrationVersion(files.slice(0,56));
     // Isolated fixture sentinel, not an allocated production migration number.

@@ -509,7 +509,7 @@ export function matchPlanItems<T extends { id: number } & PlanItemLike>(
  * إجراءٌ حرّ (غير مربوط) بنفس خدمة البند وسنّه، والبند متعدد الجلسات أو قيد التنفيذ، كان يُفوتَر
  * بسعره الكامل في كل زيارة — فيُطالب المريض بعلاج العصب ثلاث مرات. هذه الدالة تسمّي التعارض
  * لتصرّ التوقيع على ربط الإجراء ببنده (جلسة N من M). البند أحادي الجلسة المخطَّط يبقى على
- * المطابقة القديمة (matchPlanItems).
+ * المطابقة القديمة (matchPlanItems) فقط إن لم يكن له تمويل اتفاق قائم.
  */
 export interface SessionPlanItem {
   id: number;
@@ -521,6 +521,7 @@ export interface SessionPlanItem {
   doneSessions: number;
   billingStatus?: BillingStatus;
   hasInvoiceLineage?: boolean;
+  fundedByAgreement?: boolean;
   hasLegacyLineage?: boolean;
   legacyCoverage?: LegacyCoverageState;
   caseSite?: string | null;
@@ -544,7 +545,7 @@ export function unlinkedSessionConflicts(
   };
   for (const procedure of unlinked) {
     const protectedItem = items.find((one) => sameKey(one, procedure)
-      && (one.hasInvoiceLineage || one.hasLegacyLineage || one.billingStatus === "billed" || one.billingStatus === "needs_financial_review"));
+      && (one.fundedByAgreement || one.hasInvoiceLineage || one.hasLegacyLineage || one.billingStatus === "billed" || one.billingStatus === "needs_financial_review"));
     if (protectedItem) {
       conflicts.push(`«${protectedItem.serviceName}» له سجل مالي قائم — اربط العمل ببنده الأصلي وراجع حالته المالية؛ لا يُفوتر كإجراء جديد.`);
       continue;
