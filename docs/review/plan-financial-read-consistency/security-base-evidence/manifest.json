@@ -1,0 +1,36 @@
+{
+  "tested_source_commit": "1370af1864eca318000cbcd8188f88295d3e4406",
+  "base_346": "a761a089d74906b7981592cadccf8f59a57a6240",
+  "previous_reviewed_candidate": "c64993901616036f107f50c1f0f4287318571481",
+  "encoding": "gzip; lossless raw logs",
+  "files": {
+    "security-base-build.log": {
+      "raw_sha256": "7791f619f8eded3a1ae5ea3a0c240401574bb1fb31559ecea761d088ffd9413a",
+      "gzip_sha256": "89a4ab69c5d0b38689627e33669fac8b95c599e262e6739f6593b59fdd4c40d3"
+    },
+    "security-base-unit.log": {
+      "raw_sha256": "548714b722fd458e734f3a48d8868071d29e61718ce6a48a89ca9a32d4b2a067",
+      "gzip_sha256": "a0ecfc851301bd86f971465d74f96a1fd54f95d0cfdd0df4f46bef5178b09883"
+    },
+    "security-base-pg.log": {
+      "raw_sha256": "3572c81d790b74b483f5160a86de4dd29c4bc53b6901a8d015f3e65905986a73",
+      "gzip_sha256": "ccc8cc3ba050ff96a5f87e15db04bbd32b56e0526097f89ab31586e800cc276c"
+    },
+    "security-base-http.log": {
+      "raw_sha256": "a7bdf451ed502e68c23ff8ed0ec97fa4b5f43a60798206732d7d5f0d13382d4f",
+      "gzip_sha256": "c74755d455337eba5671e51601a788b193f5127a7828f62a222e8b4bb88bad00"
+    },
+    "security-base-typecheck.log": {
+      "raw_sha256": "abbbc5e1595eb05f5d213af2183ca9842e35bc698e6a81f7f6536b42a2f23060",
+      "gzip_sha256": "00a32064b3ee8a6634fc14fde138e8527a7f0270f3a507d31bd5835117bed213"
+    },
+    "security-base-lint.log": {
+      "raw_sha256": "7ff197d7e6cd6b3be9111e345e58e1247a189b39cd64a37795b984f917bf3732",
+      "gzip_sha256": "0045189e2e3200b8dd586c76c786dbb9aba3c7ac489c4170af4f31f856fa32db"
+    },
+    "security-base-verify-ci.log": {
+      "raw_sha256": "270ed26333066b9fc5d690376db59229ecd698fc26b5213738a83302c59c341c",
+      "gzip_sha256": "5e82f3012bca109b78cf94ec308dd2486ac6eecb45b58b6af712a13c963730a4"
+    }
+  }
+}

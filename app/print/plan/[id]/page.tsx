@@ -53,6 +53,20 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
       </div>
     </>
   );
+  if(plan.invoiceFinancial) return <><PrintButton /><div className="sheet sheet-a4">
+    <PrintHeader settings={settings} title="سداد الفواتير المرتبطة بخطة العلاج" />
+    <p>{plan.patientName} — {plan.title}</p>
+    <p>{plan.invoiceFinancial.message ?? "قراءة من الفواتير وجدول سداد الدين القائم؛ لا تنشئ هذه الورقة التزامًا جديدًا."}</p>
+    {plan.invoiceFinancial.kind === "invoice_backed" ? <>
+      <p>أصل الفواتير: {formatMoney(plan.invoiceFinancial.progress.totalMinor,base)}</p>
+      <p>المسدد: {formatMoney(plan.invoiceFinancial.paidMinor,base)} · المتبقي: {formatMoney(plan.invoiceFinancial.remainingMinor,base)}</p>
+      {plan.invoiceFinancial.schedules.filter(schedule=>schedule.status === "active").map(schedule=><section key={schedule.id}>
+        <h3>جدول سداد الفاتورة #{schedule.target.invoiceId} — النسخة {schedule.version}</h3>
+        {schedule.requiresReview ? <p>يحتاج جدول السداد إلى مراجعة مصدر الدين.</p> : null}
+        {!schedule.requiresReview && schedule.progress?.rows.map((row,index)=><p data-testid="verified-plan-schedule-row" key={index}>{friendlyDateLong(row.dueDate)} · {formatMoney(row.amountMinor,base)} · المتبقي {formatMoney(row.remainingMinor,base)}</p>)}
+      </section>)}
+    </> : null}
+  </div></>;
   const agreement = buildInstallmentPlanAgreement({
     planId: plan.id,
     patientName: plan.patientName,

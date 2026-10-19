@@ -384,12 +384,15 @@ export default async function PatientDossierPage({
             <div style={{ margin: "3mm 0", padding: "2mm 3mm", background: "#f8fafc", borderRadius: "2mm", border: "1px solid #e2e8f0", fontSize: "8.5pt" }}>
               {currencies.map((currency) => {
                 const bucket = balances[currency];
-                const billed = bucket.billedMinor + bucket.openingMinor;
+                const billed = bucket.billedMinor;
                 return (
-                  <div key={currency} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div key={currency} style={{ display: "flex", flexWrap: "wrap", gap: "2mm", justifyContent: "space-between", alignItems: "center" }}>
                     {currencies.length > 1 ? <strong>{CURRENCY_LABEL[currency]}</strong> : null}
                     <span>
                       إجمالي الفواتير: <strong>{formatMoney(billed, currency)}</strong>
+                    </span>
+                    <span>
+                      الرصيد السابق: <strong>{formatMoney(bucket.openingMinor, currency)}</strong>
                     </span>
                     <span>
                       إجمالي المسدد: <strong>{formatMoney(bucket.collectedMinor, currency)}</strong>

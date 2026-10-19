@@ -150,6 +150,69 @@ beforeEach(() => {
 afterEach(() => { retire(); vi.unstubAllGlobals(); });
 
 describe("actual PatientPlans financial-read lifetime", () => {
+  it('retires a saved completion callback as soon as a financial read refresh starts',async()=>{
+    hooks.session={...hooks.session!,role:'admin'};
+    await mount();const stale=button('إنهاء الخطة');expect(stale).toBeDefined();
+    const pending=deferred<MockResponse>();read=()=>pending.promise;focus();
+    await click(stale);
+    expect(fetchMock.mock.calls.some(([,options])=>options?.method==='PATCH')).toBe(false);
+    pending.resolve(response(payload()));await flush();
+  });
+
+  it('does not finish an invoice plan while an earlier collection remains uncertain',async()=>{
+    hooks.session={...hooks.session!,role:'admin'};
+    write=async()=>response({message:'Synthetic lost response'},500);
+    await mount();await click(button('تحصيل قسط'));await flush();
+    await click(button('سجّل القسط واطبع السند'));await flush();
+    read=async()=>response({...payload(),plans:[{...plan(),installments:[],invoiceFinancial:{kind:'invoice_backed',schedules:[]}}]});
+    focus();await flush();
+    expect(button('إنهاء الخطة')?.props.disabled).toBe(true);
+    await click(button('إنهاء الخطة'));
+    expect(fetchMock.mock.calls.some(([,options])=>options?.method==='PATCH')).toBe(false);
+    expect(journal.acknowledge).not.toHaveBeenCalled();
+  });
+
+  it('blocks completion during pending journal recovery even if a disabled callback is invoked',async()=>{
+    hooks.session={...hooks.session!,role:'admin'};
+    const pending=deferred<FinancialJournal>();journal.read.mockImplementation(()=>pending.promise);
+    read=async()=>response({...payload(),plans:[{...plan(),installments:[],invoiceFinancial:{kind:'invoice_backed',schedules:[]}}]});
+    await mount();expect(button('إنهاء الخطة')?.props.disabled).toBe(true);
+    await click(button('إنهاء الخطة'));expect(fetchMock.mock.calls.some(([,options])=>options?.method==='PATCH')).toBe(false);
+  });
+  it('preserves server completion rejection and does not issue a payment',async()=>{
+    hooks.session={...hooks.session!,role:'admin'};
+    read=async()=>response({...payload(),plans:[{...plan(),installments:[],invoiceFinancial:{kind:'invoice_backed',schedules:[]}}]});
+    fetchMock.mockImplementation((_url:string,options?:RequestInit)=> options?.method==='PATCH'?response({message:'تعذر الإكمال الاصطناعي'},409):read());
+    await mount();await click(button('إنهاء الخطة'));await flush();
+    expect(text(render())).toContain('تعذر الإكمال الاصطناعي');expect(writes()).toEqual([]);
+  });
+
+  it.each(['unpaid','partpaid','paid','completed','review_required'])('retains safe invoice plan print/completion affordances for %s',async state=>{
+    hooks.session = {...hooks.session!,role:'admin'};
+    read=async()=>response({...payload(),plans:[{...plan(),status:state==='completed'?'completed':'active',installments:[],invoiceFinancial:{kind:state==='review_required'?'review_required':'invoice_backed',message:null,schedules:[]}}]});
+    await mount();
+    expect(find(node=>node.type==='a' && node.props.href==='/print/plan/301')).toBeDefined();
+    expect(Boolean(button('إنهاء الخطة'))).toBe(state!=='completed');
+    expect(button('تحصيل قسط')).toBeUndefined();
+  });
+  it('hides stale payable schedule rows even when review progress is non-null',async()=>{
+    read=async()=>response({...payload(),plans:[{...plan(),invoiceFinancial:{kind:'invoice_backed',message:'تغيّر مصدر الدين',schedules:[{id:1,status:'active',version:1,target:{invoiceId:501},requiresReview:true,progress:{rows:[{dueDate:'2026-01-01',amountMinor:12345,remainingMinor:12345}]}}]}}]});
+    await mount();expect(text(render())).not.toContain('123.45');
+  });
+
+  it("shows review instructions without legacy financial totals or collection for unproven invoice ownership", async () => {
+    read = async () => response({ ...payload(), plans: [{ ...plan(), invoiceFinancial: {
+      kind: "review_required", message: "ربط الخطة يحتاج مراجعة مالية", schedules: [],
+    } }] });
+    await mount();
+    const content = text(render());
+    expect(content).toContain("ربط الخطة يحتاج مراجعة مالية");
+    expect(content).not.toContain("المدفوع");
+    expect(content).not.toContain("جدول الأقساط");
+    expect(button("تحصيل قسط")).toBeUndefined();
+    expect(writes()).toEqual([]);
+  });
+
   it("keeps collection disabled until the durable journal read completes", async () => {
     const pending = deferred<FinancialJournal>(); journal.read.mockImplementation(() => pending.promise);
     await mount(); expect(button("تحصيل قسط")?.props.disabled).toBe(true); expect(writes()).toEqual([]);

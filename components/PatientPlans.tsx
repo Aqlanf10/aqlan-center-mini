@@ -28,6 +28,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { ServiceSelect } from "./ServiceSelect";
 import { ToothField } from "./ToothPicker";
 import { useSession } from "./SessionProvider";
+import { canHandleMoney } from "@/lib/roles";
 import { ReceiptCorrectionLauncher } from "./ReceiptCorrectionLauncher";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { LegacyOrthoPlanContext } from "./LegacyOrthoPlanContext";
@@ -60,6 +61,7 @@ interface Plan {
   itemsProgress: { count: number; doneCount: number; totalMinor: number; doneMinor: number; remainingMinor: number };
   totalFromItems: boolean;
   consentAt: string | null; consentBy: string | null; consentNote: string | null;
+  invoiceFinancial?: import("@/lib/plan-financial-position").PlanInvoiceFinancialPosition | null;
   installments: { id: number; number: number; dueDate: string; amountMinor: number }[];
   hasInstallments?: boolean;
   paidMinor: number | null;
@@ -188,6 +190,12 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
       || window.confirm("هناك مسودة خطة أو تحصيل غير محفوظة. هل تريد مغادرة القسم؟");
   }, [busy, money.attempt, consentFor, payFor]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
+  const completionAllowed = useRef<(id: number) => boolean>(() => false);
+  const completionReadGeneration = readRef.current.generation;
+  completionAllowed.current = (id) => readRef.current.active && readRef.current.generation === completionReadGeneration
+    && !loading && !readUnavailable && !readDenied && canSeeFinancial && canHandleMoney(session?.role)
+    && money.ready && !busy && money.attempt === null && plans.some(plan => plan.id === id && plan.status === "active") && canLeave();
+
   const visiblePlans = plans.filter((plan) => (context?.planId === undefined || plan.id === context.planId)
     && (context?.planItemId === undefined || plan.items.some((item) => item.id === context.planItemId))
     && (context?.clinicalCaseId === undefined || plan.items.some((item) => item.caseId === context.clinicalCaseId)));
@@ -305,7 +313,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                     {hasHistory ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
                   </p>
                 </div>
-                {(plan.installments.length > 0 || plan.approvedAgreement) && canSeeFinancial && plan.progress ? (
+                {(plan.installments.length > 0 || plan.approvedAgreement || plan.invoiceFinancial?.kind === "invoice_backed") && canSeeFinancial && plan.invoiceFinancial?.kind !== "review_required" && plan.progress ? (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
                       <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</p>
@@ -337,7 +345,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </p>
               ) : null}
 
-              {(plan.installments.length > 0 || plan.approvedAgreement) && canSeeFinancial && plan.progress ? (
+              {(plan.installments.length > 0 || plan.approvedAgreement || plan.invoiceFinancial?.kind === "invoice_backed") && canSeeFinancial && plan.invoiceFinancial?.kind !== "review_required" && plan.progress ? (
                 <>
                   <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                     <div className="h-full bg-emerald-500"
@@ -355,13 +363,13 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </>
               ) : null}
 
-              {canSeeFinancial && plan.progress && plan.progress.overdueMinor > 0 ? (
+              {canSeeFinancial && plan.invoiceFinancial?.kind !== "review_required" && plan.progress && plan.progress.overdueMinor > 0 ? (
                 <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">
                   متأخر: {formatMoney(plan.progress.overdueMinor, plan.baseCurrency)}
                 </p>
               ) : null}
 
-              {(!hasHistory || plan.approvedAgreement) && canSeeFinancial && plan.progress && (plan.status === "active" || plan.status === "completed" && plan.approvedAgreement) && (plan.installments.length > 0 || plan.approvedAgreement) ? (
+              {!plan.invoiceFinancial && (!hasHistory || plan.approvedAgreement) && canSeeFinancial && plan.progress && (plan.status === "active" || plan.status === "completed" && plan.approvedAgreement) && (plan.installments.length > 0 || plan.approvedAgreement) ? (
                 payFor === plan.id ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex flex-wrap gap-2">
@@ -401,29 +409,38 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                       className="flex-1 rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white">
                       تحصيل قسط
                     </button>
-                    <button
-                      onClick={async () => {
-                        await fetch(`/api/plans/${plan.id}`, {
+                  </div>
+                )
+              ) : null}
+
+              {canSeeFinancial && canHandleMoney(session?.role) && !loading && !readUnavailable && !readDenied ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {plan.status === "active" ? <button
+                    disabled={!money.ready || busy || money.attempt !== null}
+                    onClick={async () => {
+                      if (!completionAllowed.current(plan.id)) return;
+                      setBusy(true); setError(null);
+                      try {
+                        const response = await fetch(`/api/plans/${plan.id}`, {
                           method: "PATCH", headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ status: "completed" }),
                         });
+                        if (!response.ok) {
+                          const result = await response.json().catch(() => null);
+                          throw new Error(result?.message ?? "تعذّر إنهاء الخطة.");
+                        }
                         void load();
-                      }}
-                      className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-600">
-                      إنهاء الخطة
-                    </button>
-                    <a
-                      href={`/print/plan/${plan.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-navy-800 hover:bg-slate-50 inline-flex items-center gap-1"
-                      title={hasHistory ? "طباعة مرجع الخطة التاريخي" : "طباعة اتفاقية وجدول الأقساط"}
-                    >
-                      <span>📄</span>
-                      <span>{hasHistory ? "طباعة المرجع" : "طباعة العقد"}</span>
-                    </a>
-                  </div>
-                )
+                      } catch (failure) { setError(failure instanceof Error ? failure.message : "تعذّر إنهاء الخطة."); }
+                      finally { setBusy(false); }
+                    }}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 disabled:opacity-50">
+                    إنهاء الخطة
+                  </button> : null}
+                  <a href={`/print/plan/${plan.id}`} target="_blank" rel="noopener noreferrer"
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-navy-800 hover:bg-slate-50 inline-flex items-center gap-1">
+                    <span>📄</span><span>{plan.invoiceFinancial || hasHistory ? "طباعة المرجع" : "طباعة العقد"}</span>
+                  </a>
+                </div>
               ) : null}
 
               {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
@@ -453,7 +470,19 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </p>
               ) : null}
 
-              {canSeeFinancial && plan.progress && plan.installments.length > 0 ? (
+              {canSeeFinancial && plan.invoiceFinancial ? (
+                <div className="mt-3 rounded-xl border border-slate-200 p-3 text-xs">
+                  <p>{plan.invoiceFinancial.message ?? "السداد مرتبط بالفواتير القائمة؛ التحصيل وتعديل الجدول من حساب المريض."}</p>
+                  {plan.invoiceFinancial.schedules.filter(schedule=>schedule.status==="active").map(schedule=>(
+                    <div key={schedule.id} className="mt-2">
+                      <strong>جدول سداد الفاتورة #{schedule.target.invoiceId} — النسخة {schedule.version}</strong>
+                      {schedule.requiresReview ? <p>جدول غير متحقق؛ راجع مصدر الدين قبل اعتماد مبالغ الاستحقاق.</p> : schedule.progress?.rows.map((row,index)=><p data-testid="verified-plan-schedule-row" key={index}>{friendlyDateLong(row.dueDate)} · {formatMoney(row.amountMinor,plan.baseCurrency)} · المتبقي {formatMoney(row.remainingMinor,plan.baseCurrency)}</p>)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {canSeeFinancial && plan.invoiceFinancial?.kind !== "review_required" && plan.progress && plan.installments.length > 0 ? (
               <details className="mt-2">
                 <summary className="cursor-pointer text-[11px] font-bold text-slate-500">جدول الأقساط</summary>
                 <ul className="mt-2 space-y-1">

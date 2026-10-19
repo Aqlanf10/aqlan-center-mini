@@ -1,0 +1,89 @@
+
+ RUN  v4.1.11 /workspace/aqlan-plan-finance
+
+stdout | qa-repro/patient-plan.test.ts
+FIN002_OBSERVATION {"canonical":{"remainingMinor":600,"collectedMinor":400,"terms":{"mode":"installments","installments":[{"kind":"installment","dueDate":"2026-10-19","amountMinor":1000}]}},"plan":{"paidMinor":0,"remainingMinor":1000,"installments":[]},"receipts":[{"invoice_id":1,"plan_id":null,"amount_minor":"400"}]}
+
+ ❯ qa-repro/patient-plan.test.ts (2 tests | 2 failed) 1027ms
+   × FIN002 receipts: plan reflects invoice-first settlement 7ms
+   × FIN002 schedules: plan exposes invoice-first repayment terms 2ms
+ ❯ qa-repro/cash-plans.test.ts (2 tests | 1 failed) 41ms
+   × FIN001 RED candidate: SAR installment must retain its own denomination 10ms
+stdout | qa-repro/patient-dossier.test.ts > FIN007: opening principal must not be printed as invoices
+FIN007_RENDERED إجمالي الفواتير: 1,000 ر.يإجمالي المسدد: 0 ر.يالرصيد المتبقي (الذمة): 1,000 ر.يتوقيع وخاتم الطبيب المعالج:اعتماد الإدارة الطبية / الختم الرسمي:ملخص سريري مطبوع من نظام إدارة مركز ا
+
+ ❯ qa-repro/patient-dossier.test.ts (1 test | 1 failed) 26ms
+   × FIN007: opening principal must not be printed as invoices 24ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  qa-repro/cash-plans.test.ts > FIN001 RED candidate: SAR installment must retain its own denomination
+AssertionError: expected '<main class="mx-auto max-w-5xl p-4 pb…' to contain '100.00 ر.س'
+
+Expected: "100.00 ر.س"
+Received: "<main class="mx-auto max-w-5xl p-4 pb-24" dir="rtl"><section class="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center"><div class="rounded-2xl border border-red-200 bg-red-50/80 p-3.5 shadow-2xs"><p class="text-base font-black text-red-700 font-mono">12,500 ر.ي</p><p class="text-[11px] font-bold text-red-600 mt-0.5">إجمالي الأقساط المتأخرة (2)</p></div><div class="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs"><p class="text-base font-black text-slate-800 font-mono">12,500 ر.ي</p><p class="text-[11px] font-bold text-slate-500 mt-0.5">باقٍ على كل الخطط</p></div><div class="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs"><p class="text-base font-black text-slate-800 font-mono">2</p><p class="text-[11px] font-bold text-slate-500 mt-0.5">خطة علاجية نشطة</p></div><div class="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3.5 shadow-2xs"><p class="text-base font-black text-emerald-800 font-mono">0</p><p class="text-[11px] font-bold text-emerald-700 mt-0.5">متأخرين متاح لهم واتساب</p></div></section><div class="mb-4 flex flex-wrap items-center justify-between gap-3"><div class="flex flex-wrap gap-1.5"><button id="plans-filter-overdue" class="rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors border-navy-800 bg-navy-800 text-white shadow-2xs">متأخرة<span class="mr-1 rounded-full bg-red-500 text-white px-1.5 py-0.2 text-[10px]">2</span></button><button id="plans-filter-soon" class="rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors border-slate-200 bg-white text-slate-600 hover:bg-slate-50">تستحق قريبًا</button><button id="plans-filter-all" class="rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors border-slate-200 bg-white text-slate-600 hover:bg-slate-50">كل الخطط الجارية</button></div><div class="w-full sm:w-64"><input id="plans-search-input" type="text" placeholder="بحث باسم المريض أو الهاتف..." class="w-full text-xs rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-slate-800 outline-none focus:border-navy-800" value=""/></div></div><div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xs"><div class="overflow-x-auto"><table id="plans-installments-table" class="w-full text-xs text-right border-collapse"><thead><tr class="border-b border-slate-200 bg-slate-50/80 text-slate-600 font-bold text-[11px]"><th class="py-3 px-3">المريض</th><th class="py-3 px-3">خطة العلاج</th><th class="py-3 px-3">تاريخ الاستحقاق</th><th class="py-3 px-3 text-left">المبلغ المستحق</th><th class="py-3 px-3 text-center">تاريخ آخر تذكير ⭐</th><th class="py-3 px-3 text-center">تنبيه واتساب</th></tr></thead><tbody class="divide-y divide-slate-100 font-medium"><tr class="transition-colors hover:bg-slate-50/70 bg-red-50/20"><td class="py-3 px-3"><a href="/patients/1" class="font-bold text-slate-900 hover:text-indigo-600 underline decoration-slate-300 underline-offset-2 block truncate">Synthetic SAR</a><span class="text-[11px] text-slate-500 font-mono dir-ltr inline-block">بلا هاتف</span></td><td class="py-3 px-3"><div class="font-semibold text-slate-800">PLAN-SAR</div><div class="text-[11px] text-slate-500">0 من 1 أقساط مسددة</div></td><td class="py-3 px-3"><span class="font-semibold text-red-700">الاثنين 19/10/2026</span><span class="block text-[10px] font-bold text-red-600">مستحق الدفع</span></td><td class="py-3 px-3 text-left"><div class="font-black font-mono text-red-700 text-sm">10,000 ر.ي</div><div class="text-[10px] text-slate-400">باقٍ 10,000 ر.ي</div></td><td class="py-3 px-3 text-center"><span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200"><span>—</span><span>لم يُرسل تذكير بعد</span></span></td><td class="py-3 px-3 text-center"><div class="flex items-center justify-center gap-1"></div></td></tr><tr class="transition-colors hover:bg-slate-50/70 bg-red-50/20"><td class="py-3 px-3"><a href="/patients/2" class="font-bold text-slate-900 hover:text-indigo-600 underline decoration-slate-300 underline-offset-2 block truncate">Synthetic YER</a><span class="text-[11px] text-slate-500 font-mono dir-ltr inline-block">بلا هاتف</span></td><td class="py-3 px-3"><div class="font-semibold text-slate-800">PLAN-YER</div><div class="text-[11px] text-slate-500">0 من 1 أقساط مسددة</div></td><td class="py-3 px-3"><span class="font-semibold text-red-700">الاثنين 19/10/2026</span><span class="block text-[10px] font-bold text-red-600">مستحق الدفع</span></td><td class="py-3 px-3 text-left"><div class="font-black font-mono text-red-700 text-sm">2,500 ر.ي</div><div class="text-[10px] text-slate-400">باقٍ 2,500 ر.ي</div></td><td class="py-3 px-3 text-center"><span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200"><span>—</span><span>لم يُرسل تذكير بعد</span></span></td><td class="py-3 px-3 text-center"><div class="flex items-center justify-center gap-1"></div></td></tr></tbody></table></div></div></main>"
+
+ ❯ qa-repro/cash-plans.test.ts:18:99
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  qa-repro/patient-dossier.test.ts > FIN007: opening principal must not be printed as invoices
+AssertionError: expected ' .dossier-pagination { width: 100%; b…' to contain 'إجمالي الفواتير: 0 ر.ي'
+
+Expected: "إجمالي الفواتير: 0 ر.ي"
+Received: " .dossier-pagination { width: 100%; border-collapse: collapse; table-layout: fixed; } .dossier-pagination > thead { display: none; } .dossier-pagination > thead > tr > td, .dossier-pagination > tbody > tr > td { padding: 0; border: 0; vertical-align: top; } @media screen and (max-width: 600px) { .dossier-sheet { width: 100%; min-height: 0; overflow-x: auto; } .dossier-demographics-grid { grid-template-columns: minmax(0, 1fr) !important; } .dossier-demographics-grid > .line { grid-column: 1 !important; } .dossier-demographics-grid > .line > span { min-width: 0; overflow-wrap: anywhere; } .dossier-demographics-grid > .line > span:first-child { flex-shrink: 0; white-space: nowrap; } } @media print { @page dossier { size: A4; margin: 8mm 8mm 14mm; @bottom-center { content: counter(page) " / " counter(pages); direction: ltr; font: 8pt Arial, sans-serif; color: #475569; } } .dossier-sheet { page: dossier; } .dossier-pagination > thead, .dossier-endo-record > thead { display: table-header-group; } .dossier-pagination > tbody > tr, .dossier-endo-record > tbody > tr { break-inside: auto; page-break-inside: auto; } .dossier-patient-identity { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1mm 4mm; padding-bottom: 2mm; margin-bottom: 3mm; border-bottom: 1px solid #94a3b8; font-size: 8pt; line-height: 1.4; overflow-wrap: anywhere; } .dossier-patient-identity .identity-number { white-space: nowrap; } .dossier-patient-identity .identity-caption { grid-column: 1 / -1; font-size: 7pt; color: #475569; } } المريض: Synthetic dossierرقم الملف: #SYN-DOSSIERملخص سريري · تاريخ الطباعة: الاثنين 19/10/2026ملخص الملف السريري للمريض (Clinical Summary)يشمل هذا الملخص بيانات المريض والتنبيهات الطبية، وسجل مخطط الأسنان، وأحدث الزيارات، وسجلات علاج الجذور. لا يشمل جميع سجلات التخصصات أو المستندات أو تفاصيل الخطة العلاجية. الملخص المالي، إن ظهر، يخضع للصلاحيات ولا يغني عن كشف الحساب المالي.اسم المريض:Synthetic dossierرقم الملف الطبي:#SYN-DOSSIERالجنس والعمر:ذكر · 36 سنةرقم الهاتف:—تاريخ التسجيل بالمركز:الخميس 01/01/2026🩺 العلامات الحيوية ومؤشرات الخطورة السريرية (Vital Signs)ضغط الدم (BP)غير مسجلغير مسجّلالنبض (Pulse)—معدل ضربات القلبالسكر العشوائي (RBS)—غير مسجلفصيلة الدم (Blood Group)——⚠️السوابق المرضية والتنبيهات السريرية (Medical Alerts &amp; Allergies):لا توجد حساسية أو أمراض مزمنة شائعة مسجلة في ملف المريض.🦷 ملخص المخطط الحالي وسجل حالات الأسنانالأسنان الموثقة: 0تسوّس نشط: 0خطة علاج مقترحة: 0إجراءات منجزة: 0مفقود/مخلوع: 0لا توجد إجراءات مسجلة على المخطط السني بعد.📋 أحدث الزيارات السريرية المسجّلة (0 زيارة)يعرض هذا القسم أحدث 50 زيارة كحد أقصى؛ لا يمثل كامل التاريخ إذا تجاوز الملف هذا العدد.لا توجد زيارات سابقة موثقة.سجل علاج الجذورلا توجد سجلات جلسات علاج جذور موثقة بالمحتوى السريري.إجمالي الفواتير: 1,000 ر.يإجمالي المسدد: 0 ر.يالرصيد المتبقي (الذمة): 1,000 ر.يتوقيع وخاتم الطبيب المعالج:اعتماد الإدارة الطبية / الختم الرسمي:ملخص سريري مطبوع من نظام إدارة مركز الأسنان · Clinical summary · الاثنين 19/10/2026"
+
+ ❯ qa-repro/patient-dossier.test.ts:34:16
+     32|   console.log("FIN007_RENDERED", text.slice(text.indexOf("إجمالي الفوا…
+     33|   expect(text).toContain(`الرصيد المتبقي (الذمة): ${formatMoney(1000,"…
+     34|   expect(text).toContain(`إجمالي الفواتير: ${formatMoney(0,"YER")}`);
+       |                ^
+     35| });
+     36|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  qa-repro/patient-plan.test.ts > FIN002 receipts: plan reflects invoice-first settlement
+AssertionError: expected +0 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+- 400
++ 0
+
+ ❯ qa-repro/patient-plan.test.ts:29:102
+     27| },180000);
+     28| afterAll(async()=>{await db.resetPoolForTesting();});
+     29| it('FIN002 receipts: plan reflects invoice-first settlement',()=>{expe…
+       |                                                                                                      ^
+     30| it('FIN002 schedules: plan exposes invoice-first repayment terms',()=>…
+     31|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  qa-repro/patient-plan.test.ts > FIN002 schedules: plan exposes invoice-first repayment terms
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ qa-repro/patient-plan.test.ts:30:110
+     28| afterAll(async()=>{await db.resetPoolForTesting();});
+     29| it('FIN002 receipts: plan reflects invoice-first settlement',()=>{expe…
+     30| it('FIN002 schedules: plan exposes invoice-first repayment terms',()=>…
+       |                                                                                                              ^
+     31|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  4 failed | 1 passed (5)
+   Start at  00:05:13
+   Duration  4.12s (transform 1.66s, setup 0ms, import 2.38s, tests 1.09s, environment 0ms)
+
