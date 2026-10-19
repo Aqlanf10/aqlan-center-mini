@@ -1,7 +1,8 @@
 import { getCephReferenceSet, getCephStudy, getPatient } from "@/lib/db";
 import { CephTracer } from "@/components/CephTracer";
 import { requireSession } from "@/lib/session";
-import { redirect } from "next/navigation";
+import { getAccessibleCephPatientId } from "@/lib/ceph-page-access";
+import { notFound, redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
  *
  * الصفحة تقرأ التحليل ومعالمه ولقطته وتشخيصه ومجموعته المرجعية من النطاق وتسلّمها
  * للشاشة — وما بعدها تفاعلٌ يحفظ من المسارات نفسها. ومن لا جلسة له لا يرى الشععة
- * أصلًا: مسار الصورة نفسه محروس بالجلسة، فالصفحة البوابة لا الحاجز.
+ * أصلًا. ويُفحص إذن أشعة المريض قبل قراءة التفاصيل أو تسليمها للشاشة.
  */
 export default async function CephWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -18,12 +19,15 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
 
   const { id: raw } = await params;
   const id = Number(raw);
-  if (!Number.isInteger(id) || id <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0) {
     return <p className="p-6 text-sm text-red-700">رقم التحليل غير صالح.</p>;
   }
 
+  const patientId = await getAccessibleCephPatientId(session, id);
+  if (patientId === null) notFound();
+
   const study = await getCephStudy(id);
-  if (!study) {
+  if (!study || study.analysis.patientId !== patientId) {
     return <p className="p-6 text-sm text-red-700">التحليل غير موجود أو مرفوض.</p>;
   }
   const patient = await getPatient(study.analysis.patientId);
