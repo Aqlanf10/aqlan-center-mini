@@ -1,7 +1,15 @@
+import { invoiceCurrencyScopeReasons, invoiceCurrencyScopeMessage, type InvoiceCurrencyScopeFacts, type InvoiceCurrencyScopeReason } from "./invoice-currency-scope";
 import type {DbClient,Invoice} from "./db";
 import {DebtRepaymentError} from "./debt-installments-db";
 import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
 import {planCurrencyReclassification,ReclassificationProofError,type ReclassificationPayment} from "./invoice-currency-reclassification";
+export class InvoiceCurrencyScopeError extends DebtRepaymentError {
+  readonly reasonCodes: InvoiceCurrencyScopeReason[];
+  constructor(reasonCodes: InvoiceCurrencyScopeReason[]) {
+    super("conflict", invoiceCurrencyScopeMessage(reasonCodes));
+    this.reasonCodes = reasonCodes;
+  }
+}
 const reject=(message:string):never=>{throw new DebtRepaymentError("conflict",message);};
 /** Narrow first release: explicit YER -> recorded SAR, one fully covered
  * per-procedure plan at a time. Existing clinical identities remain untouched. */
@@ -9,11 +17,12 @@ export async function prepareInvoiceCurrencyChange(client:DbClient,invoice:Invoi
   if(invoice.baseCurrency!=="YER")reject("تصحيح العملة يدعم الانتقال من اليمني إلى السعودي المسجل في السندات فقط.");
   const position=await readInvoiceSettlementPosition(client,{patientId:invoice.patientId,invoiceId:invoice.id,currency:"YER"});
   const ids=position.lineageInvoiceIds;
-  const {rows:[scope]}=await client.query<{supported:boolean}>(`SELECT
-    NOT EXISTS(SELECT 1 FROM invoices WHERE id=ANY($1::int[]) AND plan_id IS NOT NULL)
-    AND NOT EXISTS(SELECT 1 FROM invoice_items WHERE invoice_id=$2 AND source_type IS NOT NULL AND source_type<>'plan_item')
-    AND NOT EXISTS(SELECT 1 FROM invoice_settlement_reclassifications WHERE source_invoice_ids && $1::int[]) AS supported`,[ids,invoice.id]);
-  if(!scope.supported)reject("هذه الفاتورة مرتبطة باتفاق أو مصدر مالي مستقل؛ تصحيح عملته يحتاج مساره المخصص.");
+  const {rows:[scope]}=await client.query<InvoiceCurrencyScopeFacts>(`SELECT
+    EXISTS(SELECT 1 FROM invoices WHERE id=ANY($1::int[]) AND plan_id IS NOT NULL) AS plan_linked_lineage,
+    EXISTS(SELECT 1 FROM invoice_items WHERE invoice_id=$2 AND source_type IS NOT NULL AND source_type<>'plan_item') AS independent_item_source,
+    EXISTS(SELECT 1 FROM invoice_settlement_reclassifications WHERE source_invoice_ids && $1::int[]) AS already_reclassified`,[ids,invoice.id]);
+  const reasonCodes = invoiceCurrencyScopeReasons(scope);
+  if(reasonCodes.length)throw new InvoiceCurrencyScopeError(reasonCodes);
   const {rows:plans}=await client.query<{id:number;supported:boolean}>(`SELECT p.id,
       (p.patient_id=$2 AND p.base_currency='YER' AND p.total_from_items AND p.billing_mode='per_procedure'
        AND NOT EXISTS(SELECT 1 FROM plan_items i WHERE i.plan_id=p.id AND NOT EXISTS(
