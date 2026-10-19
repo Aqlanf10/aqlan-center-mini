@@ -70,8 +70,10 @@ uses the unchanged canonical ledger result. This is not a recalculation of debt.
   plans and existing installment collections.
 - The production build is exercised through the repository security HTTP harness
   against a disposable PostgreSQL18 database, with actual authenticated requests.
-  Browser checks use Chromium at390/1280 with Arabic locale. External requests and
-  browser writes are blocked. These verify native currency values, invoice schedule
+  Browser checks use Chromium at390/1280 with Arabic locale. External requests are
+  blocked. Read-only cases block browser writes; the follow-up reachability cases
+  allow only clinical completion PATCH requests for their isolated synthetic plans,
+  block every collection request, and compare receipt data before/after. These verify native currency values, invoice schedule
   print, opening labels, finance role boundaries, and the existing payment-privacy
   suite. The finance table retains its existing horizontal scroll on mobile;
   a separate check scrolls the amount into view and verifies its visible bounds.
@@ -114,3 +116,57 @@ Synthetic browser evidence:
 - [Mobile amount scrolled into view](evidence/plan-amount-visible-390.png)
 - [Invoice repayment print](evidence/plan-invoice-schedule-1280.png)
 - [Dossier opening separately labelled, mobile](evidence/dossier-opening-390.png)
+
+## Independent review follow-up (three reproduced gaps)
+
+Seven red assertions exposed draft debt inclusion, missing reachable print/finish
+controls, and stale schedule rows. `evidence/review-gaps-red.log` records the run
+before repair.
+
+- The server now supplies `debtSource` only for available approved principal,
+  structurally owned invoice debt, or the proven classic installment path with
+  explicit plan/invoice/receipt links. A quote, installment proposal or consent
+  flag alone is not debt proof. The finance screen fails closed when proof is
+  missing: no debt KPI contribution or reminder. Unfunded1500 remains a quoted
+  plan value in the patient card; the all-plans finance row says no proven debt.
+- Print and clinical completion have their own controls, separate from legacy
+  collection. The existing server role/status checks stay authoritative. Completed
+  plans retain print but no finish action. Completion checks the current read
+  generation, role, busy state, durable journal readiness/unresolved command and
+  unsaved-draft guard. Server errors remain visible. No journal is acknowledged
+  or removed by completion.
+- Unallocated account credit reproduces a schedule whose raw reader returns both
+  `requiresReview=true` and non-null rows. The plan projection withholds progress
+  in that case; patient UI and print also independently reject stale rows. Valid
+  invoice principal/settled amounts remain separate from unverified due dates.
+- Actual Chromium clicks start in the patient Plans tab and open print links, then
+  complete synthetic unpaid/partpaid/paid/review-required/drift plans. Already
+  completed plans expose print only. Both widths390/1280 are exercised. Receipts,
+  currencies and recorded exchange rates are compared unchanged.
+
+The original local verification record above describes the first draft, not an
+acceptance of the independent-review follow-up. Updated local checks are recorded below. Merge remains blocked pending root
+review and integration/revalidation of the pending #346 correction.
+
+| Follow-up check on base9fe4f227 | Result | Evidence |
+| --- | --- | --- |
+| Full Vitest | 569 files; 10,093 passed, one existing skip | `evidence/review-gaps-full-unit-summary.log` |
+| Focused component/lifecycle/print | 47 passed | `evidence/review-gaps-components.log` |
+| PostgreSQL plan sources and account-credit drift | 15 passed | `evidence/review-gaps-pg.log` |
+| PostgreSQL adjacent regression suites | 169 passed | `evidence/review-gaps-pg-adjacent.log` |
+| Actual HTTP + Arabic Chromium390/1280 | 13 passed | `evidence/review-gaps-http.log` |
+| Production build / typecheck | Passed | `evidence/review-gaps-build.log`, `evidence/review-gaps-typecheck.log` |
+| ESLint | Zero errors, 208 warnings; final changed-file scan zero errors | `evidence/review-gaps-lint.log`, `evidence/review-gaps-lint-changed.log` |
+
+[Completed synthetic click flow at390](evidence/plan-controls-clicked-390.png) ·
+[Completed synthetic click flow at1280](evidence/plan-controls-clicked-1280.png).
+
+The first expanded HTTP attempt passed the prior11 checks but failed the new
+click cases due to an overly exact accessible-name matcher and duplicate open
+shift fixture. Those test setup errors were fixed; the final run above passed
+all13 on the production build.
+
+Pending dependency: root reported hosted operational journey failures on #346
+and its author is diagnosing them. This follow-up does not edit unlinked funding
+or signing functions. The composed stack must be revalidated after that correction;
+these results do not claim CI success or release readiness.

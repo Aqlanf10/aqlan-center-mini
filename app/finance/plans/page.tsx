@@ -17,6 +17,7 @@ import { useSession } from "@/components/SessionProvider";
  */
 
 interface Plan {
+  debtSource?: "approved_agreement" | "invoice" | "classic_installments" | null;
   baseCurrency: Currency;
   invoiceFinancial?: {kind: string; message: string | null};
   id: number;
@@ -46,6 +47,13 @@ interface Plan {
     count: number;
     lastReminderAt?: string | null;
   };
+}
+
+function hasProvenDebt(plan: Plan): boolean {
+  return (plan.debtSource === "approved_agreement" || plan.debtSource === "invoice" || plan.debtSource === "classic_installments") && plan.invoiceFinancial?.kind !== "review_required";
+}
+function canRemind(plan: Plan): boolean {
+  return hasProvenDebt(plan) && !plan.invoiceFinancial?.message && plan.status === "active" && (plan.progress.overdueMinor > 0 || plan.progress.nextDueAmountMinor > 0);
 }
 
 type Filter = "overdue" | "soon" | "all";
@@ -156,6 +164,7 @@ export default function PlansPage() {
   };
 
   const handleSendReminder = (plan: Plan) => {
+    if (!canSendReminders || !canRemind(plan)) return;
     const overdue = plan.progress.overdueMinor > 0;
     const number = toWhatsAppNumber(plan.patientPhone);
     if (!number) return;
@@ -183,14 +192,14 @@ export default function PlansPage() {
     let list = plans;
     if (filter === "overdue") {
       list = list
-        .filter((plan) => plan.progress.overdueMinor > 0)
+        .filter((plan) => hasProvenDebt(plan) && plan.progress.overdueMinor > 0)
         .sort((a, b) => b.progress.overdueMinor - a.progress.overdueMinor);
     } else if (filter === "soon") {
       const limit = new Date(`${today}T12:00:00`);
       limit.setDate(limit.getDate() + 14);
       const limitText = `${limit.getFullYear()}-${String(limit.getMonth() + 1).padStart(2, "0")}-${String(limit.getDate()).padStart(2, "0")}`;
       list = list
-        .filter((plan) => plan.progress.nextDueDate && plan.progress.nextDueDate <= limitText)
+        .filter((plan) => hasProvenDebt(plan) && plan.progress.nextDueDate && plan.progress.nextDueDate <= limitText)
         .sort((a, b) => (a.progress.nextDueDate ?? "").localeCompare(b.progress.nextDueDate ?? ""));
     }
 
@@ -208,17 +217,17 @@ export default function PlansPage() {
   }, [plans, filter, today, searchQuery]);
 
   const overdueList = useMemo(() => {
-    return plans.filter((p) => p.invoiceFinancial?.kind!=="review_required" && !p.invoiceFinancial?.message && p.progress.overdueMinor > 0 && toWhatsAppNumber(p.patientPhone));
+    return plans.filter((p) => canRemind(p) && p.progress.overdueMinor > 0 && toWhatsAppNumber(p.patientPhone));
   }, [plans]);
 
   const totals = useMemo(
     () => ({
       byCurrency: CURRENCIES.map(currency => ({currency,
-        overdue: plans.filter(p=>p.baseCurrency===currency && p.invoiceFinancial?.kind!=="review_required").reduce((sum,p)=>sum+p.progress.overdueMinor,0),
-        remaining: plans.filter(p=>p.baseCurrency===currency && p.invoiceFinancial?.kind!=="review_required").reduce((sum,p)=>sum+p.progress.remainingMinor,0),
+        overdue: plans.filter(p=>p.baseCurrency===currency && hasProvenDebt(p)).reduce((sum,p)=>sum+p.progress.overdueMinor,0),
+        remaining: plans.filter(p=>p.baseCurrency===currency && hasProvenDebt(p)).reduce((sum,p)=>sum+p.progress.remainingMinor,0),
       })).filter(bucket=>plans.some(p=>p.baseCurrency===bucket.currency)),
       count: plans.length,
-      overdueCount: plans.filter((p) => p.progress.overdueMinor > 0).length,
+      overdueCount: plans.filter((p) => hasProvenDebt(p) && p.progress.overdueMinor > 0).length,
     }),
     [plans],
   );
@@ -496,10 +505,10 @@ export default function PlansPage() {
                             overdue ? "text-red-700 text-sm" : "text-slate-800"
                           }`}
                         >
-                          {plan.invoiceFinancial?.kind === "review_required" ? "يحتاج مراجعة مالية" : formatMoney(amount, plan.baseCurrency)}
+                          {!hasProvenDebt(plan) ? "لا يوجد دين مثبت" : formatMoney(amount, plan.baseCurrency)}
                         </div>
                         <div className="text-[10px] text-slate-400">
-                          {plan.invoiceFinancial?.kind === "review_required" ? "راجع مصادر الدين في حساب المريض" : `باقٍ ${formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}`}
+                          {!hasProvenDebt(plan) ? "قيمة العرض ليست رصيدًا مستحقًا" : `باقٍ ${formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}`}
                         </div>
                       </td>
 
@@ -538,7 +547,7 @@ export default function PlansPage() {
                             <span>📄</span>
                             <span>عقد</span>
                           </a>}
-                          {canSendReminders && number && !plan.invoiceFinancial?.message ? (
+                          {canSendReminders && number && canRemind(plan) ? (
                             <button
                               id={`plan-reminder-btn-${plan.id}`}
                               type="button"

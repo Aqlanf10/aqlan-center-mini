@@ -63,7 +63,7 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
       {plan.invoiceFinancial.schedules.filter(schedule=>schedule.status === "active").map(schedule=><section key={schedule.id}>
         <h3>جدول سداد الفاتورة #{schedule.target.invoiceId} — النسخة {schedule.version}</h3>
         {schedule.requiresReview ? <p>يحتاج جدول السداد إلى مراجعة مصدر الدين.</p> : null}
-        {schedule.progress?.rows.map((row,index)=><p key={index}>{friendlyDateLong(row.dueDate)} · {formatMoney(row.amountMinor,base)} · المتبقي {formatMoney(row.remainingMinor,base)}</p>)}
+        {!schedule.requiresReview && schedule.progress?.rows.map((row,index)=><p data-testid="verified-plan-schedule-row" key={index}>{friendlyDateLong(row.dueDate)} · {formatMoney(row.amountMinor,base)} · المتبقي {formatMoney(row.remainingMinor,base)}</p>)}
       </section>)}
     </> : null}
   </div></>;

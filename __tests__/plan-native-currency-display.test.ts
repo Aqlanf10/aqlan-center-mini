@@ -10,7 +10,7 @@ vi.mock('@/components/SessionProvider',()=>({useSession:()=>({role:state.role})}
 vi.mock('@/components/PageHeader',()=>({PageHeader:()=>null}));
 import PlansPage from '../app/finance/plans/page';
 import { formatMoney } from '../lib/money';
-function fixture(id:number,currency:string,amount:number){return {id,patientId:id,patientName:`Synthetic ${currency}`,patientPhone:null,title:`PLAN-${currency}`,baseCurrency:currency,totalMinor:amount,status:'active',progress:{totalMinor:amount,dueToDateMinor:amount,paidMinor:0,remainingMinor:amount,overdueMinor:amount,nextDueDate:'2026-01-01',nextDueAmountMinor:amount,paidCount:0,count:1}};}
+function fixture(id:number,currency:string,amount:number){return {debtSource:'invoice',id,patientId:id,patientName:`Synthetic ${currency}`,patientPhone:null,title:`PLAN-${currency}`,baseCurrency:currency,totalMinor:amount,status:'active',progress:{totalMinor:amount,dueToDateMinor:amount,paidMinor:0,remainingMinor:amount,overdueMinor:amount,nextDueDate:'2026-01-01',nextDueAmountMinor:amount,paidCount:0,count:1}};}
 beforeEach(()=>{state.cursor=0;state.role="accountant";state.plans=[fixture(1,'SAR',10000),fixture(2,'YER',2500)];});
 function render(){const html=renderToStaticMarkup(PlansPage());return html;}
 it('keeps native amounts and separates currency totals',()=>{
@@ -29,4 +29,9 @@ it('keeps native amounts and separates currency totals',()=>{
  expect(button).toBeDefined();button!.props.onClick();
  const message=new URL(open.mock.calls[0][0]).searchParams.get("text");
  expect(message).toContain(formatMoney(10000,"SAR"));expect(message).not.toContain(formatMoney(10000,"YER"));vi.unstubAllGlobals();
+});
+
+it('excludes an unfunded draft1500 from proven debt and reminders alongside approved and invoice sources',()=>{
+ state.role='admin';state.plans=[{...fixture(1,'YER',1000),debtSource:'approved_agreement'},fixture(2,'SAR',10000),{...fixture(3,'YER',1500),debtSource:null,patientPhone:'777123456',consentAt:null,title:'UNFUNDED-DRAFT'}];
+ const html=render();expect(html).not.toContain(formatMoney(2500,'YER'));expect(html).not.toContain('plan-reminder-btn-3');expect(html).not.toContain('UNFUNDED-DRAFT');
 });

@@ -56,11 +56,11 @@ it.each(['YER','SAR','USD'] as const)('retains approved %s principal authority a
  const [patient]=await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic approved') RETURNING id",[`APP-READ-${++serial}`]);
  const p=await db.createPlanV2({patientId:patient.id,title:'Synthetic agreement',specialty:null,primaryDoctorId:null,billingMode:'installments',baseCurrency:currency,startDate:'2026-10-01',note:null,createdBy:session.username,items:[],installments:[{dueDate:'2026-10-01',amountMinor:1000}]});
  if(!p.ok)throw Error(p.message);
- expect((await db.getPlan(p.planId,'2026-10-19'))?.approvedAgreement).toBeNull();
+ expect((await db.getPlan(p.planId,'2026-10-19'))?.debtSource).toBeNull();
  await db.recordPlanConsent({planId:p.planId,actor:session.username,note:null});
  await approveAgreement({planId:p.planId,expectedTotalMinor:1000,currency,source:{kind:'new'},reason:'Synthetic approval',idempotencyKey:`plan-approve-${++serial}`,session});
  await collectApprovedAgreement({planId:p.planId,amountMinor:400,currency,method:'cash',note:null,idempotencyKey:`plan-approved-pay-${++serial}`,session});
- expect(await db.getPlan(p.planId,'2026-10-19')).toMatchObject({paidMinor:400,invoiceFinancial:null,approvedAgreement:{paidMinor:400,remainingMinor:600},progress:{remainingMinor:600}});
+ expect(await db.getPlan(p.planId,'2026-10-19')).toMatchObject({paidMinor:400,invoiceFinancial:null,debtSource:'approved_agreement',approvedAgreement:{paidMinor:400,remainingMinor:600},progress:{remainingMinor:600}});
 });
 it('preserves the classic installment writer after a first partial receipt',async()=>{
  const [patient]=await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic classic') RETURNING id",[`CLASSIC-${++serial}`]);
@@ -68,7 +68,7 @@ it('preserves the classic installment writer after a first partial receipt',asyn
  if(!p.ok)throw Error(p.message);
  const pay=(amountMinor:number,installmentNumber:number)=>db.recordPlanInstallment({planId:p.planId,patientId:patient.id,installmentNumber,planTitle:'Synthetic classic',amountMinor,currency:'YER',baseCurrency:'YER',exchangeRate:1,method:'cash',note:null,createdBy:session.username,actorRole:'admin',idempotencyKey:`classic-${++serial}`});
  expect(await pay(400,1)).not.toHaveProperty('reason');
- expect(await db.getPlan(p.planId,'2026-10-19')).toMatchObject({invoiceFinancial:null,paidMinor:400,progress:{remainingMinor:600}});
+ expect(await db.getPlan(p.planId,'2026-10-19')).toMatchObject({invoiceFinancial:null,debtSource:'classic_installments',paidMinor:400,progress:{remainingMinor:600}});
  expect(await pay(600,2)).not.toHaveProperty('reason');
  expect((await db.getPlan(p.planId,'2026-10-19'))?.progress.remainingMinor).toBe(0);
 });
@@ -106,4 +106,15 @@ it('does not double count a receipt bearing both explicit plan and invoice refer
 it('keeps cancelled invoice principal out of current plan debt',async()=>{
  const f=await fixture('YER');await q("UPDATE invoices SET status='cancelled' WHERE id=$1",[f.invoiceId]);
  expect(await db.getPlan(f.planId,'2026-10-19')).toMatchObject({invoiceFinancial:{kind:'invoice_backed'},progress:{totalMinor:0,remainingMinor:0,overdueMinor:0}});
+});
+
+it('suppresses source-drift schedule progress after unrelated account credit',async()=>{
+ const f=await fixture('YER');
+ const paid=await db.recordPayment({patientId:f.patientId,invoiceId:null,kind:'payment',amountMinor:100,currency:'YER',baseCurrency:'YER',exchangeRate:1,method:'cash',note:null,createdBy:session.username,idempotencyKey:`drift-${++serial}`});
+ expect(paid.reason).toBeNull();
+ const {readDebtRepayments}=await import('../../lib/debt-installments-db');
+ const client=await db.getPool().connect();
+ try { const [raw]=await readDebtRepayments(client,f.patientId,'2026-10-19');expect(raw.requiresReview).toBe(true);expect(raw.progress).not.toBeNull(); } finally {client.release();}
+ const plan=await db.getPlan(f.planId,'2026-10-19');
+ expect(plan).toMatchObject({debtSource:'invoice',progress:{remainingMinor:1000,overdueMinor:0},invoiceFinancial:{schedules:[{requiresReview:true,progress:null}]}});
 });

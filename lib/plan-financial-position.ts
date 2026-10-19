@@ -15,7 +15,7 @@ export interface PlanInvoiceFinancialPosition {
   schedules:Pick<Awaited<ReturnType<typeof readDebtRepayments>>[number],"id"|"target"|"version"|"status"|"requiresReview"|"progress">[];
   message:string|null;
 }
-export async function readPlanInvoiceFinancialPosition(client:DbClient,plan:{id:number;patientId:number;currency:Currency},today:string):Promise<PlanInvoiceFinancialPosition|null>{
+export async function readPlanInvoiceFinancialPosition(client:DbClient,plan:{id:number;patientId:number;currency:Currency},today:string):Promise<PlanInvoiceFinancialPosition|{kind:"classic_installments"}|null>{
   const {rows}=await client.query<{id:number;patient_id:number;base_currency:string;owned:boolean;classic:boolean}>(`
     SELECT i.id,i.patient_id,i.base_currency,
       (i.plan_id=$1 AND EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=i.id AND p.plan_id=$1 AND p.patient_id=i.patient_id)
@@ -26,7 +26,8 @@ export async function readPlanInvoiceFinancialPosition(client:DbClient,plan:{id:
     FROM invoices i WHERE NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id)
       AND (i.plan_id=$1 OR EXISTS(SELECT 1 FROM invoice_items x JOIN plan_items pi ON pi.id=COALESCE(x.plan_item_id,CASE WHEN x.source_type='plan_item' THEN x.source_id END)
         WHERE x.invoice_id=i.id AND pi.plan_id=$1)) ORDER BY i.id`,[plan.id]);
-  if(!rows.length || rows.every(r=>r.classic && r.patient_id===plan.patientId && r.base_currency===plan.currency))return null;
+  if(!rows.length)return null;
+  if(rows.every(r=>r.classic && r.patient_id===plan.patientId && r.base_currency===plan.currency))return {kind:'classic_installments'};
   const blank:PlanProgress={totalMinor:0,paidMinor:0,remainingMinor:0,dueToDateMinor:0,overdueMinor:0,nextDueDate:null,nextDueAmountMinor:0,paidCount:0,count:0};
   const review=():PlanInvoiceFinancialPosition=>({kind:'review_required',invoiceIds:rows.map(r=>r.id),paidMinor:0,remainingMinor:0,progress:blank,schedules:[],message:'ربط الخطة بمصادر الدين يحتاج مراجعة؛ راجع حساب المريض دون إصدار قسط جديد.'});
   // Full ownership is required before attributing an entire receipt. A shared
@@ -40,7 +41,7 @@ export async function readPlanInvoiceFinancialPosition(client:DbClient,plan:{id:
   // be explicitly approved (the caller handles approved agreements first).
   if((await client.query('SELECT 1 FROM legacy_treatment_agreements a JOIN plan_items i ON i.id=a.plan_item_id WHERE i.plan_id=$1 LIMIT 1',[plan.id])).rows.length)return review();
   const allSchedules=await readDebtRepayments(client,plan.patientId,today);
-  const schedules=allSchedules.filter(s=>positions.some(p=>p.invoiceId===s.target.invoiceId)).map(({id,target,version,status,requiresReview,progress})=>({id,target,version,status,requiresReview,progress}));
+  const schedules=allSchedules.filter(s=>positions.some(p=>p.invoiceId===s.target.invoiceId)).map(({id,target,version,status,requiresReview,progress})=>({id,target,version,status,requiresReview,progress:requiresReview?null:progress}));
   const progress={...blank};
   for(const position of positions){
     progress.totalMinor+=position.principalMinor;progress.paidMinor+=position.settledMinor;

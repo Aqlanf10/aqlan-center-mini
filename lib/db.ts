@@ -19050,6 +19050,7 @@ import {
 } from "./plans";
 
 export interface TreatmentPlan {
+  debtSource?: "approved_agreement" | "invoice" | "classic_installments" | null;
   invoiceFinancial?: import("./plan-financial-position").PlanInvoiceFinancialPosition | null;
   approvedAgreement?: Awaited<ReturnType<typeof import("./approved-agreements").approvedAgreementPosition>>;
   id: number;
@@ -19170,13 +19171,17 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): P
   const approvedIds = new Set((await reader.query<{plan_id:number}>("SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])",[rows.map(r=>r.id)])).rows.map(r=>r.plan_id));
   return Promise.all(rows.map(async (row) => {
     const approvedAgreement = approvedIds.has(row.id) ? await (await import("./approved-agreements")).approvedAgreementPosition(row.id,today,reader) : null;
-    const invoiceFinancial = approvedAgreement ? null : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
+    const invoiceSource = approvedAgreement ? null : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
+    const invoiceFinancial = invoiceSource?.kind === "classic_installments" ? null : invoiceSource;
+    const debtSource = approvedAgreement ? (approvedAgreement.available ? "approved_agreement" as const : null)
+      : invoiceSource?.kind === "classic_installments" ? "classic_installments" as const
+      : invoiceFinancial?.kind === "invoice_backed" ? "invoice" as const : null;
     const installments = byPlan.get(row.id) ?? [];
     const items = itemsByPlan.get(row.id) ?? [];
     const paidMinor = approvedAgreement?.paidMinor ?? (invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.paidMinor : toMinor(row.paid_minor));
     const lastReminderAt = row.last_reminder_at ? row.last_reminder_at.toISOString() : null;
     return {
-      approvedAgreement, invoiceFinancial,
+      approvedAgreement, invoiceFinancial, debtSource,
       id: row.id,
       patientId: row.patient_id,
       patientName: row.full_name,
