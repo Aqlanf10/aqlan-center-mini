@@ -1,0 +1,40 @@
+{
+  "tested_source_commit": "a3da05eb0c5ef7998a5011dd850c4b4250364cac",
+  "base_346": "133adb887c0edc45ca81d9ea1c9050a4d024f2ac",
+  "ui_followup": "c18870fc6415b413d51d8702b4a65fd8e38c9a01",
+  "encoding": "gzip; lossless raw logs",
+  "files": {
+    "composed-verify-ci.log": {
+      "raw_sha256": "ad5beee93b1d9aee52e38751ebc350b6309cb7a2f5aeda26fdec3168b3f3059a",
+      "gzip_sha256": "51537f225a5f979c4c748bcbe55c4ca34b9f04f07a5e5916952c6634364b76ee"
+    },
+    "composed-unit.log": {
+      "raw_sha256": "de96cff11ed116365fcd12f495797798c0b0b3cdc079b0edab649d479f18c2b3",
+      "gzip_sha256": "c790316c37c4aaec7998b41cfb1b774d76dd1a8bd62d210e1497c949c26c8da3"
+    },
+    "composed-pg.log": {
+      "raw_sha256": "622bf4214372ac584a7214e8eb076cdfedd018acaf57e72c308303b30e9a2bdc",
+      "gzip_sha256": "de6ed76aa37d492d2d77593ea0cf83d03cab720d975b1941366120ea4a40a77f"
+    },
+    "composed-http.log": {
+      "raw_sha256": "14cd97948c18881f333b8de0dce3f1e92f960a9ba0c30a0536fd04be6b7d3d7b",
+      "gzip_sha256": "3cf0b5576275dc7ce8a1a2483802701f641cb5c36a0ea34cc1e0c97e940eac79"
+    },
+    "composed-build.log": {
+      "raw_sha256": "7eb64f1ed66b7576d5aa1e178d893f08c0d3a43b5651d9250ab2f727b72db76d",
+      "gzip_sha256": "03f3bd6672827331e737aba81c6e82ce442f41cbd9f20131cfa8e504e9676a80"
+    },
+    "composed-typecheck.log": {
+      "raw_sha256": "abbbc5e1595eb05f5d213af2183ca9842e35bc698e6a81f7f6536b42a2f23060",
+      "gzip_sha256": "00a32064b3ee8a6634fc14fde138e8527a7f0270f3a507d31bd5835117bed213"
+    },
+    "composed-lint.log": {
+      "raw_sha256": "7ff197d7e6cd6b3be9111e345e58e1247a189b39cd64a37795b984f917bf3732",
+      "gzip_sha256": "0045189e2e3200b8dd586c76c786dbb9aba3c7ac489c4170af4f31f856fa32db"
+    },
+    "composed-money-scan.log": {
+      "raw_sha256": "71bc52a632eb7737f18fe7905541f976ccdddd7411ff949a22fda2a7f777b03d",
+      "gzip_sha256": "0cb32c90804aa8fe1264eb6b23e0aa91562339a506f1f1e266b0ebe1e73498a5"
+    }
+  }
+}

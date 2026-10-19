@@ -1,6 +1,7 @@
 # Plan financial reads: FIN001, FIN002, FIN007
 
-Stack base: PR #346, `9fe4f2276c43ee9821e6eb217fee8f93c238dcb2`.
+Current stack base: PR #346, `133adb887c0edc45ca81d9ea1c9050a4d024f2ac`.
+Initial reproduction base: `9fe4f2276c43ee9821e6eb217fee8f93c238dcb2`.
 This branch must follow #346. It does not merge, deploy, migrate a live database,
 backfill links, change receipts, or repair FIN003/FIN011/FIN010/HR-GL.
 
@@ -145,8 +146,9 @@ before repair.
   currencies and recorded exchange rates are compared unchanged.
 
 The original local verification record above describes the first draft, not an
-acceptance of the independent-review follow-up. Updated local checks are recorded below. Merge remains blocked pending root
-review and integration/revalidation of the pending #346 correction.
+acceptance of the independent-review follow-up. Updated local checks are recorded below. The #346 correction has now been
+integrated and revalidated as recorded in the composed-stack section. Root review
+and hosted CI remain mandatory.
 
 | Follow-up check on base9fe4f227 | Result | Evidence |
 | --- | --- | --- |
@@ -166,7 +168,30 @@ click cases due to an overly exact accessible-name matcher and duplicate open
 shift fixture. Those test setup errors were fixed; the final run above passed
 all13 on the production build.
 
-Pending dependency: root reported hosted operational journey failures on #346
-and its author is diagnosing them. This follow-up does not edit unlinked funding
-or signing functions. The composed stack must be revalidated after that correction;
-these results do not claim CI success or release readiness.
+Root reported hosted operational journey failures on #346. Its author corrected
+the test fixture at133adb887; this branch integrated that exact base without
+conflict. Only scripts/verify-plans.mjs and base evidence changed. No unlinked
+funding or signing functions were edited by this follow-up.
+
+## Composed stack after #346 correction
+
+Merge commit `a3da05eb0c5ef7998a5011dd850c4b4250364cac` combines the reviewed
+UI follow-up `c18870fc` with base `133adb887`. Final evidence-only commits do not
+change the tested product or test sources. All following checks were rerun on
+that combined tree using only the isolated loopback PostgreSQL18.6 service.
+
+| Composed check | Result | Raw log (gzip) |
+| --- | --- | --- |
+| `npm run verify:ci` | **20/20 journeys passed; zero failures/skips**, including plans, schema and real backup/restore | [Operational journeys](composed-evidence/composed-verify-ci.log.gz) |
+| Relevant unit/component/print/privacy suites | 183 passed | [Unit](composed-evidence/composed-unit.log.gz) |
+| PostgreSQL plan/source/legacy/settlement/collection suites | 184 passed | [PostgreSQL](composed-evidence/composed-pg.log.gz) |
+| Built-server HTTP + Arabic Chromium390/1280 | 13 passed | [HTTP/UI](composed-evidence/composed-http.log.gz) |
+| Production build | Passed | [Build](composed-evidence/composed-build.log.gz) |
+| Typecheck | Passed | [Typecheck](composed-evidence/composed-typecheck.log.gz) |
+| ESLint | Zero errors; 208 repository warnings | [Lint](composed-evidence/composed-lint.log.gz) |
+| Money aggregation guard | Passed | [Money scan](composed-evidence/composed-money-scan.log.gz) |
+
+[SHA-256 evidence manifest](composed-evidence/manifest.json). The full10,093-test
+run above predates the base's test-fixture-only update; the composed checks are
+listed separately. Local success does not establish hosted CI success, release
+acceptance or authorization to merge/deploy.
