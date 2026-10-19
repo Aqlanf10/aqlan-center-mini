@@ -1,0 +1,356 @@
+[
+  [
+    {
+      "column": 1,
+      "style": "TitleClinic",
+      "type": "String",
+      "value": "Synthetic clinic"
+    }
+  ],
+  [
+    {
+      "column": 1,
+      "style": "TitleReport",
+      "type": "String",
+      "value": "تقرير رقابة بنود المصروفات التشغيلية والميزانيات التقديرية — شهر (2026-10)"
+    }
+  ],
+  [
+    {
+      "column": 1,
+      "style": "MetaLabel",
+      "type": "String",
+      "value": "تاريخ وساعة الاستخراج:"
+    },
+    {
+      "column": 5,
+      "style": "MetaVal",
+      "type": "String",
+      "value": "2026-10-19 ٠٤:١٠:٥٠ ص"
+    },
+    {
+      "column": 9,
+      "style": "MetaLabel",
+      "type": "String",
+      "value": "العملة المحاسبية الأساسية:"
+    },
+    {
+      "column": 13,
+      "style": "MetaVal",
+      "type": "String",
+      "value": "YER"
+    }
+  ],
+  [],
+  [
+    {
+      "column": 1,
+      "style": "KpiHeader",
+      "type": "String",
+      "value": "إجمالي الميزانية التقديرية للشهر"
+    },
+    {
+      "column": 4,
+      "style": "KpiHeader",
+      "type": "String",
+      "value": "إجمالي المنصرف الفعلي"
+    },
+    {
+      "column": 7,
+      "style": "KpiHeader",
+      "type": "String",
+      "value": "صافي الوفر / العجز"
+    },
+    {
+      "column": 10,
+      "style": "KpiHeader",
+      "type": "String",
+      "value": "نسبة الاستنزاف الإجمالية"
+    },
+    {
+      "column": 13,
+      "style": "KpiHeader",
+      "type": "String",
+      "value": "بنود متجاوزة للميزانية"
+    }
+  ],
+  [
+    {
+      "column": 1,
+      "style": "KpiVal",
+      "type": "String",
+      "value": "1,000 ر.ي"
+    },
+    {
+      "column": 4,
+      "style": "KpiVal",
+      "type": "String",
+      "value": "600 ر.ي"
+    },
+    {
+      "column": 7,
+      "style": "KpiVal",
+      "type": "String",
+      "value": "400 ر.ي"
+    },
+    {
+      "column": 10,
+      "style": "KpiVal",
+      "type": "String",
+      "value": "37%"
+    },
+    {
+      "column": 13,
+      "style": "KpiVal",
+      "type": "String",
+      "value": "0 من أصل 1"
+    }
+  ],
+  [],
+  [
+    {
+      "column": 1,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "م"
+    },
+    {
+      "column": 2,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "كود البند"
+    },
+    {
+      "column": 3,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "مسمى البند التشغيلي"
+    },
+    {
+      "column": 4,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "المجموعة والتبويب"
+    },
+    {
+      "column": 5,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "كود الدليل"
+    },
+    {
+      "column": 6,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "مسمى الحساب المحاسبي"
+    },
+    {
+      "column": 7,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "الميزانية التقديرية (YER)"
+    },
+    {
+      "column": 8,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "المنصرف الفعلي (YER)"
+    },
+    {
+      "column": 9,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "الفارق / الوفر (YER)"
+    },
+    {
+      "column": 10,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "نسبة الانحراف"
+    },
+    {
+      "column": 11,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "نسبة الاستهلاك"
+    },
+    {
+      "column": 12,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "العمليات"
+    },
+    {
+      "column": 13,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "الميزانية السنوية (YER)"
+    },
+    {
+      "column": 14,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "حالة الميزانية"
+    },
+    {
+      "column": 15,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "الحالة"
+    },
+    {
+      "column": 16,
+      "style": "ColHeader",
+      "type": "String",
+      "value": "بيان ونطاق المصروف"
+    }
+  ],
+  [
+    {
+      "column": 1,
+      "style": "CellCenter",
+      "type": "Number",
+      "value": "1"
+    },
+    {
+      "column": 2,
+      "style": "CellCode",
+      "type": "String",
+      "value": "synthetic-1"
+    },
+    {
+      "column": 3,
+      "style": "CellBold",
+      "type": "String",
+      "value": "Synthetic 1"
+    },
+    {
+      "column": 4,
+      "style": "CellCenter",
+      "type": "String",
+      "value": "Synthetic group"
+    },
+    {
+      "column": 5,
+      "style": "CellCode",
+      "type": "String",
+      "value": "5101"
+    },
+    {
+      "column": 6,
+      "style": "CellRegular",
+      "type": "String",
+      "value": "Synthetic account"
+    },
+    {
+      "column": 7,
+      "style": "CellMoney",
+      "type": "Number",
+      "value": "100.00"
+    },
+    {
+      "column": 8,
+      "style": "CellMoney",
+      "type": "Number",
+      "value": "40.00"
+    },
+    {
+      "column": 9,
+      "style": "CellMoneyPos",
+      "type": "Number",
+      "value": "60.00"
+    },
+    {
+      "column": 10,
+      "style": "CellPercent",
+      "type": "Number",
+      "value": "-0.6000"
+    },
+    {
+      "column": 11,
+      "style": "CellPercent",
+      "type": "Number",
+      "value": "0.4000"
+    },
+    {
+      "column": 12,
+      "style": "CellCenter",
+      "type": "Number",
+      "value": "2"
+    },
+    {
+      "column": 13,
+      "style": "CellMoney",
+      "type": "Number",
+      "value": "1200.00"
+    },
+    {
+      "column": 14,
+      "style": "CellStatusSurplus",
+      "type": "String",
+      "value": "ضمن الميزانية"
+    },
+    {
+      "column": 15,
+      "style": "CellActive",
+      "type": "String",
+      "value": "نشط"
+    },
+    {
+      "column": 16,
+      "style": "CellRegular",
+      "type": "String",
+      "value": "Synthetic confidential budget note"
+    }
+  ],
+  [
+    {
+      "column": 1,
+      "style": "TotalHeader",
+      "type": "String",
+      "value": "الإجمالي العام لجميع البنود (1 بنداً)"
+    },
+    {
+      "column": 7,
+      "style": "TotalMoney",
+      "type": "Number",
+      "value": "1000.00"
+    },
+    {
+      "column": 8,
+      "style": "TotalMoney",
+      "type": "Number",
+      "value": "600.00"
+    },
+    {
+      "column": 9,
+      "style": "TotalMoney",
+      "type": "Number",
+      "value": "400.00"
+    },
+    {
+      "column": 10,
+      "style": "TotalHeader",
+      "type": "String",
+      "value": "-63%"
+    },
+    {
+      "column": 11,
+      "style": "TotalHeader",
+      "type": "String",
+      "value": "37%"
+    },
+    {
+      "column": 12,
+      "style": "TotalHeader",
+      "type": "Number",
+      "value": "3"
+    },
+    {
+      "column": 13,
+      "style": "TotalHeader",
+      "type": "String",
+      "value": "-"
+    }
+  ]
+]

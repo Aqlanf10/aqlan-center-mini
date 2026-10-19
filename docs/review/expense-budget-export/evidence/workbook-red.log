@@ -1,0 +1,211 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/expense-budget-export.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+ ❯ __tests__/expense-budget-export.test.ts (12 tests | 12 failed) 1539ms
+     × exports a filtered 100 budget row with a 100 total, not the global 1000 87ms
+     × preserves all rows and computes ratios from sums, not row averages 31ms
+     × retains YER minor-unit scaling 34ms
+     × retains SAR minor-unit scaling 17ms
+     × retains USD minor-unit scaling 14ms
+     × handles budget 100 and signed actual 150 15ms
+     × handles budget 100 and signed actual -25 17ms
+     × handles budget 0 and signed actual 0 27ms
+     × handles budget 0 and signed actual 25 20ms
+     × handles budget 0 and signed actual -25 21ms
+     × exports empty selection as zero totals and ratios 44ms
+     × includes an exported inactive row's values in totals 25ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > exports a filtered 100 budget row with a 100 total, not the global 1000
+AssertionError: expected '1000.00' to be '100.00' // Object.is equality
+
+Expected: "100.00"
+Received: "1000.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:74:33
+     72|     }
+     73|     expect(at(result.rows[0], 7)).toBe("100.00");
+     74|     expect(at(result.total, 7)).toBe("100.00");
+       |                                 ^
+     75|     expect(at(result.total, 8)).toBe("40.00");
+     76|     expect(at(result.total, 9)).toBe("60.00");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > preserves all rows and computes ratios from sums, not row averages
+AssertionError: expected '600.00' to be '950.00' // Object.is equality
+
+Expected: "950.00"
+Received: "600.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:85:33
+     83|     expect(result.rows).toHaveLength(2);
+     84|     expect(at(result.total, 7)).toBe("1000.00");
+     85|     expect(at(result.total, 8)).toBe("950.00");
+       |                                 ^
+     86|     expect(at(result.total, 9)).toBe("50.00");
+     87|     expect(at(result.total, 10)).toBe("-5%");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > retains YER minor-unit scaling
+AssertionError: expected '1000.00' to be '12345.00' // Object.is equality
+
+Expected: "12345.00"
+Received: "1000.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:93:33
+     91|   it.each(["YER", "SAR", "USD"] as const)("retains %s minor-unit scali…
+     92|     const result = await workbook([category(1, 12345, 6789)], currency…
+     93|     expect(at(result.total, 7)).toBe((12345 / MINOR_UNITS[currency]).t…
+       |                                 ^
+     94|     expect(at(result.total, 8)).toBe((6789 / MINOR_UNITS[currency]).to…
+     95|     expect(at(result.rows[0], 13)).toBe((12345 * 12 / MINOR_UNITS[curr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > retains SAR minor-unit scaling
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > retains USD minor-unit scaling
+AssertionError: expected '10.00' to be '123.45' // Object.is equality
+
+Expected: "123.45"
+Received: "10.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:93:33
+     91|   it.each(["YER", "SAR", "USD"] as const)("retains %s minor-unit scali…
+     92|     const result = await workbook([category(1, 12345, 6789)], currency…
+     93|     expect(at(result.total, 7)).toBe((12345 / MINOR_UNITS[currency]).t…
+       |                                 ^
+     94|     expect(at(result.total, 8)).toBe((6789 / MINOR_UNITS[currency]).to…
+     95|     expect(at(result.rows[0], 13)).toBe((12345 * 12 / MINOR_UNITS[curr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > handles budget 100 and signed actual 150
+AssertionError: expected '400.00' to be '-50.00' // Object.is equality
+
+Expected: "-50.00"
+Received: "400.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:105:33
+    103|   ] as const)("handles budget %s and signed actual %s", async (budget,…
+    104|     const result = await workbook([category(1, budget, actual)]);
+    105|     expect(at(result.total, 9)).toBe(variance);
+       |                                 ^
+    106|     expect(at(result.total, 10)).toBe(variancePercent);
+    107|     expect(at(result.total, 11)).toBe(consumption);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > handles budget 100 and signed actual -25
+AssertionError: expected '400.00' to be '125.00' // Object.is equality
+
+Expected: "125.00"
+Received: "400.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:105:33
+    103|   ] as const)("handles budget %s and signed actual %s", async (budget,…
+    104|     const result = await workbook([category(1, budget, actual)]);
+    105|     expect(at(result.total, 9)).toBe(variance);
+       |                                 ^
+    106|     expect(at(result.total, 10)).toBe(variancePercent);
+    107|     expect(at(result.total, 11)).toBe(consumption);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > handles budget 0 and signed actual 0
+AssertionError: expected '400.00' to be '0.00' // Object.is equality
+
+Expected: "0.00"
+Received: "400.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:105:33
+    103|   ] as const)("handles budget %s and signed actual %s", async (budget,…
+    104|     const result = await workbook([category(1, budget, actual)]);
+    105|     expect(at(result.total, 9)).toBe(variance);
+       |                                 ^
+    106|     expect(at(result.total, 10)).toBe(variancePercent);
+    107|     expect(at(result.total, 11)).toBe(consumption);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > handles budget 0 and signed actual 25
+AssertionError: expected '400.00' to be '-25.00' // Object.is equality
+
+Expected: "-25.00"
+Received: "400.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:105:33
+    103|   ] as const)("handles budget %s and signed actual %s", async (budget,…
+    104|     const result = await workbook([category(1, budget, actual)]);
+    105|     expect(at(result.total, 9)).toBe(variance);
+       |                                 ^
+    106|     expect(at(result.total, 10)).toBe(variancePercent);
+    107|     expect(at(result.total, 11)).toBe(consumption);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > handles budget 0 and signed actual -25
+AssertionError: expected '400.00' to be '25.00' // Object.is equality
+
+Expected: "25.00"
+Received: "400.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:105:33
+    103|   ] as const)("handles budget %s and signed actual %s", async (budget,…
+    104|     const result = await workbook([category(1, budget, actual)]);
+    105|     expect(at(result.total, 9)).toBe(variance);
+       |                                 ^
+    106|     expect(at(result.total, 10)).toBe(variancePercent);
+    107|     expect(at(result.total, 11)).toBe(consumption);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > exports empty selection as zero totals and ratios
+AssertionError: expected '1000.00' to be '0.00' // Object.is equality
+
+Expected: "0.00"
+Received: "1000.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:113:70
+    111|     const result = await workbook([]);
+    112|     expect(result.rows).toHaveLength(0);
+    113|     for (const column of [7, 8, 9]) expect(at(result.total, column)).t…
+       |                                                                      ^
+    114|     for (const column of [10, 11]) expect(at(result.total, column)).to…
+    115|     expect(at(result.total, 12)).toBe("0");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯
+
+ FAIL  __tests__/expense-budget-export.test.ts > downloaded expense workbook uses exactly its exported rows > includes an exported inactive row's values in totals
+AssertionError: expected '1000.00' to be '100.00' // Object.is equality
+
+Expected: "100.00"
+Received: "1000.00"
+
+ ❯ __tests__/expense-budget-export.test.ts:120:33
+    118|   it("includes an exported inactive row's values in totals", async () …
+    119|     const result = await workbook([{ ...category(1, 100, 150), isActiv…
+    120|     expect(at(result.total, 7)).toBe("100.00");
+       |                                 ^
+    121|     expect(at(result.total, 8)).toBe("150.00");
+    122|     expect(result.kpis[4].value).toBe("1 من أصل 1");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/12]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  12 failed (12)
+   Start at  01:10:48
+   Duration  2.48s (transform 184ms, setup 0ms, import 747ms, tests 1.54s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

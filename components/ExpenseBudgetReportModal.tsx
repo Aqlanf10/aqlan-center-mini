@@ -123,7 +123,6 @@ export function ExpenseBudgetReportModal({
       clinicAddress: resolvedAddress,
       baseCurrency,
       categories: filteredRows,
-      summary,
       month,
       generatedDate: today,
     });
