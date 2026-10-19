@@ -15,6 +15,7 @@
 
 /** ما يُمسح — مرتّبًا من الأطراف إلى الأصول (للقراءة؛ المسح في أمر TRUNCATE واحد). */
 export const RESET_WIPE_TABLES = [
+  "approved_agreement_principals",
   // التشغيل اليومي
   "ai_confirmation_claims",
   "document_prints",

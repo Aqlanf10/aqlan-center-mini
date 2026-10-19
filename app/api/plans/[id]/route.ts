@@ -1,3 +1,5 @@
+import { collectApprovedAgreement } from "@/lib/approved-agreements";
+import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -60,25 +62,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "اكتب مبلغًا أكبر من صفر." }, { status: 400 });
   }
 
-  const settings = await getSettings();
-  // (TD-05) الأساس دستوري من الكود — وعملة الفاتورة من عملة الخطة نفسها.
-  const base = CLINIC_BASE_CURRENCY;
-  const exchangeRate = rateFromSettings(settings, currency, base);
-  if (exchangeRate === null) {
-    return NextResponse.json(
-      { message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." },
-      { status: 409 },
-    );
-  }
-
-  // رقم القسط يُشتقّ من عدد المسدَّد لا يُقبل من الواجهة: رقمٌ مكرر يجعل سندين
-  // يحملان «قسط 3» ولا يُعرف أيّهما.
-  const installmentNumber = Math.min(plan.progress.paidCount + 1, plan.installments.length || 1);
   const method = source.method === "transfer" ? "transfer" : "cash";
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
 
   try {
+    if (plan.approvedAgreement) {
+      const result = await collectApprovedAgreement({planId,amountMinor,currency,method,note,idempotencyKey:idempotencyKey??"",session});
+      return NextResponse.json({...result,invoiceId:plan.approvedAgreement.invoiceId},{status:result.replayed?200:201});
+    }
+    const settings = await getSettings();
+    // (TD-05) الأساس دستوري من الكود — وعملة الفاتورة من عملة الخطة نفسها.
+    const base = CLINIC_BASE_CURRENCY;
+    const exchangeRate = rateFromSettings(settings, currency, base);
+    if (exchangeRate === null) {
+      return NextResponse.json(
+        { message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." },
+        { status: 409 },
+      );
+    }
+
+    // رقم القسط يُشتقّ من عدد المسدَّد لا يُقبل من الواجهة: رقمٌ مكرر يجعل سندين
+    // يحملان «قسط 3» ولا يُعرف أيّهما.
+    const installmentNumber = Math.min(plan.progress.paidCount + 1, plan.installments.length || 1);
     const result = await recordPlanInstallment({
       planId, patientId: plan.patientId, installmentNumber, planTitle: plan.title,
       amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
@@ -119,7 +125,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     // إعادةٌ لسندٍ سُجّل سابقًا: 200 لا 201 — كما في /api/payments.
     return NextResponse.json(result, { status: result.replayed ? 200 : 201 });
-  } catch {
+  } catch (error) {
+    if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
   }
 }

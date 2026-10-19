@@ -1,3 +1,4 @@
+import {APPROVED_AGREEMENT_SQL} from "../../lib/approved-agreement-schema";
 import {INVOICE_CURRENCY_MIGRATION} from "../../lib/invoice-currency-runtime";
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -24,8 +25,11 @@ afterAll(async () => {
   }
 });
 it('runtime registers exact additive contracts without fabricating facts, receipts, or old migration ownership', async () => {
+  const approved = (await loadMigrationFiles()).find(file => file.version === "0064")!;
+  expect(approved).toMatchObject({name:"approved_agreement_principal",filename:"0064_approved_agreement_principal.sql",checksum:"aefc040a29c8b887a8eeca073103ce4268a8851b89e0025b406941e48f247655"});
+  expect(approved.sql).toBe(APPROVED_AGREEMENT_SQL);
   const registered = (await fixture.source.query('SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version')).rows;
-  expect(registered).toEqual([...ortho, ...bundled,INVOICE_CURRENCY_MIGRATION].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
+  expect(registered).toEqual([...ortho, ...bundled,INVOICE_CURRENCY_MIGRATION,{version:"0064",name:"approved_agreement_principal",checksum:createHash("sha256").update(APPROVED_AGREEMENT_SQL).digest("hex")}].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);
   }

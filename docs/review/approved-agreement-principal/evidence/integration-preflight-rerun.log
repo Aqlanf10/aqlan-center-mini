@@ -1,0 +1,19 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/preflight-artifact.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  21:17:44
+   Duration  1.88s (transform 150ms, setup 0ms, import 233ms, tests 1.19s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

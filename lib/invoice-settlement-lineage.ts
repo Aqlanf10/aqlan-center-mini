@@ -6,7 +6,7 @@ export class InvoiceSettlementLineageError extends Error {
 
 /** Immutable receipts keep their original invoice reference. Only explicit,
  * same-patient/currency correction edges carry settlement to a replacement. */
-export async function invoiceSettlementLineage(client: DbClient, invoiceId: number, patientId: number, currency: Currency): Promise<number[]> {
+export async function invoiceSettlementLineage(client: Pick<DbClient,"query">, invoiceId: number, patientId: number, currency: Currency): Promise<number[]> {
   const { rows } = await client.query<{ id: number; patient_id: number; base_currency: string; reclassified:boolean }>(
     `WITH RECURSIVE lineage(id) AS (
       SELECT $1::int

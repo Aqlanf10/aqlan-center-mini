@@ -1,0 +1,60 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/approved-agreement-principal-ui.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/approved-agreement-principal-ui.test.ts (8 tests | 4 failed) 28741ms
+   × real collection at 390 on 'active' survives lost reply, refusal and reload with one receipt 6084ms
+   × real collection at 390 on 'completed' survives lost reply, refusal and reload with one receipt 5406ms
+   × real collection at 1280 on 'active' survives lost reply, refusal and reload with one receipt 6228ms
+   × real collection at 1280 on 'completed' survives lost reply, refusal and reload with one receipt 5265ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/approved-agreement-principal-ui.test.ts > real collection at 390 on 'active' survives lost reply, refusal and reload with one receipt
+ FAIL  __tests__/security-http/approved-agreement-principal-ui.test.ts > real collection at 1280 on 'active' survives lost reply, refusal and reload with one receipt
+TimeoutError: locator.waitFor: Timeout 5000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: 'إعادة التحقق من العملية السابقة', exact: true }) to be visible[22m
+
+ ❯ __tests__/security-http/approved-agreement-principal-ui.test.ts:74:65
+     72|   expect(await page.getByLabel("مبلغ القسط",{exact:true}).isDisabled()…
+     73|   expect((await db.query("SELECT count(*)::int AS count FROM payments …
+     74|   await page.reload({waitUntil:"domcontentloaded"});await retry.waitFo…
+       |                                                                 ^
+     75|   await retry.click();await expect.poll(()=>page.getByRole("alert").fi…
+     76|   expect(await collect.isDisabled()).toBe(true);await page.reload({wai…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/security-http/approved-agreement-principal-ui.test.ts > real collection at 390 on 'completed' survives lost reply, refusal and reload with one receipt
+ FAIL  __tests__/security-http/approved-agreement-principal-ui.test.ts > real collection at 1280 on 'completed' survives lost reply, refusal and reload with one receipt
+TimeoutError: locator.waitFor: Timeout 5000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: 'تحصيل قسط', exact: true }) to be visible[22m
+
+ ❯ __tests__/security-http/approved-agreement-principal-ui.test.ts:69:86
+     67|   });
+     68|   await page.goto(`${baseUrl}/patients/${patientId}?tab=plans`,{waitUn…
+     69|   const collect=page.getByRole("button",{name:"تحصيل قسط",exact:true})…
+       |                                                                                      ^
+     70|   await page.getByLabel("مبلغ القسط",{exact:true}).fill("500");await p…
+     71|   const retry=page.getByRole("button",{name:"إعادة التحقق من العملية ا…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 4 passed (8)
+   Start at  19:42:30
+   Duration  32.79s (transform 27ms, setup 0ms, import 353ms, tests 28.74s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

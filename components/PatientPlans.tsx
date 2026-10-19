@@ -1,6 +1,7 @@
 "use client";
 
 import TreatmentFinancialContext from "./TreatmentFinancialContext";
+import { ApprovedAgreementPanel } from "./ApprovedAgreementPanel";
 import { INITIAL_PLAN_ITEM_DRAFT, planItemDraftChanged, type PlanItemDraftSnapshot } from "@/lib/plan-item-draft-navigation";
 import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 
@@ -52,6 +53,7 @@ interface PlanItem extends HistoricalPlanItem {
   legacyAgreementStatus?: "live" | "void";
 }
 interface Plan {
+  approvedAgreement?: Awaited<ReturnType<typeof import("@/lib/approved-agreements").approvedAgreementPosition>>;
   id: number; title: string; totalMinor: number; baseCurrency: Currency;
   status: PlanStatus; startDate: string; note: string | null;
   items: PlanItem[];
@@ -172,7 +174,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
   }, [load]);
 
   // DOT-PF-01: share pending collections with the patient collection modal.
-  const money = useMoneyAttempt(`collection:${patientId}`, canSeeFinancial && !readUnavailable && !readDenied);
+  const money = useMoneyAttempt(`collection:${patientId}`, canSeeFinancial && !readUnavailable && !readDenied, `collection:${patientId}`, {patientId});
 
   const itemGuards = useRef(new Map<number, () => boolean>());
   const registerItemGuard = useCallback((planId: number, guard: () => boolean) => {
@@ -197,10 +199,12 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
   const collect = async (plan?: Plan) => {
     if (!readRef.current.active || busy) return;
-    const body = JSON.stringify({ amount: payAmount, currency: payCurrency });
+    const source = plan?.approvedAgreement;
+    const body = JSON.stringify({ patientId, kind: "payment", amount: payAmount, currency: payCurrency,
+      ...(source ? {invoiceId:source.invoiceId,openingCurrency:source.openingCurrency} : {planId:plan?.id}) });
     setBusy(true);
     try {
-      const result = await money.run(plan ? { url: `/api/plans/${plan.id}`, body, operation: "installment" } : undefined);
+      const result = await money.run(plan ? { url: "/api/payments", body, operation: "payment" } : undefined);
       if (!result || result.kind === "busy") return;
       if (result.kind !== "confirmed") { setError(result.message); return; }
       setLastReceipt(result.acknowledgment.paymentId);
@@ -224,7 +228,8 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
         onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
       {!loading && !readDenied && !readUnavailable && visiblePlans.length === 0 && (context?.planId !== undefined || context?.planItemId !== undefined || context?.clinicalCaseId !== undefined) ? <p role="status" data-testid="plan-context-unavailable" className="rounded-xl border border-amber-300 p-3 text-sm">لا توجد خطة متاحة مرتبطة بهذا المرجع. لم يتم اختيار خطة أخرى.</p> : null}
       {canSeeFinancial && !readUnavailable && !readDenied ? (
-        <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void collect()} />
+        <><MoneyAttemptNotice attempt={money.attempt} onRetry={() => void collect()} />
+        {money.error ? <p role="alert">{money.error}</p> : null}</>
       ) : null}
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-red-700 text-red-700">{error}</p>
@@ -291,6 +296,8 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </span>
               </div>
 
+              {canSeeFinancial ? <ApprovedAgreementPanel planId={plan.id} totalMinor={plan.totalMinor} currency={plan.baseCurrency}
+                position={plan.approvedAgreement??null} canApprove={currentConsent&&plan.status==="active"&&["admin","reception"].includes(session?.role??"")} isAdmin={session?.role==="admin"} onChanged={load}/> : null}
               <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{formatMoney(plan.totalMinor, plan.baseCurrency)}</p>
@@ -298,7 +305,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                     {hasHistory ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
                   </p>
                 </div>
-                {plan.installments.length > 0 && canSeeFinancial && plan.progress ? (
+                {(plan.installments.length > 0 || plan.approvedAgreement) && canSeeFinancial && plan.progress ? (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
                       <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</p>
@@ -330,7 +337,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </p>
               ) : null}
 
-              {plan.installments.length > 0 && canSeeFinancial && plan.progress ? (
+              {(plan.installments.length > 0 || plan.approvedAgreement) && canSeeFinancial && plan.progress ? (
                 <>
                   <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                     <div className="h-full bg-emerald-500"
@@ -342,7 +349,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                     {" · "}
                     <a href={`?tab=account`}
                       className="font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
-                      سنداتها فواتير ودفعات في كشف الحساب
+                      {plan.approvedAgreement ? "التحصيل إيصالات على الأصل المعتمد" : "سنداتها فواتير ودفعات في كشف الحساب"}
                     </a>
                   </p>
                 </>
@@ -354,14 +361,14 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </p>
               ) : null}
 
-              {!hasHistory && canSeeFinancial && plan.progress && plan.status === "active" && plan.installments.length > 0 ? (
+              {(!hasHistory || plan.approvedAgreement) && canSeeFinancial && plan.progress && (plan.status === "active" || plan.status === "completed" && plan.approvedAgreement) && (plan.installments.length > 0 || plan.approvedAgreement) ? (
                 payFor === plan.id ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex flex-wrap gap-2">
-                      <input disabled={busy || money.attempt !== null} value={payAmount} onChange={(event) => setPayAmount(event.target.value)}
+                      <input disabled={!money.ready || busy || money.attempt !== null} value={payAmount} onChange={(event) => setPayAmount(event.target.value)}
                         placeholder="مبلغ القسط" aria-label="مبلغ القسط" inputMode="decimal" dir="ltr" autoFocus
                         className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
-                      <select disabled={busy || money.attempt !== null} value={payCurrency} onChange={(event) => setPayCurrency(event.target.value as Currency)}
+                      <select disabled={!money.ready || busy || money.attempt !== null} value={payCurrency} onChange={(event) => setPayCurrency(event.target.value as Currency)}
                         aria-label="العملة"
                         className="w-32 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
                         {CURRENCIES.map((currency) => (
@@ -370,7 +377,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                       </select>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => collect(plan)} disabled={busy || money.attempt !== null || !payAmount.trim()}
+                      <button onClick={() => collect(plan)} disabled={!money.ready || busy || money.attempt !== null || !payAmount.trim()}
                         className="flex-1 rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
                         سجّل القسط واطبع السند
                       </button>
@@ -382,7 +389,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    <button
+                    <button disabled={!money.ready || busy || money.attempt !== null}
                       onClick={() => {
                         setPayFor(plan.id);
                         // المقترح: القسط القادم — أكثر ما يُدفع فعلًا.

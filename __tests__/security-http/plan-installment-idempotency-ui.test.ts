@@ -70,9 +70,11 @@ describe("DOT-PF-01 installment acknowledgments", () => {
   it.each(["{", "{}"])("keeps a committed installment pending after response %s", async (body) => {
     const { context, page } = await openCollect();
     const keys: string[] = [];
-    await page.route(`**/api/plans/${planId}`, async (route) => {
+    const bodies: string[] = [];
+    await page.route("**/api/payments", async (route) => {
       if (route.request().method() !== "POST") return route.continue();
       keys.push(route.request().headers()["idempotency-key"] ?? "");
+      bodies.push(route.request().postData() ?? "");
       if (keys.length === 1) {
         const response = await route.fetch();
         expect(response.ok()).toBe(true);
@@ -85,12 +87,15 @@ describe("DOT-PF-01 installment acknowledgments", () => {
       await page.getByRole("button", { name: "سجّل القسط واطبع السند" }).click();
       const retry = page.getByRole("button", { name: "إعادة التحقق من العملية السابقة" });
       await retry.waitFor();
-      expect(await page.getByText("سُجّل القسط.").count()).toBe(0);
+      expect(await page.getByText("سُجّلت الدفعة.").count()).toBe(0);
       expect(await planReceipts()).toBe(before + 1);
       await retry.click();
-      await page.getByText("سُجّل القسط.").waitFor();
+      await page.getByText("سُجّلت الدفعة.").waitFor();
       expect(keys).toHaveLength(2);
       expect(keys[1]).toBe(keys[0]);
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]).toBe(bodies[0]);
+      expect(JSON.parse(bodies[0])).toMatchObject({ patientId, planId, kind: "payment" });
       expect(await planReceipts()).toBe(before + 1);
     } finally { await context.close(); }
   }, 120_000);
@@ -105,13 +110,16 @@ describe("تحصيل قسط الخطة — سندٌ واحد مهما أُعيد
   it("انقطاع الشبكة بعد تسجيل الخادم ثم إعادة المحاولة ⇒ سندٌ واحد بالمفتاح نفسه", async () => {
     const { context, page } = await openCollect();
     const keys: string[] = [];
+    const bodies: string[] = [];
     let dropped = false;
-    await page.route(`**/api/plans/${planId}`, async (route) => {
+    await page.route("**/api/payments", async (route) => {
       if (route.request().method() !== "POST") return route.continue();
       keys.push(route.request().headers()["idempotency-key"] ?? "");
+      bodies.push(route.request().postData() ?? "");
       if (!dropped) {
         dropped = true;
-        await route.fetch(); // الخادم يسجّل القسط فعلًا…
+        const response = await route.fetch(); // الخادم يسجّل القسط فعلًا…
+        expect(response.ok()).toBe(true);
         await route.abort("failed"); // …والمتصفح لا يصله الرد.
         return;
       }
@@ -125,15 +133,18 @@ describe("تحصيل قسط الخطة — سندٌ واحد مهما أُعيد
       expect(await planReceipts()).toBe(before + 1); // سُجّل رغم انقطاع الرد
 
       const replay = page.waitForResponse((response) =>
-        response.url().endsWith(`/api/plans/${planId}`) && response.request().method() === "POST");
+        response.url().endsWith("/api/payments") && response.request().method() === "POST");
       await page.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
       expect((await replay).status()).toBe(200); // إعادة (replay) لا قسط جديد (201)
-      await page.getByText("سُجّل القسط.").waitFor();
+      await page.getByText("سُجّلت الدفعة.").waitFor();
 
       expect(await planReceipts()).toBe(before + 1);
       expect(keys).toHaveLength(2);
       expect(keys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
       expect(keys[1]).toBe(keys[0]);
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1]).toBe(bodies[0]);
+      expect(JSON.parse(bodies[0])).toMatchObject({ patientId, planId, kind: "payment" });
     } finally {
       await context.close();
     }
@@ -144,7 +155,7 @@ describe("تحصيل قسط الخطة — سندٌ واحد مهما أُعيد
     try {
       const before = await planReceipts();
       await page.getByRole("button", { name: "سجّل القسط واطبع السند" }).dblclick();
-      await page.getByText("سُجّل القسط.").waitFor();
+      await page.getByText("سُجّلت الدفعة.").waitFor();
       expect(await planReceipts()).toBe(before + 1);
     } finally {
       await context.close();

@@ -505,3 +505,11 @@ This implementation and its tests perform **no Production drilldown execution**.
 مسار التهيئة المضاف تحت قفل الترحيلات نفسه. لا يتطلب HR 0062. ترحيل محلي قيد
 التحقق؛ لم يُطبّق على قاعدة حية. استعادة البيانات تُدرج السندات أولًا، ثم وثيقة
 إعادة التصنيف وأحداثها، وتتحقق من اكتمال التغطية عند الالتزام.
+
+### 0064_approved_agreement_principal.sql
+
+Explicit full financial approval of a treatment agreement. Adds immutable source
+and terms records and guards against duplicate principal and silent changes to
+approved sources. No automatic historical posting or backfill. Clinical consent
+alone creates no approval record.0062 remains reserved for HR. Runtime/CLI use
+identical SQL/checksum. See [design and limits](review/approved-agreement-principal/design.md).
