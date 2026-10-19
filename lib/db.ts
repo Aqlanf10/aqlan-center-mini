@@ -14992,7 +14992,9 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       party_name: string | null; payee_text: string | null;
       expense_account_code: string | null; payable_account_code: string | null;
       auto_post_journal: boolean | null;
+      payable_id: number | null; linked_payable_id: number | null; linked_party_id: number | null;
       linked_payable_currency: string | null; linked_settled_minor: string | null;
+      linked_payable_account_code: string | null; linked_snapshot_currency: string | null;
     }>(
       `SELECT e.id, e.voucher_number, e.created_at, e.category, e.currency, e.amount_minor,
               e.party_id, t.kind AS party_kind, t.name AS party_name, e.payee_text,
@@ -15000,7 +15002,9 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
               t.payable_account_code,
               CASE WHEN ec.auto_post_journal = FALSE THEN FALSE
                    ELSE COALESCE(t.auto_post_journal, TRUE) END AS auto_post_journal,
-              lp.currency AS linked_payable_currency,
+              e.payable_id, lp.id AS linked_payable_id, lp.party_id AS linked_party_id,
+              lp.currency AS linked_payable_currency, e.payable_currency AS linked_snapshot_currency,
+              COALESCE(lp.payable_account_code, t.payable_account_code) AS linked_payable_account_code,
               CASE WHEN lp.id IS NULL THEN NULL ELSE ${settledOnPayableSql("e", "lp")} END AS linked_settled_minor
          FROM expenses e
          LEFT JOIN parties t ON t.id = e.party_id
@@ -15009,9 +15013,17 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
         WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
     ),
-    pool.query<{ expense_id: number; paid_minor: string; payable_currency: string; settled_minor: string }>(
-      `SELECT a.expense_id, a.paid_minor, a.payable_currency, a.settled_minor
+    pool.query<{
+      expense_id: number; payable_id: number; paid_minor: string | null; payable_currency: string; settled_minor: string | null;
+      linked_payable_id: number | null; linked_party_id: number | null; linked_payable_currency: string | null;
+      payable_account_code: string | null;
+    }>(
+      `SELECT a.expense_id, a.payable_id, a.paid_minor, a.payable_currency, a.settled_minor,
+              p.id AS linked_payable_id, p.party_id AS linked_party_id, p.currency AS linked_payable_currency,
+              COALESCE(p.payable_account_code, t.payable_account_code) AS payable_account_code
          FROM expense_payable_allocations a JOIN expenses e ON e.id = a.expense_id
+         LEFT JOIN payables p ON p.id = a.payable_id
+         LEFT JOIN parties t ON t.id = p.party_id
         WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
         ORDER BY a.id`,
       [CLINIC_TIME_ZONE, from, to],
@@ -15126,14 +15138,11 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
     }));
   }
 
-  const allocationsByExpense = new Map<number, VoucherSettlement[]>();
+  // Keep raw linkage evidence until the voucher's posting policy has been applied.
+  const allocationsByExpense = new Map<number, typeof allocations.rows>();
   for (const row of allocations.rows) {
     const list = allocationsByExpense.get(row.expense_id) ?? [];
-    list.push({
-      paidMinor: toMinor(row.paid_minor),
-      payableCurrency: requireCurrency(row.payable_currency, "توزيع سند", row.expense_id),
-      settledMinor: toMinor(row.settled_minor),
-    });
+    list.push(row);
     allocationsByExpense.set(row.expense_id, list);
   }
 
@@ -15144,20 +15153,71 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
     /* (المراجعة النهائية ٤) عملة المصروف تُتحقّق كعملة الدفعة نفسها. */
     const currency = requireCurrency(row.currency, "مصروف", row.voucher_number);
     const amountMinor = toMinor(row.amount_minor);
-    // السداد لجهة مسجّلة (مختبر أو مورّد) يُنقص الذمم؛ وغيره مصروف مباشر.
-    const settlesPayable = row.party_kind === "lab" || row.party_kind === "supplier";
-    /* قطع التسوية كما يقرؤها كشف الجهة: الالتزام المرتبط بلقطته، أو توزيعات التسوية المجمّعة. */
-    const settlements: VoucherSettlement[] = [];
-    if (settlesPayable) {
-      if (row.linked_payable_currency !== null && row.linked_settled_minor !== null) {
-        settlements.push({
-          paidMinor: amountMinor,
-          payableCurrency: requireCurrency(row.linked_payable_currency, "التزام السند", row.voucher_number),
-          settledMinor: toMinor(row.linked_settled_minor),
-        });
-      }
-      settlements.push(...(allocationsByExpense.get(row.id) ?? []));
+    const allocatedRows = allocationsByExpense.get(row.id) ?? [];
+    const invalidSettlement = (reason: string): never => {
+      throw new Error(`سلامة ربط تسوية سند الصرف ${row.voucher_number}: ${reason}`);
+    };
+    // A direct link owns the whole voucher. Allocations are an alternative owner,
+    // never an additional settlement of the same cash movement.
+    if (row.payable_id !== null && allocatedRows.length > 0) {
+      invalidSettlement("رابط مباشر وتوزيعات متعارضة");
     }
+    const settlements: VoucherSettlement[] = [];
+    if (row.payable_id !== null) {
+      if (row.linked_payable_id !== row.payable_id || row.party_id === null
+        || row.linked_party_id !== row.party_id || row.linked_payable_currency === null) {
+        invalidSettlement("التزام غير موجود أو تابع لجهة أخرى");
+      }
+      if (row.linked_snapshot_currency !== null
+        && requireCurrency(row.linked_snapshot_currency, "لقطة التزام السند", row.voucher_number) !== row.linked_payable_currency) {
+        invalidSettlement("عملة لقطة السند لا تطابق الالتزام");
+      }
+      // Keep settledOnPayableSql's recorded snapshot / legacy conversion exactly;
+      // NULL means missing conversion evidence, not a zero settlement.
+      if (row.linked_settled_minor === null) invalidSettlement("مبلغ تسوية الالتزام غير محلول");
+      settlements.push({
+        paidMinor: amountMinor,
+        payableCurrency: requireCurrency(row.linked_payable_currency, "التزام السند", row.voucher_number),
+        settledMinor: toMinor(row.linked_settled_minor),
+        payableAccountCode: row.linked_payable_account_code,
+      });
+    }
+    for (const allocation of allocatedRows) {
+      if (allocation.linked_payable_id !== allocation.payable_id || row.party_id === null
+        || allocation.linked_party_id !== row.party_id || allocation.linked_payable_currency === null) {
+        invalidSettlement("توزيع على التزام غير موجود أو تابع لجهة أخرى");
+      }
+      if (allocation.paid_minor === null || allocation.settled_minor === null) {
+        invalidSettlement("مبلغ التوزيع غير موجود");
+      }
+      const paidMinor = toMinor(allocation.paid_minor);
+      if (paidMinor === 0) invalidSettlement("توزيع بلا مبلغ صرف");
+      const payableCurrency = requireCurrency(allocation.payable_currency, "توزيع سند", row.voucher_number);
+      if (payableCurrency !== requireCurrency(allocation.linked_payable_currency, "التزام التوزيع", allocation.payable_id)) {
+        invalidSettlement("عملة التوزيع لا تطابق الالتزام");
+      }
+      settlements.push({
+        paidMinor,
+        payableCurrency,
+        settledMinor: toMinor(allocation.settled_minor),
+        payableAccountCode: allocation.payable_account_code,
+      });
+    }
+    const sign = amountMinor < 0 ? -1 : 1;
+    let allocatedMinor = 0;
+    for (const piece of settlements) {
+      if (piece.paidMinor * sign < 0 || piece.settledMinor * sign < 0
+        || (piece.paidMinor === 0 && piece.settledMinor !== 0)) {
+        invalidSettlement("إشارة التسوية لا تطابق السند");
+      }
+      allocatedMinor += piece.paidMinor;
+      if (!Number.isSafeInteger(allocatedMinor) || Math.abs(allocatedMinor) > Math.abs(amountMinor)) {
+        invalidSettlement("توزيع يتجاوز مبلغ السند");
+      }
+    }
+    // Explicit HR salary/commission settlement is independent of party kind.
+    // Unlinked employee/doctor expenses stay expenses; trade advances stay AP.
+    const settlesPayable = settlements.length > 0 || row.party_kind === "lab" || row.party_kind === "supplier";
     entries.push(expenseEntry({
       voucherNumber: row.voucher_number,
       date: clinicDayOf(row.created_at.toISOString()),
