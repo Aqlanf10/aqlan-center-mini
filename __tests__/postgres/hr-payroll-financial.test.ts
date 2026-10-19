@@ -316,18 +316,20 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     });
   });
 
-  it("handles leave balance lifecycle, self-approval refusal, and cancellation rollback", async () => {
+  it.each(["2026-11", "2027-01"])("handles leave balance lifecycle, self-approval refusal, and cancellation rollback (%s)", async (month) => {
+    const year = Number(month.slice(0, 4));
+    const startDate = `${month}-01`, endDate = `${month}-05`;
     // 1. Allocate 30 annual leave days
     await adjustLeaveBalance(
       supportStaffId,
       "annual",
-      2026,
+      year,
       30,
       "الرصيد السنوي لعام 2026",
       adminSession,
     );
 
-    const initialBalances = await listLeaveBalances({ staffId: supportStaffId, year: 2026 });
+    const initialBalances = await listLeaveBalances({ staffId: supportStaffId, year });
     expect(initialBalances[0].allocatedDays).toBe(30);
     expect(initialBalances[0].usedDays).toBe(0);
 
@@ -336,8 +338,8 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
       {
         staffId: supportStaffId,
         leaveTypeCode: "annual",
-        startDate: "2026-11-01",
-        endDate: "2026-11-05",
+        startDate: startDate,
+        endDate: endDate,
         daysCount: 5,
         reason: "إجازة اعتيادية",
       },
@@ -345,6 +347,8 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     );
     expect(leaveReq.daysCount).toBe(5);
     expect(leaveReq.status).toBe("pending");
+    expect(leaveReq.startDate).toBe(startDate);
+    expect(leaveReq.endDate).toBe(endDate);
 
     // 3. Self-approval refusal: the staff user cannot approve their own leave request
     await expect(
@@ -361,17 +365,20 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     expect(approvedLeave.status).toBe("approved");
 
     // Verify leave balance deducted
-    const afterApprovalBalances = await listLeaveBalances({ staffId: supportStaffId, year: 2026 });
+    const afterApprovalBalances = await listLeaveBalances({ staffId: supportStaffId, year });
     expect(afterApprovalBalances[0].usedDays).toBe(5);
     expect(afterApprovalBalances[0].availableDays).toBe(25);
 
     // Verify auto-recorded on_leave attendance records
     const attendanceRecords = await listAttendanceRecords({
       staffId: supportStaffId,
-      startDate: "2026-11-01",
-      endDate: "2026-11-05",
+      startDate: startDate,
+      endDate: endDate,
     });
     expect(attendanceRecords.length).toBe(5);
+    expect(attendanceRecords.map(row => row.attendanceDate).sort()).toEqual([1,2,3,4,5].map(day => `${month}-0${day}`));
+    const {rows: allLeaveDates} = await getPool().query<{day:string}>("SELECT attendance_date::text AS day FROM hr_attendance_records WHERE staff_id=$1 ORDER BY attendance_date", [supportStaffId]);
+    expect(allLeaveDates.map(row => row.day)).toEqual([1,2,3,4,5].map(day => `${month}-0${day}`));
     for (const rec of attendanceRecords) {
       expect(rec.status).toBe("on_leave");
     }
@@ -386,16 +393,17 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     expect(cancelledLeave.status).toBe("cancelled");
 
     // Verify leave balance restored
-    const afterCancelBalances = await listLeaveBalances({ staffId: supportStaffId, year: 2026 });
+    const afterCancelBalances = await listLeaveBalances({ staffId: supportStaffId, year });
     expect(afterCancelBalances[0].usedDays).toBe(0);
     expect(afterCancelBalances[0].availableDays).toBe(30);
 
     // Verify on_leave attendance records were reverted / cleaned up
     const cleanedAttendance = await listAttendanceRecords({
       staffId: supportStaffId,
-      startDate: "2026-11-01",
-      endDate: "2026-11-05",
+      startDate: startDate,
+      endDate: endDate,
     });
     expect(cleanedAttendance.length).toBe(0);
+    expect((await getPool().query("SELECT id FROM hr_attendance_records WHERE staff_id=$1", [supportStaffId])).rows).toHaveLength(0);
   });
 });

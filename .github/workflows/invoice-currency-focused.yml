@@ -1,0 +1,70 @@
+name: Focused invoice currency checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/invoice-*.ts'
+      - 'lib/db.ts'
+      - 'lib/money.ts'
+      - '__tests__/invoice-currency-*.test.ts'
+      - '__tests__/postgres/invoice-*.test.ts'
+      - 'package*.json'
+      - '.github/workflows/invoice-currency-focused.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'lib/invoice-*.ts'
+      - 'lib/db.ts'
+      - 'lib/money.ts'
+      - '__tests__/invoice-currency-*.test.ts'
+      - '__tests__/postgres/invoice-*.test.ts'
+      - 'package*.json'
+      - '.github/workflows/invoice-currency-focused.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: invoice-currency-focused-${{ github.ref }}
+  cancel-in-progress: true
+
+# Supplemental early feedback only. The complete CI workflow stays mandatory
+# and unchanged, including all PostgreSQL, HTTP, audit and production-build gates.
+jobs:
+  invoice-currency-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d aqlan_p1_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.23.3'
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Currency unit regressions
+        run: npm test -- __tests__/invoice-currency-scope.test.ts __tests__/invoice-currency-scope-reader.test.ts __tests__/invoice-currency-scope-route.test.ts __tests__/invoice-currency-scope-view.test.ts __tests__/invoice-currency-reclassification.test.ts
+      - name: Real PostgreSQL correction regressions
+        run: npm run test:postgres -- __tests__/postgres/invoice-revision.test.ts __tests__/postgres/invoice-currency-schema.test.ts

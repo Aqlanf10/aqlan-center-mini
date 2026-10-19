@@ -27,7 +27,10 @@ describe("currency scope diagnostics preserve the existing refusal truth table",
       expect(query).toHaveBeenCalledTimes(1);
       expect(invoiceCurrencyScopeMessage(invoiceCurrencyScopeReasons(facts))).not.toContain("يحتاج مساره المخصص");
     } else await expect(operation).resolves.toMatchObject({lineageInvoiceIds:[11,12],planIds:[]});
-    expect(query.mock.calls[0][1]).toEqual([[11,12],12]);
+    expect(query.mock.calls[0][1]).toEqual([[11,12]]);
+    expect(query.mock.calls[0][0]).toContain("FROM invoice_items WHERE invoice_id=ANY($1::int[])");
+    expect(query.mock.calls[0][0]).toContain("source_type IS NOT NULL OR source_id IS NOT NULL");
+    expect(query.mock.calls[0][0]).toContain("source_type IS DISTINCT FROM 'plan_item'");
     for(const [sql] of query.mock.calls)expect(sql.trim()).toMatch(/^SELECT\b/);
   });
   it("returns allowlisted codes only; no record identities or sensitive source facts", () => {

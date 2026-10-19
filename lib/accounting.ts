@@ -513,13 +513,16 @@ export interface VoucherSettlement {
   payableCurrency: Currency;
   /** بعملة الالتزام — لقطة السند المسجَّلة (payable_settled_minor / التوزيع). */
   settledMinor: number;
+  /** حساب الالتزام نفسه؛ حساب الجهة يبقى للباقي غير الموزّع. */
+  payableAccountCode?: string | null;
 }
 
 /**
  * قيد الصرف — بعملة السند.
  *
- * صرفٌ **لجهة مسجّلة** (مختبر/مورّد) يُسدّد التزاماتها: مدين ذمم الموردين، دائن الصندوق. وصرفٌ
- * بلا جهة مصروفٌ مباشر: مدين حساب المصروف، دائن الصندوق.
+ * التسوية الصريحة لأي التزام (ومنها الرواتب والعمولات)، أو دفعة المختبر/المورد المقدّمة،
+ * مدينةٌ في حساب الذمة ودائنةٌ في الصندوق. المصروف غير المرتبط للموظف أو الطبيب يبقى
+ * مصروفًا مباشرًا: مدين حساب المصروف، دائن الصندوق.
  *
  * التمييز ضروري: لو قُيّد سداد المختبر مصروفًا لظهرت التكلفة مرتين — مرة يوم نشأ
  * الالتزام ومرة يوم سُدّد — فيبدو الشهر خاسرًا وهو ليس كذلك.
@@ -564,11 +567,12 @@ export function expenseEntry(input: {
       const settled = piece.settledMinor * sign;
       if (paid <= 0 && settled <= 0) continue;
       allocated += paid;
+      const pieceAp = payableAccount(piece.payableAccountCode ?? input.payableAccountCode);
       if (piece.payableCurrency === currency && paid === settled) {
-        lines.push({ accountCode: ap, currency, amountMinor: paid, side: "debit" });
+        lines.push({ accountCode: pieceAp, currency, amountMinor: paid, side: "debit" });
       } else {
         lines.push(...clearingLegs({ currency, amountMinor: paid }, { currency: piece.payableCurrency, amountMinor: settled }, "debit"));
-        lines.push({ accountCode: ap, currency: piece.payableCurrency, amountMinor: settled, side: "debit" });
+        lines.push({ accountCode: pieceAp, currency: piece.payableCurrency, amountMinor: settled, side: "debit" });
       }
     }
     const unallocated = amount - allocated;

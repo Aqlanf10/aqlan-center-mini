@@ -17,10 +17,14 @@ export async function prepareInvoiceCurrencyChange(client:DbClient,invoice:Invoi
   if(invoice.baseCurrency!=="YER")reject("تصحيح العملة يدعم الانتقال من اليمني إلى السعودي المسجل في السندات فقط.");
   const position=await readInvoiceSettlementPosition(client,{patientId:invoice.patientId,invoiceId:invoice.id,currency:"YER"});
   const ids=position.lineageInvoiceIds;
+  // Unique clinical source references remain on original items after correction.
+  // Inspect the whole authoritative family, including malformed partial sources.
   const {rows:[scope]}=await client.query<InvoiceCurrencyScopeFacts>(`SELECT
     EXISTS(SELECT 1 FROM invoices WHERE id=ANY($1::int[]) AND plan_id IS NOT NULL) AS plan_linked_lineage,
-    EXISTS(SELECT 1 FROM invoice_items WHERE invoice_id=$2 AND source_type IS NOT NULL AND source_type<>'plan_item') AS independent_item_source,
-    EXISTS(SELECT 1 FROM invoice_settlement_reclassifications WHERE source_invoice_ids && $1::int[]) AS already_reclassified`,[ids,invoice.id]);
+    EXISTS(SELECT 1 FROM invoice_items WHERE invoice_id=ANY($1::int[])
+      AND (source_type IS NOT NULL OR source_id IS NOT NULL)
+      AND source_type IS DISTINCT FROM 'plan_item') AS independent_item_source,
+    EXISTS(SELECT 1 FROM invoice_settlement_reclassifications WHERE source_invoice_ids && $1::int[]) AS already_reclassified`,[ids]);
   const reasonCodes = invoiceCurrencyScopeReasons(scope);
   if(reasonCodes.length)throw new InvoiceCurrencyScopeError(reasonCodes);
   const {rows:plans}=await client.query<{id:number;supported:boolean}>(`SELECT p.id,
