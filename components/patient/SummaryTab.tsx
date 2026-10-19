@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
 import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
 import { HistoricalClinicalNote } from "../HistoricalClinicalNote";
 import type { AssessmentCase, LegacyCase } from "@/lib/patient-workflow-cases";
@@ -47,19 +48,10 @@ export interface WorkflowSummary {
   /** (INV-LINK D) حالاتٌ فتحتها فاتورة علاجية وتنتظر تقييم الطبيب. */
   assessmentCases?: AssessmentCase[];
   legacyCases?: LegacyCase[];
-  financial: {
-    balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
-    agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
-    clinicalProgress?: ClinicalProgressView;
-    agreementPaidMinor?: number; agreementRemainingMinor?: number;
-    /* (TD-05) نفس الحقول لكل عملةٍ ذات نشاط — المفرد هو دلو العملة الأساسية. */
-    byCurrency?: Record<"YER" | "SAR" | "USD", {
-      balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
-      agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
-      clinicalProgress?: ClinicalProgressView;
-      agreementPaidMinor?: number; agreementRemainingMinor?: number;
-    }>;
-  } | null;
+  financial: (PatientWorkflowFinancialBucket & {
+    /* The compatibility view is the clinic base currency, never a currency sum. */
+    byCurrency?: Record<Currency, PatientWorkflowFinancialBucket>;
+  }) | null;
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
   canSeeFinancial: boolean;
 }
@@ -106,7 +98,7 @@ export function SummaryTab({
   const [lastReceipt, setLastReceipt] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const financial = summary.financial;
+  const financial = summary.canSeeFinancial ? summary.financial : null;
   const primaryPlan = summary.activePlans[0] ?? null;
   const nextPlanned = summary.plannedVisits.find((visit) => !visit.appointmentDate) ?? null;
   const scheduledNext = summary.plannedVisits.find((visit) => visit.appointmentDate) ?? null;
@@ -393,20 +385,53 @@ export function SummaryTab({
 
           {CURRENCIES.filter((currency) => {
             const row = financial.byCurrency?.[currency] ?? (currency === base ? financial : null);
-            return row && (Object.values(row).some((value) => typeof value === "number" && value !== 0) || (row.clinicalProgress?.historicalItems ?? 0) > 0 || currency === base && !financial.byCurrency);
+            return row && (hasPatientFinancialActivity(row) || currency === base && !financial.byCurrency);
           }).map((currency) => {
             const row = financial.byCurrency?.[currency] ?? financial;
+            const agreementsVerified = row.approvedAgreements !== undefined && row.classicInstallments !== undefined
+              && (!row.approvedAgreements || row.approvedAgreements.available);
             return <div key={currency} className="mt-3 rounded-xl border border-slate-200 p-3">
               <p className="text-xs font-bold">{CURRENCY_LABEL[currency]}</p>
               <p className="mt-1 text-lg font-black">
-                {row.balanceMinor > 0 ? `المستحق الحالي: ${formatMoney(row.balanceMinor, currency)}` : row.balanceMinor < 0 ? `رصيد لصالح المريض: ${formatMoney(-row.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
-                {(row.agreementRemainingMinor ?? 0) > 0 ? <span className="block text-sm text-amber-700">متبقّي من اتفاق العلاج: {formatMoney(row.agreementRemainingMinor!, currency)}</span> : null}
+                {!agreementsVerified ? `رصيد دفتر الحساب: ${formatMoney(row.balanceMinor, currency)} · ملخص الاتفاقات يحتاج تحقق` : row.balanceMinor > 0 ? `المستحق الحالي: ${formatMoney(row.balanceMinor, currency)}` : row.balanceMinor < 0 ? `رصيد لصالح المريض: ${formatMoney(-row.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
               </p>
+              {row.approvedAgreements === undefined || row.classicInstallments === undefined
+                ? <p role="status" className="mt-2 text-xs font-bold text-amber-700">ملخص الاتفاقات غير متاح؛ أعد تحميل بيانات الحساب.</p> : null}
+              {row.approvedAgreements ? <div className="mt-3" data-testid="approved-agreement-summary" data-currency={currency}>
+                <p className="text-xs font-bold">الاتفاقات المالية المعتمدة</p>
+                {!row.approvedAgreements.available ? <p role="status" className="mt-1 text-xs font-bold text-amber-700">مصدر اتفاق معتمد يحتاج مراجعة؛ إجمالي المدفوع والمتبقي والمستحق حسب الجدول غير متاح حتى التحقق.</p> : null}
+                <dl className="mt-2 grid grid-cols-2 gap-1.5 text-center text-xs sm:grid-cols-4">
+                  {([
+                    ["قيمة العلاج المعتمدة", row.approvedAgreements.totalMinor],
+                    ["المسدّد من الاتفاق المعتمد", row.approvedAgreements.paidMinor],
+                    ["المتبقي من الاتفاق المعتمد", row.approvedAgreements.remainingMinor],
+                    ["المستحق حسب جدول الاتفاق", row.approvedAgreements.dueNowMinor],
+                  ] as const).map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 px-2 py-2">
+                    <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
+                    <dd className="mt-0.5 font-extrabold text-navy-900">{value === null ? "غير متاح حتى المراجعة" : formatMoney(value, currency)}</dd>
+                  </div>)}
+                </dl>
+                <p className="mt-1 text-xs text-slate-500">{row.approvedAgreements.available
+                  ? "الاتفاق المعتمد محسوب في رصيد الحساب؛ لا يُضاف إليه مرة أخرى. المدفوع يشمل أي سداد تاريخي موثّق عند مطابقة رصيد افتتاحي."
+                  : "قيمة الاتفاق من الاعتماد المحفوظ؛ يلزم التحقق من مصدره قبل تأكيد المدفوع والمتبقي. لا تجمعها مع رصيد الحساب."}</p>
+              </div> : null}
+              {row.classicInstallments ? <div className="mt-3" data-testid="classic-installment-reference" data-currency={currency}>
+                <p className="text-xs font-bold">مرجع خطط التقسيط غير المعتمدة مالياً</p>
+                <dl className="mt-2 grid grid-cols-2 gap-1.5 text-center text-xs sm:grid-cols-3">
+                  {([
+                    ["قيمة خطة التقسيط", row.classicInstallments.totalMinor],
+                    ["المحصّل عبر أقساطها", row.classicInstallments.paidMinor],
+                    ["المتبقي المخطط للأقساط", row.classicInstallments.remainingMinor],
+                  ] as const).map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 px-2 py-2">
+                    <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
+                    <dd className="mt-0.5 font-extrabold text-navy-900">{formatMoney(value, currency)}</dd>
+                  </div>)}
+                </dl>
+                <p className="mt-1 text-xs text-slate-500">المتبقي المخطط للأقساط ليس رصيد الحساب؛ المستحق يُقرأ من دفتر الحساب فقط.</p>
+              </div> : null}
               <dl className="mt-3 grid grid-cols-2 gap-1.5 text-center text-xs sm:grid-cols-3">
                 {[
-                  ["قيمة العلاج المتفق عليه", row.agreedMinor],
-                  ["المسدّد من الاتفاق", row.agreementPaidMinor ?? 0],
-                  ["المتبقي من الاتفاق", row.agreementRemainingMinor ?? 0],
+                  ["القيمة المخططة للعلاج الجاري", row.agreedMinor],
                   [row.clinicalProgress?.historicalItems ? "تم تنفيذ علاج معروف خارج التاريخي" : "تم تنفيذ علاج", row.clinicalProgress?.historicalItems ? row.clinicalProgress.knownDoneMinor : row.treatmentDoneMinor],
                   [row.clinicalProgress?.historicalItems ? "باقي علاج معروف خارج التاريخي" : "علاج غير منفّذ", row.clinicalProgress?.historicalItems ? row.clinicalProgress.knownRemainingMinor : row.remainingTreatmentMinor],
                   ["تم فوترة", row.invoicedMinor],
@@ -420,7 +445,7 @@ export function SummaryTab({
               {row.clinicalProgress?.historicalItems ? <p className="mt-2 text-xs text-slate-600"><HistoricalClinicalNote progress={row.clinicalProgress} currency={currency} /></p> : null}
             </div>;
           })}
-          {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && Object.values(financial.byCurrency[currency]).some((value) => typeof value === "number" && value !== 0)) && financial.byCurrency ? <p className="mt-2 font-bold">لا مبالغ مستحقة ولا اتفاق متبقٍّ</p> : null}
+          {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && hasPatientFinancialActivity(financial.byCurrency[currency])) && financial.byCurrency ? <p className="mt-2 font-bold">لا حركة مالية ولا خطط علاج في الملخص</p> : null}
         </section>
       ) : null}
 

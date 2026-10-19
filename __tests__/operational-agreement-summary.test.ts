@@ -17,7 +17,7 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
-it("300 SAR agreement: paid 100 then 40 leaves 200 then 160 while current invoices are settled", async () => {
+it("300 SAR classic installment reference: paid 100 then 40 leaves 200 then 160 while current invoices are settled", async () => {
   const { rows: [patient] } = await getPool().query<{ id: number }>(
     "INSERT INTO patients (patient_number, full_name) VALUES ('OP-SAR-1', 'مريض تجريبي اتفاق') RETURNING id",
   );
@@ -34,8 +34,12 @@ it("300 SAR agreement: paid 100 then 40 leaves 200 then 160 while current invoic
   expect(await collect(10_000, 1)).toHaveProperty("paymentId");
   const first = await patientWorkflow(patient.id, "2026-10-01");
   expect(first.financial?.byCurrency.SAR).toMatchObject({ agreedMinor: 30_000,
+    approvedAgreements: null, classicInstallments: { totalMinor: 30_000, paidMinor: 10_000, remainingMinor: 20_000 },
     agreementPaidMinor: 10_000, agreementRemainingMinor: 20_000, balanceMinor: 0 });
+  expect(first.financial?.byCurrency.YER.classicInstallments).toBeNull();
   expect(first.financial?.byCurrency.YER.agreementRemainingMinor).toBe(0);
+  expect(first.financial?.agreementPaidMinor).toBe(0);
+  expect(first.financial?.agreementRemainingMinor).toBe(0);
   // Match the patient page: validate case ownership before rendering its summary.
   const cases = readWorkflowCases(first, patient.id, true);
   if (!cases) throw new Error("Invalid patient workflow case projections");
@@ -44,7 +48,9 @@ it("300 SAR agreement: paid 100 then 40 leaves 200 then 160 while current invoic
     patientName: "مريض تجريبي", patientNumber: "OP-SAR-1", patientPhone: null, base: "YER",
     onVisitStarted: () => {}, onChanged: () => {}, onGoToTab: () => {},
   }));
-  expect(html).toContain("المتبقي من الاتفاق");
+  expect(html).toContain("المتبقي المخطط للأقساط");
+  expect(html).toContain("مرجع خطط التقسيط غير المعتمدة مالياً");
+  expect(html).not.toContain("قيمة العلاج المعتمدة");
   expect(html).toContain(formatMoney(20_000, "SAR"));
   expect(html).toContain("المستحق الحالي مسدّد");
   expect(html).not.toContain("الرصيد خالص");
@@ -52,12 +58,12 @@ it("300 SAR agreement: paid 100 then 40 leaves 200 then 160 while current invoic
   expect(first.alerts.some((alert) => alert.kind === "overdue_installment")).toBe(false);
   expect(await collect(4_000, 2)).toHaveProperty("paymentId");
   const second = await patientWorkflow(patient.id, "2026-10-01");
-  expect(second.financial?.byCurrency.SAR).toMatchObject({ agreementPaidMinor: 14_000,
-    agreementRemainingMinor: 16_000, invoicedMinor: 14_000, paidMinor: 14_000, balanceMinor: 0 });
+  expect(second.financial?.byCurrency.SAR).toMatchObject({ approvedAgreements: null, classicInstallments: { paidMinor: 14_000, remainingMinor: 16_000 },
+    agreementPaidMinor: 14_000, agreementRemainingMinor: 16_000, invoicedMinor: 14_000, paidMinor: 14_000, balanceMinor: 0 });
   // Collection never implies patient consent. A fixed agreement can then be consented explicitly.
   expect(second.activePlans[0].consentAt).toBeNull();
   expect(await recordPlanConsent({ planId: planId!, actor: "operational-test", note: "موافقة صريحة" })).toMatchObject({ ok: true, totalMinor: 30_000 });
   const consented = await patientWorkflow(patient.id, "2026-10-01");
   expect(consented.activePlans[0].consentAt).not.toBeNull();
-  expect(consented.financial?.byCurrency.SAR).toMatchObject({ agreedMinor: 30_000, agreementRemainingMinor: 16_000 });
+  expect(consented.financial?.byCurrency.SAR).toMatchObject({ agreedMinor: 30_000, agreementRemainingMinor: 16_000, approvedAgreements: null, classicInstallments: { remainingMinor: 16_000 } });
 }, 30_000);

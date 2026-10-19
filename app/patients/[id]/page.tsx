@@ -1,7 +1,6 @@
 "use client";
 
 import { clinicDateString } from "@/lib/schedule";
-import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
 import { HistoricalClinicalNote } from "@/components/HistoricalClinicalNote";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useRouter } from "next/navigation";
@@ -50,6 +49,7 @@ import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
+import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { readCheckoutVisitRequest, type CheckoutVisitRequest } from "@/lib/checkout-visit-request";
@@ -1321,29 +1321,30 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           }} accountDetails={<>
             <p className="mb-2 text-xs text-slate-500">القيمة المخططة وتقدم العمل منفصلان عن الدَّين. الفاتورة المعتمدة تدخل رصيد الحساب مرة واحدة فقط؛ لا تجمع هذه الأرقام مع المستحق.</p>
         {/* Account details: separate obligations and clinical work, never added to ledger totals. */}
-        {/* (TD-05) سطرٌ لكل عملة — والباقي غير المستحق بعملة خطته. */}
+        {/* Each agreement is a source-level reference already included in the ledger. */}
         {accountHeader && summary?.financial
           ? (summary.financial.byCurrency
-              ? (Object.entries(summary.financial.byCurrency) as [Currency, {
-                  balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number;
-                  clinicalProgress?: ClinicalProgressView;
-                }][]).filter(([, bucket]) =>
-                  bucket.balanceMinor !== 0 || bucket.remainingTreatmentMinor > 0 || (bucket.agreementRemainingMinor ?? 0) > 0 || (bucket.clinicalProgress?.historicalItems ?? 0) > 0)
-              : summary.financial.balanceMinor !== 0 || summary.financial.remainingTreatmentMinor > 0 || (summary.financial.clinicalProgress?.historicalItems ?? 0) > 0
-                ? [[base, {
-                    balanceMinor: summary.financial.balanceMinor,
-                    remainingTreatmentMinor: summary.financial.remainingTreatmentMinor,
-                    clinicalProgress: summary.financial.clinicalProgress,
-                  }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number; clinicalProgress?: ClinicalProgressView }]]
+              ? (Object.entries(summary.financial.byCurrency) as [Currency, PatientWorkflowFinancialBucket][])
+                .filter(([, bucket]) => hasPatientFinancialActivity(bucket))
+              : hasPatientFinancialActivity(summary.financial)
+                ? [[base, summary.financial] as [Currency, PatientWorkflowFinancialBucket]]
                 : []
             ).map(([currency, bucket]) => (
               <p key={currency} data-testid="patient-account-currency-banner" data-currency={currency} className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
-                bucket.balanceMinor > 0
+                bucket.balanceMinor > 0 || bucket.approvedAgreements === undefined || bucket.classicInstallments === undefined
+                  || bucket.approvedAgreements?.available === false
                   ? "border-amber-200 bg-amber-50 text-amber-800"
                   : "border-emerald-200 bg-emerald-50 text-emerald-800"
               }`}>
                 {`تفاصيل العمل (${CURRENCY_LABEL[currency]})`}
-                {(bucket.agreementRemainingMinor ?? 0) > 0 ? ` · باقي الاتفاق (ليس المستحق الحالي): ${formatMoney(bucket.agreementRemainingMinor!, currency)}` : ""}
+                {bucket.approvedAgreements === undefined || bucket.classicInstallments === undefined
+                  ? " · ملخص الاتفاقات غير متاح؛ أعد تحميل بيانات الحساب" : ""}
+                {bucket.approvedAgreements
+                  ? bucket.approvedAgreements.available && bucket.approvedAgreements.remainingMinor !== null
+                    ? ` · المتبقي من الاتفاق المعتمد (ضمن رصيد الحساب): ${formatMoney(bucket.approvedAgreements.remainingMinor, currency)}`
+                    : " · متبقي الاتفاق المعتمد غير متاح؛ مصدر الاتفاق يحتاج مراجعة"
+                  : ""}
+                {bucket.classicInstallments ? ` · المتبقي المخطط للأقساط (ليس رصيد الحساب): ${formatMoney(bucket.classicInstallments.remainingMinor, currency)}` : ""}
                 {bucket.clinicalProgress?.historicalItems
                   ? <> · <HistoricalClinicalNote progress={bucket.clinicalProgress} currency={currency} /></>
                   : bucket.remainingTreatmentMinor > 0

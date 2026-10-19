@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readPatientAccountHeader } from "../lib/patient-account-header";
 
 const financial = () => ({ balanceMinor: 999999, byCurrency: {
-  YER: { balanceMinor: 0, agreementRemainingMinor: 900000, remainingTreatmentMinor: 800000 },
+  YER: { balanceMinor: 0, agreementRemainingMinor: 900000, approvedAgreements: { available: true, remainingMinor: 900000 }, remainingTreatmentMinor: 800000 },
   SAR: { balanceMinor: 2300, openingMinor: 5000, invoicedMinor: 6000, paidMinor: 8700 },
   USD: { balanceMinor: -500 },
 } });
