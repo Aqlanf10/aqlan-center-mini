@@ -1,6 +1,6 @@
 # Plan financial reads: FIN001, FIN002, FIN007
 
-Current stack base: PR #346, `133adb887c0edc45ca81d9ea1c9050a4d024f2ac`.
+Current stack base: PR #346, `a761a089d74906b7981592cadccf8f59a57a6240`.
 Initial reproduction base: `9fe4f2276c43ee9821e6eb217fee8f93c238dcb2`.
 This branch must follow #346. It does not merge, deploy, migrate a live database,
 backfill links, change receipts, or repair FIN003/FIN011/FIN010/HR-GL.
@@ -195,3 +195,29 @@ that combined tree using only the isolated loopback PostgreSQL18.6 service.
 run above predates the base's test-fixture-only update; the composed checks are
 listed separately. Local success does not establish hosted CI success, release
 acceptance or authorization to merge/deploy.
+
+## Current base integration after independent review
+
+The previously reviewed candidate `c6499390` now includes exact base
+`a761a089d74906b7981592cadccf8f59a57a6240`, through clean merge
+`1370af1864eca318000cbcd8188f88295d3e4406`. The before/after integration diff
+was byte-for-byte identical to the incoming base diff: six Ceph authorization
+product/test/documentation files, with no conflict and no additional product
+edits. The financial/UI fix sources remain identical to the reviewed candidate.
+[Integration comparison](security-base-evidence/integration.json).
+
+Checks rerun on this combined tree, using only isolated local synthetic databases:
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Unit/component/print/privacy + Ceph/permissions | 254 passed | [Unit](security-base-evidence/security-base-unit.log.gz) |
+| PostgreSQL plan/settlement/legacy/collection regressions | 184 passed | [PostgreSQL](security-base-evidence/security-base-pg.log.gz) |
+| Built-server HTTP: plan UI/privacy + Ceph authorization + permission matrix/RBAC | 60 passed, including Arabic390/1280 | [HTTP](security-base-evidence/security-base-http.log.gz) |
+| Operational `verify:ci` | 20/20 passed, no failures/skips | [Journeys](security-base-evidence/security-base-verify-ci.log.gz) |
+| Build and typecheck | Passed | [Build](security-base-evidence/security-base-build.log.gz), [Typecheck](security-base-evidence/security-base-typecheck.log.gz) |
+| Lint | Zero errors, 208 repository warnings | [Lint](security-base-evidence/security-base-lint.log.gz) |
+
+[Lossless log manifest](security-base-evidence/manifest.json). The HTTP server and
+its disposable database were torn down. No migration, live data, staging restart,
+PR merge or deployment occurred. This PR stays stacked on #346; root owns its
+retargeting to main and subsequent release decisions.

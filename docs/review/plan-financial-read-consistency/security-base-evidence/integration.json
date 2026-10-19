@@ -1,0 +1,17 @@
+{
+  "previous_reviewed_candidate": "c64993901616036f107f50c1f0f4287318571481",
+  "incoming_base": "a761a089d74906b7981592cadccf8f59a57a6240",
+  "tested_merge": "1370af1864eca318000cbcd8188f88295d3e4406",
+  "conflicts": false,
+  "integration_delta_equals_incoming_base_delta": true,
+  "binary_diff_sha256": "ba482e35d314ef2a7633c841b9ff089906b004257b81a63170d7cd92624971fa",
+  "changed_files": [
+    "__tests__/ceph-page-access.test.ts",
+    "__tests__/security-http/ceph-page-authorization.test.ts",
+    "app/ceph/[id]/page.tsx",
+    "app/ceph/compare/page.tsx",
+    "docs/security/ceph-page-authorization.md",
+    "lib/ceph-page-access.ts"
+  ],
+  "additional_product_edits": []
+}
