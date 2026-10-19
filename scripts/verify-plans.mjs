@@ -173,6 +173,41 @@ try {
     }],
   });
 
+  // Funding requires explicit identity: prove refusal before exercising the
+  // positive path. Snapshot persisted clinical and financial state, not counts only.
+  const signingSnapshot = async (visitId) => JSON.stringify({
+    rows: (await db.getPool().query(`SELECT
+      (SELECT to_jsonb(v) FROM visits v WHERE id=$2) AS visit,
+      (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM visit_procedures p WHERE visit_id=$2) AS procedures,
+      (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM treatment_plans p WHERE patient_id=$1) AS plans,
+      (SELECT jsonb_agg(to_jsonb(i) ORDER BY i.id) FROM plan_items i JOIN treatment_plans t ON t.id=i.plan_id WHERE t.patient_id=$1) AS items,
+      (SELECT jsonb_agg(to_jsonb(s) ORDER BY s.id) FROM treatment_sessions s JOIN plan_items i ON i.id=s.plan_item_id JOIN treatment_plans t ON t.id=i.plan_id WHERE t.patient_id=$1) AS sessions,
+      (SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i WHERE patient_id=$1) AS invoices,
+      (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM payments p WHERE patient_id=$1) AS payments`, [patient.id, visitId])).rows,
+    chart: await db.patientChart(patient.id),
+  });
+  const unlinkedPreview = await db.getClinicalVisit(visit.id);
+  check("الإجراء غير المرتبط لا يختار بند الاتفاق ضمنيًا", unlinkedPreview.planItemsMatched === 0);
+  check("تحذير الإجراء غير المرتبط يسمّي سجله المالي القائم",
+    typeof unlinkedPreview.planWarning === "string" && unlinkedPreview.planWarning.includes("سجل مالي قائم"));
+  const beforeRefusal = await signingSnapshot(visit.id);
+  const refused = await db.signClinicalVisit({
+    visitId: visit.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
+  });
+  check("توقيع العمل المغطى غير المرتبط مرفوض", refused.reason === "plan_session_unlinked");
+  check("الرفض لا يكتب أثرًا سريريًا أو ماليًا", await signingSnapshot(visit.id) === beforeRefusal);
+
+  const fillingItem = consented.items.find((item) => item.serviceId === filling.id && item.toothCode === 16);
+  if (!fillingItem) throw new Error("بند الحشوة الصريح غير موجود في تجهيز الرحلة");
+  await db.setVisitProcedures({
+    visitId: visit.id,
+    procedures: [{
+      serviceId: filling.id, toothCode: 16, surfaces: "mo", quantity: 1,
+      unitPriceMinor: filling.priceMinor, doctorId: null, note: null,
+      planItemId: fillingItem.id,
+    }],
+  });
+
   const preview = await db.getClinicalVisit(visit.id);
   check("الزيارة تعرف أنها تنفّذ بندًا من الخطة", preview.planItemsMatched === 1,
     `${preview.planItemsMatched} بند`);
@@ -184,6 +219,7 @@ try {
   });
   check("وُقّعت الزيارة", signed.reason === null);
   check("شُطب بندٌ واحد", signed.planItemsDone === 1, `${signed.planItemsDone}`);
+  check("جلسة الاتفاق المرتبطة لا تضيف فاتورة أو دينًا", signed.invoiceId === null && signed.duesMinor === 0);
 
   const executed = await db.getPlan(planId, today);
   const done = executed.items.filter((item) => item.status === "done");
@@ -209,10 +245,13 @@ try {
       unitPriceMinor: filling.priceMinor, doctorId: null, note: null,
     }],
   });
+  const beforeAgain = await signingSnapshot(secondVisit.id);
   const again = await db.signClinicalVisit({
     visitId: secondVisit.id, baseCurrency: "YER", signedBy: "فحص", signerDoctorPartyId: journeyDoctor,
   });
   check("البند المنفَّذ لا يُشطب مرتين", again.planItemsDone === 0, `${again.planItemsDone}`);
+  check("العمل المكتمل يبقى محميًا من إجراء جديد غير مرتبط", again.reason === "plan_session_unlinked");
+  check("رفض الزيارة التالية لا يكتب أثرًا سريريًا أو ماليًا", await signingSnapshot(secondVisit.id) === beforeAgain);
 
   await db.getPool().end();
 } catch (error) {
