@@ -1,3 +1,4 @@
+import { postgresDateOnly } from "./postgres-date-only";
 import { MAX_ATTENDANCE_GRACE_MINS, normalizeHrPolicy } from "./hr-settings-policy";
 /**
  * (HR-3 / HR-4) العقود، جداول العمل، الحضور والانصراف، والإجازات — **طبقة الخادم وقاعدة البيانات**.
@@ -109,7 +110,7 @@ async function synchronizeContractPayTerms(client: DbClient, staffId: number, se
     salary ? governing.salaryPeriod : null,salary ? governing.startDate : null];
   const changed = before.contract_kind !== values[0] || Number(before.salary_amount_minor) !== Number(values[1])
     || before.salary_currency !== values[2] || before.salary_period !== values[3]
-    || (before.salary_effective_on instanceof Date ? before.salary_effective_on.toISOString().slice(0,10) : before.salary_effective_on) !== values[4];
+    || (before.salary_effective_on == null ? null : postgresDateOnly(before.salary_effective_on)) !== values[4];
   if (!changed) return;
   await client.query(`UPDATE hr_staff SET contract_kind=$2,salary_amount_minor=$3,salary_currency=$4,
     salary_period=$5,salary_effective_on=$6,updated_at=NOW() WHERE id=$1`, [staffId,...values]);
@@ -590,9 +591,9 @@ function mapContractRow(row: Record<string, unknown>): HrContractView {
     templateKind: row.template_kind as HrContractTemplateKind,
     title: String(row.title),
     status: row.status as HrContractStatus,
-    startDate: row.start_date instanceof Date ? row.start_date.toISOString().slice(0,10) : String(row.start_date),
-    endDate: row.end_date ? (row.end_date instanceof Date ? row.end_date.toISOString().slice(0,10) : String(row.end_date)) : null,
-    probationEndDate: row.probation_end_date ? (row.probation_end_date instanceof Date ? row.probation_end_date.toISOString().slice(0,10) : String(row.probation_end_date)) : null,
+    startDate: postgresDateOnly(row.start_date),
+    endDate: row.end_date ? postgresDateOnly(row.end_date) : null,
+    probationEndDate: row.probation_end_date ? postgresDateOnly(row.probation_end_date) : null,
     noticePeriodDays: Number(row.notice_period_days ?? 30),
     termsPayload: (typeof row.terms_payload === "object" ? row.terms_payload : JSON.parse(String(row.terms_payload ?? "{}"))) as any,
     compensationKind: row.compensation_kind as any,
@@ -1137,7 +1138,7 @@ export async function recordAttendancePunch(
         ar.attendance_date ASC LIMIT 1 FOR UPDATE OF ar`,[staffId,dateStr,input.punchType,punchIso]);
     const row = prior.rows[0];
     if (row?.status === 'on_leave') throw new Error("يوجد طلب إجازة معتمد؛ راجعه قبل تسجيل حضور.");
-    const attendanceDate = row?.attendance_date instanceof Date ? row.attendance_date.toISOString().slice(0,10) : row?.attendance_date ?? dateStr;
+    const attendanceDate = row?.attendance_date == null ? dateStr : postgresDateOnly(row.attendance_date);
     const checkIn = row?.check_in_actual ? new Date(row.check_in_actual).toISOString() : input.punchType==='check_in' ? punchIso : null;
     const checkOut = row?.check_out_actual ? new Date(row.check_out_actual).toISOString() : input.punchType==='check_out' ? punchIso : null;
     if (checkIn && checkOut && Date.parse(checkOut)<Date.parse(checkIn)) throw new Error("وقت الخروج يسبق الدخول.");
@@ -1421,7 +1422,7 @@ function mapAttendanceRow(row: Record<string, unknown>): HrAttendanceRecordView 
     staffJobTitle: String(row.staff_job_title ?? ""),
     department: row.department as any,
     scheduleId: row.schedule_id ? Number(row.schedule_id) : null,
-    attendanceDate: row.attendance_date instanceof Date ? row.attendance_date.toISOString().slice(0,10) : String(row.attendance_date),
+    attendanceDate: postgresDateOnly(row.attendance_date),
     status: row.status as HrAttendanceStatus,
     checkInRaw: row.check_in_raw ? new Date(row.check_in_raw as string).toISOString() : null,
     checkOutRaw: row.check_out_raw ? new Date(row.check_out_raw as string).toISOString() : null,
@@ -1772,7 +1773,7 @@ export async function decideLeaveRequest(
     }
 
 
-    const year = Number((curr.start_date instanceof Date ? curr.start_date.toISOString() : String(curr.start_date)).slice(0,4));
+    const year = Number(postgresDateOnly(curr.start_date).slice(0,4));
 
     if (decision === "approved") {
       const overlap = await client.query(`SELECT id FROM hr_leave_requests WHERE staff_id=$1 AND id<>$2
@@ -1807,8 +1808,8 @@ export async function decideLeaveRequest(
       }
 
       // ربط الحضور بالجدول: تثبيت حالة on_leave في سجل الحضور لكل يوم من فترة الإجازة
-      const start = new Date(curr.start_date);
-      const end = new Date(curr.end_date);
+      const start = new Date(`${postgresDateOnly(curr.start_date)}T00:00:00.000Z`);
+      const end = new Date(`${postgresDateOnly(curr.end_date)}T00:00:00.000Z`);
       const cur = new Date(start);
       while (cur <= end) {
         const dStr = cur.toISOString().slice(0, 10);
@@ -1820,7 +1821,7 @@ export async function decideLeaveRequest(
           SET status = 'on_leave', notes = EXCLUDED.notes, updated_at = NOW()`,
           [curr.staff_id, dStr, `إجازة معتمدة رقم #${reqId}`, session.username],
         );
-        cur.setDate(cur.getDate() + 1);
+        cur.setUTCDate(cur.getUTCDate() + 1);
       }
     } else {
       // قرار الرفض أو الإلغاء
@@ -1931,8 +1932,8 @@ function mapLeaveRequestRow(row: Record<string, unknown>): HrLeaveRequestView {
     department: row.department as any,
     leaveTypeCode: row.leave_type_code as HrLeaveTypeCode,
     leaveTypeName: (row.leave_type_name as string) ?? undefined,
-    startDate: row.start_date instanceof Date ? row.start_date.toISOString().slice(0,10) : String(row.start_date),
-    endDate: row.end_date instanceof Date ? row.end_date.toISOString().slice(0,10) : String(row.end_date),
+    startDate: postgresDateOnly(row.start_date),
+    endDate: postgresDateOnly(row.end_date),
     daysCount: Number(row.days_count),
     isPartialDay: Boolean(row.is_partial_day),
     partialHours: row.partial_hours !== null ? Number(row.partial_hours) : null,
