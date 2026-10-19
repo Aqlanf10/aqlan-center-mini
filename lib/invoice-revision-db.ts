@@ -1,4 +1,5 @@
-import {prepareInvoiceCurrencyChange,writeInvoiceCurrencyEvidence} from "./invoice-currency-plan";
+import type { InvoiceCurrencyScopeReason } from "./invoice-currency-scope";
+import {prepareInvoiceCurrencyChange,writeInvoiceCurrencyEvidence,InvoiceCurrencyScopeError} from "./invoice-currency-plan";
 import {invoiceQuantityAllowed} from "./invoice-clinical-linkage";
 import {invoiceIdentityCatalog,validateInvoiceIdentityAmendments} from "./invoice-identity-amendments";
 import type { SessionPayload } from "./auth";
@@ -55,11 +56,11 @@ async function contextInTx(client: DbClient, invoiceId: number) {
   const identityCatalog=await invoiceIdentityCatalog(client);
   const {rows:[bound]}=await client.query<{bound:boolean}>("SELECT EXISTS(SELECT 1 FROM invoice_items WHERE invoice_id=$1 AND (source_type IS NOT NULL OR source_id IS NOT NULL) AND source_type IS DISTINCT FROM 'plan_item') AS bound",[invoiceId]);
   const identityAmendmentAvailable=Array.isArray(position.sourceSnapshot.payments)&&position.sourceSnapshot.payments.length===0&&!bound.bound;
-  let currencyCorrection:{available:boolean;targetCurrency:"SAR";settledMinor:number;accountDueMinor:number;message:string} | undefined;
+  let currencyCorrection:{available:boolean;targetCurrency:"SAR";settledMinor:number;accountDueMinor:number;message:string;reasonCodes?:InvoiceCurrencyScopeReason[]} | undefined;
   if(invoice.baseCurrency==="YER"){
     try{const planned=await prepareInvoiceCurrencyChange(client,invoice,0);
       currencyCorrection={available:true,targetCurrency:"SAR",settledMinor:planned.settledMinor,accountDueMinor:(await debtAccountDue(client,invoice.patientId,"SAR")).due,message:"تُنقل تسوية السندات السعودية المثبتة دون حركة نقدية."};
-    }catch(error){currencyCorrection={available:false,targetCurrency:"SAR",settledMinor:0,accountDueMinor:0,message:error instanceof Error?error.message:"تعذر إثبات تسوية العملة."};}
+    }catch(error){currencyCorrection={...(error instanceof InvoiceCurrencyScopeError?{reasonCodes:error.reasonCodes}:{}),available:false,targetCurrency:"SAR",settledMinor:0,accountDueMinor:0,message:error instanceof Error?error.message:"تعذر إثبات تسوية العملة."};}
   }
   const facts = { ...(currencyCorrection?{currencyCorrection}:{}), invoice, work,identityCatalog,identityAmendmentAvailable, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
     accountDueMinor,settlementProofHash:position.settlementProofHash, repaymentVersion: schedule?.version ?? 0, repaymentTerms: schedule?.status === "active" ? schedule.terms : { mode: "full", installments: [] } };

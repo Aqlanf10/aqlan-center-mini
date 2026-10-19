@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { Client } from "pg";
 import { authedGet, authedMutation, harness } from "./_server";
 
 /**
@@ -120,5 +121,54 @@ describe("شاشة نسب إهلاك المواد تكتب فعلًا", () => {
       },
     });
     expect(response.status).toBe(400);
+  });
+});
+
+
+describe("FIN011 explicit FX defaults over HTTP", () => {
+  it.each([
+    ["finance.rate.SAR", "140", "finance.rate.USD"],
+    ["finance.rate.USD", "530", "finance.rate.SAR"],
+  ] as const)("protects and persists %s through PATCH and reset", async (key, value, otherKey) => {
+    const url = new URL(h.seeded.dbUrl);
+    expect(["postgres:", "postgresql:"]).toContain(url.protocol);
+    expect(["localhost", "127.0.0.1", "[::1]"]).toContain(url.hostname);
+    expect(url.pathname).toBe("/aqlan_sec_http");
+    const db = new Client({ host: url.hostname === "[::1]" ? "::1" : url.hostname,
+      port: Number(url.port || "5432"), database: "aqlan_sec_http",
+      user: decodeURIComponent(url.username), password: decodeURIComponent(url.password), ssl: false });
+    await db.connect();
+    const { rows: saved } = await db.query("SELECT key,value,updated_at FROM settings WHERE key=$1", [key]);
+    const { rows: untouched } = await db.query("SELECT key,value,updated_at FROM settings WHERE key=$1", [otherKey]);
+    try {
+      for (const mode of ["patch", "reset"] as const) {
+        await db.query("DELETE FROM settings WHERE key=$1", [key]);
+        expect(versionOf(await snapshot(h.sessions.admin), key)).toBeNull();
+        const body = { [key]: value, __versions: { [key]: null } };
+        for (const session of [h.sessions.reception, h.sessions.doctorA]) {
+          expect((await patch(session, body)).status).toBe(403);
+          expect((await post(session, { action: "reset", keys: [key], __versions: { [key]: null } })).status).toBe(403);
+        }
+        expect((await patch(h.sessions.admin, { [key]: value })).status).toBe(409);
+        for (const invalid of ["", "0", "-1", "1000001"]) {
+          expect((await patch(h.sessions.admin, { [key]: invalid, __versions: { [key]: null } })).status).toBe(400);
+        }
+        expect((await db.query("SELECT key FROM settings WHERE key=$1", [key])).rows).toEqual([]);
+        const response = mode === "patch" ? await patch(h.sessions.admin, body) :
+          await post(h.sessions.admin, { action: "reset", keys: [key], __versions: { [key]: null } });
+        expect(response.status).toBe(200);
+        const payload = await response.json() as Record<string, unknown>;
+        expect(versionOf(payload, key)).toBeTruthy();
+        expect(payload[key]).toBe(value);
+        expect((await db.query("SELECT value FROM settings WHERE key=$1", [key])).rows).toEqual([{ value }]);
+        expect((await patch(h.sessions.admin, body)).status).toBe(409);
+        expect((await db.query("SELECT key,value,updated_at FROM settings WHERE key=$1", [otherKey])).rows).toEqual(untouched);
+      }
+    } finally {
+      await db.query("DELETE FROM settings WHERE key=$1", [key]);
+      for (const row of saved) await db.query("INSERT INTO settings(key,value,updated_at) VALUES($1,$2,$3)",
+        [row.key, row.value, row.updated_at]);
+      await db.end();
+    }
   });
 });

@@ -65,6 +65,8 @@ export function settingAuditDetails(input: {
   before: string;
   after: string;
   reason?: string | null;
+  /** False when an explicit save creates the first persisted setting row. */
+  previouslyStored?: boolean;
 }): SettingAuditDetails {
   const { definition, before, after } = input;
   const details: SettingAuditDetails = {
@@ -77,6 +79,10 @@ export function settingAuditDetails(input: {
   } else {
     details.قبل = boundValue(before);
     details.بعد = boundValue(after);
+  }
+  if (input.previouslyStored === false) {
+    details.firstPersist = true;
+    details.previousSource = "default";
   }
   const reason = (input.reason ?? "").trim();
   if (reason) details.السبب = boundValue(reason);

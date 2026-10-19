@@ -252,3 +252,31 @@ describe("expense manager catalogue-only response handling", () => {
     const view = await settle(); noBudget(view.html); expect(view.html).toContain("تعذّر التحقق");
   });
 });
+
+describe("expense manager export selection", () => {
+  it.each(["all", "search", "group", "over", "empty"])("passes the %s selection without a global summary", async (filter) => {
+    const first = { ...input.categories[0], id: 1, name: "Selected synthetic", categoryGroup: "Selected group" };
+    const second = { ...input.categories[0], id: 2, name: "Other synthetic", categoryGroup: "Other group", isOverBudget: true };
+    const data = projectExpenseCategories({ ...input, categories: [first, second] }, "full")!;
+    fetchMock.mockResolvedValueOnce(response(data)); render(); await settle();
+    if (filter === "search" || filter === "empty") {
+      const search = render().nodes.find((node) => node.type === "input" && String(node.props.placeholder).startsWith("بحث بالبند"))!;
+      (search.props.onChange as (e: unknown) => void)({ target: { value: filter === "search" ? "Selected synthetic" : "absent-synthetic" } });
+    } else if (filter === "group") {
+      const group = render().nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Selected group"))!;
+      (group.props.onClick as () => void)();
+    } else if (filter === "over") {
+      const button = render().nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("تصفية البنود المتجاوزة"))!;
+      (button.props.onClick as () => void)();
+    }
+    const exporter = (await import("../lib/expenseBudgetExport")).exportExpenseBudgetToExcel;
+    vi.mocked(exporter).mockClear();
+    const button = render().nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("تصدير Excel"))!;
+    (button.props.onClick as () => void)();
+    expect(exporter).toHaveBeenCalledOnce();
+    const params = vi.mocked(exporter).mock.calls[0][0];
+    expect(params.categories.map((row) => row.id)).toEqual(filter === "all" ? [1, 2] : filter === "empty" ? [] : filter === "over" ? [2] : [1]);
+    expect(params).not.toHaveProperty("summary");
+    expect(params.baseCurrency).toBe("YER");
+  });
+});

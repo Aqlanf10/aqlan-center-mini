@@ -414,7 +414,6 @@ export function ExpenseCategoriesManager({
                   clinicAddress,
                   baseCurrency,
                   categories: filteredCategories,
-                  summary,
                   month: selectedMonth,
                 });
               }

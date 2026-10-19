@@ -1,0 +1,101 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/expense-catalogue-manager.test.tsx __tests__/expense-budget-modal-export.test.tsx
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+ ❯ __tests__/expense-catalogue-manager.test.tsx (21 tests | 5 failed) 284ms
+     × passes the all selection without a global summary 28ms
+     × passes the search selection without a global summary 23ms
+     × passes the group selection without a global summary 23ms
+     × passes the over selection without a global summary 25ms
+     × passes the empty selection without a global summary 19ms
+ ❯ __tests__/expense-budget-modal-export.test.tsx (5 tests | 5 failed) 100ms
+     × passes the all selection without a global summary 56ms
+     × passes the group selection without a global summary 10ms
+     × passes the over selection without a global summary 11ms
+     × passes the within selection without a global summary 8ms
+     × passes the empty selection without a global summary 13ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/expense-budget-modal-export.test.tsx > expense modal export selection > passes the all selection without a global summary
+ FAIL  __tests__/expense-budget-modal-export.test.tsx > expense modal export selection > passes the group selection without a global summary
+ FAIL  __tests__/expense-budget-modal-export.test.tsx > expense modal export selection > passes the over selection without a global summary
+ FAIL  __tests__/expense-budget-modal-export.test.tsx > expense modal export selection > passes the within selection without a global summary
+ FAIL  __tests__/expense-budget-modal-export.test.tsx > expense modal export selection > passes the empty selection without a global summary
+AssertionError: expected { Object (clinicName, clinicPhone, ...) } to not have property "summary"
+
+- Expected:
+undefined
+
++ Received:
+{
+  "activeCategories": 1,
+  "month": "2026-07",
+  "overBudgetCount": 0,
+  "overallConsumptionPercent": 37,
+  "overallVariancePercent": -63,
+  "totalActualSpentMinor": 45678,
+  "totalCategories": 1,
+  "totalExpensesCount": 3,
+  "totalMonthlyBudgetMinor": 123400,
+  "totalVarianceMinor": 77722,
+}
+
+ ❯ __tests__/expense-budget-modal-export.test.tsx:51:24
+     49|     const params = vi.mocked(exportExpenseBudgetToExcel).mock.calls[0]…
+     50|     expect(params.categories.map((row) => row.id)).toEqual(filter === …
+     51|     expect(params).not.toHaveProperty("summary");
+       |                        ^
+     52|     expect(params.baseCurrency).toBe("SAR");
+     53|     expect(params.month).toBe("2026-10");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯
+
+ FAIL  __tests__/expense-catalogue-manager.test.tsx > expense manager export selection > passes the all selection without a global summary
+ FAIL  __tests__/expense-catalogue-manager.test.tsx > expense manager export selection > passes the search selection without a global summary
+ FAIL  __tests__/expense-catalogue-manager.test.tsx > expense manager export selection > passes the group selection without a global summary
+ FAIL  __tests__/expense-catalogue-manager.test.tsx > expense manager export selection > passes the over selection without a global summary
+ FAIL  __tests__/expense-catalogue-manager.test.tsx > expense manager export selection > passes the empty selection without a global summary
+AssertionError: expected { Object (clinicName, clinicPhone, ...) } to not have property "summary"
+
+- Expected:
+undefined
+
++ Received:
+{
+  "activeCategories": 1,
+  "month": "2026-07",
+  "overBudgetCount": 0,
+  "overallConsumptionPercent": 37,
+  "overallVariancePercent": -63,
+  "totalActualSpentMinor": 45678,
+  "totalCategories": 1,
+  "totalExpensesCount": 3,
+  "totalMonthlyBudgetMinor": 123400,
+  "totalVarianceMinor": 77722,
+}
+
+ ❯ __tests__/expense-catalogue-manager.test.tsx:279:24
+    277|     const params = vi.mocked(exporter).mock.calls[0][0];
+    278|     expect(params.categories.map((row) => row.id)).toEqual(filter === …
+    279|     expect(params).not.toHaveProperty("summary");
+       |                        ^
+    280|     expect(params.baseCurrency).toBe("YER");
+    281|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  10 failed | 16 passed (26)
+   Start at  01:12:11
+   Duration  1.92s (transform 799ms, setup 0ms, import 1.09s, tests 384ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

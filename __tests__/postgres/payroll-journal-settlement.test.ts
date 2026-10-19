@@ -113,15 +113,17 @@ describe("payroll disbursement journals use their actual payable links", () => {
   it("accrues 100 once, settles 40 then 60, reverses 60 and replays without duplicate expense or cash", async () => {
     const { run, item } = await approve(await staff("salary"));
     let entries = await journal();
-    expectLines(entry(entries, `PB-${item.payableId}`), [line("5401", 100, "debit"), line("2101", 100, "credit")]);
-    expect(net(entries, "5401")).toBe(100);
+    // Existing HR accrual retains its configured/default 5101 expense account.
+    // This repair must preserve that single cost, not remap the HR account catalog.
+    expectLines(entry(entries, `PB-${item.payableId}`), [line("5101", 100, "debit"), line("2101", 100, "credit")]);
+    expect(net(entries, "5101")).toBe(100);
     expect(net(entries, "2101")).toBe(-100);
     expect(net(entries, cash.YER)).toBe(0);
 
     const first = await payroll.disbursePayrollItem(item.id, { amountMinor: 40, clientRequestId: "journal-salary-40" }, admin);
     entries = await journal();
     expectLines(entry(entries, await expenseReference(first.parts[0].expenseId)), [line("2101", 40, "debit"), line(cash.YER, 40, "credit")]);
-    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "5101")).toBe(100);
     expect(net(entries, "2101")).toBe(-60);
     expect(net(entries, cash.YER)).toBe(-40);
     expect(await remaining(item.payableId!)).toBe(60);
@@ -130,7 +132,7 @@ describe("payroll disbursement journals use their actual payable links", () => {
     entries = await journal();
     const original = entry(entries, await expenseReference(second.parts[0].expenseId));
     expectLines(original, [line("2101", 60, "debit"), line(cash.YER, 60, "credit")]);
-    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "5101")).toBe(100);
     expect(net(entries, "2101")).toBe(0);
     expect(net(entries, cash.YER)).toBe(-100);
     expect(await remaining(item.payableId!)).toBe(0);
@@ -141,7 +143,7 @@ describe("payroll disbursement journals use their actual payable links", () => {
     expect(entry(entries, reversal.voucher_number).source).toBe("expense_void");
     expectLines(entry(entries, reversal.voucher_number), [line("2101", 60, "credit"), line(cash.YER, 60, "debit")]);
     expect(entry(entries, original.reference)).toEqual(original);
-    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "5101")).toBe(100);
     expect(net(entries, "2101")).toBe(-60);
     expect(net(entries, cash.YER)).toBe(-40);
     expect(await remaining(item.payableId!)).toBe(60);
@@ -155,7 +157,7 @@ describe("payroll disbursement journals use their actual payable links", () => {
     expect(await q("SELECT id FROM expenses")).toHaveLength(3);
     await payroll.disbursePayrollItem(item.id, { amountMinor: 60, clientRequestId: "journal-salary-60-new" }, admin);
     entries = await journal();
-    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "5101")).toBe(100);
     expect(net(entries, "2101")).toBe(0);
     expect(net(entries, cash.YER)).toBe(-100);
     expect(await remaining(item.payableId!)).toBe(0);
@@ -175,20 +177,18 @@ describe("payroll disbursement journals use their actual payable links", () => {
     const paid = await payroll.disbursePayrollItem(item.id, { amountMinor: 220, clientRequestId: "journal-doctor-full" }, admin);
     expect(paid.parts.map(part => [part.component, part.amountMinor]).sort()).toEqual([["commission", 120], ["salary", 100]]);
     const entries = await journal();
-    expectLines(entry(entries, `PB-${item.payableId}`), [line("5401", 100, "debit"), line("2101", 100, "credit")]);
-    expectLines(entry(entries, `PB-${item.commissionPayableId}`), [line("5301", 120, "debit"), line("2101", 120, "credit")]);
+    expectLines(entry(entries, `PB-${item.payableId}`), [line("5101", 100, "debit"), line("2101", 100, "credit")]);
+    expectLines(entry(entries, `PB-${item.commissionPayableId}`), [line("5101", 120, "debit"), line("2101", 120, "credit")]);
     for (const part of paid.parts) {
       expectLines(entry(entries, await expenseReference(part.expenseId)), [line("2101", part.amountMinor, "debit"), line(cash.YER, part.amountMinor, "credit")]);
       expect(await remaining(part.payableId!)).toBe(0);
     }
-    expect(net(entries, "5401")).toBe(100);
-    expect(net(entries, "5301")).toBe(120);
+    expect(net(entries, "5101")).toBe(220);
     expect(net(entries, "2101")).toBe(0);
     expect(net(entries.filter(value => ["expense", "expense_void"].includes(value.source)), cash.YER)).toBe(-220);
     await payroll.reversePayrollDisbursement(paid.id, { reason: "Synthetic doctor reversal" }, admin);
     const reversed = await journal();
-    expect(net(reversed, "5401")).toBe(100);
-    expect(net(reversed, "5301")).toBe(120);
+    expect(net(reversed, "5101")).toBe(220);
     expect(net(reversed, "2101")).toBe(-220);
     expect(net(reversed.filter(value => ["expense", "expense_void"].includes(value.source)), cash.YER)).toBe(0);
   });
@@ -198,15 +198,15 @@ describe("payroll disbursement journals use their actual payable links", () => {
 // produce. Inserts preserve append-only guards; no financial row is rewritten.
 async function party(kind = "employee", account: string | null = null, expenseAccount: string | null = null, posted = true) {
   return id(`INSERT INTO parties(name,kind,payable_account_code,expense_account_code,auto_post_journal)
-    VALUES($1,$2,$3,$4,$5) RETURNING id`, [`Synthetic journal party ${++sequence}`, kind, account, expenseAccount, posted]);
+    VALUES($1,$2,$3,$4,$5) RETURNING id`, [`Synthetic journal party ${++sequence}`, kind, account ?? "2101", expenseAccount ?? "5401", posted]);
 }
 async function payable(partyId: number, options: {
   amount?: number; currency?: Currency; rate?: number; account?: string | null; at?: string; posted?: boolean; source?: "operational" | "opening";
 } = {}) {
   const amount = options.amount ?? 100, currency = options.currency ?? "YER", rate = options.rate ?? 1;
   return id(`INSERT INTO payables(party_id,category,description,amount_minor,currency,exchange_rate,base_amount_minor,
-    base_currency,payable_account_code,created_at,is_posted,source_type,as_of_date,opening_reason)
-    VALUES($1,'salary','Synthetic journal payable',$2,$3,$4,$5,'YER',$6,$7,$8,$9,$10,'Synthetic opening journal fixture') RETURNING id`,
+    base_currency,payable_account_code,created_at,is_posted,source_type,as_of_date,opening_reason,expense_account_code)
+    VALUES($1,'salary','Synthetic journal payable',$2,$3,$4,$5,'YER',$6,$7,$8,$9,$10,'Synthetic opening journal fixture','5401') RETURNING id`,
   [partyId, amount, currency, rate, Math.round(amount * rate / (currency === "YER" ? 1 : 100)), options.account ?? null, options.at ?? AT, options.posted ?? true, options.source ?? "operational", options.source === "opening" ? "2026-01-01" : null]);
 }
 async function expense(partyId: number | null, options: {

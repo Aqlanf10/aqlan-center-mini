@@ -7796,7 +7796,8 @@ async function documentPrefixProblemInTx(
  *    يُردّ بتعارضٍ يسمّي المفتاح، ولا يُكتب شيء البتّة (كلّها أو لا شيء).
  *
  * ٢) **التدقيق بالقيمة**: صفٌّ لكل مفتاح تغيّر فعلًا، بقيمته قبل وبعد. والمفتاح
- *    الذي أُرسل بقيمته الحالية لا يُسجَّل — سجلٌّ يمتلئ بـ«لم يتغيّر شيء» يُخفي
+ *    المخزَّن الذي أُرسل بقيمته الحالية لا يُسجَّل؛ أول حفظٍ صريح يُثبَت حتى
+ *    إن ساوى الافتراضي. سجلٌّ يمتلئ بـ«لم يتغيّر شيء» يُخفي
  *    التغيير الحقيقي بين ضجيجه.
  *
  * ٣) **الأسرار**: لا تُنقل قيمتها إلى السجل بحالٍ — الحالة المعنوية وحدها.
@@ -7860,9 +7861,12 @@ export async function saveSettingsAudited(input: {
     for (const key of keys) {
       const definition = settingDefinition(key);
       if (!definition) continue;
-      const before = stored.get(key)?.value ?? SETTING_DEFAULTS[key as SettingKey] ?? "";
+      const current = stored.get(key);
+      const before = current?.value ?? SETTING_DEFAULTS[key as SettingKey] ?? "";
       const after = String(input.values[key]).trim();
-      if (before === after) continue;
+      // Explicitly saving a display default is still the first persisted value.
+      // The advisory lock and expected stamp above also protect this first write.
+      if (current && before === after) continue;
       await client.query(
         `INSERT INTO settings (key, value) VALUES ($1, $2)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
@@ -7871,7 +7875,7 @@ export async function saveSettingsAudited(input: {
       changed.push(key);
       audits.push({
         key,
-        details: settingAuditDetails({ definition, before, after, reason: input.reason }),
+        details: settingAuditDetails({ definition, before, after, reason: input.reason, previouslyStored: !!current }),
       });
     }
     await client.query("COMMIT");
