@@ -179,6 +179,17 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     }
     const result = await correctInvoiceInTransaction(client,{invoiceId,lines,reason,actor:session.username,actorRole:session.role},{discountMinor,amendments,...(changingCurrency?{currency:"SAR" as const}: {})});
     if (!result.ok) bad(result.message,result.reason === "not_found" ? "missing" : "conflict");
+    // Require one exact inserted identity for every retained source line before
+    // using the handoff. The pair set is internal, not part of the saved receipt.
+    const retainedIds = new Set(lines.map(line => line.itemId));
+    if (!Array.isArray(result.itemPairs) || result.itemPairs.length !== retainedIds.size
+      || result.itemPairs.some(pair => !pair || !retainedIds.has(pair.originalItemId)
+        || !Number.isSafeInteger(pair.correctedItemId) || pair.correctedItemId <= 0)
+      || new Set(result.itemPairs.map(pair => pair.originalItemId)).size !== retainedIds.size
+      || new Set(result.itemPairs.map(pair => pair.correctedItemId)).size !== retainedIds.size) {
+      bad("رابط بنود التصحيح غير مكتمل؛ لم يُحفظ التصحيح.", "conflict");
+    }
+    const correctedItems = new Map(result.itemPairs.map(pair => [pair.originalItemId, pair.correctedItemId]));
     const { rows: [revision] } = await client.query<{ id: number }>(
       `INSERT INTO invoice_corrections(patient_id,currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by,original_currency)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
@@ -198,9 +209,10 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
         }
         await client.query("UPDATE plan_items SET quantity=$2,unit_price_minor=$3,billed_invoice_id=$4,billing_status='billed' WHERE id=$1",
           [work.id,line.quantity,line.unitPriceMinor,result.correctedId]);
-        await client.query(`INSERT INTO invoice_correction_lines(correction_id,original_item_id,corrected_item_id,plan_item_id,approved_work)
+        const mapped = await client.query(`INSERT INTO invoice_correction_lines(correction_id,original_item_id,corrected_item_id,plan_item_id,approved_work)
           SELECT $1,$2,ii.id,i.id,${INVOICE_APPROVED_WORK_SQL} FROM plan_items i JOIN invoice_items ii ON ii.plan_item_id=i.id
-          WHERE i.id=$3 AND ii.invoice_id=$4`,[revision.id,original.id,work.id,result.correctedId]);
+          WHERE i.id=$3 AND ii.invoice_id=$4 AND ii.id=$5`,[revision.id,original.id,work.id,result.correctedId,correctedItems.get(original.id)]);
+        if (mapped.rowCount !== 1) bad("رابط بند العلاج لا يطابق بند الفاتورة المصححة؛ لم يُحفظ التصحيح.", "conflict");
       } else {
         await client.query("UPDATE plan_items SET status='cancelled' WHERE id=$1",[work.id]);
       }
