@@ -1,5 +1,8 @@
 # Security audit handoff — 2026-10-20 (READ-ONLY)
 
+> **Updated 2026-10-21:** For each backup finding's source, UTC event/inspection time, limits, what failed and what remains untested, refer to [BACKUP_RESTORE_EVIDENCE_2026-10-21.md](./BACKUP_RESTORE_EVIDENCE_2026-10-21.md). This later evidence matrix is authoritative for the backup/restore portion. Synthetic SQLite smoke PASS is **not** a PostgreSQL 18 or production archive restore proof. Separate hardening proposal: [Draft PR #369](https://github.com/Aqlanf10/aqlan-center-mini/pull/369). Dot retains sole review/merge decision. No production modifications or data transfers.
+
+
 **Owner for review and merge:** Dot. **Do not auto-merge or deploy.**
 
 ## Verified production facts
