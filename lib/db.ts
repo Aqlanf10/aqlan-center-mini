@@ -9916,6 +9916,7 @@ async function runPaymentTransaction(
     const approvedReceiptSource = !isRefund
       ? await (await import("./approved-agreements")).fenceApprovedReceiptSource(client,input.patientId,effectiveInvoiceId,effectiveOpeningCurrency)
       : null;
+    let cancelledInvoiceTarget = false;
     let inactivePlanTarget = false;
     let historicalPlanTarget = false;
     let lockedInvoicePlanId: number | null = null;
@@ -9926,9 +9927,9 @@ async function runPaymentTransaction(
        * لاحقًا (إلغاءٌ مثلًا) لا يعني أن ردّه يُمنع — الردُّ يُعيد ما قُبض،
        * ودورة حياة الفاتورة بعده. وتوافق العملة للردّ مضمون بنيويًّا: الردّ
        * بعملة الأصل، والأصل قُبض بعملةٍ توافقت مع فاتورته يوم قُبض. */
-      const { rows } = await client.query<{ base_currency: string; plan_id: number | null }>(
-        `SELECT base_currency, plan_id FROM invoices
-          WHERE id = $1 AND patient_id = $2 ${isRefund ? "" : "AND status <> 'cancelled'"}
+      const { rows } = await client.query<{ base_currency: string; plan_id: number | null; status: string }>(
+        `SELECT base_currency, plan_id, status FROM invoices
+          WHERE id = $1 AND patient_id = $2
           FOR SHARE`,
         [effectiveInvoiceId, input.patientId],
       );
@@ -9936,6 +9937,10 @@ async function runPaymentTransaction(
         await tx("ROLLBACK");
         return { kind: "reason", reason: "invalid_invoice" };
       }
+      // Preserve ownership/currency checks, but a committed exact retry remains
+      // a retry after correction cancels its original invoice. New writes are
+      // refused below, only after the actor-bound fingerprint replay check.
+      cancelledInvoiceTarget = !isRefund && rows[0].status === "cancelled";
       lockedInvoicePlanId = rows[0].plan_id;
       if (!isRefund) {
         /* (TD-05 / Phase J) الدفعة على فاتورة: بعملتها، أو بعملةٍ أخرى ضد فاتورةٍ
@@ -10048,6 +10053,11 @@ async function runPaymentTransaction(
         await tx("ROLLBACK");
         return { kind: "reason", reason: "idempotency_conflict" };
       }
+    }
+
+    if (cancelledInvoiceTarget) {
+      await tx("ROLLBACK");
+      return { kind: "reason", reason: "invalid_invoice" };
     }
 
     // Replay above must precede the remaining-balance check, including a fully paid source.
@@ -14247,9 +14257,9 @@ export async function adjustPartyOpeningPayable(input: {
     await client.query("BEGIN");
     const { rows } = await client.query<{
       id: number; party_id: number; party_name: string; source_type: string; currency: string;
-      effective: string; settled: string;
+      effective: string; settled: string; as_of_date: Date;
     }>(
-      `SELECT b.id, b.party_id, t.name AS party_name, b.source_type, b.currency,
+      `SELECT b.id, b.party_id, t.name AS party_name, b.source_type, b.currency, b.as_of_date,
               ${payableAmountSql("b")}::text AS effective, ${payableSettledTotalSql("b")}::text AS settled
          FROM payables b JOIN parties t ON t.id = b.party_id
         WHERE b.id = $1 FOR UPDATE OF b`,
@@ -14259,6 +14269,13 @@ export async function adjustPartyOpeningPayable(input: {
     if (!row || row.source_type !== "opening") {
       await client.query("ROLLBACK");
       return { ok: false, message: "الرصيد الافتتاحي غير موجود.", status: 404 };
+    }
+    // This operation changes the journal at the source opening date, not today.
+    // Read settings on this transaction: a process cache may predate period close.
+    const lockedBefore = (await getSettingsInTransaction(client))["finance.locked_before"]?.trim();
+    if (lockedBefore && dateText(row.as_of_date) < lockedBefore) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 409, message: "الفترة مقفلة. لا يمكن تعديل رصيد افتتاحي في فترة مقفلة." };
     }
     const currency = requireCurrency(row.currency, "رصيد افتتاحي", `#${row.id}`);
     const effective = toMinor(row.effective);
@@ -14411,6 +14428,12 @@ export async function voidPartyOpeningAdvance(input: {
     if (current.voided_at) {
       await client.query("ROLLBACK");
       return { ok: false, message: "الرصيد المقدَّم ملغى من قبل.", status: 409 };
+    }
+    // Voiding removes the source-date journal, so protect that date as well.
+    const lockedBefore = (await getSettingsInTransaction(client))["finance.locked_before"]?.trim();
+    if (lockedBefore && dateText(current.as_of_date) < lockedBefore) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 409, message: "الفترة مقفلة. لا يمكن إلغاء رصيد افتتاحي في فترة مقفلة." };
     }
     await client.query(
       `UPDATE party_opening_advances SET voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1`,

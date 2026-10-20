@@ -97,6 +97,31 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
       invoiceId=input.source.invoiceId;
       const invoice=(await client.query<{plan_id:number|null}>("SELECT plan_id FROM invoices WHERE id=$1 AND patient_id=$2 AND base_currency=$3 AND total_minor-discount_minor=$4 AND status<>'cancelled'",[invoiceId,p.patient_id,p.base_currency,p.total_minor])).rows[0];
       if(!invoice||invoice.plan_id!==null&&invoice.plan_id!==input.planId)fail("الفاتورة ليست أصلًا كاملًا مطابقًا لهذه الخطة.");
+      // A null invoice header is not proof of unowned clinical work. Signing
+      // records ownership on lines/procedures, and corrections retain ancestors.
+      // Keep standalone historical invoices eligible, but never override an
+      // authoritative association with another agreement or treatment plan.
+      const conflictingOwner=(await client.query(`WITH RECURSIVE lineage(id) AS (
+        SELECT $2::int UNION SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON l.id=c.corrected_invoice_id
+      ), owners(plan_id) AS (
+        SELECT i.plan_id FROM invoices i JOIN lineage l ON l.id=i.id
+        UNION ALL SELECT a.plan_id FROM approved_agreement_principals a JOIN lineage l ON l.id=a.invoice_id
+        UNION ALL SELECT p.plan_id FROM payments p JOIN lineage l ON l.id=p.invoice_id
+        UNION ALL SELECT pi.plan_id FROM plan_items pi WHERE pi.origin_invoice_id IN(SELECT id FROM lineage) OR pi.billed_invoice_id IN(SELECT id FROM lineage)
+        UNION ALL SELECT pi.plan_id FROM invoice_items ii JOIN lineage l ON l.id=ii.invoice_id
+          JOIN plan_items pi ON pi.id=ii.plan_item_id OR (ii.source_type='plan_item' AND pi.id=ii.source_id)
+        UNION ALL SELECT pi.plan_id FROM invoice_items ii JOIN lineage l ON l.id=ii.invoice_id
+          JOIN visit_procedures vp ON ii.source_type='visit_procedure' AND vp.id=ii.source_id JOIN plan_items pi ON pi.id=vp.plan_item_id
+        UNION ALL SELECT pi.plan_id FROM visits v JOIN lineage l ON l.id=v.invoice_id
+          JOIN visit_procedures vp ON vp.visit_id=v.id JOIN plan_items pi ON pi.id=vp.plan_item_id
+        UNION ALL SELECT pi.plan_id FROM visits v JOIN lineage l ON l.id=v.invoice_id
+          JOIN treatment_sessions ts ON ts.visit_id=v.id JOIN plan_items pi ON pi.id=ts.plan_item_id
+      ) SELECT 1 FROM owners WHERE plan_id<>$1
+      UNION ALL SELECT 1 FROM invoice_items ii JOIN lineage l ON l.id=ii.invoice_id
+        WHERE (ii.source_type='plan_item' AND NOT EXISTS(SELECT 1 FROM plan_items pi WHERE pi.id=ii.source_id))
+           OR (ii.source_type='visit_procedure' AND NOT EXISTS(SELECT 1 FROM visit_procedures vp WHERE vp.id=ii.source_id))
+      LIMIT 1`,[input.planId,invoiceId])).rows;
+      if(conflictingOwner.length)fail("الفاتورة مرتبطة بخطة أخرى أو مرجع علاجي غير واضح؛ يلزم مراجعة ملكية المصدر دون اعتماد جديد.");
       const extra=(await client.query("SELECT 1 FROM invoices WHERE plan_id=$1 AND id<>$2 UNION ALL SELECT 1 FROM payments WHERE plan_id=$1 AND (invoice_id IS NULL OR invoice_id<>$2) LIMIT 1",[input.planId,invoiceId])).rows;
       if(extra.length)fail("توجد مصادر أو دفعات أخرى للخطة؛ يلزم مطابقة مالية متعددة المصادر.");
     } else {openingCurrency=p.base_currency;historicalPaid=input.source.historicalPaidMinor;
