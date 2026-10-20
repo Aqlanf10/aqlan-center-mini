@@ -128,8 +128,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   /* (P2-10) مورّد الشراء: فاتورته تولد مع الإدخال. التزامٌ ماليٌّ فهو لمن يتعامل
      مع المال وحده، كسائر المستحقات. */
-  const supplierRaw = Number(source.supplierPartyId);
-  const supplierPartyId = Number.isInteger(supplierRaw) && supplierRaw > 0 ? supplierRaw : null;
+  const supplierRaw = source.supplierPartyId;
+  let supplierPartyId: number | null = null;
+  // Only an explicit empty choice may omit the payable. Malformed supplied
+  // IDs must not silently become a stock-only purchase or coerce to another party.
+  if (supplierRaw !== undefined && supplierRaw !== null && supplierRaw !== "") {
+    const parsedSupplier = typeof supplierRaw === "number" ? supplierRaw
+      : typeof supplierRaw === "string" && !/[^0-9]/.test(supplierRaw) ? Number(supplierRaw) : NaN;
+    if (!Number.isInteger(parsedSupplier) || parsedSupplier <= 0 || parsedSupplier > 2_147_483_647) {
+      return NextResponse.json({ message: "رقم المورّد غير صالح." }, { status: 400 });
+    }
+    supplierPartyId = parsedSupplier;
+  }
   if (supplierPartyId !== null && !canHandleMoney(session.role)) {
     return NextResponse.json({ message: "تسجيل فاتورة المورّد للإدارة والاستقبال." }, { status: 403 });
   }
