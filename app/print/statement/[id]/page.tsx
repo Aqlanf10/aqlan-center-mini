@@ -1,3 +1,4 @@
+import { StatementInvoiceDetails, currentStatementInvoices, statementPaymentLabel } from "./presentation";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, listPatientPlans, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import {
@@ -81,13 +82,25 @@ export default async function StatementPage({ params, searchParams }: {
   const activeCurrencies = CURRENCIES.filter((currency: Currency) => {
     const bucket: Balance = balances[currency];
     return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0
-      || bucket.openingMinor !== 0 || bucket.dueMinor !== 0;
+      || bucket.openingMinor !== 0 || bucket.dueMinor !== 0
+      || currentStatementInvoices(ledger.invoices).some((invoice) => invoice.baseCurrency === currency);
   });
 
   return (
     <>
       <PrintButton />
-      <div className="sheet sheet-a4">
+      <div className="sheet sheet-a4 statement-sheet" dir="rtl">
+        <style>{`
+          .statement-invoice { margin-bottom: 4mm; table-layout: fixed; }
+          .statement-invoice .statement-description { overflow-wrap: anywhere; white-space: pre-wrap; }
+          table.statement-invoice td.num, table.statement-invoice th.num { white-space: normal; overflow-wrap: anywhere; }
+          @media print {
+            .statement-invoice { break-inside: auto; page-break-inside: auto; }
+            .statement-invoice thead { display: table-header-group; }
+            .statement-invoice tr { break-inside: avoid; page-break-inside: avoid; }
+            .statement-invoice .statement-total { break-before: avoid; page-break-before: avoid; }
+          }
+        `}</style>
         <PrintHeader settings={settings} title="كشف حساب" />
 
         <div className="line">
@@ -110,28 +123,7 @@ export default async function StatementPage({ params, searchParams }: {
           </div>
         ))}
 
-        <p style={{ fontSize: "10pt", fontWeight: 700, margin: "2mm 0" }}>الفواتير</p>
-        <table className="items">
-          <thead>
-            <tr>
-              <th>الرقم</th><th>التاريخ</th><th>الحالة</th><th className="num">الصافي</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ledger.invoices.length === 0 ? (
-              <tr><td colSpan={4}>لا فواتير</td></tr>
-            ) : ledger.invoices.map((invoice) => (
-              <tr key={invoice.id}>
-                <td dir="ltr">{invoice.invoiceNumber}</td>
-                <td>{friendlyDateLong(invoice.createdAt.slice(0, 10))}</td>
-                <td>{invoice.status === "cancelled" ? "ملغاة" : invoice.status === "paid" ? "مسدّدة" : "مفتوحة"}</td>
-                <td className="num">
-                  {formatMoney(invoice.status === "cancelled" ? 0 : Math.max(0, invoice.totalMinor - invoice.discountMinor), invoice.baseCurrency)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <StatementInvoiceDetails invoices={ledger.invoices} />
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "5mm 0 2mm" }}>الدفعات</p>
         <table className="items">
@@ -148,7 +140,7 @@ export default async function StatementPage({ params, searchParams }: {
                 <td dir="ltr">{payment.receiptNumber}</td>
                 <td>{friendlyDateLong(payment.createdAt.slice(0, 10))}</td>
                 <td>
-                  {payment.kind === "refund" ? "استرداد " : ""}
+                  {statementPaymentLabel(payment, ledger.payments)}{" — "}
                   {formatMoney(payment.amountMinor, payment.currency)}
                   {payment.currency !== base ? ` (سعر ${payment.exchangeRate})` : ""}
                   {payment.settlementAllocation?<small> — تسوية مصححة {formatMoney(payment.settlementAllocation.targetMinor,payment.settlementAllocation.targetCurrency)}، دون نقد جديد</small>:null}
@@ -182,11 +174,11 @@ export default async function StatementPage({ params, searchParams }: {
                   <span className="num">{formatMoney(bucket.billedMinor, currency)}</span>
                 </div>
                 <div className="line">
-                  <span>إجمالي المحصّل</span>
+                  <span>صافي المحصّل بعد الاستردادات وعكس السندات</span>
                   <span className="num">{formatMoney(bucket.collectedMinor, currency)}</span>
                 </div>
                 <div className="line line-strong">
-                  <span>الرصيد</span>
+                  <span>الرصيد الحالي</span>
                   <span className="num">{bucket.dueMinor === 0 ? "المستحق الحالي مسدّد" : balanceText(bucket, currency)}</span>
                 </div>
               </div>
