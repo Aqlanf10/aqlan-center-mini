@@ -18,6 +18,7 @@ vi.mock("@/lib/session", () => ({
 const db = await import("../../lib/db");
 const route = await import("../../app/api/finance/expense-categories/route");
 const { isBalanced } = await import("../../lib/accounting");
+const { JournalReadIntegrityError } = await import("../../lib/journal-read-integrity");
 const ACTOR = "category-history-test";
 const FROM = "0001-01-01";
 const TO = "2099-12-31";
@@ -557,10 +558,17 @@ describe("legacy compatibility without retrospective cleanup", () => {
     const other = await category();
     // Deliberately reproduce old ambiguous data through the synthetic fixture.
     await db.getPool().query("UPDATE expense_categories SET name=$1 WHERE id=$2", [used.name, other.id]);
-    const fixture = await closedVoucher(used.name);
-    const before = await history(fixture);
-    expect(await db.updateExpenseCategory(used.id, { name: used.name, accountCode: "5502", autoPostJournal: true, monthlyBudgetMinor: 17 })).toBe(true);
-    expect(await history(fixture)).toEqual(before);
+    try {
+      const fixture = await closedVoucher(used.name);
+      const before = { expense: await db.getExpense(fixture.expenseId), shift: await db.getShift(fixture.shiftId) };
+      await expect(db.journalEntries(FROM, TO)).rejects.toBeInstanceOf(JournalReadIntegrityError);
+      expect(await db.updateExpenseCategory(used.id, { name: used.name, accountCode: "5502", autoPostJournal: true, monthlyBudgetMinor: 17 })).toBe(true);
+      expect({ expense: await db.getExpense(fixture.expenseId), shift: await db.getShift(fixture.shiftId) }).toEqual(before);
+      await expect(db.journalEntries(FROM, TO)).rejects.toBeInstanceOf(JournalReadIntegrityError);
+    } finally {
+      // Restore only this synthetic alias fixture so later independent tests can read their journals.
+      await db.getPool().query("UPDATE expense_categories SET name=$1 WHERE id=$2", [other.name, other.id]);
+    }
   });
 
   it("treats a legacy NULL posting flag as enabled without silently disabling history", async () => {

@@ -1,3 +1,4 @@
+import { JournalReadIntegrityError } from "./journal-read-integrity";
 import { patientAgreementSummary, type PatientWorkflowFinancialBucket } from "./patient-agreement-summary";
 import { APPROVED_AGREEMENT_SQL } from "./approved-agreement-schema";
 import { checksumOf } from "./migration-files";
@@ -15036,6 +15037,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
     /* (TD-REG-028) السند ومعه ما سوّاه من التزامه المرتبط **بعملة الالتزام** — القراءة نفسها التي
        يقرأ بها كشف الجهة (settledOnPayableSql)؛ والتسوية المجمّعة من التوزيعات أدناه. */
     pool.query<{
+      category_match_count: number;
       id: number; voucher_number: string; created_at: Date; category: string; currency: string;
       amount_minor: string; party_id: number | null; party_kind: string | null;
       party_name: string | null; payee_text: string | null;
@@ -15045,7 +15047,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       linked_payable_currency: string | null; linked_settled_minor: string | null;
       linked_payable_account_code: string | null; linked_snapshot_currency: string | null;
     }>(
-      `SELECT e.id, e.voucher_number, e.created_at, e.category, e.currency, e.amount_minor,
+      `SELECT e.id, e.voucher_number, e.created_at, e.category, e.currency, e.amount_minor, ec.category_match_count,
               e.party_id, t.kind AS party_kind, t.name AS party_name, e.payee_text,
               COALESCE(t.expense_account_code, ec.account_code) AS expense_account_code,
               t.payable_account_code,
@@ -15057,7 +15059,11 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
               CASE WHEN lp.id IS NULL THEN NULL ELSE ${settledOnPayableSql("e", "lp")} END AS linked_settled_minor
          FROM expenses e
          LEFT JOIN parties t ON t.id = e.party_id
-         LEFT JOIN expense_categories ec ON (ec.key = e.category OR ec.name = e.category)
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*)::int AS category_match_count, MIN(c.account_code) AS account_code,
+                  BOOL_AND(c.auto_post_journal) AS auto_post_journal
+             FROM expense_categories c WHERE c.key = e.category OR c.name = e.category
+         ) ec ON TRUE
          LEFT JOIN payables lp ON lp.id = e.payable_id
         WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
@@ -15196,6 +15202,11 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
   }
 
   for (const row of expenses.rows) {
+    // One matching row can match both aliases; multiple rows are never a winner selection.
+    // Refuse before auto-post filtering, including contradictory legacy posting flags.
+    if (row.category_match_count > 1) {
+      throw new JournalReadIntegrityError("ambiguous_expense_category", "expense", `expense:${row.id}`);
+    }
     /* الترحيل التلقائي يُعطَّل من الجهة (الربط المالي V2) أو من بند المصروف —
      * الفئة المعطّلة تُستثنى من الدفاتر المشتقة وقيودها اليدوية تكمّلها. */
     if (row.auto_post_journal === false) continue;
@@ -15345,7 +15356,13 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
 
   // قيدٌ لا يتوازن (داخل كل عملة) لا يدخل الدفاتر: وجوده يُفسد ميزان المراجعة كله ويجعل تتبّع
   // الخلل مستحيلًا بعد شهور. وهو مستحيل من قواعد الترحيل، لكنه ممكن من قيد يدوي قديم.
-  return entries.filter((entry): entry is JournalEntry => entry !== null && isBalanced(entry));
+  const complete: JournalEntry[] = [];
+  for (const entry of entries) {
+    if (entry === null) continue;
+    if (!isBalanced(entry)) throw new JournalReadIntegrityError("unbalanced_journal", entry.source, entry.reference);
+    complete.push(entry);
+  }
+  return complete;
 }
 
 /**

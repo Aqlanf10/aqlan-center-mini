@@ -1,3 +1,4 @@
+import { JournalReadIntegrityError, JOURNAL_REVIEW_RESPONSE } from "@/lib/journal-read-integrity";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, ensureSchema, getPool, journalEntries, recordAudit } from "@/lib/db";
 import { csvFile, exportFileName } from "@/lib/csv";
@@ -165,7 +166,12 @@ export async function GET(request: Request) {
   if (table === "journal") {
     const from = DATE_PATTERN.test(params.get("from") ?? "") ? params.get("from")! : `${today.slice(0, 4)}-01-01`;
     const to = DATE_PATTERN.test(params.get("to") ?? "") ? params.get("to")! : today;
-    const entries = await journalEntries(from, to);
+    let entries;
+    try { entries = await journalEntries(from, to); }
+    catch (error) {
+      if (error instanceof JournalReadIntegrityError) return NextResponse.json(JOURNAL_REVIEW_RESPONSE, { status: 409 });
+      return NextResponse.json({ message: "تعذّر التصدير." }, { status: 500 });
+    }
     /* (TD-REG-028) كل سطر بعملته الصريحة — رقمٌ في سطر دفترٍ بلا عملة لا يُعرف أهو ريالٌ يمني أم
        هللاتٌ سعودية أم سنتات. والمبالغ بوحداتها الصغرى كما في الدفاتر. */
     const rows = entries.flatMap((entry) => entry.lines.map((line) => [

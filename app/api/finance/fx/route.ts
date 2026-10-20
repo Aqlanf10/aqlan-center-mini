@@ -1,3 +1,4 @@
+import { JournalReadIntegrityError, JOURNAL_REVIEW_RESPONSE } from "@/lib/journal-read-integrity";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -32,6 +33,7 @@ export async function GET(request: Request) {
   try {
     return NextResponse.json(await fxReport(asOfFrom(request)));
   } catch (error) {
+    if (error instanceof JournalReadIntegrityError) return NextResponse.json(JOURNAL_REVIEW_RESPONSE, { status: 409 });
     if (error instanceof FinancialCurrencyIntegrityError) {
       return NextResponse.json(
         { message: "في المستندات دفعةٌ لا تُحلّ عملة تسويتها — راجع سجل المدفوعات قبل قراءة المراكز." },

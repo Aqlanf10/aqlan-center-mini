@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader, StatCard as Stat } from "@/components/PageHeader";
 import { CURRENCY_LABEL, formatMoney } from "@/lib/money";
 import {
@@ -30,19 +30,26 @@ export default function ExecutivePage() {
   const [feed, setFeed] = useState<ExecutiveKpis | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadSequence = useRef(0);
 
   const load = useCallback(async (from: string, to: string) => {
+    const sequence = ++loadSequence.current;
     setLoading(true);
+    setFeed(null);
+    setError(null);
     try {
       const response = await fetch(`/api/executive?from=${from}&to=${to}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      if (sequence !== loadSequence.current) return;
       setFeed(payload as ExecutiveKpis);
       setError(null);
     } catch (loadError) {
+      if (sequence !== loadSequence.current) return;
+      setFeed(null);
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }, []);
 
@@ -100,7 +107,9 @@ export default function ExecutivePage() {
       </section>
 
       {error && (
-        <p className="mb-4 rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm font-bold text-danger-800">{error}</p>
+        <div role="alert" className="mb-4 rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm font-bold text-danger-800">{error}
+          <button type="button" onClick={() => void load(range.from, range.to)} className="ms-3 underline">إعادة المحاولة</button>
+        </div>
       )}
 
       {loading && !feed && <p className="text-sm text-slate-500">جارٍ التحميل…</p>}
