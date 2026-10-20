@@ -102,6 +102,13 @@ describe("explicit issued-installment recovery on canonical PostgreSQL", () => {
     expect(await commission(target.doctorId, "SAR")).toBe(2_100);
     const source = await invoiceSource(target);
     const reversed = await refund(target);
+    const [refundAudit] = await q<{ action: string; details: Record<string, unknown> }>(
+      `SELECT action, details FROM audit_log WHERE entity = 'payment' AND entity_id = $1 ORDER BY id`, [String(reversed.id)]);
+    expect(refundAudit).toMatchObject({ action: "payment.refund", details: {
+      الخطة: target.planId, ردٌّ_لسند: target.paymentId, سعر_الصرف: reversed.exchangeRate,
+      المكافئ: reversed.baseAmountMinor, المبلغ: target.amountMinor, العملة: target.currency,
+    } });
+    expect(refundAudit.details).not.toHaveProperty("فاتورة_القسط");
     const [creation] = await q<{ id: string }>(`SELECT id FROM audit_log WHERE action = 'payment.create' AND entity_id = $1`, [String(target.paymentId)]);
     expect(typeof creation.id).toBe("string"); // canonical PG BIGSERIAL wire shape, not the pure fixture's number
     expect((await db.patientReversedInstallmentRecoveries(target.patientId)).recoveries[0])
@@ -119,6 +126,8 @@ describe("explicit issued-installment recovery on canonical PostgreSQL", () => {
     expect(payment).toMatchObject({ invoiceId: target.invoiceId, planId: target.planId, amountMinor: 7_000, currency: "SAR" });
     expect(results.filter((result) => result.replayed)).toHaveLength(4);
     expect(await audits(payment.id)).toHaveLength(1);
+    expect(await q(`SELECT action FROM audit_log WHERE entity = 'payment' AND entity_id = $1 ORDER BY id`, [String(payment.id)]))
+      .toEqual([{ action: "payment.recover_installment" }]);
     expect((await db.recordReversedInstallmentRecovery(request)).payment?.id).toBe(payment.id);
     expect(await audits(payment.id)).toHaveLength(1);
     expect(await due(target)).toBe(0);

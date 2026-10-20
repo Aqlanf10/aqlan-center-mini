@@ -40,6 +40,8 @@ describe("approved complete principal",()=>{
   const f=await fixture("USD",150000),a=approval(f);
   const results=await Promise.all([approveAgreement(a),approveAgreement(a)]);expect(results.filter(r=>!r.replayed)).toHaveLength(1);
   const c=collection(f,50000);const receipts=await Promise.all([collectApprovedAgreement(c),collectApprovedAgreement(c)]);
+  expect((await q("SELECT action FROM audit_log WHERE entity='payment' AND entity_id=$1 ORDER BY id",[String(receipts[0].payment!.id)])).rows)
+    .toEqual([{action:"plan.approved_collection"}]);
   expect(receipts[0].paymentId).toBe(receipts[1].paymentId);expect((await db.patientLedger(f.patientId)).invoices).toHaveLength(1);
   await expect(collectApprovedAgreement({...c,amountMinor:40000})).rejects.toThrow(/مفتاح/);
  });

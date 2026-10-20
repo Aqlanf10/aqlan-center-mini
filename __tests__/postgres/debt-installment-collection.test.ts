@@ -32,6 +32,8 @@ describe("bounded collection against existing debt",()=>{
     const {target,write}=await debt();const schedule=await schedules.saveDebtRepayment(write);
     const first=await collect(target.patientId,schedule.arrangementId,20000,"debt-collect-partial");expect(first.payment?.invoiceId).toBe(target.invoiceId);
     expect((await collect(target.patientId,schedule.arrangementId,20000,"debt-collect-partial")).payment?.id).toBe(first.payment?.id);
+    expect(await q("SELECT action FROM audit_log WHERE entity='payment' AND entity_id=$1 ORDER BY id",[String(first.payment!.id)]))
+      .toEqual([{action:"debt_repayment.collect"}]);
     await expect(collect(target.patientId,schedule.arrangementId,20001,"debt-collect-partial")).rejects.toMatchObject({code:"conflict"});
     expect((await schedules.listDebtRepayments(target.patientId,"2026-10-13"))[0]).toMatchObject({remainingMinor:40000,collectedMinor:20000,progress:{settledSinceRevisionMinor:20000}});
     expect((await q("SELECT count(*)::int AS n FROM invoices WHERE patient_id=$1",[target.patientId]))[0].n).toBe(1);
