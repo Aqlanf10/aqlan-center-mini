@@ -8303,7 +8303,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
 import { planInvoiceRevision, planInvoiceCorrection, type CorrectionLineInput } from "./invoice-correction";
-import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, toInputAmount, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
+import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, parseAmount, toInputAmount, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
 
 export interface Service {
   id: number;
@@ -14246,11 +14246,13 @@ export async function createPartyOpeningPayable(input: PartyOpeningPayableInput)
  */
 export async function adjustPartyOpeningPayable(input: {
   payableId: number;
-  newAmountMinor: number;
   reason: string;
   actor: string;
   actorRole: string | null;
-}): Promise<PartyOpeningResult<Payable>> {
+} & (
+  | { newAmountMinor: number; amount?: never; expectedCurrency?: never }
+  | { amount: string; expectedCurrency?: Currency; newAmountMinor?: never }
+)): Promise<PartyOpeningResult<Payable>> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
@@ -14278,16 +14280,35 @@ export async function adjustPartyOpeningPayable(input: {
       return { ok: false, status: 409, message: "الفترة مقفلة. لا يمكن تعديل رصيد افتتاحي في فترة مقفلة." };
     }
     const currency = requireCurrency(row.currency, "رصيد افتتاحي", `#${row.id}`);
+    // Raw HTTP amounts are major units in the locked source currency. A body
+    // currency is only an expected identity, never authority for scaling money.
+    const rawAmount = "amount" in input;
+    if ((rawAmount && "newAmountMinor" in input) || (!rawAmount && "expectedCurrency" in input)
+      || (rawAmount && input.expectedCurrency !== undefined && !isCurrency(input.expectedCurrency))) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 400, message: "اكتب القيمة الصحيحة للرصيد وعملته." };
+    }
+    if (rawAmount && input.expectedCurrency !== undefined && input.expectedCurrency !== currency) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 409, message: "عملة الطلب لا تطابق عملة الرصيد الافتتاحي. أعد تحميل الرصيد وراجع التصحيح." };
+    }
+    const newAmountMinor = rawAmount
+      ? (typeof input.amount === "string" ? parseAmount(input.amount, currency) : null)
+      : input.newAmountMinor;
+    if (typeof newAmountMinor !== "number" || !Number.isSafeInteger(newAmountMinor) || newAmountMinor < 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 400, message: "اكتب القيمة الصحيحة للرصيد." };
+    }
     const effective = toMinor(row.effective);
     const settled = toMinor(row.settled);
-    if (input.newAmountMinor < settled) {
+    if (newAmountMinor < settled) {
       await client.query("ROLLBACK");
       return {
         ok: false, status: 400,
         message: `لا يُصحَّح الرصيد إلى أقل مما سُدّد منه فعلًا (${formatMoney(settled, currency)}).`,
       };
     }
-    const delta = input.newAmountMinor - effective;
+    const delta = newAmountMinor - effective;
     if (delta === 0) {
       await client.query("ROLLBACK");
       return { ok: false, message: "القيمة الجديدة هي نفسها الحالية — لا تصحيح.", status: 400 };
@@ -14300,7 +14321,7 @@ export async function adjustPartyOpeningPayable(input: {
       action: "party_opening.adjust", entity: "payable", entityId: row.id, entityLabel: row.party_name,
       details: {
         الجهة: row.party_name, العملة: currency,
-        من: formatMoney(effective, currency), إلى: formatMoney(input.newAmountMinor, currency),
+        من: formatMoney(effective, currency), إلى: formatMoney(newAmountMinor, currency),
         الفرق: formatMoney(delta, currency), المسدد: formatMoney(settled, currency), السبب: input.reason,
       },
       actor: input.actor, actorRole: input.actorRole,

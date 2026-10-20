@@ -126,13 +126,12 @@ export async function PATCH(request: Request) {
       if (!Number.isInteger(payableId) || payableId <= 0) {
         return NextResponse.json({ message: "الرصيد الافتتاحي غير محدد." }, { status: 400 });
       }
-      const currency = isCurrency(source.currency) ? source.currency : CLINIC_BASE_CURRENCY;
-      const newAmountMinor = parseAmount(String(source.amount ?? ""), currency);
-      if (newAmountMinor === null || newAmountMinor < 0) {
-        return NextResponse.json({ message: "اكتب القيمة الصحيحة للرصيد." }, { status: 400 });
+      if (source.currency !== undefined && !isCurrency(source.currency)) {
+        return NextResponse.json({ message: "العملة يجب أن تكون YER أو SAR أو USD." }, { status: 400 });
       }
       const result = await adjustPartyOpeningPayable({
-        payableId, newAmountMinor, reason, actor: session.username, actorRole: session.role,
+        payableId, amount: String(source.amount ?? ""), expectedCurrency: source.currency,
+        reason, actor: session.username, actorRole: session.role,
       });
       if (!result.ok) return NextResponse.json({ message: result.message }, { status: result.status });
       return NextResponse.json(result.value);
