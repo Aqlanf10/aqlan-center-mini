@@ -44,6 +44,22 @@ describe("الاشتقاق الرياضي للرصيد", () => {
 });
 
 describe("فحص الحركة: الصرف لا يتجاوز والتسوية بلا سبب مرفوضة", () => {
+  it.each([0.001, 0.145, 1.001, 1.235, 999_999_999.999])(
+    "accepts exact NUMERIC(12,3) quantity %s without binary multiplication noise", qty => {
+      expect(validateMovement("in", qty, null, 0).ok).toBe(true);
+      expect(validateMovement("out", qty, null, qty).ok).toBe(true);
+      expect(validateMovement("adjust", -qty, "Synthetic loss", qty).ok).toBe(true);
+    },
+  );
+
+  it.each([0.0001, 1.2345, 999_999_999.9999, 1_000_000_000, Number.MAX_VALUE, NaN, Infinity])(
+    "rejects unsupported quantity %s before any storage rounding", qty => {
+      expect(validateMovement("in", qty, null, Number.MAX_VALUE).ok).toBe(false);
+      expect(validateMovement("out", qty, null, Number.MAX_VALUE).ok).toBe(false);
+      expect(validateMovement("adjust", -qty, "Synthetic loss", Number.MAX_VALUE).ok).toBe(false);
+    },
+  );
+
   it("الصرف داخل الرصيد يمر وتجاوزه يُرفض برسالة تذكر الرقّمين", () => {
     expect(validateMovement("out", 30, null, 50).ok).toBe(true);
     const rejected = validateMovement("out", 60, null, 50);

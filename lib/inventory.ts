@@ -17,6 +17,8 @@
  * مادة على الرف ويُكتشف ذلك يوم الحاجة إليها.
  */
 
+import { quantityAtoms } from "./inventory-domain/quantities";
+
 export type MovementKind = "in" | "out" | "adjust";
 
 export const MOVEMENT_KINDS: MovementKind[] = ["in", "out", "adjust"];
@@ -71,6 +73,14 @@ export function validateMovement(
   balance: number,
 ): MovementCheck {
   if (!Number.isFinite(qty)) return { ok: false, message: "الكمية رقمٌ غير منطقي." };
+  // Match NUMERIC(12,3) exactly, without rounding a quantity after its value or
+  // stock availability has already been checked. Decimal text avoids rejecting
+  // valid values such as 1.001 because of binary multiplication noise.
+  try {
+    quantityAtoms(String(Math.abs(qty)), 3, true);
+  } catch {
+    return { ok: false, message: "الكمية تتجاوز المدى المدعوم أو ثلاث منازل عشرية." };
+  }
   if (kind === "adjust") {
     if (qty === 0) {
       return { ok: false, message: "التسوية الصفرية لا معنى لها — إن صحّ الجرد فلا حركة." };

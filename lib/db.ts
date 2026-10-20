@@ -123,6 +123,8 @@ import {
   type BatchResult, type MovementKind, type StockStatus,
 } from "./inventory";
 import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
+import { quantityAtoms, QUANTITY_SCALE } from "./inventory-domain/quantities";
+import { proportionalCostMinor } from "./inventory-domain/treatment-cost";
 import { hashPassword } from "./auth";
 import { seedDefaultServices } from "./services-seed";
 import { seedDefaultLabServices } from "./lab-services-seed";
@@ -23951,8 +23953,26 @@ export async function createInventoryMovement(input: {
     const unitCost = isPurchase
       && typeof input.unitCostMinor === "number"
       && Number.isFinite(input.unitCostMinor) && input.unitCostMinor >= 0
-      ? Math.round(input.unitCostMinor) : null;
+      ? input.unitCostMinor : null;
     const isReturn = input.kind === "in" ? Boolean(input.isReturn) : false;
+    let purchaseAmountMinor: number | null = null;
+    if (unitCost !== null) {
+      // Minor-unit prices must already be exact integers. The HTTP boundary
+      // retains its existing YER amount parsing; internal callers cannot bypass
+      // the safe range or leave an unvaluatable purchase without a supplier.
+      if (!Number.isSafeInteger(unitCost)) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "ثمن الوحدة يجب أن يكون عددًا صحيحًا ضمن المدى المالي الآمن." };
+      }
+      try {
+        purchaseAmountMinor = proportionalCostMinor(
+          unitCost, Number(quantityAtoms(String(input.qty))), Number(QUANTITY_SCALE),
+        );
+      } catch {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "قيمة الشراء تتجاوز المدى المالي الآمن." };
+      }
+    }
 
     /* (P2-10) شراءٌ من مورّدٍ مسجَّل: فاتورته تولد هنا في المعاملة نفسها — فلا يُسجَّل
        الشراء مرتين يدويًّا ولا تُنسى المستحقات. رفضُ أي شرطٍ يتراجع بالحركة كلها. */
@@ -23963,7 +23983,7 @@ export async function createInventoryMovement(input: {
         await client.query("ROLLBACK");
         return { ok: false, message: "المورّد يُربط بإدخال الشراء وحده — لا بالصرف أو التسوية أو الرد." };
       }
-      if (unitCost == null || unitCost <= 0) {
+      if (unitCost == null || unitCost <= 0 || purchaseAmountMinor === null) {
         await client.query("ROLLBACK");
         return { ok: false, message: "اكتب ثمن الوحدة لتُسجَّل فاتورة المورّد." };
       }
@@ -23977,7 +23997,7 @@ export async function createInventoryMovement(input: {
       }
       supplier = { id: party.id, name: party.name };
       const qty = Math.abs(input.qty);
-      const amountMinor = Math.round(unitCost * qty);
+      const amountMinor = purchaseAmountMinor;
       const { rows: payableRows } = await client.query<{ id: number }>(
         `INSERT INTO payables (party_id, category, description, amount_minor, currency,
                                exchange_rate, base_amount_minor, base_currency, due_date, created_by)
@@ -24005,10 +24025,9 @@ export async function createInventoryMovement(input: {
         input.createdBy, unitCost, isReturn, supplier?.id ?? null, payableId,
       ],
     );
-    await client.query("COMMIT");
     const movement = toMovement(inserted[0]);
     const balanceAfter = deriveBalance([{ kind: movement.kind, qty: movement.qty }]) + balance;
-    void recordAudit({
+    await insertAuditRow(client, {
       action: "inventory.move", entity: "inventory_movement", entityId: movement.id,
       entityLabel: items[0].name,
       details: {
@@ -24022,6 +24041,7 @@ export async function createInventoryMovement(input: {
       },
       actor: input.createdBy,
     });
+    await client.query("COMMIT");
     return { ok: true, movement, balance: balanceAfter };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
