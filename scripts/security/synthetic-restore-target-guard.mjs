@@ -50,8 +50,13 @@ export function assertSafeLegacyRestoreTarget(connectionString, env = process.en
   let database;
   try { database = decodeURIComponent(url.pathname.slice(1)); }
   catch { refusal('invalid database encoding'); }
-  if (!/^backup_dst_[a-z0-9_]{6,80}$/.test(database)) {
-    refusal('database must be a dedicated backup_dst_* synthetic target');
+  const isLegacyDrill = /^backup_dst_[a-z0-9_]{6,80}$/.test(database);
+  // Existing restore-multiline-literals.test.ts uses a random dedicated
+  // aqlan_backup_precision_* database owned by its fixture helper.
+  const isOwnedPrecisionFixture = /^aqlan_backup_precision_[a-f0-9]{32}$/.test(database)
+    && env.NODE_ENV === 'test';
+  if (!isLegacyDrill && !isOwnedPrecisionFixture) {
+    refusal('database must be a dedicated synthetic restore fixture');
   }
   if (url.pathname.slice(1).includes('%') || url.pathname.slice(1) !== database) {
     refusal('encoded database names are ambiguous');
