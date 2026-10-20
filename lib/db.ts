@@ -9563,6 +9563,35 @@ export async function recordPayment(input: {
   return { payment: await getPayment(outcome.paymentId), reason: null };
 }
 
+/** Trusted HTTP adapter for an ordinary settings-owned receipt. The settings
+ * snapshot comes from the server, never a body rate/mode. Preserve its raw,
+ * nullable observation separately from any rounded successful-row snapshot.
+ * Direct callers, refunds and caller-owned purpose transactions do not opt in. */
+export async function recordSettingsOwnedPayment(
+  input: Omit<Parameters<typeof recordPayment>[0], "kind" | "exchangeRate" | "reversalOfId">,
+  settings: SettingsMap,
+): Promise<{
+  payment: Payment | null;
+  reason: Awaited<ReturnType<typeof recordPayment>>["reason"] | "exchange_rate_required";
+  replayed?: boolean;
+}> {
+  const observedExchangeRate = rateFromSettings(settings, input.currency, input.baseCurrency);
+  await ensureSchema();
+  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+    throw new Error("مبلغ السند يجب أن يكون عددًا صحيحًا أكبر من صفر.");
+  }
+  const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
+  const outcome = await runPaymentTransaction(
+    { ...input, kind: "payment", exchangeRate: observedExchangeRate,
+      planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
+    { idempotencyKey, reversalOfId: null, settingsOwnedFx: true,
+      receiptAudit: { actorRole: input.actorRole ?? null } },
+  );
+  if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
+  return { payment: await getPayment(outcome.paymentId), reason: null,
+    ...(outcome.kind === "replay" ? { replayed: true } : {}) };
+}
+
 /**
  * (RC-1) تصحيح سند قبضٍ أُدخل خطأً — **عكسٌ وسندٌ بديل في معاملةٍ واحدة**، لا تعديلٌ صامت.
  *
@@ -9876,27 +9905,41 @@ async function refundFitsReclassificationProof(client: DbClient, refund: {
   }
 }
 
-async function runPaymentTransaction(
-  input: {
-    patientId: number; invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
-    kind: "payment" | "refund"; amountMinor: number;
-    currency: Currency; baseCurrency: Currency; exchangeRate: number;
-    method: string; note: string | null; createdBy: string;
-  },
-  prepared: {
-    idempotencyKey: string | null; reversalOfId: number | null;
-    /** (RC-1) بديل سندٍ يرث هدف أصله المقفول كما هو — قسط الخطة يحمل فاتورته وخطته معًا قصدًا. */
-    inheritedTarget?: boolean;
-    /** Internal opt-in recovery only: ordinary/correction v1 fingerprints stay unchanged. */
-    requestHashOverride?: string;
-    /** Only recordPayment requests a generic receipt event. Caller-owned correction,
-     * debt, approved collection and recovery transactions retain their purpose audit. */
-    receiptAudit?: { actorRole: string | null };
-  },
-  /** (RC-1) معاملةٌ خارجية قائمة (تصحيح السند: عكسٌ + سندٌ بديل ذرّيًا). حينها لا تُفتح معاملة ولا
-   *  تُثبَّت ولا يُحرَّر الاتصال هنا — المتصل يملكها: يُثبّت عند النجاح، ويتراجع عن كل شيء عند أي سبب. */
+type PaymentTransactionInput = {
+  patientId: number; invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
+  kind: "payment" | "refund"; amountMinor: number;
+  currency: Currency; baseCurrency: Currency; exchangeRate: number | null;
+  method: string; note: string | null; createdBy: string;
+};
+type PaymentTransactionPrepared = {
+  idempotencyKey: string | null; reversalOfId: number | null;
+  /** (RC-1) A replacement inherits the locked origin's intentional invoice/plan pair. */
+  inheritedTarget?: boolean;
+  /** Internal opt-in recovery only: ordinary/correction v1 fingerprints stay unchanged. */
+  requestHashOverride?: string;
+  /** Only ordinary receipts request a generic atomic event; purpose callers own theirs. */
+  receiptAudit?: { actorRole: string | null };
+};
+type SettingsPaymentOutcome = PaymentOutcome | { kind: "reason"; reason: "exchange_rate_required" };
+// Existing numeric-rate callers retain their outcome contract and cannot enable
+// stored-rate fallback. Only the trusted settings wrapper owns the nullable lane.
+function runPaymentTransaction(
+  input: PaymentTransactionInput & { exchangeRate: number },
+  prepared: PaymentTransactionPrepared & { settingsOwnedFx?: never },
   outer?: DbClient,
-): Promise<PaymentOutcome> {
+): Promise<PaymentOutcome>;
+function runPaymentTransaction(
+  input: PaymentTransactionInput & { kind: "payment" },
+  prepared: PaymentTransactionPrepared & {
+    settingsOwnedFx: true; reversalOfId: null; requestHashOverride?: never; inheritedTarget?: never;
+  },
+): Promise<SettingsPaymentOutcome>;
+/** A caller-owned correction/debt/recovery transaction owns commit and rollback. */
+async function runPaymentTransaction(
+  input: PaymentTransactionInput,
+  prepared: PaymentTransactionPrepared & { settingsOwnedFx?: true },
+  outer?: DbClient,
+): Promise<SettingsPaymentOutcome> {
   const own = outer === undefined;
   const client = outer ?? await getPool().connect();
   /* التحكم بالمعاملة لمالكها وحده: داخل معاملةٍ خارجية تصير BEGIN/COMMIT/ROLLBACK بلا أثر —
@@ -10096,16 +10139,28 @@ async function runPaymentTransaction(
        origin-base allocation only after exact replay and native-budget checks. */
     const effectiveExchangeRate = refundSnapshot ? refundSnapshot.exchangeRate : input.exchangeRate;
     const effectiveBaseCurrency = refundSnapshot ? refundSnapshot.baseCurrency : input.baseCurrency;
-    let baseAmount = toBaseAmount(
-      input.amountMinor, input.currency, effectiveBaseCurrency, effectiveExchangeRate,
-    );
-    /* Preserve the legacy v1 request identity: actor, patient, native amount,
-       currency, targets, kind, method and origin. Stored base settlement is NOT
-       a hash input; refund allocation below must not change a successful key. */
-    const requestHash = prepared.requestHashOverride ?? idempotencyRequestHash(
+    // Stored base settlement is NOT a hash input; later refund allocation
+    // cannot change a successful key's legacy request identity.
+    // Every candidate uses the complete unchanged v1 identity. Only the FX
+    // slot is server-owned; never reconstruct incoming identity from saved fields.
+    const hashAtRate = (rate: number) => idempotencyRequestHash(
       input, prepared, effectiveInvoiceId, effectivePlanId,
-      effectiveExchangeRate, effectiveBaseCurrency, effectiveOpeningCurrency,
+      rate, effectiveBaseCurrency, effectiveOpeningCurrency,
     );
+    const matchesSuccessfulKey = (saved: { idempotency_request_hash: string | null; exchange_rate: string }) => {
+      if (prepared.requestHashOverride !== undefined && prepared.requestHashOverride !== null) {
+        return saved.idempotency_request_hash === prepared.requestHashOverride;
+      }
+      if (!prepared.settingsOwnedFx) {
+        return effectiveExchangeRate !== null && saved.idempotency_request_hash === hashAtRate(effectiveExchangeRate);
+      }
+      // The winning row is read on this transaction at BOTH replay exits. The
+      // raw observation can recover old overprecision hashes only when it truly
+      // matches; a lost raw value is not guessed from its rounded stored rate.
+      const rates = new Set([Number(saved.exchange_rate), effectiveExchangeRate]);
+      return [...rates].some(rate => rate !== null && Number.isFinite(rate) && rate > 0
+        && saved.idempotency_request_hash === hashAtRate(rate));
+    };
 
     /* (P1-FINAL-2) فحص الإعادة يسبق رفض المتبقي: إعادة المحاولة الناجحة لا
        يجب أن ترى «المتبقي صفر» فتُردّ بreversal_exceeds_remaining قبل أن تبلغ
@@ -10118,13 +10173,13 @@ async function runPaymentTransaction(
        متزامنين — ON CONFLICT ينتظر التزام المنافس ثم يكشفه هنا.) */
     if (prepared.idempotencyKey !== null) {
       const { rows: existing } = await client.query<{
-        id: number; idempotency_request_hash: string | null;
+        id: number; idempotency_request_hash: string | null; exchange_rate: string;
       }>(
-        `SELECT id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
+        `SELECT id, idempotency_request_hash, exchange_rate FROM payments WHERE idempotency_key = $1`,
         [prepared.idempotencyKey],
       );
       if (existing[0]) {
-        if (existing[0].idempotency_request_hash === requestHash) {
+        if (matchesSuccessfulKey(existing[0])) {
           await tx("COMMIT");
           return { kind: "replay", paymentId: existing[0].id };
         }
@@ -10132,6 +10187,18 @@ async function runPaymentTransaction(
         return { kind: "reason", reason: "idempotency_conflict" };
       }
     }
+
+    // No fabricated rate and no invalid base calculation just to reach replay.
+    // For a genuinely new settings-owned key keep the original observed raw
+    // rate/pricing and v1 bytes. Canonical persisted-rate writes are separate.
+    if (effectiveExchangeRate === null) {
+      await tx("ROLLBACK");
+      return { kind: "reason", reason: "exchange_rate_required" };
+    }
+    let baseAmount = toBaseAmount(
+      input.amountMinor, input.currency, effectiveBaseCurrency, effectiveExchangeRate,
+    );
+    const requestHash = prepared.requestHashOverride ?? hashAtRate(effectiveExchangeRate);
 
     if (cancelledInvoiceTarget) {
       await tx("ROLLBACK");
@@ -10268,13 +10335,13 @@ async function runPaymentTransaction(
       // الالتزام أبدًا.)
       if (prepared.idempotencyKey !== null) {
         const { rows: existing } = await client.query<{
-          id: number; idempotency_request_hash: string | null;
+          id: number; idempotency_request_hash: string | null; exchange_rate: string;
         }>(
-          `SELECT id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
+          `SELECT id, idempotency_request_hash, exchange_rate FROM payments WHERE idempotency_key = $1`,
           [prepared.idempotencyKey],
         );
         if (existing[0]) {
-          if (existing[0].idempotency_request_hash === requestHash) {
+          if (matchesSuccessfulKey(existing[0])) {
             await tx("COMMIT");
             return { kind: "replay", paymentId: existing[0].id };
           }

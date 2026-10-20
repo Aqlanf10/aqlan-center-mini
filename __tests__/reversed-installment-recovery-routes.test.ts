@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({
-  session: vi.fn(), recovery: vi.fn(), ordinary: vi.fn(), installment: vi.fn(),
+  session: vi.fn(), recovery: vi.fn(), ordinary: vi.fn(), direct: vi.fn(), installment: vi.fn(),
   settings: vi.fn(), audit: vi.fn(), plan: vi.fn(), funded: vi.fn(), payment: vi.fn(),
   readRecovery: vi.fn(), ledger: vi.fn(), plans: vi.fn(), access: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: mock.session }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden", getSettings: mock.settings,
-  recordReversedInstallmentRecovery: mock.recovery, recordPayment: mock.ordinary,
+  recordReversedInstallmentRecovery: mock.recovery, recordPayment: mock.direct,
+  recordSettingsOwnedPayment: mock.ordinary,
   recordPlanInstallment: mock.installment, recordAudit: mock.audit,
   getPlan: mock.plan, isPlanFundedByAgreement: mock.funded, getPayment: mock.payment,
   getPaymentByIdempotencyKey: vi.fn().mockResolvedValue(null), listPaymentsByDate: vi.fn(), setPlanStatus: vi.fn(),
@@ -87,10 +88,49 @@ describe("explicit recovery payment route", () => {
     expect((await postPayment(request({ patientId: 7, amount: "20", currency: "YER" }))).status).toBe(201);
     expect(mock.recovery).not.toHaveBeenCalled(); expect(mock.settings).toHaveBeenCalledOnce();
     expect(mock.ordinary).toHaveBeenCalledOnce();
-    expect(mock.ordinary).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: null, planId: null, idempotencyKey: "recover-route-001", amountMinor: 20, createdBy: "cashier-a", actorRole: "reception" }));
+    expect(mock.ordinary).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: null, planId: null, idempotencyKey: "recover-route-001", amountMinor: 20, createdBy: "cashier-a", actorRole: "reception" }), {});
+    expect(mock.direct).not.toHaveBeenCalled();
+    expect(mock.ordinary.mock.calls[0][0]).not.toHaveProperty("exchangeRate");
     // The canonical writer owns the atomic original event. This route mock
     // must not manufacture a second post-commit creation event.
     expect(mock.audit).not.toHaveBeenCalled();
+  });
+  it.each(["refund", "installment"])("preserves the legacy %s missing-FX response and pre-write gate", async lane => {
+    mock.session.mockResolvedValue({ username: "manager", role: "admin", userId: 1 });
+    mock.settings.mockResolvedValue({ "finance.rate.SAR": "invalid" });
+    const body = lane === "refund"
+      ? { patientId: 7, kind: "refund", reversalOfId: 9, amount: "20", currency: "SAR" }
+      : { patientId: 7, planId: 7, amount: "20", currency: "SAR" };
+    const response = await postPayment(request(body));
+    expect(response.status).toBe(409);
+    const refusal = await response.json();
+    expect(Object.keys(refusal)).toEqual(["message"]);
+    expect(refusal.message).toContain("سعر الصرف غير مضبوط");
+    expect(mock.plan).not.toHaveBeenCalled(); expect(mock.installment).not.toHaveBeenCalled();
+    expect(mock.ordinary).not.toHaveBeenCalled(); expect(mock.direct).not.toHaveBeenCalled();
+    expect(mock.audit).not.toHaveBeenCalled();
+  });
+  it("lets the ordinary settings-owned adapter resolve a key before mapping its missing-FX refusal", async () => {
+    const settings = { "finance.rate.SAR": "invalid" };
+    mock.settings.mockResolvedValue(settings);
+    mock.ordinary.mockResolvedValue({ payment: null, reason: "exchange_rate_required" });
+    const response = await postPayment(request({ patientId: 7, invoiceId: 17, amount: "20", currency: "SAR" }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ reason: "exchange_rate_required", message: expect.stringContaining("سعر الصرف غير مضبوط") });
+    expect(mock.ordinary).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ invoiceId: 17 }), settings);
+    expect(mock.direct).not.toHaveBeenCalled(); expect(mock.audit).not.toHaveBeenCalled();
+  });
+  it("refuses an ordinary payment origin link instead of dropping it in the settings adapter", async () => {
+    expect((await postPayment(request({ patientId: 7, invoiceId: 17, amount: "20", currency: "YER", reversalOfId: 9 }))).status).toBe(409);
+    expect(mock.ordinary).not.toHaveBeenCalled(); expect(mock.direct).not.toHaveBeenCalled();
+    expect(mock.audit).not.toHaveBeenCalled();
+  });
+  it("preserves the pre-existing specialized plan branch rather than claiming to repair its extra origin field", async () => {
+    mock.installment.mockResolvedValue({ paymentId: 55 });
+    mock.payment.mockResolvedValue({ id: 55 });
+    expect((await postPayment(request({ patientId: 7, planId: 7, amount: "20", currency: "YER", reversalOfId: 9 }))).status).toBe(201);
+    expect(mock.installment).toHaveBeenCalledOnce();
+    expect(mock.ordinary).not.toHaveBeenCalled(); expect(mock.direct).not.toHaveBeenCalled();
   });
   it("retains only the best-effort trace for an ordinary exact replay", async () => {
     mock.ordinary.mockResolvedValue({ payment: { id: 51, kind: "payment", receiptNumber: "P51", amountMinor: 20, currency: "YER", exchangeRate: 1, baseAmountMinor: 20, method: "cash" }, reason: null, replayed: true });
