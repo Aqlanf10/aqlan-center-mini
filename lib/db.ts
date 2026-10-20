@@ -1,3 +1,5 @@
+import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
+import { provePaymentCalculation, proveCorrectionAcknowledgment } from "./payment-acknowledgment-db";
 import { JournalReadIntegrityError } from "./journal-read-integrity";
 import { patientAgreementSummary, type PatientWorkflowFinancialBucket } from "./patient-agreement-summary";
 import { allocateRefundBaseMinor, isRefundBaseBudgetValid, type RefundBaseBudget } from "./refund-base-allocation";
@@ -8918,6 +8920,8 @@ export interface Payment {
   openingCurrency: Currency | null;
   shiftId: number;
   kind: "payment" | "refund";
+  /** Stored linkage for strict acknowledgment; database reads always emit it. */
+  reversalOfId?: number | null;
   amountMinor: number;
   currency: Currency;
   exchangeRate: number;
@@ -8937,7 +8941,7 @@ interface InvoiceRow {
 
 interface PaymentRow {
   id: number; receipt_number: string; patient_id: number; full_name: string;
-  invoice_id: number | null; plan_id: number | null; opening_currency: string | null; shift_id: number; kind: string;
+  invoice_id: number | null; plan_id: number | null; opening_currency: string | null; shift_id: number; kind: string; reversal_of_id: number | null;
   amount_minor: string; currency: string; exchange_rate: string;
   base_amount_minor: string; base_currency: string; method: string;
   note: string | null; created_by: string | null; created_at: Date;
@@ -8969,6 +8973,7 @@ const toPayment = (row: PaymentRow): Payment => ({
   openingCurrency: row.opening_currency === null ? null : requireCurrency(row.opening_currency, "دفعة رصيد سابق", row.id),
   shiftId: row.shift_id,
   kind: row.kind === "refund" ? "refund" : "payment",
+  reversalOfId: row.reversal_of_id,
   amountMinor: toMinor(row.amount_minor),
   /* (المراجعة النهائية ٤) مسار قراءة مالي يغذّي أرصدة المريض وورديّة
    * الصندوق — عملتا الدفعة وقاعدتها تُتحقّقان لا تُصبّان cast. */
@@ -8988,7 +8993,7 @@ const INVOICE_SELECT = `
     FROM invoices i JOIN patients p ON p.id = i.patient_id`;
 
 const PAYMENT_SELECT = `
-  SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.opening_currency, y.shift_id, y.kind,
+  SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.opening_currency, y.shift_id, y.kind, y.reversal_of_id,
          y.amount_minor, y.currency, y.exchange_rate, y.base_amount_minor, y.base_currency,
          y.method, y.note, y.created_by, y.created_at
     FROM payments y JOIN patients p ON p.id = y.patient_id`;
@@ -9574,6 +9579,7 @@ export async function recordSettingsOwnedPayment(
   payment: Payment | null;
   reason: Awaited<ReturnType<typeof recordPayment>>["reason"] | "exchange_rate_required";
   replayed?: boolean;
+  acknowledgmentEvidence?: AcknowledgmentEvidence;
 }> {
   const observedExchangeRate = rateFromSettings(settings, input.currency, input.baseCurrency);
   await ensureSchema();
@@ -9589,7 +9595,8 @@ export async function recordSettingsOwnedPayment(
   );
   if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
   return { payment: await getPayment(outcome.paymentId), reason: null,
-    ...(outcome.kind === "replay" ? { replayed: true } : {}) };
+    ...(outcome.kind === "replay" ? { replayed: true } : {}),
+    ...(outcome.acknowledgmentEvidence ? { acknowledgmentEvidence: outcome.acknowledgmentEvidence } : {}) };
 }
 
 /**
@@ -9626,9 +9633,9 @@ export async function correctPayment(input: {
     amountMinor: number; currency: Currency; exchangeRate: number; method: string;
     target: CorrectionTarget;
   };
-}): Promise<
+}, acknowledgment?: { observedExchangeRate: number | null }): Promise<
   | { reason: CorrectPaymentRefusal }
-  | { reason: null; replayed: boolean; reversal: Payment | null; replacement: Payment | null; original: { id: number; receiptNumber: string; patientId: number } }
+  | { reason: null; replayed: boolean; reversal: Payment | null; replacement: Payment | null; original: { id: number; receiptNumber: string; patientId: number }; acknowledgmentEvidence?: AcknowledgmentEvidence }
 > {
   await ensureSchema();
   const why = input.reason.trim();
@@ -9638,6 +9645,7 @@ export async function correctPayment(input: {
   let reversalId: number | null = null;
   let replacementId: number | null = null;
   let replayed = false;
+  let acknowledgmentEvidence: AcknowledgmentEvidence | undefined;
   let original: { id: number; receiptNumber: string; patientId: number } | null = null;
   try {
     await client.query("BEGIN");
@@ -9681,6 +9689,34 @@ export async function correctPayment(input: {
         target.invoiceId=active[0].id;
       }
     }
+    // Evidence is read-only and is never request authority. Legacy direct callers
+    // do not opt in; HTTP still uses exactly the existing correction admission.
+    const proveAcknowledgment = async (isNew: boolean): Promise<AcknowledgmentEvidence | undefined> => {
+      if (!acknowledgment || key === null || reversalId === null) return undefined;
+      const correction = await proveCorrectionAcknowledgment(client, {
+        originId: origin.id, reversalId, replacementId, key, actor: input.actor, reason: why,
+        originalTarget: next?.target.kind === "original",
+        replacementExpected: next && target ? {
+          amountMinor: next.amountMinor, currency: next.currency, method: next.method,
+          invoiceId: next.target.kind === "original" ? origin.invoice_id : target.invoiceId,
+          planId: target.planId, openingCurrency: target.openingCurrency,
+        } : null,
+        calculationRates: next ? [next.exchangeRate, acknowledgment.observedExchangeRate] : [],
+        replacementHashAtRate: (rate, receipt) => idempotencyRequestHash({
+          patientId: origin.patient_id, kind: "payment", amountMinor: next!.amountMinor,
+          currency: next!.currency, method: next!.method, note: replacementNote, createdBy: input.actor,
+        }, { idempotencyKey: key, reversalOfId: null }, receipt.invoice_id, target!.planId,
+          rate, CLINIC_BASE_CURRENCY, target!.openingCurrency),
+      });
+      if (!correction) {
+        // Never commit a new exceptional result that cannot be acknowledged.
+        // A previously committed result remains unresolved, not a fresh refusal.
+        if (isNew) throw new Error("Receipt acknowledgment evidence unavailable");
+        return { version: 1, status: "unconfirmed" };
+      }
+      return { version: 1, operation: next === null ? "void" : "correct", requestKey: key, correction };
+    };
+
     if (key !== null) {
       const { rows: keyed } = await client.query<{
         id: number; kind: string; patient_id: number; reversal_of_id: number | null; note: string | null;
@@ -9720,6 +9756,7 @@ export async function correctPayment(input: {
           }
         }
         if (!same) { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
+        acknowledgmentEvidence = await proveAcknowledgment(false);
         await client.query("COMMIT");
         replayed = true;
       }
@@ -9780,6 +9817,7 @@ export async function correctPayment(input: {
         },
         actor: input.actor, actorRole: input.actorRole ?? null,
       });
+      acknowledgmentEvidence = await proveAcknowledgment(true);
       await client.query("COMMIT");
     }
   } catch (error) {
@@ -9795,12 +9833,13 @@ export async function correctPayment(input: {
     original,
     reversal: reversalId === null ? null : await getPayment(reversalId),
     replacement: replacementId === null ? null : await getPayment(replacementId),
+    ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}),
   };
 }
 
 type PaymentOutcome =
-  | { kind: "inserted"; paymentId: number }
-  | { kind: "replay"; paymentId: number }
+  | { kind: "inserted"; paymentId: number; acknowledgmentEvidence?: AcknowledgmentEvidence }
+  | { kind: "replay"; paymentId: number; acknowledgmentEvidence?: AcknowledgmentEvidence }
   | {
     kind: "reason";
     reason:
@@ -10147,6 +10186,19 @@ async function runPaymentTransaction(
       input, prepared, effectiveInvoiceId, effectivePlanId,
       rate, effectiveBaseCurrency, effectiveOpeningCurrency,
     );
+    const paymentAcknowledgment = async (
+      paymentId: number, rates: readonly (number | null)[], isNew: boolean,
+    ): Promise<AcknowledgmentEvidence | undefined> => {
+      if (!prepared.settingsOwnedFx || prepared.idempotencyKey === null) return undefined;
+      const calculation = await provePaymentCalculation(client, {
+        paymentId, key: prepared.idempotencyKey, rates, hashAtRate,
+      });
+      if (!calculation) {
+        if (isNew) throw new Error("Receipt acknowledgment evidence unavailable");
+        return { version: 1, status: "unconfirmed" };
+      }
+      return { version: 1, operation: "payment", requestKey: prepared.idempotencyKey, calculation };
+    };
     const matchesSuccessfulKey = (saved: { idempotency_request_hash: string | null; exchange_rate: string }) => {
       if (prepared.requestHashOverride !== undefined && prepared.requestHashOverride !== null) {
         return saved.idempotency_request_hash === prepared.requestHashOverride;
@@ -10180,8 +10232,12 @@ async function runPaymentTransaction(
       );
       if (existing[0]) {
         if (matchesSuccessfulKey(existing[0])) {
+          const acknowledgmentEvidence = await paymentAcknowledgment(
+            existing[0].id, [Number(existing[0].exchange_rate), effectiveExchangeRate], false,
+          );
           await tx("COMMIT");
-          return { kind: "replay", paymentId: existing[0].id };
+          return { kind: "replay", paymentId: existing[0].id,
+            ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) };
         }
         await tx("ROLLBACK");
         return { kind: "reason", reason: "idempotency_conflict" };
@@ -10342,8 +10398,12 @@ async function runPaymentTransaction(
         );
         if (existing[0]) {
           if (matchesSuccessfulKey(existing[0])) {
+            const acknowledgmentEvidence = await paymentAcknowledgment(
+              existing[0].id, [Number(existing[0].exchange_rate), effectiveExchangeRate], false,
+            );
             await tx("COMMIT");
-            return { kind: "replay", paymentId: existing[0].id };
+            return { kind: "replay", paymentId: existing[0].id,
+              ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) };
           }
           await tx("ROLLBACK");
           return { kind: "reason", reason: "idempotency_conflict" };
@@ -10373,8 +10433,10 @@ async function runPaymentTransaction(
       });
     }
 
+    const acknowledgmentEvidence = await paymentAcknowledgment(rows[0].id, [effectiveExchangeRate], true);
     await tx("COMMIT");
-    return { kind: "inserted", paymentId: rows[0].id };
+    return { kind: "inserted", paymentId: rows[0].id,
+      ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) };
   } catch (error) {
     await tx("ROLLBACK").catch(() => {});
     throw error;

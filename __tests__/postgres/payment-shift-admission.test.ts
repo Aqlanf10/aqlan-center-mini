@@ -19,7 +19,8 @@ const ZERO = { YER: 0, SAR: 0, USD: 0 };
 const SHIFT_LOCK = /^SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE$/;
 const CLOSE_WRITE = /^UPDATE cashier_shifts SET/;
 const PAYMENT_INSERT = /^INSERT INTO payments\s*\(/;
-const FIRST_KEY_READ = /^SELECT id, idempotency_request_hash FROM payments WHERE idempotency_key = \$1$/;
+// Match both transaction replay reads, including the stored FX projection.
+const FIRST_KEY_READ = /^SELECT id, idempotency_request_hash, exchange_rate FROM payments WHERE idempotency_key = \$1$/;
 type Kind = "receipt" | "refund" | "void";
 type Currency = "YER" | "SAR" | "USD";
 const KINDS: Kind[] = ["receipt", "refund", "void"];

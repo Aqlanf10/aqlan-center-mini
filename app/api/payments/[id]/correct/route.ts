@@ -64,6 +64,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ? idempotencyKeyRaw.trim() : null;
 
   let replacement: Parameters<typeof correctPayment>[0]["replacement"] = null;
+  let acknowledgmentRate: number | null = null;
   if (mode === "correct") {
     const currency = source.currency;
     if (!isCurrency(currency)) return NextResponse.json({ message: "اختر عملة السند الصحيح." }, { status: 400 });
@@ -73,8 +74,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     const saved=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
     const original=saved?await getPayment(paymentId):null;
-    const exchangeRate = saved&&saved.patientId===original?.patientId&&saved.createdBy===session.username&&saved.currency===currency
+    const usesSavedRate = saved&&saved.patientId===original?.patientId&&saved.createdBy===session.username&&saved.currency===currency;
+    const exchangeRate = usesSavedRate
       ?saved.exchangeRate:rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY);
+    // This genuine observation may prove an old raw-FX calculation after the
+    // unchanged correction matcher succeeds. It never chooses admission/pricing.
+    acknowledgmentRate = exchangeRate;
+    if (usesSavedRate) {
+      try { acknowledgmentRate = rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY); }
+      catch { acknowledgmentRate = null; } // Optional witness failure cannot change saved-key admission.
+    }
     if (exchangeRate === null) {
       return NextResponse.json({ message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." }, { status: 409 });
     }
@@ -98,13 +107,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // التدقيق يُكتب داخل معاملة التصحيح نفسها (لا تصحيح بلا أثره).
     const result = await correctPayment({
       paymentId, reason, actor: session.username, actorRole: session.role, idempotencyKey, replacement,
-    });
+    }, { observedExchangeRate: acknowledgmentRate });
     if (result.reason !== null) {
       const refusal = MESSAGES[result.reason];
       return NextResponse.json({ message: refusal.message }, { status: refusal.status });
     }
     return NextResponse.json(
-      { original: result.original, reversal: result.reversal, replacement: result.replacement, replayed: result.replayed, idempotencyKey },
+      { original: result.original, reversal: result.reversal, replacement: result.replacement, replayed: result.replayed, idempotencyKey,
+        ...(result.acknowledgmentEvidence ? { acknowledgmentEvidence: result.acknowledgmentEvidence } : {}) },
       { status: result.replayed ? 200 : 201 },
     );
   } catch {

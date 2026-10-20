@@ -231,9 +231,11 @@ export async function POST(request: Request) {
     // Only ordinary HTTP receipts use settings-owned compatibility. Refunds
     // retain their inherited origin snapshot and their existing route FX gate.
     if (kind === "refund" && exchangeRate === null) return exchangeRateRequired();
-    const { payment, reason, replayed } = kind === "payment"
+    const result = kind === "payment"
       ? await recordSettingsOwnedPayment(receiptInput, settings)
       : await recordPayment({ ...receiptInput, kind, exchangeRate: exchangeRate!, reversalOfId });
+    const { payment, reason, replayed } = result;
+    const acknowledgmentEvidence = "acknowledgmentEvidence" in result ? result.acknowledgmentEvidence : undefined;
     if (reason === "exchange_rate_required") return exchangeRateRequired(true);
     if (reason === "issued_installment_recovery_required" || reason === "installment_recovery_review_required") {
       return NextResponse.json({ reason, message: reason === "issued_installment_recovery_required"
@@ -333,7 +335,8 @@ export async function POST(request: Request) {
       });
     }
     // replay = نفس العملية المالية التي نجحت قبل قليل، فيُعاد السند نفسه بلا 201.
-    return NextResponse.json({ ...payment, idempotencyKey }, { status: replayed ? 200 : 201 });
+    return NextResponse.json({ ...payment, idempotencyKey,
+      ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) }, { status: replayed ? 200 : 201 });
   } catch (error) {
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة." }, { status: 500 });
