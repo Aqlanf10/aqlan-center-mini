@@ -379,11 +379,12 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatmentEntry, onClinicalChange, onNavigationGuardChange }: {
+export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange, onNavigationGuardChange }: {
   patientId: number;
   context?: ClinicalNavigationContext;
   onContextChange?: (context: ClinicalNavigationContext) => unknown;
   onOpenTreatmentEntry?: () => unknown;
+  onOpenAccount?: () => unknown;
   onClinicalChange?: () => void;
   /** The page owns navigation; cleanup retires only this exact registration. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
@@ -410,11 +411,11 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onClinicalChange={onClinicalChange} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onOpenAccount={onOpenAccount} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTreatmentEntry, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onClinicalChange?: () => void }) {
+function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onOpenAccount?: () => unknown; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -568,9 +569,6 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
         <p>لإضافة علاج جديد أو اتفاق سابق، ابدأ من الحساب لربط الخطة والفاتورة أو الرصيد السابق.</p>
         <button type="button" onClick={() => onOpenTreatmentEntry()} className="mt-2 min-h-11 rounded-lg bg-sky-800 px-3 text-white">إضافة علاج أو اتفاق</button>
       </div> : null}
-      {context?.orthoCaseId !== undefined ? <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
-        planId={context.planId} planItemId={context.planItemId} clinicalCaseId={context.clinicalCaseId} orthoCaseId={context.orthoCaseId}
-        onOpenClinicalContext={(reference) => onContextChange?.(reference)} /> : null}
       <button type="button" aria-label="تحديث كابينة التقويم" onClick={load}
         className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold">تحديث كابينة التقويم</button>
       {owner.drafts.get("case-patch")?.uncertain ? <UncertainWrite draft={owner.drafts.get("case-patch")!} /> : null}
@@ -740,15 +738,20 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </div>
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
-                  {row.baselineKind === "legacy" && (row.status === "active" || row.status === "retention")
+                  <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
+                    planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
+                    onOpenClinicalContext={(reference) => onContextChange?.(reference)} />
+                  {(row.status === "active" || row.status === "retention")
                     ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
-                        refreshRevision={onboardingRevision} /> : null}
+                        refreshRevision={onboardingRevision} onOpenAccount={onOpenAccount} /> : null}
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
-                      <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
-                        canLink={session?.role === "admin" || session?.role === "reception"
-                          || (session?.role === "doctor" && session.permissions?.canEditPlans !== false)}
-                        onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
+                      <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">رابط خطة أقساط قديم · للتوافق فقط</summary>
+                        <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
+                          canLink={row.planId !== null && (session?.role === "admin" || session?.role === "reception"
+                            || (session?.role === "doctor" && session.permissions?.canEditPlans !== false))}
+                          onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
+                      </details>
                     ) : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}

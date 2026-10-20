@@ -92,7 +92,7 @@ describe("built patient walkout verifies balances for reception", () => {
         const position = (dueMinor: number) => ({ billedMinor: 0, collectedMinor: 0, openingMinor: dueMinor, dueMinor });
         const accountPositions = { YER: position(foreignCurrency ? 0 : 180000), SAR: position(foreignCurrency ? 0 : 2300), USD: position(0) };
         if (foreignCurrency) accountPositions[foreignCurrency] = position(2300);
-        const body: TreatmentFinancialContext = { patientId, references: [], plans: [], openingPositions: [], accountPositions,
+        const body: TreatmentFinancialContext = { patientId, references: [], plans: [], historicalDocuments: [], openingPositions: [], accountPositions,
           documents: paidInvoice ? [{ invoiceId: 98784, invoiceNumber: "SYN-PAID", status: "paid", currency: "SAR", grossMinor: 5000,
             discountMinor: 0, netMinor: 5000, installmentPlanId: null, settlements: [], directlyLinkedSettledMinor: 0,
             allocatedRemainingMinor: null, allocationState: "not_available" }] : [] };

@@ -17,17 +17,17 @@ export type LegacyFinancialMode = typeof LEGACY_FINANCIAL_MODES[number];
 
 export const LEGACY_FINANCIAL_LABEL: Record<LegacyFinancialMode, string> = {
   opening_balance: "المتبقي عليه رصيدٌ سابق",
-  prepaid_included: "دفع مسبقًا — الجلسات المتبقية مشمولة",
+  prepaid_included: "دفع مسبقًا بحسب اللقطة السابقة",
   per_session: "يدفع كل جلسة",
-  installments: "أقساط عبر خطة علاج",
+  installments: "تحصيل المتبقي على أقساط",
 };
 
 /** ما يفعله المستخدم في البرنامج بعد اللقطة — المال يمرّ من أبوابه القائمة، لا من اللقطة. */
 export const LEGACY_FINANCIAL_HINT: Record<LegacyFinancialMode, string> = {
-  opening_balance: "سجّل المبلغ المتبقي من «الرصيد الافتتاحي» في حساب المريض — لا فاتورة جديدة.",
-  prepaid_included: "لا تُفوتر الشدّات القادمة — تُسجَّل الجلسات فقط.",
-  per_session: "كل زيارة تُفوتر بإجراءاتها عند توقيعها كالمعتاد.",
-  installments: "اربط خطة الأقساط القائمة (أو أنشئها من الخطط) — الأقساط تُحصَّل منها.",
+  opening_balance: "راجع الاتفاق السابق و«الرصيد الافتتاحي» في الحساب؛ إن لم يُسجَّل الاتفاق فمساره من الحساب، بلا فاتورة جديدة أو تكرار للرصيد.",
+  prepaid_included: "هذا وصف تاريخي للمدفوع؛ شمول الشدّة يُتحقق من مرجع الحالة الحالي، ولا تنشأ رسوم من تسجيل اللقطة.",
+  per_session: "قرار فوترة الشدّة يوثّق في الزيارة؛ وصف اللقطة لا ينشئ فاتورة تلقائيًا.",
+  installments: "الفاتورة أو الاتفاق السابق هو أصل الالتزام؛ جدول الأقساط ينظّم تحصيل المتبقي من الحساب، دون خطة أو دين جديد.",
 };
 
 export function isLegacyFinancialMode(value: unknown): value is LegacyFinancialMode {

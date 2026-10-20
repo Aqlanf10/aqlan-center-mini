@@ -85,7 +85,7 @@ function ledger(patientId: number, mode: "standard" | "aggregate" | "missing" = 
 // This sibling uses the very same controlled ledger snapshot, never a zero
 // account substituted for the historical balance under examination.
 function financialReferences(patientId: number, value: ReturnType<typeof ledger>): TreatmentFinancialContext {
-  const result: TreatmentFinancialContext = { patientId, references: [], documents: [], plans: [],
+  const result: TreatmentFinancialContext = { patientId, references: [], documents: [], historicalDocuments: [], plans: [],
     accountPositions: value.balances,
     openingPositions: (value.legacyOpeningPositions ?? []).map(position => ({ ...position, currency: "SAR" as const,
       scope: "patient_currency" as const, agreementIds: [], allocationState: "not_allocated" as const })) };
