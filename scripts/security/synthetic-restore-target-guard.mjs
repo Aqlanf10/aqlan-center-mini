@@ -9,7 +9,7 @@ import { validateLocalVerificationTarget, validateOperationalVerificationEnviron
 const refusal = (reason) => { throw new Error('Legacy restore refused: ' + reason); };
 
 export function assertSafeLegacyRestoreTarget(connectionString, env = process.env) {
-  if (typeof connectionString !== 'string' || connectionString !== connectionString.trim() || /[\\u0000-\\u0020\\u007f]/.test(connectionString)) {
+  if (typeof connectionString !== 'string' || connectionString !== connectionString.trim() || [...connectionString].some(char => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127)) {
     refusal('ambiguous whitespace or control character in target URI');
   }
   try { validateOperationalVerificationEnvironment(env); }
