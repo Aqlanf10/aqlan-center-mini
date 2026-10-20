@@ -99,6 +99,7 @@ describe("checkout collection targets match the source-qualified recommendation"
   it("keeps the ordinary invoice's exact target, amount and currency", async () => {
     const f = await load(withDue());
     const button = elements(f.render()).find(e => e.type === "button" && e.props.children === "تحصيل وطباعة السند")!;
+    expect(f.text()).toContain('aria-label="أرصدة دفتر الزيارة"');
     expect(button).toBeTruthy(); (button.props.onClick as () => void)();
     expect(f.modal().props).toMatchObject({ patientId: 1, isOpen: true, suggestedMinor: 750, suggestedCurrency: "YER", presetInvoice: { id: 20, baseCurrency: "YER" } });
     f.props.canCollect = false;

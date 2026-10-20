@@ -201,6 +201,15 @@ describe("current patient statement built-app A4 acceptance", () => {
           for(const count of ink.markers) expect(count,"treatment marker must visibly paint, not only extract").toBeGreaterThan(10);
         } finally { await raster.close(); }
       }
+      // Check the actual paginated PDF, after saving every page for diagnosis.
+      // The old output put only the contact footer on page 8; visible ink alone
+      // did not catch it. Keep the footer AND the final financial balance.
+      const contactPhone = (await sheet.locator(".statement-closing span[dir='ltr']").innerText()).trim();
+      expect(contactPhone).not.toBe("");
+      const lastPage = pages[pages.length - 1];
+      expect(lastPage, "last PDF page retains the contact footer").toContain(contactPhone);
+      expect(lastPage, "contact footer must share its page with the final balance")
+        .toContain(formatAmount(315000, "SAR"));
       expect(errors).toEqual([]); expect(writes).toEqual([]);
       expect(await snapshot()).toEqual(before);
     } finally { await context.close(); }
