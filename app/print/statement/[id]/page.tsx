@@ -95,6 +95,9 @@ export default async function StatementPage({ params, searchParams }: {
           .statement-invoice .statement-description { overflow-wrap: anywhere; white-space: pre-wrap; }
           table.statement-invoice td.num, table.statement-invoice th.num { white-space: normal; overflow-wrap: anywhere; }
           @media print {
+            /* Keep the closing explanation, divider and contact details together,
+               and with the preceding balance/agreement instead of orphaning the footer. */
+            .statement-closing { break-inside: avoid-page; page-break-inside: avoid; break-before: avoid-page; page-break-before: avoid; }
             .statement-invoice { break-inside: auto; page-break-inside: auto; }
             .statement-invoice thead { display: table-header-group; }
             .statement-invoice tr { break-inside: avoid; page-break-inside: avoid; }
@@ -193,11 +196,12 @@ export default async function StatementPage({ params, searchParams }: {
           <div className="line line-strong"><span>المتبقي من الاتفاق</span><span>{formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}</span></div>
           <p className="footer-note">المتبقي من الاتفاق يشمل الأقساط المستقبلية ولا يعني أن كامل المبلغ مستحق الآن.</p>
         </div>)}
-        <p className="footer-note" style={{ marginTop: "4mm" }}>
-          المبالغ بالعملة الأجنبية محسوبة بسعر صرف يوم الدفع لا بسعر اليوم.
-        </p>
-
-        <PrintFooter settings={settings} />
+        <div className="statement-closing">
+          <p className="footer-note" style={{ marginTop: "4mm" }}>
+            المبالغ بالعملة الأجنبية محسوبة بسعر صرف يوم الدفع لا بسعر اليوم.
+          </p>
+          <PrintFooter settings={settings} />
+        </div>
       </div>
     </>
   );

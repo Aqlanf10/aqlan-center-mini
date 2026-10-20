@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+import { buildCheckoutDueRecommendation, readCheckoutDueRecommendation } from "../../lib/checkout-due-recommendation";
 import { formatMoney } from "../../lib/money";
 
 let browser: Browser, h: Awaited<ReturnType<typeof harness>>;
@@ -19,7 +20,12 @@ const workflow = () => ({ patient,
   alerts: [], canSeeFinancial: true, assessmentCases: [], legacyCases: [] });
 function walkout(id: number, collected = false, yer = 180000) {
   const sar = collected ? 0 : 5000;
-  return { visitId: id, patientId, patientName: patient.fullName, patientNumber: patient.patientNumber,
+  const selectedInvoiceId = invoiceId + (id - firstId);
+  const dueRecommendation = buildCheckoutDueRecommendation({ patientId, visitInvoiceId: selectedInvoiceId,
+    current: { YER: yer, SAR: sar, USD: 2300 }, sources: [{ kind: "visit_invoice", authorityId: selectedInvoiceId,
+      invoiceId: selectedInvoiceId, openingCurrency: null, currency: "SAR", remainingMinor: sar, dueNowMinor: sar, available: true }] });
+  expect(readCheckoutDueRecommendation(dueRecommendation, patientId, selectedInvoiceId)).toEqual(dueRecommendation);
+  return { dueRecommendation, visitId: id, patientId, patientName: patient.fullName, patientNumber: patient.patientNumber,
     arrivedAt: "2026-09-01T08:00:00Z", signedAt: "2026-09-01T09:00:00Z", signedToday: false, deferred: false,
     lines: [], orthoAdjustment: { id: id + 20, billingClass: "LEGACY_INCLUDED", pendingDecision: false, decision: null },
     invoice: { id: invoiceId + (id - firstId), number: `SYN-${id}`, netMinor: 5000, currency: "SAR" },
