@@ -1,26 +1,66 @@
-/** Fail closed before the legacy SQL importer opens a database connection. */
+/**
+ * Strict pre-I/O gate for the legacy SQL importer.
+ * PostgreSQL URI query parameters can override URL authority/path. Reject
+ * unknown options and pass the client a sanitized URL, not the original URL.
+ * This importer is confined to disposable local backup_dst_* fixtures.
+ */
+const refusal = (reason) => { throw new Error('Legacy restore refused: ' + reason); };
+
 export function assertSafeLegacyRestoreTarget(connectionString, env = process.env) {
-  if (env.DATABASE_ENVIRONMENT?.trim().toLowerCase() === 'production' ||
-      env.NODE_ENV === 'production' || env.RAILWAY_PROJECT_ID || env.RAILWAY_SERVICE_ID ||
+  if (env.NODE_ENV === 'production' ||
+      env.RAILWAY_PROJECT_ID || env.RAILWAY_SERVICE_ID || env.RAILWAY_ENVIRONMENT ||
       env.RAILWAY_ENVIRONMENT_NAME) {
-    throw new Error('Legacy restore refused: production runtime or target declaration.');
+    refusal('production or Railway runtime is forbidden');
   }
-  let parsed;
-  try { parsed = new URL(connectionString); }
-  catch { throw new Error('Legacy restore refused: invalid target URL.'); }
-  if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
-    throw new Error('Legacy restore refused: unsupported target protocol.');
+  const declared = env.DATABASE_ENVIRONMENT?.trim().toLowerCase();
+  if (declared && declared !== 'test' && declared !== 'development') {
+    refusal('target declaration is not test/development');
   }
-  const host = parsed.hostname.toLowerCase();
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(host)) {
-    throw new Error('Legacy restore refused: only explicitly isolated local PostgreSQL targets are accepted.');
+  // Deny implicit destination and TLS-file fallbacks before Client construction.
+  const unsafeEnvironmentKeys = [
+    'PGHOST', 'PGHOSTADDR', 'PGPORT', 'PGDATABASE', 'PGSERVICE', 'PGSERVICEFILE',
+    'PGOPTIONS', 'PGSSLMODE', 'PGSSLROOTCERT', 'PGSSLCERT', 'PGSSLKEY',
+    'PGSSLCRL', 'PGPASSFILE', 'PGSSL_ROOT_CERT', 'PGSSL_ROOT_CERT_PEM',
+  ];
+  for (const name of unsafeEnvironmentKeys) {
+    if (env[name] !== undefined) refusal('ambiguous PostgreSQL environment option ' + name);
   }
-  const database = decodeURIComponent(parsed.pathname.slice(1));
+  let url;
+  try { url = new URL(connectionString); }
+  catch { refusal('invalid PostgreSQL URI'); }
+  if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.hash) {
+    refusal('unsupported scheme or URI fragment');
+  }
+  if (!url.username || !url.pathname.startsWith('/') || !url.pathname.slice(1)) {
+    refusal('explicit user and database are required');
+  }
+  // Even encoded query keys and repeated parameters are rejected.
+  // sslmode=disable is the only permitted option for loopback fixtures.
+  let seenSslmode = false;
+  for (const [name, value] of url.searchParams) {
+    if (name !== 'sslmode' || value !== 'disable' || seenSslmode) {
+      refusal('unsupported or duplicate PostgreSQL URI option: ' + name.slice(0, 50));
+    }
+    seenSslmode = true;
+  }
+  const host = url.hostname.toLowerCase();
+  if (!['127.0.0.1', '[::1]'].includes(host)) {
+    refusal('only literal IP loopback hosts are allowed');
+  }
+  let database;
+  try { database = decodeURIComponent(url.pathname.slice(1)); }
+  catch { refusal('invalid database encoding'); }
   if (!/^backup_dst_[a-z0-9_]{6,80}$/.test(database)) {
-    throw new Error('Legacy restore refused: target must be a dedicated synthetic backup_dst_ database. Use restore:full for a controlled real recovery.');
+    refusal('database must be a dedicated backup_dst_* synthetic target');
   }
-  if (env.DATABASE_ENVIRONMENT && !['test', 'development'].includes(env.DATABASE_ENVIRONMENT.trim().toLowerCase())) {
-    throw new Error('Legacy restore refused: target environment is not test/development.');
+  if (url.pathname.slice(1).includes('%') || url.pathname.slice(1) !== database) {
+    refusal('encoded database names are ambiguous');
   }
-  return { host, database };
+  // Reconstitute from validated values: do not pass unchecked options to pg.
+  const canonical = new URL(url.toString());
+  canonical.search = '';
+  canonical.hash = '';
+  canonical.pathname = '/' + database;
+  canonical.searchParams.set('sslmode', 'disable');
+  return { host, database, connectionString: canonical.toString() };
 }
