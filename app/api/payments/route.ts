@@ -281,6 +281,12 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    if (reason === "refund_snapshot_review_required") {
+      return NextResponse.json(
+        { reason, message: "تعذّر إثبات الردّ بما يحافظ على تسوية السند الأصلية. يلزم مراجعة المدير؛ لم يُسجّل أي ردّ جديد." },
+        { status: 409 },
+      );
+    }
     if (reason === "reversal_exceeds_remaining") {
       return NextResponse.json(
         { message: "المبلغ يتجاوز المتبقي القابل للرد من السند الأصلي — مجموع الردود لا يتخطى مبلغ الأصل." },

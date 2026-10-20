@@ -30,6 +30,7 @@ const MESSAGES: Record<CorrectPaymentRefusal, { status: number; message: string 
   multiple_payment_targets: { status: 400, message: "هدفٌ واحد للسند الصحيح: فاتورة أو خطة أو رصيد سابق." },
   foreign_on_account_requires_target: { status: 400, message: "السند بعملة أجنبية يتطلب فاتورة أو خطة أو رصيدًا سابقًا بعملتها." },
   cross_currency_not_supported: { status: 409, message: "الدفع بعملةٍ مختلفة عن فاتورةٍ أو رصيدٍ بعملة اتفاق (SAR/USD) غير مدعوم — سدّد بعملته نفسها." },
+  refund_snapshot_review_required: { status: 409, message: "تعذّر إثبات الردّ بما يحافظ على تسوية السند الأصلية. يلزم مراجعة المدير؛ لم يثبت أي تصحيح." },
   reversal_exceeds_remaining: { status: 409, message: "المتبقي من السند تغيّر أثناء التصحيح — أعد فتح السند وحاول مجددًا." },
   idempotency_conflict: { status: 409, message: "مفتاح الإعادة مستعمل بعملية مختلفة." },
   issued_installment_recovery_required: { status: 409, message: "هذا قسط معكوس له فاتورته الأصلية. اختر هدف السند الأصلي أو مسار إعادة التحصيل؛ لم يثبت التصحيح." },

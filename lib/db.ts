@@ -1,10 +1,12 @@
 import { JournalReadIntegrityError } from "./journal-read-integrity";
 import { patientAgreementSummary, type PatientWorkflowFinancialBucket } from "./patient-agreement-summary";
+import { allocateRefundBaseMinor, isRefundBaseBudgetValid, type RefundBaseBudget } from "./refund-base-allocation";
 import { APPROVED_AGREEMENT_SQL } from "./approved-agreement-schema";
 import { checksumOf } from "./migration-files";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {currencyReclassificationJournal} from "./invoice-currency-journal";
 import {attachCurrencyReclassifications,readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
+import { ReclassificationProofError } from "./invoice-currency-reclassification";
 import type {InvoiceIdentityAmendment} from "./invoice-identity-amendments";
 import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { HR_STAFF_SQL } from "./hr-schema";
@@ -9521,6 +9523,7 @@ export async function recordPayment(input: {
     | "foreign_on_account_requires_target"
     | "cross_currency_not_supported"
     | "reversal_exceeds_remaining"
+    | "refund_snapshot_review_required"
     | "idempotency_conflict"
     | "issued_installment_recovery_required"
     | "installment_recovery_review_required"
@@ -9696,15 +9699,9 @@ export async function correctPayment(input: {
     if (!replayed) {
       const currency = requireCurrency(origin.currency, "سند قبض", origin.id);
       // الردود ترث عملة أصلها — فالمتبقي بعملة السند نفسه (دلوٌ واحد صريح).
-      const { rows: left } = await client.query<{ remaining: string }>(
-        `SELECT (y.amount_minor - COALESCE(SUM(r.amount_minor), 0))::text AS remaining
-           FROM payments y
-           LEFT JOIN payments r ON r.reversal_of_id = y.id AND r.kind = 'refund'
-          WHERE y.id = $1
-          GROUP BY y.id, y.amount_minor, y.currency`,
-        [input.paymentId],
-      );
-      const remaining = toMinor(left[0].remaining);
+      const budget = await readRefundBaseBudget(client, origin.id);
+      if (!budget) { await client.query("ROLLBACK"); return { reason: "refund_snapshot_review_required" }; }
+      const remaining = budget.originalAmountMinor - budget.refundedAmountMinor;
       if (remaining <= 0) { await client.query("ROLLBACK"); return { reason: "already_reversed" }; }
 
       // ١) عكس المتبقي من السند الخطأ — بعملته وسعره وهدفه الموروثة من أصله تحت قفله.
@@ -9758,6 +9755,7 @@ export async function correctPayment(input: {
     }
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
+    if (error instanceof ReclassificationProofError) return { reason: "refund_snapshot_review_required" };
     throw error;
   } finally {
     client.release();
@@ -9789,6 +9787,7 @@ type PaymentOutcome =
       | "foreign_on_account_requires_target"
       | "cross_currency_not_supported"
       | "reversal_exceeds_remaining"
+      | "refund_snapshot_review_required"
       | "idempotency_conflict"
       | "issued_installment_recovery_required"
       | "installment_recovery_review_required";
@@ -9805,6 +9804,70 @@ export async function writeDebtCollectionReceipt(client: DbClient, input: {
   if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) throw new Error("Invalid debt receipt amount");
   return runPaymentTransaction({ ...input,planId:null,kind:"payment",baseCurrency:CLINIC_BASE_CURRENCY },
     { idempotencyKey:validateIdempotencyKey(input.idempotencyKey),reversalOfId:null,requestHashOverride:input.requestHash },client);
+}
+
+/** Caller already holds the original receipt FOR UPDATE. Read every linked row;
+ * malformed history must not disappear from the native/base budget. */
+async function readRefundBaseBudget(client: DbClient, originId: number): Promise<RefundBaseBudget | null> {
+  const { rows: [row] } = await client.query<{
+    original_amount: string; original_base: string; refunded: string; refunded_base: string;
+    currency: string; base_currency: string; exchange_rate: string; invalid_history: boolean;
+  }>(`SELECT p.amount_minor::text AS original_amount, p.base_amount_minor::text AS original_base,
+             p.currency, p.base_currency, p.exchange_rate::text,
+             COALESCE(SUM(r.amount_minor) FILTER (WHERE r.kind = 'refund'), 0)::text AS refunded,
+             COALESCE(SUM(r.base_amount_minor) FILTER (WHERE r.kind = 'refund'), 0)::text AS refunded_base,
+             COALESCE(BOOL_OR(r.id IS NOT NULL AND (
+               r.kind <> 'refund' OR r.patient_id IS DISTINCT FROM p.patient_id
+               OR r.currency IS DISTINCT FROM p.currency OR r.base_currency IS DISTINCT FROM p.base_currency
+               OR r.exchange_rate IS DISTINCT FROM p.exchange_rate
+               OR r.invoice_id IS DISTINCT FROM p.invoice_id OR r.plan_id IS DISTINCT FROM p.plan_id
+               OR r.opening_currency IS DISTINCT FROM p.opening_currency
+               OR r.amount_minor <= 0 OR r.base_amount_minor < 0
+               OR (r.currency = r.base_currency AND r.amount_minor IS DISTINCT FROM r.base_amount_minor))), FALSE) AS invalid_history
+        FROM payments p LEFT JOIN payments r ON r.reversal_of_id = p.id
+       WHERE p.id = $1 AND p.kind = 'payment' GROUP BY p.id`, [originId]);
+  if (!row || row.invalid_history || !isCurrency(row.currency) || !isCurrency(row.base_currency)
+    || !Number.isFinite(Number(row.exchange_rate)) || Number(row.exchange_rate) <= 0
+    || (row.currency === row.base_currency && Number(row.original_amount) !== Number(row.original_base))) return null;
+  const budget: RefundBaseBudget = {
+    originalAmountMinor: Number(row.original_amount), originalBaseAmountMinor: Number(row.original_base),
+    refundedAmountMinor: Number(row.refunded), refundedBaseAmountMinor: Number(row.refunded_base),
+  };
+  return isRefundBaseBudgetValid(budget) ? budget : null;
+}
+
+/** The original receipt and effective invoice are already locked. Match 0063's
+ * actual source-lineage membership, not just the correction's direct original.
+ * Its immutable proof still requires standalone FX rounding, so incompatible
+ * cumulative allocations need review until that proof contract is versioned. */
+async function refundFitsReclassificationProof(client: DbClient, refund: {
+  patientId: number; invoiceId: number | null; originId: number;
+  currency: Currency; baseCurrency: Currency; exchangeRate: number;
+  amountMinor: number; baseAmountMinor: number;
+}): Promise<boolean> {
+  if (refund.invoiceId === null) return true;
+  const { rows: documents } = await client.query<{
+    id: number; patient_id: number; source_currency: string; target_currency: string; compatible: boolean;
+  }>(`SELECT id, patient_id, source_currency, target_currency,
+             $4::bigint = FLOOR($2::double precision / 100 * $3::double precision + 0.5) AS compatible
+        FROM invoice_settlement_reclassifications
+       WHERE $1::int = ANY(source_invoice_ids)`,
+    [refund.invoiceId, refund.amountMinor, refund.exchangeRate, refund.baseAmountMinor]);
+  if (!documents.length) return true;
+  const document = documents[0];
+  if (documents.length !== 1 || document.patient_id !== refund.patientId
+    || document.source_currency !== refund.baseCurrency || document.target_currency !== refund.currency
+    || document.compatible !== true) return false;
+  try {
+    const origins = (await readCurrencyReclassificationEvidence(client, refund.patientId))
+      .filter(proof => proof.paymentId === refund.originId);
+    return origins.length === 1 && origins[0].documentId === document.id
+      && origins[0].sourceInvoiceId === refund.invoiceId && origins[0].direction === 1
+      && origins[0].sourceCurrency === refund.baseCurrency && origins[0].targetCurrency === refund.currency;
+  } catch (error) {
+    if (error instanceof ReclassificationProofError) return false;
+    throw error;
+  }
 }
 
 async function runPaymentTransaction(
@@ -10022,16 +10085,17 @@ async function runPaymentTransaction(
       return { kind: "reason", reason: "foreign_on_account_requires_target" };
     }
 
-    /* (P1-FIX-5) الردّ يرث سياق الأصل المالي: عملة الأصل (فُحصت أعلاه) وسعر
-       صرفه snapshot — المكافئ الأساسي للردّ يُحسب من سياق الأصل فلا يظهر ربح أو
-       خسارة صرف من عملية إرجاع مال دخل بسعر قديم. */
+    /* Keep inherited FX/base currency in the unchanged v1 fingerprint. New
+       receipts use their ordinary calculation; a NEW refund receives its stored
+       origin-base allocation only after exact replay and native-budget checks. */
     const effectiveExchangeRate = refundSnapshot ? refundSnapshot.exchangeRate : input.exchangeRate;
     const effectiveBaseCurrency = refundSnapshot ? refundSnapshot.baseCurrency : input.baseCurrency;
-    const baseAmount = toBaseAmount(
+    let baseAmount = toBaseAmount(
       input.amountMinor, input.currency, effectiveBaseCurrency, effectiveExchangeRate,
     );
-    /* (P1-FIX-4) بصمة الطلب الكانونية بالقيم الفعلية المُخزَّنة: أي اختلاف في
-       العملية (مبلغ/مريض/عملة/نوع/ممثّل/أصل) يجعل البصمة مختلفة. */
+    /* Preserve the legacy v1 request identity: actor, patient, native amount,
+       currency, targets, kind, method and origin. Stored base settlement is NOT
+       a hash input; refund allocation below must not change a successful key. */
     const requestHash = prepared.requestHashOverride ?? idempotencyRequestHash(
       input, prepared, effectiveInvoiceId, effectivePlanId,
       effectiveExchangeRate, effectiveBaseCurrency, effectiveOpeningCurrency,
@@ -10088,15 +10152,33 @@ async function runPaymentTransaction(
        ≤ مبلغ الأصل، محسوبًا داخل المعاملة فوق قفل صفّ الأصل (FOR UPDATE أعلاه)
        فتتسلسل الردود المتزامنة ولا يتجاوز مجموعها الأصل أبدًا. */
     if (prepared.reversalOfId !== null && refundSnapshot) {
-      const { rows: refundRows } = await client.query<{ refunded: string }>(
-        `SELECT COALESCE(SUM(amount_minor), 0) AS refunded
-           FROM payments WHERE reversal_of_id = $1 AND kind = 'refund'`,
-        [prepared.reversalOfId],
-      );
-      const remaining = refundSnapshot.amountMinor - Number(refundRows[0]?.refunded ?? 0);
+      const budget = await readRefundBaseBudget(client, prepared.reversalOfId);
+      if (!budget) {
+        await tx("ROLLBACK");
+        return { kind: "reason", reason: "refund_snapshot_review_required" };
+      }
+      const remaining = budget.originalAmountMinor - budget.refundedAmountMinor;
       if (input.amountMinor > remaining) {
         await tx("ROLLBACK");
         return { kind: "reason", reason: "reversal_exceeds_remaining" };
+      }
+      // Exact-key replay above is independent of later refunds. Only a NEW
+      // refund consumes the original stored base budget; FX remains metadata.
+      const allocatedBase = allocateRefundBaseMinor(budget, input.amountMinor);
+      if (allocatedBase === null) {
+        await tx("ROLLBACK");
+        return { kind: "reason", reason: "refund_snapshot_review_required" };
+      }
+      baseAmount = allocatedBase;
+      // Do not let the existing append-only reclassification trigger turn a
+      // budget-preserving refund into a 500, nor fall back to drifting rounding.
+      if (!await refundFitsReclassificationProof(client, {
+        patientId: input.patientId, invoiceId: effectiveInvoiceId, originId: prepared.reversalOfId,
+        currency: input.currency, baseCurrency: effectiveBaseCurrency, exchangeRate: effectiveExchangeRate,
+        amountMinor: input.amountMinor, baseAmountMinor: baseAmount,
+      })) {
+        await tx("ROLLBACK");
+        return { kind: "reason", reason: "refund_snapshot_review_required" };
       }
     }
 
