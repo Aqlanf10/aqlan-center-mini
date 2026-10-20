@@ -3,6 +3,7 @@ import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
 import { prepareBackupSql } from "../lib/restore/sql.mjs";
+import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
 /**
  * استعادة نسخة احتياطية.
@@ -29,6 +30,14 @@ if (!file || !url.trim()) {
 // As with full archive restore, schema ownership belongs to the target's
 // bootstrap/migrator, not the source backup's historical registry snapshot.
 // Application rows still use plain INSERT and reject an occupied target.
+// Fail closed before reading/applying SQL or opening a connection.
+try {
+  assertSafeLegacyRestoreTarget(url, process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : "Legacy restore target refused.");
+  process.exit(2);
+}
+
 let sql;
 try {
   sql = prepareBackupSql(readFileSync(file, "utf8")).sql;
