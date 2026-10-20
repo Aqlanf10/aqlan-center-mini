@@ -21,3 +21,9 @@ The proposed Draft fix now uses the repository's existing [canonical verificatio
 ## Next decision
 
 PR #369 stays Draft. Dot to run committed final-commit guard/CLI tests and PG18 in a **new dedicated synthetic-only database**, inspect green CI, and resolve the shared target classifier risk before merging. Production-archive restore requires independent explicit approval and is not part of this PR. No changes made to finance, migrations, `lib/db.ts`, package manifests, shared CI, Railway, secrets or production data.
+
+## Final addendum: required CI coverage and latest proposed head
+
+The [PR #369 head ba6e338017fcdbe4ad4f432cfcde887f84ce477e](https://github.com/Aqlanf10/aqlan-center-mini/commit/ba6e338017fcdbe4ad4f432cfcde887f84ce477e) adds an isolated [Vitest wrapper](https://github.com/Aqlanf10/aqlan-center-mini/blob/ba6e338017fcdbe4ad4f432cfcde887f84ce477e/__tests__/legacy-restore-cli-preflight.test.ts) which invokes the committed real-script `node --test` guard and CLI checks through the existing mandatory `npm test` flow **without changing CI configuration**. The companion real PG18 negative suite remains in the same Draft branch. At the last observation the new head CI run was PENDING; **no PASS can be reported for the final head until its result is retrieved**.
+
+**Reviewer/merger:** the requesting owner retains the final decision (or delegates it explicitly). This audit performed no merge or deployment. The old notes assigning Dot do not override the owner's latest instruction.
