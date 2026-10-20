@@ -356,7 +356,12 @@ export function paymentEntry(input: {
   /** (P1-3) طريقة الدفع: النقد إلى الصندوق، والتحويل إلى البنك. الغائبة = نقد. */
   method?: string | null;
 }): JournalEntry | null {
-  if (input.amountMinor <= 0 || input.settlementMinor <= 0) return null;
+  if (input.amountMinor <= 0 || input.settlementMinor < 0) return null;
+  // A positive foreign receipt can carry zero stored base (rounding or a
+  // cumulative refund allocation). Its real cash/bank and native clearing
+  // legs remain; nonZero removes the absent base/AR legs, without inventing FX.
+  if (input.settlementMinor === 0
+    && (input.currency === input.settlementCurrency || !Number.isSafeInteger(input.amountMinor))) return null;
   const cash = isCashMethod(input.method) ? CASH_ACCOUNT[input.currency] : BANK_ACCOUNT[input.currency];
   const isRefund = input.kind === "refund";
   const paid = { currency: input.currency, amountMinor: input.amountMinor };
