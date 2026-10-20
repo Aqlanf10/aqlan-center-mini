@@ -9,7 +9,8 @@ import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { fullBackupBlocks } from '../../lib/fullBackup';
 import { stagedRestore } from '../../lib/restore/staging';
 import { parseTarBytes } from '../../lib/restore/archive';
-import { tarGzBytes, storageKeyOf } from '../helpers/backup-blocks';
+import { storageKeyOf } from '../helpers/backup-blocks';
+import { tarGzBytes } from '../helpers/backup-tar';
 
 vi.mock('next/headers', () => ({
   headers: async () => new Headers(),
@@ -18,11 +19,11 @@ vi.mock('next/headers', () => ({
 
 // Synthetic-only, owned PostgreSQL 18 databases created by a validated fixture.
 // No production URL, data, services, or attachments are used.
-let fixture;
-let directory;
-let validArchive;
-let storageKey;
-let sourceBytes;
+let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
+let directory: string;
+let validArchive: string;
+let storageKey: string;
+let sourceBytes: Buffer;
 beforeAll(async () => {
   fixture = await openBackupTimestampFixture({ ...process.env });
   directory = await mkdtemp(path.join(tmpdir(), 'security-pg18-restore-'));
@@ -40,7 +41,7 @@ beforeAll(async () => {
   );
   const client = await fixture.source.connect();
   try {
-    const parts = [];
+    const parts: Buffer[] = [];
     for await (const part of fullBackupBlocks({
       source: client, readDocument: async (key) => key === storageKey ? sourceBytes : null,
     })) parts.push(Buffer.from(part));
@@ -67,12 +68,12 @@ it('PG18 actual backup writer refuses missing registered physical document', asy
 it('PG18 actual restore refuses archive missing the referenced attachment before touching target', async () => {
   const parsed = parseTarBytes(gunzipSync(await readFile(validArchive)));
   const entries = parsed.order.filter(name => !name.startsWith('documents/'))
-    .map(name => ({ name, data: parsed.entries.get(name).data }));
+    .map(name => ({ name, data: parsed.entries.get(name)!.data }));
   const archivePath = path.join(directory, 'missing-document.tar.gz');
   await writeFile(archivePath, tarGzBytes(entries));
   const result = await stagedRestore({
     archivePath,
-    targetUrl: fixture.sqlTarget.options.connectionString,
+    targetUrl: fixture.sqlTarget.options.connectionString!,
     stagingDir: path.join(directory, 'missing-document-stage'),
   });
   expect(result.ok).toBe(false);
@@ -90,7 +91,7 @@ it('PG18 partial staging-directory failure leaves isolated target unqualified; n
   // file IO error then fails the restore and leaves a disposable partial target.
   await expect(stagedRestore({
     archivePath: validArchive,
-    targetUrl: fixture.archiveTarget.options.connectionString,
+    targetUrl: fixture.archiveTarget.options.connectionString!,
     stagingDir: invalidStage,
   })).rejects.toThrow();
   const restored = (await fixture.archiveTarget.query(
