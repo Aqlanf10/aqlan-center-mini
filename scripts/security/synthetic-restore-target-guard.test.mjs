@@ -9,6 +9,15 @@ test('allows literal-loopback synthetic fixture and canonicalizes checked URI', 
   assert.equal(new URL(guard(base + '?sslmode=disable', allow).connectionString).searchParams.get('sslmode'), 'disable');
   assert.equal(new URL(guard(base, allow).connectionString).hostname, '127.0.0.1');
 });
+test('accepts existing owned aqlan_backup_precision fixture during NODE_ENV=test', () => {
+  const url = base.replace('backup_dst_synthetic007', 'aqlan_backup_precision_' + 'a'.repeat(32));
+  assert.equal(guard(url, { NODE_ENV:'test' }).database, 'aqlan_backup_precision_' + 'a'.repeat(32));
+});
+test('does not accept precision fixture outside test runtime', () => {
+  const url = base.replace('backup_dst_synthetic007', 'aqlan_backup_precision_' + 'a'.repeat(32));
+  assert.throws(() => guard(url, { NODE_ENV:'development' }), /Legacy restore refused/);
+});
+
 for (const [name, url, env] of [
   ['production declaration', base, {DATABASE_ENVIRONMENT:'production'}],
   ['Railway runtime', base, {RAILWAY_PROJECT_ID:'fixture'}],
