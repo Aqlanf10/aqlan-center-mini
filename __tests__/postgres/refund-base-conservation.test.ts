@@ -219,6 +219,25 @@ describe('historical inconsistency requires review with no mutation', () => {
         await legacyRefund(f, 1, 1, 'bad', extra);
         await expectReviewWithoutWrites(() => refund(f, 1, 'new'));
     });
+    it.each([{ currency: 'USD' }, { baseCurrency: 'SAR' }])('rejects mixed linked currency groups without omitting valid or invalid rows %j', async (override) => {
+        const f = await fixture();
+        await legacyRefund(f, 1, 1, 'valid');
+        await legacyRefund(f, 1, 1, 'wrong-currency', override);
+        await expectReviewWithoutWrites(() => refund(f, 1, 'new'));
+    });
+    it('keeps the empty LEFT JOIN group and sums multiple valid rows within one currency pair', async () => {
+        const empty = await fixture(3, 140);
+        const full = await refund(empty, 3, 'full');
+        expect(full.reason).toBeNull();
+        expect(full.payment).toMatchObject({ amountMinor: 3, baseAmountMinor: 4 });
+        const partial = await fixture(3, 140);
+        await legacyRefund(partial, 1, 1, 'first');
+        await legacyRefund(partial, 1, 1, 'second');
+        const remaining = await refund(partial, 1, 'remaining');
+        expect(remaining.reason).toBeNull();
+        expect(remaining.payment).toMatchObject({ amountMinor: 1, baseAmountMinor: 2 });
+        expect(await totals(partial.payment.id)).toEqual({ native: '3', base: '4', count: 3 });
+    });
     it('rejects a negative linked refund base rather than hiding it in the sum', async () => {
         const f = await fixture();
         await legacyRefund(f, 1, -1, 'bad');

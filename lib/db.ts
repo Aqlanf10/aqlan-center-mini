@@ -9809,7 +9809,7 @@ export async function writeDebtCollectionReceipt(client: DbClient, input: {
 /** Caller already holds the original receipt FOR UPDATE. Read every linked row;
  * malformed history must not disappear from the native/base budget. */
 async function readRefundBaseBudget(client: DbClient, originId: number): Promise<RefundBaseBudget | null> {
-  const { rows: [row] } = await client.query<{
+  const { rows } = await client.query<{
     original_amount: string; original_base: string; refunded: string; refunded_base: string;
     currency: string; base_currency: string; exchange_rate: string; invalid_history: boolean;
   }>(`SELECT p.amount_minor::text AS original_amount, p.base_amount_minor::text AS original_base,
@@ -9825,7 +9825,13 @@ async function readRefundBaseBudget(client: DbClient, originId: number): Promise
                OR r.amount_minor <= 0 OR r.base_amount_minor < 0
                OR (r.currency = r.base_currency AND r.amount_minor IS DISTINCT FROM r.base_amount_minor))), FALSE) AS invalid_history
         FROM payments p LEFT JOIN payments r ON r.reversal_of_id = p.id
-       WHERE p.id = $1 AND p.kind = 'payment' GROUP BY p.id`, [originId]);
+       WHERE p.id = $1 AND p.kind = 'payment'
+       GROUP BY p.id, r.currency, r.base_currency`, [originId]);
+  // Keep actual linked currencies separate even when history is malformed.
+  // The LEFT JOIN still yields one zero-refund group. Multiple currency groups,
+  // or a single contradictory group below, require review rather than omission.
+  if (rows.length !== 1) return null;
+  const row = rows[0];
   if (!row || row.invalid_history || !isCurrency(row.currency) || !isCurrency(row.base_currency)
     || !Number.isFinite(Number(row.exchange_rate)) || Number(row.exchange_rate) <= 0
     || (row.currency === row.base_currency && Number(row.original_amount) !== Number(row.original_base))) return null;
