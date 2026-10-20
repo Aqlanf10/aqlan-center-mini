@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getParty, getSettingsSafe, partyStatement } from "@/lib/db";
 import { EXPENSE_CATEGORY_LABEL, PARTY_KIND_LABEL } from "@/lib/expenses";
 import { CURRENCY_LABEL, formatMoney } from "@/lib/money";
+import { partyStatementNetMinor, partyStatementUnlinkedPaidMinor } from "@/lib/party-statement";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
@@ -97,7 +98,11 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
                 <td>{friendlyDateLong(row.createdAt.slice(0, 10))}</td>
                 <td>
                   {row.reversalOfId !== null ? "إبطال سند" : EXPENSE_CATEGORY_LABEL[row.category] ?? row.category}
-                  {row.payableId === null && row.reversalOfId === null ? " — على الحساب" : ""}
+                  {(row.payableId === null || !row.payableExists) && row.reversalOfId === null
+                    ? row.allocatedPaidMinor === 0 ? " — على الحساب"
+                      : partyStatementUnlinkedPaidMinor(row) === 0 ? " — تسوية التزامات"
+                        : ` — منه على الحساب ${formatMoney(partyStatementUnlinkedPaidMinor(row), row.currency)}`
+                    : ""}
                 </td>
                 <td className="num">{formatMoney(row.amountMinor, row.currency)}</td>
               </tr>
@@ -146,8 +151,8 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
                 </div>
               ) : null}
               <div className="line line-strong">
-                <span>المتبقي علينا</span>
-                <span className="num">{formatMoney(bucket.remainingMinor - (bucket.openingAdvanceMinor ?? 0), bucket.currency)}</span>
+                <span>{partyStatementNetMinor(bucket) < 0 ? "رصيد لنا عند الجهة" : "المتبقي علينا"}</span>
+                <span className="num">{formatMoney(Math.abs(partyStatementNetMinor(bucket)), bucket.currency)}</span>
               </div>
             </div>
           ))}

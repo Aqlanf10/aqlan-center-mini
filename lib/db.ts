@@ -12134,12 +12134,19 @@ export async function listExpensesBetween(from: string, to: string): Promise<Exp
   return rows.map(toExpense);
 }
 
-export async function listPartyExpenses(partyId: number): Promise<Expense[]> {
+export async function listPartyExpenses(partyId: number): Promise<(Expense & { allocatedPaidMinor: number; payableExists: boolean })[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ExpenseRow>(
-    `${EXPENSE_SELECT} WHERE e.party_id = $1 ORDER BY e.created_at DESC, e.id DESC`, [partyId],
+  const { rows } = await getPool().query<ExpenseRow & { allocated_paid_minor: string; payable_exists: boolean }>(
+    `SELECT statement_expense.*,
+            EXISTS (SELECT 1 FROM payables p WHERE p.id = statement_expense.payable_id) AS payable_exists,
+            COALESCE((SELECT SUM(a.paid_minor) FROM expense_payable_allocations a
+                       WHERE a.expense_id = statement_expense.id), 0)::text AS allocated_paid_minor
+       FROM (${EXPENSE_SELECT} WHERE e.party_id = $1) statement_expense
+      ORDER BY statement_expense.created_at DESC, statement_expense.id DESC`, [partyId],
   );
-  return rows.map(toExpense);
+  // paid_minor is signed and belongs to the expense currency; settled_minor is
+  // denominated in the payable currency and must never be deducted here.
+  return rows.map((row) => ({ ...toExpense(row), allocatedPaidMinor: toMinor(row.allocated_paid_minor), payableExists: row.payable_exists }));
 }
 
 /**
@@ -14360,7 +14367,7 @@ export async function loadPartyNativeBalanceSnapshot(runner: Pick<DbPool, "query
  * للمورّد: إمّا كاملٌ أو لا شيء. والإجماليات لكل عملةٍ من القائمة نفسها.
  */
 export async function partyStatement(partyId: number): Promise<{
-  payables: Payable[]; expenses: Expense[]; advances: PartyOpeningAdvance[]; totals: PartyCurrencyTotals[];
+  payables: Payable[]; expenses: (Expense & { allocatedPaidMinor: number; payableExists: boolean })[]; advances: PartyOpeningAdvance[]; totals: PartyCurrencyTotals[];
 }> {
   await ensureSchema();
   const [{ rows }, expenses, advances] = await Promise.all([
