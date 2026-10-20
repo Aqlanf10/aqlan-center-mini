@@ -1,3 +1,4 @@
+import { JournalReadIntegrityError, JOURNAL_REVIEW_RESPONSE } from "@/lib/journal-read-integrity";
 import { NextResponse } from "next/server";
 import { executiveKpis, CLINIC_TIME_ZONE, findUserByUsername } from "@/lib/db";
 import { executiveCsv } from "@/lib/executive";
@@ -56,7 +57,8 @@ export async function GET(request: Request) {
       });
     }
     return NextResponse.json(kpis);
-  } catch {
+  } catch (error) {
+    if (error instanceof JournalReadIntegrityError) return NextResponse.json(JOURNAL_REVIEW_RESPONSE, { status: 409 });
     return NextResponse.json({ message: "تعذّر تحميل مؤشرات القيادة." }, { status: 500 });
   }
 }

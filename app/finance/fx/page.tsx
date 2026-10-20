@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
@@ -45,20 +45,27 @@ export default function FxPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadSequence = useRef(0);
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
     setLoading(true);
+    setReport(null);
+    setError(null);
     try {
       const asOf = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
       const response = await fetch(`/api/finance/fx?asOf=${asOf}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      if (sequence !== loadSequence.current) return;
       setReport(payload as Report);
       setError(null);
     } catch (loadError) {
+      if (sequence !== loadSequence.current) return;
+      setReport(null);
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }, []);
 
@@ -75,7 +82,9 @@ export default function FxPage() {
       />
 
       {error ? (
-        <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}
+          <button type="button" onClick={() => void load()} className="ms-3 underline">إعادة المحاولة</button>
+        </div>
       ) : null}
 
       <p className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 text-[11px] font-bold leading-5 text-slate-500">
@@ -86,7 +95,7 @@ export default function FxPage() {
 
       {loading ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ الحساب…</p>
-      ) : !report || report.positions.length === 0 ? (
+      ) : error || !report ? null : report.positions.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
           لا عملات أجنبية في هذا النظام.
         </p>
