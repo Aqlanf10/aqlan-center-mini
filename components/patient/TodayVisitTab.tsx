@@ -10,6 +10,8 @@ import { CollectPaymentModal } from "../CollectPaymentModal";
 import { CheckoutExtras, isCheckoutWalkout } from "./CheckoutExtras";
 import { hasWalkoutFinancials, workflowBalanceRows, type FinancialReadState } from "@/lib/walkout-financial-read";
 import { walkoutNeedsReview, PREVIOUS_BALANCE_LABEL, PREVIOUS_BALANCE_NOTE } from "@/lib/walkout-presentation";
+import type { CheckoutCurrencyLine } from "@/lib/checkout-summary";
+import { readCheckoutDueRecommendation, type CheckoutDueRecommendation } from "@/lib/checkout-due-recommendation";
 import type { WorkflowSummary } from "./SummaryTab";
 
 /** Uses canonical workflow / walkout reads. Unknown money is never zero. */
@@ -83,6 +85,8 @@ function OwnedTodayVisitTab({
     remainingMinor: number;
     invoiceCurrency: Currency;
     invoiceId: number | null;
+    dueRecommendation: CheckoutDueRecommendation | null;
+    financialSummary: CheckoutCurrencyLine[] | null;
     sessionsCompleted: number;
     nextPlannedVisit: { id: number; title: string; sequence: number; durationMinutes: number; suggestedDate?: string | null; afterDays?: number | null } | null;
     labOrdersCreated: number;
@@ -144,12 +148,20 @@ function OwnedTodayVisitTab({
         })).filter((row) => row.balanceMinor !== 0));
         setCurrentBalances(payload.balances);
         const remainingMinor = Math.max(0, (payload.invoice?.netMinor ?? 0) - payload.checkout.invoicePaidMinor);
+        const candidate = readCheckoutDueRecommendation((payload as typeof payload & { dueRecommendation?: unknown }).dueRecommendation,
+          patientId, payload.invoice?.id ?? null);
+        // The source facts and displayed ledger must belong to this same read.
+        const dueRecommendation = candidate && CURRENCIES.every(currency =>
+          (candidate.currencies.find(row => row.currency === currency)?.currentBalanceMinor ?? 0) === payload.checkout.current[currency])
+          && (candidate.collectionAction !== "visit_invoice" || candidate.currencies.flatMap(row => row.sources).some(source =>
+            source.kind === "visit_invoice" && source.invoiceId === payload.invoice?.id && source.currency === payload.invoice.currency
+              && source.remainingMinor === remainingMinor)) ? candidate : null;
         setCollected(Boolean(payload.invoice && remainingMinor === 0));
         setPaidSome(payload.checkout.invoicePaidMinor > 0);
         setCheckout((previous) => ({
           visitId, financialReviewRequired: walkoutNeedsReview(payload),
           invoiceId: payload.invoice?.id ?? null, invoiceCurrency: payload.invoice?.currency ?? base,
-          duesMinor: payload.invoice?.netMinor ?? 0, remainingMinor,
+          duesMinor: payload.invoice?.netMinor ?? 0, remainingMinor, dueRecommendation, financialSummary: (payload as typeof payload & { summary?: CheckoutCurrencyLine[] }).summary ?? null,
           sessionsCompleted: previous?.visitId === visitId ? previous.sessionsCompleted : 0,
           nextPlannedVisit: previous?.visitId === visitId ? previous.nextPlannedVisit : null,
           labOrdersCreated: previous?.visitId === visitId ? previous.labOrdersCreated : 0,
@@ -268,12 +280,17 @@ function OwnedTodayVisitTab({
   const totalDueInInvoiceCurrency = financialRead === "verified"
     ? currentBalances?.find((row) => row.currency === invoiceCurrency)?.balanceMinor ?? 0 : null;
 
-  // Preset only an unpaid visit invoice; other debt uses an explicit existing account target.
+  const dueRecommendation = financialRead === "verified" ? checkout?.dueRecommendation ?? null : null;
+  const inlineSource = dueRecommendation?.collectionAction === "visit_invoice"
+    ? dueRecommendation.currencies.flatMap(row => row.sources).find(source => source.kind === "visit_invoice"
+      && source.invoiceId === checkout?.invoiceId && source.currency === invoiceCurrency && source.remainingMinor === checkout?.remainingMinor) : null;
+  // Never give a scheduled/aggregate recommendation to the old invoice or
+  // untargeted modal. Only the exact ordinary visit invoice remains inline.
   const presetInvoice = useMemo(
-    () => checkout?.invoiceId && checkout.remainingMinor > 0
+    () => inlineSource && checkout?.invoiceId && checkout.remainingMinor > 0
       ? { id: checkout.invoiceId, baseCurrency: invoiceCurrency }
       : null,
-    [checkout?.invoiceId, checkout?.remainingMinor, invoiceCurrency],
+    [checkout?.invoiceId, checkout?.remainingMinor, invoiceCurrency, inlineSource],
   );
   const todayInvoice = presetInvoice && checkout ? [{
     id: checkout.invoiceId as number,
@@ -374,6 +391,8 @@ function OwnedTodayVisitTab({
               setCheckout({
                 visitId: openVisit.id,
                 financialReviewRequired: null,
+                dueRecommendation: null,
+                financialSummary: null,
                 duesMinor: result?.duesMinor ?? 0,
                 remainingMinor: result?.duesMinor ?? 0,
                 invoiceCurrency: result?.invoiceCurrency ?? base,
@@ -445,11 +464,11 @@ function OwnedTodayVisitTab({
             </div>
             <p className="text-xs text-slate-500">{PREVIOUS_BALANCE_NOTE}</p>
             <div className="flex items-center justify-between">
-              <dt className="text-slate-500">{checkoutNeedsFinanceAttention ? "فاتورة اليوم المثبتة" : "استحقاق اليوم"}</dt>
+              <dt className="text-slate-500">{checkout.invoiceId ? "فاتورة اليوم المثبتة" : "فاتورة الزيارة"}</dt>
               <dd data-testid="checkout-visit-invoice" data-currency={invoiceCurrency} className="font-extrabold text-navy-900">
                 {financialRead !== "verified" ? "غير متحقق" : checkoutNeedsFinanceAttention && checkout.invoiceId === null
                   ? (checkout.financialReviewRequired === true ? "لا فاتورة جديدة؛ توجد بنود تحتاج مراجعة مالية" : "لا فاتورة جديدة؛ تغطية العمل غير متحققة")
-                  : formatMoney(checkout.duesMinor, invoiceCurrency)}
+                  : checkout.invoiceId === null ? "لا فاتورة جديدة مثبتة لهذه الزيارة" : formatMoney(checkout.duesMinor, invoiceCurrency)}
                 {invoiceCurrency !== base ? (
                   <span className="mr-1 text-[10px] font-bold text-slate-400">{CURRENCY_LABEL[invoiceCurrency]}</span>
                 ) : null}
@@ -513,11 +532,13 @@ function OwnedTodayVisitTab({
                 اللقطة المجمّدة والرصيد الجاري وحده. */}
             {financialRead !== "verified" ? (
               <span role="status">الرصيد غير متحقق؛ لا يمكن تأكيد المبلغ المطلوب</span>
+            ) : !dueRecommendation ? (
+              <span role="status">الاستحقاق حسب المصدر غير متحقق؛ راجع الحساب قبل التحصيل</span>
             ) : collected && !currentBalances?.some((row) => row.balanceMinor > 0) ? (
               <span className="flex-[2] rounded-xl bg-emerald-600 px-4 py-2.5 text-center text-sm font-extrabold text-white">
                 تم التحصيل — سند الاستحقاق سُجّل
               </span>
-            ) : checkout.remainingMinor > 0 || currentBalances?.some((row) => row.currency === "YER" && row.balanceMinor > 0) ? (
+            ) : presetInvoice ? (
               <button
                 type="button"
                 onClick={() => setCollectOpen(true)}
@@ -525,14 +546,14 @@ function OwnedTodayVisitTab({
               >
                 تحصيل وطباعة السند
               </button>
-            ) : currentBalances?.some((row) => row.balanceMinor > 0)
-              ? <span className="font-bold text-amber-900">يوجد رصيد بعملة أخرى؛ اختر هدف تحصيله من الحساب</span>
+            ) : dueRecommendation.collectionAction === "account"
+              ? <span className="font-bold text-amber-900">استحقاق الاتفاق أو الجدول مستقل عن كامل المتبقي؛ اختر المصدر من الحساب</span>
               : checkoutNeedsFinanceAttention
               ? <span className="font-bold text-amber-900">لا مبلغ مثبت للتحصيل الآن؛ التحقق من تغطية العمل ما زال مطلوبًا</span>
               : <span className="font-bold text-emerald-800">لا مبلغ مطلوب لهذه الزيارة</span>}
-            {!presetInvoice && financialRead === "verified" && currentBalances?.some((row) => row.balanceMinor > 0) ? (
-              <a href={`/patients/${patientId}?tab=account`} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-navy-800">
-                اختيار هدف التحصيل من الحساب
+            {!presetInvoice && financialRead === "verified" && (dueRecommendation?.collectionAction === "account" || !dueRecommendation) ? (
+              <a href={`/patients/${patientId}?tab=account`} target="_blank" rel="noopener" title="يفتح الحساب في تبويب جديد لإبقاء مدخلات الزيارة والتحصيل هنا" className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-navy-800">
+                اختيار مصدر التحصيل من الحساب
               </a>
             ) : null}
             {checkout.invoiceId ? (
@@ -553,6 +574,8 @@ function OwnedTodayVisitTab({
             expectedPatientId={patientId}
             financialVerified={financialRead === "verified"}
             financialRevision={financialRevision}
+            dueRecommendation={dueRecommendation}
+            financialSummary={financialRead === "verified" ? checkout.financialSummary : null}
             collected={collected}
             suggestedDate={checkout.nextPlannedVisit?.suggestedDate ?? null}
             durationMinutes={checkout.nextPlannedVisit?.durationMinutes ?? null}
@@ -630,7 +653,7 @@ function OwnedTodayVisitTab({
       <CollectPaymentModal
         patientId={patientId}
         patientName={patientName}
-        isOpen={canCollect && collectOpen && financialRead === "verified"}
+        isOpen={canCollect && collectOpen && financialRead === "verified" && presetInvoice !== null}
         onClose={() => setCollectOpen(false)}
         onSuccess={() => {
           setCollectOpen(false);
@@ -640,14 +663,14 @@ function OwnedTodayVisitTab({
           onChanged();
           void loadCurrentBalances();
         }}
-        suggestedMinor={checkout && checkout.remainingMinor > 0 ? checkout.remainingMinor : null}
+        suggestedMinor={presetInvoice && checkout ? checkout.remainingMinor : null}
         suggestedCurrency={presetInvoice ? invoiceCurrency : null}
         invoices={todayInvoice}
         presetInvoice={presetInvoice}
         contextLabel={
           presetInvoice && checkout
-            ? `استحقاق اليوم: ${formatMoney(checkout.duesMinor, invoiceCurrency)}${sameCurrencyBefore && sameCurrencyBefore.balanceMinor > 0 ? ` · رصيد سابق ${formatMoney(sameCurrencyBefore.balanceMinor, invoiceCurrency)}` : ""}`
-            : "دفعة على الحساب بالريال اليمني؛ لا تستهدف فاتورة الزيارة المسددة. لتسوية فاتورة أخرى أو رصيد سابق بعملته، افتح تبويب الحساب واختر الهدف."
+            ? `فاتورة الزيارة المثبتة: ${formatMoney(checkout.duesMinor, invoiceCurrency)}${sameCurrencyBefore && sameCurrencyBefore.balanceMinor > 0 ? ` · رصيد سابق ${formatMoney(sameCurrencyBefore.balanceMinor, invoiceCurrency)}` : ""}`
+            : "اختر المصدر المقصود من الحساب؛ لا تحصيل غير مخصص من هذا الشبّاك."
         }
       />
     </div>

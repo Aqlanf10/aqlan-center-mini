@@ -5,6 +5,7 @@ import { TodayVisitTab } from "../components/patient/TodayVisitTab";
 import { ClinicalVisit } from "../components/ClinicalVisit";
 import { CollectPaymentModal } from "../components/CollectPaymentModal";
 import type { WorkflowSummary } from "../components/patient/SummaryTab";
+import { buildCheckoutDueRecommendation } from "../lib/checkout-due-recommendation";
 import { formatMoney } from "../lib/money";
 
 type Slot = { value?: unknown; deps?: unknown[]; cleanup?: () => void };
@@ -45,6 +46,7 @@ const workflow = () => ({ patient: { id: 1 }, canSeeFinancial: true,
 const walkout = (balance = 180000) => ({ visitId: 10, patientId: 1, patientName: "Synthetic",
   signedAt: "2026-10-09T10:00:00Z", arrivedAt: "2026-10-09T09:00:00Z", signedToday: true,
   deferred: false, lines: [], orthoAdjustment: { id: 30, billingClass: "LEGACY_INCLUDED", pendingDecision: false, decision: null },
+  dueRecommendation: buildCheckoutDueRecommendation({ patientId: 1, visitInvoiceId: null, current: { YER: balance }, sources: [] }),
   nextAppointment: null, invoice: null, balances: balance ? [{ currency: "YER", balanceMinor: balance }] : [],
   checkout: { previous: { YER: 180000, SAR: 0, USD: 0 }, current: { YER: balance, SAR: 0, USD: 0 }, invoicePaidMinor: 0 } });
 const response = (body: unknown, ok = true) => ({ ok, json: async () => body });

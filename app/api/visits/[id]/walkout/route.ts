@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, getVisitOwner, visitWalkout } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getVisitOwner } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
-import { visitCheckoutSummary } from "@/lib/checkout-db";
+import { readVisitCheckout } from "@/lib/checkout-db";
 import { authorizeVisit } from "@/lib/operational-access";
 import { requireSession } from "@/lib/session";
 import { canSeeWalkout } from "@/lib/walkout-access";
@@ -31,16 +31,19 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (!(await canSeeWalkout(session, owner.patientId))) {
       return NextResponse.json({ message: "ملخّص المغادرة فيه أرقامٌ مالية — للاستقبال والمدير." }, { status: 403 });
     }
-    const walkout = await visitWalkout(id);
-    if (!walkout) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
-    /* (P0-G) الملخص المالي بكل عملة + قسط الرصيد السابق المقترح (P0-C) — من الخادم لا من الواجهة. */
-    const summary = await visitCheckoutSummary(walkout);
+    const checkout = await readVisitCheckout(id);
+    if (!checkout) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+    const { walkout, summary, dueRecommendation, today } = checkout;
+    // Refuse an owner changed between authorization and the money snapshot.
+    if (walkout.patientId !== owner.patientId || walkout.patientId !== allowed.patientId) {
+      return NextResponse.json({ message: "تغيّر ارتباط الزيارة؛ أعد تحميل الملف." }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
+    }
     // (OP-03) «وُقِّعت اليوم» بتوقيت العيادة المضبوط في الخادم لا بافتراض العميل — لاستعادة الشبّاك.
     const signedToday = walkout.signedAt !== null
-      && clinicDateString(new Date(walkout.signedAt), CLINIC_TIME_ZONE) === clinicDateString(new Date(), CLINIC_TIME_ZONE);
+      && clinicDateString(new Date(walkout.signedAt), CLINIC_TIME_ZONE) === today;
     const handoff = canReadReceptionHandoff(session.role) && walkout.signedAt
       ? await readReceptionHandoff(id, walkout) : null;
-    return NextResponse.json({ ...walkout, summary, signedToday,
+    return NextResponse.json({ ...walkout, summary, dueRecommendation, signedToday,
       ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason } } : {}),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

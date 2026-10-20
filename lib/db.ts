@@ -28977,7 +28977,9 @@ export interface VisitWalkout {
  * (CHAIR-1 Slice 5) ملخّص المغادرة من بياناتٍ قائمة: عمل الزيارة (وما شُمل بالخطة)، وفاتورتها،
  * وسندات اليوم، والرصيد بكل عملة، والموعد القادم. قراءةٌ فقط — لا يكتب شيئًا.
  */
-export async function visitWalkout(visitId: number): Promise<VisitWalkout | null> {
+export async function visitWalkout(visitId: number, snapshotClient?: DbClient): Promise<VisitWalkout | null> {
+  // An owning checkout reader supplies its existing read-only snapshot.
+  if (snapshotClient) return visitWalkoutInSnapshot(snapshotClient, visitId);
   await ensureSchema();
   const client = await getPool().connect();
   try {
