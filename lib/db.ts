@@ -9306,16 +9306,23 @@ export async function correctInvoiceInTransaction(client: DbClient, input: Invoi
       ],
     );
     const itemById = new Map(items.map((item) => [item.id, item]));
+    const itemPairs: { originalItemId: number; correctedItemId: number }[] = [];
     for (const line of plan.lines) {
       const item = itemById.get(line.itemId)!;
       const amended=revision?.amendments?.get(line.itemId);
-      await client.query(
+      const inserted = await client.query<{ id: number }>(
         `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
                                     plan_item_id)
-         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::int)`,
+         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::int) RETURNING id`,
         [created.id, amended?amended.serviceId:item.service_id, amended?amended.doctorId:item.doctor_id, amended?amended.description:item.description, line.quantity, line.unitPriceMinor, line.totalMinor,
           item.plan_item_id],
       );
+      if (inserted.rowCount !== 1 || inserted.rows.length !== 1 || !Number.isSafeInteger(inserted.rows[0].id) || inserted.rows[0].id <= 0) {
+        throw new Error("تعذّر إثبات هوية بند الفاتورة المصححة؛ لم يُحفظ التصحيح.");
+      }
+      // Identity comes from this exact INSERT, never matching clinical labels,
+      // nullable plan links, prices, or a later query's incidental row order.
+      itemPairs.push({ originalItemId: line.itemId, correctedItemId: inserted.rows[0].id });
     }
     const { rowCount: relinked } = await client.query(
       `UPDATE visits SET invoice_id = $2 WHERE invoice_id = $1`, [original.id, created.id],
@@ -9363,7 +9370,7 @@ export async function correctInvoiceInTransaction(client: DbClient, input: Invoi
       },
       actor: input.actor, actorRole: input.actorRole,
     });
-    return { ok: true as const, originalId: original.id, correctedId: created.id };
+    return { ok: true as const, originalId: original.id, correctedId: created.id, itemPairs };
 }
 
 export async function correctInvoice(input: InvoiceCorrectionWrite): Promise<InvoiceCorrectionResult> {
