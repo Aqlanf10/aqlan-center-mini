@@ -47,14 +47,6 @@ try {
   process.exit(1);
 }
 
-function sslFor(target) {
-  const lowered = target.toLowerCase();
-  if (lowered.includes("sslmode=disable")) return false;
-  if (/@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(lowered)) return false;
-  return { rejectUnauthorized: false };
-}
-
-// Never give pg unvalidated connection-string query parameters or TLS file options.
 const client = new Client({ connectionString: validatedTarget.connectionString, ssl: false });
 try {
   await client.connect();
