@@ -1,3 +1,5 @@
+import { validateLocalVerificationTarget } from '../../lib/verification-target-policy.mjs';
+
 /**
  * Strict pre-I/O gate for the legacy SQL importer.
  * PostgreSQL URI query parameters can override URL authority/path. Reject
@@ -25,9 +27,11 @@ export function assertSafeLegacyRestoreTarget(connectionString, env = process.en
   for (const name of unsafeEnvironmentKeys) {
     if (env[name] !== undefined) refusal('ambiguous PostgreSQL environment option ' + name);
   }
+  // Share the repository's existing #185 safe-target URI policy rather than
+  // silently diverge from its URL override, encoding and Railway checks.
   let url;
-  try { url = new URL(connectionString); }
-  catch { refusal('invalid PostgreSQL URI'); }
+  try { url = validateLocalVerificationTarget(connectionString, env, { varName:'DATABASE_URL' }); }
+  catch { refusal('canonical verification target policy rejected this URI'); }
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.hash) {
     refusal('unsupported scheme or URI fragment');
   }
