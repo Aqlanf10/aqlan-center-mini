@@ -96,10 +96,10 @@ describe("restored patient Summary presentation", () => {
   it("preserves existing historical labels and native currency values unchanged", () => {
     const row = { balanceMinor: 180000, invoicedMinor: 0, paidMinor: 0, openingMinor: 180000,
       agreedMinor: 300000, treatmentDoneMinor: 0, remainingTreatmentMinor: 0,
-      agreementPaidMinor: 120000, agreementRemainingMinor: 180000,
+      approvedAgreements: { count: 1, available: true, reviewCount: 0, totalMinor: 300000, paidMinor: 120000, remainingMinor: 180000, dueNowMinor: 0 }, classicInstallments: null,
       clinicalProgress: { historicalItems: 1, knownItems: 0, knownDoneItems: 0, knownDoneMinor: 0, knownRemainingMinor: 0 } };
-    const sar = { ...row, balanceMinor: 2300, openingMinor: 2300, agreedMinor: 3000, agreementPaidMinor: 700, agreementRemainingMinor: 2300 };
-    const zero = { balanceMinor: 0, invoicedMinor: 0, paidMinor: 0, openingMinor: 0, agreedMinor: 0, treatmentDoneMinor: 0, remainingTreatmentMinor: 0 };
+    const sar = { ...row, balanceMinor: 2300, openingMinor: 2300, agreedMinor: 3000, approvedAgreements: { ...row.approvedAgreements, totalMinor: 3000, paidMinor: 700, remainingMinor: 2300 } };
+    const zero = { balanceMinor: 0, invoicedMinor: 0, paidMinor: 0, openingMinor: 0, agreedMinor: 0, treatmentDoneMinor: 0, remainingTreatmentMinor: 0, approvedAgreements: null, classicInstallments: null };
     const financial = { ...row, byCurrency: { YER: row, SAR: sar, USD: zero } };
     const original = JSON.stringify(financial);
     const html = render({ financial, canSeeFinancial: true });
@@ -109,6 +109,53 @@ describe("restored patient Summary presentation", () => {
     expect(html).not.toContain("علاج غير منفّذ");
     expect(html).not.toContain(formatMoney(182300, "YER"));
     expect(JSON.stringify(financial)).toBe(original);
+  });
+
+  const zero = { balanceMinor: 0, invoicedMinor: 0, paidMinor: 0, openingMinor: 0,
+    agreedMinor: 0, treatmentDoneMinor: 0, remainingTreatmentMinor: 0, approvedAgreements: null, classicInstallments: null };
+  it("separates the approved trio, planned work, and the classic reference without mixing currencies", () => {
+    const sar = { ...zero, balanceMinor: 100000, agreedMinor: 220000, remainingTreatmentMinor: 220000,
+      approvedAgreements: { count: 1, available: true, reviewCount: 0, totalMinor: 150000, paidMinor: 50000, remainingMinor: 100000, dueNowMinor: 25000 },
+      agreementPaidMinor: 876543, agreementRemainingMinor: 987654,
+      classicInstallments: { count: 1, totalMinor: 30000, paidMinor: 10000, remainingMinor: 20000 } };
+    const html = render({ financial: { ...zero, byCurrency: { YER: { ...zero, agreedMinor: 300000 }, SAR: sar, USD: zero } }, canSeeFinancial: true });
+    expect(html).toContain("القيمة المخططة للعلاج الجاري");
+    expect(html).toContain("الاتفاقات المالية المعتمدة");
+    expect(html).toContain("مرجع خطط التقسيط غير المعتمدة مالياً");
+    for (const [label, value] of [["قيمة العلاج المعتمدة", 150000], ["المسدّد من الاتفاق المعتمد", 50000], ["المتبقي من الاتفاق المعتمد", 100000], ["المستحق حسب جدول الاتفاق", 25000]] as const) {
+      expect(html).toContain(`${label}</dt><dd class="mt-0.5 font-extrabold text-navy-900">${formatMoney(value, "SAR")}</dd>`);
+    }
+    expect(html).not.toContain(formatMoney(520000, "YER"));
+    expect(html).not.toContain(formatMoney(876543, "SAR"));
+    expect(html).not.toContain(formatMoney(987654, "SAR"));
+    expect(html).not.toContain("قيمة العلاج المتفق عليه");
+  });
+
+  it("retains a review-only currency even without any ledger or active-plan amounts", () => {
+    const usd = { ...zero, approvedAgreements: { count: 1, available: false, reviewCount: 1,
+      totalMinor: 150000, paidMinor: null, remainingMinor: null, dueNowMinor: null } };
+    const html = render({ financial: { ...zero, byCurrency: { YER: zero, SAR: zero, USD: usd } }, canSeeFinancial: true });
+    expect(html).toContain('data-testid="approved-agreement-summary" data-currency="USD"');
+    expect(html).toContain(formatMoney(150000, "USD"));
+    expect(html.match(/غير متاح حتى المراجعة/g)).toHaveLength(3);
+    expect(html).toContain("مصدر اتفاق معتمد يحتاج مراجعة");
+    expect(html).toContain(`رصيد دفتر الحساب: ${formatMoney(0, "USD")} · ملخص الاتفاقات يحتاج تحقق`);
+    expect(html).not.toContain("المستحق الحالي مسدّد");
+    expect(html).not.toContain("الاتفاق المعتمد محسوب في رصيد الحساب");
+    expect(html).not.toContain("لا حركة مالية ولا خطط علاج في الملخص");
+  });
+
+  it("does not invent zero settlement for an older scalar response and honors the financial role gate", () => {
+    const old = { balanceMinor: 0, invoicedMinor: 0, paidMinor: 0, openingMinor: 0,
+      agreedMinor: 300000, treatmentDoneMinor: 0, remainingTreatmentMinor: 300000 } as NonNullable<WorkflowSummary["financial"]>;
+    const html = render({ financial: old, canSeeFinancial: true });
+    expect(html).toContain("ملخص الاتفاقات غير متاح");
+    expect(html).not.toContain("المستحق الحالي مسدّد");
+    expect(html).toContain(formatMoney(300000, "YER"));
+    expect(html).not.toContain("قيمة العلاج المعتمدة");
+    const hidden = render({ financial: old, canSeeFinancial: false });
+    expect(hidden).not.toContain('aria-label="الحساب"');
+    expect(hidden).not.toContain(formatMoney(300000, "YER"));
   });
 });
 

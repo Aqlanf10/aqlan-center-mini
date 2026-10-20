@@ -10,7 +10,7 @@ const patient = { id: patientId, patientNumber: "SYN-EXACT-HANDOFF", fullName: "
   phone: null, altPhone: null, gender: "unknown", birthYear: null, birthDate: null, address: null, medicalAlert: null,
   note: null, createdAt: "2026-10-09T08:00:00Z", photoDocumentId: null, flags: [], email: null, preferredChannel: null };
 const money = (balanceMinor: number) => ({ balanceMinor, invoicedMinor: 0, paidMinor: 0, openingMinor: balanceMinor,
-  agreedMinor: 999999, treatmentDoneMinor: 0, remainingTreatmentMinor: 999999, agreementPaidMinor: 0, agreementRemainingMinor: 999999 });
+  agreedMinor: 999999, treatmentDoneMinor: 0, remainingTreatmentMinor: 999999, approvedAgreements: null, classicInstallments: { count: 1, totalMinor: 999999, paidMinor: 0, remainingMinor: 999999 } });
 const workflow = () => ({ patient,
   openVisit: { id: openId, arrivedAt: "2026-10-09T11:00:00Z", status: "waiting", chair: null, plannedTitle: null },
   lastVisit: { id: secondId, date: "2026-10-09", treatmentDone: "زيارة أحدث", proceduresSummary: null, nextPlan: null },

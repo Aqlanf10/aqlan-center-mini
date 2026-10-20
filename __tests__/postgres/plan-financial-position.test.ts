@@ -36,6 +36,8 @@ it.each(['YER','SAR','USD'] as const)('reads %s invoice-first settlement once, i
  const f=await fixture(currency);const paid=await f.collect(400);const plan=await db.getPlan(f.planId,'2026-10-19');
  expect(plan).toMatchObject({paidMinor:400,progress:{paidMinor:400,remainingMinor:600,overdueMinor:600},installments:[],invoiceFinancial:{kind:'invoice_backed'}});
  expect(plan!.invoiceFinancial!.schedules).toHaveLength(1);
+ const summary=await db.patientWorkflow(f.patientId,'2026-10-19');
+ expect(summary.financial?.byCurrency[currency]).toMatchObject({balanceMinor:600,approvedAgreements:null,classicInstallments:null});
  const refund=async(amountMinor:number)=>db.recordPayment({patientId:f.patientId,invoiceId:f.invoiceId,kind:'refund',amountMinor,currency,baseCurrency:'YER',exchangeRate:paid.payment!.exchangeRate,method:'cash',note:null,createdBy:session.username,reversalOfId:paid.payment!.id,idempotencyKey:`plan-refund-${++serial}`});
  expect((await refund(100)).reason).toBeNull();expect((await db.getPlan(f.planId,'2026-10-19'))?.paidMinor).toBe(300);
  expect((await refund(300)).reason).toBeNull();expect((await db.getPlan(f.planId,'2026-10-19'))?.progress.remainingMinor).toBe(1000);
