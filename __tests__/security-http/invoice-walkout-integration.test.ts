@@ -11,6 +11,8 @@ beforeAll(async () => {
   h = await harness(); db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
   doctorId = (await db.query("INSERT INTO parties(kind,name) VALUES('doctor','Synthetic consumer HTTP doctor') RETURNING id")).rows[0].id;
   serviceId = (await db.query("INSERT INTO services(name,category,price_minor,price_sar_minor,price_usd_minor,price_configured,is_active) VALUES('Synthetic consumer historical group','ortho',1500,1500,1500,TRUE,TRUE) RETURNING id")).rows[0].id;
+  // Scheduled collections require stored FX, even when tender and debt match.
+  await db.query("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','140'),('finance.rate.USD','530') ON CONFLICT(key) DO NOTHING");
   await db.query("INSERT INTO cashier_shifts(opened_by,opening_yer,opening_sar,opening_usd) SELECT 'synthetic-consumer-http',0,0,0 WHERE NOT EXISTS(SELECT 1 FROM cashier_shifts WHERE status='open')");
   await mkdir(evidence, { recursive: true });
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
@@ -70,22 +72,76 @@ describe("real invoice signing, correction lineage and browser checkout", () => 
     expect(result.summary.find((row: { currency: string }) => row.currency === currency)).toMatchObject({ todayRemainingMinor: Math.max(0, 900 - paid), dueNowMinor: Math.max(0, 900 - paid) });
     const { context, page } = await open(f.patientId, f.visitId, width, h.sessions.reception);
     try {
-      let region = await checked(page, currency, 900 - paid);
-      if (paid === 1000) expect(await region.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
-      else {
-        await region.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).click();
-        const dialog = page.getByRole("dialog", { name: "تحصيل دفعة", exact: true });
-        await expect.poll(async () => ({ target: await dialog.getByLabel("فاتورة الهدف", { exact: true }).inputValue(), amount: await dialog.getByLabel("المبلغ", { exact: true }).inputValue(), currency: await dialog.getByLabel("العملة", { exact: true }).inputValue() }))
-          .toEqual({ target: String(current.id), amount: currency === "YER" ? "500" : "5.00", currency });
-        await page.screenshot({ path: `${evidence}/remaining-preset-${currency}-${width}.png`, fullPage: true });
+      const region = await checked(page, currency, 900 - paid);
+      expect(await region.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
+      if (paid === 400) {
+        // Correction creates a full-repayment schedule. Its explicit source
+        // selection belongs in the account, never the unscheduled inline modal.
+        expect(result.dueRecommendation).toMatchObject({ patientId: f.patientId, visitInvoiceId: current.id,
+          collectionAction: "account", accountHref: `/patients/${f.patientId}?tab=account` });
+        const due = result.dueRecommendation.currencies.find((row: { currency: string }) => row.currency === currency);
+        expect(due).toMatchObject({ currentBalanceMinor: 500, dueNowMinor: 500, status: "verified" });
+        expect(due.sources).toEqual([{ kind: "repayment_schedule", authorityId: expect.any(Number), currency,
+          invoiceId: current.id, openingCurrency: null, remainingMinor: 500, dueNowMinor: 500, available: true }]);
+        const schedulesResponse = await authedGet(`/api/patients/${f.patientId}/debt-repayments`, h.sessions.reception);
+        const schedules = await schedulesResponse.json(); expect(schedulesResponse.status, JSON.stringify(schedules)).toBe(200);
+        const schedule = schedules.arrangements.find((row: { id: number }) => row.id === due.sources[0].authorityId);
+        // Each correction creates a new replacement-specific arrangement at
+        // version 1. Read that verified version rather than hard-code a command.
+        expect(schedule).toMatchObject({ version: 1, status: "active", available: true, remainingMinor: 500,
+          target: { patientId: f.patientId, invoiceId: current.id, openingCurrency: null, currency } });
+        const checkoutUrl = page.url();
+        const accountLink = region.getByRole("link", { name: "اختيار مصدر التحصيل ومراجعته من الحساب", exact: true });
+        expect(await accountLink.getAttribute("href")).toBe(`/patients/${f.patientId}?tab=account`);
+        expect(await accountLink.getAttribute("target")).toBe("_blank");
+        const accountErrors: string[] = [], collectionKeys: string[] = [];
+        const accountOpened = context.waitForEvent("page").then(accountPage => {
+          accountPage.setDefaultTimeout(15000);
+          accountPage.on("pageerror", error => accountErrors.push(error.message));
+          accountPage.on("request", request => {
+            if (request.method() === "POST" && request.url().endsWith("/collect")) collectionKeys.push(request.headers()["idempotency-key"]);
+          });
+          return accountPage;
+        });
+        await accountLink.click();
+        const accountPage = await accountOpened;
+        await accountPage.waitForLoadState("networkidle");
+        expect(accountPage.url()).toBe(`${baseUrl}/patients/${f.patientId}?tab=account`);
+        expect(page.isClosed()).toBe(false); expect(page.url()).toBe(checkoutUrl);
+        expect(await region.getAttribute("data-visit-id")).toBe(String(f.visitId));
+        const panel = accountPage.getByTestId("debt-repayment-panel");
+        const source = panel.getByRole("article").filter({ has: accountPage.getByRole("heading", { name: `فاتورة ${current.invoiceNumber} · ${currency}`, exact: true }) });
+        await source.getByRole("button", { name: "تحصيل دفعة فعلية", exact: true }).click();
+        const collection = panel.getByRole("group", { name: "تحصيل قسط فعلي", exact: true });
+        const amount = currency === "YER" ? "500" : "5.00";
+        await expect.poll(async () => ({ amount: await collection.getByLabel("مبلغ تحصيل القسط", { exact: true }).inputValue(), currency: await collection.getByLabel("عملة تحصيل القسط", { exact: true }).inputValue() }))
+          .toEqual({ amount, currency });
+        await accountPage.screenshot({ path: `${evidence}/remaining-preset-${currency}-${width}.png`, fullPage: true });
         // Collect exactly the lineage remainder on the replacement. The original
         // receipt stays on its ancestor; neither receipt may be counted twice.
-        const response = page.waitForResponse(response => response.url().endsWith("/api/payments") && response.request().method() === "POST");
-        await dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).click();
-        expect((await response).status()).toBe(201); await dialog.waitFor({ state: "detached" });
-        region = await checked(page, currency, 0);
-        expect((await db.query("SELECT invoice_id,amount_minor::text FROM payments WHERE patient_id=$1 ORDER BY id", [f.patientId])).rows)
-          .toEqual([{ invoice_id: f.original.id, amount_minor: "400" }, { invoice_id: current.id, amount_minor: "500" }]);
+        const response = accountPage.waitForResponse(response => response.url() === `${baseUrl}/api/patients/${f.patientId}/debt-repayments/${due.sources[0].authorityId}/collect` && response.request().method() === "POST");
+        await collection.getByRole("button", { name: "تأكيد التحصيل وإصدار السند", exact: true }).click();
+        const collected = await response, receipt = await collected.json();
+        expect(collected.status(), JSON.stringify(receipt)).toBe(201);
+        expect(collected.request().postDataJSON()).toEqual({ amount, currency, method: "cash", note: null, expectedVersion: schedule.version });
+        const collectionKey = collected.request().headers()["idempotency-key"];
+        expect(collectionKey).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
+        expect(receipt).toMatchObject({ replayed: false, payment: { id: expect.any(Number), patientId: f.patientId,
+          invoiceId: current.id, openingCurrency: null, planId: null, kind: "payment", amountMinor: 500, currency, method: "cash" } });
+        await collection.waitFor({ state: "detached" });
+        await expect.poll(() => panel.getByRole("link", { name: "طباعة سند التحصيل", exact: true }).getAttribute("href")).toBe(`/print/receipt/${receipt.payment.id}`);
+        // The public payment omits its key; bind the returned receipt identity
+        // to the exact persisted request key and prove no second receipt exists.
+        expect((await db.query("SELECT id,invoice_id,opening_currency,currency,kind,amount_minor::text,idempotency_key FROM payments WHERE patient_id=$1 ORDER BY id", [f.patientId])).rows)
+          .toEqual([{ id: f.receiptId, invoice_id: f.original.id, opening_currency: null, currency, kind: "payment", amount_minor: "400", idempotency_key: `consumer-receipt-${f.patientId}` },
+            { id: receipt.payment.id, invoice_id: current.id, opening_currency: null, currency, kind: "payment", amount_minor: "500", idempotency_key: collectionKey }]);
+        expect(page.url()).toBe(checkoutUrl);
+        await accountPage.close();
+        expect(accountErrors).toEqual([]); expect(collectionKeys).toEqual([collectionKey]);
+        await page.reload({ waitUntil: "networkidle" }); await checked(page, currency, 0);
+        result = await read(f.visitId);
+        expect(result).toMatchObject({ invoice: { id: current.id, netMinor: 900, currency },
+          checkout: { invoicePaidMinor: 900, current: { [currency]: 0 } }, receptionHandoff: { status: "collected" } });
       }
       await page.screenshot({ path: `${evidence}/corrected-${currency}-${paid}-${width}.png`, fullPage: true });
       const reversal = await post(`/api/payments/${f.receiptId}/correct`, { mode: "void", reason: "إبطال اصطناعي لإعادة التحقق من تسوية الأصل" }, h.sessions.admin, `consumer-void-${f.receiptId}`);

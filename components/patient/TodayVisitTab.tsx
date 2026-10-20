@@ -440,7 +440,7 @@ function OwnedTodayVisitTab({
           <h3 className="mb-2 text-sm font-extrabold text-emerald-900">
             انتهت الزيارة — شبّاك التحصيل · زيارة #{checkout.visitId}
           </h3>
-          <dl className="space-y-1 rounded-xl border border-emerald-200 bg-white p-3 text-sm">
+          <dl aria-label="أرصدة دفتر الزيارة" className="space-y-1 rounded-xl border border-emerald-200 bg-white p-3 text-sm">
             <div className="flex items-center justify-between">
               <dt className="text-slate-500">{PREVIOUS_BALANCE_LABEL}</dt>
               <dd className="font-bold">
