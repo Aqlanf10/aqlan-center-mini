@@ -9,7 +9,7 @@ describe("partyStatementTotals", () => {
         { amountMinor: 50_000, currency: "YER", settledMinor: 20_000, remainingMinor: 30_000 },
         { amountMinor: 10_000, currency: "SAR", settledMinor: 0, remainingMinor: 10_000 },
       ],
-      [{ amountMinor: 20_000, currency: "YER", payableId: 1 }],
+      [{ amountMinor: 20_000, currency: "YER", payableId: 1, payableExists: true, allocatedPaidMinor: 0 }],
     );
     expect(totals).toEqual([
       { currency: "YER", owedMinor: 50_000, settledMinor: 20_000, remainingMinor: 30_000, paidMinor: 20_000, unlinkedPaidMinor: 0, openingAdvanceMinor: 0, openingOwedMinor: 0 },
@@ -21,9 +21,9 @@ describe("partyStatementTotals", () => {
     const totals = partyStatementTotals(
       [{ amountMinor: 5_000, currency: "USD", settledMinor: 0, remainingMinor: 5_000 }],
       [
-        { amountMinor: 5_000, currency: "USD", payableId: 7 },
-        { amountMinor: -5_000, currency: "USD", payableId: 7 },
-        { amountMinor: 1_500, currency: "USD", payableId: null },
+        { amountMinor: 5_000, currency: "USD", payableId: 7, payableExists: true, allocatedPaidMinor: 0 },
+        { amountMinor: -5_000, currency: "USD", payableId: 7, payableExists: true, allocatedPaidMinor: 0 },
+        { amountMinor: 1_500, currency: "USD", payableId: null, payableExists: false, allocatedPaidMinor: 0 },
       ],
     );
     expect(totals).toEqual([
@@ -35,7 +35,7 @@ describe("partyStatementTotals", () => {
     expect(partyStatementTotals([], [])).toEqual([]);
     const totals = partyStatementTotals(
       [{ amountMinor: 100, currency: "USD", settledMinor: 0, remainingMinor: 100 }],
-      [{ amountMinor: 300, currency: "YER", payableId: null }],
+      [{ amountMinor: 300, currency: "YER", payableId: null, payableExists: false, allocatedPaidMinor: 0 }],
     );
     expect(totals.map((row) => row.currency)).toEqual(["YER", "USD"]);
   });

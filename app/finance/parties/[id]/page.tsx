@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORY_LABEL, type ExpenseCategory } from "@/lib/expenses";
-import type { PartyCurrencyTotals } from "@/lib/party-statement";
+import { partyStatementNetMinor, readPartyStatementTotals, type PartyCurrencyTotals } from "@/lib/party-statement";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "@/components/SessionProvider";
 import { canHandleMoney } from "@/lib/roles";
@@ -41,6 +41,7 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
   const [partyName, setPartyName] = useState("");
   const [base, setBase] = useState<Currency>("YER");
   const [loading, setLoading] = useState(true);
+  const [readFailed, setReadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -56,14 +57,17 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
       const response = await fetch(`/api/payables?partyId=${id}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      const nextTotals = readPartyStatementTotals(payload.totals);
       setPayables(payload.payables as Payable[]);
       setExpenses(payload.expenses as Expense[]);
-      setTotals(Array.isArray(payload.totals) ? payload.totals as PartyCurrencyTotals[] : []);
+      setTotals(nextTotals);
       setPartyName(typeof payload.party?.name === "string" ? payload.party.name : "");
       if (isCurrency(payload.baseCurrency)) setBase(payload.baseCurrency);
       setError(null);
+      setReadFailed(false);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      setReadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -97,10 +101,11 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
   /* (TD-05) لكل عملةٍ سطرها: كانت البطاقة تجمع مكافئات الريال اليمني لفواتير
      بالسعودي والدولار في رقمٍ واحد، وتحسبه من آخر ٢٠٠ سطرٍ فقط. الإجمالي الآن من
      الخادم لكل عملة، والمتبقي بعملة الالتزام من لقطات السداد. */
-  /* (FIA-1) المتبقي علينا يُنقصه الرصيد المقدَّم السابق لنا عند الجهة — بعملته. */
+  // Net party debt also includes unallocated on-account payments, in their own
+  // currencies. Invoice remainders below remain unchanged.
   const due = totals
-    .map((row) => ({ ...row, remainingMinor: row.remainingMinor - (row.openingAdvanceMinor ?? 0) }))
-    .filter((row) => row.remainingMinor !== 0);
+    .map((row) => ({ ...row, netMinor: partyStatementNetMinor(row) }))
+    .filter((row) => row.netMinor !== 0);
   return (
     <main className="mx-auto max-w-3xl p-4 pb-24">
       <header className="mb-4">
@@ -118,12 +123,16 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
 
-      <section className={`mb-4 rounded-2xl border-2 p-4 text-center ${
+      {loading || readFailed ? (
+        <p role="status" className="mb-4 text-center text-sm text-slate-500">
+          {loading ? "جارٍ تحميل رصيد الجهة…" : "رصيد الجهة غير متاح."}
+        </p>
+      ) : <section className={`mb-4 rounded-2xl border-2 p-4 text-center ${
         due.length > 0 ? "border-amber-300 bg-amber-50" : "border-emerald-300 bg-emerald-50"
       }`}>
         <p className="text-xl font-extrabold">
           {due.length > 0
-            ? `علينا ${due.map((row) => formatMoney(row.remainingMinor, row.currency)).join(" + ")}`
+            ? due.map((row) => `${row.netMinor > 0 ? "علينا" : "لنا عند الجهة"} ${formatMoney(Math.abs(row.netMinor), row.currency)}`).join(" · ")
             : "الحساب مسدّد"}
         </p>
         {totals.map((row) => (
@@ -133,7 +142,7 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
             {row.unlinkedPaidMinor !== 0 ? ` (منه على الحساب ${formatMoney(row.unlinkedPaidMinor, row.currency)})` : ""}
           </p>
         ))}
-      </section>
+      </section>}
 
       {!canMutate ? null : !adding ? (
         <button onClick={() => setAdding(true)}
@@ -174,7 +183,7 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
 
       {loading ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
-      ) : (
+      ) : readFailed ? null : (
         <>
           <section className="mb-5" aria-label="الالتزامات">
             <h2 className="mb-2 text-sm font-bold">الالتزامات ({payables.length})</h2>
