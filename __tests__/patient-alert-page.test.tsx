@@ -428,10 +428,10 @@ describe("compact patient account header and Account details", () => {
   it("keeps signed ledger totals compact and moves agreement and historical details to Account", async () => {
     const zero = { balanceMinor: 0, invoicedMinor: 0, paidMinor: 0, openingMinor: 0,
       agreedMinor: 0, treatmentDoneMinor: 0, remainingTreatmentMinor: 0,
-      agreementPaidMinor: 0, agreementRemainingMinor: 0 };
+      approvedAgreements: null, classicInstallments: null };
     const progress = { historicalItems: 1, knownItems: 0, knownDoneItems: 0, knownDoneMinor: 0, knownRemainingMinor: 0 };
     const financial = { ...zero, byCurrency: {
-      YER: { ...zero, agreementRemainingMinor: 900000, clinicalProgress: progress },
+      YER: { ...zero, approvedAgreements: { count: 1, available: true, reviewCount: 0, totalMinor: 1000000, paidMinor: 100000, remainingMinor: 900000, dueNowMinor: 0 }, clinicalProgress: progress },
       SAR: { ...zero, balanceMinor: 25000000, openingMinor: 25000000, remainingTreatmentMinor: 25250000 },
       USD: { ...zero, balanceMinor: -500, paidMinor: 500 },
     } };
@@ -472,7 +472,7 @@ describe("compact patient account header and Account details", () => {
     expect(text(planned)).not.toContain(formatMoney(25000000, "SAR"));
     expect(text(totals)).not.toContain(formatMoney(25250000, "SAR"));
     const historical = banners.find(element => element.props["data-currency"] === "YER")!;
-    expect(text(historical)).toContain(`باقي الاتفاق (ليس المستحق الحالي): ${formatMoney(900000, "YER")}`);
+    expect(text(historical)).toContain(`المتبقي من الاتفاق المعتمد (ضمن رصيد الحساب): ${formatMoney(900000, "YER")}`);
     expect(nodes(historical).find(element => element.type === HistoricalClinicalNote)?.props)
       .toMatchObject({ progress, currency: "YER" });
     expect(JSON.stringify(financial)).toBe(originalValue);
@@ -480,6 +480,31 @@ describe("compact patient account header and Account details", () => {
     hooks.username = "new-financial-owner";
     expect(render().filter(element => element.type === PatientLedger)).toHaveLength(0);
     expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(0);
+  });
+
+  it.each(["review", "older-response"])("uses warning styling for %s agreement data even with a zero ledger balance", async kind => {
+    const zero = { balanceMinor: 0, invoicedMinor: 0, paidMinor: 0, openingMinor: 0,
+      agreedMinor: 0, treatmentDoneMinor: 0, remainingTreatmentMinor: 0 };
+    const verified = { ...zero, approvedAgreements: null, classicInstallments: null };
+    const financial = { ...verified, byCurrency: { YER: verified, USD: verified,
+      SAR: kind === "review" ? { ...verified, approvedAgreements: { count: 1, available: false, reviewCount: 1,
+        totalMinor: 150000, paidMinor: null, remainingMinor: null, dueNowMinor: null } } : zero } };
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, options) => {
+      const response = await originalFetch(input, options);
+      if (!String(input).endsWith("/workflow")) return response;
+      return Response.json({ ...await response.json(), financial, canSeeFinancial: true });
+    });
+    await mount();
+    await vi.waitFor(() => expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(3));
+    click("patient-tab-account");
+    const [banner] = accountBanners();
+    expect(accountBanners()).toHaveLength(1);
+    expect(banner.props["data-currency"]).toBe("SAR");
+    expect(banner.props.className).toContain("bg-amber-50");
+    expect(banner.props.className).not.toContain("bg-emerald-50");
+    expect(text(banner)).toContain("غير متاح");
+    expect(text(banner)).not.toContain("ضمن رصيد الحساب");
   });
 
   it("does not invent a zero-balance banner without verified workflow financial data", () => {

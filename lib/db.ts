@@ -1,3 +1,4 @@
+import { patientAgreementSummary, type PatientWorkflowFinancialBucket } from "./patient-agreement-summary";
 import { APPROVED_AGREEMENT_SQL } from "./approved-agreement-schema";
 import { checksumOf } from "./migration-files";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
@@ -20844,18 +20845,9 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   }[];
   plannedVisits: PlannedVisitView[];
   counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
-  financial: {
-    balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
-    agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
-    clinicalProgress?: ClinicalProgressView;
-    agreementPaidMinor: number; agreementRemainingMinor: number;
-    byCurrency: Record<Currency, {
-      balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
-      agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
-      clinicalProgress?: ClinicalProgressView;
-      agreementPaidMinor: number; agreementRemainingMinor: number;
-    }>;
-  } | null;
+  financial: (PatientWorkflowFinancialBucket & {
+    byCurrency: Record<Currency, PatientWorkflowFinancialBucket>;
+  }) | null;
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
   /** (INV-LINK D) حالاتٌ فتحتها فاتورة علاجية وتنتظر تقييم الطبيب. */
   assessmentCases: { id: number; patientId: number; kind: "specialty"; orthoCaseId: null; specialty: string; title: string; needsAssessment: true }[];
@@ -21018,19 +21010,16 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     ),
     openingMinorsOf(financial.openings),
   );
-  const byCurrency = {} as Record<Currency, {
-    balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
-    agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
-    clinicalProgress: ClinicalProgressView;
-    agreementPaidMinor: number; agreementRemainingMinor: number;
-  }>;
+  const byCurrency = {} as Record<Currency, PatientWorkflowFinancialBucket>;
   for (const currency of CURRENCIES) {
     const settlement = settlementBuckets[currency];
     const currencyPlans = livePlans.filter((plan) => plan.baseCurrency === currency);
     const agreedMinor = currencyPlans.reduce((sum, plan) => sum + plan.totalMinor, 0);
-    const agreements = currencyPlans.filter((plan) => !plan.totalFromItems);
-    const agreementPaidMinor = agreements.reduce((sum, plan) => sum + plan.progress.paidMinor, 0);
-    const agreementRemainingMinor = agreements.reduce((sum, plan) => sum + plan.progress.remainingMinor, 0);
+    // Deprecated compatibility fields preserve the old population for open tabs.
+    // New clients must use the explicit approved/classic projections below.
+    const compatibilityAgreements = currencyPlans.filter((plan) => !plan.totalFromItems);
+    const agreementPaidMinor = compatibilityAgreements.reduce((sum, plan) => sum + plan.progress.paidMinor, 0);
+    const agreementRemainingMinor = compatibilityAgreements.reduce((sum, plan) => sum + plan.progress.remainingMinor, 0);
     const treatmentDoneMinor = currencyPlans.reduce(
       (sum, plan) => sum + plan.itemsProgress.doneMinor, 0);
     byCurrency[currency] = {
@@ -21039,6 +21028,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
       paidMinor: settlement.collectedMinor,
       openingMinor: settlement.openingMinor,
       agreedMinor, agreementPaidMinor, agreementRemainingMinor,
+      ...patientAgreementSummary(plans, currency),
       treatmentDoneMinor,
       remainingTreatmentMinor: Math.max(0, agreedMinor - treatmentDoneMinor),
       clinicalProgress: combineClinicalProgress(currencyPlans.map((plan) => historicalClinicalProgress(plan.items))),
@@ -21051,6 +21041,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     paidMinor: baseView.paidMinor,
     openingMinor: baseView.openingMinor,
     agreedMinor: baseView.agreedMinor,
+    approvedAgreements: baseView.approvedAgreements,
+    classicInstallments: baseView.classicInstallments,
     agreementPaidMinor: baseView.agreementPaidMinor,
     agreementRemainingMinor: baseView.agreementRemainingMinor,
     treatmentDoneMinor: baseView.treatmentDoneMinor,

@@ -24,7 +24,8 @@ const summary = {
     chair: null, plannedTitle: null },
   nextAppointment: { id: 51 }, activePlans: [{ id: 61 }], plannedVisits: [{ id: 71 }],
   assessmentCases: [assessment], legacyCases: [legacy],
-  financial: { balanceMinor: 900 }, alerts: [],
+  financial: { balanceMinor: 900, approvedAgreements: { count: 1, available: true, totalMinor: 1500, paidMinor: 600, remainingMinor: 900, dueNowMinor: 100 },
+    classicInstallments: { count: 1, totalMinor: 3000, paidMinor: 1000, remainingMinor: 2000 } }, alerts: [],
   counts: { visits: 1, openLabOrders: 0, documents: 0, orthoCase: false },
 };
 const request = () => new Request("http://test.invalid/api/patients/7/workflow");
@@ -109,4 +110,20 @@ describe("workflow GET case projection authorization", () => {
     expect(response.status).toBe(500);
     expect(await response.json()).not.toHaveProperty("legacyCases");
   });
+});
+
+it.each(["doctor", "assistant"])("withholds the complete financial projection from %s", async role => {
+  boundary.requireSession.mockResolvedValue({ username: `synthetic-${role}`, role });
+  const body = await (await GET(request(), context())).json();
+  expect(body.financial).toBeNull();
+  expect(JSON.stringify(body)).not.toContain("approvedAgreements");
+  expect(JSON.stringify(body)).not.toContain("classicInstallments");
+});
+
+it("retains the existing explicit doctor financial-view setting", async () => {
+  boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor" });
+  boundary.getSettings.mockResolvedValue({ "workflow.doctor_financial_view": "true" });
+  const body = await (await GET(request(), context())).json();
+  expect(body.canSeeFinancial).toBe(true);
+  expect(body.financial).toEqual(summary.financial);
 });
