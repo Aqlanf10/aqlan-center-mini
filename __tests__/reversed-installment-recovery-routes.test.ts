@@ -83,11 +83,23 @@ describe("explicit recovery payment route", () => {
     expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ reason, message: expect.stringContaining("لم يُسجّل قبض جديد") });
     expect(mock.recovery).not.toHaveBeenCalled(); expect(mock.audit).not.toHaveBeenCalled(); expect(mock.installment).not.toHaveBeenCalled();
   });
-  it("retains the ordinary parser/writer path for no purpose", async () => {
+  it("retains the ordinary audited writer for no purpose without a duplicate route audit", async () => {
     expect((await postPayment(request({ patientId: 7, amount: "20", currency: "YER" }))).status).toBe(201);
     expect(mock.recovery).not.toHaveBeenCalled(); expect(mock.settings).toHaveBeenCalledOnce();
-    expect(mock.ordinary).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: null, planId: null, idempotencyKey: "recover-route-001", amountMinor: 20 }));
-    expect(mock.audit).toHaveBeenCalledOnce();
+    expect(mock.ordinary).toHaveBeenCalledOnce();
+    expect(mock.ordinary).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: null, planId: null, idempotencyKey: "recover-route-001", amountMinor: 20, createdBy: "cashier-a", actorRole: "reception" }));
+    // The canonical writer owns the atomic original event. This route mock
+    // must not manufacture a second post-commit creation event.
+    expect(mock.audit).not.toHaveBeenCalled();
+  });
+  it("retains only the best-effort trace for an ordinary exact replay", async () => {
+    mock.ordinary.mockResolvedValue({ payment: { id: 51, kind: "payment", receiptNumber: "P51", amountMinor: 20, currency: "YER", exchangeRate: 1, baseAmountMinor: 20, method: "cash" }, reason: null, replayed: true });
+    const response = await postPayment(request({ patientId: 7, amount: "20", currency: "YER" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: 51, idempotencyKey: "recover-route-001" });
+    expect(mock.recovery).not.toHaveBeenCalled();
+    expect(mock.ordinary).toHaveBeenCalledOnce();
+    expect(mock.audit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ action: "payment.idempotent_replay", entity: "payment", entityId: 51, actor: "cashier-a", actorRole: "reception" }));
   });
 });
 

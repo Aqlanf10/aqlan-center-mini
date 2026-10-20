@@ -218,7 +218,7 @@ export async function POST(request: Request) {
     const { payment, reason, replayed } = await recordPayment({
       patientId, invoiceId, planId, openingCurrency, kind, amountMinor, currency,
       baseCurrency: base, exchangeRate, method, note, createdBy: session.username,
-      idempotencyKey, reversalOfId,
+      idempotencyKey, reversalOfId, actorRole: session.role,
     });
     if (reason === "issued_installment_recovery_required" || reason === "installment_recovery_review_required") {
       return NextResponse.json({ reason, message: reason === "issued_installment_recovery_required"
@@ -301,22 +301,8 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    // بعد النجاح لا قبله: تسجيلُ ما لم يقع أسوأ من عدم تسجيل ما وقع.
-    if (payment && !replayed) {
-      await recordAudit({
-        action: payment.kind === "refund" ? "payment.refund" : "payment.create",
-        entity: "payment", entityId: payment.id, entityLabel: payment.receiptNumber,
-        details: {
-          المريض: patientId, المبلغ: payment.amountMinor, العملة: payment.currency,
-          سعر_الصرف: payment.exchangeRate, المكافئ: payment.baseAmountMinor,
-          الطريقة: payment.method,
-          ...(planId ? { الخطة: planId } : {}),
-          ...(openingCurrency ? { رصيد_سابق: openingCurrency } : {}),
-          ...(reversalOfId ? { ردٌّ_لسند: reversalOfId } : {}),
-        },
-        actor: session.username, actorRole: session.role,
-      });
-    }
+    // Creation/refund evidence is already committed atomically by recordPayment.
+    // A replay trace is best-effort and must not turn a saved success into a failure.
     if (payment && replayed) {
       await recordAudit({
         action: "payment.idempotent_replay", entity: "payment",

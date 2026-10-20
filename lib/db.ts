@@ -9490,6 +9490,8 @@ export async function recordPayment(input: {
   method: string;
   note: string | null;
   createdBy: string;
+  /** Attribution for the atomic receipt audit; never part of the financial fingerprint. */
+  actorRole?: string | null;
   /**
    * (P1.5 + P1-FIX-4) مفتاح إعادة المحاولة المطلوب (ترويسة Idempotency-Key):
    * مرتبط ببصمة الطلب الكاملة — نفس المفتاح بنفس العملية ⇒ replay، وبعملية
@@ -9545,7 +9547,7 @@ export async function recordPayment(input: {
      مطالبات متزامنة على PostgreSQL حقيقي. */
   const outcome = await runPaymentTransaction(
     { ...input, planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
-    { idempotencyKey, reversalOfId },
+    { idempotencyKey, reversalOfId, receiptAudit: { actorRole: input.actorRole ?? null } },
   );
 
   /* الاتصال محرَّر الآن — الترطيب (قراءة السند كاملًا) خارج الحجز. */
@@ -9816,6 +9818,9 @@ async function runPaymentTransaction(
     inheritedTarget?: boolean;
     /** Internal opt-in recovery only: ordinary/correction v1 fingerprints stay unchanged. */
     requestHashOverride?: string;
+    /** Only recordPayment requests a generic receipt event. Caller-owned correction,
+     * debt, approved collection and recovery transactions retain their purpose audit. */
+    receiptAudit?: { actorRole: string | null };
   },
   /** (RC-1) معاملةٌ خارجية قائمة (تصحيح السند: عكسٌ + سندٌ بديل ذرّيًا). حينها لا تُفتح معاملة ولا
    *  تُثبَّت ولا يُحرَّر الاتصال هنا — المتصل يملكها: يُثبّت عند النجاح، ويتراجع عن كل شيء عند أي سبب. */
@@ -10135,7 +10140,12 @@ async function runPaymentTransaction(
     /* الإدراج محصور في الوردية المقفولة أعلاه — لا اكتشاف ولا قفل لوردية
        لاحقة بعد أقفال أهداف التسوية. المعرّف الفارغ لا يُنتج صفًا، فيبقى
        فحص مفتاح الإعادة الثاني أدناه قبل رفض no_shift كما هو. */
-    const { rows } = await client.query<{ id: number }>(
+    const { rows } = await client.query<{
+      id: number; receipt_number: string; patient_id: number; kind: "payment" | "refund";
+      amount_minor: string; currency: Currency; exchange_rate: string; base_amount_minor: string;
+      method: string; plan_id: number | null; opening_currency: Currency | null;
+      reversal_of_id: number | null; created_by: string;
+    }>(
       `INSERT INTO payments (
          receipt_number, patient_id, invoice_id, plan_id, shift_id, kind, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, method, note, created_by,
@@ -10148,7 +10158,9 @@ async function runPaymentTransaction(
         WHERE s.id = $17::int AND s.status = 'open'
         LIMIT 1
         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-       RETURNING id`,
+       RETURNING id, receipt_number, patient_id, kind, amount_minor, currency,
+         exchange_rate, base_amount_minor, method, plan_id, opening_currency,
+         reversal_of_id, created_by`,
       [
         input.patientId, effectiveInvoiceId, effectivePlanId,
         input.kind, input.amountMinor, input.currency,
@@ -10182,6 +10194,26 @@ async function runPaymentTransaction(
       }
       await tx("ROLLBACK");
       return { kind: "reason", reason: "no_shift" };
+    }
+
+    // The financial event and its audit commit together, or neither does. Both
+    // replay exits are above this point; retrying a committed receipt never creates
+    // another original event or invents missing historical creation evidence.
+    if (prepared.receiptAudit) {
+      const receipt = rows[0];
+      await insertAuditRow(client, {
+        action: receipt.kind === "refund" ? "payment.refund" : "payment.create",
+        entity: "payment", entityId: receipt.id, entityLabel: receipt.receipt_number,
+        details: {
+          المريض: receipt.patient_id, المبلغ: toMinor(receipt.amount_minor), العملة: receipt.currency,
+          سعر_الصرف: Number(receipt.exchange_rate), المكافئ: toMinor(receipt.base_amount_minor),
+          الطريقة: receipt.method,
+          ...(receipt.plan_id !== null ? { الخطة: receipt.plan_id } : {}),
+          ...(receipt.opening_currency !== null ? { رصيد_سابق: receipt.opening_currency } : {}),
+          ...(receipt.reversal_of_id !== null ? { ردٌّ_لسند: receipt.reversal_of_id } : {}),
+        },
+        actor: receipt.created_by, actorRole: prepared.receiptAudit.actorRole,
+      });
     }
 
     await tx("COMMIT");

@@ -585,6 +585,7 @@ export async function recordPatientPaymentAction(
       method: params.method || "cash",
       note: params.note || "سند قبض مسجل عبر المساعد الذكي",
       createdBy: context.username || "admin",
+      actorRole: role,
     });
 
     if (reason === "no_shift") {
@@ -599,20 +600,7 @@ export async function recordPatientPaymentAction(
       return { success: false, textSummary: "❌ تعذّر حفظ سند القبض في قاعدة البيانات." };
     }
 
-    await recordAudit({
-      action: "payment.create",
-      entity: "payment",
-      entityId: String(payment.id),
-      entityLabel: payment.receiptNumber,
-      details: {
-        patientId,
-        amount: payment.amountMinor,
-        currency: payment.currency,
-        recordedBy: "ai_assistant",
-      },
-      actor: context.username || "admin",
-      actorRole: role,
-    });
+    // recordPayment owns the atomic receipt audit; do not emit a duplicate here.
 
     const cards: KpiCard[] = [
       { title: "سند القبض", value: payment.receiptNumber, tone: "good" },
