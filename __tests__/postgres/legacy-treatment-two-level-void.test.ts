@@ -169,15 +169,39 @@ describe("ordinary and explicit manager void share immutable financial lineage",
     expect(after.receipts).toEqual(before.receipts);
     expect(after.invoices).toEqual(before.invoices);
   });
-  it("preserves a negative foreign-base bucket caused by legitimate split-refund rounding", async () => {
+  it("conserves the original foreign-base budget for new split refunds without rewriting void evidence", async () => {
     const id = await patient(), agreement = await register(id);
     await register(id, 26);
     await collect(id, 500);
     const payment = await collect(id, 2, "SAR", "YER", 150);
     await refund(payment, 1);
     await refund(payment, 1);
-    // The original 0.02 SAR is 3 YER; each independently rounded 0.01 SAR refund is 2 YER.
-    // Preserve the -1 YER SAR bucket: 500 + 3 - 2 - 2 = 499, without clamping or rebalancing.
+    // New refunds consume the stored 3 YER budget as 2 + 1, not 2 + 2.
+    expect(await q("SELECT base_amount_minor::text FROM payments WHERE patient_id=$1 ORDER BY id", [id]))
+      .toEqual(["500", "3", "2", "1"].map((base_amount_minor) => ({ base_amount_minor })));
+    const before = await state(id);
+    expect(await preview(id, agreement.id)).toMatchObject({ canVoid: true, netCollectionsMinor: 500 });
+    expect(await ordinary(id, agreement.id)).toEqual({ ok: false, reason: "opening_collected" });
+    expect((await manager(id, agreement.id)).ok).toBe(true);
+    expect((await state(id)).receipts).toEqual(before.receipts);
+  });
+  it("preserves an already-recorded negative foreign-base bucket from historical split-refund rounding", async () => {
+    const id = await patient(), agreement = await register(id);
+    await register(id, 26);
+    await collect(id, 500);
+    const payment = await collect(id, 2, "SAR", "YER", 150);
+    // Synthetic immutable history from the former standalone-rounding policy.
+    // Insert the recorded facts only in this owned fixture; do not ask the new
+    // writer to recreate a defect or edit a receipt/disable any database guard.
+    for (let i = 0; i < 2; i++) {
+      await q(`INSERT INTO payments (receipt_number, patient_id, shift_id, kind, amount_minor, currency,
+          exchange_rate, base_amount_minor, base_currency, opening_currency, method, created_by, reversal_of_id)
+        SELECT $1, patient_id, shift_id, 'refund', 1, currency, exchange_rate, 2,
+          base_currency, opening_currency, method, created_by, id FROM payments WHERE id=$2`,
+      [`SYN-LEGACY-SPLIT-${++sequence}`, payment.id]);
+    }
+    // Preserve the historical -1 YER SAR bucket: 500 + 3 - 2 - 2 = 499.
+    // Reader/void behavior must not clamp it or retroactively apply new allocation.
     expect(await q("SELECT base_amount_minor::text FROM payments WHERE patient_id=$1 ORDER BY id", [id]))
       .toEqual(["500", "3", "2", "2"].map((base_amount_minor) => ({ base_amount_minor })));
     const before = await state(id);

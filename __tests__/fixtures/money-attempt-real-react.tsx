@@ -24,7 +24,7 @@ const api = {
     const actor="synthetic-money",currency=body.currency??"YER",amountMinor=Math.round(Number(body.amount??500)*(currency==="YER"?1:100));
     const payment=(id:number,kind:string,value:number)=>({id,receiptNumber:`SYN-${id}`,patientId,invoiceId:body.invoiceId?Number(body.invoiceId):null,planId:null,openingCurrency:null,shiftId:1,kind,amountMinor:value,currency,exchangeRate:1,baseAmountMinor:Math.round(value/(currency==="YER"?1:100)),baseCurrency:"YER",method:body.method??"cash",note:null,createdBy:actor,createdAt:"2026-10-14T03:00:00Z"});
     const payload=correction?{original:{id:patientId+500,receiptNumber:"SYN-P",patientId},replayed:true,idempotencyKey:request.key,
-      reversal:payment(ids.reversalId??801,"refund",500),replacement:payment(ids.replacementId??802,"payment",amountMinor)}
+      reversal:{...payment(ids.reversalId??801,"refund",500),reversalOfId:patientId+500},replacement:{...payment(ids.replacementId??802,"payment",amountMinor),reversalOfId:null}}
       :{...payment(ids.id??701,"payment",amountMinor),idempotencyKey:request.key};
     request.resolve(new Response(JSON.stringify(payload),{status:200,headers:{"Content-Type":"application/json"}}));
   },

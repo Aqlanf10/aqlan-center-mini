@@ -147,18 +147,18 @@ describe("حارس تجميع المال — العينات الآمنة تمر"
 });
 
 describe("حارس تجميع المال — كود المنتج الحقيقي", () => {
-  it("lib/db.ts لا يحوي تجميعًا عبر العملات (خارج الاستثناءين الموثَّقين)", async () => {
+  it("lib/db.ts لا يحوي تجميعًا عبر العملات (خارج استثناء الخطة الموثَّق)", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const source = readFileSync(join(process.cwd(), "lib/db.ts"), "utf8");
     const violations = scanMoneyAggregation(source, "lib/db.ts");
-    // الاستثناءان الموثَّقان في db.ts: سلسلة الاسترداد (عملة الأصل حكامًا)،
-    // والاستعلام المرتبط لكل خطة (دلو عملة الخطة حكامًا) — كلاهما TD-05.
+    // الردود تُجمَّع الآن بحسب عملاتها الفعلية بلا استثناء. يبقى الاستعلام
+    // المرتبط لكل خطة وحده (دلو عملة الخطة حكامًا) ضمن استثناء TD-05 الموثَّق.
     // المطابقة على نص الجملة كاملًا (sqlSegment): استعلام الخطة طويلٌ
     // فيقع موضع الدفعات خارج مقتطف العرض المقتطع.
-    expect(violations.length).toBe(2);
-    expect(violations[0]?.sqlSegment).toContain("reversal_of_id");
-    expect(violations[1]?.sqlSegment).toContain("y.plan_id = t.id");
+    expect(violations).toHaveLength(1);
+    expect(violations.some((violation) => violation.sqlSegment.includes("reversal_of_id"))).toBe(false);
+    expect(violations[0]?.sqlSegment).toContain("y.plan_id = t.id");
   });
 });
 

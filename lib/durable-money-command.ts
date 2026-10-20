@@ -1,6 +1,7 @@
 import {CLINIC_BASE_CURRENCY,isCurrency,parseAmount,toBaseAmount,type Currency} from "./money";
 import {FinancialRecoveryError,type FinancialCommand} from "./financial-command-journal";
 import {moneyAcknowledgment,type MoneyAttempt,type MoneyAcknowledgment} from "./money-attempt";
+import {readPaymentAcknowledgmentEvidence,calculationEvidenceMatchesReceipt,closingRefundEvidenceMatchesReceipt,replacementLineageEvidenceMatches} from "./payment-acknowledgment";
 
 export interface MoneyReceiptContext {id:number;receiptNumber:string;amountMinor:number;currency:Currency;method:string;invoiceId:number|null;planId?:number|null;openingCurrency?:Currency|null;remainingMinor:number}
 export interface DurableMoneyCommand {actor:string;patientId:number;owner:string;attempt:MoneyAttempt;receipt:MoneyReceiptContext|null}
@@ -46,22 +47,45 @@ export function restoreMoneyCommand(command:FinancialCommand,patientId:number,ac
     ||result.owner!==(command.kind==="collection"?`collection:${patientId}`:`correction:${result.receipt!.id}`))throw new FinancialRecoveryError("invalid");
   return {...result,attempt:{request:result.attempt.request,key:result.attempt.key,phase:"uncertain"}};
 }
-function receipt(value:unknown,command:DurableMoneyCommand,expected:{kind:string;amountMinor:number;currency:Currency;invoiceId:unknown;planId:unknown;openingCurrency:unknown;method?:string;note?:string|null}){
+function receipt(value:unknown,command:DurableMoneyCommand,expected:{kind:string;amountMinor:number;currency:Currency;invoiceId:unknown;planId:unknown;openingCurrency:unknown;method?:string;note?:string|null},baseProven=false){
   return record(value)&&id(value.id)&&typeof value.receiptNumber==="string"&&!!value.receiptNumber.trim()&&value.patientId===command.patientId&&value.createdBy===command.actor
     &&value.kind===expected.kind&&value.amountMinor===expected.amountMinor&&value.currency===expected.currency&&(expected.invoiceId===undefined?nullableId(value.invoiceId):value.invoiceId===expected.invoiceId)&&value.planId===expected.planId
     &&value.openingCurrency===expected.openingCurrency&&(expected.method===undefined||value.method===expected.method)&&(expected.note===undefined||value.note===expected.note)
     &&id(value.shiftId)&&typeof value.createdAt==="string"&&Number.isFinite(Date.parse(value.createdAt))&&value.baseCurrency===CLINIC_BASE_CURRENCY&&amount(value.baseAmountMinor)
     &&typeof value.exchangeRate==="number"&&Number.isFinite(value.exchangeRate)&&value.exchangeRate>0
-    &&toBaseAmount(expected.amountMinor,expected.currency,CLINIC_BASE_CURRENCY,value.exchangeRate)===value.baseAmountMinor;
+    &&(baseProven||toBaseAmount(expected.amountMinor,expected.currency,CLINIC_BASE_CURRENCY,value.exchangeRate)===value.baseAmountMinor);
 }
 /** A successful status or ID alone never retires a saved money command. */
 export function readDurableMoneyAcknowledgment(value:unknown,command:DurableMoneyCommand):MoneyAcknowledgment|null {
   const expected=input(command);if(!expected||!record(value)||value.idempotencyKey!==command.attempt.key)return null;
   const operation=command.attempt.request.operation;
-  if(operation==="payment")return receipt(value,command,{...expected,kind:"payment"})?moneyAcknowledgment(operation,value):null;
+  const hasEvidence=Object.hasOwn(value,"acknowledgmentEvidence");
+  const evidence=hasEvidence?readPaymentAcknowledgmentEvidence(value.acknowledgmentEvidence):null;
+  // Never discard an unknown or contradictory supplied proof and fall back to
+  // standalone arithmetic, even if that arithmetic happens to match.
+  if(hasEvidence&&(!evidence||"status" in evidence||evidence.operation!==operation||evidence.requestKey!==command.attempt.key))return null;
+  if(operation==="payment"){
+    const calculation=evidence&&"operation" in evidence&&evidence.operation==="payment"?evidence.calculation:null;
+    if(calculation&&(value.reversalOfId!==null||!calculationEvidenceMatchesReceipt(calculation,value))
+      ||!calculation&&Object.hasOwn(value,"reversalOfId")&&value.reversalOfId!==null)return null;
+    return receipt(value,command,{...expected,kind:"payment"},calculation!==null)?moneyAcknowledgment(operation,value):null;
+  }
   const old=command.receipt!;
+  const proof=evidence&&"correction" in evidence?evidence.correction:null;
   if(!record(value.original)||value.original.id!==old.id||value.original.patientId!==command.patientId||value.original.receiptNumber!==old.receiptNumber||typeof value.replayed!=="boolean"
-    ||!receipt(value.reversal,command,{kind:"refund",amountMinor:old.remainingMinor,currency:old.currency,invoiceId:old.invoiceId,planId:old.planId??null,openingCurrency:old.openingCurrency??null}))return null;
-  if(operation==="void")return value.replacement===null?moneyAcknowledgment(operation,value):null;
-  return receipt(value.replacement,command,{...expected,kind:"payment",note:undefined})?moneyAcknowledgment(operation,value):null;
+    ||!record(value.reversal)||value.reversal.reversalOfId!==old.id||value.reversal.id===old.id
+    ||!receipt(value.reversal,command,{kind:"refund",amountMinor:old.remainingMinor,currency:old.currency,invoiceId:old.invoiceId,planId:old.planId??null,openingCurrency:old.openingCurrency??null,method:old.method},proof!==null))return null;
+  if(proof&&(proof.pair.originalId!==old.id||proof.pair.reversalId!==value.reversal.id||proof.pair.actor!==command.actor
+    ||proof.pair.reason!==(expected.body.reason as string).trim().slice(0,300)
+    ||!closingRefundEvidenceMatchesReceipt(proof,old,value.reversal)))return null;
+  if(operation==="void")return value.replacement===null&&(!proof||proof.pair.replacementId===null)?moneyAcknowledgment(operation,value):null;
+  if(!record(value.replacement)||value.replacement.reversalOfId!==null||value.replacement.id===old.id||value.replacement.id===value.reversal.id
+    ||proof&&proof.pair.replacementId!==value.replacement.id)return null;
+  let replacementInvoiceId=expected.invoiceId;
+  if(proof?.replacementLineage){
+    if(expected.body.target!=="original"||!replacementLineageEvidenceMatches(proof.replacementLineage,{patientId:command.patientId,originalPaymentId:old.id,sourceInvoiceId:old.invoiceId,targetInvoiceId:value.replacement.invoiceId}))return null;
+    replacementInvoiceId=proof.replacementLineage.targetInvoiceId;
+  }
+  if(proof?.replacementCalculation&&!calculationEvidenceMatchesReceipt(proof.replacementCalculation,value.replacement))return null;
+  return receipt(value.replacement,command,{...expected,invoiceId:replacementInvoiceId,kind:"payment",note:undefined},proof?.replacementCalculation!==undefined)?moneyAcknowledgment(operation,value):null;
 }

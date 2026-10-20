@@ -1,10 +1,14 @@
+import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
+import { provePaymentCalculation, proveCorrectionAcknowledgment } from "./payment-acknowledgment-db";
 import { JournalReadIntegrityError } from "./journal-read-integrity";
 import { patientAgreementSummary, type PatientWorkflowFinancialBucket } from "./patient-agreement-summary";
+import { allocateRefundBaseMinor, isRefundBaseBudgetValid, type RefundBaseBudget } from "./refund-base-allocation";
 import { APPROVED_AGREEMENT_SQL } from "./approved-agreement-schema";
 import { checksumOf } from "./migration-files";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {currencyReclassificationJournal} from "./invoice-currency-journal";
 import {attachCurrencyReclassifications,readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
+import { ReclassificationProofError } from "./invoice-currency-reclassification";
 import type {InvoiceIdentityAmendment} from "./invoice-identity-amendments";
 import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { HR_STAFF_SQL } from "./hr-schema";
@@ -8916,6 +8920,8 @@ export interface Payment {
   openingCurrency: Currency | null;
   shiftId: number;
   kind: "payment" | "refund";
+  /** Stored linkage for strict acknowledgment; database reads always emit it. */
+  reversalOfId?: number | null;
   amountMinor: number;
   currency: Currency;
   exchangeRate: number;
@@ -8935,7 +8941,7 @@ interface InvoiceRow {
 
 interface PaymentRow {
   id: number; receipt_number: string; patient_id: number; full_name: string;
-  invoice_id: number | null; plan_id: number | null; opening_currency: string | null; shift_id: number; kind: string;
+  invoice_id: number | null; plan_id: number | null; opening_currency: string | null; shift_id: number; kind: string; reversal_of_id: number | null;
   amount_minor: string; currency: string; exchange_rate: string;
   base_amount_minor: string; base_currency: string; method: string;
   note: string | null; created_by: string | null; created_at: Date;
@@ -8967,6 +8973,7 @@ const toPayment = (row: PaymentRow): Payment => ({
   openingCurrency: row.opening_currency === null ? null : requireCurrency(row.opening_currency, "دفعة رصيد سابق", row.id),
   shiftId: row.shift_id,
   kind: row.kind === "refund" ? "refund" : "payment",
+  reversalOfId: row.reversal_of_id,
   amountMinor: toMinor(row.amount_minor),
   /* (المراجعة النهائية ٤) مسار قراءة مالي يغذّي أرصدة المريض وورديّة
    * الصندوق — عملتا الدفعة وقاعدتها تُتحقّقان لا تُصبّان cast. */
@@ -8986,7 +8993,7 @@ const INVOICE_SELECT = `
     FROM invoices i JOIN patients p ON p.id = i.patient_id`;
 
 const PAYMENT_SELECT = `
-  SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.opening_currency, y.shift_id, y.kind,
+  SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.opening_currency, y.shift_id, y.kind, y.reversal_of_id,
          y.amount_minor, y.currency, y.exchange_rate, y.base_amount_minor, y.base_currency,
          y.method, y.note, y.created_by, y.created_at
     FROM payments y JOIN patients p ON p.id = y.patient_id`;
@@ -9521,6 +9528,7 @@ export async function recordPayment(input: {
     | "foreign_on_account_requires_target"
     | "cross_currency_not_supported"
     | "reversal_exceeds_remaining"
+    | "refund_snapshot_review_required"
     | "idempotency_conflict"
     | "issued_installment_recovery_required"
     | "installment_recovery_review_required"
@@ -9560,6 +9568,37 @@ export async function recordPayment(input: {
   return { payment: await getPayment(outcome.paymentId), reason: null };
 }
 
+/** Trusted HTTP adapter for an ordinary settings-owned receipt. The settings
+ * snapshot comes from the server, never a body rate/mode. Preserve its raw,
+ * nullable observation separately from any rounded successful-row snapshot.
+ * Direct callers, refunds and caller-owned purpose transactions do not opt in. */
+export async function recordSettingsOwnedPayment(
+  input: Omit<Parameters<typeof recordPayment>[0], "kind" | "exchangeRate" | "reversalOfId">,
+  settings: SettingsMap,
+): Promise<{
+  payment: Payment | null;
+  reason: Awaited<ReturnType<typeof recordPayment>>["reason"] | "exchange_rate_required";
+  replayed?: boolean;
+  acknowledgmentEvidence?: AcknowledgmentEvidence;
+}> {
+  const observedExchangeRate = rateFromSettings(settings, input.currency, input.baseCurrency);
+  await ensureSchema();
+  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+    throw new Error("مبلغ السند يجب أن يكون عددًا صحيحًا أكبر من صفر.");
+  }
+  const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
+  const outcome = await runPaymentTransaction(
+    { ...input, kind: "payment", exchangeRate: observedExchangeRate,
+      planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
+    { idempotencyKey, reversalOfId: null, settingsOwnedFx: true,
+      receiptAudit: { actorRole: input.actorRole ?? null } },
+  );
+  if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
+  return { payment: await getPayment(outcome.paymentId), reason: null,
+    ...(outcome.kind === "replay" ? { replayed: true } : {}),
+    ...(outcome.acknowledgmentEvidence ? { acknowledgmentEvidence: outcome.acknowledgmentEvidence } : {}) };
+}
+
 /**
  * (RC-1) تصحيح سند قبضٍ أُدخل خطأً — **عكسٌ وسندٌ بديل في معاملةٍ واحدة**، لا تعديلٌ صامت.
  *
@@ -9594,9 +9633,9 @@ export async function correctPayment(input: {
     amountMinor: number; currency: Currency; exchangeRate: number; method: string;
     target: CorrectionTarget;
   };
-}): Promise<
+}, acknowledgment?: { observedExchangeRate: number | null }): Promise<
   | { reason: CorrectPaymentRefusal }
-  | { reason: null; replayed: boolean; reversal: Payment | null; replacement: Payment | null; original: { id: number; receiptNumber: string; patientId: number } }
+  | { reason: null; replayed: boolean; reversal: Payment | null; replacement: Payment | null; original: { id: number; receiptNumber: string; patientId: number }; acknowledgmentEvidence?: AcknowledgmentEvidence }
 > {
   await ensureSchema();
   const why = input.reason.trim();
@@ -9606,6 +9645,7 @@ export async function correctPayment(input: {
   let reversalId: number | null = null;
   let replacementId: number | null = null;
   let replayed = false;
+  let acknowledgmentEvidence: AcknowledgmentEvidence | undefined;
   let original: { id: number; receiptNumber: string; patientId: number } | null = null;
   try {
     await client.query("BEGIN");
@@ -9649,6 +9689,34 @@ export async function correctPayment(input: {
         target.invoiceId=active[0].id;
       }
     }
+    // Evidence is read-only and is never request authority. Legacy direct callers
+    // do not opt in; HTTP still uses exactly the existing correction admission.
+    const proveAcknowledgment = async (isNew: boolean): Promise<AcknowledgmentEvidence | undefined> => {
+      if (!acknowledgment || key === null || reversalId === null) return undefined;
+      const correction = await proveCorrectionAcknowledgment(client, {
+        originId: origin.id, reversalId, replacementId, key, actor: input.actor, reason: why,
+        originalTarget: next?.target.kind === "original",
+        replacementExpected: next && target ? {
+          amountMinor: next.amountMinor, currency: next.currency, method: next.method,
+          invoiceId: next.target.kind === "original" ? origin.invoice_id : target.invoiceId,
+          planId: target.planId, openingCurrency: target.openingCurrency,
+        } : null,
+        calculationRates: next ? [next.exchangeRate, acknowledgment.observedExchangeRate] : [],
+        replacementHashAtRate: (rate, receipt) => idempotencyRequestHash({
+          patientId: origin.patient_id, kind: "payment", amountMinor: next!.amountMinor,
+          currency: next!.currency, method: next!.method, note: replacementNote, createdBy: input.actor,
+        }, { idempotencyKey: key, reversalOfId: null }, receipt.invoice_id, target!.planId,
+          rate, CLINIC_BASE_CURRENCY, target!.openingCurrency),
+      });
+      if (!correction) {
+        // Never commit a new exceptional result that cannot be acknowledged.
+        // A previously committed result remains unresolved, not a fresh refusal.
+        if (isNew) throw new Error("Receipt acknowledgment evidence unavailable");
+        return { version: 1, status: "unconfirmed" };
+      }
+      return { version: 1, operation: next === null ? "void" : "correct", requestKey: key, correction };
+    };
+
     if (key !== null) {
       const { rows: keyed } = await client.query<{
         id: number; kind: string; patient_id: number; reversal_of_id: number | null; note: string | null;
@@ -9688,6 +9756,7 @@ export async function correctPayment(input: {
           }
         }
         if (!same) { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
+        acknowledgmentEvidence = await proveAcknowledgment(false);
         await client.query("COMMIT");
         replayed = true;
       }
@@ -9696,15 +9765,9 @@ export async function correctPayment(input: {
     if (!replayed) {
       const currency = requireCurrency(origin.currency, "سند قبض", origin.id);
       // الردود ترث عملة أصلها — فالمتبقي بعملة السند نفسه (دلوٌ واحد صريح).
-      const { rows: left } = await client.query<{ remaining: string }>(
-        `SELECT (y.amount_minor - COALESCE(SUM(r.amount_minor), 0))::text AS remaining
-           FROM payments y
-           LEFT JOIN payments r ON r.reversal_of_id = y.id AND r.kind = 'refund'
-          WHERE y.id = $1
-          GROUP BY y.id, y.amount_minor, y.currency`,
-        [input.paymentId],
-      );
-      const remaining = toMinor(left[0].remaining);
+      const budget = await readRefundBaseBudget(client, origin.id);
+      if (!budget) { await client.query("ROLLBACK"); return { reason: "refund_snapshot_review_required" }; }
+      const remaining = budget.originalAmountMinor - budget.refundedAmountMinor;
       if (remaining <= 0) { await client.query("ROLLBACK"); return { reason: "already_reversed" }; }
 
       // ١) عكس المتبقي من السند الخطأ — بعملته وسعره وهدفه الموروثة من أصله تحت قفله.
@@ -9754,10 +9817,12 @@ export async function correctPayment(input: {
         },
         actor: input.actor, actorRole: input.actorRole ?? null,
       });
+      acknowledgmentEvidence = await proveAcknowledgment(true);
       await client.query("COMMIT");
     }
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
+    if (error instanceof ReclassificationProofError) return { reason: "refund_snapshot_review_required" };
     throw error;
   } finally {
     client.release();
@@ -9768,12 +9833,13 @@ export async function correctPayment(input: {
     original,
     reversal: reversalId === null ? null : await getPayment(reversalId),
     replacement: replacementId === null ? null : await getPayment(replacementId),
+    ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}),
   };
 }
 
 type PaymentOutcome =
-  | { kind: "inserted"; paymentId: number }
-  | { kind: "replay"; paymentId: number }
+  | { kind: "inserted"; paymentId: number; acknowledgmentEvidence?: AcknowledgmentEvidence }
+  | { kind: "replay"; paymentId: number; acknowledgmentEvidence?: AcknowledgmentEvidence }
   | {
     kind: "reason";
     reason:
@@ -9789,6 +9855,7 @@ type PaymentOutcome =
       | "foreign_on_account_requires_target"
       | "cross_currency_not_supported"
       | "reversal_exceeds_remaining"
+      | "refund_snapshot_review_required"
       | "idempotency_conflict"
       | "issued_installment_recovery_required"
       | "installment_recovery_review_required";
@@ -9807,27 +9874,111 @@ export async function writeDebtCollectionReceipt(client: DbClient, input: {
     { idempotencyKey:validateIdempotencyKey(input.idempotencyKey),reversalOfId:null,requestHashOverride:input.requestHash },client);
 }
 
-async function runPaymentTransaction(
-  input: {
-    patientId: number; invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
-    kind: "payment" | "refund"; amountMinor: number;
-    currency: Currency; baseCurrency: Currency; exchangeRate: number;
-    method: string; note: string | null; createdBy: string;
-  },
-  prepared: {
-    idempotencyKey: string | null; reversalOfId: number | null;
-    /** (RC-1) بديل سندٍ يرث هدف أصله المقفول كما هو — قسط الخطة يحمل فاتورته وخطته معًا قصدًا. */
-    inheritedTarget?: boolean;
-    /** Internal opt-in recovery only: ordinary/correction v1 fingerprints stay unchanged. */
-    requestHashOverride?: string;
-    /** Only recordPayment requests a generic receipt event. Caller-owned correction,
-     * debt, approved collection and recovery transactions retain their purpose audit. */
-    receiptAudit?: { actorRole: string | null };
-  },
-  /** (RC-1) معاملةٌ خارجية قائمة (تصحيح السند: عكسٌ + سندٌ بديل ذرّيًا). حينها لا تُفتح معاملة ولا
-   *  تُثبَّت ولا يُحرَّر الاتصال هنا — المتصل يملكها: يُثبّت عند النجاح، ويتراجع عن كل شيء عند أي سبب. */
+/** Caller already holds the original receipt FOR UPDATE. Read every linked row;
+ * malformed history must not disappear from the native/base budget. */
+async function readRefundBaseBudget(client: DbClient, originId: number): Promise<RefundBaseBudget | null> {
+  const { rows } = await client.query<{
+    original_amount: string; original_base: string; refunded: string; refunded_base: string;
+    currency: string; base_currency: string; exchange_rate: string; invalid_history: boolean;
+  }>(`SELECT p.amount_minor::text AS original_amount, p.base_amount_minor::text AS original_base,
+             p.currency, p.base_currency, p.exchange_rate::text,
+             COALESCE(SUM(r.amount_minor) FILTER (WHERE r.kind = 'refund'), 0)::text AS refunded,
+             COALESCE(SUM(r.base_amount_minor) FILTER (WHERE r.kind = 'refund'), 0)::text AS refunded_base,
+             COALESCE(BOOL_OR(r.id IS NOT NULL AND (
+               r.kind <> 'refund' OR r.patient_id IS DISTINCT FROM p.patient_id
+               OR r.currency IS DISTINCT FROM p.currency OR r.base_currency IS DISTINCT FROM p.base_currency
+               OR r.exchange_rate IS DISTINCT FROM p.exchange_rate
+               OR r.invoice_id IS DISTINCT FROM p.invoice_id OR r.plan_id IS DISTINCT FROM p.plan_id
+               OR r.opening_currency IS DISTINCT FROM p.opening_currency
+               OR r.amount_minor <= 0 OR r.base_amount_minor < 0
+               OR (r.currency = r.base_currency AND r.amount_minor IS DISTINCT FROM r.base_amount_minor))), FALSE) AS invalid_history
+        FROM payments p LEFT JOIN payments r ON r.reversal_of_id = p.id
+       WHERE p.id = $1 AND p.kind = 'payment'
+       GROUP BY p.id, r.currency, r.base_currency`, [originId]);
+  // Keep actual linked currencies separate even when history is malformed.
+  // The LEFT JOIN still yields one zero-refund group. Multiple currency groups,
+  // or a single contradictory group below, require review rather than omission.
+  if (rows.length !== 1) return null;
+  const row = rows[0];
+  if (!row || row.invalid_history || !isCurrency(row.currency) || !isCurrency(row.base_currency)
+    || !Number.isFinite(Number(row.exchange_rate)) || Number(row.exchange_rate) <= 0
+    || (row.currency === row.base_currency && Number(row.original_amount) !== Number(row.original_base))) return null;
+  const budget: RefundBaseBudget = {
+    originalAmountMinor: Number(row.original_amount), originalBaseAmountMinor: Number(row.original_base),
+    refundedAmountMinor: Number(row.refunded), refundedBaseAmountMinor: Number(row.refunded_base),
+  };
+  return isRefundBaseBudgetValid(budget) ? budget : null;
+}
+
+/** The original receipt and effective invoice are already locked. Match 0063's
+ * actual source-lineage membership, not just the correction's direct original.
+ * Its immutable proof still requires standalone FX rounding, so incompatible
+ * cumulative allocations need review until that proof contract is versioned. */
+async function refundFitsReclassificationProof(client: DbClient, refund: {
+  patientId: number; invoiceId: number | null; originId: number;
+  currency: Currency; baseCurrency: Currency; exchangeRate: number;
+  amountMinor: number; baseAmountMinor: number;
+}): Promise<boolean> {
+  if (refund.invoiceId === null) return true;
+  const { rows: documents } = await client.query<{
+    id: number; patient_id: number; source_currency: string; target_currency: string; compatible: boolean;
+  }>(`SELECT id, patient_id, source_currency, target_currency,
+             $4::bigint = FLOOR($2::double precision / 100 * $3::double precision + 0.5) AS compatible
+        FROM invoice_settlement_reclassifications
+       WHERE $1::int = ANY(source_invoice_ids)`,
+    [refund.invoiceId, refund.amountMinor, refund.exchangeRate, refund.baseAmountMinor]);
+  if (!documents.length) return true;
+  const document = documents[0];
+  if (documents.length !== 1 || document.patient_id !== refund.patientId
+    || document.source_currency !== refund.baseCurrency || document.target_currency !== refund.currency
+    || document.compatible !== true) return false;
+  try {
+    const origins = (await readCurrencyReclassificationEvidence(client, refund.patientId))
+      .filter(proof => proof.paymentId === refund.originId);
+    return origins.length === 1 && origins[0].documentId === document.id
+      && origins[0].sourceInvoiceId === refund.invoiceId && origins[0].direction === 1
+      && origins[0].sourceCurrency === refund.baseCurrency && origins[0].targetCurrency === refund.currency;
+  } catch (error) {
+    if (error instanceof ReclassificationProofError) return false;
+    throw error;
+  }
+}
+
+type PaymentTransactionInput = {
+  patientId: number; invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
+  kind: "payment" | "refund"; amountMinor: number;
+  currency: Currency; baseCurrency: Currency; exchangeRate: number | null;
+  method: string; note: string | null; createdBy: string;
+};
+type PaymentTransactionPrepared = {
+  idempotencyKey: string | null; reversalOfId: number | null;
+  /** (RC-1) A replacement inherits the locked origin's intentional invoice/plan pair. */
+  inheritedTarget?: boolean;
+  /** Internal opt-in recovery only: ordinary/correction v1 fingerprints stay unchanged. */
+  requestHashOverride?: string;
+  /** Only ordinary receipts request a generic atomic event; purpose callers own theirs. */
+  receiptAudit?: { actorRole: string | null };
+};
+type SettingsPaymentOutcome = PaymentOutcome | { kind: "reason"; reason: "exchange_rate_required" };
+// Existing numeric-rate callers retain their outcome contract and cannot enable
+// stored-rate fallback. Only the trusted settings wrapper owns the nullable lane.
+function runPaymentTransaction(
+  input: PaymentTransactionInput & { exchangeRate: number },
+  prepared: PaymentTransactionPrepared & { settingsOwnedFx?: never },
   outer?: DbClient,
-): Promise<PaymentOutcome> {
+): Promise<PaymentOutcome>;
+function runPaymentTransaction(
+  input: PaymentTransactionInput & { kind: "payment" },
+  prepared: PaymentTransactionPrepared & {
+    settingsOwnedFx: true; reversalOfId: null; requestHashOverride?: never; inheritedTarget?: never;
+  },
+): Promise<SettingsPaymentOutcome>;
+/** A caller-owned correction/debt/recovery transaction owns commit and rollback. */
+async function runPaymentTransaction(
+  input: PaymentTransactionInput,
+  prepared: PaymentTransactionPrepared & { settingsOwnedFx?: true },
+  outer?: DbClient,
+): Promise<SettingsPaymentOutcome> {
   const own = outer === undefined;
   const client = outer ?? await getPool().connect();
   /* التحكم بالمعاملة لمالكها وحده: داخل معاملةٍ خارجية تصير BEGIN/COMMIT/ROLLBACK بلا أثر —
@@ -10022,20 +10173,46 @@ async function runPaymentTransaction(
       return { kind: "reason", reason: "foreign_on_account_requires_target" };
     }
 
-    /* (P1-FIX-5) الردّ يرث سياق الأصل المالي: عملة الأصل (فُحصت أعلاه) وسعر
-       صرفه snapshot — المكافئ الأساسي للردّ يُحسب من سياق الأصل فلا يظهر ربح أو
-       خسارة صرف من عملية إرجاع مال دخل بسعر قديم. */
+    /* Keep inherited FX/base currency in the unchanged v1 fingerprint. New
+       receipts use their ordinary calculation; a NEW refund receives its stored
+       origin-base allocation only after exact replay and native-budget checks. */
     const effectiveExchangeRate = refundSnapshot ? refundSnapshot.exchangeRate : input.exchangeRate;
     const effectiveBaseCurrency = refundSnapshot ? refundSnapshot.baseCurrency : input.baseCurrency;
-    const baseAmount = toBaseAmount(
-      input.amountMinor, input.currency, effectiveBaseCurrency, effectiveExchangeRate,
-    );
-    /* (P1-FIX-4) بصمة الطلب الكانونية بالقيم الفعلية المُخزَّنة: أي اختلاف في
-       العملية (مبلغ/مريض/عملة/نوع/ممثّل/أصل) يجعل البصمة مختلفة. */
-    const requestHash = prepared.requestHashOverride ?? idempotencyRequestHash(
+    // Stored base settlement is NOT a hash input; later refund allocation
+    // cannot change a successful key's legacy request identity.
+    // Every candidate uses the complete unchanged v1 identity. Only the FX
+    // slot is server-owned; never reconstruct incoming identity from saved fields.
+    const hashAtRate = (rate: number) => idempotencyRequestHash(
       input, prepared, effectiveInvoiceId, effectivePlanId,
-      effectiveExchangeRate, effectiveBaseCurrency, effectiveOpeningCurrency,
+      rate, effectiveBaseCurrency, effectiveOpeningCurrency,
     );
+    const paymentAcknowledgment = async (
+      paymentId: number, rates: readonly (number | null)[], isNew: boolean,
+    ): Promise<AcknowledgmentEvidence | undefined> => {
+      if (!prepared.settingsOwnedFx || prepared.idempotencyKey === null) return undefined;
+      const calculation = await provePaymentCalculation(client, {
+        paymentId, key: prepared.idempotencyKey, rates, hashAtRate,
+      });
+      if (!calculation) {
+        if (isNew) throw new Error("Receipt acknowledgment evidence unavailable");
+        return { version: 1, status: "unconfirmed" };
+      }
+      return { version: 1, operation: "payment", requestKey: prepared.idempotencyKey, calculation };
+    };
+    const matchesSuccessfulKey = (saved: { idempotency_request_hash: string | null; exchange_rate: string }) => {
+      if (prepared.requestHashOverride !== undefined && prepared.requestHashOverride !== null) {
+        return saved.idempotency_request_hash === prepared.requestHashOverride;
+      }
+      if (!prepared.settingsOwnedFx) {
+        return effectiveExchangeRate !== null && saved.idempotency_request_hash === hashAtRate(effectiveExchangeRate);
+      }
+      // The winning row is read on this transaction at BOTH replay exits. The
+      // raw observation can recover old overprecision hashes only when it truly
+      // matches; a lost raw value is not guessed from its rounded stored rate.
+      const rates = new Set([Number(saved.exchange_rate), effectiveExchangeRate]);
+      return [...rates].some(rate => rate !== null && Number.isFinite(rate) && rate > 0
+        && saved.idempotency_request_hash === hashAtRate(rate));
+    };
 
     /* (P1-FINAL-2) فحص الإعادة يسبق رفض المتبقي: إعادة المحاولة الناجحة لا
        يجب أن ترى «المتبقي صفر» فتُردّ بreversal_exceeds_remaining قبل أن تبلغ
@@ -10048,20 +10225,36 @@ async function runPaymentTransaction(
        متزامنين — ON CONFLICT ينتظر التزام المنافس ثم يكشفه هنا.) */
     if (prepared.idempotencyKey !== null) {
       const { rows: existing } = await client.query<{
-        id: number; idempotency_request_hash: string | null;
+        id: number; idempotency_request_hash: string | null; exchange_rate: string;
       }>(
-        `SELECT id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
+        `SELECT id, idempotency_request_hash, exchange_rate FROM payments WHERE idempotency_key = $1`,
         [prepared.idempotencyKey],
       );
       if (existing[0]) {
-        if (existing[0].idempotency_request_hash === requestHash) {
+        if (matchesSuccessfulKey(existing[0])) {
+          const acknowledgmentEvidence = await paymentAcknowledgment(
+            existing[0].id, [Number(existing[0].exchange_rate), effectiveExchangeRate], false,
+          );
           await tx("COMMIT");
-          return { kind: "replay", paymentId: existing[0].id };
+          return { kind: "replay", paymentId: existing[0].id,
+            ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) };
         }
         await tx("ROLLBACK");
         return { kind: "reason", reason: "idempotency_conflict" };
       }
     }
+
+    // No fabricated rate and no invalid base calculation just to reach replay.
+    // For a genuinely new settings-owned key keep the original observed raw
+    // rate/pricing and v1 bytes. Canonical persisted-rate writes are separate.
+    if (effectiveExchangeRate === null) {
+      await tx("ROLLBACK");
+      return { kind: "reason", reason: "exchange_rate_required" };
+    }
+    let baseAmount = toBaseAmount(
+      input.amountMinor, input.currency, effectiveBaseCurrency, effectiveExchangeRate,
+    );
+    const requestHash = prepared.requestHashOverride ?? hashAtRate(effectiveExchangeRate);
 
     if (cancelledInvoiceTarget) {
       await tx("ROLLBACK");
@@ -10088,15 +10281,33 @@ async function runPaymentTransaction(
        ≤ مبلغ الأصل، محسوبًا داخل المعاملة فوق قفل صفّ الأصل (FOR UPDATE أعلاه)
        فتتسلسل الردود المتزامنة ولا يتجاوز مجموعها الأصل أبدًا. */
     if (prepared.reversalOfId !== null && refundSnapshot) {
-      const { rows: refundRows } = await client.query<{ refunded: string }>(
-        `SELECT COALESCE(SUM(amount_minor), 0) AS refunded
-           FROM payments WHERE reversal_of_id = $1 AND kind = 'refund'`,
-        [prepared.reversalOfId],
-      );
-      const remaining = refundSnapshot.amountMinor - Number(refundRows[0]?.refunded ?? 0);
+      const budget = await readRefundBaseBudget(client, prepared.reversalOfId);
+      if (!budget) {
+        await tx("ROLLBACK");
+        return { kind: "reason", reason: "refund_snapshot_review_required" };
+      }
+      const remaining = budget.originalAmountMinor - budget.refundedAmountMinor;
       if (input.amountMinor > remaining) {
         await tx("ROLLBACK");
         return { kind: "reason", reason: "reversal_exceeds_remaining" };
+      }
+      // Exact-key replay above is independent of later refunds. Only a NEW
+      // refund consumes the original stored base budget; FX remains metadata.
+      const allocatedBase = allocateRefundBaseMinor(budget, input.amountMinor);
+      if (allocatedBase === null) {
+        await tx("ROLLBACK");
+        return { kind: "reason", reason: "refund_snapshot_review_required" };
+      }
+      baseAmount = allocatedBase;
+      // Do not let the existing append-only reclassification trigger turn a
+      // budget-preserving refund into a 500, nor fall back to drifting rounding.
+      if (!await refundFitsReclassificationProof(client, {
+        patientId: input.patientId, invoiceId: effectiveInvoiceId, originId: prepared.reversalOfId,
+        currency: input.currency, baseCurrency: effectiveBaseCurrency, exchangeRate: effectiveExchangeRate,
+        amountMinor: input.amountMinor, baseAmountMinor: baseAmount,
+      })) {
+        await tx("ROLLBACK");
+        return { kind: "reason", reason: "refund_snapshot_review_required" };
       }
     }
 
@@ -10180,15 +10391,19 @@ async function runPaymentTransaction(
       // الالتزام أبدًا.)
       if (prepared.idempotencyKey !== null) {
         const { rows: existing } = await client.query<{
-          id: number; idempotency_request_hash: string | null;
+          id: number; idempotency_request_hash: string | null; exchange_rate: string;
         }>(
-          `SELECT id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
+          `SELECT id, idempotency_request_hash, exchange_rate FROM payments WHERE idempotency_key = $1`,
           [prepared.idempotencyKey],
         );
         if (existing[0]) {
-          if (existing[0].idempotency_request_hash === requestHash) {
+          if (matchesSuccessfulKey(existing[0])) {
+            const acknowledgmentEvidence = await paymentAcknowledgment(
+              existing[0].id, [Number(existing[0].exchange_rate), effectiveExchangeRate], false,
+            );
             await tx("COMMIT");
-            return { kind: "replay", paymentId: existing[0].id };
+            return { kind: "replay", paymentId: existing[0].id,
+              ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) };
           }
           await tx("ROLLBACK");
           return { kind: "reason", reason: "idempotency_conflict" };
@@ -10218,8 +10433,10 @@ async function runPaymentTransaction(
       });
     }
 
+    const acknowledgmentEvidence = await paymentAcknowledgment(rows[0].id, [effectiveExchangeRate], true);
     await tx("COMMIT");
-    return { kind: "inserted", paymentId: rows[0].id };
+    return { kind: "inserted", paymentId: rows[0].id,
+      ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) };
   } catch (error) {
     await tx("ROLLBACK").catch(() => {});
     throw error;

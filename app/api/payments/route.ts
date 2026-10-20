@@ -3,7 +3,7 @@ import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getPayment, getPaymentByIdempotencyKey, getPlan, getSettings, isPlanFundedByAgreement, listPaymentsByDate, recordAudit, recordPayment, recordPlanInstallment, recordReversedInstallmentRecovery } from "@/lib/db";
+import { getPayment, getPaymentByIdempotencyKey, getPlan, getSettings, isPlanFundedByAgreement, listPaymentsByDate, recordAudit, recordPayment, recordSettingsOwnedPayment, recordPlanInstallment, recordReversedInstallmentRecovery } from "@/lib/db";
 import { parseRecoveryIntent } from "@/lib/reversed-installment-recovery";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
@@ -165,12 +165,10 @@ export async function POST(request: Request) {
   const savedPayment=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
   const exchangeRate = savedPayment?.patientId===patientId&&savedPayment.createdBy===session.username&&savedPayment.currency===currency
     ?savedPayment.exchangeRate:rateFromSettings(settings, currency, base);
-  if (exchangeRate === null) {
-    return NextResponse.json(
-      { message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." },
-      { status: 409 },
-    );
-  }
+  const exchangeRateRequired = (includeReason = false) => NextResponse.json(
+    { ...(includeReason ? { reason: "exchange_rate_required" } : {}), message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." },
+    { status: 409 },
+  );
 
   /* (BILL-1 — قرار المالك: «القسط وحده يفوتر») دفعةٌ على خطةٍ ممولة بالأقساط من باب القبض العام
      تُسجَّل **قسطًا بفاتورته** — المسار نفسه لزر «سجّل القسط» (recordPlanInstallment) — لا دفعةً
@@ -179,6 +177,8 @@ export async function POST(request: Request) {
   if (kind === "payment" && planId !== null) {
     try {
       if (await isPlanFundedByAgreement(planId, patientId)) {
+        // Keep the specialized installment/approved-collection FX gate unchanged.
+        if (exchangeRate === null) return exchangeRateRequired();
         const plan = await getPlan(planId, clinicDateString(new Date(), CLINIC_TIME_ZONE));
         if (plan && plan.patientId === patientId) {
           if(plan.approvedAgreement) {
@@ -214,12 +214,29 @@ export async function POST(request: Request) {
     }
   }
 
+  // Ordinary receipts must not silently discard a caller-supplied reversal link.
+  if (kind === "payment" && reversalOfId !== null) {
+    return NextResponse.json(
+      { message: "السند المُراد ردّه غير موجود، أو لا يخص المريض، أو ليس دفعة أصلية." },
+      { status: 409 },
+    );
+  }
+
   try {
-    const { payment, reason, replayed } = await recordPayment({
-      patientId, invoiceId, planId, openingCurrency, kind, amountMinor, currency,
-      baseCurrency: base, exchangeRate, method, note, createdBy: session.username,
-      idempotencyKey, reversalOfId, actorRole: session.role,
-    });
+    const receiptInput = {
+      patientId, invoiceId, planId, openingCurrency, amountMinor, currency,
+      baseCurrency: base, method, note, createdBy: session.username,
+      idempotencyKey, actorRole: session.role,
+    };
+    // Only ordinary HTTP receipts use settings-owned compatibility. Refunds
+    // retain their inherited origin snapshot and their existing route FX gate.
+    if (kind === "refund" && exchangeRate === null) return exchangeRateRequired();
+    const result = kind === "payment"
+      ? await recordSettingsOwnedPayment(receiptInput, settings)
+      : await recordPayment({ ...receiptInput, kind, exchangeRate: exchangeRate!, reversalOfId });
+    const { payment, reason, replayed } = result;
+    const acknowledgmentEvidence = "acknowledgmentEvidence" in result ? result.acknowledgmentEvidence : undefined;
+    if (reason === "exchange_rate_required") return exchangeRateRequired(true);
     if (reason === "issued_installment_recovery_required" || reason === "installment_recovery_review_required") {
       return NextResponse.json({ reason, message: reason === "issued_installment_recovery_required"
         ? "يوجد قسط معكوس بفاتورته الأصلية. لم يُسجّل قبض جديد؛ يلزم مسار إعادة تحصيل الفاتورة الأصلية. لا تكرر القبض أو تُصدر قسطًا جديدًا."
@@ -281,6 +298,12 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    if (reason === "refund_snapshot_review_required") {
+      return NextResponse.json(
+        { reason, message: "تعذّر إثبات الردّ بما يحافظ على تسوية السند الأصلية. يلزم مراجعة المدير؛ لم يُسجّل أي ردّ جديد." },
+        { status: 409 },
+      );
+    }
     if (reason === "reversal_exceeds_remaining") {
       return NextResponse.json(
         { message: "المبلغ يتجاوز المتبقي القابل للرد من السند الأصلي — مجموع الردود لا يتخطى مبلغ الأصل." },
@@ -312,7 +335,8 @@ export async function POST(request: Request) {
       });
     }
     // replay = نفس العملية المالية التي نجحت قبل قليل، فيُعاد السند نفسه بلا 201.
-    return NextResponse.json({ ...payment, idempotencyKey }, { status: replayed ? 200 : 201 });
+    return NextResponse.json({ ...payment, idempotencyKey,
+      ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) }, { status: replayed ? 200 : 201 });
   } catch (error) {
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة." }, { status: 500 });
