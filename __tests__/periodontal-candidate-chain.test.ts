@@ -11,13 +11,15 @@ const legacy = { version: "0042", filename: "0042_legacy_treatment_agreements.sq
 const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sql" };
 
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
-  it("accepts exact0064 only after the reviewed57-entry chain, retaining sentinel9000", async () => {
+  it("accepts exact 0065 only after the reviewed 58-entry chain, retaining sentinel 9000", async () => {
     const files = await loadMigrationFiles();
-    expect(files).toHaveLength(58);
+    expect(files).toHaveLength(59);
+    expect(files[58]).toMatchObject({ version: "0065", filename: "0065_inventory_purchase_receipts.sql" });
     expect(files[57]).toMatchObject({version:"0064",filename:"0064_approved_agreement_principal.sql"});
     expect(periodontalCandidateMigrationVersion(files)).toBe("9000");
+    expect(periodontalCandidateMigrationVersion(files.slice(0,58))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,57))).toBe("9000");
-    expect(()=>periodontalCandidateMigrationVersion([...files,{version:"0065",filename:"0065_unknown.sql"}])).toThrow();
+    expect(()=>periodontalCandidateMigrationVersion([...files,{version:"0066",filename:"0066_unknown.sql"}])).toThrow();
     for (let index = 40; index < files.length; index++) {
       expect(()=>periodontalCandidateMigrationVersion(files.map((file,n)=>n===index?{...file,filename:`${file.version}_unknown.sql`}:file))).toThrow();
       if(index < files.length-1) expect(()=>periodontalCandidateMigrationVersion(files.filter((_,n)=>n!==index))).toThrow();

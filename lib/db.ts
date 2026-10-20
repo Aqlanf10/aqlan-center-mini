@@ -1,3 +1,4 @@
+import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
 import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
 import { provePaymentCalculation, proveCorrectionAcknowledgment } from "./payment-acknowledgment-db";
 import { JournalReadIntegrityError } from "./journal-read-integrity";
@@ -94,7 +95,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { PURCHASE_RESET_FENCE, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -2086,6 +2087,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(LEGACY_TREATMENT_DOCUMENT_SQL);
     await ensureInvoiceCurrencySchema(getPool());
     await applyRuntimeMigrationFiles(getPool(), [{version:"0064",name:"approved_agreement_principal",filename:"0064_approved_agreement_principal.sql",sql:APPROVED_AGREEMENT_SQL,checksum:checksumOf(APPROVED_AGREEMENT_SQL)}]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0065", name: "inventory_purchase_receipts", filename: "0065_inventory_purchase_receipts.sql", sql: INVENTORY_PURCHASE_RECEIPTS_SQL, checksum: checksumOf(INVENTORY_PURCHASE_RECEIPTS_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -24116,7 +24118,7 @@ async function inventoryBalanceFor(id: number, row: InventoryItemRow): Promise<I
  * واحد ذرّي. الصرف الذي يجاوز الرصيد يُرفض، والتسوية بلا سبب مكتوب تُرفض،
  * وتاريخ الصلاحية لا يُقبل إلا على الإدخال — فالدفعة واقعةُ شراء لا رأي.
  */
-export async function createInventoryMovement(input: {
+export interface InventoryMovementInput {
   itemId: number;
   kind: MovementKind;
   qty: number;
@@ -24136,136 +24138,127 @@ export async function createInventoryMovement(input: {
   supplierPartyId?: number | null;
   /** (P2-10) تاريخ استحقاق فاتورة المورّد — اختياري. */
   supplierDueDate?: string | null;
-}): Promise<{ ok: true; movement: InventoryMovement; balance: number } | { ok: false; message: string }> {
+}
+export type InventoryMovementResult = { ok: true; movement: InventoryMovement; balance: number } | { ok: false; message: string };
+
+export async function createInventoryMovement(input: InventoryMovementInput): Promise<InventoryMovementResult> {
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const { rows: items } = await client.query<{ id: number; is_active: boolean; name: string }>(
-      `SELECT id, is_active, name FROM inventory_items WHERE id = $1 FOR UPDATE`, [input.itemId],
-    );
-    if (!items[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "بند المخزون غير موجود." };
-    }
-    if (!items[0].is_active) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "البند موقوف — أعد تفعيله قبل أي حركة عليه." };
-    }
-    const { rows: bal } = await client.query<{ balance: string }>(
-      `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
-         FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
-        WHERE i.id = $1 GROUP BY i.id`, [input.itemId],
-    );
-    const balance = Number(bal[0]?.balance ?? 0);
-    const check = validateMovement(input.kind, input.qty, input.reason ?? null, balance);
-    if (!check.ok) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: check.message ?? "حركة غير مقبولة." };
-    }
-    const expiry = input.kind === "in" && input.expiryDate ? input.expiryDate : null;
-    /* التكلفة تكتب للشراء وحده: الردّ والصرف والتسوية تُقيَّم بالمشتقّ لا بثمنٍ
-       يُدخل معها — والسعر السالب أو غير الرقمي يُهمل لا يُفسد الحركة. */
-    const isPurchase = input.kind === "in" && !input.isReturn;
-    const unitCost = isPurchase
-      && typeof input.unitCostMinor === "number"
-      && Number.isFinite(input.unitCostMinor) && input.unitCostMinor >= 0
-      ? input.unitCostMinor : null;
-    const isReturn = input.kind === "in" ? Boolean(input.isReturn) : false;
-    let purchaseAmountMinor: number | null = null;
-    if (unitCost !== null) {
-      // Minor-unit prices must already be exact integers. The HTTP boundary
-      // retains its existing YER amount parsing; internal callers cannot bypass
-      // the safe range or leave an unvaluatable purchase without a supplier.
-      if (!Number.isSafeInteger(unitCost)) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "ثمن الوحدة يجب أن يكون عددًا صحيحًا ضمن المدى المالي الآمن." };
-      }
-      try {
-        purchaseAmountMinor = proportionalCostMinor(
-          unitCost, Number(quantityAtoms(String(input.qty))), Number(QUANTITY_SCALE),
-        );
-      } catch {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "قيمة الشراء تتجاوز المدى المالي الآمن." };
-      }
-    }
+  return withTransaction(getPool(), client => createInventoryMovementInTransaction(client, input));
+}
 
-    /* (P2-10) شراءٌ من مورّدٍ مسجَّل: فاتورته تولد هنا في المعاملة نفسها — فلا يُسجَّل
-       الشراء مرتين يدويًّا ولا تُنسى المستحقات. رفضُ أي شرطٍ يتراجع بالحركة كلها. */
-    let supplier: { id: number; name: string } | null = null;
-    let payableId: number | null = null;
-    if (input.supplierPartyId != null) {
-      if (!isPurchase) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "المورّد يُربط بإدخال الشراء وحده — لا بالصرف أو التسوية أو الرد." };
-      }
-      if (unitCost == null || unitCost <= 0 || purchaseAmountMinor === null) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "اكتب ثمن الوحدة لتُسجَّل فاتورة المورّد." };
-      }
-      const { rows: parties } = await client.query<{ id: number; name: string; kind: string; is_active: boolean }>(
-        `SELECT id, name, kind, is_active FROM parties WHERE id = $1 FOR SHARE`, [input.supplierPartyId],
-      );
-      const party = parties[0];
-      if (!party || party.kind === "doctor" || !party.is_active) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "المورّد غير موجود أو موقوف." };
-      }
-      supplier = { id: party.id, name: party.name };
-      const qty = Math.abs(input.qty);
-      const amountMinor = purchaseAmountMinor;
-      const { rows: payableRows } = await client.query<{ id: number }>(
-        `INSERT INTO payables (party_id, category, description, amount_minor, currency,
-                               exchange_rate, base_amount_minor, base_currency, due_date, created_by)
-         VALUES ($1, 'supplier', $2, $3, $4, 1, $3, $4, $5::date, $6)
-         RETURNING id`,
-        [
-          party.id, `توريد مخزون: ${items[0].name} × ${qty}`.slice(0, 200), amountMinor,
-          CLINIC_BASE_CURRENCY, input.supplierDueDate ?? null, input.createdBy,
-        ],
-      );
-      payableId = payableRows[0].id;
+/** Caller owns BEGIN/COMMIT. Business refusals happen before inserts; any write
+ * or mandatory audit failure throws and rolls back the caller's transaction. */
+export async function createInventoryMovementInTransaction(client: DbClient, input: InventoryMovementInput): Promise<InventoryMovementResult> {
+  const { rows: items } = await client.query<{ id: number; is_active: boolean; name: string }>(
+    `SELECT id, is_active, name FROM inventory_items WHERE id = $1 FOR UPDATE`, [input.itemId],
+  );
+  if (!items[0]) {
+    return { ok: false, message: "بند المخزون غير موجود." };
+  }
+  if (!items[0].is_active) {
+    return { ok: false, message: "البند موقوف — أعد تفعيله قبل أي حركة عليه." };
+  }
+  const { rows: bal } = await client.query<{ balance: string }>(
+    `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
+       FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
+      WHERE i.id = $1 GROUP BY i.id`, [input.itemId],
+  );
+  const balance = Number(bal[0]?.balance ?? 0);
+  const check = validateMovement(input.kind, input.qty, input.reason ?? null, balance);
+  if (!check.ok) {
+    return { ok: false, message: check.message ?? "حركة غير مقبولة." };
+  }
+  const expiry = input.kind === "in" && input.expiryDate ? input.expiryDate : null;
+  /* التكلفة تكتب للشراء وحده: الردّ والصرف والتسوية تُقيَّم بالمشتقّ لا بثمنٍ
+     يُدخل معها — والسعر السالب أو غير الرقمي يُهمل لا يُفسد الحركة. */
+  const isPurchase = input.kind === "in" && !input.isReturn;
+  const unitCost = isPurchase
+    && typeof input.unitCostMinor === "number"
+    && Number.isFinite(input.unitCostMinor) && input.unitCostMinor >= 0
+    ? input.unitCostMinor : null;
+  const isReturn = input.kind === "in" ? Boolean(input.isReturn) : false;
+  let purchaseAmountMinor: number | null = null;
+  if (unitCost !== null) {
+    // Minor-unit prices must already be exact integers. The HTTP boundary
+    // retains its existing YER amount parsing; internal callers cannot bypass
+    // the safe range or leave an unvaluatable purchase without a supplier.
+    if (!Number.isSafeInteger(unitCost)) {
+      return { ok: false, message: "ثمن الوحدة يجب أن يكون عددًا صحيحًا ضمن المدى المالي الآمن." };
     }
+    try {
+      purchaseAmountMinor = proportionalCostMinor(
+        unitCost, Number(quantityAtoms(String(input.qty))), Number(QUANTITY_SCALE),
+      );
+    } catch {
+      return { ok: false, message: "قيمة الشراء تتجاوز المدى المالي الآمن." };
+    }
+  }
 
-    const { rows: inserted } = await client.query<InventoryMovementRow>(
-      `INSERT INTO inventory_movements
-         (item_id, kind, qty, expiry_date, reason, visit_id, patient_id, created_by,
-          unit_cost_minor, is_return, party_id, payable_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10, $11::int, $12::int)
-       RETURNING id, item_id, kind, qty, expiry_date, reason, visit_id, created_by,
-                 created_at, unit_cost_minor, is_return, party_id, payable_id`,
+  /* (P2-10) شراءٌ من مورّدٍ مسجَّل: فاتورته تولد هنا في المعاملة نفسها — فلا يُسجَّل
+     الشراء مرتين يدويًّا ولا تُنسى المستحقات. رفضُ أي شرطٍ يتراجع بالحركة كلها. */
+  let supplier: { id: number; name: string } | null = null;
+  let payableId: number | null = null;
+  if (input.supplierPartyId != null) {
+    if (!isPurchase) {
+      return { ok: false, message: "المورّد يُربط بإدخال الشراء وحده — لا بالصرف أو التسوية أو الرد." };
+    }
+    if (unitCost == null || unitCost <= 0 || purchaseAmountMinor === null) {
+      return { ok: false, message: "اكتب ثمن الوحدة لتُسجَّل فاتورة المورّد." };
+    }
+    const { rows: parties } = await client.query<{ id: number; name: string; kind: string; is_active: boolean }>(
+      `SELECT id, name, kind, is_active FROM parties WHERE id = $1 FOR SHARE`, [input.supplierPartyId],
+    );
+    const party = parties[0];
+    if (!party || party.kind === "doctor" || !party.is_active) {
+      return { ok: false, message: "المورّد غير موجود أو موقوف." };
+    }
+    supplier = { id: party.id, name: party.name };
+    const qty = Math.abs(input.qty);
+    const amountMinor = purchaseAmountMinor;
+    const { rows: payableRows } = await client.query<{ id: number }>(
+      `INSERT INTO payables (party_id, category, description, amount_minor, currency,
+                             exchange_rate, base_amount_minor, base_currency, due_date, created_by)
+       VALUES ($1, 'supplier', $2, $3, $4, 1, $3, $4, $5::date, $6)
+       RETURNING id`,
       [
-        input.itemId, input.kind,
-        input.kind === "adjust" ? input.qty : Math.abs(input.qty),
-        expiry, input.reason ?? null, input.visitId ?? null, input.patientId ?? null,
-        input.createdBy, unitCost, isReturn, supplier?.id ?? null, payableId,
+        party.id, `توريد مخزون: ${items[0].name} × ${qty}`.slice(0, 200), amountMinor,
+        CLINIC_BASE_CURRENCY, input.supplierDueDate ?? null, input.createdBy,
       ],
     );
-    const movement = toMovement(inserted[0]);
-    const balanceAfter = deriveBalance([{ kind: movement.kind, qty: movement.qty }]) + balance;
-    await insertAuditRow(client, {
-      action: "inventory.move", entity: "inventory_movement", entityId: movement.id,
-      entityLabel: items[0].name,
-      details: {
-        النوع: movement.kind, الكمية: movement.qty,
-        الرصيد_قبل: balance, الرصيد_بعد: balanceAfter,
-        ...(movement.kind === "adjust" ? { السبب: movement.reason } : {}),
-        ...(expiry ? { الصلاحية: expiry } : {}),
-        ...(unitCost != null ? { تكلفة_الوحدة: unitCost } : {}),
-        ...(isReturn ? { نوع_الحركة: "ردُّ مصروف" } : {}),
-        ...(supplier ? { المورّد: supplier.name, التزام_المورّد: payableId } : {}),
-      },
-      actor: input.createdBy,
-    });
-    await client.query("COMMIT");
-    return { ok: true, movement, balance: balanceAfter };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+    payableId = payableRows[0].id;
   }
+
+  const { rows: inserted } = await client.query<InventoryMovementRow>(
+    `INSERT INTO inventory_movements
+       (item_id, kind, qty, expiry_date, reason, visit_id, patient_id, created_by,
+        unit_cost_minor, is_return, party_id, payable_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10, $11::int, $12::int)
+     RETURNING id, item_id, kind, qty, expiry_date::text AS expiry_date, reason, visit_id, created_by,
+               created_at, unit_cost_minor, is_return, party_id, payable_id`,
+    [
+      input.itemId, input.kind,
+      input.kind === "adjust" ? input.qty : Math.abs(input.qty),
+      expiry, input.reason ?? null, input.visitId ?? null, input.patientId ?? null,
+      input.createdBy, unitCost, isReturn, supplier?.id ?? null, payableId,
+    ],
+  );
+  const movement = toMovement(inserted[0]);
+  const balanceAfter = deriveBalance([{ kind: movement.kind, qty: movement.qty }]) + balance;
+  await insertAuditRow(client, {
+    action: "inventory.move", entity: "inventory_movement", entityId: movement.id,
+    entityLabel: items[0].name,
+    details: {
+      النوع: movement.kind, الكمية: movement.qty,
+      الرصيد_قبل: balance, الرصيد_بعد: balanceAfter,
+      ...(movement.kind === "adjust" ? { السبب: movement.reason } : {}),
+      ...(expiry ? { الصلاحية: expiry } : {}),
+      ...(unitCost != null ? { تكلفة_الوحدة: unitCost } : {}),
+      ...(isReturn ? { نوع_الحركة: "ردُّ مصروف" } : {}),
+      ...(supplier ? { المورّد: supplier.name, التزام_المورّد: payableId } : {}),
+    },
+    actor: input.createdBy,
+  });
+  return { ok: true, movement, balance: balanceAfter };
 }
 
 /**
@@ -26697,6 +26690,13 @@ export async function resetClinicData<F>(
       await client.query(`SET LOCAL idle_in_transaction_session_timeout = '30min'`);
       await client.query(`SET LOCAL statement_timeout = '5min'`);
       await client.query(`SET LOCAL lock_timeout = '20s'`);
+      // Same fence is acquired shared by purchases before user/key/table locks.
+      // EXCLUSIVE permits the separate backup connection to read; ACCESS
+      // EXCLUSIVE here would deadlock while awaiting that backup.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [PURCHASE_RESET_FENCE]);
+      await client.query("LOCK TABLE inventory_purchase_receipts IN EXCLUSIVE MODE");
+      const { rows: [purchaseHistory] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM inventory_purchase_receipts) AS exists");
+      if (purchaseHistory.exists) throw new ProtectedPurchaseHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -26711,7 +26711,10 @@ export async function resetClinicData<F>(
       const { rows: files } = await client.query<{ storage_key: string }>(
         `SELECT storage_key FROM patient_documents UNION SELECT storage_key FROM expense_attachments`,
       );
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")} RESTART IDENTITY`);
+      // The receipt table is KEEP, never an unconditional wipe target. It is
+      // provably empty under the held lock; including it satisfies the movement
+      // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }

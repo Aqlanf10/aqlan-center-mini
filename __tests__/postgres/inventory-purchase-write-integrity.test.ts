@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { purchaseTestSession } from "./_inventory-purchase-session";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -7,8 +9,10 @@ import { dropPublicSchema, stubPostgresEnv } from "./_setup";
 const target = validatePostgresTestTarget(process.env);
 stubPostgresEnv();
 const auth = vi.hoisted(() => ({ session: { username: "synthetic-admin", role: "admin" } as
-  { username: string; role: string } | null }));
-vi.mock("@/lib/session", () => ({ requireSession: async () => auth.session }));
+  { username: string; role: string; userId?: number } | null }));
+vi.mock("@/lib/session", async importOriginal => ({
+  ...await importOriginal<typeof import("../../lib/session")>(), requireSession: async () => auth.session,
+}));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: async () => false }));
 const db = await import("../../lib/db");
 const { POST } = await import("../../app/api/inventory/[id]/movements/route");
@@ -36,10 +40,13 @@ async function state(f: Awaited<ReturnType<typeof fixture>>) {
     "SELECT * FROM audit_log WHERE action='inventory.move' AND actor=$1 ORDER BY id", [f.createdBy]);
   return { movements, payables, audit };
 }
-function request(f: Awaited<ReturnType<typeof fixture>>, changes: Record<string, unknown> = {}) {
+async function request(f: Awaited<ReturnType<typeof fixture>>, changes: Record<string, unknown> = {}) {
+  if (auth.session) auth.session = await purchaseTestSession(auth.session.username, auth.session.role);
+  const purchase = { kind: "in", qty: 1, unitCost: "10000", supplierPartyId: f.supplierPartyId, ...changes };
+  const keyed = purchase.kind === "in";
   return POST(new Request("http://localhost/api/inventory/movements", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ kind: "in", qty: 1, unitCost: "10000", supplierPartyId: f.supplierPartyId, ...changes }),
+    method: "POST", headers: { "content-type": "application/json", ...(keyed ? { "Idempotency-Key": randomUUID(), "X-Purchase-Actor": auth.session?.username ?? "logged-out", "X-Purchase-Actor-Id": String(auth.session?.userId ?? 0) } : {}) },
+    body: JSON.stringify(keyed ? { protocol: "inventory-purchase-v1", purchase } : purchase),
   }), { params: Promise.resolve({ id: String(f.itemId) }) });
 }
 async function failingAudit(run: () => Promise<void>) {

@@ -1,4 +1,5 @@
 import {APPROVED_AGREEMENT_SQL} from "../../lib/approved-agreement-schema";
+import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "../../lib/inventory-purchase-schema";
 import {INVOICE_CURRENCY_MIGRATION} from "../../lib/invoice-currency-runtime";
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -29,8 +30,10 @@ it('runtime registers exact additive contracts without fabricating facts, receip
   expect(approved).toMatchObject({name:"approved_agreement_principal",filename:"0064_approved_agreement_principal.sql",checksum:"aefc040a29c8b887a8eeca073103ce4268a8851b89e0025b406941e48f247655"});
   expect(approved.sql).toBe(APPROVED_AGREEMENT_SQL);
   const registered = (await fixture.source.query('SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version')).rows;
-  expect(registered).toEqual([...ortho, ...bundled,INVOICE_CURRENCY_MIGRATION,{version:"0064",name:"approved_agreement_principal",checksum:createHash("sha256").update(APPROVED_AGREEMENT_SQL).digest("hex")}].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
-  for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings']) {
+  expect(registered).toEqual([...ortho, ...bundled,INVOICE_CURRENCY_MIGRATION,{version:"0064",name:"approved_agreement_principal",checksum:createHash("sha256").update(APPROVED_AGREEMENT_SQL).digest("hex")},
+    { version: "0065", name: "inventory_purchase_receipts", checksum: createHash("sha256").update(INVENTORY_PURCHASE_RECEIPTS_SQL).digest("hex") },
+  ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
+  for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);
   }
   expect(await applyRuntimeMigrationFiles(fixture.source, bundled)).toEqual([]);

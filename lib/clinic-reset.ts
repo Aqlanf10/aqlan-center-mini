@@ -125,7 +125,14 @@ export const RESET_WIPE_TABLES = [
 ] as const;
 
 /** ما يبقى — الإعداد الذي لا يُعاد تجهيزه، وسجل التدقيق، وسجل الهجرات. */
+/** A reset must never erase either committed or terminal-rejected purchase keys. */
+export const PURCHASE_RESET_FENCE = "inventory-purchase-reset-v1";
+export class ProtectedPurchaseHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد تسجيل نتائج شراء محفوظة. لم يُمسح شيء؛ يجب الاحتفاظ بسجل الشراء ومفاتيح طلباته."); this.name = "ProtectedPurchaseHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
+  "inventory_purchase_receipts",
   "users",
   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
   "hr_staff",

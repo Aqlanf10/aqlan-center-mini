@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { PageHeader } from "@/components/PageHeader";
@@ -17,6 +17,8 @@ import {
   type MovementKind,
   type StockStatus,
 } from "@/lib/inventory";
+import { useDurablePurchaseAttempt } from "./useDurablePurchaseAttempt";
+import { purchaseDocument, PURCHASE_UNCERTAIN } from "@/lib/inventory-purchase-command";
 import { friendlyDateLong } from "@/lib/reminders";
 
 interface InventoryItemView {
@@ -79,6 +81,12 @@ const fmt = (n: number): string =>
 
 export default function InventoryOverview({ integrationEnabled = false }: { integrationEnabled?: boolean }) {
   const session = useSession();
+  // Drop draft values and private recovery views on a principal/role switch.
+  return <InventoryOverviewContent key={`${session?.username ?? "none"}:${session?.role ?? "none"}`} integrationEnabled={integrationEnabled} />;
+}
+
+function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: boolean }) {
+  const session = useSession();
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
   const isAdmin = session?.role === "admin";
@@ -112,6 +120,7 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const movementInFlight = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
 
   // Filters
@@ -149,6 +158,11 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
   const [qty, setQty] = useState("");
   const [expiry, setExpiry] = useState("");
   const [reason, setReason] = useState("");
+  const purchase = useDurablePurchaseAttempt(detail?.item.id ?? null);
+  const savedPurchase = purchase.attempt ? purchaseDocument(purchase.attempt.command.body) : null;
+  const movementKind = savedPurchase ? "in" : kind;
+  const savedText = (field: string, draft: string) => savedPurchase ? String(savedPurchase[field] ?? "") : draft;
+  const movementLocked = busy || !!purchase.attempt;
 
   const today = useMemo(() => {
     const now = new Date();
@@ -205,6 +219,9 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
     setQty("");
     setExpiry("");
     setReason("");
+    setUnitCost("");
+    setSupplierId("");
+    setSupplierDue("");
     try {
       const response = await fetch(`/api/inventory/${id}`, { cache: "no-store" });
       const payload = await response.json();
@@ -270,43 +287,68 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
     }
   };
 
-  const addMovement = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (busy || !detail || !qty) return;
+  const submitPurchase = async (document?: Record<string, unknown>) => {
+    if (!detail || movementInFlight.current) return;
+    movementInFlight.current = true;
     setBusy(true);
     setMessage(null);
     try {
+      const result = await purchase.run(document);
+      if (!result || result.kind === "busy") return;
+      if (result.kind !== "settled") { setMessage(result.message); return; }
+      const receipt = result.receipt;
+      if (receipt.status === "rejected") {
+        // Only a persisted matching terminal rejection unlocks correction.
+        const original = purchaseDocument(result.attempt.command.body)!;
+        setKind("in"); setQty(String(original.qty ?? "")); setExpiry(String(original.expiryDate ?? ""));
+        setUnitCost(String(original.unitCost ?? "")); setSupplierId(String(original.supplierPartyId ?? ""));
+        setSupplierDue(String(original.supplierDueDate ?? "")); setReason(String(original.reason ?? ""));
+        purchase.consume(result.attempt);
+        setMessage(receipt.message);
+        return;
+      }
+      // Retire before refresh; a later failed read cannot resubmit this purchase.
+      purchase.consume(result.attempt);
+      setQty(""); setExpiry(""); setUnitCost(""); setReason(""); setSupplierId(""); setSupplierDue("");
+      const success = receipt.payableCreated
+        ? "تم تسجيل الإدخال وسُجّلت فاتورة المورّد في المستحقات."
+        : "تم تسجيل حركة المخزون بنجاح.";
+      setMessage(success);
+      await Promise.all([load(), openDetail(receipt.itemId)]);
+      // load/openDetail report their own read failures; no write retry follows.
+    } finally { movementInFlight.current = false; setBusy(false); }
+  };
+
+  const addMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy || movementInFlight.current || purchase.attempt || !detail || !qty) return;
+    const document = {
+      kind, qty: Number(qty), expiryDate: kind === "in" && expiry ? expiry : null,
+      unitCost: kind === "in" && unitCost.trim() !== "" ? unitCost : undefined,
+      supplierPartyId: kind === "in" && supplierId ? Number(supplierId) : undefined,
+      supplierDueDate: kind === "in" && supplierId && supplierDue ? supplierDue : undefined,
+      reason: reason.trim() || null,
+    };
+    if (kind === "in") {
+      if (!detail.item.isActive) { setMessage("البند موقوف؛ أعد تفعيله قبل الشراء."); return; }
+      if (supplierId && (suppliersError || !suppliers.some(supplier => supplier.isActive && String(supplier.id) === supplierId))) {
+        setMessage("تحقّق من اختيار مورّد نشط قبل الشراء."); return;
+      }
+      await submitPurchase(document); return;
+    }
+    movementInFlight.current = true;
+    setBusy(true); setMessage(null);
+    try {
       const response = await fetch(`/api/inventory/${detail.item.id}/movements`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind,
-          qty: Number(qty),
-          expiryDate: kind === "in" && expiry ? expiry : null,
-          unitCost: kind === "in" && unitCost.trim() !== "" ? unitCost : undefined,
-          supplierPartyId: kind === "in" && supplierId ? Number(supplierId) : undefined,
-          supplierDueDate: kind === "in" && supplierId && supplierDue ? supplierDue : undefined,
-          reason: reason.trim() || null,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(document),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر تسجيل الحركة.");
-      setQty("");
-      setExpiry("");
-      setUnitCost("");
-      setReason("");
-      const billed = Boolean(supplierId);
-      setSupplierId("");
-      setSupplierDue("");
-      setMessage(billed
-        ? "تم تسجيل الإدخال وسُجّلت فاتورة المورّد في المستحقات."
-        : "تم تسجيل حركة المخزون بنجاح.");
+      setQty(""); setExpiry(""); setUnitCost(""); setReason(""); setSupplierId(""); setSupplierDue("");
+      setMessage("تم تسجيل حركة المخزون بنجاح.");
       await Promise.all([load(), openDetail(detail.item.id)]);
-    } catch (moveError) {
-      setMessage(moveError instanceof Error ? moveError.message : "تعذّر تسجيل الحركة.");
-    } finally {
-      setBusy(false);
-    }
+    } catch (moveError) { setMessage(moveError instanceof Error ? moveError.message : "تعذّر تسجيل الحركة."); }
+    finally { movementInFlight.current = false; setBusy(false); }
   };
 
   const nearestExpiry = (id: number): string | null => {
@@ -803,6 +845,18 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
             {/* نموذج تسجيل حركة جديدة */}
             <form onSubmit={addMovement} className="space-y-3 rounded-xl bg-slate-50 p-4 border border-slate-200">
               <h4 className="text-xs font-extrabold text-navy-900">تسجيل حركة جديدة على البند</h4>
+              {purchase.attempt ? (
+                <div role="status" data-testid="purchase-recovery" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs">
+                  <p>{purchase.attempt.phase === "sending" ? "جارٍ إرسال طلب الشراء المحفوظ…" : PURCHASE_UNCERTAIN}</p>
+                  <p>مرجع الطلب: <bdi>{purchase.attempt.command.key}</bdi></p>
+                  <button type="button" onClick={() => void submitPurchase()} disabled={busy || !purchase.ready || purchase.attempt.phase === "sending"}
+                    className="rounded-lg bg-navy-800 px-3 py-2 font-bold text-white disabled:opacity-40">إعادة محاولة الشراء المحفوظ</button>
+                </div>
+              ) : null}
+              {purchase.error ? <div role="alert" className="text-xs text-red-700">
+                <p>{purchase.error}</p><button type="button" onClick={() => void purchase.refresh()} className="underline">إعادة فحص الحفظ الآمن</button>
+              </div> : null}
+              <fieldset disabled={movementLocked} className="space-y-3">
               <div className="grid grid-cols-3 gap-1">
                 {(["out", "in", "adjust"] as const).map((k) => (
                   <button
@@ -810,7 +864,7 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
                     type="button"
                     onClick={() => setKind(k)}
                     className={`rounded-xl py-1.5 text-xs font-bold transition-all ${
-                      kind === k
+                      movementKind === k
                         ? "bg-navy-800 text-white shadow-xs"
                         : "bg-white text-slate-600 border border-slate-200"
                     }`}
@@ -827,22 +881,22 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
                   </span>
                   <input
                     type="number"
-                    min="0.01"
+                    min="0.001"
                     step="any"
-                    value={qty}
+                    value={savedText("qty", qty)}
                     onChange={(e) => setQty(e.target.value)}
                     required
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
                   />
                 </label>
 
-                {kind === "in" ? (
+                {movementKind === "in" ? (
                   <>
                   <label className="text-xs">
                     <span className="mb-1 block font-bold text-slate-700">تاريخ الصلاحية</span>
                     <input
                       type="date"
-                      value={expiry}
+                      value={savedText("expiryDate", expiry)}
                       onChange={(e) => setExpiry(e.target.value)}
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
                     />
@@ -855,7 +909,7 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
                       ثمن الوحدة للشراء {isAdmin ? "" : "(اختياري)"}
                     </span>
                     <input
-                      value={unitCost}
+                      value={savedText("unitCost", unitCost)}
                       onChange={(e) => setUnitCost(e.target.value)}
                       inputMode="decimal"
                       dir="ltr"
@@ -871,7 +925,7 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
                       <label className="text-xs">
                         <span className="mb-1 block font-bold text-slate-700">المورّد (اختياري)</span>
                         <select
-                          value={supplierId}
+                          value={savedText("supplierPartyId", supplierId)}
                           onChange={(e) => setSupplierId(e.target.value)}
                           aria-label="المورّد"
                           className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
@@ -890,12 +944,12 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
                           اختياره يسجّل فاتورته في المستحقات (الثمن × الكمية) — فلا تُدخل مرتين.
                         </span>
                       </label>
-                      {supplierId ? (
+                      {savedText("supplierPartyId", supplierId) ? (
                         <label className="text-xs">
                           <span className="mb-1 block font-bold text-slate-700">استحقاق فاتورة المورّد</span>
                           <input
                             type="date"
-                            value={supplierDue}
+                            value={savedText("supplierDueDate", supplierDue)}
                             onChange={(e) => setSupplierDue(e.target.value)}
                             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
                           />
@@ -908,16 +962,16 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
 
                 <label className="text-xs sm:col-span-2">
                   <span className="mb-1 block font-bold text-slate-700">
-                    {kind === "adjust" ? "سبب التسوية (إلزامي) *" : "السبب أو الملاحظة"}
+                    {movementKind === "adjust" ? "سبب التسوية (إلزامي) *" : "السبب أو الملاحظة"}
                   </span>
                   <input
-                    value={reason}
+                    value={savedText("reason", reason)}
                     onChange={(e) => setReason(e.target.value)}
-                    required={kind === "adjust"}
+                    required={movementKind === "adjust"}
                     placeholder={
-                      kind === "out"
+                      movementKind === "out"
                         ? "مثال: استهلاك عيادة أو علاج مريض"
-                        : kind === "in"
+                        : movementKind === "in"
                         ? "مثال: فاتورة شراء رقم #123"
                         : "مثال: نقص بعد الجرد الدوري"
                     }
@@ -928,11 +982,12 @@ export default function InventoryOverview({ integrationEnabled = false }: { inte
 
               <button
                 type="submit"
-                disabled={busy || !qty || (kind === "adjust" && !reason.trim())}
+                disabled={movementLocked || !qty || (movementKind === "in" && !purchase.ready) || (movementKind === "adjust" && !reason.trim())}
                 className="w-full rounded-xl bg-navy-800 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 تأكيد وقيد الحركة
               </button>
+              </fieldset>
             </form>
 
             {/* سجل الحركات والدفعات */}

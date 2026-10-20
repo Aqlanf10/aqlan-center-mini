@@ -513,3 +513,25 @@ and terms records and guards against duplicate principal and silent changes to
 approved sources. No automatic historical posting or backfill. Clinical consent
 alone creates no approval record.0062 remains reserved for HR. Runtime/CLI use
 identical SQL/checksum. See [design and limits](review/approved-agreement-principal/design.md).
+
+### 0065_inventory_purchase_receipts.sql
+
+Durable retry outcomes for the existing inventory purchase command. Adds only
+`inventory_purchase_receipts`: a globally unique request key, authenticated actor,
+versioned request digest, and an allowlisted immutable committed result or terminal
+business rejection. A committed outcome references exactly one stock movement;
+stock, optional supplier payable, mandatory audit and outcome share one transaction.
+No raw request body, historical backfill, expiry or key cleanup is introduced.
+
+Numbered and existing checksum-checked runtime registration use identical SQL.
+The Production/unknown-remote migration CLI `--apply` guard is unchanged. Release
+verification requires the packaged strict read-only preflight to confirm 0065 is
+registered without name/checksum mismatch; health alone is not migration proof.
+Historical registry differences must remain separately disclosed.
+
+Preserve this table and all outcome keys on rollback. New versioned purchase
+envelopes fail closed on older code; never downgrade uncertain retries to unkeyed
+writes. Demo reset refuses before backup when any committed or rejected outcome
+exists. Only a genuinely empty table may join the existing reset truncation under
+the reviewed serialization/table locks and an empty-table trigger recheck; receipts
+are not an unconditional wipe target. See [protocol and release limits](INVENTORY_PURCHASE_RETRY.md).
