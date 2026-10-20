@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { purchaseTestSession } from "./_inventory-purchase-session";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -7,8 +9,10 @@ import { dropPublicSchema, stubPostgresEnv } from "./_setup";
 const target = validatePostgresTestTarget(process.env);
 stubPostgresEnv();
 const auth = vi.hoisted(() => ({ session: { username: "synthetic-admin", role: "admin" } as
-  { username: string; role: string } | null }));
-vi.mock("@/lib/session", () => ({ requireSession: async () => auth.session }));
+  { username: string; role: string; userId?: number } | null }));
+vi.mock("@/lib/session", async importOriginal => ({
+  ...await importOriginal<typeof import("../../lib/session")>(), requireSession: async () => auth.session,
+}));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: async () => false }));
 const db = await import("../../lib/db");
 const { POST } = await import("../../app/api/inventory/[id]/movements/route");
@@ -40,11 +44,12 @@ async function state(f: Awaited<ReturnType<typeof fixture>>) {
   return { movements, payables, audit, balance: stock.balance };
 }
 
-function request(f: Awaited<ReturnType<typeof fixture>>, supplier: Record<string, unknown>,
+async function request(f: Awaited<ReturnType<typeof fixture>>, supplier: Record<string, unknown>,
   changes: Record<string, unknown> = {}) {
+  if (auth.session) auth.session = await purchaseTestSession(auth.session.username, auth.session.role);
   return POST(new Request(`http://test.invalid/api/inventory/${f.itemId}/movements`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ kind: "in", qty: 2, unitCost: "100", ...supplier, ...changes }),
+    method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": randomUUID(), "X-Purchase-Actor": auth.session?.username ?? "logged-out", "X-Purchase-Actor-Id": String(auth.session?.userId ?? 0) },
+    body: JSON.stringify({ protocol: "inventory-purchase-v1", purchase: { kind: "in", qty: 2, unitCost: "100", ...supplier, ...changes } }),
   }), { params: Promise.resolve({ id: String(f.itemId) }) });
 }
 
@@ -75,7 +80,9 @@ describe("supplier ID validation through the real purchase writer", () => {
         : format === "decimal string" ? String(f.supplierId) : `000${f.supplierId}`;
       const response = await request(f, { supplierPartyId: value }, { supplierDueDate: "2026-12-31" });
       expect(response.status).toBe(201);
-      const result = await response.json();
+      const acknowledgment = await response.json();
+      expect(acknowledgment).toMatchObject({ protocol: "inventory-purchase-v1", status: "committed", replayed: false });
+      const result = acknowledgment.result;
       expect(result).toMatchObject({ ok: true, balance: 2, movement: { partyId: f.supplierId } });
       const saved = await state(f);
       expect(saved.movements).toEqual([expect.objectContaining({

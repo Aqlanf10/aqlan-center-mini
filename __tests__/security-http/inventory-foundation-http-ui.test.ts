@@ -1,3 +1,4 @@
+import { seededInventoryPurchase } from "./_inventory-purchase";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright";
 import { Client } from "pg";
@@ -27,9 +28,9 @@ beforeAll(async () => {
   async function create(name: string, unitCost?: string, supplierPartyId?: number) {
     const created = await authedMutation("/api/inventory", h.sessions.admin, "POST", JSON.stringify({ name, category: "other", unit: "piece", minLevel: 5 }));
     expect(created.status).toBe(201); const item = await created.json();
-    const receipt = await authedMutation(`/api/inventory/${item.id}/movements`, h.sessions.admin, "POST", JSON.stringify({ kind: "in", qty: 5, unitCost, supplierPartyId }));
+    const receipt = await seededInventoryPurchase(item.id, h.sessions.admin, { kind: "in", qty: 5, unitCost, supplierPartyId });
     expect(receipt.status).toBe(201); const result = await receipt.json();
-    if (supplierPartyId) payableId = result.movement.payableId;
+    if (supplierPartyId) payableId = result.result.movement.payableId;
     return item.id as number;
   }
   pricedId = await create(`${witness}-known`, "123", supplierId);
