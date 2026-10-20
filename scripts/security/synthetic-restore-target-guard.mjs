@@ -1,4 +1,4 @@
-import { validateLocalVerificationTarget } from '../../lib/verification-target-policy.mjs';
+import { validateLocalVerificationTarget, validateOperationalVerificationEnvironment } from '../../lib/verification-target-policy.mjs';
 
 /**
  * Strict pre-I/O gate for the legacy SQL importer.
@@ -9,6 +9,11 @@ import { validateLocalVerificationTarget } from '../../lib/verification-target-p
 const refusal = (reason) => { throw new Error('Legacy restore refused: ' + reason); };
 
 export function assertSafeLegacyRestoreTarget(connectionString, env = process.env) {
+  if (typeof connectionString !== 'string' || connectionString !== connectionString.trim() || /[\\u0000-\\u0020\\u007f]/.test(connectionString)) {
+    refusal('ambiguous whitespace or control character in target URI');
+  }
+  try { validateOperationalVerificationEnvironment(env); }
+  catch { refusal('conflicting operational database URL or runtime environment'); }
   if (env.NODE_ENV === 'production' ||
       env.RAILWAY_PROJECT_ID || env.RAILWAY_SERVICE_ID || env.RAILWAY_ENVIRONMENT ||
       env.RAILWAY_ENVIRONMENT_NAME) {
