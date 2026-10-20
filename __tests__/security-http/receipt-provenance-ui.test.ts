@@ -12,7 +12,7 @@ import { emitReceiptProvenanceEvidence, emitReceiptProvenanceFailedPdf, type Rec
 // SOURCE-ONLY CANDIDATE. All fixtures belong to the isolated HTTP database.
 // The browser journey permits GET/HEAD only; it never clicks Print or a financial action.
 type Payment = { id: number; receiptNumber: string; patientId: number; amountMinor: number;
-  currency: string; baseAmountMinor: number; kind: "payment" | "refund"; createdAt: string };
+  currency: string; baseAmountMinor: number; kind: "payment" | "refund"; createdAt: string; reversalOfId: number | null };
 type Feed = { payments: Payment[]; receiptProvenance: Record<string, ReceiptProvenance>; receiptRemaining?: unknown };
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -36,7 +36,7 @@ async function seedReceipt(suffix: string, amount: number, reversalOfId: number 
   [number, patientId, invoiceId, shiftId, reversalOfId === null ? "payment" : "refund", amount, sourceTimestamp,
     reversalOfId, reversalOfId === null ? null : `تصحيح السند ${ordinary.receiptNumber}: same-looking note`]);
   return { id: row.id, receiptNumber: number, patientId, amountMinor: amount, currency: "YER",
-    baseAmountMinor: amount, kind: reversalOfId === null ? "payment" as const : "refund" as const, createdAt: sourceTimestamp };
+    baseAmountMinor: amount, kind: reversalOfId === null ? "payment" as const : "refund" as const, createdAt: sourceTimestamp, reversalOfId };
 }
 
 beforeAll(async () => {
@@ -104,11 +104,19 @@ function assertProjection(feed: Feed) {
   const originalDto = feed.payments.find(payment => payment.id === original.id);
   expect(originalDto).toMatchObject({ amountMinor: 50_000, baseAmountMinor: 50_000, kind: "payment", createdAt: sourceTimestamp });
   expect(originalDto).not.toHaveProperty("receiptProvenance");
-  expect(originalDto).not.toHaveProperty("reversalOfId");
+  // Raw immutable origin linkage supports acknowledgment; the derived privacy-
+  // minimal provenance projection and original financial values stay separate.
+  for (const [payment, originId] of [
+    [original, null], [reversal, original.id], [replacement, null],
+    [voidOriginal, null], [voidReversal, voidOriginal.id],
+    [ordinary, null], [ordinaryRefund, ordinary.id],
+  ] as const) {
+    expect(feed.payments.find(row => row.id === payment.id)).toMatchObject({ reversalOfId: originId });
+  }
 }
 
 describe("receipt provenance through existing authorized read routes", () => {
-  it("adds a separate privacy-minimal projection without changing existing financial permissions or DTOs", async () => {
+  it("adds separate privacy-minimal provenance while retaining permissions, face values and stored origin links", async () => {
     const before = await snapshot();
     for (const role of ["admin", "reception", "cashier", "accountant"] as const) {
       const ledger = await authedGet(`/api/patients/${patientId}/ledger`, h.sessions[role]);

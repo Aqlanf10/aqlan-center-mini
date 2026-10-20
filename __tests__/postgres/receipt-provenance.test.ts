@@ -70,7 +70,7 @@ beforeAll(async () => {
 afterAll(async () => { await resetPoolForTesting(); });
 
 describe("receipt provenance is an append-only read projection", () => {
-  it("separates original face value, full reversal and replacement without expanding Payment", async () => {
+  it("separates immutable face values from derived provenance while exposing the stored reversal link", async () => {
     const original = await pay(await patient(), 50_000);
     const corrected = await correct(original.id, 5_000);
     const reversal = corrected.reversal!, replacement = corrected.replacement!;
@@ -86,7 +86,13 @@ describe("receipt provenance is an append-only read projection", () => {
     const face = await getPayment(original.id);
     expect(face).toEqual(original);
     expect(face).not.toHaveProperty("receiptProvenance");
-    expect(face).not.toHaveProperty("reversalOfId");
+    // The raw stored FK is needed by strict acknowledgment; derived provenance
+    // and private audit details still belong only to their separate projection.
+    expect(face?.reversalOfId).toBeNull();
+    expect((await getPayment(reversal.id))?.reversalOfId).toBe(original.id);
+    expect((await getPayment(replacement.id))?.reversalOfId).toBeNull();
+    expect(reversal.reversalOfId).toBe(original.id);
+    expect(replacement.reversalOfId).toBeNull();
   });
 
   it("voids have no invented replacement and retain their exact audit-linked reversal", async () => {
