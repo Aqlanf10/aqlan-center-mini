@@ -31,8 +31,9 @@ if (!file || !url.trim()) {
 // bootstrap/migrator, not the source backup's historical registry snapshot.
 // Application rows still use plain INSERT and reject an occupied target.
 // Fail closed before reading/applying SQL or opening a connection.
+let validatedTarget;
 try {
-  assertSafeLegacyRestoreTarget(url, process.env);
+  validatedTarget = assertSafeLegacyRestoreTarget(url, process.env);
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Legacy restore target refused.");
   process.exit(2);
@@ -53,7 +54,8 @@ function sslFor(target) {
   return { rejectUnauthorized: false };
 }
 
-const client = new Client({ connectionString: url, ssl: sslFor(url) });
+// Never give pg unvalidated connection-string query parameters or TLS file options.
+const client = new Client({ connectionString: validatedTarget.connectionString, ssl: false });
 try {
   await client.connect();
   // Match the backup writer's quote escaping even on a differently configured server.
