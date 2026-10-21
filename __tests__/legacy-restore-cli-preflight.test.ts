@@ -8,8 +8,8 @@ import { spawnSync } from 'node:child_process';
 it('legacy restore guard rejects URI overrides before archive read or PostgreSQL Client', () => {
   const run = spawnSync(process.execPath, [
     '--test',
-    'scripts/security/synthetic-restore-target-guard.test.mjs',
-    'scripts/security/legacy-restore-cli.test.mjs',
+    'scripts/security/synthetic-restore-target-guard.nodecheck.mjs',
+    'scripts/security/legacy-restore-cli.nodecheck.mjs',
   ], {
     cwd: process.cwd(),
     env: { ...process.env, NODE_ENV:'test' },
