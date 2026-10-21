@@ -19,6 +19,8 @@ beforeAll(async()=>{
  const u=(await q("INSERT INTO users(username,display_name,password_hash,role,is_active) VALUES('delta-admin','Synthetic delta admin',$1,'admin',TRUE) RETURNING id",[hash])).rows[0];
  session={userId:u.id,username:"delta-admin",role:"admin",credentialVersion:auth.sessionCredentialVersion(hash),expiresAt:Date.now()+3600000};
  await db.openShift({openedBy:session.username,opening:{YER:0,SAR:0,USD:0}});
+ // The suite uses synthetic local FX settings, never live currency rates.
+ await q("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','140'),('finance.rate.USD','530') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
 },180000);
 afterAll(async()=>{await db.resetPoolForTesting();});
 async function fixture(currency:"YER"|"SAR"|"USD"="YER",paid=180000,doctorPolicy?:"no_cost"|"missing_cost"){
@@ -91,7 +93,7 @@ describe("actual PostgreSQL 18 atomic agreement delta",()=>{
  });
  it("rejects a payment arriving after preview and never posts a delta",async()=>{
   const f=await fixture("YER",0),input=await command(f);
-  await approve.collectApprovedAgreement({planId:f.planId,amountMinor:10000,currency:"YER",method:"cash",note:null,idempotencyKey:`late-${++serial}`,session});
+  await approve.collectApprovedAgreement({planId:f.planId,amountMinor:10000,currency:"YER",method:"cash",note:null,idempotencyKey:`late-source-${++serial}`,session});
   await expect(api.saveAgreementAmendment(f.planId,input,session)).rejects.toMatchObject({code:"stale"});
   expect((await q("SELECT id FROM agreement_delta_amendments WHERE plan_id=$1",[f.planId])).rows).toHaveLength(0);
  });
