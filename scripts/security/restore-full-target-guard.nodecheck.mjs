@@ -13,7 +13,9 @@ test('local synthetic target becomes canonical URI (no ambiguous params)', () =>
 test('explicit staging target with verified TLS PEM is permitted without any file read', () => {
   const checked = validate(staging,{NODE_ENV:'development', DATABASE_ENVIRONMENT:'staging', PGSSL_ROOT_CERT_PEM:pem});
   assert.equal(checked.local, false);
-  assert.equal(new URL(checked.connectionString).searchParams.get('sslmode'), 'verify-full');
+  // The input was required to say verify-full, but the *output* must omit it:
+  // node-postgres query parsing could replace the supplied verified TLS object.
+  assert.equal(new URL(checked.connectionString).searchParams.has('sslmode'), false);
 });
 for(const [label,url,env] of [
   ['host query override',local+'?host=remote.example.invalid', {NODE_ENV:'test'}],
