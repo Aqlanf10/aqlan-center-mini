@@ -1,3 +1,5 @@
+import { readVisitFinancialContext } from "./visit-financial-context-db";
+import { VISIT_SOURCE_SUMMARY, type VisitFinancialContext } from "./visit-financial-context";
 import { UNVERIFIED_VISIT_INVOICE_LABEL } from "./visit-financial-presentation";
 import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
@@ -1038,6 +1040,7 @@ interface ReportContext {
   movements: PatientMovement[];
   /** (تقارير R1) سجل الزيارات حتى نهاية المدى — مصدر أعداد الزيارات وتقريرها. */
   visits: ReportVisit[];
+  visitSources?: Map<number, VisitFinancialContext>;
   /** (P0-1) مخرجات محرّك العمولات نفسه للمدى — لتقرير الطبيب وحده. */
   commissionRows?: CommissionRow[];
   /** (RPT-SPEC) الإجراءات وتكاليف المختبر ونسب المواد — للتقرير حسب التخصص وحده. */
@@ -1218,6 +1221,16 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   }
   if (report === "specialty") ctx.specialty = await loadSpecialtyExtras(filters);
 
+  if (report === "visits") {
+    ctx.visitSources = await withFinancialReadSnapshot(getPool(), async runner => {
+      const sources = new Map<number, VisitFinancialContext>();
+      for (const visit of visitsInRange(ctx, filters.from, filters.to)) {
+        const source = await readVisitFinancialContext(runner, visit.id, visit.patientId);
+        if (source) sources.set(visit.id, source);
+      }
+      return sources;
+    }, usesSharedLocalDatabaseConnection());
+  }
   switch (report) {
     case "daily": return dailyReport(ctx);
     case "monthly": return monthlyReport(ctx);
@@ -3218,6 +3231,7 @@ function visitsReport(ctx: ReportContext): ReportResult {
       statusLabel: VISIT_STATUS_LABEL[visit.status] ?? visit.status,
       services: work.length ? work.map((line) => line.description).join("، ") : "—",
       invoiceText: invoice ? formatMoney(invoice.netMinor, invoice.currency) : UNVERIFIED_VISIT_INVOICE_LABEL,
+      workSource: VISIT_SOURCE_SUMMARY[ctx.visitSources?.get(visit.id)?.summary ?? "unresolved"],
       collection,
     });
   }
@@ -3257,6 +3271,7 @@ function visitsReport(ctx: ReportContext): ReportResult {
       { key: "sessionMinutes", label: "الجلسة (د)" },
       { key: "statusLabel", label: "الحالة" },
       { key: "services", label: "الخدمات" },
+      { key: "workSource", label: "مصادر العمل — تحقق حالي" },
       { key: "invoiceText", label: "الفاتورة" },
       { key: "collection", label: "التحصيل" },
     ],
@@ -3265,6 +3280,7 @@ function visitsReport(ctx: ReportContext): ReportResult {
     notes: [
       "الطبيب طبيب الزيارة نفسها؛ و«مراجع جديد» أول زيارةٍ مسجّلة للمريض في السجل كله.",
       "الخدمات من إجراءات الزيارة المسجلة؛ عند غيابها تُعرض بنود الفاتورة المباشرة إن وجدت.",
+      "مصادر العمل تحقق حالي للروابط المسجلة، لا حالة السداد ولا رصيدًا موزعًا على الزيارة. التفاصيل في صفحة الزيارة؛ المصادر غير المحسومة تبقى للمراجعة.",
       "غياب فاتورة مباشرة لا يثبت دينًا أو مجانية أو تغطية باتفاق سابق؛ يلزم التحقق من المصدر المالي للعمل.",
       "التحصيل: ما سُدّد من فاتورة الزيارة المباشرة بعملتها، وليس حالة سداد تغطية سابقة.",
     ],

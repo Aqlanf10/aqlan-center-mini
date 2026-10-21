@@ -21,6 +21,7 @@ import { useSetting } from "./SettingsProvider";
 import {
   appendPhrase, parsePhraseList, treatmentDoneFromProcedures, type VisitSuggestions,
 } from "@/lib/visit-suggestions";
+import VisitFinancialSources from "@/components/VisitFinancialSources";
 import { canViewMoney, isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
@@ -1287,6 +1288,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           </div>
         ) : null}
       </div>
+
+      {signed ? <VisitFinancialSources key={ownerKey} visitId={visit.id} patientId={visit.patientId} role={session?.role} /> : null}
 
       <VisitSteps steps={orthoFollowUp ? [
         { id: "visit-ortho-session", label: "جلسة اليوم", done: Boolean(visit.ortho?.visitAdjustmentId || orthoSession?.done.trim()) },

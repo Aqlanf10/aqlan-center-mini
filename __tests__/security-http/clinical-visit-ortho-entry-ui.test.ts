@@ -92,6 +92,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
       await json(route, diagnosisResponse.body, diagnosisResponse.status);
     }
     else if (path === clinicalPath) await json(route, stored);
+    else if (path === `/api/visits/${visitId}/financial-context`) await json(route, { visitId, patientId, signed: true, directReference: null, directReferenceState: "missing", work: [], summary: "no_recorded_work" });
     else if (path === `/api/visits/${visitId}/billing-preview`) await json(route, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "شدّة مشمولة" });
     else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
     else if (path === `/api/patients/${patientId}`) await json(route, { id: patientId, medicalAlert: null, phone: null });
