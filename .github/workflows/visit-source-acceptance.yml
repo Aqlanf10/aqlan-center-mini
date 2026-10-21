@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
       - name: Verify product SHA and overlay test-only probes
         env:
-          FINAL_APP_SHA: 'e26ea370071def3c97d0faa1ab381fe9efda7c96'
+          FINAL_APP_SHA: 'fa0d8a994da9353cc4e24f9e799ec14605df34d0'
           EXPECTED_BASE_REF: 'fix/visit-source-context'
         run: |
           test "${{ github.event.pull_request.base.ref }}" = "$EXPECTED_BASE_REF"
@@ -121,31 +121,21 @@ jobs:
       - name: Run only the visit source journey file
         run: npm run test:security-http -- __tests__/security-http/invoice-clinic-continuity-journey.test.ts
 
-      # Visual evidence comes from pdftoppm on the exact synthetic PDF under test.
-      # This is not a browser DOM capture and does not replace the strict text assertion.
-      - name: Preserve original PDF visual evidence
+      # Single-run proof: exact synthetic PDFs and preprint/PDF raster evidence
+      # are uploaded together with a SHA256 manifest identifying this product HEAD.
+      # Failure to generate any requested file blocks acceptance.
+      - name: Preserve same-run synthetic PDF and visual proof
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: visit-source-original-pdf-raster
-          path: |
-            artifacts/visit-source-acceptance/same-day-decisions-raster.png
-            artifacts/visit-source-acceptance/same-day-decisions-preprint.png
-            artifacts/visit-source-acceptance/same-day-decisions-preprint-cell.png
-            artifacts/visit-source-acceptance/same-day-font-probe.pdf
-            artifacts/visit-source-acceptance/same-day-font-probe.png
-            artifacts/visit-source-acceptance/same-day-shaping-probe.pdf
-            artifacts/visit-source-acceptance/same-day-shaping-probe.png
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Preserve only the three synthetic report PDFs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: visit-source-acceptance-pdfs
+          name: visit-source-same-run-proof
           path: |
             artifacts/visit-source-acceptance/mixed.pdf
             artifacts/visit-source-acceptance/same-day-decisions.pdf
             artifacts/visit-source-acceptance/historical-agreement.pdf
-          if-no-files-found: warn
+            artifacts/visit-source-acceptance/same-day-decisions-preprint.png
+            artifacts/visit-source-acceptance/same-day-decisions-preprint-cell.png
+            artifacts/visit-source-acceptance/same-day-decisions-raster.png
+            artifacts/visit-source-acceptance/same-day-proof-manifest.json
+          if-no-files-found: error
           retention-days: 7
