@@ -115,7 +115,7 @@ jobs:
       - name: Install hosted Chromium
         run: npx playwright install --with-deps chromium
       - name: Install PDF inspection tools
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils fonts-hosny-amiri
       # Existing global setup creates/seeds/drops its own synthetic HTTP database
       # and launches the standalone server; no separate server or schema shortcut.
       - name: Run only the visit source journey file
@@ -134,6 +134,8 @@ jobs:
             artifacts/visit-source-acceptance/same-day-decisions-preprint-cell.png
             artifacts/visit-source-acceptance/same-day-font-probe.pdf
             artifacts/visit-source-acceptance/same-day-font-probe.png
+            artifacts/visit-source-acceptance/same-day-shaping-probe.pdf
+            artifacts/visit-source-acceptance/same-day-shaping-probe.png
           if-no-files-found: warn
           retention-days: 7
       - name: Preserve only the three synthetic report PDFs
