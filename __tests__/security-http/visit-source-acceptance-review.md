@@ -24,3 +24,12 @@ Suggested bounded hosted selection, only after parent review:
     npm run test:security-http -- __tests__/security-http/invoice-clinic-continuity-journey.test.ts -t 'Endo tooth 36:|Supplemental visit source acceptance'
 
 This is authored acceptance coverage, not evidence of a successful hosted run. Canonical fixture acceptance, browser role rendering and Arabic PDF extraction remain unexecuted until that run. Any product failure must be reported before product changes.
+
+
+## Reviewed assistant entry follow-up
+
+The standalone visit page remains denied to assistants. The browser suite asserts that redirect, then uses `/patients/{patientId}?tab=today&visitId={visitId}` and asserts the exact selected-visit marker before testing source redaction. Product increment `dbc345ad` verifies only patient/visit identity through the already-permitted clinical GET; no route grant or treatment graph is added.
+
+Real browser negatives pair an allowed synthetic patient file with another allowed patient's exact visit, and request a mixed visit-plus-existing-plan context. Both must leave the selected reader/source panel absent with an explicit context error. The mixed request must not call the graph, clinical or source endpoints. These probes do not establish tenant isolation, real callback/session-switching lifetimes, or old-day browser refusal. This journey has no canonical older-day visit fixture; it does not backdate records or bypass writers to manufacture one. Old-day 403 handling remains unit coverage plus the unchanged server guard.
+
+Print DOM checks summary multiplicities; PDF checks unique summary presence, not complete PDF-row or invoice/collection parity. Hosted runtime evidence remains a separate result from the deterministic hook simulations.

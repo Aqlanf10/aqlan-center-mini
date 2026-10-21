@@ -503,6 +503,11 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
       });
       try {
         await view.page.goto(`${baseUrl}/visits/${visit.id}`);
+        if (who === "assistant") {
+          // API admission does not grant the standalone page. Keep its existing denial.
+          expect(new URL(view.page.url()).pathname).toBe("/");
+          await view.page.goto(`${baseUrl}/patients/${patientId}?tab=today&visitId=${visit.id}`);
+        }
         const panel = view.page.getByRole("region", {name: "مصادر عمل الزيارة"});
         try {
           await panel.waitFor(); // Preserve the existing 20-second timeout and visibility assertion.
@@ -530,6 +535,10 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
           if (error instanceof Error) { error.message += `\nBounded synthetic source diagnostic: ${JSON.stringify(context)}`; throw error; }
           throw error;
         }
+        if (who === "assistant") {
+          expect(await view.page.getByTestId("clinical-context-visit").getByText(`الزيارة المحددة #${visit.id}`, {exact:true}).count()).toBe(1);
+          expect(new URL(view.page.url()).searchParams.get("visitId")).toBe(String(visit.id));
+        }
         expect(await panel.innerText()).toContain(VISIT_SOURCE_SUMMARY[visit.summary]);
         const invoices = data.work.flatMap(line => line.references).filter(source => source.kind === "invoice" && source.state === "current");
         const expectedLinks = [...new Set(invoices.map(source => `/print/invoice/${source.id}`))];
@@ -543,6 +552,7 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
       } finally { await close(view.context); }
     }
   }
+  if (label === "mixed") await assistantNavigationRefusals(patientId, visits[0].id);
   const params = new URLSearchParams({report:"visits",preset:"today",patientId:String(patientId)});
   const report = await read<{result:{rows:{patientId:number;workSource:string;invoiceText:string;collection:string}[]}}>("admin", `/api/reports?${params}`);
   // Exact visit IDs were asserted above. The report has no visit ID field; compare the complete multiset.
@@ -642,3 +652,37 @@ describe("Supplemental visit source acceptance through canonical writers", () =>
     expect(await q("SELECT id,agreed_minor,previously_paid_minor,remaining_minor FROM legacy_treatment_agreements WHERE patient_id=$1",[patientId])).toEqual(principal);
   },240_000);
 });
+
+/** Real, already-permitted patient pages. Never substitute API responses or grant access. */
+async function assistantNavigationRefusals(patientId: number, visitId: number) {
+  const otherPatientId = await patient("source-navigation-other");
+  await walkIn(otherPatientId); // Canonical arrival makes this synthetic patient's file readable today.
+  const [{planId}] = await q<{planId:number}>(`SELECT i.plan_id AS "planId" FROM visit_procedures p
+    JOIN plan_items i ON i.id=p.plan_item_id WHERE p.visit_id=$1 ORDER BY p.id LIMIT 1`, [visitId]);
+  expect(planId).toBeGreaterThan(0);
+  const view = await open("assistant", patientId, "today");
+  try {
+    const wrongRead = view.page.waitForResponse(response => new URL(response.url()).pathname === `/api/visits/${visitId}/clinical`
+      && response.request().method() === "GET");
+    await view.page.goto(`${baseUrl}/patients/${otherPatientId}?tab=today&visitId=${visitId}`);
+    const originalVisit = await wrongRead;
+    expect(originalVisit.status()).toBe(200); // Both files are permitted; the requested pairing is not.
+    expect(await originalVisit.json()).toMatchObject({id:visitId,patientId});
+    const refused = view.page.getByTestId("clinical-context-state");
+    await expect.poll(() => refused.getAttribute("role")).toBe("alert");
+    expect(await view.page.getByTestId("clinical-context-visit").count()).toBe(0);
+    expect(await view.page.getByRole("region",{name:"مصادر عمل الزيارة"}).count()).toBe(0);
+
+    const forbiddenReads:string[]=[];
+    view.page.on("request", request => {
+      const path=new URL(request.url()).pathname;
+      if (request.method()==="GET" && (path===`/api/patients/${patientId}/clinical-context`
+        || path===`/api/visits/${visitId}/financial-context` || path===`/api/visits/${visitId}/clinical`)) forbiddenReads.push(path);
+    });
+    await view.page.goto(`${baseUrl}/patients/${patientId}?tab=today&visitId=${visitId}&planId=${planId}`);
+    await expect.poll(() => view.page.getByTestId("clinical-context-state").getAttribute("role")).toBe("alert");
+    expect(forbiddenReads).toEqual([]); // Refuse the mixed graph before borrowing any visit read.
+    expect(await view.page.getByTestId("clinical-context-visit").count()).toBe(0);
+    expect(await view.page.getByRole("region",{name:"مصادر عمل الزيارة"}).count()).toBe(0);
+  } finally { await close(view.context); }
+}
