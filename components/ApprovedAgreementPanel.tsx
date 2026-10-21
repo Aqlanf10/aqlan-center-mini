@@ -1,5 +1,5 @@
-import { AgreementAmendmentPanel } from "./AgreementAmendmentPanel";
 "use client";
+import { AgreementAmendmentPanel } from "./AgreementAmendmentPanel";
 import { useRef, useState } from "react";
 import { formatMoney, parseAmount, type Currency } from "@/lib/money";
 import type { approvedAgreementPosition } from "@/lib/approved-agreements";
