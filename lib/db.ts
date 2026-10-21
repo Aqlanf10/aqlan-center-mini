@@ -13108,10 +13108,24 @@ export async function commissionReport(
       patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string; issued_at: Date; issued_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
-      case_id: number | null; plan_id: number | null;
+      case_id: number | null; plan_id: number | null; allocation_origin_id: number | null;
     }>(
       `SELECT i.patient_id,
               i.id AS invoice_id,
+              /* Follow persisted same-patient/currency edges, not MIN(id) or a note.
+                 A currency reissue starts a new allocation identity; its policy time is separate. */
+              (WITH RECURSIVE lineage(id) AS (
+                SELECT i.id UNION
+                SELECT original.id FROM invoice_corrections c
+                  JOIN lineage l ON c.corrected_invoice_id=l.id
+                  JOIN invoices original ON original.id=c.original_invoice_id
+                 WHERE c.patient_id=i.patient_id AND original.patient_id=i.patient_id
+                   AND original.base_currency=i.base_currency AND c.currency=i.base_currency
+                   AND COALESCE(c.original_currency,c.currency)=i.base_currency
+              ) SELECT l.id FROM lineage l WHERE NOT EXISTS (
+                SELECT 1 FROM invoice_corrections c WHERE c.corrected_invoice_id=l.id
+                  AND c.original_invoice_id IN(SELECT id FROM lineage)
+              )) AS allocation_origin_id,
               GREATEST(0, i.total_minor - i.discount_minor) AS net_minor,
               i.base_currency,
               i.created_at AS issued_at, to_char(i.created_at, 'US') AS issued_at_us,
@@ -13177,12 +13191,16 @@ export async function commissionReport(
   const clinicDateOfInvoice = new Map<number, string>();
   const allocationTimeOfInvoice = new Map<number, string>();
   for (const row of invoiceRows) {
+    if (typeof row.allocation_origin_id !== "number" || !Number.isSafeInteger(row.allocation_origin_id) || row.allocation_origin_id <= 0) {
+      throw new Error("تعذّر إثبات أصل ترتيب عمولة الفاتورة من سجل التصحيح.");
+    }
     // Policy time may remain the original YER issue; allocation starts at the actual issue.
     allocationTimeOfInvoice.set(row.invoice_id, commissionTimestampIso(row.issued_at, row.issued_at_us));
     clinicDateOfInvoice.set(row.invoice_id, dateText(row.clinic_date));
     const patientInvoices = byPatient.get(row.patient_id) ?? new Map<number, CommissionInvoice>();
     const invoice = patientInvoices.get(row.invoice_id) ?? {
       id: row.invoice_id,
+      allocationOriginId: row.allocation_origin_id,
       netMinor: toMinor(row.net_minor),
       currency: requireCurrency(row.base_currency, "فاتورة", row.invoice_id),
       createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
@@ -13536,7 +13554,10 @@ export async function commissionReport(
     for (const currency of CURRENCIES) {
       const ordered = [...invoices.values()]
         .filter((invoice) => invoice.currency === currency)
-        .sort((a, b) => allocationTimeOfInvoice.get(a.id)!.localeCompare(allocationTimeOfInvoice.get(b.id)!));
+        // Retain the persisted source's position through same-currency corrections.
+        // Explicit allocatedInvoiceId reservations below still bypass FIFO order.
+        .sort((a, b) => allocationTimeOfInvoice.get(a.id)!.localeCompare(allocationTimeOfInvoice.get(b.id)!)
+          || (a.allocationOriginId ?? a.id) - (b.allocationOriginId ?? b.id) || a.id - b.id);
       for (const invoice of ordered) {
         const net = Math.max(0, invoice.netMinor);
         if (net > 0) capacitiesByCurrency.get(currency)!.push({ invoiceId: invoice.id, remaining: net });
