@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { Client } from "pg";
-import { authedGet, authedMutation, baseUrl, harness } from "./_server";
+import { authedGet, authedMutation, baseUrl, harness, loginStaff } from "./_server";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { UNVERIFIED_VISIT_INVOICE_LABEL } from "../../lib/visit-financial-presentation";
+import { VISIT_SOURCE_SUMMARY, type VisitFinancialContext } from "../../lib/visit-financial-context";
 import { formatAmount } from "../../lib/money";
 
 /** Three independent journeys on the existing built-app/isolated PG harness.
@@ -27,6 +32,7 @@ let h: Awaited<ReturnType<typeof harness>>;
 let browser: Browser;
 let db: Client;
 let doctorId = 0;
+let sourceAssistant: {cookie:string};
 const stamp = Date.now();
 const services: Record<Category, number> = { ortho: 0, rct: 0, crown: 0 };
 const prices: Record<Category, number> = { ortho: 30000000, rct: 6000000, crown: 9000000 };
@@ -45,6 +51,12 @@ beforeAll(async () => {
   }
   await db.query(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
     SELECT 'invoice-clinic-acceptance', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`);
+  const assistantName = `sourceassist${stamp}`;
+  const assistantCreated = await authedMutation("/api/users", h.sessions.admin, "POST", JSON.stringify({
+    username:assistantName, displayName:"مساعد قبول المصادر", password:"SourceAssist#Pass11", role:"assistant",
+  }));
+  expect(assistantCreated.status).toBeLessThan(300);
+  sourceAssistant = await loginStaff(assistantName, "SourceAssist#Pass11");
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => {
@@ -62,8 +74,8 @@ async function mutate<T>(who: Who, method: "POST" | "PUT" | "PATCH", path: strin
   expect(response.status, `${method} ${path}: ${text}`).toBe(status);
   return JSON.parse(text) as T;
 }
-async function read<T>(who: Who, path: string): Promise<T> {
-  const response = await authedGet(path, h.sessions[who]);
+async function read<T>(who: Who | "assistant", path: string): Promise<T> {
+  const response = await authedGet(path, who === "assistant" ? sourceAssistant : h.sessions[who]);
   const text = await response.text();
   expect(response.status, `GET ${path}: ${text}`).toBe(200);
   return JSON.parse(text) as T;
@@ -72,10 +84,10 @@ async function patient(label: string): Promise<number> {
   return (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name, primary_doctor_id)
     VALUES ($1, $2, $3) RETURNING id`, [`ICJ-${stamp}-${label}`, `مريض قبول اصطناعي ${label}`, doctorId]))[0].id;
 }
-async function open(who: Who, patientId: number, tab = "account") {
+async function open(who: Who | "assistant", patientId: number, tab = "account") {
   const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE" });
   contexts.add(context);
-  const [name, ...value] = h.sessions[who].cookie.split("=");
+  const [name, ...value] = (who === "assistant" ? sourceAssistant : h.sessions[who]).cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
@@ -402,6 +414,7 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
     await stageThroughUi(patientId, visitId, created.clinical.links[0].planItemId, "rct", 36);
     await recordEndo(patientId, endo.id, visitId, "assessment", true);
     const signed = await signOnce(patientId, visitId, 1, created.clinical.links[0].planItemId, first);
+    await sourceAcceptance(patientId, [{ id: visitId, summary: "mixed" }], "mixed");
     const next = await nextAfterSign(created.clinical.links[0].planItemId, 2, first.id, signed);
     const [{ id: recordId }] = await q<{ id: number }>(`SELECT id FROM endo_visits WHERE visit_id = $1`, [visitId]);
     const path = `/api/patients/${patientId}/endo/${endo.id}/visits`;
@@ -460,3 +473,330 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
       .toEqual([{ specialty: "endodontics", site: "46" }, { specialty: "prosthodontics", site: "46" }]);
   }, 360_000);
 });
+
+/** Supplemental acceptance: all reads below reach the built server. No response interception.
+ * Only patient/catalogue bootstrap uses SQL; source identities, decisions and signatures use APIs.
+ * These checks intentionally do not turn source coverage into receipts or monetary totals.
+ */
+async function sourceAcceptance(patientId: number, visits: {id: number; summary: VisitFinancialContext["summary"]}[], label: string) {
+  const before = await q(`SELECT
+    (SELECT count(*) FROM invoices WHERE patient_id=$1)::int AS invoices,
+    (SELECT count(*) FROM payments WHERE patient_id=$1)::int AS payments,
+    (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM legacy_treatment_agreements a WHERE patient_id=$1) AS agreements`, [patientId]);
+  for (const visit of visits) {
+    for (const who of ["doctorA", "assistant", "reception", "admin"] as const) {
+      const financial = who === "reception" || who === "admin";
+      expect(await read<Clinical>(who, `/api/visits/${visit.id}/clinical`)).toMatchObject({id:visit.id,patientId,status:"signed",invoiceId:null});
+      const data = await read<VisitFinancialContext>(who, `/api/visits/${visit.id}/financial-context`);
+      expect(data).toMatchObject({ visitId: visit.id, patientId, signed: true, summary: visit.summary, directReference: null, directReferenceState: "missing" });
+      expect(JSON.stringify(data)).not.toMatch(/"[^" ]*(?:Minor|total|paid|remaining)[^" ]*"/i);
+      if (!financial) expect(data.work.every(line => line.references.length === 0)).toBe(true);
+      if (financial && visit.summary === "mixed") {
+        expect(data.work).toContainEqual(expect.objectContaining({coverage:"verified",references:expect.arrayContaining([expect.objectContaining({kind:"invoice",state:"current"})])}));
+        expect(data.work).toContainEqual(expect.objectContaining({kind:"endodontic_record",coverage:"unresolved"}));
+      }
+      const view = await open(who, patientId);
+      const reads: {path:string;status:number}[] = [];
+      const observedPaths = new Set([`/api/visits/${visit.id}/clinical`, `/api/visits/${visit.id}/financial-context`, "/api/services", "/api/parties", "/api/auth/me"]);
+      view.page.on("response", response => {
+        const path = new URL(response.url()).pathname;
+        if (response.request().method() === "GET" && observedPaths.has(path) && reads.length < 20) reads.push({path,status:response.status()});
+      });
+      try {
+        await view.page.goto(`${baseUrl}/visits/${visit.id}`);
+        if (who === "assistant") {
+          // API admission does not grant the standalone page. Keep its existing denial.
+          expect(new URL(view.page.url()).pathname).toBe("/");
+          await view.page.goto(`${baseUrl}/patients/${patientId}?tab=today&visitId=${visit.id}`);
+        }
+        const panel = view.page.getByRole("region", {name: "مصادر عمل الزيارة"});
+        try {
+          await panel.waitFor(); // Preserve the existing 20-second timeout and visibility assertion.
+        } catch (error) {
+          const diagnostic = await view.page.evaluate(() => {
+            const visible = (node:Element) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden";
+            const text = (node:Element) => (node.textContent ?? "").replace(/\s+/g," ").trim().slice(0,180);
+            const bounded = (selector:string) => [...document.querySelectorAll(selector)].filter(visible).slice(0,8).map(text);
+            const regions = [...document.querySelectorAll('[aria-label="مصادر عمل الزيارة"]')];
+            const readMessages = [...document.querySelectorAll("p")].filter(visible).map(text)
+              .filter(value => /جارٍ تحميل الزيارة الحالية|تعذّر.*الزيارة|بيانات الزيارة|جارٍ التحقق من مصادر العمل|تعذّر التحقق من مصادر العمل/.test(value)).slice(0,6);
+            return {
+              // Omit query/hash values: never include credentials or arbitrary navigation parameters.
+              actualPageUrl:location.origin + location.pathname,
+              omittedQueryOrHash:Boolean(location.search || location.hash),
+              headings:bounded("h1,h2"), statusOrErrors:bounded('[role="status"],[role="alert"]'), readMessages,
+              clinicalWorkSectionMounted:Boolean(document.querySelector("#visit-procedures")),
+              clinicalReadStateVisible:readMessages.length > 0,
+              confirmedSignMarker:Boolean(document.querySelector('[data-testid="clinical-sign-confirmed"]')),
+              sourceRegion:regions.length === 0 ? "absent" : regions.some(visible) ? "visible" : "hidden",
+            };
+          }).catch(() => ({diagnosticUnavailable:true}));
+          const context = {role:who,requestedPatientId:patientId,requestedVisitId:visit.id,...diagnostic,reads,
+            sourceGetRefused:reads.some(read => read.path.endsWith("/financial-context") && [401,403,404].includes(read.status))};
+          if (error instanceof Error) { error.message += `\nBounded synthetic source diagnostic: ${JSON.stringify(context)}`; throw error; }
+          throw error;
+        }
+        if (who === "assistant") {
+          expect(await view.page.getByTestId("clinical-context-visit").getByText(`الزيارة المحددة #${visit.id}`, {exact:true}).count()).toBe(1);
+          expect(new URL(view.page.url()).searchParams.get("visitId")).toBe(String(visit.id));
+        }
+        expect(await panel.innerText()).toContain(VISIT_SOURCE_SUMMARY[visit.summary]);
+        const invoices = data.work.flatMap(line => line.references).filter(source => source.kind === "invoice" && source.state === "current");
+        const expectedLinks = [...new Set(invoices.map(source => `/print/invoice/${source.id}`))];
+        const actualLinks = await panel.locator("a").evaluateAll(nodes => nodes.map(node => node.getAttribute("href")));
+        expect([...new Set(actualLinks)].sort()).toEqual(financial ? expectedLinks.sort() : []);
+        if (!financial) expect(await panel.innerText()).not.toMatch(/(?:فاتورة|اتفاق سابق|اتفاق معتمد|جدول خطة) #/);
+        for (const source of data.work.flatMap(line => line.references).filter(source => source.kind === "historical_agreement")) {
+          expect(await panel.innerText()).toContain(`اتفاق سابق #${source.id}`);
+          expect(await panel.locator(`a[href*="${source.id}"]`).count()).toBe(0);
+        }
+      } finally { await close(view.context); }
+    }
+  }
+  if (label === "mixed") await assistantNavigationRefusals(patientId, visits[0].id);
+  const params = new URLSearchParams({report:"visits",preset:"today",patientId:String(patientId)});
+  const report = await read<{result:{rows:{patientId:number;workSource:string;invoiceText:string;collection:string}[]}}>("admin", `/api/reports?${params}`);
+  // Exact visit IDs were asserted above. The report has no visit ID field; compare the complete multiset.
+  expect(report.result.rows).toHaveLength(visits.length);
+  expect(report.result.rows.map(row => row.workSource).sort()).toEqual(visits.map(visit => VISIT_SOURCE_SUMMARY[visit.summary]).sort());
+  expect(report.result.rows.every(row => row.patientId === patientId && row.collection === "—" && row.invoiceText === UNVERIFIED_VISIT_INVOICE_LABEL)).toBe(true);
+  const printParams = new URLSearchParams(params);
+  printParams.set("columns", "patientNumber,workSource,invoiceText,collection");
+  const print = await open("admin", patientId);
+  try {
+    const response = await print.page.goto(`${baseUrl}/print/report?${printParams}`);
+    expect(response?.status()).toBe(200);
+    await print.page.getByText("مصادر العمل — تحقق حالي", {exact:true}).waitFor();
+    for (const summary of new Set(visits.map(visit => VISIT_SOURCE_SUMMARY[visit.summary]))) {
+      expect(await print.page.getByRole("cell", {name:summary,exact:true}).count()).toBe(visits.filter(visit => VISIT_SOURCE_SUMMARY[visit.summary] === summary).length);
+    }
+    await print.page.emulateMedia({media:"print"});
+    await print.page.evaluate(() => document.fonts.ready);
+    const directory = "artifacts/visit-source-acceptance";
+    await mkdir(directory, {recursive:true});
+    if (label === "same-day-decisions") {
+      // This screenshot is from the live report DOM in PRINT media, before Chromium creates the PDF.
+      const noChargeIndex = report.result.rows.findIndex(row => row.workSource === VISIT_SOURCE_SUMMARY.no_new_charge);
+      expect(noChargeIndex).toBeGreaterThanOrEqual(0);
+      const sourceCell = print.page.locator(".report-section table.report-table tbody > tr")
+        .nth(noChargeIndex).locator("td").nth(1);
+      expect(await sourceCell.innerText()).toBe(VISIT_SOURCE_SUMMARY.no_new_charge);
+      await sourceCell.screenshot({path:`${directory}/same-day-decisions-preprint-cell.png`});
+      await print.page.screenshot({path:`${directory}/same-day-decisions-preprint.png`,fullPage:true});
+      console.info("PDF source preprint DOM:",JSON.stringify({
+        text:await sourceCell.innerText(),
+        font:await sourceCell.evaluate(node=>getComputedStyle(node).fontFamily),
+        direction:await sourceCell.evaluate(node=>getComputedStyle(node).direction),
+      }));
+    }
+    const path = `${directory}/${label}.pdf`;
+    await writeFile(path, await print.page.pdf({preferCSSPageSize:true,printBackground:true}));
+    expect(execFileSync("pdfinfo", [path], {encoding:"utf8"})).toMatch(/Pages:\s+[1-9]/);
+    if(label==="same-day-decisions") {
+      // This is a fresh raster of the EXACT, unmodified PDF being asserted below,
+      // not a browser screenshot or an OCR re-render. The printed text expectation
+      // remains strictly unchanged. A reviewer must inspect this raster if
+      // Poppler's Arabic text extraction and the visible glyphs disagree.
+      execFileSync("pdftoppm",["-f","1","-l","1","-r","200","-png","-singlefile",
+        path,`${directory}/same-day-decisions-raster`],{maxBuffer:1024*1024});
+      const raw = execFileSync("pdftotext",["-raw",path,"-"],{encoding:"utf8"});
+      const proofFiles = [
+        "same-day-decisions.pdf", "same-day-decisions-preprint.png",
+        "same-day-decisions-preprint-cell.png", "same-day-decisions-raster.png",
+      ];
+      const fileHashes = Object.fromEntries(await Promise.all(proofFiles.map(async name => [
+        name, createHash("sha256").update(await readFile(`${directory}/${name}`)).digest("hex"),
+      ])));
+      const productCommit = execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim();
+      await writeFile(`${directory}/same-day-proof-manifest.json`,
+        JSON.stringify({productCommit,sourceText:VISIT_SOURCE_SUMMARY.no_new_charge,
+          generatedFrom:"single hosted Playwright print job",filesSha256:fileHashes},null,2)+"\n");
+      const exact=VISIT_SOURCE_SUMMARY.no_new_charge;
+      console.info("Bounded original PDF raw text inspection:",JSON.stringify({
+        exactPhraseInRaw:raw.includes(exact),
+        reversedPhraseInRaw:raw.includes("قرار بال رسوم مثبت للعمل المسجل"),
+        rasterOfOriginalPdf:"same-day-decisions-raster.png",
+      }));
+    }
+    const rawPdfText = execFileSync("pdftotext",["-raw",path,"-"],{encoding:"utf8"});
+    const text = execFileSync("pdftotext",["-layout",path,"-"],{encoding:"utf8"})
+      .replace(/[\u202a-\u202e]/g,"").replace(/\s+/g," ");
+    if (label === "same-day-decisions") {
+      // Regression for literal PDF copy/paste Unicode, not just visual glyphs.
+      expect(rawPdfText).toContain("بلا");
+      // Deterministic Unicode/copy-order witness: no OCR, no correction or replaced expectations.
+      const word = VISIT_SOURCE_SUMMARY.no_new_charge;
+      console.info("PDF Unicode/copy audit:",JSON.stringify({
+        dom:word,
+        layoutContainsExpected:text.includes(word),
+        layoutContainsMalformed:text.includes("قرار بال رسوم مثبت للعمل المسجل"),
+        rawContainsExpected:rawPdfText.includes(word),
+        rawContainsMalformed:rawPdfText.includes("بال"),
+        visibleRaster:"same-day-decisions-raster.png",
+        preprintScreenshot:"same-day-decisions-preprint.png",
+        preprintSourceCell:"same-day-decisions-preprint-cell.png",
+        embeddedFonts:execFileSync("pdffonts",[path],{encoding:"utf8"}).split("\n").slice(0,8),
+      }));
+      // Hosted, synthetic font comparison: one page, identical words and browser renderer.
+      // The output identifies a font with correct extractable logical text before any product font change.
+      const probe=await print.context.newPage();
+      try {
+        const choices=["DejaVu Sans","Noto Sans Arabic","Noto Naskh Arabic","Arial","Tahoma","serif","sans-serif","Amiri"];
+        const rows=choices.map((font,index)=>
+          '<div class="probe" style="font-family:&#39;'+font+'&#39;">'+
+          '<span class="id">FONT'+index+'</span><span lang="ar" dir="rtl">'+word+'</span></div>').join("");
+        await probe.setContent('<!doctype html><html lang="ar"><meta charset="utf-8"><style>'+
+          '@page{size:A4;margin:12mm}body{font-size:18px}.probe{display:flex;justify-content:space-between;'+
+          'width:95%;height:48px;white-space:nowrap}.id{font:12px monospace;direction:ltr}'+
+          '</style><body>'+rows+'</body></html>');
+        await probe.evaluate(()=>document.fonts.ready);
+        const probePdf=directory+"/same-day-font-probe.pdf";
+        await writeFile(probePdf,await probe.pdf({preferCSSPageSize:true,printBackground:true}));
+        execFileSync("pdftoppm",["-f","1","-l","1","-r","150","-png","-singlefile",
+          probePdf,directory+"/same-day-font-probe"],{maxBuffer:1024*1024});
+        const extracted=execFileSync("pdftotext",["-layout",probePdf,"-"],{encoding:"utf8"});
+        console.info("PDF font shaping diagnostic:",JSON.stringify({
+          fonts:choices,
+          extractedLines:extracted.split(/\r?\n/).filter(line=>line.includes("FONT")).slice(0,choices.length),
+          embeddedFonts:execFileSync("pdffonts",[probePdf],{encoding:"utf8"}).split("\n").slice(0,14),
+        }));
+
+        // All candidates preserve the literal DOM string. Probe shaping instead of tampering
+        // with the report's mandatory extracted-text assertion.
+        const variants=[
+          ["normal",""],
+          ["liga-disabled","font-variant-ligatures:none;font-feature-settings:'liga' 0,'rlig' 0"],
+          ["rlig-disabled","font-feature-settings:'rlig' 0"],
+          ["no-kerning","font-kerning:none;text-rendering:optimizeSpeed"],
+          ["plaintext","unicode-bidi:plaintext;direction:rtl"],
+          ["isolate","unicode-bidi:isolate;direction:rtl"],
+          ["letter-spacing","letter-spacing:0.15px"],
+        ] as const;
+        const html=variants.map(([name,style],index)=>
+          '<p class="variant" style="'+style+'"><span>CASE'+index+'</span><b dir="rtl">'+word+'</b></p>').join("");
+        await probe.setContent('<!doctype html><html lang="ar"><meta charset="utf-8"><style>'+
+          '@page{size:A4;margin:12mm}.variant{font-family:"DejaVu Sans";font-size:18px;display:flex;'+
+          'justify-content:space-between;white-space:nowrap;margin:18px 0}.variant span{font:12px monospace}'+
+          '</style><body>'+html+'</body></html>');
+        await probe.evaluate(()=>document.fonts.ready);
+        const variantsPdf=directory+"/same-day-shaping-probe.pdf";
+        await writeFile(variantsPdf,await probe.pdf({preferCSSPageSize:true,printBackground:true}));
+        const variantsText=execFileSync("pdftotext",["-layout",variantsPdf,"-"],{encoding:"utf8"});
+        execFileSync("pdftoppm",["-f","1","-l","1","-r","150","-png","-singlefile",
+          variantsPdf,directory+"/same-day-shaping-probe"],{maxBuffer:1024*1024});
+        console.info("PDF Arabic shaping variants:",JSON.stringify({
+          variants:variants.map(v=>v[0]),
+          extractedLines:variantsText.split(/\r?\n/).filter(line=>line.includes("CASE")).slice(0,variants.length),
+        }));
+      } finally {await probe.close();}
+    }
+    expect(text).toContain("مصادر العمل");
+    for (const summary of new Set(visits.map(visit=>VISIT_SOURCE_SUMMARY[visit.summary]))) {
+      // Never rewrite the contract to accept malformed Arabic copy/paste.
+      expect(text).toContain(summary.replace(/\s+/g," "));
+    }
+  } finally { await close(print.context); }
+  expect(await q(`SELECT
+    (SELECT count(*) FROM invoices WHERE patient_id=$1)::int AS invoices,
+    (SELECT count(*) FROM payments WHERE patient_id=$1)::int AS payments,
+    (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM legacy_treatment_agreements a WHERE patient_id=$1) AS agreements`, [patientId])).toEqual(before);
+}
+
+async function walkIn(patientId: number) {
+  const visit = await mutate<{id:number}>("reception", "POST", "/api/visits", {patientId,patientName:"قبول مصادر اصطناعي",doctorId}, 201);
+  await mutate("reception", "PATCH", `/api/visits/${visit.id}`, {action:"clear"});
+  const [{chair}] = await q<{chair:number}>(`SELECT n AS chair FROM generate_series(1,20) n WHERE NOT EXISTS
+    (SELECT 1 FROM visits WHERE chair=n AND status IN ('called','in_chair')) ORDER BY n LIMIT 1`);
+  await mutate("reception", "PATCH", `/api/visits/${visit.id}`, {action:"call",chair});
+  await mutate("reception", "PATCH", `/api/visits/${visit.id}`, {action:"seat",chair});
+  return visit.id;
+}
+
+describe("Supplemental visit source acceptance through canonical writers", () => {
+  it("distinguishes a signed unresolved adjustment from an explicit no-charge decision in same-day visits, reader and printed report", async () => {
+    const patientId = await patient("source-decisions");
+    const ortho = await mutate<{id:number}>("doctorA", "POST", "/api/ortho", {patientId,appliance:"fixed_metal",arches:"both",slot:"022",plannedMonths:18}, 201);
+    const visits: {id:number;summary:VisitFinancialContext["summary"]}[] = [];
+    for (const noCharge of [false,true]) {
+      const id = await walkIn(patientId);
+      const signed = await mutate<Clinical>("doctorA", "POST", `/api/visits/${id}/clinical`, {
+        action:"sign", orthoSession:{caseId:ortho.id,upperWire:"016 NiTi",lowerWire:null,elastics:"none",elasticNote:null,done:"متابعة قبول اصطناعية",nextWeeks:4},
+        outsideContractDecision:noCharge ? {decision:"no_charge",reason:"قرار متابعة اصطناعي صريح"} : null,
+      });
+      expect(signed).toMatchObject({id,invoiceId:null,status:"signed"});
+      visits.push({id,summary:noCharge ? "no_new_charge" : "unresolved"});
+    }
+    expect(visits[0].id).not.toBe(visits[1].id);
+    expect(await q(`SELECT count(DISTINCT (arrived_at AT TIME ZONE 'Asia/Aden')::date)::int AS days FROM visits WHERE id=ANY($1::int[])`,[visits.map(v=>v.id)])).toEqual([{days:1}]);
+    await sourceAcceptance(patientId,visits,"same-day-decisions");
+    const first = await read<VisitFinancialContext>("admin",`/api/visits/${visits[0].id}/financial-context`);
+    const second = await read<VisitFinancialContext>("admin",`/api/visits/${visits[1].id}/financial-context`);
+    expect(first.work.map(w=>w.decision)).toEqual(["none"]);
+    expect(second.work.map(w=>w.decision)).toEqual(["no_charge"]);
+    expect(first.work.some(a=>second.work.some(b=>a.key===b.key))).toBe(false);
+    expect(await q("SELECT id FROM invoices WHERE patient_id=$1",[patientId])).toEqual([]);
+  },240_000);
+
+  it("renders one valid historical agreement across two same-day signed visits without creating invoices or receipts", async () => {
+    const patientId = await patient("source-history");
+    const created = await mutate<{document:{id:number;lines:{planItemId:number;agreementId:number}[]}}>("admin","POST",`/api/patients/${patientId}/historical-documents`,{
+      patientId,currency:"YER",items:[{serviceId:services.rct,doctorId,quantity:1,sessions:3,price:String(prices.rct),catalogPriceMinor:prices.rct,toothCode:16}],
+      discount:"0",previouslyPaidAmount:String(prices.rct),historicalAsOf:"2026-10-01",idempotencyKey:`source-acceptance-${stamp}`,
+      repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:0,repaymentVersion:0,repaymentSourceHash:null,
+    },201);
+    const item = created.document.lines[0];
+    const principal = await q("SELECT id,agreed_minor,previously_paid_minor,remaining_minor FROM legacy_treatment_agreements WHERE patient_id=$1",[patientId]);
+    const [{plan_id:planId}] = await q<{plan_id:number}>("SELECT plan_id FROM plan_items WHERE id=$1",[item.planItemId]);
+    await consent(planId);
+    const visits: {id:number;summary:VisitFinancialContext["summary"]}[] = [];
+    for (let index=0;index<2;index++) {
+      const id = await walkIn(patientId);
+      await stageThroughUi(patientId,id,item.planItemId,"rct",16);
+      const signed = await mutate<Clinical>("doctorA","POST",`/api/visits/${id}/clinical`,{action:"sign"});
+      expect(signed).toMatchObject({id,invoiceId:null,status:"signed"});
+      const evidence = await read<VisitFinancialContext>("admin",`/api/visits/${id}/financial-context`);
+      expect(evidence.work).toHaveLength(1);
+      expect(evidence.work[0].references).toEqual([{kind:"historical_agreement",id:item.agreementId,state:"current",path:"plan_item"}]);
+      visits.push({id,summary:"verified"});
+    }
+    await sourceAcceptance(patientId,visits,"historical-agreement");
+    expect(await q("SELECT id FROM invoices WHERE patient_id=$1",[patientId])).toEqual([]);
+    expect(await q("SELECT id FROM payments WHERE patient_id=$1",[patientId])).toEqual([]);
+    expect(await q("SELECT id FROM legacy_treatment_agreements WHERE patient_id=$1",[patientId])).toEqual([{id:item.agreementId}]);
+    expect(await q("SELECT id,agreed_minor,previously_paid_minor,remaining_minor FROM legacy_treatment_agreements WHERE patient_id=$1",[patientId])).toEqual(principal);
+  },240_000);
+});
+
+/** Real, already-permitted patient pages. Never substitute API responses or grant access. */
+async function assistantNavigationRefusals(patientId: number, visitId: number) {
+  const otherPatientId = await patient("source-navigation-other");
+  await walkIn(otherPatientId); // Canonical arrival makes this synthetic patient's file readable today.
+  const [{planId}] = await q<{planId:number}>(`SELECT i.plan_id AS "planId" FROM visit_procedures p
+    JOIN plan_items i ON i.id=p.plan_item_id WHERE p.visit_id=$1 ORDER BY p.id LIMIT 1`, [visitId]);
+  expect(planId).toBeGreaterThan(0);
+  const view = await open("assistant", patientId, "today");
+  try {
+    const wrongRead = view.page.waitForResponse(response => new URL(response.url()).pathname === `/api/visits/${visitId}/clinical`
+      && response.request().method() === "GET");
+    await view.page.goto(`${baseUrl}/patients/${otherPatientId}?tab=today&visitId=${visitId}`);
+    const originalVisit = await wrongRead;
+    expect(originalVisit.status()).toBe(200); // Both files are permitted; the requested pairing is not.
+    expect(await originalVisit.json()).toMatchObject({id:visitId,patientId});
+    const refused = view.page.getByTestId("clinical-context-state");
+    await expect.poll(() => refused.getAttribute("role")).toBe("alert");
+    expect(await view.page.getByTestId("clinical-context-visit").count()).toBe(0);
+    expect(await view.page.getByRole("region",{name:"مصادر عمل الزيارة"}).count()).toBe(0);
+
+    const forbiddenReads:string[]=[];
+    view.page.on("request", request => {
+      const path=new URL(request.url()).pathname;
+      if (request.method()==="GET" && (path===`/api/patients/${patientId}/clinical-context`
+        || path===`/api/visits/${visitId}/financial-context` || path===`/api/visits/${visitId}/clinical`)) forbiddenReads.push(path);
+    });
+    await view.page.goto(`${baseUrl}/patients/${patientId}?tab=today&visitId=${visitId}&planId=${planId}`);
+    await expect.poll(() => view.page.getByTestId("clinical-context-state").getAttribute("role")).toBe("alert");
+    expect(forbiddenReads).toEqual([]); // Refuse the mixed graph before borrowing any visit read.
+    expect(await view.page.getByTestId("clinical-context-visit").count()).toBe(0);
+    expect(await view.page.getByRole("region",{name:"مصادر عمل الزيارة"}).count()).toBe(0);
+  } finally { await close(view.context); }
+}
