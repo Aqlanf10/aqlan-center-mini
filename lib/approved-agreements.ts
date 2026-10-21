@@ -1,4 +1,6 @@
 import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
+import {clinicDateString} from "./schedule";
+import {CLINIC_TIME_ZONE} from "./db";
 import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt, type DbClient } from "./db";
 import { canHandleMoney } from "./roles";
 import { revalidateSessionInTransaction } from "./session";
@@ -187,10 +189,23 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
     await assertCollectionSession(client,input.session);
     const replay=async()=>{const p=(await client.query<{id:number;idempotency_request_hash:string}>("SELECT id,idempotency_request_hash FROM payments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
       if(p&&p.idempotency_request_hash!==hash)throw new DebtRepaymentError("conflict","مفتاح التحصيل مستعمل بطلب مختلف.");return p;};
+    const groupReplay=async()=>{
+      const row=(await client.query<{request_hash:string;actor_id:number;plan_id:number;patient_id:number;payment_ids:number[];result_snapshot:Record<string,unknown>}>(
+        "SELECT request_hash,actor_id,plan_id,patient_id,payment_ids,result_snapshot FROM agreement_delta_collection_receipts WHERE idempotency_key=$1",
+        [input.idempotencyKey])).rows[0];
+      if(!row)return null;
+      if(row.request_hash!==hash||row.actor_id!==input.session.userId||row.plan_id!==input.planId
+        ||!Array.isArray(row.payment_ids)||!row.payment_ids.length
+        ||!row.payment_ids.every(positive))
+        throw new DebtRepaymentError("conflict","مفتاح تحصيل الفرق لا يطابق المحاولة السابقة.");
+      return {paymentId:row.payment_ids[0],paymentIds:row.payment_ids,replayed:true};
+    };
+    const grouped=await groupReplay();if(grouped)return grouped;
     const prior=await replay();if(prior)return {paymentId:prior.id,replayed:true};
     const a=await readApprovedAgreement(client,input.planId);if(!a)throw new DebtRepaymentError("missing","لم يُعتمد أصل مالي لهذه الخطة.");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE",[a.patient_id]);
     await lockDebtAccountForSchedule(client,a.patient_id);
+    const groupedAfterLock=await groupReplay();if(groupedAfterLock)return groupedAfterLock;
     const waited=await replay();if(waited)return {paymentId:waited.id,replayed:true};
     const position=await readDebtPosition(client,target(a),true);
     if(!position.available||!approvedSourceMatches(position.sourceSnapshot,a.source_snapshot))throw new DebtRepaymentError("stale","تغير مصدر الأصل؛ يلزم مراجعة مالية قبل التحصيل.");
@@ -201,6 +216,62 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
     const settlement=settlePaymentMinor({amountMinor:input.amountMinor,currency:input.currency,baseAmountMinor:base},a.currency);
     const account=await debtAccountDue(client,a.patient_id,a.currency);
     if(!positive(settlement)||settlement>position.remainingMinor||settlement>account.due)fail("المبلغ يتجاوز متبقي المصدر أو الحساب.");
+    const amendments=(await client.query<{delta_invoice_id:number;delta_minor:string}>(
+      "SELECT delta_invoice_id,delta_minor::text FROM agreement_delta_amendments WHERE plan_id=$1 ORDER BY id",[input.planId])).rows;
+    if(amendments.length){
+      // This first supported amendment flow accepts native agreement currency
+      // only: one external FX receipt cannot be safely split and replayed.
+      if(input.currency!==a.currency || a.invoice_id===null)
+        fail("حصّل اتفاق الترقية بعملة الاتفاق وبمصدر فاتورة مثبت.");
+      const current=await approvedAgreementPosition(input.planId,clinicDateString(new Date(),CLINIC_TIME_ZONE),client);
+      if(!current?.available)throw new DebtRepaymentError("stale","مصادر الترقية تغيرت؛ يلزم تحديث الاتفاق.");
+      if(settlement>current.remainingMinor)fail("المبلغ يتجاوز متبقي الاتفاق المعدّل.");
+      const segments=[{invoiceId:a.invoice_id,remainingMinor:position.remainingMinor}];
+      for(const amendment of amendments){
+        const delta=await readInvoiceSettlementPosition(client,{
+          patientId:a.patient_id,invoiceId:amendment.delta_invoice_id,currency:a.currency});
+        if(!delta.available||delta.principalMinor!==Number(amendment.delta_minor))
+          throw new DebtRepaymentError("stale","فرق التعديل لا يطابق مصدره.");
+        segments.push({invoiceId:amendment.delta_invoice_id,remainingMinor:delta.remainingMinor});
+      }
+      if(segments.reduce((n,x)=>n+x.remainingMinor,0)!==current.remainingMinor)
+        throw new DebtRepaymentError("conflict","التزام الخطة ومصادر الفواتير غير متطابقة.");
+      const created:{invoiceId:number;paymentId:number;amountMinor:number}[]=[];
+      let unallocated=settlement;
+      for(const segment of segments){
+        const portion=Math.min(unallocated,segment.remainingMinor);
+        if(!portion)continue;
+        // Child receipts have disjoint durable keys and each uses the same
+        // canonical receipt/cashbox writer. The outer transaction owns all.
+        const childKey=`agreement-delta:${hash.slice(0,38)}:${segment.invoiceId}`;
+        const child=await writeDebtCollectionReceipt(client,{
+          patientId:a.patient_id,invoiceId:segment.invoiceId,openingCurrency:null,
+          amountMinor:portion,currency:input.currency,exchangeRate:rate,
+          method:input.method,note:input.note,createdBy:input.session.username,
+          idempotencyKey:childKey,requestHash:debtRequestHash({
+            hash,invoiceId:segment.invoiceId,portion})});
+        if(child.kind==="reason")throw new DebtRepaymentError("stale",`تعذر توزيع التحصيل: ${child.reason}`);
+        created.push({invoiceId:segment.invoiceId,paymentId:child.paymentId,amountMinor:portion});
+        unallocated-=portion;
+      }
+      if(unallocated!==0||created.length===0)
+        throw new DebtRepaymentError("conflict","تعذر توزيع التحصيل كاملًا دون تجاوز المصدر.");
+      const paymentIds=created.map(row=>row.paymentId);
+      const snapshot={planId:input.planId,patientId:a.patient_id,currency:a.currency,
+        amountMinor:settlement,allocations:created,paymentIds};
+      await client.query(`INSERT INTO agreement_delta_collection_receipts
+         (idempotency_key,request_hash,actor_id,plan_id,patient_id,payment_ids,result_snapshot)
+         VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,[
+        input.idempotencyKey,hash,input.session.userId,input.planId,a.patient_id,paymentIds,JSON.stringify(snapshot)]);
+      for(const row of created){
+        await insertAuditRow(client,{action:"plan.approved_collection",entity:"payment",entityId:row.paymentId,
+          actor:input.session.username,actorRole:input.session.role,
+          details:{planId:input.planId,invoiceId:row.invoiceId,settlementMinor:row.amountMinor,
+            logicalCollectionKey:input.idempotencyKey,deltaCollection:true}});
+      }
+      await assertCollectionSession(client,input.session);
+      return {paymentId:paymentIds[0],paymentIds,replayed:false};
+    }
     const result=await writeDebtCollectionReceipt(client,{patientId:a.patient_id,invoiceId:a.invoice_id,openingCurrency:a.opening_currency,
       amountMinor:input.amountMinor,currency:input.currency,exchangeRate:rate,method:input.method,note:input.note,createdBy:input.session.username,idempotencyKey:input.idempotencyKey,requestHash:hash});
     if(result.kind==="reason")throw new DebtRepaymentError("stale",`تعذر التحصيل: ${result.reason}`);
