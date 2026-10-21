@@ -3,9 +3,12 @@ import { createReadStream } from "node:fs";
 import { mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { backupSnapshotSqlLines, backupSqlLines, getPool, type Queryable } from "./db";
+import { backupSnapshotSqlLines, backupSnapshotEvents, backupSqlLines, getPool, type Queryable } from "./db";
 import { readFileByKey } from "./files";
 import { tarEnd, tarHeader, tarPadding } from "./tar";
+import { renderBackupSnapshotEvent, validateBackupDeferredReferences, type BackupSnapshotEvent } from './backup-events';
+import { beginSyntheticCapture, finishSyntheticCapture, sealSyntheticCapture, failSyntheticCapture,
+  SYNTHETIC_U0_PROFILE, SYNTHETIC_U0_ENTRY, SYNTHETIC_LIMITS, recoverySha256, type SyntheticCaptureController, type SyntheticDeferredLink } from './restore/u0-synthetic-capture';
 
 /**
  * النسخة الكاملة بملفٍّ واحد — قاعدة البيانات **وأشعّة المرضى معًا**.
@@ -66,6 +69,8 @@ export interface ManifestPhysicalFile {
  *    (إضافية فقط: قارئ الاستعادة يتجاهل ما لا يعرفه، والصيغة والإصدار كما هما).
  */
 export interface FullBackupOptions {
+  /** Internal disposable-fixture capability only. Never created by operational routes/CLI. */
+  syntheticRecovery?: SyntheticCaptureController;
   source?: Queryable;
   appCommitSha?: string | null;
   pgVersion?: string | null;
@@ -112,6 +117,7 @@ function samePhysicalMetadata(first: BackupDocument, second: BackupDocument): bo
 }
 
 interface BackupSnapshot {
+  syntheticRecovery?: Buffer;
   sqlPath: string;
   sqlSha256: string;
   sqlSize: number;
@@ -152,17 +158,34 @@ async function readDocumentMetadata(source: Queryable): Promise<BackupDocument[]
  * تُغلق COMMIT قبل أي قراءة فيزيائية للملفات. أي فشل: ROLLBACK ثم استثناء —
  * ولا يُترك اتصالٌ داخل معاملة.
  */
-async function captureSnapshotFromSource(source: Queryable, stage: string): Promise<BackupSnapshot> {
+async function captureSnapshotFromSource(source: Queryable, stage: string, controller?: SyntheticCaptureController): Promise<BackupSnapshot> {
+  if (controller) beginSyntheticCapture(controller, source);
   await source.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   let completed = false;
   try {
     const sqlPath = join(stage, "database.sql");
     const sqlFile = await open(sqlPath, "wx", 0o600);
     const hash = createHash("sha256");
+    let byteOffset = 0, statementOrdinal = 0;
+    const links: SyntheticDeferredLink[] = [];
+    const events: BackupSnapshotEvent[] = [];
     try {
-      for await (const line of backupSnapshotSqlLines(source)) {
-        hash.update(line);
-        await sqlFile.writeFile(line);
+      if (controller) {
+        for await (const event of backupSnapshotEvents(source)) {
+          const line = renderBackupSnapshotEvent(event);
+          if (events.length >= SYNTHETIC_LIMITS.events || byteOffset + Buffer.byteLength(line) > SYNTHETIC_LIMITS.sqlBytes) throw new Error('Synthetic SQL size/count limit');
+          if (event.kind === 'deferred-reference') links.push({ ...event, ordinal: statementOrdinal,
+            startByte: byteOffset, endByte: byteOffset + Buffer.byteLength(line, 'utf8') - 1 });
+          if (event.kind !== 'comment' && event.kind !== 'separator') statementOrdinal += 1;
+          events.push(event);
+          hash.update(line); await sqlFile.writeFile(line);
+          byteOffset += Buffer.byteLength(line, 'utf8');
+        }
+        validateBackupDeferredReferences(events);
+      } else {
+        for await (const line of backupSnapshotSqlLines(source)) {
+          hash.update(line); await sqlFile.writeFile(line);
+        }
       }
     } finally {
       await sqlFile.close();
@@ -170,15 +193,19 @@ async function captureSnapshotFromSource(source: Queryable, stage: string): Prom
 
     // metadata داخل المعاملة نفسها — اللقطة واحدة لا اثنتين.
     const documents = uniqueDocumentsByStorageKey(await readDocumentMetadata(source));
+    const sqlSha256 = hash.digest("hex");
+    const sqlSize = (await stat(sqlPath)).size;
+    const syntheticRecovery = controller ? await finishSyntheticCapture(controller, { sha256: sqlSha256, bytes: sqlSize }, links) : undefined;
 
     await source.query("COMMIT");
     completed = true;
 
     return {
       sqlPath,
-      sqlSha256: hash.digest("hex"),
-      sqlSize: (await stat(sqlPath)).size,
+      sqlSha256,
+      sqlSize,
       documents,
+      ...(syntheticRecovery ? { syntheticRecovery } : {}),
     };
   } finally {
     if (!completed) await source.query("ROLLBACK").catch(() => {});
@@ -238,12 +265,20 @@ async function* renderArchiveBlocks(
     yield tarPadding(bytes.length);
   }
 
+  if (snapshot.syntheticRecovery) {
+    yield tarHeader(SYNTHETIC_U0_ENTRY, snapshot.syntheticRecovery.length, now);
+    yield snapshot.syntheticRecovery;
+    yield tarPadding(snapshot.syntheticRecovery.length);
+  }
+
   // يُكتب أخيرًا: التنزيل المقطوع لا يستطيع التنكر كنسخة كاملة.
   // أجسام فيزيقية فريدة حصرًا: المفتاح والبصمة والحجم — بلا عناوين ولا
   // معرّفات مرضى (database.sql يحمل الصفوف كلها، والاستعادة تحتاج وصفَ
   // الملف لا وصفَ صف). حقول الإثراء إضافية كما كانت.
   const manifest = Buffer.from(JSON.stringify({
-    format: "aqlan-full-backup", version: 1, createdAt: now.toISOString(),
+    format: "aqlan-full-backup", version: snapshot.syntheticRecovery ? 2 : 1, createdAt: now.toISOString(),
+    ...(snapshot.syntheticRecovery ? { recoveryProfile: SYNTHETIC_U0_PROFILE,
+      recoverySha256: recoverySha256(snapshot.syntheticRecovery), recoveryBytes: snapshot.syntheticRecovery.length } : {}),
     databaseSha256: snapshot.sqlSha256,
     databaseBytes: snapshot.sqlSize,
     documentCount: snapshot.documents.length,
@@ -288,10 +323,24 @@ export async function* fullBackupBlocks(
     throw new Error("Unsafe backup temporary path");
   }
   try {
+    if (options.syntheticRecovery && !source) throw new Error('Synthetic capture requires explicit source');
     const snapshot = source
-      ? await captureSnapshotFromSource(source, stage)
+      ? await captureSnapshotFromSource(source, stage, options.syntheticRecovery)
       : await captureSnapshotDefault(stage);
-    yield* renderArchiveBlocks(snapshot, options);
+    if (options.syntheticRecovery) {
+      const tarHash = createHash('sha256'); let tarBytes = 0;
+      for await (const block of renderArchiveBlocks(snapshot, options)) {
+        tarBytes += block.length;
+        if (tarBytes > SYNTHETIC_LIMITS.tarBytes) throw new Error('Synthetic archive size limit');
+        tarHash.update(block); yield block;
+      }
+      sealSyntheticCapture(options.syntheticRecovery, tarHash.digest('hex'));
+    } else {
+      yield* renderArchiveBlocks(snapshot, options);
+    }
+  } catch (error) {
+    if (options.syntheticRecovery) failSyntheticCapture(options.syntheticRecovery);
+    throw error;
   } finally {
     await rm(stage, { recursive: true, force: true });
   }

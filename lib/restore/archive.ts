@@ -20,6 +20,8 @@ export interface TarEntry {
 }
 
 export interface ParsedArchive {
+  /** Exact parser input, retained only for same-byte synthetic trust verification. */
+  capturedBytes?: Uint8Array;
   entries: Map<string, TarEntry>;
   order: string[];
   truncated: boolean;
@@ -86,7 +88,7 @@ export function parseTarBytes(bytes: Buffer | Uint8Array): ParsedArchive {
   // لو بدت المداخل الأخيرة سليمة: كاتبنا يكتب العلامة دائمًا، فغيابها دليل قصّ.
   if (!sawEndMarker) truncated = true;
 
-  return { entries, order, truncated };
+  return { entries, order, truncated, capturedBytes: bytes };
 }
 
 /**
