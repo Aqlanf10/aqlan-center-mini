@@ -54,7 +54,9 @@ describe("explicit recovery payment route", () => {
   });
   it("normalizes the explicit request and returns the canonical receipt without current FX or a duplicate audit", async () => {
     expect((await postPayment(request())).status).toBe(201);
-    expect(mock.recovery).toHaveBeenCalledWith({ purpose: intent.purpose, patientId: 7, invoiceId: 17, amountMinor: 2050, currency: "SAR", method: "cash", note: "existing invoice", createdBy: "cashier-a", actorRole: "reception", idempotencyKey: "recover-route-001" });
+    expect(mock.recovery).toHaveBeenCalledWith({ purpose: intent.purpose, patientId: 7, invoiceId: 17, amountMinor: 2050, currency: "SAR", method: "cash", note: "existing invoice", createdBy: "cashier-a", actorRole: "reception", idempotencyKey: "recover-route-001" },
+      // The HTTP route always applies the advisory similar-receipt review (absent header = saw none).
+      { similarityReview: { observedReceiptIds: [] } });
     expect(mock.settings).not.toHaveBeenCalled(); expect(mock.ordinary).not.toHaveBeenCalled(); expect(mock.installment).not.toHaveBeenCalled(); expect(mock.audit).not.toHaveBeenCalled();
   });
   it("replays with 200 even when current FX is unavailable, without another audit", async () => {

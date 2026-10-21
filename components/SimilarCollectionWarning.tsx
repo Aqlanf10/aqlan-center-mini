@@ -1,5 +1,6 @@
 "use client";
 import {formatMoney} from "@/lib/money";
+import {CLINIC_ZONE_FALLBACK} from "@/lib/clinicZone";
 import {SIMILAR_COLLECTION_WINDOW_HOURS,type SimilarCollectionReceipt} from "@/lib/similar-collection";
 
 /**
@@ -19,7 +20,7 @@ export function SimilarCollectionWarning({receipts,busy,onConfirm,onCancel}:{
       :`سُجّل لهذا المريض تحصيل بالمبلغ والعملة نفسيهما خلال آخر ${SIMILAR_COLLECTION_WINDOW_HOURS} ساعة. لم يُسجَّل شيء بعد. تأكد أن المبلغ لم يُحصَّل سابقًا.`}</p>
     {receipts.slice(0,6).map(r=><div key={r.id} className="rounded-lg border border-amber-200 bg-white p-2">
       <p className="font-extrabold">السند {r.receiptNumber} · {formatMoney(r.amountMinor,r.currency)}</p>
-      <p>الوقت: {new Date(r.createdAt).toLocaleString("ar-YE",{timeZone:"Asia/Aden"})}</p>
+      <p>الوقت: {new Date(r.createdAt).toLocaleString("ar-YE",{timeZone:CLINIC_ZONE_FALLBACK})}</p>
       <p>الطريقة: {r.method==="transfer"?"تحويل":"نقدًا"}{r.invoiceId?` · الفاتورة #${r.invoiceId}`:r.planId?` · الخطة #${r.planId}`:""} · الموظف: {r.createdBy}</p>
       <a href={`/print/receipt/${r.id}`} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-800 underline">مراجعة السند</a>
     </div>)}
