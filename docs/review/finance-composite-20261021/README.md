@@ -44,7 +44,7 @@ No migrations, workflow settings, permissions or production configuration change
 
 ## Validation identity and scope
 
-Final executable/test source freeze: `85ebfc60eb56f7f189ae0463460571148e4bc0a9`,
+Historical pre-mobile executable/test source freeze: `85ebfc60eb56f7f189ae0463460571148e4bc0a9`,
 tree `3f34dbe1d9c59cdb5e8cec571573f46afcee1237`. The subsequent manifest/evidence
 commit changes only this documentation directory. Hosted CI must validate the
 published final head; older passing heads or cancelled runs are not substitutes.
@@ -65,7 +65,7 @@ A temporary local runner retained the project's target/classification/version
 preflight and only added the three reviewed HTTP filenames to the lifecycle test
 selection; it was removed, not committed. No browser was launched locally.
 
-Final source checks passed: 10,745 unit tests across 613 files (287.82s),
+Historical pre-mobile source checks passed: 10,745 unit tests across 613 files (287.82s),
 17 combined HTTP tests across four files (11.81s), 21 focused PostgreSQL tests
 across three files (8.98s), full TypeScript and fixture ESLint (exit 0).
 Before the fixture increment: 86 guard tests, 55 PostgreSQL tests, fresh build,
@@ -92,3 +92,23 @@ request key; no real network outage is claimed.
   whitespace errors were introduced. Scoped lint has existing warnings, not errors.
 - No skips, timeout increases, assertion weakening, closed-period race, denied raw
   log retrieval, Production operation, credentials change, main merge or deployment.
+
+## Approved mobile follow-up
+
+Product `90b275a1293b6f28200e05ecaa2d62794d1caa5d` and diagnostic
+`d4760fbfd55878c8f9e7f8553701408f317447a7` were applied as exact individual
+patches after independent parent approval. No supplemental workflow commits
+cc7757d8 or 9a9e13ae were included. Only the prescription component and its two
+test files changed; the three blobs match their approved source commits exactly.
+The six phone spacing adjustments preserve desktop values and clinical content.
+
+New executable/test source: `72ad06f4a48db3a23c2d6d5020b97b689c930cf9`, tree
+`c7d5951dc6ccab09d06347942968eb3dcf17367e`. Node22 focused tests passed 79/79,
+full TypeScript passed, and scoped lint had 0 errors / 4 existing warnings.
+Only evidence documentation follows this source freeze. The earlier full units,
+HTTP, PostgreSQL and build results above are historical; they do not certify the
+new mobile geometry. No local browser was run. Exact final hosted CI must pass.
+
+Earlier full CI39538030593 on b2e5a4a3 was still in progress immediately before
+the update, not passed. One push to the existing Draft triggers one new full CI
+through pull_request synchronize; automatic supersession is not a successful run.

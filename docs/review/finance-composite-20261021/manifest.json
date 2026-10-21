@@ -216,10 +216,10 @@
       "scripts/security/restore-full-target-guard.d.mts": "6bd3e336f3d715dca12bb7e7bad4c647b0f9a847",
       "scripts/security/restore-full-target-guard.mjs": "d011c271f41965ea9ea144e2f7f3b73d68f09b5e",
       "scripts/security/restore-full-target-guard.nodecheck.mjs": "dda2825e829b0f566be5badc103c60703aea160d",
-      "__tests__/patient-ortho-read-safety.test.tsx": "9bc5d11a791923499c9ef01ec18a0cc1a5fbfcdc",
+      "__tests__/patient-ortho-read-safety.test.tsx": "5b65a24452fd8eee8bca7bb4d8900d2fc3f9dbc6",
       "__tests__/security-http/legacy-onboarding-checklist-ui.test.ts": "c8e20842d01b5f8cd72bcc945582b26a59259d66",
-      "__tests__/security-http/ortho-prescription-truth-built-page.test.ts": "a064e55cfb8a2b5284075fc07913f903a9a692b7",
-      "components/PatientOrtho.tsx": "0afb92a23fc38ede6666ee26d233ea99b189044a",
+      "__tests__/security-http/ortho-prescription-truth-built-page.test.ts": "f8320bae8e60c798a0f3ca72f4f7b270378e589a",
+      "components/PatientOrtho.tsx": "ec91f8857752bb4ab5c81c817f508e49d802c36c",
       "docs/review/ortho-http-regressions/prescription-checklist-follow-up.md": "527ee062cadd7db399d39af459d31e58c611f40b"
     },
     "sharedFunctionSourceMatches": [
@@ -295,9 +295,58 @@
     "whitespace": "5 inherited evidence-log EOF blank lines preserved verbatim; no code whitespace errors",
     "hostedCi": "not triggered; final source freeze pending"
   },
-  "sourceFreezeHead": "85ebfc60eb56f7f189ae0463460571148e4bc0a9",
-  "sourceFreezeTree": "3f34dbe1d9c59cdb5e8cec571573f46afcee1237",
-  "finalValidation": {
+  "sourceFreezeHead": "72ad06f4a48db3a23c2d6d5020b97b689c930cf9",
+  "sourceFreezeTree": "c7d5951dc6ccab09d06347942968eb3dcf17367e",
+  "evidenceLogs": {
+    "composite-final-fixture-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "composite-final-postgres.log": "5acb8e11f0cbb188ae3976e046c4d79f6d28f30ef8e5a933c06eab73dda5a1d5",
+    "composite-final-http.log": "96b925ee9f7fa2c4b33f82e93b147b55de73f67dfe9deaa9a41482f4d3deecd0",
+    "composite-final-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "composite-final-units.log": "ef52b7e29268388d3a7b19bf0d9300b6451109ac68b225943a4ba79dab05d9b3",
+    "composite-whitespace.log": "81c680557016ae3b9ef560f975b3f1fe3cc9d2dea5fb7c4397772295867434ad",
+    "composite-money-scan.log": "ddaaffde592d08d4932249d73d5f66552de6a67f9a418f3efb0557a3962137e9",
+    "composite-http.log": "55acc5d9f4bac9ef607863fb7ec154f36e67844380a1b73c6ca4f49ca4d66733",
+    "composite-lint.log": "e7ca533ae71e30234911d7ff22cab13e44558de696b6e3c6015d54743f7f2bd6",
+    "composite-build.log": "9115fdb01731a16c5b140a4010a8bd8fa385ac435a6df5f7755a24c8ba0480f4",
+    "composite-postgres.log": "f1e140b4004142c937a51b997f7224005a478f8291e07cc5da42594036afad51",
+    "composite-units.log": "1898bb7dd921c690527587df213a653c33073bef83834b1c7df3ecd4eeeeb485",
+    "composite-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "composite-guards.log": "776e99ef46698de4995870e1dab893e8ef5f665b417f8a07595f28cfaedf7f68",
+    "composite-mobile-focused.log": "903a3202819b36f6d64c476ca598046f2582e9e0f6eef0addcb9a6264740e5b0",
+    "composite-mobile-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "composite-mobile-lint.log": "1ee6ca74050084c307eee76330e5bafd4182b134c9a8e1ec112bbe7d8c8a8f23"
+  },
+  "evidenceLogNormalization": "New copied logs trim trailing whitespace; original inherited evidence remains unchanged.",
+  "approvedMobilePrescriptionFollowup": [
+    {
+      "sourceHead": "90b275a1293b6f28200e05ecaa2d62794d1caa5d",
+      "sourceBase": "cc7757d8bb0bcbfea37a7aed4abcb22c3b17743b",
+      "sourceTree": "6837c08ff051003f2a409b06bb681ecb086ea548",
+      "patchSha256": "e700165175400db71ab17f72d407afed2bc7eed6bee5cb934acbd9d8a3ddd179",
+      "patchId": "abf58fb14d377b9c51167d0e68c3e7cf98ac6061",
+      "files": [
+        "__tests__/patient-ortho-read-safety.test.tsx",
+        "components/PatientOrtho.tsx"
+      ],
+      "composedHead": "5432e3eaceba22fe2cbbea43f92fe61279485a44",
+      "composedTree": "49244314e40bf36a69f8ae48ffac61a9816c61c4"
+    },
+    {
+      "sourceHead": "d4760fbfd55878c8f9e7f8553701408f317447a7",
+      "sourceBase": "2b52888a06a9ea23a014a8913d4a3147a64f0c56",
+      "sourceTree": "5ed981910feb57faa453559d895c9f260ee55709",
+      "patchSha256": "35765371b476a943c0ddb7e4ee5299c874214a6f5837bf112cdef766f5cc5836",
+      "patchId": "607633865e7765a0113b7aac68ae10fd624bc8b1",
+      "files": [
+        "__tests__/security-http/ortho-prescription-truth-built-page.test.ts"
+      ],
+      "composedHead": "72ad06f4a48db3a23c2d6d5020b97b689c930cf9",
+      "composedTree": "c7d5951dc6ccab09d06347942968eb3dcf17367e"
+    }
+  ],
+  "historicalSourceFreezeHead": "85ebfc60eb56f7f189ae0463460571148e4bc0a9",
+  "historicalSourceFreezeTree": "3f34dbe1d9c59cdb5e8cec571573f46afcee1237",
+  "historicalValidation": {
     "sourceHead": "85ebfc60eb56f7f189ae0463460571148e4bc0a9",
     "fullUnits": {
       "files": 613,
@@ -320,21 +369,26 @@
     "buildInputsIdenticalToPreFixtureBuild": true,
     "harnessDatabaseAbsentAfterRun": true
   },
-  "evidenceLogs": {
-    "composite-final-fixture-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "composite-final-postgres.log": "5acb8e11f0cbb188ae3976e046c4d79f6d28f30ef8e5a933c06eab73dda5a1d5",
-    "composite-final-http.log": "96b925ee9f7fa2c4b33f82e93b147b55de73f67dfe9deaa9a41482f4d3deecd0",
-    "composite-final-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "composite-final-units.log": "ef52b7e29268388d3a7b19bf0d9300b6451109ac68b225943a4ba79dab05d9b3",
-    "composite-whitespace.log": "81c680557016ae3b9ef560f975b3f1fe3cc9d2dea5fb7c4397772295867434ad",
-    "composite-money-scan.log": "ddaaffde592d08d4932249d73d5f66552de6a67f9a418f3efb0557a3962137e9",
-    "composite-http.log": "55acc5d9f4bac9ef607863fb7ec154f36e67844380a1b73c6ca4f49ca4d66733",
-    "composite-lint.log": "e7ca533ae71e30234911d7ff22cab13e44558de696b6e3c6015d54743f7f2bd6",
-    "composite-build.log": "9115fdb01731a16c5b140a4010a8bd8fa385ac435a6df5f7755a24c8ba0480f4",
-    "composite-postgres.log": "f1e140b4004142c937a51b997f7224005a478f8291e07cc5da42594036afad51",
-    "composite-units.log": "1898bb7dd921c690527587df213a653c33073bef83834b1c7df3ecd4eeeeb485",
-    "composite-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "composite-guards.log": "776e99ef46698de4995870e1dab893e8ef5f665b417f8a07595f28cfaedf7f68"
+  "finalValidation": {
+    "focusedUnits": {
+      "files": 1,
+      "passed": 79,
+      "seconds": 1.94
+    },
+    "fullTypecheck": "passed, exit 0",
+    "scopedLint": {
+      "errors": 0,
+      "existingWarnings": 4
+    },
+    "exactSourceBlobsMatched": true,
+    "workflowDelta": "none",
+    "localBrowser": "not run; hosted exact-head acceptance required",
+    "fullUnitsAndHttp": "prior results historical, not rerun after mobile product change"
   },
-  "evidenceLogNormalization": "New copied logs trim trailing whitespace; original inherited evidence remains unchanged."
+  "historicalHostedCi": {
+    "run": 39538030593,
+    "head": "b2e5a4a33752594dc3483bc27915f0f7a130e0e4",
+    "observedStatusBeforePush": "in_progress",
+    "conclusion": null
+  }
 }
