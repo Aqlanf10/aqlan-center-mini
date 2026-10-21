@@ -37,8 +37,10 @@ function paymentGross(source:Record<string,unknown>,currency:Currency){
  const rows=source.payments;
  if(!Array.isArray(rows))fail("مصدر التسويات غير مكتمل؛ يلزم مراجعة مالية.");
  let payments=0,refunds=0;
- for(const data of rows as unknown[]){
-  if(!record(data)||!positive(data.id)||!(data.kind==="payment"||data.kind==="refund"))fail("سند غير مثبت.");
+ for(const candidate of rows as unknown[]){
+  if(!record(candidate))fail("سند غير مثبت.");
+  const data=candidate;
+  if(!positive(data.id)||!(data.kind==="payment"||data.kind==="refund"))fail("سند غير مثبت.");
   const money=settlePaymentMinor({id:data.id,currency:sameCurrency(String(data.currency)),
    amountMinor:safe(data.amount_minor as number),baseAmountMinor:safe(data.base_amount_minor as number)},currency);
   if(data.kind==="payment")payments+=money;else refunds+=money;
