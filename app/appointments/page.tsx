@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrivalPanel } from "@/components/ArrivalPanel";
 import {
   clinicDateString,
@@ -112,10 +112,6 @@ export default function AppointmentsPage() {
      إلى يومٍ آخر أثناء الانتظار. */
   const dateRef = useRef(today);
   const dateRevisionRef = useRef(0);
-  useEffect(() => {
-    if (dateRef.current !== date) dateRevisionRef.current += 1;
-    dateRef.current = date;
-  }, [date]);
   const [items, setItems] = useState<Appointment[]>([]);
   /* (P0-D) المريض الذي سُجّل وصوله للتو — تُفتح له لوحة الوصول. */
   const [arrivalPatient, setArrivalPatient] = useState<number | null>(null);
@@ -163,10 +159,21 @@ export default function AppointmentsPage() {
      والمطابقةُ نفسها في الخادم (`lib/waiting-list-match`) لا هنا: كانت هذه
      الشاشة وحدها تعرف كيف يُرشَّح، فكلُّ بابٍ آخر يفتح مكانًا يفتحه صامتًا. */
   const [freed, setFreed] = useState<
-    { slot: FreedSlotInfo; candidates: SlotCandidate[] } | null
+    { slot: FreedSlotInfo; candidates: SlotCandidate[]; request: number; dateRevision: number } | null
   >(null);
   const [candidateBusy, setCandidateBusy] = useState<number | null>(null);
   const [candidateNote, setCandidateNote] = useState<string | null>(null);
+  const candidateRequestRef = useRef(0);
+  const candidateInFlight = useRef(false);
+  // A slot belongs to one displayed-day lifetime, including leaving and returning.
+  useLayoutEffect(() => {
+    // Commit the date fence before browser events can use the previous panel.
+    if (dateRef.current !== date) dateRevisionRef.current += 1;
+    dateRef.current = date;
+    candidateRequestRef.current += 1;
+    setFreed(null);
+    setCandidateNote(null);
+  }, [date]);
   /* نقلُ موعد — يفتح لوحةً صغيرة على الصفّ نفسه. وقبل هذا لم يكن في النظام نقل:
      كان يُلغى الموعد ويُحجز غيره، فيُحتسب المريض «ملغيًا» وهو لم يُلغِ. */
   const [moving, setMoving] = useState<
@@ -174,6 +181,10 @@ export default function AppointmentsPage() {
   >(null);
 
   const findCandidates = useCallback(async (item: Appointment) => {
+    const request = ++candidateRequestRef.current;
+    const revision = dateRevisionRef.current;
+    setFreed(null);
+    setCandidateNote(null);
     try {
       const params = new URLSearchParams({
         date: item.scheduledDate,
@@ -189,6 +200,8 @@ export default function AppointmentsPage() {
       const res = await fetch(`/api/waiting-list?${params.toString()}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
+      if (request !== candidateRequestRef.current || revision !== dateRevisionRef.current
+        || item.scheduledDate !== dateRef.current) return;
       const candidates: SlotCandidate[] = Array.isArray(data?.candidates) ? data.candidates : [];
       const slot: FreedSlotInfo = data?.slot ?? {
         date: item.scheduledDate,
@@ -199,7 +212,7 @@ export default function AppointmentsPage() {
       };
       if (candidates.length > 0) {
         setCandidateNote(null);
-        setFreed({ slot, candidates });
+        setFreed({ slot, candidates, request, dateRevision: revision });
       }
     } catch {
       /* تعذّر الترشيح لا يُفشل الإلغاء — الموعد أُلغي فعلًا. */
@@ -210,7 +223,14 @@ export default function AppointmentsPage() {
      نفسها: هذا يُستدعى بضغطةٍ بعد أن يسمع الموظّف موافقة المريض. */
   const candidateAction = useCallback(async (
     id: number, body: Record<string, unknown>, success: string,
+    context: { slot: FreedSlotInfo; request: number; dateRevision: number },
   ) => {
+    if (context.request !== candidateRequestRef.current || context.dateRevision !== dateRevisionRef.current
+      || context.slot.date !== dateRef.current || candidateInFlight.current) return false;
+    candidateInFlight.current = true;
+    const request = candidateRequestRef.current;
+    const revision = dateRevisionRef.current;
+    const isCurrent = () => request === candidateRequestRef.current && revision === dateRevisionRef.current;
     setCandidateBusy(id);
     try {
       const res = await fetch(`/api/waiting-list/${id}`, {
@@ -220,18 +240,21 @@ export default function AppointmentsPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setCandidateNote(data?.message ?? "تعذّر تنفيذ الإجراء.");
+        if (isCurrent()) setCandidateNote(data?.message ?? "تعذّر تنفيذ الإجراء.");
         return false;
       }
-      setCandidateNote(success);
-      setFreed((current) => current
-        ? { ...current, candidates: current.candidates.filter((one) => one.id !== id) }
-        : current);
+      if (isCurrent()) {
+        setCandidateNote(success);
+        setFreed((current) => current
+          ? { ...current, candidates: current.candidates.filter((one) => one.id !== id) }
+          : current);
+      }
       return true;
     } catch {
-      setCandidateNote("تعذّر الاتصال بالخادم.");
+      if (isCurrent()) setCandidateNote("تعذّر الاتصال بالخادم.");
       return false;
     } finally {
+      candidateInFlight.current = false;
       setCandidateBusy(null);
     }
   }, []);
@@ -579,7 +602,7 @@ export default function AppointmentsPage() {
             </div>
             <button
               type="button"
-              onClick={() => { setFreed(null); setCandidateNote(null); }}
+              onClick={() => { candidateRequestRef.current += 1; setFreed(null); setCandidateNote(null); }}
               aria-label="إخفاء"
               className="rounded-lg p-1 text-emerald-800 hover:bg-emerald-100"
             >
@@ -641,7 +664,7 @@ export default function AppointmentsPage() {
                   <button
                     type="button"
                     data-action="book-candidate"
-                    disabled={candidateBusy === candidate.id}
+                    disabled={candidateBusy !== null}
                     onClick={() => void (async () => {
                       const booked = await candidateAction(candidate.id, {
                         action: "book",
@@ -650,8 +673,8 @@ export default function AppointmentsPage() {
                         durationMinutes: freed.slot.durationMinutes,
                         serviceId: freed.slot.serviceId,
                         doctorId: freed.slot.doctorId,
-                      }, `حُجز الموعد لـ${candidate.patientName ?? "المريض"}.`);
-                      if (booked) await load(date);
+                      }, `حُجز الموعد لـ${candidate.patientName ?? "المريض"}.`, freed);
+                      if (booked) await load(dateRef.current);
                     })()}
                     className="rounded-lg bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
                   >
@@ -660,11 +683,11 @@ export default function AppointmentsPage() {
                   <button
                     type="button"
                     data-action="candidate-no-answer"
-                    disabled={candidateBusy === candidate.id}
+                    disabled={candidateBusy !== null}
                     onClick={() => void candidateAction(candidate.id, {
                       action: "contact", outcome: "no_answer", channel: "phone",
                       slotDate: freed.slot.date, slotTime: freed.slot.time,
-                    }, "سُجّل: لم يردّ.")}
+                    }, "سُجّل: لم يردّ.", freed)}
                     className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     لم يردّ
@@ -672,11 +695,11 @@ export default function AppointmentsPage() {
                   <button
                     type="button"
                     data-action="candidate-declined"
-                    disabled={candidateBusy === candidate.id}
+                    disabled={candidateBusy !== null}
                     onClick={() => void candidateAction(candidate.id, {
                       action: "contact", outcome: "declined_slot", channel: "phone",
                       slotDate: freed.slot.date, slotTime: freed.slot.time,
-                    }, "سُجّل: اعتذر عن هذا الوقت — ويبقى في القائمة لغيره.")}
+                    }, "سُجّل: اعتذر عن هذا الوقت — ويبقى في القائمة لغيره.", freed)}
                     className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     اعتذر عن هذا الوقت
