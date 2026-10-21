@@ -1,13 +1,15 @@
 // Synthetic-only fixture generator. Never use an application or Production target.
 import { Client } from "pg";
 import { writeFile } from "node:fs/promises";
-import { validatePostgresTestTarget } from "../__tests__/postgres/_safe-target";
+// Same canonical guard used by the test wrapper, with no DATABASE_URL fallback.
+// Keep build-time dependencies outside the Docker-excluded test tree.
+import { validateOwnershipHarnessEnvironment } from "./verify-schema-ownership";
 import { loadMigrationFiles } from "../lib/migration-files";
 import { projectDetailedSchemaReadOnly } from "../lib/schema-manifest";
 import { PURCHASE_READINESS_SECTIONS, purchaseReadinessValue, isPurchaseReadinessObject } from "../lib/purchase-schema-readiness";
 
 async function main() {
-const target = validatePostgresTestTarget(process.env);
+const target = validateOwnershipHarnessEnvironment(process.env);
 const client = new Client({ connectionString: target.testUrl.toString() });
 await client.connect();
 try {
