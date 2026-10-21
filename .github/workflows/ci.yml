@@ -13,19 +13,12 @@ concurrency:
 
 jobs:
   quality:
-    name: Typecheck, Lint, Test, Postgres, Audit, Build
+    name: Typecheck, Lint, Unit, Audit, Build
     runs-on: ubuntu-latest
-    # The complete HR and financial PostgreSQL/browser suites exceeded the old
-    # 55-minute job budget. Keep every gate and individual test deadline intact;
-    # allow the full sequence to finish within a bounded execution window.
+    # Code/unit/audit/build gates; DB integration and hosted HTTP have isolated runners.
     timeout-minutes: 75
 
-    services:
-      # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
-      # ليست اختيارية: التزامن المالي لا يُثبت على PGlite أحادي الاتصال.
-      postgres:
-        image: postgres:18-alpine
-        env:
+    env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: aqlan_p1_test
@@ -91,6 +84,128 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Dependency audit
+        # Preserve complete raw reports. Only the exact reviewed braces advisory
+        # may receive a disposition after independent fail-closed verification;
+        # every other advisory, malformed report or failed lookup blocks.
+        run: node --import tsx scripts/ci-audit.mjs
+
+      - name: Upload exact dependency audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoped-dependency-audit
+          path: |
+            .dependency-audit/full-attempt-1.json
+            .dependency-audit/full-attempt-1.stderr.txt
+            .dependency-audit/full-attempt-1.process.json
+            .dependency-audit/full-attempt-2.json
+            .dependency-audit/full-attempt-2.stderr.txt
+            .dependency-audit/full-attempt-2.process.json
+            .dependency-audit/full-attempt-3.json
+            .dependency-audit/full-attempt-3.stderr.txt
+            .dependency-audit/full-attempt-3.process.json
+            .dependency-audit/production-attempt-1.json
+            .dependency-audit/production-attempt-1.stderr.txt
+            .dependency-audit/production-attempt-1.process.json
+            .dependency-audit/production-attempt-2.json
+            .dependency-audit/production-attempt-2.stderr.txt
+            .dependency-audit/production-attempt-2.process.json
+            .dependency-audit/production-attempt-3.json
+            .dependency-audit/production-attempt-3.stderr.txt
+            .dependency-audit/production-attempt-3.process.json
+            .dependency-audit/exception-proof.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # (P2-FIX-2) عدّاء انحدار قارئات الأجسام — إلزامي: أي request.json()
+      # خام في app/api يفشل البناء؛ كل القراءة عبر readJsonBody المحدود (S8).
+      - name: Raw body parser scanner
+        run: npm run ci:scan:body
+
+      - name: Production build
+        run: npm run build
+
+      - name: Build and smoke-test read-only preflight artifact
+        run: npm run build:preflight
+
+      - name: Verify braces absence in actual runtime artifacts
+        run: node scripts/verify-braces-runtime.mjs
+
+      - name: Upload exact runtime dependency proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: braces-runtime-absence
+          path: .dependency-audit/runtime-proof.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+
+  # DB tests, schema provenance and operational DB journeys run on their own
+  # disposable PostgreSQL 18 service; never against a deployed clinic database.
+  postgres_integration:
+    name: PostgreSQL 18 integration, schema and operational journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    services:
+      # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
+      # ليست اختيارية: التزامن المالي لا يُثبت على PGlite أحادي الاتصال.
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Build and unit tests do not open a database connection. The placeholder
+      # prevents accidental use of a real Railway URL in CI.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      # اختبارات تكامل PostgreSQL الحقيقية (test:postgres) — قاعدة الخدمة المعزولة.
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Upgrade npm to bulk advisory endpoint
+        run: npm install -g npm@11
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify environment contract
+        run: npm run verify:environment
+      - name: Verify isolated PostgreSQL 18 server version
+        run: |
+          node --input-type=module <<'NODE'
+          import {Client} from 'pg';
+          const u = new URL(process.env.TEST_DATABASE_URL);
+          if (u.hostname !== '127.0.0.1' || u.port !== '5432' || u.pathname !== '/aqlan_p1_test') {
+            throw new Error('Unexpected PostgreSQL integration target');
+          }
+          const c = new Client({connectionString:u.toString(),ssl:false});
+          await c.connect();
+          try {
+            const r = await c.query('SHOW server_version_num');
+            if (Math.floor(Number(r.rows[0].server_version_num)/10000) !== 18) throw new Error('PostgreSQL 18 required');
+          } finally { await c.end(); }
+          NODE
       - name: PostgreSQL integration tests
         env:
           # Explicit fixture reset opt-in for this disposable service database only.
@@ -180,69 +295,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Dependency audit
-        # Preserve complete raw reports. Only the exact reviewed braces advisory
-        # may receive a disposition after independent fail-closed verification;
-        # every other advisory, malformed report or failed lookup blocks.
-        run: node --import tsx scripts/ci-audit.mjs
 
-      - name: Upload exact dependency audit evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scoped-dependency-audit
-          path: |
-            .dependency-audit/full-attempt-1.json
-            .dependency-audit/full-attempt-1.stderr.txt
-            .dependency-audit/full-attempt-1.process.json
-            .dependency-audit/full-attempt-2.json
-            .dependency-audit/full-attempt-2.stderr.txt
-            .dependency-audit/full-attempt-2.process.json
-            .dependency-audit/full-attempt-3.json
-            .dependency-audit/full-attempt-3.stderr.txt
-            .dependency-audit/full-attempt-3.process.json
-            .dependency-audit/production-attempt-1.json
-            .dependency-audit/production-attempt-1.stderr.txt
-            .dependency-audit/production-attempt-1.process.json
-            .dependency-audit/production-attempt-2.json
-            .dependency-audit/production-attempt-2.stderr.txt
-            .dependency-audit/production-attempt-2.process.json
-            .dependency-audit/production-attempt-3.json
-            .dependency-audit/production-attempt-3.stderr.txt
-            .dependency-audit/production-attempt-3.process.json
-            .dependency-audit/exception-proof.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-      # (P2-FIX-2) عدّاء انحدار قارئات الأجسام — إلزامي: أي request.json()
-      # خام في app/api يفشل البناء؛ كل القراءة عبر readJsonBody المحدود (S8).
-      - name: Raw body parser scanner
-        run: npm run ci:scan:body
-
-      - name: Production build
-        run: npm run build
-
-      - name: Build and smoke-test read-only preflight artifact
-        run: npm run build:preflight
-
-      - name: Verify braces absence in actual runtime artifacts
-        run: node scripts/verify-braces-runtime.mjs
-
-      - name: Upload exact runtime dependency proof
-        uses: actions/upload-artifact@v4
-        with:
-          name: braces-runtime-absence
-          path: .dependency-audit/runtime-proof.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-
-  # Runs concurrently with quality: its own runner and disposable PostgreSQL 18.
+  # Hosted browser/HTTP starts only after the independently required code/build gate.
+  # It still rebuilds in its own runner with its own disposable PostgreSQL service.
   # Nothing from the serial security suite is omitted or marked continue-on-error.
   security_http:
     name: Built-app HTTP security and hosted browser
+    needs: [quality]
     runs-on: ubuntu-latest
     timeout-minutes: 75
     services:
@@ -1141,16 +1200,17 @@ jobs:
   required_completion:
     name: Required CI gates (fail closed)
     if: always()
-    needs: [quality, security_http]
+    needs: [quality, postgres_integration, security_http]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify both required jobs finished successfully
+      - name: Verify all required jobs finished successfully
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
+          POSTGRES_RESULT: ${{ needs.postgres_integration.result }}
           HTTP_RESULT: ${{ needs.security_http.result }}
         run: |
-          if [ "$QUALITY_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ]; then
-            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, security_http=$HTTP_RESULT"
+          if [ "$QUALITY_RESULT" != "success" ] || [ "$POSTGRES_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ]; then
+            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, postgres_integration=$POSTGRES_RESULT, security_http=$HTTP_RESULT"
             exit 1
           fi
