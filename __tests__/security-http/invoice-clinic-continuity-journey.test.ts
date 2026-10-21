@@ -495,10 +495,41 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
         expect(data.work).toContainEqual(expect.objectContaining({kind:"endodontic_record",coverage:"unresolved"}));
       }
       const view = await open(who, patientId);
+      const reads: {path:string;status:number}[] = [];
+      const observedPaths = new Set([`/api/visits/${visit.id}/clinical`, `/api/visits/${visit.id}/financial-context`, "/api/services", "/api/parties", "/api/auth/me"]);
+      view.page.on("response", response => {
+        const path = new URL(response.url()).pathname;
+        if (response.request().method() === "GET" && observedPaths.has(path) && reads.length < 20) reads.push({path,status:response.status()});
+      });
       try {
         await view.page.goto(`${baseUrl}/visits/${visit.id}`);
         const panel = view.page.getByRole("region", {name: "مصادر عمل الزيارة"});
-        await panel.waitFor();
+        try {
+          await panel.waitFor(); // Preserve the existing 20-second timeout and visibility assertion.
+        } catch (error) {
+          const diagnostic = await view.page.evaluate(() => {
+            const visible = (node:Element) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden";
+            const text = (node:Element) => (node.textContent ?? "").replace(/\s+/g," ").trim().slice(0,180);
+            const bounded = (selector:string) => [...document.querySelectorAll(selector)].filter(visible).slice(0,8).map(text);
+            const regions = [...document.querySelectorAll('[aria-label="مصادر عمل الزيارة"]')];
+            const readMessages = [...document.querySelectorAll("p")].filter(visible).map(text)
+              .filter(value => /جارٍ تحميل الزيارة الحالية|تعذّر.*الزيارة|بيانات الزيارة|جارٍ التحقق من مصادر العمل|تعذّر التحقق من مصادر العمل/.test(value)).slice(0,6);
+            return {
+              // Omit query/hash values: never include credentials or arbitrary navigation parameters.
+              actualPageUrl:location.origin + location.pathname,
+              omittedQueryOrHash:Boolean(location.search || location.hash),
+              headings:bounded("h1,h2"), statusOrErrors:bounded('[role="status"],[role="alert"]'), readMessages,
+              clinicalWorkSectionMounted:Boolean(document.querySelector("#visit-procedures")),
+              clinicalReadStateVisible:readMessages.length > 0,
+              confirmedSignMarker:Boolean(document.querySelector('[data-testid="clinical-sign-confirmed"]')),
+              sourceRegion:regions.length === 0 ? "absent" : regions.some(visible) ? "visible" : "hidden",
+            };
+          }).catch(() => ({diagnosticUnavailable:true}));
+          const context = {role:who,requestedPatientId:patientId,requestedVisitId:visit.id,...diagnostic,reads,
+            sourceGetRefused:reads.some(read => read.path.endsWith("/financial-context") && [401,403,404].includes(read.status))};
+          if (error instanceof Error) { error.message += `\nBounded synthetic source diagnostic: ${JSON.stringify(context)}`; throw error; }
+          throw error;
+        }
         expect(await panel.innerText()).toContain(VISIT_SOURCE_SUMMARY[visit.summary]);
         const invoices = data.work.flatMap(line => line.references).filter(source => source.kind === "invoice" && source.state === "current");
         const expectedLinks = [...new Set(invoices.map(source => `/print/invoice/${source.id}`))];
