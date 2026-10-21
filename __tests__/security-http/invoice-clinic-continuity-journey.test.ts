@@ -6,7 +6,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { UNVERIFIED_VISIT_INVOICE_LABEL } from "../../lib/visit-financial-presentation";
 import { VISIT_SOURCE_SUMMARY, type VisitFinancialContext } from "../../lib/visit-financial-context";
-import { diagnoseVisitSourcePdfOcr } from "../helpers/visit-source-pdf-ocr";
 import { formatAmount } from "../../lib/money";
 
 /** Three independent journeys on the existing built-app/isolated PG harness.
@@ -574,6 +573,21 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
     await print.page.evaluate(() => document.fonts.ready);
     const directory = "artifacts/visit-source-acceptance";
     await mkdir(directory, {recursive:true});
+    if (label === "same-day-decisions") {
+      // This screenshot is from the live report DOM in PRINT media, before Chromium creates the PDF.
+      const noChargeIndex = report.result.rows.findIndex(row => row.workSource === VISIT_SOURCE_SUMMARY.no_new_charge);
+      expect(noChargeIndex).toBeGreaterThanOrEqual(0);
+      const sourceCell = print.page.locator(".report-section table.report-table tbody > tr")
+        .nth(noChargeIndex).locator("td").nth(1);
+      expect(await sourceCell.innerText()).toBe(VISIT_SOURCE_SUMMARY.no_new_charge);
+      await sourceCell.screenshot({path:`${directory}/same-day-decisions-preprint-cell.png`});
+      await print.page.screenshot({path:`${directory}/same-day-decisions-preprint.png`,fullPage:true});
+      console.info("PDF source preprint DOM:",JSON.stringify({
+        text:await sourceCell.innerText(),
+        font:await sourceCell.evaluate(node=>getComputedStyle(node).fontFamily),
+        direction:await sourceCell.evaluate(node=>getComputedStyle(node).direction),
+      }));
+    }
     const path = `${directory}/${label}.pdf`;
     await writeFile(path, await print.page.pdf({preferCSSPageSize:true,printBackground:true}));
     expect(execFileSync("pdfinfo", [path], {encoding:"utf8"})).toMatch(/Pages:\s+[1-9]/);
@@ -592,20 +606,53 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
         rasterOfOriginalPdf:"same-day-decisions-raster.png",
       }));
     }
-    const noChargeRow=report.result.rows.findIndex(row=>row.workSource===VISIT_SOURCE_SUMMARY.no_new_charge);
-    const ocrDiagnostic=label==="same-day-decisions" ? await diagnoseVisitSourcePdfOcr(print.page,browser,directory,noChargeRow,report.result.rows.length) : null;
-    if(ocrDiagnostic) console.info("Bounded fresh PDF OCR diagnostic:",JSON.stringify(ocrDiagnostic));
-    const text = execFileSync("pdftotext", ["-layout",path,"-"], {encoding:"utf8"}).replace(/[\u202a-\u202e]/g, "").replace(/\s+/g," ");
-    expect(text).toContain("مصادر العمل");
-    try {
-      for (const summary of new Set(visits.map(visit => VISIT_SOURCE_SUMMARY[visit.summary]))) {
-        expect(text).toContain(summary.replace(/\s+/g," "));
-      }
-    } catch(error) {
-      if(error instanceof Error && ocrDiagnostic) error.message += `\nBounded fresh PDF OCR diagnostic: ${JSON.stringify(ocrDiagnostic)}`;
-      throw error;
+    const rawPdfText = execFileSync("pdftotext",["-raw",path,"-"],{encoding:"utf8"});
+    const text = execFileSync("pdftotext",["-layout",path,"-"],{encoding:"utf8"})
+      .replace(/[\u202a-\u202e]/g,"").replace(/\s+/g," ");
+    if (label === "same-day-decisions") {
+      // Deterministic Unicode/copy-order witness: no OCR, no correction or replaced expectations.
+      const word = VISIT_SOURCE_SUMMARY.no_new_charge;
+      console.info("PDF Unicode/copy audit:",JSON.stringify({
+        dom:word,
+        layoutContainsExpected:text.includes(word),
+        layoutContainsMalformed:text.includes("قرار بال رسوم مثبت للعمل المسجل"),
+        rawContainsExpected:rawPdfText.includes(word),
+        rawContainsMalformed:rawPdfText.includes("بال"),
+        visibleRaster:"same-day-decisions-raster.png",
+        preprintScreenshot:"same-day-decisions-preprint.png",
+        preprintSourceCell:"same-day-decisions-preprint-cell.png",
+        embeddedFonts:execFileSync("pdffonts",[path],{encoding:"utf8"}).split("\n").slice(0,8),
+      }));
+      // Hosted, synthetic font comparison: one page, identical words and browser renderer.
+      // The output identifies a font with correct extractable logical text before any product font change.
+      const probe=await print.context.newPage();
+      try {
+        const choices=["DejaVu Sans","Noto Sans Arabic","Noto Naskh Arabic","Arial","Tahoma","serif","sans-serif"];
+        const rows=choices.map((font,index)=>
+          '<div class="probe" style="font-family:&#39;'+font+'&#39;">'+
+          '<span class="id">FONT'+index+'</span><span lang="ar" dir="rtl">'+word+'</span></div>').join("");
+        await probe.setContent('<!doctype html><html lang="ar"><meta charset="utf-8"><style>'+
+          '@page{size:A4;margin:12mm}body{font-size:18px}.probe{display:flex;justify-content:space-between;'+
+          'width:95%;height:48px;white-space:nowrap}.id{font:12px monospace;direction:ltr}'+
+          '</style><body>'+rows+'</body></html>');
+        await probe.evaluate(()=>document.fonts.ready);
+        const probePdf=directory+"/same-day-font-probe.pdf";
+        await writeFile(probePdf,await probe.pdf({preferCSSPageSize:true,printBackground:true}));
+        execFileSync("pdftoppm",["-f","1","-l","1","-r","150","-png","-singlefile",
+          probePdf,directory+"/same-day-font-probe"],{maxBuffer:1024*1024});
+        const extracted=execFileSync("pdftotext",["-layout",probePdf,"-"],{encoding:"utf8"});
+        console.info("PDF font shaping diagnostic:",JSON.stringify({
+          fonts:choices,
+          extractedLines:extracted.split(/\r?\n/).filter(line=>line.includes("FONT")).slice(0,choices.length),
+          embeddedFonts:execFileSync("pdffonts",[probePdf],{encoding:"utf8"}).split("\n").slice(0,14),
+        }));
+      } finally {await probe.close();}
     }
-    if(ocrDiagnostic) expect(ocrDiagnostic.verdict,JSON.stringify(ocrDiagnostic)).toBe("correct_visible_phrase");
+    expect(text).toContain("مصادر العمل");
+    for (const summary of new Set(visits.map(visit=>VISIT_SOURCE_SUMMARY[visit.summary]))) {
+      // Never rewrite the contract to accept malformed Arabic copy/paste.
+      expect(text).toContain(summary.replace(/\s+/g," "));
+    }
   } finally { await close(print.context); }
   expect(await q(`SELECT
     (SELECT count(*) FROM invoices WHERE patient_id=$1)::int AS invoices,
