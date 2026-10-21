@@ -610,7 +610,7 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
       const productCommit = execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim();
       await writeFile(`${directory}/same-day-proof-manifest.json`,
         JSON.stringify({productCommit,sourceText:VISIT_SOURCE_SUMMARY.no_new_charge,
-          generatedFrom:"single hosted Playwright print job",filesSha256:fileHashes},null,2)+"\\n");
+          generatedFrom:"single hosted Playwright print job",filesSha256:fileHashes},null,2)+"\n");
       const exact=VISIT_SOURCE_SUMMARY.no_new_charge;
       console.info("Bounded original PDF raw text inspection:",JSON.stringify({
         exactPhraseInRaw:raw.includes(exact),
