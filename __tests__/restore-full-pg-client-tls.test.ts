@@ -62,6 +62,24 @@ describe('restore:full effective node-postgres TLS configuration (without connec
     expect(effective.ssl.checkServerIdentity).toBeUndefined();
   });
 
+  it('fails closed on remote TLS with no CA instead of allowing unverified encryption', () => {
+    vi.stubEnv('PGSSL_ROOT_CERT_PEM', undefined);
+    vi.stubEnv('PGSSL_ROOT_CERT', undefined);
+    const target = validatedRestoreFullTarget(REMOTE_INPUT, {
+      DATABASE_ENVIRONMENT: 'staging',
+      PGSSL_ROOT_CERT_PEM: CA,
+    });
+    // Simulates runtime CA removal after input policy validation.
+    expect(() => restoreClientConfigFor(target.connectionString))
+      .toThrow(/RESTORE_TLS_VERIFICATION_REQUIRED/);
+  });
+
+  it('rejects a remote sslmode query at the actual pg configuration boundary', () => {
+    vi.stubEnv('PGSSL_ROOT_CERT_PEM', CA);
+    expect(() => restoreClientConfigFor(REMOTE_INPUT))
+      .toThrow(/RESTORE_TLS_UNSAFE_QUERY/);
+  });
+
   it('keeps SSL off only for explicit literal-loopback synthetic test target', () => {
     const local = validatedRestoreFullTarget(
       'postgresql://fixture:fixture@127.0.0.1:5432/aqlan_test_synthetic?sslmode=disable',
