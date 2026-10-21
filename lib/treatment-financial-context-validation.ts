@@ -6,7 +6,9 @@ const row = (value: unknown): value is Row => value !== null && typeof value ===
 const id = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 const nullableId = (value: unknown) => value === null || id(value);
 const amount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
-const nonnegative = (value: unknown) => amount(value) && value >= 0;
+const nonnegative = (value: unknown): value is number => amount(value) && value >= 0;
+const historicalDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 const nullableString = (value: unknown) => value === null || typeof value === "string";
 const ids = (value: unknown): value is number[] => Array.isArray(value) && value.every(id) && new Set(value).size === value.length;
 const rows = (value: unknown, check: (item: Row) => boolean): value is Row[] =>
@@ -42,6 +44,23 @@ export function isTreatmentFinancialContext(value: unknown, expectedPatientId: n
       && nonnegative(receipt.originalAmountMinor) && nonnegative(receipt.settlementMinor)))) return false;
   const documents = new Map(value.documents.map((document) => [document.invoiceId, document]));
   if (documents.size !== value.documents.length) return false;
+  if (!rows(value.historicalDocuments, (document) => id(document.documentId) && document.patientId === expectedPatientId
+    && id(document.revisionId) && id(document.version) && isCurrency(document.currency)
+    && nonnegative(document.grossMinor) && document.grossMinor > 0
+    && nonnegative(document.discountMinor) && document.discountMinor < document.grossMinor
+    && nonnegative(document.agreedMinor) && document.agreedMinor === document.grossMinor - document.discountMinor
+    && nonnegative(document.previouslyPaidMinor) && nonnegative(document.remainingAtRevisionMinor)
+    && document.remainingAtRevisionMinor === document.agreedMinor - document.previouslyPaidMinor
+    && historicalDate(document.historicalAsOf) && document.scope === "historical_document"
+    && document.currentAllocatedRemainingMinor === null && document.allocationState === "not_allocated"
+    && rows(document.lines, (line) => id(line.agreementId) && nonnegative(line.documentLine)
+      && line.patientId === expectedPatientId && id(line.planId) && id(line.planItemId) && nullableId(line.clinicalCaseId)
+      && plans.get(line.planId)?.currency === document.currency)
+    && document.lines.length > 0 && document.lines.length <= 40
+    && document.lines.every((line, index) => line.documentLine === index)
+    && new Set(document.lines.map((line) => line.agreementId)).size === document.lines.length)) return false;
+  const historicalDocuments = new Map(value.historicalDocuments.map((document) => [document.documentId, document]));
+  if (historicalDocuments.size !== value.historicalDocuments.length) return false;
   if (!rows(value.openingPositions, (opening) => isCurrency(opening.currency)
     && amount(opening.openingMinor) && amount(opening.settledMinor) && nonnegative(opening.remainingMinor)
     && opening.scope === "patient_currency" && opening.allocationState === "not_allocated" && ids(opening.agreementIds))) return false;
@@ -67,15 +86,26 @@ export function isTreatmentFinancialContext(value: unknown, expectedPatientId: n
       return !!document && document.currency === line.currency && (reference.invoiceIds as number[]).includes(line.invoiceId)
         && (line.planItemId === reference.planItemId || line.sourceType === "plan_item" && line.sourceId === reference.planItemId);
     })) return false;
-    if (!rows(reference.historicalAgreements, (agreement) => agreement.patientId === expectedPatientId
-      && agreement.planItemId === reference.planItemId && id(agreement.id) && nullableId(agreement.clinicalCaseId)
-      && isCurrency(agreement.currency) && nonnegative(agreement.agreedMinor) && nonnegative(agreement.previouslyPaidMinor)
-      && nonnegative(agreement.remainingAtRegistrationMinor) && typeof agreement.historicalAsOf === "string"
-      && /^\d{4}-\d{2}-\d{2}$/.test(agreement.historicalAsOf)
-      && nullableId(agreement.openingHistoryId) && (agreement.openingEffect === "none" || agreement.openingEffect === "created" || agreement.openingEffect === "increased")
-      && (agreement.status === "live" || agreement.status === "void")
-      && (agreement.openingPositionCurrency === null || agreement.openingPositionCurrency === agreement.currency && openings.has(agreement.currency))
-      && agreement.currentAgreementRemainingMinor === null && agreement.currentAgreementSettlementState === "not_allocated")) return false;
+    if (!rows(reference.historicalAgreements, (agreement) => {
+      if (agreement.patientId !== expectedPatientId || agreement.planItemId !== reference.planItemId
+        || !id(agreement.id) || agreement.clinicalCaseId !== reference.clinicalCaseId
+        || !isCurrency(agreement.currency) || !nonnegative(agreement.agreedMinor)
+        || !historicalDate(agreement.historicalAsOf) || !nullableId(agreement.documentId)
+        || !nullableId(agreement.openingHistoryId)
+        || !(agreement.openingEffect === "none" || agreement.openingEffect === "created" || agreement.openingEffect === "increased")
+        || !(agreement.status === "live" || agreement.status === "void")
+        || !(agreement.openingPositionCurrency === null || agreement.openingPositionCurrency === agreement.currency && openings.has(agreement.currency))
+        || agreement.currentAgreementRemainingMinor !== null || agreement.currentAgreementSettlementState !== "not_allocated") return false;
+      if (agreement.documentId === null) return agreement.documentLine === null
+        && nonnegative(agreement.previouslyPaidMinor) && nonnegative(agreement.remainingAtRegistrationMinor)
+        && agreement.remainingAtRegistrationMinor === agreement.agreedMinor - agreement.previouslyPaidMinor;
+      const document = historicalDocuments.get(agreement.documentId);
+      return !!document && document.currency === agreement.currency && agreement.status === "live"
+        && agreement.previouslyPaidMinor === null && agreement.remainingAtRegistrationMinor === null
+        && agreement.openingEffect === "none" && agreement.openingHistoryId === null && agreement.openingPositionCurrency === null
+        && (document.lines as Row[]).some((line) => line.agreementId === agreement.id && line.documentLine === agreement.documentLine
+          && line.planItemId === reference.planItemId && line.planId === reference.planId && line.clinicalCaseId === reference.clinicalCaseId);
+    })) return false;
     const installment = reference.installment;
     if (!row(installment) || !ids(installment.planDocumentIds) || typeof installment.collectionRequiresFinancialReview !== "boolean"
       || !(installment.mode === "none" && installment.planId === null
@@ -83,5 +113,10 @@ export function isTreatmentFinancialContext(value: unknown, expectedPatientId: n
           && installment.planId === reference.planId)) return false;
     return installment.planDocumentIds.every((invoiceId) => documents.get(invoiceId)?.installmentPlanId === reference.planId);
   })) return false;
-  return new Set(value.references.map((reference) => reference.planItemId)).size === value.references.length;
+  if (new Set(value.references.map((reference) => reference.planItemId)).size !== value.references.length) return false;
+  const agreements = value.references.flatMap((reference) => reference.historicalAgreements as Row[]);
+  if (new Set(agreements.map((agreement) => agreement.id)).size !== agreements.length) return false;
+  return value.historicalDocuments.every((document) => (document.lines as Row[]).every((line) =>
+    agreements.some((agreement) => agreement.id === line.agreementId && agreement.documentId === document.documentId
+      && agreement.documentLine === line.documentLine && agreement.planItemId === line.planItemId)));
 }

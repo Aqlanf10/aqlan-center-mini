@@ -67,7 +67,7 @@ import {
   type ClinicalNavigationContext, type PatientLocation, type PatientTab, type TreatmentSubTab,
 } from "@/lib/patient-navigation";
 
-import { useClinicalNavigationContext, readVerifiedClinicalContext } from "@/components/useClinicalNavigationContext";
+import { useClinicalNavigationContext, readVerifiedClinicalContext, clinicalNavigationVerificationMode } from "@/components/useClinicalNavigationContext";
 
 
 interface PatientFile {
@@ -211,7 +211,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const [location, setLocation] = useState<PatientLocation>(() =>
     readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
   const contextAuthority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
-  const clinicalContext = useClinicalNavigationContext(Number(id), location.context, !!location.contextError, contextAuthority);
+  const clinicalContext = useClinicalNavigationContext(Number(id), location.context, !!location.contextError, contextAuthority, clinicalNavigationVerificationMode(session, location.tab));
   const [contextNavigationError, setContextNavigationError] = useState<string | null>(null);
   const contextRequest = useRef(0);
   const tab = location.tab;
@@ -276,14 +276,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     return accepted;
   };
   const openClinicalContext = async (context: ClinicalNavigationContext, target?: string) => {
+    if (session?.role === "assistant" && context.patientId !== undefined && context.patientId !== Number(id)) return false;
     if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
     const ticket = ++contextRequest.current;
     const capturedOwner = alertOwner;
     setContextNavigationError(null);
     try {
-      const accepted = await readVerifiedClinicalContext(Number(id), { ...context, patientId: Number(id) });
+      const accepted = await readVerifiedClinicalContext(Number(id), { ...context, patientId: Number(id) }, undefined, clinicalNavigationVerificationMode(session, target ?? location.tab));
       if (!capturedOwner.active || ticket !== contextRequest.current) return false;
-      const destination = patientDestination(target ?? accepted.sub, { ...location, contextError: undefined }, accepted.context);
+      const destination = patientDestination(target ?? (session?.role === "assistant" ? "today" : accepted.sub), { ...location, contextError: undefined }, accepted.context);
       return navigation.current?.navigate(destination) ?? false;
     } catch {
       if (capturedOwner.active && ticket === contextRequest.current) setContextNavigationError("تعذّر فتح العلاج المحدد. لم يتم اختيار حالة بديلة.");
@@ -291,6 +292,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     }
   };
   const canStartTreatmentEntry = summary?.canSeeFinancial === true && !!session && canHandleMoney(session.role);
+  const openExistingAccount = () => {
+    if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !summary?.canSeeFinancial) return false;
+    // Review existing sources without opening a new invoice/agreement chooser.
+    return goTo("account");
+  };
   const openTreatmentEntry = () => {
     if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !canStartTreatmentEntry) return false;
     // The same controller asks every current clinical draft owner before leaving.
@@ -1231,7 +1237,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
-              <PatientOrtho onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
+              <PatientOrtho onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} onOpenAccount={summary?.canSeeFinancial ? openExistingAccount : undefined} patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
             </section>
           )}
 

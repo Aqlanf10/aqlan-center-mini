@@ -662,6 +662,31 @@ it.each(["matching", "notes", "provider", "currency"])("adopts server-owned link
   }
 });
 
+it.each([
+  { name: "another visit of the same patient", id: 91002, patientId: 92001 },
+  { name: "another patient", id: 91001, patientId: 92002 },
+])("refuses checkout navigation for a successful sign response owned by $name", async ({ id, patientId }) => {
+  await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+  const before = structuredClone(stored);
+  const readCount = fetchMock.mock.calls.filter(([url, options]) => url === "/api/visits/91001/clinical" && !options?.method).length;
+  // Exercise the real ClinicalVisit -> isClinicalSignResult boundary. A 200
+  // status must not publish a checkout callback for a foreign echoed identity.
+  pendingWrite = async (requestedVisitId, body) => {
+    expect(requestedVisitId).toBe(91001);
+    expect(body.action).toBe("sign");
+    return response(200, { id, patientId, status: "signed", invoiceId: null,
+      invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  };
+  await invoke(find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
+  await flush();
+  expect(onSigned).not.toHaveBeenCalled();
+  expect(window.location.href).toBe("/visits/91001");
+  expect(contents(render())).toContain("تعذّر تأكيد نتيجة التوقيع");
+  expect(fetchMock.mock.calls.filter(([url, options]) => url === "/api/visits/91001/clinical" && !options?.method)).toHaveLength(readCount);
+  expect(writes().filter(([, options]) => JSON.parse(String(options.body)).action === "sign")).toHaveLength(1);
+  expect(stored).toEqual(before);
+});
+
 it("invalidates an in-flight read when a sign response has an unknown outcome", async () => {
   reads.set(91001, async () => response(503, {})); await mount();
   const capturedRetry = button("أعد تحميل الزيارة"); reads.delete(91001);
@@ -677,4 +702,55 @@ it("invalidates an in-flight read when a sign response has an unknown outcome", 
   expect(nodes().some((node) => node.props.label === "② التشخيص")).toBe(false);
   expect(contents(render())).toContain("تعذّر تأكيد نتيجة التوقيع");
   expect(onSigned).not.toHaveBeenCalled();
+});
+
+it("does not describe a signed visit without a direct invoice as a consultation", async () => {
+  stored.set(91001, { ...stored.get(91001), status: "signed", signedAt: "2025-05-02T10:00:00Z", invoiceId: null });
+  await mount();
+  expect(contents(render())).not.toContain("بلا فاتورة (كشف)");
+  expect(contents(render())).toContain("لا فاتورة مباشرة مثبتة");
+  expect(nodes().some(node => String(node.props.href ?? "").startsWith("/print/invoice/"))).toBe(false);
+});
+
+it.each(["review", "cancelled", undefined] as const)("does not advertise an active invoice link for %s reference", async invoiceReferenceState => {
+  hooks.role = "admin";
+  stored.set(91001, { ...stored.get(91001), status: "signed", signedAt: "2025-05-02T10:00:00Z", invoiceId: 98001, invoiceReferenceState });
+  await mount();
+  expect(nodes().some(node => node.props.href === "/print/invoice/98001")).toBe(false);
+  expect(contents(render())).toContain(invoiceReferenceState === "cancelled" ? "مرجع فاتورة ملغاة" : "مرجع الفاتورة يحتاج تحققًا");
+});
+
+it.each(["admin", "doctor"])("shows a verified documentary reference without widening %s print access", async role => {
+  hooks.role = role;
+  stored.set(91001, { ...stored.get(91001), status: "signed", signedAt: "2025-05-02T10:00:00Z", invoiceId: 98001, invoiceReferenceState: "current" });
+  await mount();
+  expect(contents(render())).toContain("مرجع فاتورة #98001");
+  expect(nodes().some(node => node.props.href === "/print/invoice/98001")).toBe(role === "admin");
+});
+
+it("clears stale documentary verification after sign until the exact response invoice is reread", async () => {
+  hooks.role = "admin";
+  stored.set(91001, { ...stored.get(91001), invoiceId: 98001, invoiceReferenceState: "current" });
+  await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+  const reread = deferred<Response>();
+  pendingWrite = async (_id, body) => {
+    expect(body).toEqual({ action: "sign", dependencyOverrideReason: null, outsideContractDecision: null, orthoSession: null });
+    reads.set(91001, () => reread.promise);
+    return response(200, { patientId: 92001, invoiceId: 98002, invoiceCurrency: "YER", duesMinor: 10000,
+      sessionsCompleted: 0, nextPlannedVisit: null });
+  };
+  const signing = invoke(find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
+  await flush();
+  const optimistic = hooks.values.find(value => value && typeof value === "object"
+    && "id" in value && value.id === 91001 && "status" in value && value.status === "signed") as Record<string, unknown>;
+  expect(optimistic).toMatchObject({ invoiceId: 98002, status: "signed" });
+  expect(optimistic.invoiceReferenceState).toBeUndefined();
+  expect(nodes().some(node => String(node.props.href ?? "").startsWith("/print/invoice/"))).toBe(false);
+  expect(onSigned).not.toHaveBeenCalled();
+  reread.resolve(response(200, { ...stored.get(91001), status: "signed", invoiceId: 98002, invoiceReferenceState: "current" }));
+  await signing; await flush();
+  expect(nodes().some(node => node.props.href === "/print/invoice/98001")).toBe(false);
+  expect(nodes().some(node => node.props.href === "/print/invoice/98002")).toBe(true);
+  expect(onSigned).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ patientId: 92001, invoiceId: 98002,
+    invoiceCurrency: "YER", duesMinor: 10000 }));
 });

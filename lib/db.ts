@@ -16585,6 +16585,8 @@ export interface ClinicalVisit {
   signedAt: string | null;
   signedBy: string | null;
   invoiceId: number | null;
+  /** Same-patient documentary validation; never a coverage or payment decision. */
+  invoiceReferenceState?: import("./visit-financial-presentation").VisitInvoiceReferenceState;
   arrivedAt: string;
   procedures: ProcedureLine[];
   totalMinor: number;
@@ -16711,6 +16713,7 @@ interface ClinicalRow {
   chief_complaint: string | null; examination: string | null; diagnosis: string | null;
   treatment_done: string | null; next_plan: string | null; addendum: string | null;
   doctor_id: number | null; signed_at: Date | null; signed_by: string | null;
+  invoice_reference_state: import("./visit-financial-presentation").VisitInvoiceReferenceState;
   invoice_id: number | null; arrived_at: Date; billing_currency: string | null;
 }
 
@@ -16749,7 +16752,11 @@ export async function getClinicalVisit(
   const { rows } = await pool.query<ClinicalRow>(
     `SELECT id, patient_id, patient_name, patient_phone, chief_complaint, examination, diagnosis,
             treatment_done, next_plan, addendum, doctor_id, signed_at, signed_by,
-            invoice_id, arrived_at, billing_currency
+            invoice_id, arrived_at, billing_currency,
+            CASE WHEN invoice_id IS NULL THEN 'missing' ELSE COALESCE((
+              SELECT CASE WHEN i.status = 'cancelled' THEN 'cancelled' ELSE 'current' END
+                FROM invoices i WHERE i.id = visits.invoice_id AND i.patient_id = visits.patient_id
+            ), 'review') END AS invoice_reference_state
        FROM visits WHERE id = $1`,
     [visitId],
   );
@@ -16812,6 +16819,7 @@ export async function getClinicalVisit(
     signedAt: row.signed_at?.toISOString() ?? null,
     signedBy: row.signed_by,
     invoiceId: row.invoice_id,
+    invoiceReferenceState: row.invoice_reference_state,
     arrivedAt: row.arrived_at.toISOString(),
     procedures,
     totalMinor: visitTotal(procedures),
@@ -16900,7 +16908,7 @@ export const ORTHO_CASE_FUNDED_SQL =
     WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled')`;
 
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
-async function orthoAdjustmentBillingClass(
+export async function orthoAdjustmentBillingClass(
   db: DbClient | DbPool, caseId: number, patientId: number,
 ): Promise<BillingClassification> {
   const { rows: [evidence] } = await db.query<{
