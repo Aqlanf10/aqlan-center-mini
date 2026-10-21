@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/ortho-prescription-diagnostic.yml
       - __tests__/security-http/ortho-prescription-truth-built-page.test.ts
+      - components/PatientOrtho.tsx
 
 permissions:
   contents: read
