@@ -1,0 +1,10 @@
+
+ RUN  v4.1.11 /workspace/plan-consent-audit
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  2 passed (2)
+      Tests  13 passed (13)
+   Start at  02:21:28
+   Duration  5.10s (transform 1.36s, setup 0ms, import 2.58s, tests 2.00s, environment 0ms)
+
