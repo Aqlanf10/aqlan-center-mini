@@ -171,7 +171,7 @@ it("real browser PatientPlans retains the committed split when the reply is lost
   await expect.poll(()=>captured.length).toBe(2);
   expect(captured[1]).toEqual(captured[0]);
   await page.getByTestId("approved-split-receipts").getByRole("link",{name:/طباعة السند/}).first().waitFor();
-  await expect(page.getByTestId("approved-split-receipts").getByRole("link",{name:/طباعة السند/})).toHaveCount(2);
+  expect(await page.getByTestId("approved-split-receipts").getByRole("link",{name:/طباعة السند/}).count()).toBe(2);
   expect((await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n).toBe(3);
  }finally{await context.close();}
 });
