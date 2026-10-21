@@ -17,8 +17,7 @@ export async function GET(request:Request) {
     return NextResponse.json({message:"طلب فحص التحصيل غير صالح."},{status:400});
   try{
     const receipts=await findSimilarCollections(patientId,amountMinor,currency);
-    // Bounded response: refuse a truncated preview, rather than miss a concurrent receipt.
-    if(receipts.length>32)return NextResponse.json({message:"توجد سندات مشابهة كثيرة؛ راجع حساب المريض قبل التحصيل."},{status:409});
+    // Latest 32 receipts bound the preview; new receipts always displace the newest-first snapshot.
     return NextResponse.json({receipts,windowHours:24},{headers:{"Cache-Control":"no-store"}});
   }catch{return NextResponse.json({message:"تعذّر التأكد من السندات السابقة، لم يبدأ التحصيل."},{status:503});}
 }
