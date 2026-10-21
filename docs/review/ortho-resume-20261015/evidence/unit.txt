@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ceph-wits-zero.test.ts __tests__/ceph.test.ts __tests__/ceph-versioned-planes.test.ts __tests__/ceph-ai.test.ts __tests__/ceph-compare.test.ts __tests__/ceph-calendar-date.test.ts __tests__/ceph-superimpose.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+
+ Test Files  7 passed (7)
+      Tests  98 passed (98)
+   Start at  20:16:35
+   Duration  5.41s (transform 1.45s, setup 0ms, import 183ms, tests 4.35s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

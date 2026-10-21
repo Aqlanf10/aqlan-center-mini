@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ceph-wits-zero.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+ ❯ __tests__/ceph-wits-zero.test.ts (7 tests | 1 failed) 11ms
+     × retains a measured zero in the calculation and result table 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ceph-wits-zero.test.ts > WITS zero separation > retains a measured zero in the calculation and result table
+AssertionError: expected NaN to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ NaN
+
+ ❯ __tests__/ceph-wits-zero.test.ts:13:42
+     11| describe("WITS zero separation", () => {
+     12|   it("retains a measured zero in the calculation and result table", ()…
+     13|     expect(measure("WITS", points, 0.5)).toBe(0);
+       |                                          ^
+     14|     expect(computeAll(points, 0.5).find(row => row.code === "WITS")?.v…
+     15|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed (7)
+   Start at  20:16:12
+   Duration  290ms (transform 116ms, setup 0ms, import 136ms, tests 11ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
