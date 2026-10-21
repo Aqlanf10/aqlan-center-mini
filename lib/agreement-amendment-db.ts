@@ -97,7 +97,7 @@ async function snapshot(client:DbClient,planId:number){
  const oldServiceId=events.length?events[events.length-1].new_service_id:item.service_id!;
  const oldUnitMinor=events.length?safe(events[events.length-1].new_unit_minor):safe(item.unit_price_minor);
  const result={planId,patientId:plan.patient_id,itemId:item.id,caseId:item.case_id,doctorId:item.doctor_id,
-  currency,approvalInvoiceId:approval.invoice_id,quantity:item.quantity,oldServiceId,oldUnitMinor,
+  currency,approvalInvoiceId:approval.invoice_id!,quantity:item.quantity,oldServiceId,oldUnitMinor,
   previousAgreementMinor:total,recordedPaymentsMinor:payments,recordedRefundsMinor:refunds,
   previousAmendmentId:events.length?safe(events[events.length-1].id):null,
   sourceProof:root.proofHash,documentProofs:events.map(e=>({id:e.id,invoiceId:e.delta_invoice_id,deltaMinor:e.delta_minor})),
