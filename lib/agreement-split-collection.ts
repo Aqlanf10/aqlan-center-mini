@@ -55,7 +55,7 @@ export function readSplitCollectionEvidence(value:unknown,expected?:ExpectedSpli
     !Number.isFinite(Date.parse(receipt.createdAt))||receipt.baseCurrency!==CLINIC_BASE_CURRENCY||
     !nonnegative(receipt.baseAmountMinor)||typeof receipt.exchangeRate!=="number"||
     !Number.isFinite(receipt.exchangeRate)||receipt.exchangeRate<=0||
-    receipt.baseAmountMinor!==toBaseAmount(receipt.amountMinor,receipt.currency,CLINIC_BASE_CURRENCY,receipt.exchangeRate))
+    receipt.baseAmountMinor!==toBaseAmount(receipt.amountMinor as number,receipt.currency as Currency,CLINIC_BASE_CURRENCY,receipt.exchangeRate as number))
       return null;
   // Top-level legacy receipt must match the first part exactly.
   if(i===0&&(value.receiptNumber!==receipt.receiptNumber||

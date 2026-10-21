@@ -147,7 +147,7 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
 
 export async function approvedAgreementPosition(planId:number,today:string, reader?:DbClient):Promise<{
   planId:number;currency:Currency;totalMinor:number;paidMinor:number;remainingMinor:number;dueNowMinor:number;
-  invoiceId:number|null;openingCurrency:Currency|null;sourceKind:string;available:boolean;deltaInvoiceIds:number[];
+  invoiceId:number|null;openingCurrency:Currency|null;sourceKind:string;available:boolean;deltaInvoiceIds?:number[];
 }|null> {
   if(!reader)return transaction(client=>approvedAgreementPosition(planId,today,client),true);
   const a=await readApprovedAgreement(reader,planId);if(!a)return null;
