@@ -1,9 +1,10 @@
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { Client, type ClientConfig } from "pg";
+import { Client } from "pg";
 import { loadMigrationFiles, migrate, migrationStatus } from "../migrations";
-import { sslForConnection, parseDatabaseHost } from "../db-tls";
+import { parseDatabaseHost } from "../db-tls";
+import { restoreClientConfigFor } from "./client-config";
 import { readTarGzEntries } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
@@ -51,10 +52,6 @@ export interface StagedRestoreResult {
   };
   cutoverSteps: string[];
   errors: string[];
-}
-
-function clientConfigFor(url: string): ClientConfig {
-  return { connectionString: url, ssl: sslForConnection(url) };
 }
 
 /** pool-محاكٍ حول Client واحد — ليستخدمه نظام الهجرات على اتصال مخصص. */
@@ -157,7 +154,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     return result; // لا استعادة قاعدة أصلًا (P1.12)
   }
 
-  const client = new Client(clientConfigFor(options.targetUrl));
+  const client = new Client(restoreClientConfigFor(options.targetUrl));
   try {
     await client.connect();
 
