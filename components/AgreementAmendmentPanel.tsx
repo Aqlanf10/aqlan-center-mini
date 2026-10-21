@@ -16,7 +16,8 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
  const [opened,setOpened]=useState(false),[view,setView]=useState<View|null>(null);
  const [serviceId,setServiceId]=useState(""),[unitPrice,setUnitPrice]=useState("");
  const [reason,setReason]=useState(""),[message,setMessage]=useState<string|null>(null),[busy,setBusy]=useState(false);
- const [pending,setPending]=useState<Pending|null>(null),active=useRef(false),submitting=useRef(false);
+ const [pending,setPending]=useState<Pending|null>(null),[refused,setRefused]=useState(false),
+  [previewVersion,setPreviewVersion]=useState(0),active=useRef(false),submitting=useRef(false);
  useEffect(()=>{active.current=true;
   try{const raw=sessionStorage.getItem(storageKey(planId));if(raw){const parsed:unknown=JSON.parse(raw);if(isPending(parsed))setPending(parsed);}}catch{/* Keep uncertain, never invent success. */}
   return()=>{active.current=false;};
@@ -32,7 +33,7 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
     setView(value as View);setMessage(null);
    }catch{if(!cancelled)setMessage("البيانات أو الهجرة المالية غير جاهزة؛ لا يمكن حفظ التعديل.");}})();
    return()=>{cancelled=true;};
- },[planId,opened]);
+ },[planId,opened,previewVersion]);
  const proposal=useMemo(()=>{
   if(!view||!serviceId||!reason.trim())return null;
   const price=parseAmount(unitPrice,view.currency);
@@ -42,7 +43,7 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
  },[view,serviceId,unitPrice,reason]);
  const send=async()=>{
   if(submitting.current||(!pending&&(!view||!proposal||proposal.deltaMinor<=0)))return;
-  submitting.current=true;setBusy(true);setMessage(null);
+  submitting.current=true;setBusy(true);setMessage(null);setRefused(false);
   try{
    let command=pending;
    if(!command){
@@ -66,10 +67,28 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
      setMessage("تم توثيق فرق الاتفاق. بقيت الفاتورة الأصلية والمدفوعات دون تعديل.");
      setView(null);setOpened(false);
    }else{
-     setMessage("لم تثبت نتيجة الحفظ؛ أعد الطلب نفسه بالمفتاح المحفوظ. لا تنشئ طلبًا بديلًا.");
+     const terminal=!response.redirected&&[400,403,404,409].includes(response.status)&&
+       !!data&&typeof data==="object"&&"code" in data&&
+       ["invalid","unauthorized","missing","stale","conflict"].includes(String(data.code));
+     if(terminal){
+       setRefused(true);
+       setMessage("رفض نهائي مؤكد دون حفظ: "+("message" in data?String(data.message):"أعد مراجعة المصدر")+
+         " يمكنك تحديث المعاينة وتصحيح الطلب بمفتاح جديد.");
+     }else{
+       setMessage("نتيجة غير مؤكدة: احتفظ بالطلب ومفتاحه وأعد المحاولة نفسها؛ لا تصنع طلبًا بديلًا.");
+     }
    }
   }catch{if(active.current)setMessage("انقطع الرد ولم يتأكد الحفظ. الطلب ومفتاحه محفوظان لإعادة المحاولة نفسها.");}
   finally{submitting.current=false;if(active.current)setBusy(false);}
+ };
+ const refreshAfterRefusal=()=>{
+  if(busy||submitting.current||!pending||!refused)return;
+  try{sessionStorage.removeItem(storageKey(planId));}catch{
+    setMessage("تعذر مسح المحاولة المرفوضة؛ لا تنشئ طلبًا جديدًا.");return;
+  }
+  setPending(null);setRefused(false);setView(null);setServiceId("");
+  setUnitPrice("");setMessage("تم إلغاء المحاولة المرفوضة؛ راجع الاتفاق والخدمة والسعر من جديد.");
+  setPreviewVersion(v=>v+1);
  };
  return <section dir="rtl" className="mt-3 space-y-3 rounded-xl border border-amber-300 p-3" data-testid="agreement-amendment">
   <button type="button" className="font-bold underline" onClick={()=>setOpened(!opened)}>ترقية خدمة الاتفاق بفرق مؤرخ</button>
@@ -93,9 +112,11 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
     <div><dt>أثر الخطة</dt><dd>إضافة فرق مالي مؤرخ دون تغيير الأعمال الموقعة</dd></div>
    </dl>:null}
    </>:null}
-   {pending?<p role="status">هناك طلب سابق محفوظ بمفتاح {pending.key.slice(0,8)}… لا تغيّر الطلب حتى تتأكد نتيجته.</p>:null}
+   {pending?<p role="status">هناك طلب سابق محفوظ بمفتاح {pending.key.slice(0,8)}… {refused?"رفضه الخادم نهائيًا ولم يحفظ.":"لا تغيّر الطلب حتى تتأكد نتيجته."}</p>:null}
+   {pending&&refused?<button type="button" className="rounded-lg border px-3 py-2 font-bold" disabled={busy}
+     onClick={refreshAfterRefusal}>تحديث المعاينة وتصحيح الطلب المرفوض</button>:null}
    {message?<p role="alert">{message}</p>:null}
-   <button type="button" className="btn-primary" disabled={busy||(!pending&&(!proposal||proposal.deltaMinor<=0))}
+   <button type="button" className="btn-primary" disabled={busy||refused||(!pending&&(!proposal||proposal.deltaMinor<=0))}
     onClick={()=>void send()}>{busy?"جارٍ التحقق…":pending?"إعادة الطلب المحفوظ نفسه":"حفظ فرق التعديل المؤرخ"}</button>
   </div>:null}
  </section>;
