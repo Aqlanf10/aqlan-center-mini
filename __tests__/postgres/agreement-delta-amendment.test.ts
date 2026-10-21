@@ -23,7 +23,7 @@ beforeAll(async()=>{
  await q("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','140'),('finance.rate.USD','530') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
 },180000);
 afterAll(async()=>{await db.resetPoolForTesting();});
-async function fixture(currency:"YER"|"SAR"|"USD"="YER",paid=180000,doctorPolicy?:"no_cost"|"missing_cost"|"primary_no_cost"){
+async function fixture(currency:"YER"|"SAR"|"USD"="YER",paid=180000,doctorPolicy?:"no_cost"|"missing_cost"|"primary_no_cost",quantity=10){
  const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic agreement upgrade') RETURNING id",[`DELTA-${++serial}`])).rows[0].id as number;
  const oldServiceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES($1,50000,TRUE,TRUE,'prostho') RETURNING id",[`Old crown ${serial}`])).rows[0].id as number;
  const newServiceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES($1,80000,TRUE,TRUE,'prostho') RETURNING id",[`Zircon crown ${serial}`])).rows[0].id as number;
@@ -37,11 +37,11 @@ async function fixture(currency:"YER"|"SAR"|"USD"="YER",paid=180000,doctorPolicy
   await q("INSERT INTO doctor_commission_history(party_id,percent,config,effective_from,source) VALUES($1,20,$2::jsonb,now()-interval '1 day','baseline')",
     [doctorId,config?JSON.stringify(config):null]);
  }
- const plan=await db.createPlanV2({patientId,title:"Synthetic ten crowns",specialty:null,primaryDoctorId:doctorPolicy==="primary_no_cost"?doctorId:null,billingMode:"installments",baseCurrency:currency,startDate:"2026-10-01",note:null,createdBy:session.username,items:[],installments:[{dueDate:"2026-10-01",amountMinor:250000},{dueDate:"2026-12-01",amountMinor:250000}]});
+ const plan=await db.createPlanV2({patientId,title:"Synthetic ten crowns",specialty:null,primaryDoctorId:doctorPolicy==="primary_no_cost"?doctorId:null,billingMode:"installments",baseCurrency:currency,startDate:"2026-10-01",note:null,createdBy:session.username,items:[],installments:[{dueDate:"2026-10-01",amountMinor:25000*quantity},{dueDate:"2026-12-01",amountMinor:25000*quantity}]});
  if(!plan.ok)throw Error(plan.message);
- const itemId=(await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,billing_rule,session_count,doctor_id) VALUES($1,$2,'Ten crowns',10,50000,'once',1,$3) RETURNING id",[plan.planId,oldServiceId,doctorPolicy==="primary_no_cost"?null:doctorId])).rows[0].id;
+ const itemId=(await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,billing_rule,session_count,doctor_id) VALUES($1,$2,'Ten crowns',$4,50000,'once',1,$3) RETURNING id",[plan.planId,oldServiceId,doctorPolicy==="primary_no_cost"?null:doctorId,quantity])).rows[0].id;
  expect(await db.recordPlanConsent({planId:plan.planId,actor:session.username,note:null})).toMatchObject({ok:true});
- const agreement=await approve.approveAgreement({planId:plan.planId,expectedTotalMinor:500000,currency,source:{kind:"new"},reason:"Synthetic approved treatment",idempotencyKey:`delta-approve-${serial}`,session});
+ const agreement=await approve.approveAgreement({planId:plan.planId,expectedTotalMinor:50000*quantity,currency,source:{kind:"new"},reason:"Synthetic approved treatment",idempotencyKey:`delta-approve-${serial}`,session});
  let paymentId:number|null=null;
  if(paid){const result=await approve.collectApprovedAgreement({planId:plan.planId,amountMinor:paid,currency,method:"cash",note:null,idempotencyKey:`delta-paid-${serial}`,session});paymentId=result.paymentId;}
  return {patientId,planId:plan.planId,itemId,oldServiceId,newServiceId,currency,originalInvoiceId:agreement.agreement.invoice_id!,paymentId,doctorId};
@@ -296,4 +296,24 @@ it("protects recorded amendment history from a factory reset and from TRUNCATE; 
  }
  await expect(q("TRUNCATE patients CASCADE")).rejects.toThrow("immutable");
  expect(await snapshot()).toEqual(before);
+});
+
+it("owner acceptance example: 19 crowns from 50,000 to 80,000 posts one 570,000 difference and settles once across both sources", async () => {
+ const f = await fixture("YER", 200000, undefined, 19);
+ const saved = await api.saveAgreementAmendment(f.planId, await command(f), session);
+ expect(saved).toMatchObject({ replayed: false, previousAgreementMinor: 950000, deltaMinor: 570000, revisedAgreementMinor: 1520000,
+   settledMinor: 200000, remainingMinor: 1320000, cashMovementMinor: 0 });
+ expect((await q("SELECT total_minor::int FROM invoices WHERE id=$1", [saved.deltaInvoiceId])).rows).toEqual([{ total_minor: 570000 }]);
+ expect(await approve.approvedAgreementPosition(f.planId, "2026-10-21")).toMatchObject({ totalMinor: 1520000, paidMinor: 200000, remainingMinor: 1320000 });
+ const collection = { planId: f.planId, amountMinor: 1320000, currency: "YER" as const, method: "cash" as const, note: null, idempotencyKey: `delta-nineteen-${serial}`, session };
+ const before = (await db.getOpenShift())!.expected.YER;
+ const paid = await approve.collectApprovedAgreement(collection);
+ expect("collection" in paid && paid.collection).toMatchObject({ amountMinor: 1320000 });
+ const allocations = ("collection" in paid && paid.collection ? (paid.collection as { allocations: { invoiceId: number; amountMinor: number }[] }).allocations : []);
+ expect(allocations).toEqual([{ invoiceId: f.originalInvoiceId, amountMinor: 750000 }, { invoiceId: saved.deltaInvoiceId, amountMinor: 570000 }].map(a => expect.objectContaining(a)));
+ const replay = await approve.collectApprovedAgreement(collection);
+ expect(replay).toMatchObject({ replayed: true, paymentIds: (paid as { paymentIds: number[] }).paymentIds });
+ expect((await db.getOpenShift())!.expected.YER - before).toBe(1320000);
+ expect(await approve.approvedAgreementPosition(f.planId, "2026-10-21")).toMatchObject({ totalMinor: 1520000, paidMinor: 1520000, remainingMinor: 0 });
+ expect((await db.computeDebtRows([f.patientId])).find(row => row.currency === "YER")?.dueMinor ?? 0).toBe(0);
 });
