@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /workspace/plan-consent-audit
+
+
+ Test Files  3 passed (3)
+      Tests  33 passed (33)
+   Start at  02:21:30
+   Duration  576ms (transform 161ms, setup 0ms, import 198ms, tests 46ms, environment 1ms)
+

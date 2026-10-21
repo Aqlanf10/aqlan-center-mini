@@ -453,6 +453,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic current-statement browser/PDF evidence only.
+      - name: Upload current patient statement print artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-statement-current-print-ui
+          path: |
+            .settings-ui-artifacts/patient-statement-current/screen.png
+            .settings-ui-artifacts/patient-statement-current/print.png
+            .settings-ui-artifacts/patient-statement-current/statement-a4.pdf
+            .settings-ui-artifacts/patient-statement-current/layout.json
+            .settings-ui-artifacts/patient-statement-current/pdf-layout.json
+            .settings-ui-artifacts/patient-statement-current/page-*.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic clinical-note containment fixture is allowlisted.
       - name: Upload pending clinical notes UI screenshot
         if: always()

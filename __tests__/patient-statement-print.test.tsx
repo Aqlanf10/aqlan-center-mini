@@ -142,3 +142,124 @@ describe("existing statement print with an explicit cutoff", () => {
     expect(mocks.patientLedger).not.toHaveBeenCalled();
   });
 });
+
+// Synthetic presentation evidence only: no live patient data or database writes.
+import type { Invoice, Payment } from "../lib/db";
+import { ledgerBalancesByCurrency } from "../lib/db";
+import { StatementInvoiceDetails, statementPaymentLabel } from "../app/print/statement/[id]/presentation";
+
+function statementInvoice(overrides: Partial<Invoice> = {}): Invoice {
+  return { id: 1, invoiceNumber: "SYN-INV-1", patientId: 17, patientName: "Synthetic patient",
+    status: "open", totalMinor: 20000, discountMinor: 3000, baseCurrency: "SAR", note: null,
+    createdAt: "2026-09-01T10:00:00Z", items: [{ id: 1, serviceId: 900, doctorId: null,
+      description: "علاج عصب — السن ٢٦", quantity: 2, unitPriceMinor: 10000, totalMinor: 20000 }], ...overrides };
+}
+function statementPayment(overrides: Partial<Payment> = {}): Payment {
+  return { id: 1, receiptNumber: "SYN-REC-1", patientId: 17, patientName: "Synthetic patient",
+    invoiceId: 1, planId: null, openingCurrency: null, shiftId: 1, kind: "payment", reversalOfId: null,
+    amountMinor: 5000, currency: "SAR", exchangeRate: 140, baseAmountMinor: 700000,
+    baseCurrency: "YER", method: "cash", note: null, createdBy: "synthetic", createdAt: "2026-09-02T10:00:00Z", ...overrides };
+}
+
+describe("current patient statement explains stored treatment and discounts", () => {
+  it.each(["open", "paid"] as const)("shows recorded items and gross/discount/net for a %s invoice", async (status) => {
+    const invoice = statementInvoice({ status });
+    const before = structuredClone(invoice);
+    mocks.patientLedger.mockResolvedValue({ invoices: [invoice], payments: status === "paid"
+      ? [statementPayment({ amountMinor: 17000, baseAmountMinor: 2380000 })] : [], openings: [] });
+    const html = renderToStaticMarkup(await run());
+    if (status === "paid") expect(html).toContain("المستحق الحالي مسدّد");
+    for (const value of [invoice.invoiceNumber, invoice.items[0].description, "الكمية", "سعر الوحدة", "إجمالي البند",
+      "الإجمالي قبل الخصم", "الخصم المسجل", "صافي الفاتورة بعد الخصم",
+      formatMoney(10000, "SAR"), formatMoney(20000, "SAR"), formatMoney(3000, "SAR"), formatMoney(17000, "SAR")]) {
+      expect(html).toContain(value);
+    }
+    expect(html).toContain('<td class="num">2</td>');
+    expect(invoice).toEqual(before);
+  });
+
+  it("omits cancelled original invoices entirely and prints their current corrected replacement once", async () => {
+    const original = statementInvoice({ status: "cancelled", invoiceNumber: "SYN-CANCELLED-ORIGINAL",
+      items: [{ ...statementInvoice().items[0], description: "CANCELLED-OLD-TREATMENT" }] });
+    const corrected = statementInvoice({ id: 2, invoiceNumber: "SYN-CORRECTED-2", totalMinor: 14000, discountMinor: 3000,
+      items: [{ ...statementInvoice().items[0], id: 2, unitPriceMinor: 7000, totalMinor: 14000, originInvoiceId: 1 }] });
+    // Payment remains linked to its historical original; filtering is presentation-only.
+    const ledger = { invoices: [original, corrected], payments: [statementPayment()], openings: [] };
+    const before = structuredClone(ledger);
+    mocks.patientLedger.mockResolvedValue(ledger);
+    const html = renderToStaticMarkup(await run());
+    expect(html).not.toContain("SYN-CANCELLED-ORIGINAL");
+    expect(html).not.toContain("CANCELLED-OLD-TREATMENT");
+    expect(html.match(/data-invoice-id="2"/g)).toHaveLength(1);
+    expect(html).not.toContain('data-invoice-id="1"');
+    expect(html).toContain("SYN-REC-1");
+    expect(html).toContain(formatMoney(6000, "SAR"));
+    expect(ledgerBalancesByCurrency(17, ledger, new Map()).SAR.dueMinor).toBe(6000);
+    expect(ledger).toEqual(before);
+  });
+
+  it("shows zero discount and zero-net treatment without inventing catalogue discounts", async () => {
+    const zero = statementInvoice({ totalMinor: 0, discountMinor: 0,
+      items: [{ ...statementInvoice().items[0], unitPriceMinor: 0, totalMinor: 0 }] });
+    mocks.patientLedger.mockResolvedValue({ invoices: [zero], payments: [], openings: [] });
+    const html = renderToStaticMarkup(await run());
+    expect(html).toContain(zero.items[0].description);
+    expect(html).toContain(`الخصم المسجل</td><td class="num">${formatMoney(0, "SAR")}`);
+    expect(html).toContain("المستحق الحالي مسدّد");
+    expect(html).not.toContain(formatMoney(20000, "SAR"));
+  });
+
+  it("renders fully discounted invoices from stored gross, not inferred item discounts", () => {
+    const html = renderToStaticMarkup(createElement(StatementInvoiceDetails, {
+      invoices: [statementInvoice({ discountMinor: 20000 })],
+    }));
+    expect(html).toContain(`الخصم المسجل</td><td class="num">${formatMoney(20000, "SAR")}`);
+    expect(html).toContain(`صافي الفاتورة بعد الخصم</td><td class="num">${formatMoney(0, "SAR")}`);
+  });
+
+  it("preserves independent native-currency balances and real refund/reversal receipts", async () => {
+    const ledger = { invoices: [statementInvoice(), statementInvoice({ id: 2, invoiceNumber: "SYN-USD", baseCurrency: "USD" })],
+      payments: [statementPayment(), statementPayment({ id: 2, receiptNumber: "SYN-REV-2", kind: "refund", reversalOfId: 1,
+        amountMinor: 1000, baseAmountMinor: 140000 }), statementPayment({ id: 3, receiptNumber: "SYN-REF-3",
+        kind: "refund", amountMinor: 500, baseAmountMinor: 70000 })], openings: [] };
+    mocks.patientLedger.mockResolvedValue(ledger);
+    const html = renderToStaticMarkup(await run());
+    expect(html).toContain("عكس سند SYN-REC-1");
+    expect(html).toContain("استرداد");
+    for (const payment of ledger.payments) expect(html).toContain(payment.receiptNumber);
+    expect(html).toContain(formatMoney(13500, "SAR"));
+    expect(html).toContain(formatMoney(17000, "USD"));
+    expect(html).toContain("صافي المحصّل بعد الاستردادات وعكس السندات");
+    expect(ledgerBalancesByCurrency(17, ledger, new Map()).SAR.dueMinor).toBe(13500);
+    expect(ledgerBalancesByCurrency(17, ledger, new Map()).USD.dueMinor).toBe(17000);
+  });
+
+  it("does not interpret note wording as a correction or silently remove refunds", () => {
+    expect(statementPaymentLabel(statementPayment({ note: "تصحيح السند" }), [])).toBe("دفعة");
+    expect(statementPaymentLabel(statementPayment({ kind: "refund", note: "تصحيح السند" }), [])).toBe("استرداد");
+    expect(statementPaymentLabel(statementPayment({ kind: "refund", reversalOfId: 99 }), [])).toBe("عكس سند سابق");
+  });
+
+  it("keeps long RTL treatment rows in a splittable table with repeated invoice identity and headings", async () => {
+    const invoice = statementInvoice({ items: Array.from({ length: 120 }, (_, i) => ({
+      ...statementInvoice().items[0], id: i + 1, description: `بند-${i + 1} ${"علاج طويل متعدد المراحل والأسنان ".repeat(12)}`,
+    })) });
+    mocks.patientLedger.mockResolvedValue({ invoices: [invoice], payments: [], openings: [] });
+    const html = renderToStaticMarkup(await run());
+    expect(html).toContain('class="sheet sheet-a4 statement-sheet" dir="rtl"');
+    expect(html.match(/class="statement-description"/g)).toHaveLength(120);
+    expect(html).toContain("بند-120");
+    expect(html).toContain("overflow-wrap: anywhere");
+    expect(html).toContain("table.statement-invoice td.num, table.statement-invoice th.num");
+    expect(html).toContain("break-inside: auto");
+    expect(html).toContain("display: table-header-group");
+    expect(html).toContain('<thead><tr><th colSpan="4">فاتورة');
+    // Markup contract only; physical multipage browser/PDF verification belongs to hosted CI.
+  });
+
+  it("makes missing stored details explicit rather than fabricating a treatment", () => {
+    const html = renderToStaticMarkup(createElement(StatementInvoiceDetails, { invoices: [statementInvoice({ items: [] })] }));
+    expect(html).toContain("تفاصيل البنود غير مسجلة لهذه الفاتورة");
+    expect(html).toContain(formatMoney(17000, "SAR"));
+  });
+});
