@@ -21,18 +21,28 @@ beforeAll(async()=>{
  await db.openShift({openedBy:session.username,opening:{YER:0,SAR:0,USD:0}});
 },180000);
 afterAll(async()=>{await db.resetPoolForTesting();});
-async function fixture(currency:"YER"|"SAR"|"USD"="YER",paid=180000){
+async function fixture(currency:"YER"|"SAR"|"USD"="YER",paid=180000,doctorPolicy?:"no_cost"|"missing_cost"){
  const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic agreement upgrade') RETURNING id",[`DELTA-${++serial}`])).rows[0].id as number;
  const oldServiceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES($1,50000,TRUE,TRUE,'prostho') RETURNING id",[`Old crown ${serial}`])).rows[0].id as number;
  const newServiceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES($1,80000,TRUE,TRUE,'prostho') RETURNING id",[`Zircon crown ${serial}`])).rows[0].id as number;
+ let doctorId:number|null=null;
+ if(doctorPolicy){
+  doctorId=(await q("INSERT INTO parties(kind,name,commission_percent) VALUES('doctor',$1,20) RETURNING id",[`Synthetic delta doctor ${serial}`])).rows[0].id as number;
+  const config=doctorPolicy==="no_cost"
+    ? {...(await import("../../lib/doctor-permissions")).DEFAULT_DOCTOR_COMMISSION_CONFIG,
+       defaultPercent:20,deductLabCost:false,deductMaterialCost:false,basis:"collected_cash"}
+    : null;
+  await q("INSERT INTO doctor_commission_history(party_id,percent,config,effective_from,source) VALUES($1,20,$2::jsonb,now()-interval '1 day','baseline')",
+    [doctorId,config?JSON.stringify(config):null]);
+ }
  const plan=await db.createPlanV2({patientId,title:"Synthetic ten crowns",specialty:null,primaryDoctorId:null,billingMode:"installments",baseCurrency:currency,startDate:"2026-10-01",note:null,createdBy:session.username,items:[],installments:[{dueDate:"2026-10-01",amountMinor:250000},{dueDate:"2026-12-01",amountMinor:250000}]});
  if(!plan.ok)throw Error(plan.message);
- const itemId=(await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,billing_rule,session_count) VALUES($1,$2,'Ten crowns',10,50000,'once',1) RETURNING id",[plan.planId,oldServiceId])).rows[0].id;
+ const itemId=(await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,billing_rule,session_count,doctor_id) VALUES($1,$2,'Ten crowns',10,50000,'once',1,$3) RETURNING id",[plan.planId,oldServiceId,doctorId])).rows[0].id;
  expect(await db.recordPlanConsent({planId:plan.planId,actor:session.username,note:null})).toMatchObject({ok:true});
  const agreement=await approve.approveAgreement({planId:plan.planId,expectedTotalMinor:500000,currency,source:{kind:"new"},reason:"Synthetic approved treatment",idempotencyKey:`delta-approve-${serial}`,session});
  let paymentId:number|null=null;
  if(paid){const result=await approve.collectApprovedAgreement({planId:plan.planId,amountMinor:paid,currency,method:"cash",note:null,idempotencyKey:`delta-paid-${serial}`,session});paymentId=result.paymentId;}
- return {patientId,planId:plan.planId,itemId,oldServiceId,newServiceId,currency,originalInvoiceId:agreement.agreement.invoice_id!,paymentId};
+ return {patientId,planId:plan.planId,itemId,oldServiceId,newServiceId,currency,originalInvoiceId:agreement.agreement.invoice_id!,paymentId,doctorId};
 }
 const command=async(f:Awaited<ReturnType<typeof fixture>>,key=`upgrade-${++serial}`,price=80000)=>{
  const view=await api.readAgreementAmendment(f.planId,session);
@@ -114,4 +124,71 @@ describe("actual PostgreSQL 18 atomic agreement delta",()=>{
   await expect(api.saveAgreementAmendment(f.planId,{...input,expectedSourceHash:"0".repeat(64)},session)).rejects.toMatchObject({code:"stale"});
   expect((await q("SELECT id FROM agreement_delta_amendments WHERE plan_id=$1",[f.planId])).rows).toHaveLength(0);
  });
+it("settles 620000 once across original 320000 and delta 300000 and matches plan, checkout, statement and cash",async()=>{
+ const f=await fixture("YER",180000),command1=await command(f);
+ const saved=await api.saveAgreementAmendment(f.planId,command1,session);
+ const {readCheckoutDueRecommendationInSnapshot}=await import("../../lib/checkout-due-recommendation-db");
+ const {buildReport,parseFilters}=await import("../../lib/reports");
+ const args=(from:string,to:string)=>parseFilters(new URLSearchParams({preset:"custom",from,to,patientId:String(f.patientId)}));
+ const history=await buildReport("patient-statement",args("2025-01-01","2026-10-20"));
+ expect((await db.computeDebtRows([f.patientId])).find(r=>r.currency==="YER")?.dueMinor).toBe(620000);
+ const checkout=async()=>{
+  const client=await db.getPool().connect();
+  try{
+   await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+   const value=await readCheckoutDueRecommendationInSnapshot(client,{patientId:f.patientId,visitInvoiceId:null,today:"2026-10-21"});
+   await client.query("COMMIT");return value;
+  }catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}
+ };
+ expect((await checkout()).currencies.find(x=>x.currency==="YER")?.currentBalanceMinor).toBe(620000);
+ const before=(await db.getOpenShift())!.expected;
+ const input={planId:f.planId,amountMinor:620000,currency:"YER" as const,method:"cash" as const,note:null,idempotencyKey:`whole-upgrade-${++serial}`,session};
+ const received=await approve.collectApprovedAgreement(input);
+ expect(received.paymentIds).toHaveLength(2);
+ const receipts=(await q("SELECT invoice_id,amount_minor::int AS amount FROM payments WHERE id=ANY($1::int[]) ORDER BY id",[received.paymentIds])).rows;
+ expect(receipts).toEqual([{invoice_id:f.originalInvoiceId,amount:320000},{invoice_id:saved.deltaInvoiceId,amount:300000}]);
+ const after=(await db.getOpenShift())!.expected;
+ expect(after.YER-before.YER).toBe(620000);
+ expect(await approve.collectApprovedAgreement(input)).toMatchObject({paymentIds:received.paymentIds,replayed:true});
+ expect((await db.getOpenShift())!.expected).toEqual(after);
+ expect((await q("SELECT id FROM payments WHERE id=ANY($1::int[])",[received.paymentIds])).rows).toHaveLength(2);
+ expect((await q("SELECT idempotency_key FROM agreement_delta_collection_receipts WHERE plan_id=$1",[f.planId])).rows).toEqual([{idempotency_key:input.idempotencyKey}]);
+ expect((await db.computeDebtRows([f.patientId])).find(r=>r.currency==="YER")?.dueMinor??0).toBe(0);
+ expect(await approve.approvedAgreementPosition(f.planId,"2026-10-21")).toMatchObject({totalMinor:800000,paidMinor:800000,remainingMinor:0});
+ expect((await checkout()).currencies.find(x=>x.currency==="YER")?.currentBalanceMinor??0).toBe(0);
+ const current=await buildReport("patient-statement",args("2026-10-01","2099-12-31"));
+ expect(current.kpis.find(k=>k.key==="balance-YER")?.minor??0).toBe(0);
+ expect(await buildReport("patient-statement",args("2025-01-01","2026-10-20"))).toEqual(history);
+});
+it.each(["no_cost","missing_cost"] as const)("uses actual doctor policy for $s and never mutates historical commission",async policy=>{
+ const f=await fixture("SAR",180000,policy),cmd=await command(f);
+ const prior=(await q("SELECT to_jsonb(h) AS value FROM doctor_commission_history h WHERE party_id=$1 ORDER BY id",[f.doctorId])).rows;
+ const result=await api.saveAgreementAmendment(f.planId,cmd,session);
+ expect((await q("SELECT doctor_id FROM agreement_delta_amendments WHERE id=$1",[result.eventId])).rows).toEqual([{doctor_id:f.doctorId}]);
+ const line=(await q("SELECT doctor_id FROM invoice_items WHERE invoice_id=$1",[result.deltaInvoiceId])).rows[0];
+ if(policy==="no_cost"){expect(result.commissionDecision.state).toBe("policy_resolved");expect(line.doctor_id).toBe(f.doctorId);}
+ else {expect(result.commissionDecision).toMatchObject({state:"pending_cost_evidence",required:["lab"]});expect(line.doctor_id).toBeNull();}
+ expect((await q("SELECT to_jsonb(h) AS value FROM doctor_commission_history h WHERE party_id=$1 ORDER BY id",[f.doctorId])).rows).toEqual(prior);
+ await q("INSERT INTO doctor_commission_history(party_id,percent,config,effective_from,source) VALUES($1,40,NULL,now()+interval '1 second','party')",[f.doctorId]);
+ const stored=(await q("SELECT receipt FROM agreement_delta_amendments WHERE id=$1",[result.eventId])).rows[0].receipt;
+ expect(stored.commissionHistoryId).toBe(result.commissionHistoryId);
+ expect(stored.commissionDecision).toEqual(result.commissionDecision);
+});
+it("rolls back both halves and logical collection receipt when payment audit insert fails",async()=>{
+ const f=await fixture("YER",180000);
+ await api.saveAgreementAmendment(f.planId,await command(f),session);
+ const balances=(await db.computeDebtRows([f.patientId])).find(x=>x.currency==="YER")?.dueMinor;
+ const originalCount=(await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n;
+ await q(`CREATE FUNCTION aqlan_synthetic_collection_audit_fail() RETURNS TRIGGER AS $$ BEGIN
+   IF NEW.action='plan.approved_collection' AND NEW.details::text LIKE '%deltaCollection%'
+     THEN RAISE EXCEPTION 'SYNTHETIC_SPLIT_AUDIT_FAIL'; END IF;RETURN NEW; END; $$ LANGUAGE plpgsql`);
+ await q("CREATE TRIGGER synthetic_collection_audit_fail BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION aqlan_synthetic_collection_audit_fail()");
+ try{
+  await expect(approve.collectApprovedAgreement({planId:f.planId,amountMinor:620000,currency:"YER",method:"cash",note:null,idempotencyKey:`audit-split-${++serial}`,session}))
+   .rejects.toThrow(/SYNTHETIC_SPLIT_AUDIT_FAIL/);
+ }finally{await q("DROP TRIGGER synthetic_collection_audit_fail ON audit_log");await q("DROP FUNCTION aqlan_synthetic_collection_audit_fail()");}
+ expect((await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n).toBe(originalCount);
+ expect((await db.computeDebtRows([f.patientId])).find(x=>x.currency==="YER")?.dueMinor).toBe(balances);
+});
+
 });
