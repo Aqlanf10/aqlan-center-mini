@@ -64,7 +64,11 @@ export function assertSafeLegacyRestoreTarget(connectionString, env = process.en
   // aqlan_backup_precision_* database owned by its fixture helper.
   const isOwnedPrecisionFixture = /^aqlan_backup_precision_[a-f0-9]{32}$/.test(database)
     && env.NODE_ENV === 'test';
-  if (!isLegacyDrill && !isOwnedPrecisionFixture) {
+  // Existing real PG18 agreement restore test creates this dedicated
+  // local synthetic fixture, with no production markers and NODE_ENV=test.
+  const isAgreementRestoreFixture = database === 'aqlan_approved_agreement_restore_test'
+    && env.NODE_ENV === 'test';
+  if (!isLegacyDrill && !isOwnedPrecisionFixture && !isAgreementRestoreFixture) {
     refusal('database must be a dedicated synthetic restore fixture');
   }
   if (url.pathname.slice(1).includes('%') || url.pathname.slice(1) !== database) {
