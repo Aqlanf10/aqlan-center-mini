@@ -649,7 +649,7 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
       ["security_http", "HTTP_RESULT"],
     ] as const) {
       expect(final).toContain(`needs.${job}.result`);
-      expect(final).toContain(`"${result}" != "success"`);
+      expect(final).toContain(`"$${result}" != "success"`);
     }
     expect(final).toContain("exit 1");
   });
