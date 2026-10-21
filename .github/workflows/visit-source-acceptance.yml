@@ -1,0 +1,103 @@
+# LOCAL REVIEW DRAFT ONLY. Install on the dedicated head only after parent authorization.
+# Supplemental acceptance; does not replace the mandatory full composed CI.
+name: Supplemental visit source acceptance
+
+on:
+  pull_request:
+    branches: [fix/visit-source-context]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/visit-source-acceptance.yml
+      - __tests__/security-http/invoice-clinic-continuity-journey.test.ts
+      - __tests__/security-http/visit-source-acceptance-review.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visit-source-acceptance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  visit-source-acceptance:
+    if: >-
+      github.repository == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'review/visit-source-acceptance-hosted' &&
+      github.event.pull_request.base.sha == '1948be2b56cddc7e14b34e1677fcb5dae6bb0635'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d aqlan_p1_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - name: Check out the acceptance PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install supported npm
+        run: npm install -g npm@11
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify environment contract
+        run: npm run verify:environment
+      - name: Verify disposable PostgreSQL major
+        run: |
+          node --input-type=module <<'NODE'
+          import { Client } from 'pg';
+          const url = new URL(process.env.TEST_DATABASE_URL);
+          if (url.hostname !== '127.0.0.1' || url.port !== '5432' || url.pathname !== '/aqlan_p1_test') {
+            throw new Error('Unexpected diagnostic database target');
+          }
+          const db = new Client({ connectionString: url.toString(), ssl: false });
+          await db.connect();
+          try {
+            const { rows } = await db.query('SHOW server_version_num');
+            if (Math.floor(Number(rows[0].server_version_num) / 10000) !== 18) {
+              throw new Error('Diagnostic requires PostgreSQL 18');
+            }
+          } finally { await db.end(); }
+          NODE
+      - name: Build the real application
+        run: npm run build
+      - name: Install hosted Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Install PDF inspection tools
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
+      # Existing global setup creates/seeds/drops its own synthetic HTTP database
+      # and launches the standalone server; no separate server or schema shortcut.
+      - name: Run only the visit source journey file
+        run: npm run test:security-http -- __tests__/security-http/invoice-clinic-continuity-journey.test.ts
+      - name: Preserve only the three synthetic report PDFs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visit-source-acceptance-pdfs
+          path: |
+            artifacts/visit-source-acceptance/mixed.pdf
+            artifacts/visit-source-acceptance/same-day-decisions.pdf
+            artifacts/visit-source-acceptance/historical-agreement.pdf
+          if-no-files-found: warn
+          retention-days: 7
