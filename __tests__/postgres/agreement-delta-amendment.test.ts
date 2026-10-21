@@ -23,23 +23,23 @@ beforeAll(async()=>{
  await q("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','140'),('finance.rate.USD','530') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
 },180000);
 afterAll(async()=>{await db.resetPoolForTesting();});
-async function fixture(currency:"YER"|"SAR"|"USD"="YER",paid=180000,doctorPolicy?:"no_cost"|"missing_cost"){
+async function fixture(currency:"YER"|"SAR"|"USD"="YER",paid=180000,doctorPolicy?:"no_cost"|"missing_cost"|"primary_no_cost"){
  const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic agreement upgrade') RETURNING id",[`DELTA-${++serial}`])).rows[0].id as number;
  const oldServiceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES($1,50000,TRUE,TRUE,'prostho') RETURNING id",[`Old crown ${serial}`])).rows[0].id as number;
  const newServiceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES($1,80000,TRUE,TRUE,'prostho') RETURNING id",[`Zircon crown ${serial}`])).rows[0].id as number;
  let doctorId:number|null=null;
  if(doctorPolicy){
   doctorId=(await q("INSERT INTO parties(kind,name,commission_percent) VALUES('doctor',$1,20) RETURNING id",[`Synthetic delta doctor ${serial}`])).rows[0].id as number;
-  const config=doctorPolicy==="no_cost"
+  const config=(doctorPolicy==="no_cost"||doctorPolicy==="primary_no_cost")
     ? {...(await import("../../lib/doctor-permissions")).DEFAULT_DOCTOR_COMMISSION_CONFIG,
        defaultPercent:20,deductLabCost:false,deductMaterialCost:false,basis:"collected_cash"}
     : null;
   await q("INSERT INTO doctor_commission_history(party_id,percent,config,effective_from,source) VALUES($1,20,$2::jsonb,now()-interval '1 day','baseline')",
     [doctorId,config?JSON.stringify(config):null]);
  }
- const plan=await db.createPlanV2({patientId,title:"Synthetic ten crowns",specialty:null,primaryDoctorId:null,billingMode:"installments",baseCurrency:currency,startDate:"2026-10-01",note:null,createdBy:session.username,items:[],installments:[{dueDate:"2026-10-01",amountMinor:250000},{dueDate:"2026-12-01",amountMinor:250000}]});
+ const plan=await db.createPlanV2({patientId,title:"Synthetic ten crowns",specialty:null,primaryDoctorId:doctorPolicy==="primary_no_cost"?doctorId:null,billingMode:"installments",baseCurrency:currency,startDate:"2026-10-01",note:null,createdBy:session.username,items:[],installments:[{dueDate:"2026-10-01",amountMinor:250000},{dueDate:"2026-12-01",amountMinor:250000}]});
  if(!plan.ok)throw Error(plan.message);
- const itemId=(await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,billing_rule,session_count,doctor_id) VALUES($1,$2,'Ten crowns',10,50000,'once',1,$3) RETURNING id",[plan.planId,oldServiceId,doctorId])).rows[0].id;
+ const itemId=(await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,billing_rule,session_count,doctor_id) VALUES($1,$2,'Ten crowns',10,50000,'once',1,$3) RETURNING id",[plan.planId,oldServiceId,doctorPolicy==="primary_no_cost"?null:doctorId])).rows[0].id;
  expect(await db.recordPlanConsent({planId:plan.planId,actor:session.username,note:null})).toMatchObject({ok:true});
  const agreement=await approve.approveAgreement({planId:plan.planId,expectedTotalMinor:500000,currency,source:{kind:"new"},reason:"Synthetic approved treatment",idempotencyKey:`delta-approve-${serial}`,session});
  let paymentId:number|null=null;
@@ -194,4 +194,46 @@ it("rolls back both halves and logical collection receipt when payment audit ins
  expect((await db.computeDebtRows([f.patientId])).find(x=>x.currency==="YER")?.dueMinor).toBe(balances);
 });
 
+});
+
+
+it("attributes a missing item doctor to the APPROVED primary doctor at the amendment event",async()=>{
+ const f=await fixture("SAR",180000,"primary_no_cost");
+ expect((await q("SELECT doctor_id FROM plan_items WHERE id=$1",[f.itemId])).rows).toEqual([{doctor_id:null}]);
+ const before=(await q("SELECT to_jsonb(h) row FROM doctor_commission_history h WHERE party_id=$1 ORDER BY id",[f.doctorId])).rows;
+ const saved=await api.saveAgreementAmendment(f.planId,await command(f),session);
+ expect(saved.doctorId).toBe(f.doctorId);
+ expect(saved.commissionDecision.state).toBe("policy_resolved");
+ expect((await q("SELECT doctor_id FROM agreement_delta_amendments WHERE id=$1",[saved.eventId])).rows).toEqual([{doctor_id:f.doctorId}]);
+ expect((await q("SELECT doctor_id FROM invoice_items WHERE invoice_id=$1",[saved.deltaInvoiceId])).rows).toEqual([{doctor_id:f.doctorId}]);
+ expect((await q("SELECT to_jsonb(h) row FROM doctor_commission_history h WHERE party_id=$1 ORDER BY id",[f.doctorId])).rows).toEqual(before);
+});
+
+
+it("preserves a populated historical statement before upgrade and after two-source settlement",async()=>{
+ const f=await fixture();
+ // A separate fully-settled, dated source on the SAME synthetic patient.
+ // This is existing history, not an artificial empty pre-amendment report.
+ const shift=(await q("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id LIMIT 1")).rows[0].id;
+ const historicInvoice=(await q(`INSERT INTO invoices
+  (invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by,created_at)
+  VALUES($1,$2,25000,0,'YER','synthetic-history','2026-09-12T10:00:00+03:00') RETURNING id`,
+  [`HIST-UPGRADE-${f.planId}`,f.patientId])).rows[0].id;
+ await q("INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor) VALUES($1,'Synthetic old checkup',1,25000,25000)",[historicInvoice]);
+ await q(`INSERT INTO payments
+  (receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,
+   base_amount_minor,base_currency,method,created_by,created_at)
+  VALUES($1,$2,$3,$4,'payment',25000,'YER',1,25000,'YER','cash','synthetic-history','2026-09-13T10:00:00+03:00')`,
+  [`HIST-RECEIPT-${f.planId}`,f.patientId,historicInvoice,shift]);
+ const {buildReport,parseFilters}=await import("../../lib/reports");
+ const filters=parseFilters(new URLSearchParams({preset:"custom",from:"2026-09-01",to:"2026-09-30",patientId:String(f.patientId)}));
+ const history=await buildReport("patient-statement",filters);
+ expect(history.rows?.length??0).toBeGreaterThan(0);
+ const change=await api.saveAgreementAmendment(f.planId,await command(f),session);
+ expect(change.deltaMinor).toBe(300000);
+ const received=await approve.collectApprovedAgreement({planId:f.planId,amountMinor:620000,currency:"YER",
+  method:"cash",note:null,idempotencyKey:`history-collect-${f.planId}`,session});
+ expect("paymentIds" in received&&received.paymentIds?.length).toBe(2);
+ expect(await buildReport("patient-statement",filters)).toEqual(history);
+ expect((await db.computeDebtRows([f.patientId])).find(r=>r.currency==="YER")?.dueMinor??0).toBe(0);
 });

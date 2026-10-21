@@ -123,3 +123,37 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
   </div>:null}
  </section>;
 }
+
+
+it("a populated historical statement has stable totals after /api/payments distributed collection",async()=>{
+ const f=await fixture();
+ const shift=(await q("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id LIMIT 1")).rows[0].id;
+ const old=(await q(`INSERT INTO invoices
+   (invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by,created_at)
+   VALUES($1,$2,15000,0,'YER','synthetic-history','2026-09-12T10:00:00+03:00') RETURNING id`,
+   [`SPLIT-HIST-${f.planId}`,f.patientId])).rows[0].id;
+ await q("INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor) VALUES($1,'Synthetic earlier care',1,15000,15000)",[old]);
+ await q(`INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,
+   base_amount_minor,base_currency,method,created_by,created_at)
+   VALUES($1,$2,$3,$4,'payment',15000,'YER',1,15000,'YER','cash','synthetic-history','2026-09-13T10:00:00+03:00')`,
+   [`SPLIT-HIST-R-${f.planId}`,f.patientId,old,shift]);
+ const path=`/api/reports?report=patient-statement&preset=custom&from=2026-09-01&to=2026-09-30&patientId=${f.patientId}`;
+ const read=async()=>{
+   const response=await fetch(baseUrl+path,{headers:{cookie:h.sessions.admin.cookie}});
+   expect(response.status,await response.clone().text()).toBe(200);
+   return (await response.json()).result;
+ };
+ const before=await read();
+ expect(before.rows.length).toBeGreaterThan(0);
+ const view=await preview(f.planId);
+ const saved=await authedMutation(`/api/plans/${f.planId}/agreement-amendment`,h.sessions.admin,"POST",JSON.stringify({
+   idempotencyKey:`stable-hist-upgrade-${f.planId}`,expectedSourceHash:view.sourceHash,
+   newServiceId:f.newServiceId,newUnitMinor:80000,reason:"Historical cutoff witness"}));
+ expect(saved.status,await saved.clone().text()).toBe(201);
+ const collection=await authedMutation("/api/payments",h.sessions.admin,"POST",
+  JSON.stringify({patientId:f.patientId,planId:f.planId,kind:"payment",amount:"620000",currency:"YER",method:"cash"}),
+  {"Idempotency-Key":`stable-hist-collect-${f.planId}`});
+ expect(collection.status,await collection.clone().text()).toBe(201);
+ expect((await collection.json()).collection.receipts).toHaveLength(2);
+ expect(await read()).toEqual(before);
+});
