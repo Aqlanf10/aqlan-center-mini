@@ -20235,8 +20235,8 @@ export async function recordPlanConsent(input: {
       charted += 1;
     }
 
-    await client.query("COMMIT");
-    void recordAudit({
+    // Consent, chart entries and their audit evidence commit together.
+    await insertAuditRow(client, {
       action: "plan.consent",
       entity: "treatment_plans",
       entityId: input.planId,
@@ -20247,6 +20247,7 @@ export async function recordPlanConsent(input: {
       },
       actor: input.actor,
     });
+    await client.query("COMMIT");
     return { ok: true, itemCount: itemRows.length, totalMinor };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
