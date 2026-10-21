@@ -11,6 +11,23 @@ const REMOTE_INPUT =
 // This verifies the *actual pg.Client configuration*. Handshake to a real CA
 // is a separate end-to-end staging test, not claimed by this test.
 const CA = '-----BEGIN CERTIFICATE-----\nSYNTHETIC-NO-NETWORK-CA\n-----END CERTIFICATE-----';
+type ObservedPgClient = {
+  connectionParameters: {
+    host: string;
+    database: string;
+    ssl: false | {
+      rejectUnauthorized?: boolean;
+      ca?: string[] | string | Buffer;
+      servername?: string;
+      checkServerIdentity?: unknown;
+    };
+  };
+};
+function actualConnectionParameters(client: Client): ObservedPgClient['connectionParameters'] {
+  // @types/pg intentionally hides this runtime property. Read-only inspection
+  // of the *constructed* pg client is required to catch SSL URL precedence.
+  return (client as unknown as ObservedPgClient).connectionParameters;
+}
 
 afterEach(() => { vi.unstubAllEnvs(); });
 
@@ -30,7 +47,7 @@ describe('restore:full effective node-postgres TLS configuration (without connec
     const config = restoreClientConfigFor(target.connectionString);
     const actualClient = new Client(config); // DO NOT invoke .connect()
 
-    const effective = actualClient.connectionParameters;
+    const effective = actualConnectionParameters(actualClient);
     expect(effective.host).toBe(REMOTE);
     expect(effective.database).toBe('aqlan_recovery_synthetic');
     expect(effective.ssl).toBeTruthy();
@@ -51,7 +68,7 @@ describe('restore:full effective node-postgres TLS configuration (without connec
       { NODE_ENV:'test', DATABASE_ENVIRONMENT:'test' },
     );
     const actualClient = new Client(restoreClientConfigFor(local.connectionString));
-    expect(actualClient.connectionParameters.host).toBe('127.0.0.1');
-    expect(actualClient.connectionParameters.ssl).toBe(false);
+    expect(actualConnectionParameters(actualClient).host).toBe('127.0.0.1');
+    expect(actualConnectionParameters(actualClient).ssl).toBe(false);
   });
 });
