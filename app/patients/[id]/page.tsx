@@ -291,6 +291,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     }
   };
   const canStartTreatmentEntry = summary?.canSeeFinancial === true && !!session && canHandleMoney(session.role);
+  const openExistingAccount = () => {
+    if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !summary?.canSeeFinancial) return false;
+    // Review existing sources without opening a new invoice/agreement chooser.
+    return goTo("account");
+  };
   const openTreatmentEntry = () => {
     if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !canStartTreatmentEntry) return false;
     // The same controller asks every current clinical draft owner before leaving.
@@ -1231,7 +1236,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
-              <PatientOrtho onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
+              <PatientOrtho onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} onOpenAccount={summary?.canSeeFinancial ? openExistingAccount : undefined} patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
             </section>
           )}
 

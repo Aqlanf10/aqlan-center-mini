@@ -1,0 +1,12 @@
+Verified explicit test target: 127.0.0.1:55443/aqlan_finance_test; PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2); server_version_num=180006; aqlan_sec_http absent.
+
+ RUN  v4.1.11 /workspace/finance-composed-acceptance
+
+[security-http] الخادم جاهز على http://127.0.0.1:3249 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  3 passed (3)
+      Tests  14 passed (14)
+   Start at  03:02:42
+   Duration  7.32s (transform 41ms, setup 0ms, import 74ms, tests 4.30s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /workspace/finance-http-acceptance
+
+
+ Test Files  1 passed (1)
+      Tests  40 passed (40)
+   Start at  00:21:09
+   Duration  196ms (transform 61ms, setup 0ms, import 82ms, tests 20ms, environment 0ms)
+

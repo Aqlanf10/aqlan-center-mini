@@ -64,6 +64,9 @@ describe("read-only preflight connection contract", () => {
       ["--fingerprint-drilldown=columns:00", "--write"]]) {
       await expect(runPreflightCli(flags, { NODE_ENV: "test" })).rejects.toThrow("Unsupported arguments");
     }
+    await expect(runPreflightCli(["--purchase-receipts-readiness"], { NODE_ENV: "test" })).rejects.toMatchObject({ code: "DATABASE_URL_REQUIRED" });
+    await expect(runPreflightCli(["--purchase-receipts-readiness=users"], { NODE_ENV: "test" })).rejects.toThrow("Unsupported arguments");
+    await expect(runPreflightCli(["--purchase-receipts-readiness", "--fingerprint-drilldown"], { NODE_ENV: "test" })).rejects.toThrow("Unsupported arguments");
     await expect(runPreflightCli(["--fingerprint-drilldown"], { NODE_ENV: "test" })).rejects.toMatchObject({ code: "DATABASE_URL_REQUIRED" });
     await expect(runPreflightCli(["--fingerprint-drilldown=constraints:3f"], { NODE_ENV: "test" })).rejects.toMatchObject({ code: "DATABASE_URL_REQUIRED" });
   });

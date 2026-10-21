@@ -39,8 +39,8 @@ function readPlans(payload: unknown, patientId: number): PlanOption[] {
 }
 
 /**
- * (P1-B) The case remains clinical; its existing installment agreement is the
- * financial source. An unavailable read must never claim that it is unfunded.
+ * Compatibility reference only. Invoice/historical source and adjustment scope
+ * are read separately; the old plan field must never declare overall absence.
  */
 export function OrthoPackageLink(props: Props) {
   const session = useSession();
@@ -162,13 +162,13 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
       ) : linked ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-extrabold text-navy-900">
-            {funded ? "✓ باقة تقويم: " : "مربوطة بخطة: "}{linked.title}
+            {funded ? "✓ رابط اتفاق أقساط قديم: " : "رابط خطة قديم: "}{linked.title}
           </span>
           <span className="text-slate-700">
             {linked.status === "cancelled" ? "الخطة المربوطة ملغاة — راجع الاتفاق قبل متابعة الفوترة."
               : funded
-                ? "الشدّات مشمولة بالأقساط — بلا عددٍ محدد ولا فاتورة لكل شدّة."
-                : "الخطة بلا أقساط — الشدّات لا تُعدّ مشمولة حتى يُجدوَل الاتفاق."}
+                ? "رابط قائم محفوظ للتوافق؛ مرجع العلاج وشمول الشدّة يُعرضان بصورة مستقلة أعلاه."
+                : "الخطة بلا أقساط؛ هذا وحده لا ينفي مرجع الفاتورة أو الاتفاق السابق ولا يحدد شمول الشدّة."}
           </span>
           {canLink ? (
             <button type="button" disabled={busy} onClick={() => void save(null)}
@@ -179,8 +179,8 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-extrabold text-navy-900">لا اتفاق مالي مربوط بالحالة</span>
-          <span className="text-slate-700">الشدّة تحتاج قرار فوترة حتى تُربط الحالة باتفاق أقساط.</span>
+          <span className="font-extrabold text-navy-900">لا يوجد رابط خطة أقساط قديم</span>
+          <span className="text-slate-700">هذا الرابط ليس مطلوبًا للفاتورة أو الاتفاق السابق؛ راجع مرجع الحالة وشمول الشدّة أعلاه.</span>
           {canLink && agreements.length > 0 ? (
             <>
               <select value={choice} onChange={(event) => {
@@ -195,10 +195,6 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
                 اربط
               </button>
             </>
-          ) : canLink ? (
-            <a href={`/patients/${patientId}?tab=plans`} className="font-bold text-navy-800 underline underline-offset-4">
-              أنشئ اتفاق تقويم من تبويب الخطط
-            </a>
           ) : null}
         </div>
       )}

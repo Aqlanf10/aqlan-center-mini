@@ -81,6 +81,8 @@ export default function TreatmentFinancialContext({
     && (orthoCaseId == null || reference.orthoCaseId === orthoCaseId));
   const documentIds = new Set(references.flatMap((reference) => [...reference.invoiceIds, ...reference.installment.planDocumentIds]));
   const documents = data.documents.filter((document) => documentIds.has(document.invoiceId));
+  const historicalDocumentIds = new Set(references.flatMap((reference) => reference.historicalAgreements.map((agreement) => agreement.documentId)));
+  const historicalDocuments = data.historicalDocuments.filter((document) => historicalDocumentIds.has(document.documentId));
   const currencies = (["YER", "SAR", "USD"] as Currency[]).filter((currency) => {
     const position = data.accountPositions[currency];
     return position && (position.billedMinor !== 0 || position.collectedMinor !== 0 || position.openingMinor !== 0 || position.dueMinor !== 0);
@@ -105,10 +107,15 @@ export default function TreatmentFinancialContext({
         فاتورة #{line.invoiceId} · سطر #{line.invoiceLineId} · قيمة السطر قبل خصم المستند: {formatMoney(line.grossMinor, line.currency)}
       </p>)}
       {reference.historicalAgreements.map((agreement) => <div key={agreement.id} className="space-y-1 rounded bg-amber-50 p-2">
-        <p className="font-medium">اتفاق تاريخي #{agreement.id}{agreement.status === "void" ? " · مُبطل" : ""} · حتى {agreement.historicalAsOf}</p>
-        <p>المتفق: {formatMoney(agreement.agreedMinor, agreement.currency)} · المدفوع قبل النظام: {formatMoney(agreement.previouslyPaidMinor, agreement.currency)}</p>
-        <p>المتبقي عند التسجيل: {formatMoney(agreement.remainingAtRegistrationMinor, agreement.currency)}</p>
-        <p className="text-xs">المتبقي الحالي يُعرض في رصيد المريض بهذه العملة أدناه؛ لا يُنسب تحصيل الرصيد المشترك إلى اتفاق بعينه دون تخصيص مثبت.</p>
+        {agreement.documentId !== null ? <>
+          <p className="font-medium">بند اتفاق تاريخي #{agreement.id} · مستند #{agreement.documentId} · سطر {agreement.documentLine === null ? "غير متاح" : agreement.documentLine + 1}</p>
+          <p className="text-xs">ارتباط البند بالمستند مثبت؛ المدفوع والمتبقي غير موزعين على هذا البند. إجماليات النسخة الحالية للمستند موضحة مرة واحدة أدناه، وليست رصيد هذه الحالة أو قرار شمول أعمالها.</p>
+        </> : <>
+          <p className="font-medium">اتفاق تاريخي #{agreement.id}{agreement.status === "void" ? " · مُبطل" : ""} · حتى {agreement.historicalAsOf}</p>
+          <p>المتفق: {formatMoney(agreement.agreedMinor, agreement.currency)} · المدفوع قبل النظام: {agreement.previouslyPaidMinor === null ? "غير متاح" : formatMoney(agreement.previouslyPaidMinor, agreement.currency)}</p>
+          <p>المتبقي عند التسجيل: {agreement.remainingAtRegistrationMinor === null ? "غير متاح" : formatMoney(agreement.remainingAtRegistrationMinor, agreement.currency)}</p>
+          <p className="text-xs">المتبقي الحالي يُعرض في رصيد المريض بهذه العملة أدناه؛ لا يُنسب تحصيل الرصيد المشترك إلى اتفاق بعينه دون تخصيص مثبت.</p>
+        </>}
       </div>)}
       {reference.installment.mode === "historical_invoice_on_collection" && <p className="text-amber-800">
         مسار أقساط قائم يصدر الفواتير عند التحصيل. يلزم الحفاظ على تاريخه؛ لا تُنشأ فوقه فاتورة بكامل الاتفاق.
@@ -118,6 +125,16 @@ export default function TreatmentFinancialContext({
         {reference.unresolvedReasons.map((reason) => <li key={reason}>{REASON[reason]}</li>)}
       </ul>}
     </article>)}
+    {!!historicalDocuments.length && <div className="space-y-2">
+      <h4 className="font-medium">المستندات التاريخية · كل مستند مرة واحدة</h4>
+      {historicalDocuments.map((document) => <div key={document.documentId} className="space-y-1 rounded-lg border bg-amber-50 p-2">
+        <p className="font-medium">مستند تاريخي #{document.documentId} · النسخة الحالية {document.version} · حتى {document.historicalAsOf}</p>
+        <p>إجمالي المتفق بعد الخصم: {formatMoney(document.agreedMinor, document.currency)} · المدفوع قبل النظام: {formatMoney(document.previouslyPaidMinor, document.currency)}</p>
+        <p>المتبقي بحسب النسخة: {formatMoney(document.remainingAtRevisionMinor, document.currency)}</p>
+        <p className="text-xs">بنود المستند المثبتة لهذا المريض: {document.lines.map((line) => `خطة #${line.planId} / بند #${line.planItemId}${line.clinicalCaseId === null ? "" : ` / حالة #${line.clinicalCaseId}`}`).join("؛ ")}</p>
+        <p className="text-xs text-slate-600">هذه إجماليات المستند كله، وليست رصيدًا مخصصًا لكل بند أو حالة. السداد اللاحق يظهر في حساب المريض أدناه؛ لا يُفترض توزيع المدفوع أو المتبقي على الحالات، ولا يُستنتج شمول أعمال إضافية.</p>
+      </div>)}
+    </div>}
     {!!documents.length && <div className="space-y-2">
       <h4 className="font-medium">المستندات الفعلية · كل مستند مرة واحدة</h4>
       {documents.map((document) => <div key={document.invoiceId} className="space-y-1 rounded-lg border bg-white p-2">

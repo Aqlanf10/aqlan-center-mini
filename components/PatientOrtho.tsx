@@ -379,11 +379,12 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatmentEntry, onClinicalChange, onNavigationGuardChange }: {
+export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange, onNavigationGuardChange }: {
   patientId: number;
   context?: ClinicalNavigationContext;
   onContextChange?: (context: ClinicalNavigationContext) => unknown;
   onOpenTreatmentEntry?: () => unknown;
+  onOpenAccount?: () => unknown;
   onClinicalChange?: () => void;
   /** The page owns navigation; cleanup retires only this exact registration. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
@@ -410,11 +411,11 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onClinicalChange={onClinicalChange} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onOpenAccount={onOpenAccount} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTreatmentEntry, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onClinicalChange?: () => void }) {
+function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onOpenAccount?: () => unknown; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -568,9 +569,6 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
         <p>لإضافة علاج جديد أو اتفاق سابق، ابدأ من الحساب لربط الخطة والفاتورة أو الرصيد السابق.</p>
         <button type="button" onClick={() => onOpenTreatmentEntry()} className="mt-2 min-h-11 rounded-lg bg-sky-800 px-3 text-white">إضافة علاج أو اتفاق</button>
       </div> : null}
-      {context?.orthoCaseId !== undefined ? <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
-        planId={context.planId} planItemId={context.planItemId} clinicalCaseId={context.clinicalCaseId} orthoCaseId={context.orthoCaseId}
-        onOpenClinicalContext={(reference) => onContextChange?.(reference)} /> : null}
       <button type="button" aria-label="تحديث كابينة التقويم" onClick={load}
         className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold">تحديث كابينة التقويم</button>
       {owner.drafts.get("case-patch")?.uncertain ? <UncertainWrite draft={owner.drafts.get("case-patch")!} /> : null}
@@ -694,6 +692,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
             const wires = wiresFor(row.slot);
             const currentPillar: OrthoPillar = activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? "wires";
 
+            const FinancialContextContainer = currentPillar === "prescription" ? "details" : "div";
+
             return (
               <li
                 key={row.id}
@@ -702,7 +702,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 }`}
               >
                 {/* رأس الحالة التقويمية */}
-                <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "p-3 sm:p-4" : "p-4"}`}>
+                <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "px-3 py-1 sm:p-4" : "p-4"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-navy-800 text-xs font-bold text-white">
@@ -740,15 +740,25 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </div>
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
-                  {row.baselineKind === "legacy" && (row.status === "active" || row.status === "retention")
-                    ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
-                        refreshRevision={onboardingRevision} /> : null}
+                  <FinancialContextContainer data-testid="ortho-financial-context" className={currentPillar === "prescription" ? "mt-2" : undefined}>
+                    {currentPillar === "prescription" ? <summary className="min-h-11 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700">
+                      مرجع الحالة المالي وشمول الشدّة
+                    </summary> : null}
+                    <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
+                      planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
+                      onOpenClinicalContext={(reference) => onContextChange?.(reference)} />
+                    {(row.status === "active" || row.status === "retention")
+                      ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
+                          refreshRevision={onboardingRevision} onOpenAccount={onOpenAccount} /> : null}
+                  </FinancialContextContainer>
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
-                      <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
-                        canLink={session?.role === "admin" || session?.role === "reception"
-                          || (session?.role === "doctor" && session.permissions?.canEditPlans !== false)}
-                        onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
+                      <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">رابط خطة أقساط قديم · للتوافق فقط</summary>
+                        <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
+                          canLink={row.planId !== null && (session?.role === "admin" || session?.role === "reception"
+                            || (session?.role === "doctor" && session.permissions?.canEditPlans !== false))}
+                          onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
+                      </details>
                     ) : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
@@ -822,7 +832,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 </div>
 
                 {/* محتوى الركن المختار */}
-                <div className={currentPillar === "prescription" ? "p-2 sm:p-4" : "p-4"}>
+                <div className={currentPillar === "prescription" ? "px-2 py-1 sm:p-4" : "p-4"}>
                   {/* ────────────────── الركن الأول: مسار الأسلاك والشدّات ────────────────── */}
                   {currentPillar === "wires" && (
                     <div className="space-y-4">
@@ -1028,8 +1038,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   {currentPillar === "prescription" && (
                     <div className="space-y-2 sm:space-y-4">
                       <OrthoStrategyPanel patientId={patientId} caseRow={row} />
-                      <div className="rounded-2xl border border-slate-200 bg-white p-2 sm:p-4">
-                        <h4 className="mb-2 text-xs sm:mb-3 font-black text-navy-900">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-2 py-1 sm:p-4">
+                        <h4 className="mb-1 text-xs sm:mb-3 font-black text-navy-900">
                           وصفة الجهاز والمواصفات الميكانيكية
                         </h4>
                         <div className="grid grid-cols-1 gap-0.5 text-xs sm:grid-cols-3 sm:gap-3">
@@ -1062,8 +1072,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                         </div>
 
                         {row.note && (
-                          <div className="mt-2 rounded-xl bg-slate-50 p-2 sm:mt-3 sm:p-3 border border-slate-100 text-xs">
-                            <span className="block font-bold text-slate-500 mb-1">ملاحظات خطة العلاج والميكانيكا:</span>
+                          <div className="mt-2 rounded-xl bg-slate-50 px-2 py-1 sm:mt-3 sm:p-3 border border-slate-100 text-xs">
+                            <span className="block font-bold text-slate-500 sm:mb-1">ملاحظات خطة العلاج والميكانيكا:</span>
                             <p className="text-slate-800">{row.note}</p>
                           </div>
                         )}

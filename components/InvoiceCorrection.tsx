@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { formatMoney, parseAmount, toInputAmount, type Currency } from "@/lib/money";
+import { CURRENCY_LABEL, formatMoney, parseAmount, toInputAmount, type Currency } from "@/lib/money";
+import { invoiceCurrencyReadiness } from "@/lib/invoice-currency-readiness";
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
@@ -69,6 +70,8 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
     return {lines,total,discountMinor,after,remaining,credit:Math.max(0,settledMinor-after),before:view.invoice.totalMinor-view.invoice.discountMinor};
   },[view,drafts,discount,currency,settledMinor]);
   const allowed=financialRecovery.ready&&session?.role==="admin";
+  const currencyOptions=invoiceCurrencyReadiness({sourceCurrency:view?.invoice.baseCurrency,
+    preview:recovery?"recovery":view?"ready":error?"unavailable":"loading",correction:view?.currencyCorrection});
   const checked=preview?readDebtRepaymentDraft(terms,currency,preview.remaining):null;
   const send=async(command:InvoiceRevisionCommand)=>{
     if(!allowed||pending.current||!lifetime.current.active||command.actor!==session.username||command.patientId!==patientId||command.invoiceId!==invoiceId)return;
@@ -87,7 +90,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
     finally{pending.current=false;if(lifetime.current.active)setBusy(false);}
   };
   const submit=()=>{
-    if(!view||!preview||!checked?.ok||recovery||!allowed||pending.current||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3)return;
+    if(!view||!preview||!checked?.ok||recovery||!allowed||pending.current||!currencyOptions.some(option=>option.currency===currency&&option.selectable)||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3)return;
     const key=newIdempotencyKey();draftRevision.current=financialRecovery.revision;
     const body={...(changingCurrency?{currency}:{}),idempotencyKey:key,expectedSourceHash:view.sourceHash,reason:reason.trim(),lines:preview.lines.map(item=>({itemId:item.id,quantity:item.quantity,unitPrice:toInputAmount(item.unitPriceMinor,currency),serviceId:item.serviceId,doctorId:item.doctorId,toothCode:item.toothCode??null,surfaces:item.surfaces??null})),
       discount:toInputAmount(preview.discountMinor,currency),discountReason:discountReason.trim()||null,repaymentTerms:checked.value,expectedRemainingMinor:preview.remaining};
@@ -95,7 +98,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
   };
   const clearRefused=async()=>{if(!recovery||recovery.outcome!=="refused"||busy)return;try{await financialRecovery.acknowledge(durableInvoiceRevision(recovery));if(lifetime.current.active){onRecoveryChange(null);setReason("");await load();}}catch{setError("تعذّر إغلاق الطلب المرفوض بأمان؛ أعد المحاولة.");}};
   const changeCurrency=(next:Currency)=>{
-    if(!view)return;
+    if(!view||busy||pending.current||recovery||!allowed||!currencyOptions.some(option=>option.currency===next&&option.selectable))return;
     if(next!==view.invoice.baseCurrency&&view.invoice.items.some(item=>{
       const draft=drafts[item.id];
       return !draft?.keep||Number(draft.quantity)!==item.quantity
@@ -114,6 +117,15 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       <button className={button} type="button" disabled={busy||!!recovery} onClick={onCancel}>إغلاق التصحيح</button></div>
     <p className="text-sm leading-7 text-slate-600">راجع المبلغ والأقساط قبل التأكيد. تُحفظ الفاتورة الأصلية وسبب التصحيح، وتبقى إيصالات القبض السابقة مرتبطة بها وتُحتسب للمصححة.</p>
     {error?<p role="alert" className="text-sm text-rose-800">{error}</p>:null}
+    <div aria-label="إتاحة تصحيح العملات" aria-live="polite" className="min-w-0 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+      <p className="font-bold">خيارات العملات في النسخة الحالية</p>
+      {session?.role!=="admin"?<p>تأكيد التصحيح يحتاج جلسة مدير سارية.</p>:!financialRecovery.ready?<p>الحفظ الآمن للطلب غير جاهز؛ انتظر اكتماله أو استعادة الطلب السابق قبل بدء تصحيح جديد.</p>:null}
+      {recovery?<p>يوجد طلب تصحيح محفوظ؛ احسم نتيجته بإعادة نفس الطلب قبل اختيار عملة أو مبلغ جديد.</p>:null}
+      <ul className="space-y-2">{currencyOptions.map(option=><li key={option.currency} data-currency={option.currency} data-readiness={option.status} className="min-w-0 break-words leading-7">
+        <strong>{CURRENCY_LABEL[option.currency]} ({option.currency}): </strong>{option.message}
+      </li>)}</ul>
+      <p>تغيير العملة ليس تحويلًا بسعر صرف: يبقى الرقم المكتوب ويُقرأ بالعملة المختارة. راجع السعر والخصم والأقساط قبل التأكيد؛ لا تُنشأ حركة نقدية جديدة.</p>
+    </div>
     {!view&&!recovery?<button className={button} type="button" onClick={()=>void load()}>إعادة قراءة الفاتورة</button>:null}
     {recovery?<div role="status" data-testid="invoice-revision-recovery" className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
       <p>{busy?"جارٍ حفظ التصحيح…":recovery.message}</p>
@@ -122,8 +134,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
     </div>:null}
     {view?<><fieldset disabled={locked} className="space-y-3">
       <label className="block text-sm font-bold">عملة الفاتورة المصححة<select aria-label="عملة الفاتورة المصححة" className={input} value={currency} onChange={event=>changeCurrency(event.target.value as Currency)}>
-        <option value={view.invoice.baseCurrency}>{view.invoice.baseCurrency}</option>
-        {view.invoice.baseCurrency==="YER"&&view.currencyCorrection?.available?<option value="SAR">SAR — تصحيح العملة مع إعادة تصنيف التسوية</option>:null}
+        {currencyOptions.map(option=><option key={option.currency} value={option.currency} disabled={!option.selectable}>{CURRENCY_LABEL[option.currency]} ({option.currency}){option.selectable?"":" — غير متاح"}</option>)}
       </select></label>
       {view.currencyCorrection?<p className="text-sm leading-7">{view.currencyCorrection.message}</p>:null}
       {changingCurrency?<p role="status" className="text-sm leading-7">تسوية مثبتة {formatMoney(settledMinor,currency)}. لا تُنشأ حركة نقدية، وتبقى أرقام السندات ومبالغها وأسعار صرفها الأصلية محفوظة.</p>:null}
@@ -161,7 +172,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       <p>المحصّل المثبت: {formatMoney(settledMinor,currency)}</p><p>المتبقي للتحصيل: <strong>{formatMoney(preview.remaining,currency)}</strong></p>
       {preview.credit>0?<p className="font-bold text-sky-900">رصيد لصالح المريض {formatMoney(preview.credit,currency)}. صرفه يحتاج إجراء ردّ مستقل.</p>:null}</div>
       <DebtRepaymentEditor value={terms} onChange={setTerms} currency={currency} remainingMinor={preview.remaining} today={clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)} disabled={locked}/></>:null}
-    <button type="button" className={button+" bg-navy-800 text-white"} disabled={locked||!preview||!checked?.ok||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3} onClick={submit}>تأكيد تصحيح الفاتورة</button>
+    <button type="button" className={button+" bg-navy-800 text-white"} disabled={locked||!currencyOptions.some(option=>option.currency===currency&&option.selectable)||!preview||!checked?.ok||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3} onClick={submit}>تأكيد تصحيح الفاتورة</button>
     </>:null}
   </section>;
 }

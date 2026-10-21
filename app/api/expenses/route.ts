@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, ratesFromSettings, recordAudit, recordExpense, voidExpense } from "@/lib/db";
+import { CLINIC_TIME_ZONE, findUserByUsername, getSettings, listExpensesBetween, ratesFromSettings, recordExpense, voidExpense } from "@/lib/db";
 import { parseExpenseRequest, refusalStatus } from "@/lib/expense-request";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { refusalMessage } from "@/lib/supplier-payments";
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
       amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
       exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
-      createdBy: session.username, rates: settingsRates,
+      createdBy: session.username, actorRole: session.role, rates: settingsRates,
       payableExchangeRate: request_.payableExchangeRate,
       rateOverrideReason: request_.rateOverrideReason,
       prepaymentReason: request_.prepaymentReason,
@@ -80,54 +80,6 @@ export async function POST(request: Request) {
         { message: refusalMessage(reason, quote), code: reason, quote },
         { status: refusalStatus(reason) },
       );
-    }
-    if (expense) {
-      await recordAudit({
-        action: "expense.create",
-        entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
-        details: {
-          البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
-          سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
-          الجهة: expense.partyId ?? expense.payeeText,
-          ...(expense.payableId !== null ? {
-            الالتزام: expense.payableId,
-            عملة_الفاتورة: expense.payableCurrency,
-            قيمة_الفاتورة: expense.payableAmountMinor,
-            سعر_الفاتورة: expense.payableExchangeRate,
-            المخصوم_من_الفاتورة: expense.payableSettledMinor,
-            المتبقي_بعد: quote?.payable?.remainingAfterMinor,
-          } : {}),
-        },
-        actor: session.username, actorRole: session.role,
-      });
-      if (expense.rateOverrideReason) {
-        await recordAudit({
-          action: "expense.rate_override",
-          entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
-          details: {
-            العملة: expense.currency,
-            سعر_الإعدادات: request_.settingsExchangeRate,
-            السعر_المستعمل: expense.exchangeRate,
-            عملة_الفاتورة: expense.payableCurrency,
-            سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
-            سعر_الفاتورة_المستعمل: expense.payableExchangeRate,
-            السبب: expense.rateOverrideReason,
-          },
-          actor: session.username, actorRole: session.role,
-        });
-      }
-      if (quote?.party?.prepayment) {
-        await recordAudit({
-          action: "expense.prepayment",
-          entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
-          details: {
-            الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
-            المستحق_قبل: quote.party.outstandingBeforeMinor,
-            السبب: request_.prepaymentReason,
-          },
-          actor: session.username, actorRole: session.role,
-        });
-      }
     }
     return NextResponse.json(expense, { status: 201 });
   } catch {

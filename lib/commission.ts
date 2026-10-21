@@ -45,6 +45,8 @@ export interface DoctorShareItem {
 
 export interface CommissionInvoice {
   id: number;
+  /** Proven same-currency correction-chain root; unchanged by replacement IDs. */
+  allocationOriginId?: number;
   /** صافي الفاتورة — بعملتها (تصحيح ٢). */
   netMinor: number;
   /** (تصحيح ٢) عملة الفاتورة — دلو التوزيع والاستحقاق كله. */
@@ -270,7 +272,7 @@ export function resolveLegacyServiceRateNames(
  * للمريض في عملته ولا يُنسب إلى فاتورة — فلا عمولة على مالٍ لم يقابله عمل.
  */
 export function allocateFifoByCurrency(
-  invoices: { id: number; netMinor: number; createdAt: string; currency: Currency }[],
+  invoices: Pick<CommissionInvoice, "id" | "allocationOriginId" | "netMinor" | "createdAt" | "currency">[],
   collectedByCurrency: Record<Currency, number>,
 ): Map<number, number> {
   const allocation = new Map<number, number>();
@@ -278,7 +280,10 @@ export function allocateFifoByCurrency(
     let pool = Math.max(0, collectedByCurrency[currency] ?? 0);
     const ordered = invoices
       .filter((invoice) => invoice.currency === currency)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      // Replacement IDs do not create new work. Keep the proven source's FIFO
+      // position on a timestamp tie; ordinary invoices use their own identity.
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt)
+        || (a.allocationOriginId ?? a.id) - (b.allocationOriginId ?? b.id) || a.id - b.id);
     for (const invoice of ordered) {
       const covered = Math.min(pool, Math.max(0, invoice.netMinor));
       allocation.set(invoice.id, covered);
