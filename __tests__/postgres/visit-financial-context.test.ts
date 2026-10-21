@@ -158,10 +158,13 @@ it("deduplicates a completed session and direct plan-item path while preserving 
 it("keeps two same-patient plans and their exact invoice sources separate across signed visits",async()=>{
  const p=await patient(),first=await visit(p),second=await visit(p);
  async function separatePlan(visitId:number,title:string){
+  // Canonical prepaid coverage requires known performer identity on the plan work and invoice line.
+  // Keep each plan's physician distinct: missing or cross-plan attribution must not assert coverage.
+  const [doctor]=await q<{id:number}>("INSERT INTO parties(name,kind) VALUES($1,'doctor') RETURNING id",[`Synthetic performer for ${title}`]);
   const [plan]=await q<{id:number}>("INSERT INTO treatment_plans(patient_id,title,total_minor,created_by) VALUES($1,$2,10000,'synthetic') RETURNING id",[p,title]);
-  const [item]=await q<{id:number}>("INSERT INTO plan_items(plan_id,service_id,service_name,category,tooth_code,quantity,unit_price_minor,status,visit_id,billing_status) VALUES($1,$2,'Synthetic separate-plan work','rct',16,1,10000,'done',$3,'billed') RETURNING id",[plan.id,serviceId,visitId]);
+  const [item]=await q<{id:number}>("INSERT INTO plan_items(plan_id,service_id,service_name,category,tooth_code,doctor_id,quantity,unit_price_minor,status,visit_id,billing_status) VALUES($1,$2,'Synthetic separate-plan work','rct',16,$3,1,10000,'done',$4,'billed') RETURNING id",[plan.id,serviceId,doctor.id,visitId]);
   const inv=await invoice(p,0,"open",false);
-  await q("UPDATE invoice_items SET source_type='plan_item',source_id=$1::int,plan_item_id=$1::int WHERE invoice_id=$2",[item.id,inv]);
+  await q("UPDATE invoice_items SET source_type='plan_item',source_id=$1::int,plan_item_id=$1::int,doctor_id=$2 WHERE invoice_id=$3",[item.id,doctor.id,inv]);
   await q("UPDATE plan_items SET billed_invoice_id=$1,origin_invoice_id=$1 WHERE id=$2",[inv,item.id]);
   return {planId:plan.id,itemId:item.id,invoiceId:inv};
  }
