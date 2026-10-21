@@ -39,9 +39,10 @@ function paymentGross(source:Record<string,unknown>,currency:Currency){
  let payments=0,refunds=0;
  for(const candidate of rows as unknown[]){
   if(!record(candidate))fail("سند غير مثبت.");
-  const data=candidate;
-  if(!positive(data.id)||!(data.kind==="payment"||data.kind==="refund"))fail("سند غير مثبت.");
-  const money=settlePaymentMinor({id:data.id,currency:sameCurrency(String(data.currency)),
+  const data=candidate as Record<string,unknown>;
+  const paymentId=data.id;
+  if(!positive(paymentId)||!(data.kind==="payment"||data.kind==="refund"))fail("سند غير مثبت.");
+  const money=settlePaymentMinor({id:paymentId as number,currency:sameCurrency(String(data.currency)),
    amountMinor:safe(data.amount_minor as number),baseAmountMinor:safe(data.base_amount_minor as number)},currency);
   if(data.kind==="payment")payments+=money;else refunds+=money;
   if(!amount(payments)||!amount(refunds))fail("تسوية خارج النطاق الآمن.");
@@ -114,6 +115,13 @@ export async function readAgreementAmendment(planId:number,session:SessionPayloa
  }catch(e){try{await client.query("ROLLBACK");}catch{destroy=true;}throw e;}finally{client.release(destroy);}
 }
 export type AmendmentWrite={idempotencyKey:string;expectedSourceHash:string;newServiceId:number;newUnitMinor:number;reason:string;};
+export interface AgreementDeltaReceipt {
+ planId:number;patientId:number;planItemId:number;caseId:number|null;originalInvoiceId:number;
+ deltaInvoiceId:number;previousServiceId:number;newServiceId:number;currency:Currency;
+ previousAgreementMinor:number;deltaMinor:number;revisedAgreementMinor:number;
+ settledMinor:number;remainingMinor:number;idempotencyKey:string;
+ commissionDecision:string;cashMovementMinor:0;
+}
 export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,session:SessionPayload){
  if(!positive(planId)||!record(input)||Object.keys(input).some(k=>!["idempotencyKey","expectedSourceHash","newServiceId","newUnitMinor","reason"].includes(k))
   ||typeof input.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)
@@ -125,12 +133,14 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
  await ensureSchema();const client=await getPool().connect();let destroy=false;
  try{
   await client.query("BEGIN");await authorize(client,session);
-  const replay=async()=>{
+  const replay=async():Promise<(AgreementDeltaReceipt & {eventId:number;replayed:boolean})|null>=>{
    const row=(await client.query<{request_hash:string;actor_id:number;plan_id:number;receipt:Record<string,unknown>;id:string}>(
     "SELECT request_hash,actor_id,plan_id,receipt,id FROM agreement_delta_amendments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
    if(!row)return null;
    if(row.request_hash!==hash||row.actor_id!==session.userId||row.plan_id!==planId)fail("مفتاح إعادة المحاولة مستعمل لطلب آخر.");
-   return {...row.receipt,eventId:safe(row.id),replayed:true};
+   if(!record(row.receipt)||row.receipt.planId!==planId||row.receipt.idempotencyKey!==input.idempotencyKey||
+     !positive(row.receipt.deltaInvoiceId))fail("إقرار المحاولة السابقة ناقص؛ تحقق من المصادر.");
+   return {...row.receipt as unknown as AgreementDeltaReceipt,eventId:safe(row.id),replayed:true};
   };
   const earlier=await replay();if(earlier){await client.query("COMMIT");return earlier;}
   const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[planId])).rows[0];
@@ -164,7 +174,7 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
     [deltaInvoice.id,input.newServiceId,`فرق ترقية العلاج — ${service.name}`,quote.deltaMinor]);
   // Doctor_id intentionally null: no automatic accrued/earned commission
   // before the canonical policy and incremental cost attribution are verified.
-  const receipt={planId,patientId:before.patientId,planItemId:before.itemId,caseId:before.caseId,
+  const receipt:AgreementDeltaReceipt={planId,patientId:before.patientId,planItemId:before.itemId,caseId:before.caseId,
     originalInvoiceId:before.approvalInvoiceId,deltaInvoiceId:deltaInvoice.id,
     previousServiceId:before.oldServiceId,newServiceId:input.newServiceId,
     currency:before.currency,previousAgreementMinor:quote.previousAgreementMinor,
