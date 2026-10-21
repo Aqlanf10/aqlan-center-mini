@@ -42,7 +42,7 @@ export type AuditAction =
   /* (P1-4) الجهات والخدمات وأسعارها — كانت تتغيّر بلا أثر. */
   | "party.create" | "party.update"
   | "service.create" | "service.update" | "service.prices.batch" | "service.prices.provisional"
-  | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent" | "plan.financial_approval" | "plan.approved_collection" | "plan.proposal_contact"
+  | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent" | "plan.financial_approval" | "plan.agreement_delta_amendment" | "plan.approved_collection" | "plan.proposal_contact"
   /* (FIA-1) الأرصدة الافتتاحية للمعامل والموردين: دَينٌ سابق وتصحيحه، ورصيدٌ مقدَّم وإلغاؤه. */
   | "party_opening.create" | "party_opening.adjust" | "party_advance.create" | "party_advance.void"
   /* (FIN-5) سعر بند خطةٍ خالف الدليل عند إضافته لخطة قائمة — بسببه وقراره. */
@@ -221,6 +221,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "plan.installment": "تحصيل قسط",
   "plan.status": "تغيير حالة خطة",
   "plan.financial_approval": "اعتماد أصل الالتزام المالي",
+  "plan.agreement_delta_amendment": "إضافة فرق ترقية علاج مؤرخ مع حفظ الأصل",
   "plan.approved_collection": "تحصيل من أصل اتفاق معتمد",
   "plan.consent": "موافقة على خطة علاج",
   "plan.proposal_contact": "متابعة عرض علاج مع المريض",

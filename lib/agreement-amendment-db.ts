@@ -34,9 +34,10 @@ async function authorize(client:DbClient,session:SessionPayload){
  if(!active||active.role!=="admin")fail("يتطلب تعديل اتفاق العلاج جلسة مدير سارية.","unauthorized");
 }
 function paymentGross(source:Record<string,unknown>,currency:Currency){
- if(!Array.isArray(source.payments))fail("مصدر التسويات غير مكتمل؛ يلزم مراجعة مالية.");
+ const rows=source.payments;
+ if(!Array.isArray(rows))fail("مصدر التسويات غير مكتمل؛ يلزم مراجعة مالية.");
  let payments=0,refunds=0;
- for(const data of source.payments){
+ for(const data of rows as unknown[]){
   if(!record(data)||!positive(data.id)||!(data.kind==="payment"||data.kind==="refund"))fail("سند غير مثبت.");
   const money=settlePaymentMinor({id:data.id,currency:sameCurrency(String(data.currency)),
    amountMinor:safe(data.amount_minor as number),baseAmountMinor:safe(data.base_amount_minor as number)},currency);
@@ -75,7 +76,7 @@ async function snapshot(client:DbClient,planId:number){
  if(duplicateWork.length)fail("توجد فوترة أخرى للعمل؛ لا تُضاعف أصل العلاج.");
  const events=(await client.query<EventRow>("SELECT id,plan_id,plan_item_id,patient_id,delta_invoice_id,new_service_id,new_unit_minor::text,delta_minor::text,receipt FROM agreement_delta_amendments WHERE plan_id=$1 ORDER BY id",[planId])).rows;
  let total=safe(approval.total_minor),payments=0,refunds=0;
- const root=await readInvoiceSettlementPosition(client,{patientId:plan.patient_id,invoiceId:approval.invoice_id,currency});
+ const root=await readInvoiceSettlementPosition(client,{patientId:plan.patient_id,invoiceId:approval.invoice_id!,currency});
  if(!root.available||root.principalMinor!==safe(approval.total_minor))fail("تغطية الفاتورة الأصلية غير مثبتة.");
  const rootGross=paymentGross(root.sourceSnapshot,currency);
  payments+=rootGross.payments;refunds+=rootGross.refunds;

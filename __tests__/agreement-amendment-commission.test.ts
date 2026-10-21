@@ -1,10 +1,10 @@
 import {expect,it} from "vitest";
 import {decideAmendmentCommission} from "../lib/agreement-amendment-commission";
+import {DEFAULT_DOCTOR_COMMISSION_CONFIG} from "../lib/doctor-permissions";
 const share={category:"prosthodontics",serviceId:7,serviceName:"Zirconia"};
 it("uses the existing policy and does not demand costs policy does not deduct",()=>{
- const policy={percent:20,config:{basis:"collected_cash",deductLab:false,deductMaterials:false}};
- // The real policy resolver may apply config defaults; explicit rules win.
- const result=decideAmendmentCommission({policy:policy as never,atIso:"2026-10-21T00:00:00Z",share});
+ const policy={percent:20,config:{...DEFAULT_DOCTOR_COMMISSION_CONFIG,deductLabCost:false,deductMaterialCost:false}};
+ const result=decideAmendmentCommission({policy,atIso:"2026-10-21T00:00:00Z",share});
  expect(result.state).toBe("policy_resolved");
 });
 it("holds an unproven lab deduction rather than inventing zero",()=>{

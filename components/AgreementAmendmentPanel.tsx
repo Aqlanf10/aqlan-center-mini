@@ -41,11 +41,12 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
    previousUnitPriceMinor:view.oldUnitMinor,selectedUnitPriceMinor:price,reason});}catch{return null;}
  },[view,serviceId,unitPrice,reason]);
  const send=async()=>{
-  if(submitting.current||!view||!proposal||proposal.deltaMinor<=0&&!pending)return;
+  if(submitting.current||(!pending&&(!view||!proposal||proposal.deltaMinor<=0)))return;
   submitting.current=true;setBusy(true);setMessage(null);
   try{
    let command=pending;
    if(!command){
+    if(!view||!proposal)return;
     command={key:crypto.randomUUID(),body:JSON.stringify({idempotencyKey:"",expectedSourceHash:view.sourceHash,
      newServiceId:Number(serviceId),newUnitMinor:proposal.selectedUnitPriceMinor,reason:reason.trim()})};
     const obj=JSON.parse(command.body) as Record<string,unknown>;obj.idempotencyKey=command.key;
