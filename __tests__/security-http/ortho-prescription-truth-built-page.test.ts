@@ -120,19 +120,30 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
       const rect = node.getBoundingClientRect();
       const range = document.createRange(); range.selectNodeContents(node);
       const text = range.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       return { text: node.textContent, fontSize: parseFloat(getComputedStyle(node).fontSize),
         visible: getComputedStyle(node).visibility, display: getComputedStyle(node).display,
         left: text.left, right: text.right, top: text.top, bottom: text.bottom,
-        exposed: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)),
+        exposed: node.contains(hit),
+        element: { tag: node.tagName, className: node.className,
+          left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+        hit: hit ? { tag: hit.tagName, className: hit.getAttribute("class"),
+          role: hit.getAttribute("role"), inNavigation: hit.closest("nav") !== null,
+          inCard: element.contains(hit) } : null,
         isButton: node.tagName === "BUTTON", width: rect.width, height: rect.height };
     });
   });
+  // Preserve the exact synthetic failing scene before fail-closed assertions.
+  // Existing CI allowlists already include these paths; no traces or broad upload.
+  await card.screenshot({ path: `.settings-ui-artifacts/ortho-prescription-${kind}-${width}.png` });
+  await writeFile(`.settings-ui-artifacts/ortho-prescription-${width}-bounds.json`,
+    `${JSON.stringify({ phase: "before-visibility-assertions", width, kind, frame, visibleContent }, null, 2)}\n`);
   for (const entry of visibleContent) {
     expect(entry.fontSize).toBeGreaterThanOrEqual(12);
     expect(entry.visible).toBe("visible"); expect(entry.display).not.toBe("none");
     expect(entry.left).toBeGreaterThanOrEqual(-1); expect(entry.right).toBeLessThanOrEqual(width + 1);
     expect(entry.top).toBeGreaterThanOrEqual(79); expect(entry.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
-    expect(entry.exposed).toBe(true);
+    expect(entry.exposed, JSON.stringify({ kind, viewportWidth: width, ...entry })).toBe(true);
     if (entry.isButton) { expect(entry.width).toBeGreaterThanOrEqual(44); expect(entry.height).toBeGreaterThanOrEqual(44); }
   }
 
