@@ -166,6 +166,50 @@ export interface AgreementDeltaReceipt {
  commissionDecision:AmendmentCommissionDecision;commissionHistoryId:number|null;
  commissionOverrideId:number|null;doctorId:number|null;cashMovementMinor:0;
 }
+/** Per-idempotency database fence: status verification waits for any writer
+ * that entered PostgreSQL. An absent event is NEVER proof of rejection.
+ * Only an immutable, committed stale-rejection record permits key rotation.
+ */
+async function lockAmendmentAttempt(client:DbClient,key:string){
+ await client.query("SELECT pg_advisory_xact_lock(hashtextextended('aqlan:agreement-delta:' || $1::text, 0))",[key]);
+}
+const amendmentDigest=(planId:number,input:AmendmentWrite,session:SessionPayload)=>
+ debtRequestHash({purpose:"agreement-delta-v1",planId,input,actor:session.userId});
+/** POST status only accepts the EXACT saved command; actor never comes from body. */
+export async function readAgreementAmendmentAttemptStatus(planId:number,input:AmendmentWrite,session:SessionPayload){
+ if(!positive(planId)||!record(input)||Object.keys(input).some(k=>!["idempotencyKey","expectedSourceHash","newServiceId","newUnitMinor","reason"].includes(k))
+   ||typeof input.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)
+   ||typeof input.expectedSourceHash!=="string"||!/^[a-f0-9]{64}$/.test(input.expectedSourceHash)
+   ||!positive(input.newServiceId)||!amount(input.newUnitMinor)||typeof input.reason!=="string"
+   ||input.reason.trim().length<3||input.reason.trim().length>300)
+   fail("طلب الاستعلام عن المحاولة غير صالح.","invalid");
+ const hash=amendmentDigest(planId,input,session);
+ await ensureSchema();const client=await getPool().connect();let destroy=false;
+ try{
+  await client.query("BEGIN");await authorize(client,session);
+  await lockAmendmentAttempt(client,input.idempotencyKey);
+  const saved=(await client.query<{id:string;plan_id:number;actor_id:number;request_hash:string;receipt:Record<string,unknown>}>(
+   "SELECT id,plan_id,actor_id,request_hash,receipt FROM agreement_delta_amendments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
+  if(saved){
+    if(saved.actor_id!==session.userId||saved.plan_id!==planId||saved.request_hash!==hash)
+       fail("هذا المفتاح يخص محاولة مختلفة.");
+    if(!record(saved.receipt)||saved.receipt.idempotencyKey!==input.idempotencyKey||
+      !positive(saved.receipt.deltaInvoiceId))fail("إقرار تعديل محفوظ غير متطابق.");
+    await authorize(client,session);await client.query("COMMIT");
+    return {state:"committed" as const,receipt:{...saved.receipt,eventId:safe(saved.id),replayed:true}};
+  }
+  const rejected=(await client.query<{actor_id:number;plan_id:number;request_hash:string;expected_source_hash:string;observed_source_hash:string;rejected_at:Date}>(
+    "SELECT actor_id,plan_id,request_hash,expected_source_hash,observed_source_hash,rejected_at FROM agreement_delta_attempt_rejections WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
+  if(rejected&&(rejected.actor_id!==session.userId||rejected.plan_id!==planId||
+    rejected.request_hash!==hash||rejected.expected_source_hash!==input.expectedSourceHash))
+    fail("بصمة المحاولة المرفوضة غير متطابقة.");
+  await authorize(client,session);await client.query("COMMIT");
+  if(rejected)return {state:"rejected_stale" as const,requestKey:input.idempotencyKey,
+    requestHash:hash,observedSourceHash:rejected.observed_source_hash,rejectedAt:rejected.rejected_at.toISOString()};
+  return {state:"unresolved" as const}; // delayed requests may still arrive; NEVER clear
+ }catch(error){try{await client.query("ROLLBACK");}catch{destroy=true;}throw error;}
+ finally{client.release(destroy);}
+}
 export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,session:SessionPayload){
  if(!positive(planId)||!record(input)||Object.keys(input).some(k=>!["idempotencyKey","expectedSourceHash","newServiceId","newUnitMinor","reason"].includes(k))
   ||typeof input.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)
@@ -173,10 +217,18 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
   ||!positive(input.newServiceId)||!amount(input.newUnitMinor)||typeof input.reason!=="string"
   ||input.reason.trim().length<3||input.reason.trim().length>300)
    fail("يرجى مراجعة الخدمة المحددة والسعر ومفتاح الطلب والسبب.","invalid");
- const hash=debtRequestHash({purpose:"agreement-delta-v1",planId,input,actor:session.userId});
+ const hash=amendmentDigest(planId,input,session);
  await ensureSchema();const client=await getPool().connect();let destroy=false;
  try{
   await client.query("BEGIN");await authorize(client,session);
+  await lockAmendmentAttempt(client,input.idempotencyKey);
+  const staleRejection=(await client.query<{request_hash:string;actor_id:number;plan_id:number}>(
+    "SELECT request_hash,actor_id,plan_id FROM agreement_delta_attempt_rejections WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
+  if(staleRejection){
+    if(staleRejection.request_hash!==hash||staleRejection.actor_id!==session.userId||staleRejection.plan_id!==planId)
+      fail("مفتاح المحاولة المرفوضة مستخدم لطلب مختلف.");
+    fail("هذه المحاولة رُفضت بسبب تغيّر المصدر ولم تُحفظ؛ افحص حالتها قبل تحديث المعاينة.","stale");
+  }
   const replay=async():Promise<(AgreementDeltaReceipt & {eventId:number;replayed:boolean})|null>=>{
    const row=(await client.query<{request_hash:string;actor_id:number;plan_id:number;receipt:Record<string,unknown>;id:string}>(
     "SELECT request_hash,actor_id,plan_id,receipt,id FROM agreement_delta_amendments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
@@ -195,7 +247,16 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
   await client.query("SELECT id FROM plan_items WHERE plan_id=$1 ORDER BY id FOR UPDATE",[planId]);
   const repeated=await replay();if(repeated){await authorize(client,session);await client.query("COMMIT");return repeated;}
   const before=await snapshot(client,planId);
-  if(before.sourceHash!==input.expectedSourceHash)fail("تغيرت مصادر الاتفاق أو التسويات؛ حدّث المعاينة.","stale");
+  if(before.sourceHash!==input.expectedSourceHash){
+    // Positive rejection proof, committed BEFORE replying 409. Do not convert
+    // a mere missing event into permission to discard a pending request.
+    await client.query(`INSERT INTO agreement_delta_attempt_rejections
+      (idempotency_key,request_hash,actor_id,plan_id,patient_id,expected_source_hash,observed_source_hash)
+      VALUES($1,$2,$3,$4,$5,$6,$7)`,[input.idempotencyKey,hash,session.userId,planId,
+      before.patientId,input.expectedSourceHash,before.sourceHash]);
+    await authorize(client,session);await client.query("COMMIT");
+    fail("تغيرت مصادر الاتفاق أو التسويات؛ تحقق من رفض المحاولة ثم حدّث المعاينة.","stale");
+  }
   if(before.patientId!==owner.patient_id)fail("تغير مالك المصدر؛ أوقف التعديل.");
   const service=(await client.query<ServiceRow>("SELECT id,name,category,is_active FROM services WHERE id=$1",[input.newServiceId])).rows[0];
   if(!service?.is_active)fail("يجب اختيار خدمة فعالة صراحة، ولا تكفي كتابة اسمها في السبب.","invalid");
