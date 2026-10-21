@@ -137,6 +137,11 @@ export const RESET_KEEP_TABLES = [
   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
   "hr_staff",
   "hr_staff_changes",
+  // Person/account identity and its correction evidence survive operational reset.
+  "hr_identity_import_runs",
+  "hr_identity_events",
+  "hr_staff_account_links",
+  "hr_staff_party_links",
   "hr_effective_streams",
   "hr_effective_revisions",
   "hr_temporal_write_receipts",
