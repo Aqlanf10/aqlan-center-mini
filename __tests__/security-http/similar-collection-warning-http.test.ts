@@ -28,7 +28,7 @@ async function count(amountMinor:number){
 describe("similar-collection warning has no financial side effects",()=>{
   it("warns on an independent second request, allows deliberate confirmation, replays same key",async()=>{
     // Deliberately unusual amount to avoid seeded fixture overlap.
-    const amount="71593",minor=7159300;
+    const amount="71593",minor=71593;
     const intent={patientId:ctx.seeded.patientAId,kind:"payment",amount,currency:"YER",method:"cash"};
     const preview=await fetch(`${baseUrl}/api/payments/similar?patientId=${ctx.seeded.patientAId}&amountMinor=${minor}&currency=YER`,{
       headers:{Cookie:ctx.sessions.admin.cookie},cache:"no-store"});
