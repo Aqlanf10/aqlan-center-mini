@@ -12,6 +12,7 @@ import {
 } from "@/lib/money";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { useMoneyAttempt } from "./useMoneyAttempt";
+import {useSession} from "./SessionProvider";
 import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
 import {SimilarCollectionWarning,useSimilarCollectionWarning} from "./SimilarCollectionWarning";
 import type {SimilarCollectionReview} from "@/lib/similar-collection";
@@ -116,7 +117,8 @@ export function CollectPaymentModal({
      الإغلاق نصفر الحارس كي يعاد الاقتراح طبيعيًا في الفتح التالي. */
   const initializationKey = `${patientId}:${presetInvoice?.id ?? (presetOpeningCurrency ? `opening-${presetOpeningCurrency}` : presetPlanId ? `plan-${presetPlanId}` : "account")}:${initialCurrency}`;
   const money = useMoneyAttempt(`collection:${patientId}`, isOpen, initializationKey,{patientId});
-  const similarity = useSimilarCollectionWarning();
+  const session=useSession();
+  const similarity = useSimilarCollectionWarning(JSON.stringify([patientId,initializationKey,isOpen,session?.username,session?.role]));
   const initializedSessionRef = useRef<string | null>(null);
   const [initializedFor, setInitializedFor] = useState<string | null>(null);
   const formReady = initializedFor === initializationKey;
