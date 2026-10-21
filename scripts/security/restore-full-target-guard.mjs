@@ -64,6 +64,11 @@ export function validatedRestoreFullTarget(raw, env = process.env) {
   clean.search = '';
   clean.hash = '';
   clean.pathname = '/' + name;
-  clean.searchParams.set('sslmode', loopback ? 'disable' : 'verify-full');
+  // Do not forward sslmode=verify-full to node-postgres: pg-connection-string
+  // may replace the explicitly supplied { ca, rejectUnauthorized, servername }
+  // object when an sslmode query option is present. The guard has already
+  // required verify-full in the INPUT for remote staging; the actual TLS
+  // verification is enforced in restoreClientConfigFor, not URL query parsing.
+  if (loopback) clean.searchParams.set('sslmode', 'disable');
   return { connectionString: clean.toString(), host, database: name, local: loopback };
 }
