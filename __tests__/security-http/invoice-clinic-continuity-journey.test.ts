@@ -627,7 +627,7 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
       // The output identifies a font with correct extractable logical text before any product font change.
       const probe=await print.context.newPage();
       try {
-        const choices=["DejaVu Sans","Noto Sans Arabic","Noto Naskh Arabic","Arial","Tahoma","serif","sans-serif"];
+        const choices=["DejaVu Sans","Noto Sans Arabic","Noto Naskh Arabic","Arial","Tahoma","serif","sans-serif","Amiri"];
         const rows=choices.map((font,index)=>
           '<div class="probe" style="font-family:&#39;'+font+'&#39;">'+
           '<span class="id">FONT'+index+'</span><span lang="ar" dir="rtl">'+word+'</span></div>').join("");
@@ -645,6 +645,34 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
           fonts:choices,
           extractedLines:extracted.split(/\r?\n/).filter(line=>line.includes("FONT")).slice(0,choices.length),
           embeddedFonts:execFileSync("pdffonts",[probePdf],{encoding:"utf8"}).split("\n").slice(0,14),
+        }));
+
+        // All candidates preserve the literal DOM string. Probe shaping instead of tampering
+        // with the report's mandatory extracted-text assertion.
+        const variants=[
+          ["normal",""],
+          ["liga-disabled","font-variant-ligatures:none;font-feature-settings:'liga' 0,'rlig' 0"],
+          ["rlig-disabled","font-feature-settings:'rlig' 0"],
+          ["no-kerning","font-kerning:none;text-rendering:optimizeSpeed"],
+          ["plaintext","unicode-bidi:plaintext;direction:rtl"],
+          ["isolate","unicode-bidi:isolate;direction:rtl"],
+          ["letter-spacing","letter-spacing:0.15px"],
+        ] as const;
+        const html=variants.map(([name,style],index)=>
+          '<p class="variant" style="'+style+'"><span>CASE'+index+'</span><b dir="rtl">'+word+'</b></p>').join("");
+        await probe.setContent('<!doctype html><html lang="ar"><meta charset="utf-8"><style>'+
+          '@page{size:A4;margin:12mm}.variant{font-family:"DejaVu Sans";font-size:18px;display:flex;'+
+          'justify-content:space-between;white-space:nowrap;margin:18px 0}.variant span{font:12px monospace}'+
+          '</style><body>'+html+'</body></html>');
+        await probe.evaluate(()=>document.fonts.ready);
+        const variantsPdf=directory+"/same-day-shaping-probe.pdf";
+        await writeFile(variantsPdf,await probe.pdf({preferCSSPageSize:true,printBackground:true}));
+        const variantsText=execFileSync("pdftotext",["-layout",variantsPdf,"-"],{encoding:"utf8"});
+        execFileSync("pdftoppm",["-f","1","-l","1","-r","150","-png","-singlefile",
+          variantsPdf,directory+"/same-day-shaping-probe"],{maxBuffer:1024*1024});
+        console.info("PDF Arabic shaping variants:",JSON.stringify({
+          variants:variants.map(v=>v[0]),
+          extractedLines:variantsText.split(/\r?\n/).filter(line=>line.includes("CASE")).slice(0,variants.length),
         }));
       } finally {await probe.close();}
     }
