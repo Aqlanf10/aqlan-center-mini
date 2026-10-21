@@ -141,7 +141,7 @@ async function expenses(rows: ExpenseFixture[]) {
 }
 
 function expenseComparison(result: ReportResult) {
-  return result.comparison?.entries.find((entry) => entry.label === "المصروفات");
+  return result.comparison?.entries.find((entry) => entry.label === "سندات الصرف (المكافئ الأساسي)");
 }
 function minor(result: ReportResult, key: string) {
   return result.kpis.find((item) => item.key === key)?.minor;
@@ -300,7 +300,7 @@ describe("RPT-EXPENSE-COMPARISON", () => {
       { id: 2, at: at("2026-10-01"), minor: 350 },
     ]);
     const result = await read("2026-10-01", "2026-10-01");
-    expect(result.comparison?.entries.find((entry) => entry.label === "التحصيل"))
+    expect(result.comparison?.entries.find((entry) => entry.label === "التحصيل بعملة التسوية"))
       .toMatchObject({ currentMinor: 2_300, previousMinor: 1_500 });
     expect(expenseComparison(result)).toMatchObject({ currentMinor: 350, previousMinor: 200 });
     expect(minor(result, "collected")).toBe(2_300);

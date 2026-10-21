@@ -1731,16 +1731,17 @@ function monthlyReport(ctx: ReportContext): ReportResult {
     countKpi("patients", "إجمالي المرضى", summary.patients),
     countKpi("new", "مرضى جدد", summary.newPatients, "good"),
     countKpi("visits", "الزيارات", summary.visits),
-    ...moneyKpis("invoiced", "قيمة الخدمات", summary.invoicedByCurrency),
-    ...moneyKpis("collected", "التحصيل", summary.collectedByCurrency, "good"),
+    ...moneyKpis("invoiced", "صافي الفواتير بعد الخصم", summary.invoicedByCurrency),
+    ...moneyKpis("collected", "التحصيل بعملة التسوية", summary.collectedByCurrency, "good"),
     ...moneyKpis("newDebt", "مديونية جديدة (صافي)", summary.newDebtByCurrency, "warn"),
     ...moneyKpis("oldDebt", "تحصيل ديون قديمة", summary.oldDebtByCurrency, "info"),
-    moneyKpi("expenses", "المصروفات", summary.expensesMinor, base, "bad"),
+    moneyKpi("expenses", "سندات الصرف (المكافئ الأساسي)", summary.expensesMinor, base, "bad",
+      "صافي السندات وعكسها حسب تاريخ التسجيل، بالقيمة الأساسية المحفوظة"),
     ...moneyKpis("outstanding", "المستحقات بنهاية الفترة", summary.outstandingEnd, "warn"),
-    // (P-01/D-1) الصافي بالأساس وحده: المصروف بعملة الأساس فلا يُطرح من فواتير
-    // عملةٍ أخرى — ذلك طرحٌ عابرٌ للعملات محظور.
-    moneyKpi("net", "صافي الإيراد (الأساس)", summary.invoicedByCurrency[base] - summary.expensesMinor, base, "info",
-      "قيمة الخدمات المسجلة بالأساس ناقص المصروفات — أساس الاستحقاق لا الصندوق"),
+    // Historical key and arithmetic retained for consumers; this mixed-source
+    // difference is neither accrual profit nor net cash flow.
+    moneyKpi("net", "فرق الفواتير وسندات الصرف (الأساس)", summary.invoicedByCurrency[base] - summary.expensesMinor, base, "info",
+      "صافي الفواتير بالعملة الأساسية ناقص مكافئ سندات الصرف؛ ليس صافي ربح أو تدفق نقدي"),
   ];
 
   let comparison: ReportResult["comparison"];
@@ -1767,9 +1768,9 @@ function monthlyReport(ctx: ReportContext): ReportResult {
     comparison = {
       title: compare.label,
       entries: [
-        ...entry("التحصيل", summary.collectedByCurrency, prev.collectedByCurrency),
-        ...entry("قيمة الخدمات", summary.invoicedByCurrency, prev.invoicedByCurrency),
-        ...entry("المصروفات", { YER: summary.expensesMinor, SAR: 0, USD: 0 }, { YER: prev.expensesMinor, SAR: 0, USD: 0 }),
+        ...entry("التحصيل بعملة التسوية", summary.collectedByCurrency, prev.collectedByCurrency),
+        ...entry("صافي الفواتير بعد الخصم", summary.invoicedByCurrency, prev.invoicedByCurrency),
+        ...entry("سندات الصرف (المكافئ الأساسي)", { YER: summary.expensesMinor, SAR: 0, USD: 0 }, { YER: prev.expensesMinor, SAR: 0, USD: 0 }),
         ...entry("المستحقات", summary.outstandingEnd, prev.outstandingEnd),
       ],
     };
@@ -1797,7 +1798,10 @@ function monthlyReport(ctx: ReportContext): ReportResult {
     })),
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "«صافي الإيراد» على أساس الاستحقاق: الإيراد من الفواتير بعملتها، والمصروف بالأساس عند نشوئه.",
+      "الفرق مؤشر مختلط المصادر، وليس صافي ربح على أساس الاستحقاق أو صافي تدفق نقدي؛ مستحقات الموردين غير المدفوعة لا تدخل فيه.",
+      `تُحدّد الفترة بتواريخ التسجيل في منطقة العيادة الزمنية (${CLINIC_TIME_ZONE}): تاريخ الفاتورة للفواتير، وتاريخ الدفعة أو الاسترداد للتحصيل، وتاريخ سند الصرف للصرف؛ وليس تاريخ استحقاق المورد.`,
+      "الفواتير بعد الخصم بعملة الفاتورة؛ التحصيل هو الدفعات ناقص الاستردادات بعملة التسوية وبالدليل المحفوظ، وليس بالضرورة عملة النقد المقبوض. الاسترداد يخفض التحصيل ولا يُطرح مرة أخرى من الفواتير أو يُضاف للصرف.",
+      `الفرق يستخدم فواتير ${base} وحدها ومكافئ سندات الصرف المحفوظ بعملة ${base}؛ لا يضم فواتير العملات الأخرى ولا يعيد تحويلها بسعر اليوم.`,
       "أكثر الخدمات مرتَّب داخل كل عملة — الخدمة نفسها بعملتين سطران بعملتيهما.",
     ],
   };
