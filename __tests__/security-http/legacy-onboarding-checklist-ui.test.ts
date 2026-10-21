@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { baseUrl, harness } from "./_server";
 
 // Remote CI only. Actual parent/package/checklist rendering and canonical GETs.
-// Only the two explicit link/unlink PATCHes to this owned synthetic case may
+// Only the explicit unlink PATCH to this owned synthetic case may
 // write. Agreement, receipt, invoice, opening, arrangement and manual-journal
 // snapshots must remain unchanged; every other browser write is blocked.
 let h: Awaited<ReturnType<typeof harness>>;
@@ -16,6 +16,7 @@ let caseId = 0;
 let planId = 0;
 const stamp = Date.now();
 const included = "الشدّة اليوم مشمولة باتفاق الأقساط — بلا فاتورة مستقلة.";
+const outside = "الشدّة اليوم تحتاج قرار فوترة (خارج العقد أو تُفوتر كل جلسة).";
 const unavailable = "تعذّر تحديث تهيئة الحالة السابقة؛ لا يمكن تأكيد تغطية الشدّة من هذه القراءة.";
 const retry = "أعد تحميل تهيئة الحالة السابقة";
 const checklistPath = () => `/api/patients/${patientId}/legacy-onboarding`;
@@ -106,7 +107,7 @@ async function open(width: number, failPlans: boolean) {
       const body: unknown = req.postDataJSON();
       if (!failPlans && req.method() === "PATCH" && url.pathname === `/api/ortho/${caseId}`
         && body !== null && typeof body === "object" && Object.keys(body).join() === "planId"
-        && ((body as { planId?: unknown }).planId === null || (body as { planId?: unknown }).planId === planId)) {
+        && (body as { planId?: unknown }).planId === null) {
         writes.push(body as { planId: number | null }); await route.continue(); return;
       }
       blocked.push(`${req.method()} ${url.pathname}`); await route.abort(); return;
@@ -130,6 +131,7 @@ async function open(width: number, failPlans: boolean) {
     await page.goto(`${baseUrl}/patients/${patientId}?tab=ortho`, { waitUntil: "domcontentloaded" });
     const checklist = page.getByRole("region", { name: "تهيئة الحالة السابقة", exact: true });
     const agreement = page.getByRole("region", { name: "اتفاق التقويم", exact: true });
+    await page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact: true }).click();
     await checklist.getByText(included, { exact: true }).waitFor();
     return { context, page, checklist, agreement, held, writes,
       setMode: (next: typeof mode) => { mode = next; },
@@ -149,7 +151,7 @@ describe("legacy checklist confirmed-context refresh in the real parent", () => 
     } finally { await f.context.close(); }
   });
 
-  it.each([1280, 390])("retires a confirmed unlink label on error and fences its late read after relink at %ipx", async (width) => {
+  it.each([1280, 390])("retires the label after unlink and fences its late read after refreshing the restored fixture at %ipx", async (width) => {
     const before = await moneySnapshot(); const f = await open(width, false);
     try {
       f.setMode("error");
@@ -158,20 +160,28 @@ describe("legacy checklist confirmed-context refresh in the real parent", () => 
       expect(await f.checklist.innerText()).not.toContain(included);
       expect(await f.checklist.innerText()).not.toContain("تهيئة الحالة السابقة مكتملة");
       await capture(f.checklist, `.settings-ui-artifacts/legacy-checklist-unavailable-${width}.png`);
-      await f.agreement.getByText("لا اتفاق مالي مربوط بالحالة", { exact: true }).waitFor();
+      await f.agreement.getByText("لا يوجد رابط خطة أقساط قديم", { exact: true }).waitFor();
+      expect(await f.agreement.getByRole("button", { name: "اربط", exact: true }).count()).toBe(0);
       f.setMode("hold");
       await f.checklist.getByRole("button", { name: retry, exact: true }).click();
       await expect.poll(() => f.held.length).toBeGreaterThan(0);
       f.setMode("live");
-      await f.agreement.getByRole("combobox", { name: "اختر اتفاق الأقساط", exact: true }).selectOption(String(planId));
-      await f.agreement.getByRole("button", { name: "اربط", exact: true }).click();
+      // Restore the pre-existing synthetic compatibility link, never create a
+      // financial source or use the removed UI action to manufacture a new link.
+      await db.query("UPDATE ortho_cases SET plan_id = $1 WHERE id = $2 AND patient_id = $3", [planId, caseId, patientId]);
+      await f.page.getByRole("button", { name: "تحديث كابينة التقويم", exact: true }).click();
       await f.checklist.getByText(included, { exact: true }).waitFor();
       for (const old of f.held) await old.route.fulfill({ status: 200, contentType: "application/json", body: old.body }).catch(() => {});
       await f.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       expect(await f.checklist.innerText()).toContain(included);
-      expect(f.writes).toEqual([{ planId: null }, { planId }]); f.isolated();
+      expect(await f.checklist.innerText()).not.toContain(outside);
+      expect(f.writes).toEqual([{ planId: null }]); f.isolated();
       expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id = $1 AND patient_id = $2", [caseId, patientId])).rows).toEqual([{ plan_id: planId }]);
       expect(await moneySnapshot()).toEqual(before);
-    } finally { await f.context.close(); }
+    } finally {
+      await f.context.close();
+      // Restore only this owned synthetic compatibility fixture for the next viewport.
+      await db.query("UPDATE ortho_cases SET plan_id = $1 WHERE id = $2 AND patient_id = $3", [planId, caseId, patientId]);
+    }
   }, 90_000);
 });
