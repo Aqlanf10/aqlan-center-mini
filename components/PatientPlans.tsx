@@ -7,6 +7,7 @@ import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMoneyAttempt } from "./useMoneyAttempt";
+import type { SplitCollectionEvidence } from "@/lib/agreement-split-collection";
 import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
 import {
   CURRENCIES,
@@ -112,6 +113,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
   const [payAmount, setPayAmount] = useState("");
   const [payCurrency, setPayCurrency] = useState<Currency>(fallback);
   const [lastReceipt, setLastReceipt] = useState<number | null>(null);
+  const [lastSplit, setLastSplit] = useState<SplitCollectionEvidence | null>(null);
   const [lastReceiptIsInstallment, setLastReceiptIsInstallment] = useState(true);
   const [consentFor, setConsentFor] = useState<number | null>(null);
 
@@ -209,13 +211,17 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
     if (!readRef.current.active || busy) return;
     const source = plan?.approvedAgreement;
     const body = JSON.stringify({ patientId, kind: "payment", amount: payAmount, currency: payCurrency,
-      ...(source ? {invoiceId:source.invoiceId,openingCurrency:source.openingCurrency} : {planId:plan?.id}) });
+      ...(source && (source.deltaInvoiceIds?.length??0)>0
+        ? {planId:plan!.id}
+        : source ? {invoiceId:source.invoiceId,openingCurrency:source.openingCurrency}
+          : {planId:plan?.id}) });
     setBusy(true);
     try {
       const result = await money.run(plan ? { url: "/api/payments", body, operation: "payment" } : undefined);
       if (!result || result.kind === "busy") return;
       if (result.kind !== "confirmed") { setError(result.message); return; }
       setLastReceipt(result.acknowledgment.paymentId);
+      setLastSplit(result.acknowledgment.collection??null);
       setLastReceiptIsInstallment(result.attempt.request.operation === "installment");
       money.consume(result.attempt);
       setPayFor(null);
@@ -245,16 +251,26 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
       {lastReceipt && canSeeFinancial ? (
         <div className="mb-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-center">
-          <p className="mb-2 text-sm font-bold text-emerald-800">{lastReceiptIsInstallment ? "سُجّل القسط." : "سُجّلت الدفعة."}</p>
+          <p className="mb-2 text-sm font-bold text-emerald-800">{lastSplit
+            ? `سُجّل تحصيل إجمالي ${formatMoney(lastSplit.amountMinor,lastSplit.currency)} على ${lastSplit.receipts.length} سندات.`
+            :lastReceiptIsInstallment ? "سُجّل القسط." : "سُجّلت الدفعة."}</p>
+          {lastSplit?<div data-testid="approved-split-receipts" className="mb-3 grid gap-2 text-sm">
+            {lastSplit.allocations.map((allocation,index)=><div key={allocation.paymentId}>
+              الفاتورة #{allocation.invoiceId}: {formatMoney(allocation.amountMinor,lastSplit.currency)}
+              {" · "}
+              <a href={`/print/receipt/${allocation.paymentId}`} target="_blank" rel="noopener noreferrer"
+                className="font-bold underline">طباعة السند {index+1}</a>
+            </div>)}
+          </div>:null}
           <div className="flex flex-wrap items-start justify-center gap-2">
-            <a href={`/print/receipt/${lastReceipt}`} target="_blank" rel="noopener"
-              onClick={() => setLastReceipt(null)}
+            {!lastSplit?<a href={`/print/receipt/${lastReceipt}`} target="_blank" rel="noopener"
               className="inline-block rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">
               اطبع السند
-            </a>
+            </a>:null}
             {/* (RC-2) قسطٌ بمبلغٍ خطأ يُصحَّح هنا — ويبقى على خطته وفاتورته. */}
-            <ReceiptCorrectionLauncher key={lastReceipt} paymentId={lastReceipt} patientId={patientId} label="المبلغ خطأ؟ صحّح السند"
-              onDone={(_message, replacementId) => { setLastReceipt(replacementId); void load(); }} />
+            {!lastSplit?<ReceiptCorrectionLauncher key={lastReceipt} paymentId={lastReceipt} patientId={patientId} label="المبلغ خطأ؟ صحّح السند"
+              onDone={(_message, replacementId) => { setLastReceipt(replacementId); setLastSplit(null); void load(); }} />
+              :<span className="text-xs text-amber-900">لتصحيح التحصيل الموزع، راجع السند المعني في حساب المريض؛ لا تعامل أول سند كإجمالي.</span>}
           </div>
         </div>
       ) : null}
