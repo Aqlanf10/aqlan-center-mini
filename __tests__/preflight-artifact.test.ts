@@ -52,6 +52,8 @@ describe("packaged read-only preflight", () => {
       expect(createHash("sha256").update(await readFile(file)).digest("hex")).toBe(hash);
     }
     expect(manifest.sourceFiles).toHaveProperty("schema/preflight-disclosure.pg18.json");
+    expect(manifest.sourceFiles).toHaveProperty("lib/purchase-schema-readiness.ts");
+    expect(manifest.sourceFiles).toHaveProperty("schema/purchase-receipts-readiness.pg18.json");
     const notices = await readFile(path.join(artifact, "THIRD_PARTY_NOTICES.txt"), "utf8");
     expect(notices).not.toContain(canary);
     expect(manifest.bundledPackages.map((pkg) => pkg.name)).toEqual(expect.arrayContaining([
