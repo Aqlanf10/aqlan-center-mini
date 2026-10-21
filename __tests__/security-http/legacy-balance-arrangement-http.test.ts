@@ -102,6 +102,7 @@ describe("P0-C legacy balance arrangement HTTP", () => {
         openingCurrency: "YER",
         method: "cash",
       }),
+      { "Idempotency-Key": `legacy-arrangement-payment-${patientId}` },
     );
     expect(paid.status).toBe(201);
 

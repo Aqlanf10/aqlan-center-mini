@@ -40,7 +40,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      السند الأول لا يُنشئ ثانيًا. */
   const idempotencyKeyRaw = request.headers.get("idempotency-key");
   const idempotencyKey = idempotencyKeyRaw && idempotencyKeyRaw.trim() ? idempotencyKeyRaw.trim() : null;
-  if (idempotencyKey && !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+  if (!idempotencyKey) {
+    return NextResponse.json(
+      { reason: "idempotency_key_required", message: "مفتاح الإعادة (Idempotency-Key) مطلوب للتحصيل. أعد إرسال الطلب المحفوظ بالمفتاح نفسه." },
+      { status: 400 },
+    );
+  }
+  if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
     return NextResponse.json(
       { message: "مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -" },
       { status: 400 },
