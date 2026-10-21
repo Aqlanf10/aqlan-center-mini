@@ -606,7 +606,7 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     // verify:full is serial; hosted CI intentionally isolates quality, PostgreSQL,
     // and HTTP into separate jobs. Check ordering *within* each job, not a fake
     // cross-job textual ordering, and enforce the fail-closed dependency DAG.
-    const jobMarkers = [...ciYaml.matchAll(/^  (quality|postgres_integration|security_http|required_completion):\s*$/gm)];
+    const jobMarkers = [...ciYaml.matchAll(/^ {2}(quality|postgres_integration|security_http|required_completion):\s*$/gm)];
     expect(jobMarkers.map(match => match[1])).toEqual([
       "quality", "postgres_integration", "security_http", "required_completion",
     ]);
