@@ -560,6 +560,23 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     },
   );
 
+  it("keeps every clinical specification and note in the closed legacy prescription without disclosure or writes", async () => {
+    const { row, before } = await openPrescription({ bracketSystem: "وصفة خاصة موثقة", status: "completed", phase: "retention",
+      baselineKind: "legacy", legacyFinancialMode: "installments", planId: 73,
+      remainingObjectives: "Recorded baseline objectives", note: "Original clinical note" });
+    const specifications = one(node => node.type === "div" && Array.isArray(node.props.children)
+      && node.props.children.some((child: ReactNode) => child && typeof child === "object"
+        && "props" in child && child.type === "h4" && text(child).trim() === "وصفة الجهاز والمواصفات الميكانيكية"));
+    for (const label of ["نوع الجهاز", "الفكّان المعالجان", "مقاس الشق (Slot)", "فلسفة البراكيت", "تاريخ البدء", "المدة المخططة"]) {
+      expect(elements(specifications).filter(node => node.type === "span" && text(node) === label)).toHaveLength(1);
+    }
+    expect(elements(specifications).filter(node => node.type === "p" && text(node) === "Original clinical note")).toHaveLength(1);
+    expect(elements(specifications).some(node => node.type === "details" || node.props.hidden || node.props["aria-hidden"])).toBe(false);
+    expect(text(prescriptionValue())).toBe("وصفة خاصة موثقة");
+    expect(text(render())).toContain("Recorded baseline objectives");
+    expect(row).toEqual(before); expect(writes()).toEqual([]);
+  });
+
   it("does not carry a previous recorded prescription through a refresh with unrecorded data", async () => {
     await openPrescription({ bracketSystem: "Prior recorded prescription", planId: 73 });
     expect(text(prescriptionValue())).toBe("Prior recorded prescription");
