@@ -49,8 +49,8 @@ jobs:
       CLINIC_TIME_ZONE: Asia/Aden
     steps:
       # Build the actual final product commit, NOT the historical acceptance head.
-      # The supplemental test and its diagnostic helper are the ONLY files taken
-      # from #386. Both checkouts are isolated and use read-only credentials.
+      # Only the dedicated test probe comes from #386; the application is built from pinned #383.
+      # Both checkouts are isolated and use read-only credentials.
       - name: Check out live product branch (must equal pinned final SHA)
         uses: actions/checkout@v7
         with:
@@ -70,13 +70,12 @@ jobs:
           test "${{ github.event.pull_request.base.ref }}" = "$EXPECTED_BASE_REF"
           test "$(git rev-parse HEAD)" = "$FINAL_APP_SHA"
           cp visit-acceptance-probes/__tests__/security-http/invoice-clinic-continuity-journey.test.ts __tests__/security-http/invoice-clinic-continuity-journey.test.ts
-          cp visit-acceptance-probes/__tests__/helpers/visit-source-pdf-ocr.ts __tests__/helpers/visit-source-pdf-ocr.ts
           rm -rf visit-acceptance-probes
           test "$(git rev-parse HEAD)" = "$FINAL_APP_SHA"
           # Only two acceptance probe paths may differ from the product commit.
           python3 - <<'PY'
           import subprocess
-          permitted={'__tests__/security-http/invoice-clinic-continuity-journey.test.ts','__tests__/helpers/visit-source-pdf-ocr.ts'}
+          permitted={'__tests__/security-http/invoice-clinic-continuity-journey.test.ts'}
           names=set(subprocess.check_output(['git','status','--porcelain','--untracked-files=all'],text=True).splitlines())
           changed={line[3:] for line in names}
           if not changed or changed-permitted:
@@ -116,7 +115,7 @@ jobs:
       - name: Install hosted Chromium
         run: npx playwright install --with-deps chromium
       - name: Install PDF inspection tools
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-ara
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
       # Existing global setup creates/seeds/drops its own synthetic HTTP database
       # and launches the standalone server; no separate server or schema shortcut.
       - name: Run only the visit source journey file
@@ -129,7 +128,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: visit-source-original-pdf-raster
-          path: artifacts/visit-source-acceptance/same-day-decisions-raster.png
+          path: |
+            artifacts/visit-source-acceptance/same-day-decisions-raster.png
+            artifacts/visit-source-acceptance/same-day-decisions-preprint.png
+            artifacts/visit-source-acceptance/same-day-decisions-preprint-cell.png
+            artifacts/visit-source-acceptance/same-day-font-probe.pdf
+            artifacts/visit-source-acceptance/same-day-font-probe.png
           if-no-files-found: warn
           retention-days: 7
       - name: Preserve only the three synthetic report PDFs
