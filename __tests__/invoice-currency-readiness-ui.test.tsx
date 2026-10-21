@@ -198,3 +198,88 @@ describe("real editor currency readiness and retained write boundaries", () => {
     click("إعادة نفس طلب التصحيح"); await settle(); expect(fetchMock).not.toHaveBeenCalled(); expect(control.reserve).not.toHaveBeenCalled();
   });
 });
+
+describe("invoice correction explanations without changing recovery semantics", () => {
+  const conflict = "توجد تسويات أخرى على الحساب؛ راجع تخصيص السندات قبل جدولة تحصيل إضافي.";
+  const warning = () => nodes(render()).filter(node => node.props["data-testid"] === "invoice-unchanged-service-warning");
+
+  it("explains only the exact known settlement refusal and retains the rejected command until review", async () => {
+    post = async () => json({ code: "conflict", message: conflict }, 409);
+    render(); await settle();
+    change("سبب التصحيح", "Synthetic correction"); click("تأكيد تصحيح الفاتورة"); await settle();
+    expect(recovery?.outcome).toBe("refused");
+    expect(recovery?.message).toContain("رُفض هذا الطلب قبل حفظ التصحيح");
+    expect(recovery?.message).toContain("المتبقي المخصص لهذه الفاتورة");
+    expect(recovery?.message).toContain("حساب المريض ككل بالعملة نفسها");
+    expect(recovery?.message).toContain("ولا يحسم نتيجة أي طلب سابق");
+    expect(control.acknowledge).not.toHaveBeenCalled();
+    expect(button("تأكيد تصحيح الفاتورة")?.props.disabled).toBe(true);
+    expect(button("مراجعة التصحيح بعد الرفض")).toBeDefined();
+    const body = recovery!.body, key = recovery!.key;
+    click("إعادة نفس طلب التصحيح"); await settle();
+    expect(recovery).toMatchObject({ body, key, outcome: "refused" });
+    expect(posts().map(([, init]) => init.body)).toEqual([body, body]);
+    click("مراجعة التصحيح بعد الرفض"); await settle();
+    expect(control.acknowledge).toHaveBeenCalledTimes(1); expect(recovery).toBeNull();
+    expect(done).not.toHaveBeenCalled();
+  });
+  it.each([
+    { status: 409, code: "conflict", message: "Synthetic other conflict" },
+    { status: 400, code: "invalid", message: conflict },
+    { status: 400, code: "conflict", message: conflict },
+    { status: 404, code: "conflict", message: conflict },
+    { status: 409, code: "stale", message: conflict },
+  ])("does not mislabel another known refusal: $code / $message", async ({ status, code, message }) => {
+    post = async () => json({ code, message }, status);
+    recovery = saved(); render(); click("إعادة نفس طلب التصحيح"); await settle();
+    expect(recovery?.outcome).toBe("refused"); expect(recovery?.message).toBe(message);
+    expect(control.acknowledge).not.toHaveBeenCalled();
+  });
+  it.each(["server", "redirect", "malformed", "transport"])("never claims pre-save refusal or unlocks an unknown %s outcome", async failure => {
+    recovery = saved(); const body = recovery.body, key = recovery.key;
+    post = async () => {
+      if (failure === "transport") throw new Error("Synthetic lost response");
+      if (failure === "malformed") return json({ code: "conflict" }, 409);
+      const response = json({ code: "conflict", message: conflict }, failure === "server" ? 500 : 409);
+      if (failure === "redirect") Object.defineProperty(response, "redirected", { value: true });
+      return response;
+    };
+    render(); click("إعادة نفس طلب التصحيح"); await settle();
+    expect(recovery).toMatchObject({ body, key, outcome: "uncertain" });
+    expect(recovery?.message).not.toContain("رُفض هذا الطلب");
+    expect(button("مراجعة التصحيح بعد الرفض")).toBeUndefined();
+    click("إعادة نفس طلب التصحيح"); await settle();
+    expect(posts().map(([, init]) => init.body)).toEqual([body, body]);
+    expect(control.acknowledge).not.toHaveBeenCalled(); expect(done).not.toHaveBeenCalled();
+  });
+  it("warns when a valid price changes but the service remains, without treating the reason as a service edit", async () => {
+    render(); await settle(); expect(warning()).toHaveLength(0);
+    change("سعر التصحيح 1", "900"); change("سبب التصحيح", "تصحيح إلى زركون");
+    expect(warning()).toHaveLength(1);
+    expect(text(warning())).toContain("الخدمة ستبقى «Synthetic»");
+    expect(text(warning())).toContain("تغيير السعر أو كتابة سبب التصحيح لا يغيّر نوع الخدمة");
+    expect(text(warning())).toContain("زركون");
+    click("تأكيد تصحيح الفاتورة"); await settle();
+    expect(JSON.parse(posts()[0][1].body).lines[0]).toMatchObject({ itemId: 19, serviceId: null, unitPrice: "900" });
+  });
+  it("does not warn for unchanged, invalid, currency-only, or removed prices", async () => {
+    render(); await settle();
+    change("سبب التصحيح", "تصحيح إلى زركون"); expect(warning()).toHaveLength(0);
+    change("سعر التصحيح 1", "not-a-price"); expect(warning()).toHaveLength(0);
+    change("سعر التصحيح 1", "1000"); change("عملة الفاتورة المصححة", "SAR"); expect(warning()).toHaveLength(0);
+    change("عملة الفاتورة المصححة", "YER"); change("سعر التصحيح 1", "900"); expect(warning()).toHaveLength(1);
+    const checkbox = find(node => node.type === "input" && node.props.type === "checkbox")!;
+    (checkbox.props.onChange as (e: { target: { checked: boolean } }) => void)({ target: { checked: false } });
+    expect(warning()).toHaveLength(0);
+  });
+  it("removes the price-only warning after a real service selection changes", async () => {
+    const view = fixture();
+    view.identityAmendmentAvailable = true;
+    view.identityCatalog = { services: [{ id: 101, name: "Synthetic alternate", category: null }], doctors: [] };
+    get = async () => json(view); render(); await settle();
+    change("سعر التصحيح 1", "900"); expect(warning()).toHaveLength(1);
+    expect(label("خدمة التصحيح 1")?.props.disabled).toBe(false);
+    change("خدمة التصحيح 1", "101"); expect(warning()).toHaveLength(0);
+    change("خدمة التصحيح 1", ""); expect(warning()).toHaveLength(1);
+  });
+});
