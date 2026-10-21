@@ -183,7 +183,21 @@ export async function POST(request: Request) {
         if (plan && plan.patientId === patientId) {
           if(plan.approvedAgreement) {
             const result=await collectApprovedAgreement({planId,amountMinor,currency,method:method==="transfer"?"transfer":"cash",note,idempotencyKey:idempotencyKey??"",session});
-            return NextResponse.json({...result.payment,idempotencyKey},{status:result.replayed?200:201});
+            // Split receipts are one logical collection, not one payment for the whole amount.
+            // The first receipt remains the backward-compatible top-level identity.
+            const split="collection" in result && result.collection && "payments" in result && Array.isArray(result.payments);
+            return NextResponse.json({
+              ...result.payment,idempotencyKey,
+              ...(split?{
+                collection:{
+                  kind:"approved_agreement_split_v1",...result.collection,
+                  receipts:result.payments,
+                },
+                paymentIds:result.paymentIds,
+                allocations:result.collection.allocations,
+                collectionAmountMinor:result.collection.amountMinor,
+              }:{}),
+            },{status:result.replayed?200:201});
           }
           const installmentNumber = Math.min(plan.progress.paidCount + 1, plan.installments.length || 1);
           const result = await recordPlanInstallment({

@@ -198,7 +198,13 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
         ||!Array.isArray(row.payment_ids)||!row.payment_ids.length
         ||!row.payment_ids.every(positive))
         throw new DebtRepaymentError("conflict","مفتاح تحصيل الفرق لا يطابق المحاولة السابقة.");
-      return {paymentId:row.payment_ids[0],paymentIds:row.payment_ids,replayed:true};
+      const snapshot=row.result_snapshot;
+      if(!snapshot||snapshot.planId!==input.planId||snapshot.patientId!==row.patient_id||
+         snapshot.currency!==input.currency||!Array.isArray(snapshot.allocations)||
+         !Array.isArray(snapshot.paymentIds)||JSON.stringify(snapshot.paymentIds)!==JSON.stringify(row.payment_ids)||
+         !Number.isSafeInteger(snapshot.amountMinor)||snapshot.amountMinor!==input.amountMinor)
+        throw new DebtRepaymentError("conflict","دليل التخصيص المحفوظ غير مكتمل؛ يحتاج مراجعة مالية.");
+      return {paymentId:row.payment_ids[0],paymentIds:row.payment_ids,collection:snapshot,replayed:true};
     };
     const grouped=await groupReplay();if(grouped)return grouped;
     const prior=await replay();if(prior)return {paymentId:prior.id,replayed:true};
@@ -282,7 +288,7 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
             logicalCollectionKey:input.idempotencyKey,deltaCollection:true}});
       }
       await assertCollectionSession(client,input.session);
-      return {paymentId:paymentIds[0],paymentIds,replayed:false};
+      return {paymentId:paymentIds[0],paymentIds,collection:snapshot,replayed:false};
     }
     const result=await writeDebtCollectionReceipt(client,{patientId:a.patient_id,invoiceId:a.invoice_id,openingCurrency:a.opening_currency,
       amountMinor:input.amountMinor,currency:input.currency,exchangeRate:rate,method:input.method,note:input.note,createdBy:input.session.username,idempotencyKey:input.idempotencyKey,requestHash:hash});
@@ -292,7 +298,20 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
     await assertCollectionSession(client,input.session);
     return {paymentId:result.paymentId,replayed:result.kind==="replay"};
   });
-  return {...receipt,payment:await getPayment(receipt.paymentId)};
+  const payment=await getPayment(receipt.paymentId);
+  if(!payment)throw new Error("Committed agreement payment unavailable; retain original key for reconciliation.");
+  if("collection" in receipt && receipt.collection) {
+    const group=receipt.collection as {planId:number;patientId:number;currency:Currency;amountMinor:number;
+      paymentIds:number[];allocations:{invoiceId:number;paymentId:number;amountMinor:number}[]};
+    const payments=await Promise.all(group.paymentIds.map(id=>getPayment(id)));
+    if(payments.some(p=>!p) || payments.some((p,index)=>p!.id!==group.paymentIds[index] ||
+      p!.invoiceId!==group.allocations[index]?.invoiceId ||
+      p!.amountMinor!==group.allocations[index]?.amountMinor ||
+      p!.patientId!==group.patientId || p!.currency!==group.currency))
+      throw new Error("Committed split receipts disagree with immutable allocation; retain recovery evidence.");
+    return {...receipt,payment,payments:payments as NonNullable<typeof payment>[],collection:group};
+  }
+  return {...receipt,payment};
 }
 
 /** Invoked after the canonical shift lock, before any settlement-target lock.

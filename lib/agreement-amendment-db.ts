@@ -22,7 +22,7 @@ import { parseDoctorCommissionConfig } from "./doctor-permissions";
 type EventRow = {id:string;plan_id:number;plan_item_id:number;patient_id:number;
   delta_invoice_id:number;new_service_id:number;new_unit_minor:string;delta_minor:string;
   receipt:Record<string,unknown>;};
-type PlanRow={id:number;patient_id:number;base_currency:string;status:string;consent_at:Date|null};
+type PlanRow={id:number;patient_id:number;base_currency:string;status:string;consent_at:Date|null;primary_doctor_id:number|null};
 type ItemRow={id:number;plan_id:number;service_id:number|null;service_name:string;unit_price_minor:string;
   quantity:number;case_id:number|null;doctor_id:number|null;status:string;};
 type ServiceRow={id:number;name:string;category:string|null;is_active:boolean};
@@ -53,7 +53,7 @@ function paymentGross(source:Record<string,unknown>,currency:Currency){
  return {payments,refunds};
 }
 async function snapshot(client:DbClient,planId:number){
- const plan=(await client.query<PlanRow>("SELECT id,patient_id,base_currency,status,consent_at FROM treatment_plans WHERE id=$1",[planId])).rows[0];
+ const plan=(await client.query<PlanRow>("SELECT id,patient_id,base_currency,status,consent_at,primary_doctor_id FROM treatment_plans WHERE id=$1",[planId])).rows[0];
  if(!plan)fail("الخطة غير موجودة.","missing");
  const approval=await readApprovedAgreement(client,planId);
  if(!approval||approval.patient_id!==plan.patient_id||approval.currency!==plan.base_currency
@@ -101,7 +101,10 @@ async function snapshot(client:DbClient,planId:number){
  if(refunds>payments)fail("الاستردادات تتجاوز سندات المصدر؛ يلزم مراجعة مالية.");
  const oldServiceId=events.length?events[events.length-1].new_service_id:item.service_id!;
  const oldUnitMinor=events.length?safe(events[events.length-1].new_unit_minor):safe(item.unit_price_minor);
- const result={planId,patientId:plan.patient_id,itemId:item.id,caseId:item.case_id,doctorId:item.doctor_id,
+ const result={planId,patientId:plan.patient_id,itemId:item.id,caseId:item.case_id,
+  // Same approved precedence as original agreement issue: explicit performer,
+  // otherwise validated primary doctor; never infer from reason/service text.
+  doctorId:item.doctor_id??plan.primary_doctor_id,
   currency,approvalInvoiceId:approval.invoice_id!,quantity:item.quantity,oldServiceId,oldUnitMinor,
   previousAgreementMinor:total,recordedPaymentsMinor:payments,recordedRefundsMinor:refunds,
   previousAmendmentId:events.length?safe(events[events.length-1].id):null,
@@ -230,7 +233,7 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
     idempotency_key,request_hash,actor_id,actor_username,reason,receipt)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::jsonb) RETURNING id`,
    [planId,before.itemId,before.patientId,before.caseId,before.approvalInvoiceId,deltaInvoice.id,
-    before.previousAmendmentId,before.oldServiceId,input.newServiceId,before.doctorId,
+    before.previousAmendmentId,before.oldServiceId,input.newServiceId,commission.doctorId,
     before.quantity,before.oldUnitMinor,input.newUnitMinor,quote.previousAgreementMinor,
     quote.deltaMinor,quote.revisedAgreementMinor,quote.settledMinor,before.sourceHash,
     input.idempotencyKey,hash,session.userId,session.username,input.reason.trim(),JSON.stringify(receipt)])).rows[0];

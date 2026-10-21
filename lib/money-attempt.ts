@@ -104,7 +104,7 @@ export class MoneyAttemptStore {
       if (!response.redirected) failure = moneyRecoveryFailure(response.status, message);
       // These routes return their explicit pre-commit refusals as 4xx. Once a
       // reply was lost, even a later permission/shift/target refusal cannot clear it.
-      if (!previous && [400, 401, 403, 404, 409, 422].includes(response.status) && typeof message === "string" && message.trim()) {
+      if (!previous && [400, 404, 422].includes(response.status) && typeof message === "string" && message.trim()) {
         this.publish(scope, null);
         return { kind: "refused", message };
       }
