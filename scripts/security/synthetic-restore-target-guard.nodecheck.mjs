@@ -18,6 +18,14 @@ test('does not accept precision fixture outside test runtime', () => {
   assert.throws(() => guard(url, { NODE_ENV:'development' }), /Legacy restore refused/);
 });
 
+test('allows only the exact PG18 agreement restore fixture in test runtime', () => {
+  const uri = base.replace('backup_dst_synthetic007', 'aqlan_approved_agreement_restore_test');
+  assert.equal(guard(uri, {NODE_ENV:'test', DATABASE_ENVIRONMENT:'test'}).database,
+    'aqlan_approved_agreement_restore_test');
+  assert.throws(() => guard(uri, {NODE_ENV:'development'}), /Legacy restore refused/);
+  assert.throws(() => guard(uri.replace('restore_test', 'production'), {NODE_ENV:'test'}), /Legacy restore refused/);
+});
+
 for (const [name, url, env] of [
   ['production declaration', base, {DATABASE_ENVIRONMENT:'production'}],
   ['Railway runtime', base, {RAILWAY_PROJECT_ID:'fixture'}],
