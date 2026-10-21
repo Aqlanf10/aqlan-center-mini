@@ -24,10 +24,21 @@ describe("commission FIFO at equal invoice timestamps", () => {
   });
 
   it("preserves timestamp precedence over ID and keeps currencies separate", () => {
-    const other: CommissionInvoice = { ...invoices[1], id: 9, createdAt: "2026-10-03T00:00:00Z" };
+    const other: CommissionInvoice = { ...invoices[1], id: 9, allocationOriginId: 1, createdAt: "2026-10-03T00:00:00Z" };
     const usd: CommissionInvoice = { ...invoices[0], id: 8, currency: "USD",
       doctorShares: [{ doctorId: 21, amountMinor: 10000, currency: "USD" }] };
     expect(allocateFifoByCurrency([other, usd, invoices[0]], { YER: 4000, SAR: 0, USD: 2000 }))
       .toEqual(new Map([[11, 4000], [9, 0], [8, 2000]]));
   });
+});
+
+
+it("keeps the persisted same-currency lineage identity when the current invoice ID changes", () => {
+  for (const id of [13, 14]) {
+    const corrected: CommissionInvoice & { allocationOriginId: number } = { ...invoices[0], id, allocationOriginId: 11 };
+    for (const order of [[invoices[1], corrected], [corrected, invoices[1]]]) {
+      expect(allocateFifoByCurrency(order, { YER: 4000, SAR: 0, USD: 0 }))
+        .toEqual(new Map([[id, 4000], [12, 0]]));
+    }
+  }
 });

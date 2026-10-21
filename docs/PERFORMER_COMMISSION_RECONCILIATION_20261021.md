@@ -2,7 +2,8 @@
 
 Base: `e32efbaa15ef4996a8bc375a6ef01579683bab8a`.
 Branch: `fix/performer-commission-reconciliation`.
-Status: local candidate for dot review; no merge or deployment.
+Status: Draft PR #374 for dot review; no merge or deployment.
+Initial candidate: `ada1b065b26b7ba676db357753420e84e81856c8`; the follow-up below supersedes its current-ID-only ordering.
 
 ## Proven defect and repair
 
@@ -23,11 +24,52 @@ invoice result rows in the supplied query runner, and failed with `expected 0 to
 be 1200` for A's commission. This reproduces order dependence; it does not claim
 a production incident or that a particular PostgreSQL plan always reverses rows.
 
-The repair adds invoice ID ascending as the tie-break after the existing issue
-timestamp in `allocateFifoByCurrency` and `commissionReport`. Dates and currency
-buckets retain precedence. The `lib/db.ts` change is one comparator plus its
-comment, notified to the parent before editing. No SQL, schema, expense writer,
-permissions, currency configuration, debt correction, or print file changed.
+The initial candidate added the current invoice ID as a tie-break. Parent review
+correctly identified that this moves a corrected invoice behind another equal-time
+invoice. A new real-writer witness reproduced that defect on Node 22: after each
+of **two successive same-value corrections**, A's coverage/commission changed
+from 4,000/1,200 to 0/0, while B changed from 0/0 to 4,000/1,600. Both invoice-linked
+and account collection cases failed. The original receipt rows, invoice amount,
+performer/work amount and timestamp were verified unchanged.
+
+The follow-up projects `allocation_origin_id` from the persisted
+`invoice_corrections` graph and passes it as `CommissionInvoice.allocationOriginId`.
+The root is the node with no predecessor **in the traversed same-patient,
+same-currency segment**, not the smallest numerical ID, an inferred description,
+or the immediately preceding replacement. A currency transition stops traversal.
+An unresolved root refuses the report instead of silently assigning a new order.
+
+Both comparators now order by the existing timestamp, then the proven origin ID
+(or the invoice's own ID for the pure helper's ordinary invoices), then current
+ID only as a final deterministic tie-break. The production reader always supplies
+the validated origin. The timestamp remains the existing allocation timestamp;
+policy time is unchanged. This preserves the original FIFO position through
+same-currency correction chains without selecting priority from replacement IDs.
+
+The runtime changes are confined to these ordering fields/comparators in
+`lib/db.ts` and `lib/commission.ts`, specifically authorized by the parent after
+the witness request. No expense writer, supplier path, 0065 tool, schema,
+permissions, currency eligibility/configuration, debt correction writer or print
+file is changed.
+
+### Explicit reservations and currency boundaries
+
+The existing `allocatedInvoiceId` path still reserves its exact target before
+legacy FIFO. An additional PostgreSQL case uses complete trigger-validated
+historical reclassification evidence: a reserved SAR 4,000 stays with B (earning
+1,600), while an ordinary SAR 2,000 receipt goes to the earlier SAR invoice for A
+(earning 600). The result remains unchanged after a same-value replacement of B's
+invoice, and the evidence resolves to its new leaf. Receipt rows remain identical.
+The old YER source has a lower ID than both SAR invoices; it must not give the
+later SAR reissue priority over the earlier SAR invoice. This case proves both
+the currency boundary and preservation of the explicit reservation.
+
+Ordinary `payments.invoice_id` alone still does not create an explicit reservation
+in this reader: it establishes settlement currency, while its collection uses the
+existing pooled FIFO unless proven reclassification evidence resolves a target.
+That broader policy is unchanged, and the new witness covers both ordinary linked
+receipts and account collection. No claim of redesigning direct receipt allocation
+is made.
 
 ## Policy and provenance inspected
 
@@ -53,6 +95,8 @@ is a separate business-policy decision; this patch does not change it.
 | Scenario | Result |
 | --- | --- |
 | Equal-time invoices, both SQL row permutations | A earns 1,200; B earns 0, consistently |
+| Same-value correction, then correction of replacement; linked and account receipts | Coverage 4,000/0 and commission 1,200/0 unchanged after each correction; immutable cash snapshot identical |
+| Explicit reservation and currency-segment root | Reserved 4,000 remains B; ordinary 2,000 remains A before/after replacement; YER root priority does not cross into SAR |
 | Two explicit performers, third doctor creates/signs invoice | Invoice source/performer identities match; creator earns nothing |
 | Unsigned procedures then signed/done visit | No draft commission; partial payment yields A 1,500 and B 2,000 |
 | Discount, linked refund, cancellation | Existing gross-share calculation preserved; cancelled USD invoice removed; YER unchanged |
@@ -65,21 +109,36 @@ is a separate business-policy decision; this patch does not change it.
 
 ## Checks
 
-- Before repair: unit file 1 failed / 1 passed; PostgreSQL file 1 failed / 3 passed.
-- After repair: 60 unit tests across five files passed.
-- Targeted PostgreSQL 18.6 suite: 88 tests across six files passed. After adding
-  the conversion-evidence case and stabilizing fixture dates, the final new file
-  passed all five tests (89 unique PostgreSQL cases across these runs).
-- Fresh `npm run build` passed. Two HTTP tests passed against its standalone
-  server and isolated `aqlan_sec_http`, which the harness removed afterward.
-- TypeScript check passed. Changed/new focused files lint clean; linting the
-  large existing `lib/db.ts` reports eight pre-existing unused-symbol warnings,
-  no errors. `git diff --check` passed.
+Actual follow-up runtime: **Node v22.23.3**, PostgreSQL **18.6**. Node 22 comes
+from `/workspace/.cloud-tools/node_modules/node/bin/node`; prepending that bin
+directory to PATH also runs child workers and the standalone server on Node 22.
+The initial candidate's Node 24 evidence is historical only and does not substitute
+for this follow-up verification.
+
+- Initial defect: unit 1 failed / 1 passed; PostgreSQL 1 failed / 3 passed.
+- Follow-up before repair on `ada1b065`: new unit 1 failed / 2 passed; two
+  correction witnesses failed (four before/after equality assertions), with the
+  other five cases excluded by the targeted test-name filter.
+- Follow-up on Node 22: **69/69 unit tests in seven files**, including two
+  existing PGlite-backed commission readers; **92/92 PostgreSQL tests in six
+  files**; **2/2 real HTTP tests** against the fresh Node 22 standalone build.
+- `next build` and standalone `tsc --noEmit` both passed on Node 22 with
+  `--max-old-space-size=4096`. Scoped ESLint: 0 errors, eight existing unused-symbol
+  warnings in `lib/db.ts`; no new warnings. `git diff --check` passed.
+- The new PostgreSQL file independently passed all eight cases after the repair,
+  including correction chains, explicit reservation, payroll and conversion proof.
+  No skipped witness is counted as a passing test. The final 92-test run includes
+  the complete new file with no test-name filter.
+- HTTP used only the isolated synthetic `aqlan_sec_http`; the harness stopped the
+  server and removed the database after the two tests. No Chromium was launched.
 
 Reproduction:
 
 ```sh
-npm test -- __tests__/commission-fifo-order.test.ts __tests__/commission.test.ts __tests__/commission-event-time.test.ts __tests__/commission-detail.test.ts __tests__/commission-time.test.ts
+# Use Node 22 on PATH for every command and child process.
+# Local runtime: /workspace/.cloud-tools/node_modules/node/bin/node (v22.23.3).
+node --version
+npm test -- __tests__/commission-fifo-order.test.ts __tests__/commission.test.ts __tests__/commission-event-time.test.ts __tests__/commission-detail.test.ts __tests__/commission-time.test.ts __tests__/commission-refund-aware.test.ts __tests__/commission-material-rate-event-time.test.ts
 TEST_DATABASE_URL='postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable' npm run test:postgres -- __tests__/postgres/performer-commission-reconciliation.test.ts __tests__/postgres/doctor-commission-engine.test.ts __tests__/postgres/commission-case-attribution-freeze.test.ts __tests__/postgres/commission-refund-aware.test.ts __tests__/postgres/p01-commission-currency.test.ts __tests__/postgres/payroll-journal-settlement.test.ts
 # After a fresh local build:
 TEST_DATABASE_URL='postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disable' npm run test:security-http -- __tests__/security-http/performer-commission-http.test.ts
@@ -87,8 +146,12 @@ TEST_DATABASE_URL='postgresql://ci:ci@127.0.0.1:54329/aqlan_p1_test?sslmode=disa
 
 ## Boundaries and review risk
 
+- The correction-priority blocker from the initial candidate is reproduced and
+  addressed by the persisted same-currency root, with the above before/after
+  witnesses. A legacy replacement without recorded lineage cannot inherit an
+  origin by guesswork. No historical backfill is performed.
 - Historical derived balances for equal-time invoices can change to deterministic
-  ID order. No stored financial history is rewritten; existing payouts are not
+  source-identity order. No stored financial history is rewritten; existing payouts are not
   reassigned or repaired. Review any impacted historical balances before release.
 - Native currency isolation and the specific stored-base/unsupported-cross-FX
   cases are covered, not every conversion or later currency correction path.

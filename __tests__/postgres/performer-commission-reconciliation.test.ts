@@ -32,7 +32,7 @@ async function invoice(patientId: number, doctorId: number, currency: Currency, 
     VALUES($1,'SYNTHETIC performed work',1,10000,10000,$2)`, [invoiceId, doctorId]);
   return invoiceId;
 }
-async function receipt(patientId: number, invoiceId: number, amount: number, currency: Currency, reversalOfId: number | null = null) {
+async function receipt(patientId: number, invoiceId: number | null, amount: number, currency: Currency, reversalOfId: number | null = null) {
   const result = await db.recordPayment({ patientId, invoiceId: reversalOfId === null ? invoiceId : null,
     kind: reversalOfId === null ? "payment" : "refund", amountMinor: amount, currency, baseCurrency: "YER",
     exchangeRate: currency === "YER" ? 1 : 500, method: "cash", createdBy: admin.username,
@@ -211,5 +211,115 @@ describe("commission settlement currency evidence", () => {
       await client.query("ROLLBACK");
       client.release();
     }
+  });
+});
+
+
+describe("equal-time correction lineage witness", () => {
+  it.each(["invoice", "account"] as const)("preserves performer allocation across two same-value corrections with %s collection", async (target) => {
+    const revision = await import("../../lib/invoice-revision-db");
+    const { toInputAmount } = await import("../../lib/money");
+    const a = await doctor(30), b = await doctor(40), p = await patient();
+    const original = await invoice(p, a.id, "YER");
+    const other = await invoice(p, b.id, "YER");
+    await receipt(p, target === "invoice" ? original : null, 4000, "YER");
+    const cash = () => q("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id", [p]);
+    const financial = async () => {
+      const detail = await db.commissionDetailReport(FROM, TO);
+      return detail.lines.filter(line => line.patientId === p).map(line => ({ doctorId: line.doctorId,
+        covered: line.invoiceCoveredMinor, accrued: line.accruedMinor, earned: line.earnedMinor,
+        currency: line.currency, percent: line.percent, basis: line.basis })).sort((left, right) => left.doctorId - right.doctorId);
+    };
+    const initial = await financial(), initialCash = await cash();
+    expect(initial).toEqual([
+      { doctorId: a.id, covered: 4000, accrued: 3000, earned: 1200, currency: "YER", percent: 30, basis: "collected_cash" },
+      { doctorId: b.id, covered: 0, accrued: 4000, earned: 0, currency: "YER", percent: 40, basis: "collected_cash" },
+    ]);
+    let current = original;
+    for (let step = 0; step < 2; step++) {
+      const view = await revision.readInvoiceRevision(current, admin);
+      const result = await revision.reviseInvoice(current, {
+        idempotencyKey: `performer-correction-${target}-${++seq}`, expectedSourceHash: view.sourceHash,
+        reason: "SYNTHETIC same-value correction preserves work and cash",
+        lines: view.invoice.items.map(item => ({ itemId: item.id, quantity: item.quantity,
+          unitPrice: toInputAmount(item.unitPriceMinor, "YER") })), discount: "0",
+        repaymentTerms: { mode: "full", installments: [] }, expectedRemainingMinor: view.remainingMinor,
+      }, admin);
+      expect(result).toMatchObject({ beforeMinor: 10000, afterMinor: 10000, replayed: false });
+      const [edge] = await q<{ corrected_invoice_id: number }>(
+        "SELECT corrected_invoice_id FROM invoice_corrections WHERE original_invoice_id=$1 AND patient_id=$2", [current, p]);
+      current = edge.corrected_invoice_id;
+      expect(current).toBeGreaterThan(other);
+      expect(await q(`SELECT i.total_minor::int AS total,i.discount_minor::int AS discount,
+        i.created_at=original.created_at AS same_time,ii.doctor_id,ii.total_minor::int AS work
+        FROM invoices i JOIN invoices original ON original.id=$2 JOIN invoice_items ii ON ii.invoice_id=i.id WHERE i.id=$1`, [current, original]))
+        .toEqual([{ total: 10000, discount: 0, same_time: true, doctor_id: a.id, work: 10000 }]);
+      expect(await cash()).toEqual(initialCash);
+      expect.soft(await financial(), `allocation after correction ${step + 1}`).toEqual(initial);
+    }
+  });
+});
+
+describe("explicit reservation and currency-boundary ordering", () => {
+  it("keeps allocatedInvoiceId reserved and starts the FIFO identity at the currency reissue", async () => {
+    const revision = await import("../../lib/invoice-revision-db");
+    const { toInputAmount } = await import("../../lib/money");
+    const { readCurrencyReclassificationEvidence } = await import("../../lib/invoice-currency-evidence");
+    const a = await doctor(30), b = await doctor(40), p = await patient();
+    const yerOrigin = await invoice(p, b.id, "YER");
+    const earlierSar = await invoice(p, a.id, "SAR");
+    const targetSar = await invoice(p, b.id, "SAR");
+    await db.setInvoiceStatus(yerOrigin, "cancelled", { actor: admin.username, actorRole: "admin" });
+    const client = await db.getPool().connect();
+    try {
+      await client.query("BEGIN");
+      // Complete historical evidence accepted by the existing database guards.
+      // No currency writer, eligibility or schema is changed by this test.
+      const { rows: [payment] } = await client.query<{ id: number }>(`INSERT INTO payments
+        (receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by,created_at)
+        SELECT $1,$2,$3,id,'payment',4000,'SAR',200,8000,'YER','cash',$4,'2026-10-10T07:00:00Z'
+        FROM cashier_shifts WHERE status='open' LIMIT 1 RETURNING id`, [`PERFORMER-RESERVED-${++seq}`, p, yerOrigin, admin.username]);
+      const key = `performer-reservation-${++seq}`;
+      const { rows: [correction] } = await client.query<{ id: number }>(`INSERT INTO invoice_corrections
+        (patient_id,currency,original_currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by)
+        VALUES($1,'SAR','YER',$2,$3,$4,$5,'SYNTHETIC existing currency evidence',$6) RETURNING id`,
+        [p, yerOrigin, targetSar, key, "a".repeat(64), admin.username]);
+      await client.query("INSERT INTO invoice_correction_receipts(correction_id,receipt) VALUES($1,$2::jsonb)", [correction.id,
+        JSON.stringify({ patientId: p, currency: "SAR", idempotencyKey: key, createdBy: admin.username,
+          original: { id: yerOrigin, patientId: p, baseCurrency: "YER" },
+          corrected: { id: targetSar, patientId: p, baseCurrency: "SAR" } })]);
+      const { rows: [document] } = await client.query<{ id: number }>(`INSERT INTO invoice_settlement_reclassifications
+        (correction_id,patient_id,source_currency,target_currency,source_invoice_ids) VALUES($1,$2,'YER','SAR',$3) RETURNING id`,
+        [correction.id, p, [yerOrigin]]);
+      await client.query(`INSERT INTO invoice_settlement_reclassification_events
+        (reclassification_id,payment_id,direction,source_minor,target_minor,payment_snapshot)
+        SELECT $1,id,1,base_amount_minor,amount_minor,to_jsonb(p) FROM payments p WHERE id=$2`, [document.id, payment.id]);
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      expect(await readCurrencyReclassificationEvidence(client, p)).toMatchObject([
+        { paymentId: payment.id, targetInvoiceId: targetSar, targetMinor: 4000 }]);
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+    // Ordinary linked receipt still enters the pre-existing pooled FIFO path.
+    await receipt(p, earlierSar, 2000, "SAR");
+    const cashBefore = await q("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id", [p]);
+    const check = async (target: number) => {
+      const detail = await db.commissionDetailReport(FROM, TO);
+      expect(detail.lines.filter(line => line.patientId === p).map(line => ({ invoice: line.invoiceId,
+        doctor: line.doctorId, covered: line.invoiceCoveredMinor, earned: line.earnedMinor })).sort((left, right) => left.invoice - right.invoice))
+        .toEqual([{ invoice: earlierSar, doctor: a.id, covered: 2000, earned: 600 },
+          { invoice: target, doctor: b.id, covered: 4000, earned: 1600 }]);
+    };
+    await check(targetSar);
+    const view = await revision.readInvoiceRevision(targetSar, admin);
+    await revision.reviseInvoice(targetSar, { idempotencyKey: `performer-reservation-correction-${++seq}`,
+      expectedSourceHash: view.sourceHash, reason: "SYNTHETIC same-value reserved correction",
+      lines: view.invoice.items.map(item => ({ itemId: item.id, quantity: item.quantity, unitPrice: toInputAmount(item.unitPriceMinor, "SAR") })),
+      discount: "0", repaymentTerms: { mode: "full", installments: [] }, expectedRemainingMinor: view.remainingMinor }, admin);
+    const [{ corrected_invoice_id: corrected }] = await q<{ corrected_invoice_id: number }>(
+      "SELECT corrected_invoice_id FROM invoice_corrections WHERE original_invoice_id=$1", [targetSar]);
+    await check(corrected);
+    expect(await readCurrencyReclassificationEvidence(db.getPool(), p)).toMatchObject([{ targetInvoiceId: corrected, targetMinor: 4000 }]);
+    expect(await q("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id", [p])).toEqual(cashBefore);
   });
 });
