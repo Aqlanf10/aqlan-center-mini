@@ -1,6 +1,7 @@
 import {afterAll,beforeAll,expect,it} from "vitest";
 import {chromium,type Browser} from "playwright";
 import {Client} from "pg";
+import {formatMoney} from "../../lib/money";
 import {authedMutation,baseUrl,harness} from "./_server";
 let browser:Browser,h:Awaited<ReturnType<typeof harness>>,client:Client,serial=0;
 const q=(s:string,v:unknown[]=[])=>client.query(s,v);
@@ -207,4 +208,131 @@ it("a populated historical statement has stable totals after /api/payments distr
  expect(collection.status,await collection.clone().text()).toBe(201);
  expect((await collection.json()).collection.receipts).toHaveLength(2);
  expect(await read()).toEqual(before);
+});
+
+
+it("real browser refreshes a payment-stale preview ONLY after same-key committed rejection proof",async()=>{
+ const f=await fixture();
+ const context=await browser.newContext({viewport:{width:1280,height:900},locale:"ar-YE",serviceWorkers:"block"});
+ const [cookieName,...cookieParts]=h.sessions.admin.cookie.split("=");
+ await context.addCookies([{name:cookieName,value:cookieParts.join("="),url:baseUrl}]);
+ const page=await context.newPage();
+ const editor=`/api/plans/${f.planId}/agreement-amendment`;
+ try{
+  await page.goto(`${baseUrl}/patients/${f.patientId}?tab=plans`,{waitUntil:"domcontentloaded"});
+  await page.getByRole("button",{name:"ترقية خدمة الاتفاق بفرق مؤرخ"}).click();
+  const fill=async()=>{
+   await page.getByLabel("الخدمة الجديدة — اختيار صريح").selectOption(String(f.newServiceId));
+   await page.getByLabel("سعر الوحدة الجديد (YER)").fill("80000");
+   await page.getByLabel("سبب التعديل وموافقة المريض").fill("Signed synthetic upgrade with fresh debt evidence");
+  };
+  await fill();
+  const later=await authedMutation(`/api/plans/${f.planId}`,h.sessions.admin,"POST",
+    JSON.stringify({amount:"20000",currency:"YER"}),{"Idempotency-Key":`stale-between-preview-${f.planId}`});
+  expect(later.status,await later.clone().text()).toBe(201);
+  await page.getByRole("button",{name:"حفظ فرق التعديل المؤرخ"}).click();
+  await page.getByRole("button",{name:"تحديث المعاينة وتصحيح الطلب المرفوض"}).waitFor();
+  const rows=(await q("SELECT idempotency_key FROM agreement_delta_attempt_rejections WHERE plan_id=$1",[f.planId])).rows;
+  expect(rows).toHaveLength(1);
+  const prior=(await q("SELECT count(*)::int n FROM agreement_delta_amendments WHERE plan_id=$1",[f.planId])).rows[0].n;
+  expect(prior).toBe(0);
+  // Refreshed attempt must have a fresh source hash, and a NEW key is allowed
+  // only now that the stale attempt has its immutable rejection witness.
+  await page.getByRole("button",{name:"تحديث المعاينة وتصحيح الطلب المرفوض"}).click();
+  await fill();
+  await page.getByRole("button",{name:"حفظ فرق التعديل المؤرخ"}).click();
+  await expect.poll(async()=>Number((await q("SELECT count(*)::int n FROM agreement_delta_amendments WHERE plan_id=$1",[f.planId])).rows[0].n)).toBe(1);
+  expect((await q("SELECT count(*)::int n FROM invoices WHERE patient_id=$1",[f.patientId])).rows[0].n).toBe(2);
+  const plans=await fetch(`${baseUrl}/api/patients/${f.patientId}/plans`,{headers:{Cookie:h.sessions.admin.cookie}});
+  expect(plans.status,await plans.clone().text()).toBe(200);
+  const payload=await plans.json();
+  expect(payload.plans.find((p:{id:number})=>p.id===f.planId).approvedAgreement)
+    .toMatchObject({totalMinor:800000,paidMinor:200000,remainingMinor:600000});
+  const ledger=await fetch(`${baseUrl}/api/reports?report=patient-statement&preset=custom&from=2026-01-01&to=2099-12-31&patientId=${f.patientId}`,{headers:{cookie:h.sessions.admin.cookie}});
+  expect(ledger.status,await ledger.clone().text()).toBe(200);
+  const report=(await ledger.json()).result;
+  expect(report.kpis.find((k:{key:string})=>k.key==="balance-YER")?.minor).toBe(600000);
+ }finally{await context.close();}
+});
+it("losing an ACTUAL amendment commit reply survives user switch and retries the saved request without a second difference invoice",async()=>{
+ const f=await fixture();
+ const context=await browser.newContext({viewport:{width:390,height:900},locale:"ar-YE",serviceWorkers:"block"});
+ const login=async(cookie:string)=>{
+  const [name,...v]=cookie.split("=");await context.clearCookies();
+  await context.addCookies([{name,value:v.join("="),url:baseUrl}]);
+ };
+ await login(h.sessions.admin.cookie);
+ const page=await context.newPage();
+ const captured:{key:string;body:string}[]=[];
+ let dropped=false;
+ try{
+  await page.route(`**/api/plans/${f.planId}/agreement-amendment`,async route=>{
+   if(route.request().method()!=="POST")return route.continue();
+   const body=route.request().postData()??"";
+   captured.push({key:JSON.parse(body).idempotencyKey,body});
+   if(!dropped){
+    dropped=true;
+    const committed=await route.fetch();
+    expect(committed.status(),await committed.text()).toBe(201);
+    await route.abort("failed");
+   }else await route.continue();
+  });
+  await page.goto(`${baseUrl}/patients/${f.patientId}?tab=plans`,{waitUntil:"domcontentloaded"});
+  await page.getByRole("button",{name:"ترقية خدمة الاتفاق بفرق مؤرخ"}).click();
+  await page.getByLabel("الخدمة الجديدة — اختيار صريح").selectOption(String(f.newServiceId));
+  await page.getByLabel("سعر الوحدة الجديد (YER)").fill("80000");
+  await page.getByLabel("سبب التعديل وموافقة المريض").fill("Signed synthetic saved request with missing transport reply");
+  await page.getByRole("button",{name:"حفظ فرق التعديل المؤرخ"}).click();
+  await page.getByRole("button",{name:"إعادة الطلب المحفوظ نفسه"}).waitFor();
+  expect(captured).toHaveLength(1);
+  expect((await q("SELECT count(*)::int n FROM agreement_delta_amendments WHERE plan_id=$1",[f.planId])).rows[0].n).toBe(1);
+  const stored=await page.evaluate((id:number)=>sessionStorage.getItem(`aqlan:agreement-amendment:pending:${id}`),f.planId);
+  expect(stored).toContain(captured[0].key);
+  // Different role must not discard the original actor's recovery material.
+  await login(h.sessions.doctorA.cookie);
+  await page.reload({waitUntil:"domcontentloaded"});
+  const denied=await authedMutation(`/api/plans/${f.planId}/agreement-amendment`,h.sessions.doctorA,"PUT",captured[0].body);
+  expect(denied.status).toBe(403);
+  expect(await page.evaluate((id:number)=>sessionStorage.getItem(`aqlan:agreement-amendment:pending:${id}`),f.planId)).toContain(captured[0].key);
+  await login(h.sessions.admin.cookie);
+  await page.reload({waitUntil:"domcontentloaded"});
+  await page.getByRole("button",{name:"ترقية خدمة الاتفاق بفرق مؤرخ"}).click();
+  await page.getByRole("button",{name:"إعادة الطلب المحفوظ نفسه"}).click();
+  await expect.poll(()=>captured.length).toBe(2);
+  expect(captured[1]).toEqual(captured[0]);
+  const replay=await authedMutation(`/api/plans/${f.planId}/agreement-amendment`,h.sessions.admin,"PUT",captured[0].body);
+  expect(replay.status,await replay.clone().text()).toBe(200);
+  expect((await replay.json()).state).toBe("committed");
+  expect((await q("SELECT count(*)::int n FROM agreement_delta_amendments WHERE plan_id=$1",[f.planId])).rows[0].n).toBe(1);
+  expect((await q("SELECT count(*)::int n FROM invoices WHERE patient_id=$1",[f.patientId])).rows[0].n).toBe(2);
+ }finally{await context.close();}
+});
+it("each PRINTED receipt proves its own original/difference invoice and cash amount (not just links)",async()=>{
+ const f=await fixture(),view=await preview(f.planId);
+ const saved=await authedMutation(`/api/plans/${f.planId}/agreement-amendment`,h.sessions.admin,"POST",JSON.stringify({
+  idempotencyKey:`print-delta-${f.planId}`,expectedSourceHash:view.sourceHash,
+  newServiceId:f.newServiceId,newUnitMinor:80000,reason:"Signed synthetic print proof"}));
+ expect(saved.status,await saved.clone().text()).toBe(201);
+ const receive=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({
+  patientId:f.patientId,planId:f.planId,kind:"payment",amount:"620000",currency:"YER",method:"cash"
+ }),{"Idempotency-Key":`print-split-${f.planId}`});
+ expect(receive.status,await receive.clone().text()).toBe(201);
+ const groups=(await receive.json()).collection;
+ expect(groups.receipts).toHaveLength(2);
+ const context=await browser.newContext({locale:"ar-YE",serviceWorkers:"block"});
+ const [name,...cookie]=h.sessions.admin.cookie.split("=");
+ await context.addCookies([{name,value:cookie.join("="),url:baseUrl}]);
+ const page=await context.newPage();
+ try{
+  for(const [index,receipt] of groups.receipts.entries()){
+   const allocation=groups.allocations[index];
+   await page.goto(`${baseUrl}/print/receipt/${receipt.id}`,{waitUntil:"domcontentloaded"});
+   const printed=await page.locator(".sheet").innerText();
+   expect(printed).toContain(receipt.receiptNumber);
+   expect(printed).toContain(`#${allocation.invoiceId}`);
+   expect((await page.locator(".sheet .amount-box").innerText()).trim())
+     .toBe(formatMoney(allocation.amountMinor,"YER"));
+   expect(allocation.amountMinor).toBe(index===0?320000:300000);
+  }
+ }finally{await context.close();}
 });
