@@ -131,8 +131,16 @@ export class ProtectedPurchaseHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد تسجيل نتائج شراء محفوظة. لم يُمسح شيء؛ يجب الاحتفاظ بسجل الشراء ومفاتيح طلباته."); this.name = "ProtectedPurchaseHistoryError"; }
 }
 
+/** Agreement amendments (0066) are immutable financial history, like purchase receipts. */
+export const AGREEMENT_HISTORY_TABLES = ["agreement_delta_collection_receipts", "agreement_delta_attempt_rejections", "agreement_delta_amendments"] as const;
+export class ProtectedAgreementHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد تسجيل تعديلات اتفاق علاج أو تحصيلات موزّعة عليها. لم يُمسح شيء؛ يجب الاحتفاظ بسجل تعديلات الاتفاق ومفاتيحها."); this.name = "ProtectedAgreementHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
   "inventory_purchase_receipts",
+  // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
+  ...AGREEMENT_HISTORY_TABLES,
   "users",
   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
   "hr_staff",

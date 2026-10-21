@@ -96,7 +96,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { PURCHASE_RESET_FENCE, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { AGREEMENT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -26789,6 +26789,11 @@ export async function resetClinicData<F>(
       await client.query("LOCK TABLE inventory_purchase_receipts IN EXCLUSIVE MODE");
       const { rows: [purchaseHistory] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM inventory_purchase_receipts) AS exists");
       if (purchaseHistory.exists) throw new ProtectedPurchaseHistoryError();
+      // Agreement amendment history (0066) is protected the same way; EXCLUSIVE blocks new rows.
+      await client.query(`LOCK TABLE ${AGREEMENT_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [agreementHistory] } = await client.query<{ exists: boolean }>(
+        `SELECT ${AGREEMENT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
+      if (agreementHistory.exists) throw new ProtectedAgreementHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -26806,7 +26811,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }

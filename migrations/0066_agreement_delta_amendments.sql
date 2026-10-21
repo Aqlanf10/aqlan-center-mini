@@ -34,7 +34,15 @@ CREATE INDEX agreement_delta_amendments_patient_time_idx ON agreement_delta_amen
 CREATE UNIQUE INDEX agreement_delta_amendments_next_unique
   ON agreement_delta_amendments(previous_amendment_id) WHERE previous_amendment_id IS NOT NULL;
 CREATE FUNCTION aqlan_agreement_delta_immutable() RETURNS TRIGGER AS $$
+DECLARE has_rows BOOLEAN;
 BEGIN
+  -- Same rule as inventory purchase receipts: TRUNCATE holds ACCESS EXCLUSIVE, so an
+  -- empty-table truncate (factory reset, cascades from wiped parents) removes no evidence
+  -- and no concurrent INSERT can race this check. Any recorded event is never truncated.
+  IF TG_OP = 'TRUNCATE' THEN
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I)', TG_TABLE_SCHEMA, TG_TABLE_NAME) INTO has_rows;
+    IF NOT has_rows THEN RETURN NULL; END IF;
+  END IF;
   RAISE EXCEPTION 'agreement amendment events are immutable';
 END;
 $$ LANGUAGE plpgsql;

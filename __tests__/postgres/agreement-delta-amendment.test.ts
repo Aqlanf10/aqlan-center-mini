@@ -272,3 +272,28 @@ it("status waits behind the exact command fence; an absent row is unresolved, ne
   expect(await state).toMatchObject({state:"unresolved"});
  }finally{await client.query("ROLLBACK").catch(()=>{});client.release();}
 });
+
+it("protects recorded amendment history from a factory reset and from TRUNCATE; nothing is wiped and no backup runs", async () => {
+ const {ProtectedAgreementHistoryError} = await import("../../lib/clinic-reset");
+ const f = await fixture("YER", 180000);
+ await api.saveAgreementAmendment(f.planId, await command(f), session);
+ const snapshot = async () => (await q(`SELECT
+   (SELECT COUNT(*)::int FROM agreement_delta_amendments) AS amendments,
+   (SELECT COUNT(*)::int FROM patients) AS patients,
+   (SELECT COUNT(*)::int FROM invoices) AS invoices,
+   (SELECT COUNT(*)::int FROM payments) AS payments`)).rows[0];
+ const before = await snapshot();
+ expect(before.amendments).toBeGreaterThan(0);
+ let backupRan = false;
+ await expect(db.resetClinicData({ actor: "synthetic-reset-owner", actorRole: "admin" },
+   async () => { backupRan = true; return { ok: true as const, backupId: "must-not-run" }; }))
+   .rejects.toBeInstanceOf(ProtectedAgreementHistoryError);
+ expect(backupRan).toBe(false);
+ expect(await snapshot()).toEqual(before);
+ for (const table of ["agreement_delta_amendments", "agreement_delta_collection_receipts", "agreement_delta_attempt_rejections"]) {
+   const { rows: [{ n }] } = await q(`SELECT COUNT(*)::int AS n FROM ${table}`);
+   if (n > 0) await expect(q(`TRUNCATE ${table} CASCADE`)).rejects.toThrow("immutable");
+ }
+ await expect(q("TRUNCATE patients CASCADE")).rejects.toThrow("immutable");
+ expect(await snapshot()).toEqual(before);
+});
