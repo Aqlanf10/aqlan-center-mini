@@ -108,7 +108,7 @@ describe("backend-first explicit installment recovery through the real proxy and
       VALUES ($1, $2, 1000, 0, 'YER', 'synthetic') RETURNING id`, [`RECOVERY-ORDINARY-INV-${Date.now()}`, patient.id]);
     for (const invoiceId of [invoice.id, undefined]) {
       const response = await authedMutation("/api/payments", h.sessions.reception, "POST",
-        JSON.stringify({ patientId: patient.id, invoiceId, amount: "1000", currency: "YER", method: "cash" }));
+        JSON.stringify({ patientId: patient.id, invoiceId, amount: "1000", currency: "YER", method: "cash" }), { "Idempotency-Key": `ordinary-${patient.id}-${invoiceId ?? "account"}` });
       expect(response.status).toBe(201); expect(await response.json()).toMatchObject({ planId: null });
     }
   });
