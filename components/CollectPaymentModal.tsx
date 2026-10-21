@@ -7,11 +7,14 @@ import {
   CURRENCIES,
   CURRENCY_LABEL,
   formatAmount,
+  parseAmount,
   type Currency,
 } from "@/lib/money";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { useMoneyAttempt } from "./useMoneyAttempt";
 import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
+import {SimilarCollectionWarning,useSimilarCollectionWarning} from "./SimilarCollectionWarning";
+import type {SimilarCollectionReview} from "@/lib/similar-collection";
 
 /**
  * التحصيل الموحَّد — مكونٌ واحد ومسارٌ واحد (المواصفة §٢٦ و AC-09).
@@ -113,6 +116,7 @@ export function CollectPaymentModal({
      الإغلاق نصفر الحارس كي يعاد الاقتراح طبيعيًا في الفتح التالي. */
   const initializationKey = `${patientId}:${presetInvoice?.id ?? (presetOpeningCurrency ? `opening-${presetOpeningCurrency}` : presetPlanId ? `plan-${presetPlanId}` : "account")}:${initialCurrency}`;
   const money = useMoneyAttempt(`collection:${patientId}`, isOpen, initializationKey,{patientId});
+  const similarity = useSimilarCollectionWarning();
   const initializedSessionRef = useRef<string | null>(null);
   const [initializedFor, setInitializedFor] = useState<string | null>(null);
   const formReady = initializedFor === initializationKey;
@@ -141,29 +145,45 @@ export function CollectPaymentModal({
 
   const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;
 
+  const postPayment = async (retry = false, review?: SimilarCollectionReview) => {
+    const body = JSON.stringify({
+      patientId, amount, currency, invoiceId: invoiceId || undefined,
+      planId: planId || undefined, openingCurrency: openingCurrency || undefined,
+      kind: "payment", method, note: note.trim() || undefined,
+      ...(review ? {similarityReview:review} : {}),
+    });
+    const result = await money.run(retry ? undefined : { url: "/api/payments", body, operation: "payment" });
+    if (!result || result.kind === "busy") return;
+    if (result.kind !== "confirmed") { setError(result.message); return; }
+    onSuccess(result.acknowledgment.paymentId!);
+    money.consume(result.attempt);
+  };
   const submit = async (retry = false) => {
     if (busy || !money.ready || (!retry && (!formReady || !amount.trim()))) return;
     if (!retry && missingForeignTarget) {
       setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة أو رصيد سابق بنفس العملة.");
       return;
     }
-    const body = JSON.stringify({
-      patientId,
-      amount,
-      currency,
-      invoiceId: invoiceId || undefined,
-      planId: planId || undefined,
-      openingCurrency: openingCurrency || undefined,
-      kind: "payment",
-      method,
-      note: note.trim() || undefined,
-    });
-    setBusy(true);
-    setError(null);
+    setBusy(true);setError(null);
     try {
-      const result = await money.run(retry ? undefined : { url: "/api/payments", body, operation: "payment" });
-      if (!result || result.kind === "busy") return;
-      if (result.kind !== "confirmed") { setError(result.message); return; }
+      if (retry) await postPayment(true);
+      else {
+        const minor = parseAmount(amount,currency);
+        if (minor === null || minor<=0) {setError("اكتب مبلغًا صحيحًا أكبر من صفر.");return;}
+        await similarity.check({patientId,amountMinor:minor,currency,onProceed:(review)=>postPayment(false,review)});
+      }
+    } catch {
+      setError("تعذّر فحص السندات أو الاتصال بالخادم. لم يُؤكد تسجيل دفعة جديدة؛ راجع الحساب وأعد المحاولة.");
+    } finally {setBusy(false);}
+  };
+  const confirmSimilar = async () => {
+    if(busy || !money.ready)return;
+    setBusy(true);setError(null);
+    try {await similarity.confirm();}
+    catch {setError("تعذّر إتمام عملية التحصيل. راجع الحساب قبل محاولة جديدة.");}
+    finally {setBusy(false);}
+  };
+ }
       onSuccess(result.acknowledgment.paymentId!);
       money.consume(result.attempt);
     } catch {
@@ -196,6 +216,7 @@ export function CollectPaymentModal({
           </button>
         </header>
 
+        <SimilarCollectionWarning pending={similarity.pending} onConfirm={()=>void confirmSimilar()} onCancel={similarity.cancel}/>
         <CurrentCollectionGuidance />
         <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void submit(true)} />
         {money.error?<p role="alert" className="mb-3 text-sm text-rose-800">{money.error}</p>:null}
