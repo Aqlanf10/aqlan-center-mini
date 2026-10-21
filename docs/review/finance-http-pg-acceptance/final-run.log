@@ -1,0 +1,12 @@
+Verified synthetic target: 127.0.0.1:55439/aqlan_finance_test; aqlan_sec_http absent.
+
+ RUN  v4.1.11 /workspace/finance-http-acceptance
+
+[security-http] الخادم جاهز على http://127.0.0.1:3249 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  00:06:26
+   Duration  6.33s (transform 21ms, setup 0ms, import 47ms, tests 3.09s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
