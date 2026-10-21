@@ -686,3 +686,19 @@ it("does not describe a signed visit without a direct invoice as a consultation"
   expect(contents(render())).toContain("لا فاتورة مباشرة مثبتة");
   expect(nodes().some(node => String(node.props.href ?? "").startsWith("/print/invoice/"))).toBe(false);
 });
+
+it.each(["review", "cancelled", undefined] as const)("does not advertise an active invoice link for %s reference", async invoiceReferenceState => {
+  hooks.role = "admin";
+  stored.set(91001, { ...stored.get(91001), status: "signed", signedAt: "2025-05-02T10:00:00Z", invoiceId: 98001, invoiceReferenceState });
+  await mount();
+  expect(nodes().some(node => node.props.href === "/print/invoice/98001")).toBe(false);
+  expect(contents(render())).toContain(invoiceReferenceState === "cancelled" ? "مرجع فاتورة ملغاة" : "مرجع الفاتورة يحتاج تحققًا");
+});
+
+it.each(["admin", "doctor"])("shows a verified documentary reference without widening %s print access", async role => {
+  hooks.role = role;
+  stored.set(91001, { ...stored.get(91001), status: "signed", signedAt: "2025-05-02T10:00:00Z", invoiceId: 98001, invoiceReferenceState: "current" });
+  await mount();
+  expect(contents(render())).toContain("مرجع فاتورة #98001");
+  expect(nodes().some(node => node.props.href === "/print/invoice/98001")).toBe(role === "admin");
+});

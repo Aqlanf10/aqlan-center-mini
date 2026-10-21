@@ -21,7 +21,7 @@ import { useSetting } from "./SettingsProvider";
 import {
   appendPhrase, parsePhraseList, treatmentDoneFromProcedures, type VisitSuggestions,
 } from "@/lib/visit-suggestions";
-import { isAdmin } from "@/lib/roles";
+import { canViewMoney, isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
 import { VisitPhraseField as Field } from "./VisitPhraseField";
@@ -90,6 +90,7 @@ interface Visit {
   treatmentDone: string | null; nextPlan: string | null; addendum: string | null;
   doctorId: number | null; status: "open" | "signed";
   signedAt: string | null; signedBy: string | null; invoiceId: number | null;
+  invoiceReferenceState?: import("@/lib/visit-financial-presentation").VisitInvoiceReferenceState;
   procedures: ProcedureLine[]; totalMinor: number;
   planItemsMatched: number; planTitle: string | null; planWarning: string | null;
   ortho: {
@@ -695,7 +696,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       // The sign POST has succeeded. A failed follow-up GET must not turn that
       // accepted signature into editable work or suppress its live checkout.
       setVisit((current) => current?.id === visitId ? {
-        ...current, status: "signed", invoiceId: typeof payload.invoiceId === "number" ? payload.invoiceId : null,
+        ...current, status: "signed", invoiceReferenceState: undefined, invoiceId: typeof payload.invoiceId === "number" ? payload.invoiceId : null,
         signedAt: typeof payload.signedAt === "string" ? payload.signedAt : current.signedAt,
         signedBy: typeof payload.signedBy === "string" ? payload.signedBy : current.signedBy,
       } : current);
@@ -1251,11 +1252,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           {signed ? (
             <p className="text-[11px] font-semibold text-slate-500">
               وقّعها {visit.signedBy} · {visit.signedAt?.slice(0, 10)}
-              {visit.invoiceId ? ` · فاتورة #${visit.invoiceId}` : ` · ${UNVERIFIED_VISIT_INVOICE_LABEL}`}
+              {!visit.invoiceId ? ` · ${UNVERIFIED_VISIT_INVOICE_LABEL}`
+                : visit.invoiceReferenceState === "current" ? ` · مرجع فاتورة #${visit.invoiceId}`
+                  : visit.invoiceReferenceState === "cancelled" ? " · مرجع فاتورة ملغاة — لا يثبت تغطية العمل"
+                    : " · مرجع الفاتورة يحتاج تحققًا"}
             </p>
           ) : null}
         </div>
-        {signed && visit.invoiceId ? (
+        {signed && visit.invoiceId && visit.invoiceReferenceState === "current" && canViewMoney(session?.role) ? (
           <a href={`/print/invoice/${visit.invoiceId}`} target="_blank" rel="noopener"
             className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
             الفاتورة

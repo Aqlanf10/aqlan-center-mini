@@ -200,3 +200,52 @@ it("does not treat cancelled or cross-patient direct pointers as active coverage
     expect(row.collection).toBe("—");
   }
 });
+
+it("filters specialty by the displayed visit work, not the patient's financial history", async () => {
+  const [patient] = await q<{id:number}>(`INSERT INTO patients(patient_number,full_name)
+    VALUES ('SYNTHETIC-SPECIALTY','Synthetic procedure-only patient') RETURNING id`);
+  const [service] = await q<{id:number}>(`INSERT INTO services(name,price_minor,is_active,category)
+    VALUES ('Synthetic root canal',0,true,'rct') RETURNING id`);
+  // regular has general invoice history, but both July visits only record rct work.
+  for (const patientId of [patient.id,regular]) {
+    const [visit] = await q<{id:number}>(`INSERT INTO visits(patient_name,patient_id,status,arrived_at,signed_at)
+      VALUES ('Synthetic specialty visit',$1,'done',$2,$2) RETURNING id`,[patientId,at("2025-07-02")]);
+    await q(`INSERT INTO visit_procedures(visit_id,service_id,quantity,unit_price_minor)
+      VALUES ($1,$2,1,0)`,[visit.id,service.id]);
+  }
+  const all = await buildReport("visits",filters("visits","2025-07-02","2025-07-02"));
+  expect(all.rows).toHaveLength(2);
+  const selected = (specialty:string) => parseFilters(new URLSearchParams({preset:"custom",from:"2025-07-02",to:"2025-07-02",specialty}),"2025-07-02");
+  const rct = await buildReport("visits",selected("rct"));
+  expect(rct.rows).toEqual(all.rows);
+  expect(kpi(rct,"visits")).toBe(2);
+  expect((await buildReport("visits",selected("general"))).rows).toHaveLength(0);
+  for (const row of rct.rows!) {
+    expect(row.invoiceText).toBe("لا فاتورة مباشرة مثبتة");
+    expect(row.collection).toBe("—");
+  }
+  const scoped = selected("rct");
+  scoped.patientId = patient.id;
+  expect((await buildReport("visits",scoped)).rows?.map(row=>row.patientId)).toEqual([patient.id]);
+});
+
+it("keeps specialty fallback limited to the visit's validated direct invoice", async () => {
+  const selected = parseFilters(new URLSearchParams({preset:"custom",from:"2025-03-01",to:"2025-03-31",specialty:"general"}),"2025-03-31");
+  const result = await buildReport("visits",selected);
+  expect(result.rows).toHaveLength(3);
+  expect(result.rows!.every(row=>row.patientId===regular && row.specialtyLabel!=="—")).toBe(true);
+});
+
+it("validates the clinical documentary reference separately without changing persisted pointers", async () => {
+  const rows = await q<{id:number;invoice_id:number}>(`SELECT id,invoice_id FROM visits
+    WHERE (arrived_at AT TIME ZONE 'Asia/Aden')::date='2025-06-02' ORDER BY id`);
+  expect(rows).toHaveLength(2);
+  for (const [index,row] of rows.entries()) {
+    const clinical = await db.getClinicalVisit(row.id);
+    expect(clinical?.invoiceId).toBe(row.invoice_id);
+    expect(clinical).toHaveProperty("invoiceReferenceState",index===0 ? "cancelled" : "review");
+  }
+  const [valid] = await q<{id:number}>(`SELECT id FROM visits WHERE patient_id=$1 AND invoice_id IS NOT NULL
+    AND (arrived_at AT TIME ZONE 'Asia/Aden')::date='2025-03-05'`,[regular]);
+  expect(await db.getClinicalVisit(valid.id)).toHaveProperty("invoiceReferenceState","current");
+});

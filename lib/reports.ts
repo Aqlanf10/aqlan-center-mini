@@ -1330,11 +1330,15 @@ function patientHasDoctor(m: PatientMovement, doctorId: number): boolean {
     || m.visitDoctorIds.includes(doctorId);
 }
 
-/** (P-01/D-1) حالة المديونية داخل دلوٍ بعينه — لا يطفئ رصيدُ عملةٍ حالةَ أخرى. */
+/** One source precedence for visit display and filters; no patient-history inference. */
+function visitReportWork(visit: ReportVisit, invoice: MovementInvoice | undefined) {
+  return visit.procedures?.length ? visit.procedures : invoice?.lines ?? [];
+}
+
 /**
  * (تقارير R1) زيارات السجل داخل مدى وفلاتر التقرير. الطبيب بطبيب الزيارة نفسها لا
- * بعلاقة المريض التاريخية؛ والتخصص وحالة المريض بفلاتر المريض كما في بقية التقارير؛
- * والخدمة بإجراءات الزيارة المسجلة، أو بنود فاتورتها عند غيابها.
+ * بعلاقة المريض التاريخية؛ وحالة المريض بفلتر المريض كما في بقية التقارير؛
+ * والتخصص والخدمة بإجراءات الزيارة المسجلة، أو بنود فاتورتها عند غيابها.
  */
 function visitsInRange(ctx: ReportContext, from: string, to: string): ReportVisit[] {
   const { filters } = ctx;
@@ -1345,13 +1349,11 @@ function visitsInRange(ctx: ReportContext, from: string, to: string): ReportVisi
     if (visit.date < from || visit.date > to) return false;
     if (filters.doctorId && visit.doctorId !== filters.doctorId) return false;
     const patient = visit.patientId !== null ? byPatient.get(visit.patientId) : undefined;
-    if ((filters.specialty || statusFiltered) && !patient) return false;
-    if (filters.specialty && patient && !patientHasSpecialty(patient, filters.specialty)) return false;
-    if (filters.serviceId) {
-      const invoice = visit.invoiceId !== null ? invoiceById.get(visit.invoiceId) : undefined;
-      const work = visit.procedures?.length ? visit.procedures : invoice?.lines ?? [];
-      if (!work.some((line) => line.serviceId === filters.serviceId)) return false;
-    }
+    if (statusFiltered && !patient) return false;
+    const invoice = visit.invoiceId !== null ? invoiceById.get(visit.invoiceId) : undefined;
+    const work = visitReportWork(visit, invoice);
+    if (filters.specialty && !work.some((line) => line.category === filters.specialty)) return false;
+    if (filters.serviceId && !work.some((line) => line.serviceId === filters.serviceId)) return false;
     return true;
   });
 }
@@ -3194,7 +3196,7 @@ function visitsReport(ctx: ReportContext): ReportResult {
         : paid >= invoice.netMinor ? "مسدَّدة"
           : paid > 0 ? `جزئي (${formatMoney(paid, invoice.currency)})` : "غير محصّلة";
     }
-    const work = visit.procedures?.length ? visit.procedures : invoice?.lines ?? [];
+    const work = visitReportWork(visit, invoice);
     const categories = [...new Set(work.map((line) => line.category).filter(Boolean))] as string[];
 
     rows.push({
