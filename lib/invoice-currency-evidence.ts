@@ -1,3 +1,4 @@
+import {readCurrencyEvidenceDispatch} from "./invoice-currency-evidence-dispatch";
 import type {DbClient} from "./db";
 import {ReclassificationProofError} from "./invoice-currency-reclassification";
 
@@ -12,6 +13,7 @@ export interface SettlementReclassification {
 export async function readCurrencyReclassificationEvidence(client:Pick<DbClient,"query">,patientId:number|readonly number[]):Promise<SettlementReclassification[]>{
   const patientIds=typeof patientId==="number"?[patientId]:[...patientId];
   if(!patientIds.length)return [];
+  await readCurrencyEvidenceDispatch(client,patientIds);
   const {rows:documents}=await client.query<{id:number;correction_id:number;source_invoice_ids:number[];valid:boolean}>(`
     SELECT d.id,d.correction_id,d.source_invoice_ids,
       (d.patient_id=c.patient_id AND d.source_currency='YER' AND d.target_currency='SAR'

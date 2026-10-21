@@ -1,3 +1,4 @@
+import {CURRENCY_PRINCIPAL_RELATION} from "./invoice-currency-principal";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
 import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
 import { provePaymentCalculation, proveCorrectionAcknowledgment } from "./payment-acknowledgment-db";
@@ -13144,7 +13145,7 @@ export async function commissionReport(
            WITH RECURSIVE lineage(id) AS (SELECT i.id UNION
              SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id=l.id)
            SELECT original.created_at FROM invoice_corrections c
-           JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+           JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=c.id
            JOIN invoices original ON original.id=c.original_invoice_id
            WHERE c.corrected_invoice_id IN(SELECT id FROM lineage) ORDER BY d.id LIMIT 1
          ) currency_origin ON TRUE
@@ -13154,12 +13155,12 @@ export async function commissionReport(
          LEFT JOIN visit_procedures vp ON it.source_type = 'visit_procedure' AND vp.id = it.source_id
          LEFT JOIN plan_items pi ON pi.id = COALESCE(it.plan_item_id,
            CASE WHEN it.source_type = 'plan_item' THEN it.source_id END, vp.plan_item_id)
-        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=correction.id
           WHERE correction.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
           AND (currency_origin.created_at IS NULL OR (i.created_at AT TIME ZONE $1)::date <= $3::date)
           AND i.patient_id IN (
                 SELECT historical.patient_id FROM invoices historical
-                 WHERE (historical.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
+                 WHERE (historical.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=correction.id
                    WHERE correction.original_invoice_id=historical.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
                    AND (historical.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
@@ -13279,7 +13280,7 @@ export async function commissionReport(
        * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
       pool.query<{ id: number; patient_id: number; base_currency: string; settlement_leaf_id:number|null; reclassified_at_cutoff:boolean }>(
         `SELECT i.id, i.patient_id, i.base_currency,
-          EXISTS(SELECT 1 FROM invoice_settlement_reclassifications d
+          EXISTS(SELECT 1 FROM ${CURRENCY_PRINCIPAL_RELATION} d
             JOIN invoice_corrections c ON c.id=d.correction_id
             WHERE c.corrected_invoice_id=i.id AND d.patient_id=i.patient_id AND d.target_currency=i.base_currency
               AND (d.created_at AT TIME ZONE $2)::date <= $3::date) AS reclassified_at_cutoff,
@@ -15350,7 +15351,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       invoice_number: string; created_at: Date; full_name: string; base_currency: string;
       total_minor: string; discount_minor: string; status: string; currency_corrected:boolean;
     }>(
-      `SELECT i.invoice_number, i.created_at, p.full_name, i.base_currency, i.total_minor, i.discount_minor, i.status, EXISTS(SELECT 1 FROM invoice_corrections c JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id WHERE c.original_invoice_id=i.id) AS currency_corrected
+      `SELECT i.invoice_number, i.created_at, p.full_name, i.base_currency, i.total_minor, i.discount_minor, i.status, EXISTS(SELECT 1 FROM invoice_corrections c JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=c.id WHERE c.original_invoice_id=i.id) AS currency_corrected
          FROM invoices i JOIN patients p ON p.id = i.patient_id
         WHERE (i.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
@@ -15971,7 +15972,8 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
-import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
+import { backupSelectColumns, insertionOrder } from "./backup";
+import { renderBackupSnapshotEvent, type BackupSnapshotEvent } from "./backup-events";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -16011,6 +16013,12 @@ export async function* backupSqlLines(source?: Queryable): AsyncGenerator<string
  * ONLY واحدة** — والترتيب لا يتحقق إن كانت الإدارة هنا مبعثرة.
  */
 export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
+  for await (const event of backupSnapshotEvents(pool)) yield renderBackupSnapshotEvent(event);
+}
+
+/** Same canonical snapshot traversal as the legacy SQL export. Internal events
+ * are not a trusted recovery envelope and do not authorize any target writes. */
+export async function* backupSnapshotEvents(pool: Queryable): AsyncGenerator<BackupSnapshotEvent> {
 
   const { rows: tableRows } = (await pool.query(
     `SELECT table_name FROM information_schema.tables
@@ -16058,10 +16066,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
 
-  yield `-- نسخة احتياطية — انسياب العيادة\n`;
-  yield `-- أُخذت: ${new Date().toISOString()}\n`;
-  yield `-- الاستعادة: على قاعدة فارغة فتحها البرنامج مرة واحدة فأنشأ جداولها.\n`;
-  yield `BEGIN;\n`;
+  yield { kind: 'comment', text: 'نسخة احتياطية — انسياب العيادة', leadingSeparator: false };
+  yield { kind: 'comment', text: `أُخذت: ${new Date().toISOString()}`, leadingSeparator: false };
+  yield { kind: 'comment', text: 'الاستعادة: على قاعدة فارغة فتحها البرنامج مرة واحدة فأنشأ جداولها.', leadingSeparator: false };
+  yield { kind: 'begin' };
 
   // العدّادات تُعاد فقط لجداول لها عمود `id`. الجداول ذات المفتاح الطبيعي —
   // الإعدادات بمفتاحها النصّي، والأرصدة الافتتاحية برقم المريض — لا عدّاد لها،
@@ -16098,33 +16106,33 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       : table === "legacy_treatment_document_revisions" ? " ORDER BY document_id, version"
       : table === "hr_effective_revisions" ? " ORDER BY stream_id, revision" : "";
     const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"${restoreOrder}`);
-    yield `\n-- ${table} (${rows.length})\n`;
+    yield { kind: 'comment', text: `${table} (${rows.length})`, leadingSeparator: true };
     for (const row of rows) {
       if (table === "plan_items" && typeof row.id === "number" && typeof row.visit_id === "number") {
         planVisitLinks.push({itemId:row.id,visitId:row.visit_id});
-        yield `${insertStatement(table, columns, {...row,visit_id:null}, columnType, identityInsert)}\n`;
+        yield { kind: 'insert', table, columns, row: {...row,visit_id:null}, columnTypes: [...columnType], identityInsert };
       } else if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
         familyGuarantorLinks.push({ familyId: row.id, patientId: row.guarantor_patient_id });
-        yield `${insertStatement(table, columns, { ...row, guarantor_patient_id: null }, columnType, identityInsert)}\n`;
+        yield { kind: 'insert', table, columns, row: { ...row, guarantor_patient_id: null }, columnTypes: [...columnType], identityInsert };
       } else if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
         patientPhotoLinks.push({ patientId: row.id, documentId: row.photo_document_id });
-        yield `${insertStatement(table, columns, { ...row, photo_document_id: null }, columnType, identityInsert)}\n`;
+        yield { kind: 'insert', table, columns, row: { ...row, photo_document_id: null }, columnTypes: [...columnType], identityInsert };
       } else {
-        yield `${insertStatement(table, columns, row, columnType, identityInsert)}\n`;
+        yield { kind: 'insert', table, columns, row, columnTypes: [...columnType], identityInsert };
       }
     }
   }
 
-  yield `\n`;
-  for (const link of planVisitLinks) yield `UPDATE plan_items SET visit_id = ${link.visitId} WHERE id = ${link.itemId};\n`;
+  yield { kind: 'separator' };
+  for (const link of planVisitLinks) yield { kind: 'deferred-reference', reference: 'plan-visit', sourceId: link.itemId, targetId: link.visitId };
   for (const link of patientPhotoLinks) {
-    yield `UPDATE patients SET photo_document_id = ${link.documentId} WHERE id = ${link.patientId};\n`;
+    yield { kind: 'deferred-reference', reference: 'patient-photo', sourceId: link.patientId, targetId: link.documentId };
   }
   for (const link of familyGuarantorLinks) {
-    yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
+    yield { kind: 'deferred-reference', reference: 'family-guarantor', sourceId: link.familyId, targetId: link.patientId };
   }
-  for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
-  yield `COMMIT;\n`;
+  for (const table of withSerialId) yield { kind: 'sequence-reset', table };
+  yield { kind: 'commit' };
 }
 
 // ─── إعادة تقييم العملات الأجنبية ────────────────────────────────────────────
