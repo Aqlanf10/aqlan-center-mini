@@ -2,8 +2,8 @@ import {afterAll,beforeAll,describe,expect,it} from "vitest";
 import {Client} from "pg";
 import {baseUrl,harness} from "./_server";
 
-/** Synthetic patient/shift only. Tests real HTTP, database receipts and native
- * no-write rejection; does not inspect or mutate Production/Railway patients. */
+/** Built app, synthetic patient/shift only. The advisory review is answered inside the writer
+ * transaction: a 409 proves nothing was written; confirmation reuses the same key and body. */
 let ctx:Awaited<ReturnType<typeof harness>>;
 let db:Client;
 beforeAll(async()=>{
@@ -15,9 +15,10 @@ beforeAll(async()=>{
     WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status='open')`);
 },240000);
 afterAll(async()=>{await db?.end();});
-function post(body:Record<string,unknown>,key:string){
+function post(body:Record<string,unknown>,key:string,review?:string,cookie:string|null=ctx.sessions.admin.cookie){
   return fetch(`${baseUrl}/api/payments`,{method:"POST",headers:{
-    Cookie:ctx.sessions.admin.cookie,"Content-Type":"application/json","Idempotency-Key":key,
+    ...(cookie?{Cookie:cookie}:{}),"Content-Type":"application/json","Idempotency-Key":key,Origin:baseUrl,"Sec-Fetch-Site":"same-origin",
+    ...(review!==undefined?{"x-collection-similarity-review":review}:{}),
   },body:JSON.stringify(body)});
 }
 async function count(amountMinor:number){
@@ -25,49 +26,40 @@ async function count(amountMinor:number){
     WHERE patient_id=$1 AND kind='payment' AND amount_minor=$2 AND currency='YER'`,
   [ctx.seeded.patientAId,amountMinor]);return r.rows[0].n;
 }
-describe("similar-collection warning has no financial side effects",()=>{
-  it("warns on an independent second request, allows deliberate confirmation, replays same key",async()=>{
+describe("similar-collection review over HTTP has no financial side effects",()=>{
+  it("asks on an independent second request, records on deliberate confirmation, replays the same key",async()=>{
     // Deliberately unusual amount to avoid seeded fixture overlap.
-    const amount="71593",minor=71593;
-    const intent={patientId:ctx.seeded.patientAId,kind:"payment",amount,currency:"YER",method:"cash"};
-    const preview=await fetch(`${baseUrl}/api/payments/similar?patientId=${ctx.seeded.patientAId}&amountMinor=${minor}&currency=YER`,{
-      headers:{Cookie:ctx.sessions.admin.cookie},cache:"no-store"});
-    expect(preview.status).toBe(200);
-    const initial=await preview.json() as {receipts:{id:number}[]};
-    expect(initial.receipts).toHaveLength(0);
+    const minor=71593;
+    const intent={patientId:ctx.seeded.patientAId,kind:"payment",amount:"71593",currency:"YER",method:"cash"};
     const before=await count(minor);
-    const firstBody={...intent,similarityReview:{observedReceiptIds:[],confirmed:false}};
-    const first=await post(firstBody,"similar:test:first:20261022");
+    const first=await post(intent,"similar:http:first:20261022");
     expect(first.status).toBe(201);
     const firstReceipt=await first.json() as {id:number;receiptNumber:string};
-    expect(firstReceipt.id).toBeGreaterThan(0);
     expect(await count(minor)).toBe(before+1);
 
-    const stale=await post(firstBody,"similar:test:second:20261022");
-    expect(stale.status).toBe(409);
-    expect((await stale.json() as {reason:string}).reason).toBe("similar_collection_review_required");
+    const asked=await post(intent,"similar:http:second:20261022","none");
+    expect(asked.status).toBe(409);
+    const refusal=await asked.json() as {reason:string;message:string;windowHours:number;receipts:{id:number;receiptNumber:string}[]};
+    expect(refusal).toMatchObject({reason:"similar_collection_review_required",windowHours:24});
+    expect(refusal.message).toMatch(/[؀-ۿ]/);
+    expect(refusal.receipts.map(r=>r.id)).toEqual([firstReceipt.id]);
     expect(await count(minor)).toBe(before+1);
 
-    const checked=await fetch(`${baseUrl}/api/payments/similar?patientId=${ctx.seeded.patientAId}&amountMinor=${minor}&currency=YER`,{
-      headers:{Cookie:ctx.sessions.admin.cookie},cache:"no-store"});
-    const matches=await checked.json() as {receipts:{id:number;receiptNumber:string}[]};
-    expect(matches.receipts.map(r=>r.id)).toContain(firstReceipt.id);
-    const secondBody={...intent,similarityReview:{observedReceiptIds:matches.receipts.map(r=>r.id),confirmed:true}};
-    const second=await post(secondBody,"similar:test:second:20261022");
-    expect(second.status).toBe(201);
-    const secondReceipt=await second.json() as {id:number};
+    const confirmed=await post(intent,"similar:http:second:20261022",`ids:${firstReceipt.id}`);
+    expect(confirmed.status).toBe(201);
+    const secondReceipt=await confirmed.json() as {id:number};
     expect(secondReceipt.id).not.toBe(firstReceipt.id);
     expect(await count(minor)).toBe(before+2);
 
-    // Replaying the exact second operation after the match-set changed must not
-    // create a third receipt or block recovery with an unrelated warning.
-    const replay=await post(secondBody,"similar:test:second:20261022");
+    // The exact second operation replays even though the similar set changed and no header is sent.
+    const replay=await post(intent,"similar:http:second:20261022");
     expect(replay.status).toBe(200);
     expect((await replay.json() as {id:number}).id).toBe(secondReceipt.id);
     expect(await count(minor)).toBe(before+2);
   },120000);
-  it("does not leak another patient's collection information without collection rights",async()=>{
-    const res=await fetch(`${baseUrl}/api/payments/similar?patientId=${ctx.seeded.patientAId}&amountMinor=100&currency=YER`,{cache:"no-store"});
+  it("never reveals receipts to an unauthenticated caller",async()=>{
+    const res=await post({patientId:ctx.seeded.patientAId,kind:"payment",amount:"71593",currency:"YER",method:"cash"},"similar:http:anon:20261022",undefined,null);
     expect(res.status).toBe(401);
+    expect(JSON.stringify(await res.json())).not.toContain("receipts");
   });
 });

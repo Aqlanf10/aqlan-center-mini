@@ -1,5 +1,5 @@
+import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
-import {findSimilarCollections,parseSimilarCollectionReview,reviewMatchesReceipts} from "@/lib/similar-collection";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -55,6 +55,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
   }
 
+  // Advisory similar-receipt review for every NEW collection (never refunds); checked inside
+  // each writer's transaction after its shift lock and exact-key replay (lib/similar-collection).
+  const similarityReview = parseSimilarCollectionReviewHeader(request.headers.get(SIMILAR_COLLECTION_REVIEW_HEADER));
+  if (!similarityReview) return NextResponse.json({ message: "مراجعة السندات المشابهة المرسلة غير صالحة. أعد فتح نافذة التحصيل." }, { status: 400 });
+
   // Opt-in mode: replay/FX/audit belong to its canonical transaction. No generic
   // invoice-only write or post-commit audit may run for this purpose.
   const recovery = parseRecoveryIntent(body, request.headers.get("idempotency-key"));
@@ -66,7 +71,7 @@ export async function POST(request: Request) {
       const result = await recordReversedInstallmentRecovery({
         ...recovery.intent, idempotencyKey: recovery.idempotencyKey,
         createdBy: session.username, actorRole: session.role,
-      });
+      }, { similarityReview });
       if (result.reason || !result.payment) {
         const messages: Record<string, string> = {
           invalid_recovery_request: "طلب إعادة تحصيل القسط غير صالح.",
@@ -84,7 +89,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ reason: result.reason, message: messages[result.reason ?? ""] ?? "تعذّرت إعادة تحصيل القسط. راجع الحساب قبل المحاولة." }, { status: result.reason === "invalid_recovery_request" ? 400 : 409 });
       }
       return NextResponse.json({ ...result.payment, idempotencyKey:recovery.idempotencyKey }, { status: result.replayed ? 200 : 201 });
-    } catch {
+    } catch (error) {
+      if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
       return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة بالمفتاح نفسه." }, { status: 500 });
     }
   }
@@ -171,18 +177,6 @@ export async function POST(request: Request) {
   // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
   const base = CLINIC_BASE_CURRENCY;
   const savedPayment=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
-  // Advisory warning protocol is opt-in for the human collection UI. Never gate
-  // a same-key replay; the canonical writer still checks the request fingerprint.
-  if(kind==="payment"&&Object.hasOwn(source,"similarityReview")&&!savedPayment){
-    const review=parseSimilarCollectionReview(source.similarityReview);
-    if(!review)return NextResponse.json({message:"تأكيد مراجعة السندات غير صالح."},{status:400});
-    try{
-      const matches=await findSimilarCollections(patientId,amountMinor,currency);
-      if(!reviewMatchesReceipts(review,matches))
-        return NextResponse.json({reason:"similar_collection_review_required",
-          message:"ظهر سند قبض مشابه أو تغيّر سجل التحصيل بعد المراجعة. أعد فحص السندات قبل تسجيل دفعة مستقلة."},{status:409});
-    }catch{return NextResponse.json({message:"تعذّر فحص السندات السابقة؛ لم يبدأ التحصيل."},{status:503});}
-  }
   const exchangeRate = savedPayment?.patientId===patientId&&savedPayment.createdBy===session.username&&savedPayment.currency===currency
     ?savedPayment.exchangeRate:rateFromSettings(settings, currency, base);
   const exchangeRateRequired = (includeReason = false) => NextResponse.json(
@@ -202,7 +196,7 @@ export async function POST(request: Request) {
         const plan = await getPlan(planId, clinicDateString(new Date(), CLINIC_TIME_ZONE));
         if (plan && plan.patientId === patientId) {
           if(plan.approvedAgreement) {
-            const result=await collectApprovedAgreement({planId,amountMinor,currency,method:method==="transfer"?"transfer":"cash",note,idempotencyKey:idempotencyKey??"",session});
+            const result=await collectApprovedAgreement({planId,amountMinor,currency,method:method==="transfer"?"transfer":"cash",note,idempotencyKey:idempotencyKey??"",session},{similarityReview});
             // Split receipts are one logical collection, not one payment for the whole amount.
             // The first receipt remains the backward-compatible top-level identity.
             const split="collection" in result && result.collection && "payments" in result && Array.isArray(result.payments);
@@ -223,7 +217,7 @@ export async function POST(request: Request) {
           const result = await recordPlanInstallment({
             planId, patientId, installmentNumber, planTitle: plan.title,
             amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
-            createdBy: session.username, actorRole: session.role, idempotencyKey,
+            createdBy: session.username, actorRole: session.role, idempotencyKey, similarityReview,
           });
           if ("reason" in result) {
             const messages = {
@@ -243,6 +237,7 @@ export async function POST(request: Request) {
         }
       }
     } catch (error) {
+      if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
       if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
       return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
     }
@@ -266,7 +261,7 @@ export async function POST(request: Request) {
     // retain their inherited origin snapshot and their existing route FX gate.
     if (kind === "refund" && exchangeRate === null) return exchangeRateRequired();
     const result = kind === "payment"
-      ? await recordSettingsOwnedPayment(receiptInput, settings)
+      ? await recordSettingsOwnedPayment({ ...receiptInput, similarityReview }, settings)
       : await recordPayment({ ...receiptInput, kind, exchangeRate: exchangeRate!, reversalOfId });
     const { payment, reason, replayed } = result;
     const acknowledgmentEvidence = "acknowledgmentEvidence" in result ? result.acknowledgmentEvidence : undefined;
@@ -372,6 +367,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...payment, idempotencyKey,
       ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) }, { status: replayed ? 200 : 201 });
   } catch (error) {
+    if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة." }, { status: 500 });
   }

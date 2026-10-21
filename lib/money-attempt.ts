@@ -1,5 +1,6 @@
 import { newIdempotencyKey } from "./idempotency-key";
 import {readSplitCollectionEvidence,type SplitCollectionEvidence} from "./agreement-split-collection";
+import {formatSimilarCollectionReviewHeader,readSimilarCollectionRefusal,SIMILAR_COLLECTION_REVIEW_HEADER,type SimilarCollectionReceipt,type SimilarCollectionReview} from "./similar-collection";
 
 export const MONEY_UNCERTAIN = "تعذّر تأكيد نتيجة العملية. قد تكون سُجّلت ماليًا. أعد التحقق بنفس الطلب قبل تسجيل عملية أخرى.";
 /** A later refusal is diagnostic, never proof that the first write failed. */
@@ -16,15 +17,35 @@ export type MoneyRequest = Readonly<{
 type Receipt = { id: number; receiptNumber: string };
 export type MoneyAcknowledgment = { paymentId: number | null; reversal?: Receipt; replacement?: Receipt | null;
   paymentIds?:number[];collection?:SplitCollectionEvidence };
+/**
+ * "review": the server proved it wrote nothing and reported similar receipts (advisory).
+ * `proven` = no earlier send with this key can still be in flight (every send of this key got
+ * a definitive answer), so cancelling may retire the attempt; otherwise it stays uncertain.
+ */
 export type MoneyAttempt = Readonly<{
   request: MoneyRequest;
   key: string;
-  phase: "sending" | "uncertain" | "confirmed";
+  phase: "sending" | "uncertain" | "confirmed" | "review";
   acknowledgment?: MoneyAcknowledgment;
+  similar?: Readonly<{ receipts: SimilarCollectionReceipt[]; proven: boolean }>;
 }>;
-type Result = { kind: "confirmed"; attempt: MoneyAttempt; acknowledgment: MoneyAcknowledgment }
+export type MoneyResult = { kind: "confirmed"; attempt: MoneyAttempt; acknowledgment: MoneyAcknowledgment }
   | { kind: "refused" | "uncertain" | "blocked"; message: string }
+  | { kind: "similar"; receipts: SimilarCollectionReceipt[] }
   | { kind: "busy" };
+type Result = MoneyResult;
+
+/** Headers for a send; the review never enters the body, so the request/fingerprint stays identical. */
+export function moneyHeaders(key: string, review?: SimilarCollectionReview): Record<string, string> {
+  return { "Content-Type": "application/json", "Idempotency-Key": key,
+    ...(review ? { [SIMILAR_COLLECTION_REVIEW_HEADER]: formatSimilarCollectionReviewHeader(review) } : {}) };
+}
+/** A 409 that proves an advisory review is needed for THIS send (nothing was written). */
+export function similarReview(previous: MoneyAttempt | null, status: number, payload: unknown): MoneyAttempt["similar"] | null {
+  const receipts = status === 409 ? readSimilarCollectionRefusal(payload) : null;
+  if (!receipts) return null;
+  return { receipts, proven: previous === null || (previous.phase === "review" && previous.similar?.proven === true) };
+}
 
 function object(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -78,7 +99,15 @@ export class MoneyAttemptStore {
   consume(scope: string, attempt: MoneyAttempt) {
     if (this.get(scope) === attempt && attempt.phase === "confirmed") this.publish(scope, null);
   }
-  async run(scope: string, request?: MoneyRequest): Promise<Result> {
+  /** Operator cancelled a similar-receipt review. Retire only when no send of this key can still land. */
+  dismiss(scope: string): "retired" | "kept" | null {
+    const current = this.get(scope);
+    if (!current || current.phase !== "review") return null;
+    if (current.similar?.proven) { this.publish(scope, null); return "retired"; }
+    this.publish(scope, { request: current.request, key: current.key, phase: "uncertain" });
+    return "kept";
+  }
+  async run(scope: string, request?: MoneyRequest, review?: SimilarCollectionReview): Promise<Result> {
     const previous = this.get(scope);
     if (previous?.phase === "sending") return { kind: "busy" };
     if (previous && request && (previous.request.url !== request.url || previous.request.body !== request.body || previous.request.operation !== request.operation)) {
@@ -89,14 +118,14 @@ export class MoneyAttemptStore {
     }
     if (!previous && !request) return { kind: "busy" };
     const attempt: MoneyAttempt = previous
-      ? { ...previous, phase: "sending" }
+      ? { request: previous.request, key: previous.key, phase: "sending" }
       : { request: { ...request! }, key: this.key(), phase: "sending" };
     this.publish(scope, attempt); // synchronous lock, before fetch/React renders
     let failure = MONEY_UNCERTAIN;
     try {
       const response = await this.transport(attempt.request.url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": attempt.key },
+        headers: moneyHeaders(attempt.key, review),
         body: attempt.request.body,
       });
       const payload: unknown = await response.json(); // malformed JSON is never a refusal/ack
@@ -105,6 +134,11 @@ export class MoneyAttemptStore {
         const confirmed: MoneyAttempt = { ...attempt, phase: "confirmed", acknowledgment };
         this.publish(scope, confirmed);
         return { kind: "confirmed", attempt: confirmed, acknowledgment };
+      }
+      const similar = response.redirected ? null : similarReview(previous, response.status, payload);
+      if (similar) {
+        this.publish(scope, { ...attempt, phase: "review", similar });
+        return { kind: "similar", receipts: similar.receipts };
       }
       const message = object(payload)?.message;
       if (!response.redirected) failure = moneyRecoveryFailure(response.status, message);

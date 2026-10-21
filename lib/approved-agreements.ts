@@ -1,3 +1,4 @@
+import {assertSimilarCollectionReviewed,type SimilarCollectionReview} from "./similar-collection";
 import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
 import {clinicDateString} from "./schedule";
 import {CLINIC_TIME_ZONE} from "./db";
@@ -183,7 +184,8 @@ async function assertCollectionSession(client:DbClient,session:SessionPayload) {
   const current=await revalidateSessionInTransaction(session,client);
   if(!current||!canHandleMoney(current.role))throw new DebtRepaymentError("unauthorized","انتهت الجلسة أو تغيّرت صلاحية التحصيل.");
 }
-export async function collectApprovedAgreement(input:{planId:number;amountMinor:number;currency:Currency;method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:SessionPayload}) {
+export async function collectApprovedAgreement(input:{planId:number;amountMinor:number;currency:Currency;method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:SessionPayload},
+  options:{similarityReview?:SimilarCollectionReview}={}) {
   if(!positive(input.planId)||!positive(input.amountMinor)||!isCurrency(input.currency)||!validKey(input.idempotencyKey)||!["cash","transfer"].includes(input.method))fail("راجع بيانات التحصيل.");
   const hash=debtRequestHash({purpose:"approved-agreement-collection-v1",...input,session:{id:input.session.userId,username:input.session.username}});
   const receipt=await transaction(async client=>{
@@ -214,6 +216,8 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
     await lockDebtAccountForSchedule(client,a.patient_id);
     const groupedAfterLock=await groupReplay();if(groupedAfterLock)return groupedAfterLock;
     const waited=await replay();if(waited)return {paymentId:waited.id,replayed:true};
+    // Advisory review under the shift lock (lockDebtAccountForSchedule) and after exact-key replay.
+    await assertSimilarCollectionReviewed(client,{patientId:a.patient_id,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
     const position=await readDebtPosition(client,target(a),true);
     if(!position.available||!approvedSourceMatches(position.sourceSnapshot,a.source_snapshot))throw new DebtRepaymentError("stale","تغير مصدر الأصل؛ يلزم مراجعة مالية قبل التحصيل.");
     if(input.currency!==a.currency&&a.currency!==CLINIC_BASE_CURRENCY)fail("حصّل الاتفاق بعملته؛ لا يوجد تحويل مسجل بين هاتين العملتين.");

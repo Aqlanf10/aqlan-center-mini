@@ -42,16 +42,16 @@ describe("actual cashier receipt warning: advisory UI",()=>{
       modal=await openPayment(page);
       await modal.getByLabel("المبلغ").fill("71594");
       await modal.getByRole("button",{name:"سجّل الدفعة واطبع السند"}).click();
-      const warning=page.getByRole("dialog",{name:"تنبيه سند قبض مشابه"});
+      const warning=page.getByRole("alertdialog",{name:"تنبيه سند قبض مشابه"});
       await warning.waitFor();
       expect(await warning.getByText(/71594|71,594/).count()).toBeGreaterThan(0);
       expect(await count()).toBe(initial+1);
-      await warning.getByRole("button",{name:"إلغاء"}).click();
+      await warning.getByRole("button",{name:"إلغاء التحصيل"}).click();
       await warning.waitFor({state:"hidden"});
       expect(await count()).toBe(initial+1);
       await modal.getByRole("button",{name:"سجّل الدفعة واطبع السند"}).click();
       await warning.waitFor();
-      await warning.getByRole("button",{name:"تسجيل الدفعة رغم التشابه"}).click();
+      await warning.getByRole("button",{name:"تسجيل دفعة مستقلة"}).click();
       await modal.waitFor({state:"hidden"});
       expect(await count()).toBe(initial+2);
     }finally{await context.close();}

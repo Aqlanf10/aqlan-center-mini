@@ -1,3 +1,4 @@
+import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
 import { AGREEMENT_DELTA_SQL } from "./agreement-delta-schema";
 import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
@@ -9523,6 +9524,8 @@ export async function recordPayment(input: {
    * مرفوض (refund_requires_origin). الرد الجزئي مسموح بما تبقى من الأصل.
    */
   reversalOfId?: number | null;
+  /** Human collection entry points only (HTTP). Undefined = no advisory review applies. */
+  similarityReview?: SimilarCollectionReview;
 }): Promise<{
   payment: Payment | null;
   reason:
@@ -9568,7 +9571,8 @@ export async function recordPayment(input: {
      مطالبات متزامنة على PostgreSQL حقيقي. */
   const outcome = await runPaymentTransaction(
     { ...input, planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
-    { idempotencyKey, reversalOfId, receiptAudit: { actorRole: input.actorRole ?? null } },
+    { idempotencyKey, reversalOfId, receiptAudit: { actorRole: input.actorRole ?? null },
+      ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}) },
   );
 
   /* الاتصال محرَّر الآن — الترطيب (قراءة السند كاملًا) خارج الحجز. */
@@ -9602,7 +9606,8 @@ export async function recordSettingsOwnedPayment(
     { ...input, kind: "payment", exchangeRate: observedExchangeRate,
       planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
     { idempotencyKey, reversalOfId: null, settingsOwnedFx: true,
-      receiptAudit: { actorRole: input.actorRole ?? null } },
+      receiptAudit: { actorRole: input.actorRole ?? null },
+      ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}) },
   );
   if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
   return { payment: await getPayment(outcome.paymentId), reason: null,
@@ -9969,6 +9974,8 @@ type PaymentTransactionPrepared = {
   requestHashOverride?: string;
   /** Only ordinary receipts request a generic atomic event; purpose callers own theirs. */
   receiptAudit?: { actorRole: string | null };
+  /** Human collection entry points only: advisory similar-receipt review (lib/similar-collection). */
+  similarityReview?: SimilarCollectionReview;
 };
 type SettingsPaymentOutcome = PaymentOutcome | { kind: "reason"; reason: "exchange_rate_required" };
 // Existing numeric-rate callers retain their outcome contract and cannot enable
@@ -10254,6 +10261,11 @@ async function runPaymentTransaction(
         return { kind: "reason", reason: "idempotency_conflict" };
       }
     }
+    // Advisory review under the shift lock and after exact-key replay; a throw rolls back.
+    if (input.kind === "payment") {
+      await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+        currency: input.currency, review: prepared.similarityReview });
+    }
 
     // No fabricated rate and no invalid base calculation just to reach replay.
     // For a genuinely new settings-owned key keep the original observed raw
@@ -10531,6 +10543,7 @@ async function recoveryReplay(
 
 async function runRecoveryTransaction(
   client: DbClient, input: RecoveryWriteInput, key: string, requestHash: string,
+  similarityReview?: SimilarCollectionReview,
 ): Promise<RecoveryOutcome> {
   const previous = await recoveryReplay(client, input, key, requestHash);
   if (previous) return previous;
@@ -10575,6 +10588,9 @@ async function runRecoveryTransaction(
     `SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR SHARE`, [input.patientId]);
   const afterShiftWait = await recoveryReplay(client, input, key, requestHash);
   if (afterShiftWait) return afterShiftWait;
+  // Advisory review under the shift lock and after exact-key replay; a throw rolls back.
+  await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+    currency: input.currency, review: similarityReview });
   const current = (await readRecoveryDocumentStates(client, input.patientId)).find((state) => state.invoiceId === input.invoiceId);
   if (!current || current.snapshot.invoice.status === "cancelled") return { kind: "reason", reason: "invalid_invoice" };
   if (current.projection.kind === "review_required") return { kind: "reason", reason: "recovery_review_required" };
@@ -10643,7 +10659,8 @@ async function runRecoveryTransaction(
 /** Explicit, append-only recovery on an already issued invoice. Ordinary receipts
  * retain their existing target, fingerprint, overpayment and manual-status semantics.
  */
-export async function recordReversedInstallmentRecovery(input: RecoveryWriteInput & { idempotencyKey: string }): Promise<{
+export async function recordReversedInstallmentRecovery(input: RecoveryWriteInput & { idempotencyKey: string },
+  options: { similarityReview?: SimilarCollectionReview } = {}): Promise<{
   payment: Payment | null; reason: RecoveryPaymentRefusal | null; replayed?: boolean;
 }> {
   if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0 || !isCurrency(input.currency)
@@ -10657,7 +10674,7 @@ export async function recordReversedInstallmentRecovery(input: RecoveryWriteInpu
   let outcome: RecoveryOutcome;
   try {
     await client.query("BEGIN");
-    outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash);
+    outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash, options.similarityReview);
     await client.query(outcome.kind === "reason" ? "ROLLBACK" : "COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -20426,6 +20443,8 @@ export async function recordPlanInstallment(input: {
    * idempotency_conflict. بلا مفتاح يبقى السلوك كما كان.
    */
   idempotencyKey?: string | null;
+  /** Human collection entry points only (HTTP). Undefined = no advisory review applies. */
+  similarityReview?: SimilarCollectionReview;
 }): Promise<
   | { invoiceId: number; paymentId: number; replayed?: boolean }
   | { reason: "no_shift" | "cross_currency_not_supported" | "idempotency_conflict" | "inactive_plan"
@@ -20551,6 +20570,9 @@ async function runPlanInstallmentTransaction(
       return { reason: "idempotency_conflict" };
     }
   }
+  // Advisory review under the shift lock and after exact-key replay; a throw rolls the caller back.
+  await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+    currency: input.currency, review: input.similarityReview });
 
   // Existing invoice locks precede the plan lock. Never discover/acquire another
   // payment lock after shift; new/ambiguous evidence below aborts instead of billing.

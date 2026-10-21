@@ -207,7 +207,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
     onOpenClinicalContext({ patientId, planId, planItemId: item.id, ...(item.caseId != null ? { clinicalCaseId: item.caseId } : {}) }, target);
   };
 
-  const collect = async (plan?: Plan) => {
+  const collect = async (plan?: Plan, review?: { observedReceiptIds: number[] }) => {
     if (!readRef.current.active || busy) return;
     const source = plan?.approvedAgreement;
     const body = JSON.stringify({ patientId, kind: "payment", amount: payAmount, currency: payCurrency,
@@ -217,8 +217,9 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
           : {planId:plan?.id}) });
     setBusy(true);
     try {
-      const result = await money.run(plan ? { url: "/api/payments", body, operation: "payment" } : undefined);
-      if (!result || result.kind === "busy") return;
+      const result = await money.run(plan ? { url: "/api/payments", body, operation: "payment" } : undefined, review);
+      // "similar": nothing was written; the saved attempt shows the advisory review.
+      if (!result || result.kind === "busy" || result.kind === "similar") return;
       if (result.kind !== "confirmed") { setError(result.message); return; }
       setLastReceipt(result.acknowledgment.paymentId);
       setLastSplit(result.acknowledgment.collection??null);
@@ -242,7 +243,8 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
         onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
       {!loading && !readDenied && !readUnavailable && visiblePlans.length === 0 && (context?.planId !== undefined || context?.planItemId !== undefined || context?.clinicalCaseId !== undefined) ? <p role="status" data-testid="plan-context-unavailable" className="rounded-xl border border-amber-300 p-3 text-sm">لا توجد خطة متاحة مرتبطة بهذا المرجع. لم يتم اختيار خطة أخرى.</p> : null}
       {canSeeFinancial && !readUnavailable && !readDenied ? (
-        <><MoneyAttemptNotice attempt={money.attempt} onRetry={() => void collect()} />
+        <><MoneyAttemptNotice attempt={money.attempt} busy={busy} onRetry={() => void collect()}
+          onSimilar={{ confirm: (observedReceiptIds) => void collect(undefined, { observedReceiptIds }), cancel: () => void money.dismiss() }} />
         {money.error ? <p role="alert">{money.error}</p> : null}</>
       ) : null}
       {error ? (

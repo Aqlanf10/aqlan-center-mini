@@ -3,7 +3,8 @@
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useSyncExternalStore} from "react";
 import {acknowledgeFinancialCommand,readFinancialJournal,reserveFinancialCommand,FinancialRecoveryError,type FinancialCommand} from "@/lib/financial-command-journal";
 import {durableMoneyCommand,restoreMoneyCommand,readDurableMoneyAcknowledgment,type DurableMoneyCommand,type MoneyReceiptContext} from "@/lib/durable-money-command";
-import {MONEY_UNCERTAIN,moneyRecoveryFailure,type MoneyAttempt,type MoneyRequest} from "@/lib/money-attempt";
+import {MONEY_UNCERTAIN,moneyHeaders,moneyRecoveryFailure,similarReview,type MoneyAttempt,type MoneyRequest} from "@/lib/money-attempt";
+import type {SimilarCollectionReview} from "@/lib/similar-collection";
 import {newIdempotencyKey} from "@/lib/idempotency-key";
 import {readInvoiceCommandResponse} from "@/lib/invoice-command-transport";
 import {useSession} from "./SessionProvider";
@@ -41,7 +42,7 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
   const own=state.command?.owner===owner?state.command:null;
   useEffect(()=>{if(!enabled||!own)return;const block=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue="";};window.addEventListener("beforeunload",block);return()=>window.removeEventListener("beforeunload",block);},[enabled,own]);
   const blocked=state.other||state.command&&!own;
-  const run=async(request?:MoneyRequest)=>{
+  const run=async(request?:MoneyRequest,review?:SimilarCollectionReview)=>{
     if(!context||!actor||lifetime.current!==token)return null;
     const current=states.get(scope)??empty;
     if(!current.ready||current.error||current.other||current.command&&current.command.owner!==owner)return {kind:"blocked" as const,message:current.error??"يوجد طلب مالي سابق لهذا المريض. استعده من الحساب قبل تسجيل عملية جديدة."};
@@ -50,7 +51,7 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
     if(previous&&request&&(request.url!==previous.attempt.request.url||request.body!==previous.attempt.request.body||request.operation!==previous.attempt.request.operation))return {kind:"blocked" as const,message:MONEY_UNCERTAIN};
     if(previous?.attempt.phase==="confirmed"&&previous.attempt.acknowledgment)return {kind:"confirmed" as const,attempt:previous.attempt,acknowledgment:previous.attempt.acknowledgment};
     if(!previous&&!request)return {kind:"busy" as const};
-    const command:DurableMoneyCommand=previous?{...previous,attempt:{...previous.attempt,phase:"sending"}}:{actor,patientId,owner,receipt:context.receipt??null,attempt:{request:request!,key:newIdempotencyKey("money"),phase:"sending"}};
+    const command:DurableMoneyCommand=previous?{...previous,attempt:{request:previous.attempt.request,key:previous.attempt.key,phase:"sending"}}:{actor,patientId,owner,receipt:context.receipt??null,attempt:{request:request!,key:newIdempotencyKey("money"),phase:"sending"}};
     publish(scope,{...current,command});
     const durable=durableMoneyCommand(command);
     let reserved=false;
@@ -62,11 +63,15 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
       announce();
       // An unmounted or replaced principal may persist recovery, but cannot start a fresh write.
       if(lifetime.current!==token){publish(scope,{...current,command:{...command,attempt:{...command.attempt,phase:"uncertain"}}});return null;}
-      const {response,payload}=await readInvoiceCommandResponse(signal=>fetch(command.attempt.request.url,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":command.attempt.key},body:command.attempt.request.body,signal}));
+      const {response,payload}=await readInvoiceCommandResponse(signal=>fetch(command.attempt.request.url,{method:"POST",headers:moneyHeaders(command.attempt.key,review),body:command.attempt.request.body,signal}));
       const acknowledgment=response.ok&&!response.redirected?readDurableMoneyAcknowledgment(payload,command):null;
       if(acknowledgment){const completed=await acknowledgeFinancialCommand({actor,patientId},durable);
         const confirmed={...command.attempt,phase:"confirmed" as const,acknowledgment};publish(scope,{...current,revision:completed.revision,command:{...command,attempt:confirmed}});announce();
         return lifetime.current===token?{kind:"confirmed" as const,attempt:confirmed,acknowledgment}:null;}
+      // Advisory review: nothing was written for this send. Keep the same key/body for confirmation.
+      const similar=response.redirected?null:similarReview(previous?.attempt??null,response.status,payload);
+      if(similar){publish(scope,{...current,command:{...command,attempt:{...command.attempt,phase:"review",similar}}});
+        return lifetime.current===token?{kind:"similar" as const,receipts:similar.receipts}:null;}
       const message=payload&&typeof payload==="object"&&"message" in payload?payload.message:null;
       if(!response.redirected)failure=moneyRecoveryFailure(response.status,message);
       if(!previous&&!response.redirected&&[400,404,422].includes(response.status)&&typeof message==="string"&&message.trim()){
@@ -83,6 +88,17 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
     publish(scope,{...current,command:{...command,attempt:{...command.attempt,phase:"uncertain"}}});
     return lifetime.current===token?{kind:"uncertain" as const,message:failure}:null;
   };
+  /** Operator cancelled a similar-receipt review: retire only when no send of this key can still land. */
+  const dismiss=async():Promise<"retired"|"kept"|null>=>{
+    const current=states.get(scope);const command=current?.command;
+    if(!current||!command||command.owner!==owner||command.attempt.phase!=="review")return null;
+    if(command.attempt.similar?.proven){
+      try{const retired=await acknowledgeFinancialCommand({actor,patientId},durableMoneyCommand(command));publish(scope,{...current,revision:retired.revision,command:null});announce();return "retired";}
+      catch{/* journal unavailable: keep the command, never drop it silently */}
+    }
+    publish(scope,{...current,command:{...command,attempt:{request:command.attempt.request,key:command.attempt.key,phase:"uncertain"}}});
+    return "kept";
+  };
   const consume=(attempt:MoneyAttempt)=>{const current=states.get(scope);if(current?.command?.attempt===attempt&&attempt.phase==="confirmed"){publish(scope,{...current,command:null});announce();}};
-  return {attempt:own?.attempt??null,run,consume,ready:state.ready&&!blocked&&!state.error,error:state.error??(blocked?"يوجد طلب مالي سابق لهذا المريض. استعده من الحساب قبل تسجيل عملية جديدة.":null)};
+  return {attempt:own?.attempt??null,run,consume,dismiss,ready:state.ready&&!blocked&&!state.error,error:state.error??(blocked?"يوجد طلب مالي سابق لهذا المريض. استعده من الحساب قبل تسجيل عملية جديدة.":null)};
 }

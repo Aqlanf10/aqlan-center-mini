@@ -6,10 +6,11 @@ import { assertDebtSession, DebtRepaymentError, debtRequestHash, readDebtPositio
 
 import { debtAccountDue } from "./debt-account-position";
 import {debtRevisionSourceMatches} from "./debt-source-proof";
+import {assertSimilarCollectionReviewed,type SimilarCollectionReview} from "./similar-collection";
 export async function collectDebtInstallment(input: {
   patientId:number;arrangementId:number;expectedVersion:number;amountMinor:number;currency:Currency;
   method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:SessionPayload;
-}) {
+},options:{similarityReview?:SimilarCollectionReview}={}) {
   if(![input.patientId,input.arrangementId,input.expectedVersion,input.amountMinor].every(value=>Number.isSafeInteger(value)&&value>0)
     ||!isCurrency(input.currency)||!["cash","transfer"].includes(input.method)||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey))
     throw new DebtRepaymentError("invalid","بيانات التحصيل غير صالحة.");
@@ -37,6 +38,8 @@ export async function collectDebtInstallment(input: {
       if(waited){paymentId=waited;replayed=true;await client.query("COMMIT");}
       else{
         if(!shifts.length)throw new DebtRepaymentError("stale","لا توجد وردية مفتوحة؛ افتح الوردية قبل التحصيل.");
+        // Advisory review under the shift lock and after exact-key replay; a throw rolls back.
+        await assertSimilarCollectionReviewed(client,{patientId:input.patientId,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
         await client.query("SELECT id FROM visits WHERE patient_id=$1 AND invoice_id IS NOT NULL ORDER BY id FOR UPDATE",[input.patientId]);
         await client.query("LOCK TABLE patient_opening_balances IN SHARE MODE");
         const invoices=(await client.query<{id:number}>("SELECT id FROM invoices WHERE patient_id=$1 ORDER BY id FOR UPDATE",[input.patientId])).rows;

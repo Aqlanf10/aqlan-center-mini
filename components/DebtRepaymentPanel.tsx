@@ -10,14 +10,18 @@ import { debtRecord, readDebtRepaymentWorkspace, type DebtRepaymentChoice, type 
 import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "@/lib/debt-installments";
 import { DebtRepaymentEditor, readDebtRepaymentDraft, type DebtRepaymentDraft } from "./DebtRepaymentEditor";
 import { useSession } from "./SessionProvider";
-import {SimilarCollectionWarning,useSimilarCollectionWarning} from "./SimilarCollectionWarning";
 import { FinancialRecoveryError, type FinancialCommand, type FinancialRecoveryControl } from "@/lib/financial-command-journal";
+import { moneyHeaders } from "@/lib/money-attempt";
+import { readSimilarCollectionRefusal, type SimilarCollectionReceipt, type SimilarCollectionReview } from "@/lib/similar-collection";
+import { SimilarCollectionWarning } from "./SimilarCollectionWarning";
 
 /** Retained by the patient/actor owner above this panel, including A -> B -> A. */
 export interface DebtRepaymentCommand {
   url:string;body:string;key:string;target:DebtRepaymentTarget;actor:string;
   expected:{kind:"schedule";version:number;terms:DebtRepaymentTerms;status:"active"|"cancelled"}|{kind:"collection";amountMinor:number;currency:Currency;method:string};
-  outcome:"pending"|"uncertain"|"refused";message:string;
+  outcome:"pending"|"uncertain"|"refused"|"review";message:string;
+  /** outcome "review": nothing was written; `proven` = no earlier send of this key can still land. */
+  similar?:{receipts:SimilarCollectionReceipt[];proven:boolean};
 }
 function durableDebtCommand(command: DebtRepaymentCommand): FinancialCommand {
   const { url, body, key, target, actor, expected } = command;
@@ -75,13 +79,11 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
   const [method,setMethod]=useState<"cash"|"transfer">("cash");
   const [note,setNote]=useState("");
   const [writing,setWriting]=useState(false);
-  const [checkingSimilar,setCheckingSimilar]=useState(false);
-  const similarity=useSimilarCollectionWarning(JSON.stringify([patientId,session?.username,session?.role,enabled]));
   const pending=useRef(false);
   const draftRevision=useRef(financialRecovery.revision);
   const lifetime=useRef({active:false,generation:0});
   useLayoutEffect(()=>{const owner=lifetime.current;owner.active=true;return()=>{owner.active=false;owner.generation++;};},[]);
-  const held=writing||checkingSimilar||Boolean(similarity.pending)||Boolean(recovery&&recovery.outcome!=="refused")||Boolean(editing||collecting);
+  const held=writing||Boolean(recovery&&recovery.outcome!=="refused")||Boolean(editing||collecting);
   useLayoutEffect(()=>{onHold(held);},[held,onHold]);
   const load=useCallback(async()=>{
     if(!enabled||!lifetime.current.active)return;
@@ -98,14 +100,16 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
   },[enabled,patientId]);
   useEffect(()=>{void load();},[load,refreshKey]);
   const allowed=enabled&&financialRecovery.ready&&!!session&&["admin","reception"].includes(session.role);
-  const send=async(command:DebtRepaymentCommand)=>{
+  const send=async(command:DebtRepaymentCommand,review?:SimilarCollectionReview)=>{
     if(!allowed||pending.current||!lifetime.current.active||command.actor!==session.username||command.target.patientId!==patientId)return;
     pending.current=true;setWriting(true);onHold(true);setNotice(null);setReceiptId(null);
-    onRecoveryChange({...command,outcome:"pending",message:"جارٍ حفظ الطلب…"});
+    // A brand-new command (never sent) or a proven review: every earlier send of this key was answered.
+    const proven=command.outcome==="pending"||command.outcome==="review"&&command.similar?.proven===true;
+    onRecoveryChange({...command,similar:undefined,outcome:"pending",message:"جارٍ حفظ الطلب…"});
     try{
       const durable=durableDebtCommand(command);
       if(!await financialRecovery.reserve(durable,draftRevision.current)||!lifetime.current.active)return;
-      const {response,payload}=await readInvoiceCommandResponse(signal=>fetch(command.url,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":command.key},body:command.body,signal}),response=>{
+      const {response,payload}=await readInvoiceCommandResponse(signal=>fetch(command.url,{method:"POST",headers:moneyHeaders(command.key,review),body:command.body,signal}),response=>{
         if(lifetime.current.active&&(response.status===401||response.status===403))setData(null);
       });
       if(!lifetime.current.active)return;
@@ -116,20 +120,24 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
         setNotice(command.expected.kind==="collection"?"ثُبّت التحصيل بسند قبض.":"حُفظ ترتيب سداد الدين القائم؛ لم تُنشأ فاتورة أو دفعة.");
         if(verified>0)setReceiptId(verified);
         onChanged();void load();
+      }else if(!response.redirected&&response.status===409&&readSimilarCollectionRefusal(payload)){
+        onRecoveryChange({...command,outcome:"review",similar:{receipts:readSimilarCollectionRefusal(payload)!,proven},
+          message:"لم يُسجَّل التحصيل بعد: يوجد سند قبض مشابه. راجعه ثم ألغِ أو سجّل دفعة مستقلة."});
       }else{
-        // This conflict is an explicit pre-writer review refusal, not an
-        // unknown commit. Retire its durable reservation before a fresh review.
-        if(response.status===409&&!response.redirected&&debtRecord(payload)&&payload.reason==="similar_collection_review_required"){
-          await financialRecovery.acknowledge(durable);
-          onRecoveryChange(null);
-          setError("تغيّر سجل التحصيل بعد الفحص؛ راجع السندات المشابهة وأعد المحاولة.");
-        }else{
-          const refused=!response.redirected&&[400,409].includes(response.status)&&debtRecord(payload)&&typeof payload.message==="string"&&["invalid","stale","conflict","missing"].includes(String(payload.code));
-          onRecoveryChange({...command,outcome:refused?"refused":"uncertain",message:refused?String((payload as Record<string,unknown>).message):"نتيجة الطلب غير مؤكدة. أعد الطلب نفسه للتحقق قبل أي تحصيل أو تعديل جديد."});
-        }
+        const refused=!response.redirected&&[400,409].includes(response.status)&&debtRecord(payload)&&typeof payload.message==="string"&&["invalid","stale","conflict","missing"].includes(String(payload.code));
+        onRecoveryChange({...command,outcome:refused?"refused":"uncertain",message:refused?String((payload as Record<string,unknown>).message):"نتيجة الطلب غير مؤكدة. أعد الطلب نفسه للتحقق قبل أي تحصيل أو تعديل جديد."});
       }
     }catch{if(lifetime.current.active)onRecoveryChange({...command,outcome:"uncertain",message:"انقطع الاتصال أو لم يكتمل الرد. البيانات والمفتاح محفوظان لإعادة التحقق."});}
     finally{pending.current=false;if(lifetime.current.active)setWriting(false);}
+  };
+  /** Cancel an advisory review. Retire the saved command only when no send of this key can still land. */
+  const cancelSimilar=async(command:DebtRepaymentCommand)=>{
+    if(pending.current||command.outcome!=="review")return;
+    if(command.similar?.proven){
+      try{await financialRecovery.acknowledge(durableDebtCommand(command));onRecoveryChange(null);setCollecting(null);setNotice("أُلغي التحصيل؛ لم يُسجَّل سند جديد.");return;}
+      catch{/* journal unavailable: keep the command */}
+    }
+    onRecoveryChange({...command,similar:undefined,outcome:"uncertain",message:"نتيجة محاولة سابقة بالمفتاح نفسه غير محسومة. أعد التحقق بنفس الطلب قبل أي تحصيل جديد."});
   };
   const startEdit=(target:DebtRepaymentChoice)=>{
     if(!allowed||recovery||pending.current)return;
@@ -147,28 +155,15 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
     void send({url:`/api/patients/${patientId}/debt-repayments`,body:JSON.stringify(body),key,target:editing.target,actor:session.username,
       expected:{kind:"schedule",version:editing.version+1,terms,status:cancel?"cancelled":"active"},outcome:"pending",message:""});
   };
-  const collect=async()=>{
+  const collect=()=>{
     const minor=parseAmount(amount,tender);
-    if(!collecting||!allowed||recovery||pending.current||checkingSimilar||minor===null||minor<=0||tender===collecting.target.currency&&minor>collecting.collectibleMinor)return;
-    const current=collecting,submittedAmount=amount,submittedCurrency=tender,submittedMethod=method,submittedNote=note.trim()||null;
-    setCheckingSimilar(true);setError(null);
-    try{
-      await similarity.check({patientId,amountMinor:minor,currency:submittedCurrency,onProceed:async(review)=>{
-        // The command key is minted only after the preview/employee decision.
-        const key=newIdempotencyKey();
-        await send({url:`/api/patients/${patientId}/debt-repayments/${current.id}/collect`,
-          body:JSON.stringify({amount:submittedAmount,currency:submittedCurrency,method:submittedMethod,note:submittedNote,
-            expectedVersion:current.version,similarityReview:review}),
-          key,target:current.target,actor:session!.username,
-          expected:{kind:"collection",amountMinor:minor,currency:submittedCurrency,method:submittedMethod},
-          outcome:"pending",message:""});
-      }});
-    }catch{setError("تعذّر فحص السندات السابقة؛ لم يبدأ التحصيل. أعد المحاولة.");}
-    finally{setCheckingSimilar(false);}
+    if(!collecting||!allowed||recovery||pending.current||minor===null||minor<=0||tender===collecting.target.currency&&minor>collecting.collectibleMinor)return;
+    const key=newIdempotencyKey();
+    void send({url:`/api/patients/${patientId}/debt-repayments/${collecting.id}/collect`,body:JSON.stringify({amount,currency:tender,method,note:note.trim()||null,expectedVersion:collecting.version}),key,target:collecting.target,actor:session.username,
+      expected:{kind:"collection",amountMinor:minor,currency:tender,method},outcome:"pending",message:""});
   };
-  const locked=writing||checkingSimilar||!!recovery;
+  const locked=writing||!!recovery;
   return <section aria-label="سداد الاتفاقات القائمة" data-testid="debt-repayment-panel" dir="rtl" className="my-4 min-w-0 space-y-3 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
-    <SimilarCollectionWarning pending={similarity.pending} onCancel={similarity.cancel} onConfirm={()=>void similarity.confirm()}/>
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-base font-extrabold">سداد الاتفاقات القائمة</h3>
       <button type="button" className={button} disabled={!allowed||writing||!!editing||!!collecting} onClick={()=>void load()}>تحديث ترتيب السداد</button></div>
     <p className="text-xs leading-6 text-slate-600">الأقساط توزّع دين الفاتورة أو الرصيد السابق. قيمة العلاج المخطط وغير المفوتر ليست دينًا جديدًا، والدفعة المقترحة ليست تحصيلًا.</p>
@@ -177,7 +172,10 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
     {receiptId?<a className={button+" inline-flex items-center"} href={`/print/receipt/${receiptId}`} target="_blank" rel="noopener">طباعة سند التحصيل</a>:null}
     {recovery?<div role="status" data-testid="debt-command-recovery" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">
       <p>{writing?"جارٍ حفظ الطلب…":recovery.message||"يوجد طلب محفوظ يحتاج إعادة التحقق."}</p>
-      <button type="button" className={button} disabled={writing||!allowed} onClick={()=>void send(recovery)}>إعادة نفس طلب السداد</button>
+      {recovery.outcome==="review"&&recovery.similar?<SimilarCollectionWarning receipts={recovery.similar.receipts} busy={writing}
+        onConfirm={()=>void send(recovery,{observedReceiptIds:recovery.similar!.receipts.map(receipt=>receipt.id)})}
+        onCancel={()=>void cancelSimilar(recovery)}/>
+      :<button type="button" className={button} disabled={writing||!allowed} onClick={()=>void send(recovery)}>إعادة نفس طلب السداد</button>}
       {recovery.outcome==="refused"?<button type="button" className={button} disabled={writing} onClick={()=>{void load();}}>مراجعة الحساب بعد الرفض</button>:null}
     </div>:null}
     {!enabled?<p role="status" className="text-xs text-slate-500">تُراجع ترتيبات السداد بعد إغلاق إدخال العلاج والتحقق من الحساب.</p>:null}

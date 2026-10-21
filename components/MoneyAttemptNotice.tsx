@@ -1,10 +1,21 @@
 "use client";
 
 import { MONEY_UNCERTAIN, type MoneyAttempt } from "@/lib/money-attempt";
+import { SimilarCollectionWarning } from "./SimilarCollectionWarning";
 
-export function MoneyAttemptNotice({ attempt, onRetry }: { attempt: MoneyAttempt | null; onRetry: () => void }) {
+/** `onSimilar` answers an advisory similar-receipt review: confirm resends the same request/key
+ * with the reviewed receipt IDs; cancel retires the attempt only when nothing can still land. */
+export function MoneyAttemptNotice({ attempt, onRetry, onSimilar, busy = false }: {
+  attempt: MoneyAttempt | null; onRetry: () => void; busy?: boolean;
+  onSimilar?: { confirm: (observedReceiptIds: number[]) => void; cancel: () => void };
+}) {
   if (!attempt) return null;
   if (attempt.phase === "sending") return <p role="status" className="mb-3 text-sm">جارٍ انتظار إقرار العملية. لا تعِد تحميل الصفحة.</p>;
+  if (attempt.phase === "review" && attempt.similar && onSimilar) {
+    const receipts = attempt.similar.receipts;
+    return <SimilarCollectionWarning receipts={receipts} busy={busy}
+      onConfirm={() => onSimilar.confirm(receipts.map((receipt) => receipt.id))} onCancel={onSimilar.cancel} />;
+  }
   const original = JSON.parse(attempt.request.body) as { amount?: string; currency?: string };
   const label = { payment: "سند قبض", installment: "قسط خطة", correct: "تصحيح سند", void: "إبطال سند" }[attempt.request.operation];
   return (
