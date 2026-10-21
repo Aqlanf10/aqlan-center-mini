@@ -145,8 +145,8 @@ export function CollectPaymentModal({
 
   const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;
 
-  const postPayment = async (retry = false, review?: SimilarCollectionReview) => {
-    const body = JSON.stringify({
+  const postPayment = async (retry = false, review?: SimilarCollectionReview, frozen?: string) => {
+    const body = frozen ?? JSON.stringify({
       patientId, amount, currency, invoiceId: invoiceId || undefined,
       planId: planId || undefined, openingCurrency: openingCurrency || undefined,
       kind: "payment", method, note: note.trim() || undefined,
@@ -170,7 +170,10 @@ export function CollectPaymentModal({
       else {
         const minor = parseAmount(amount,currency);
         if (minor === null || minor<=0) {setError("اكتب مبلغًا صحيحًا أكبر من صفر.");return;}
-        await similarity.check({patientId,amountMinor:minor,currency,onProceed:(review)=>postPayment(false,review)});
+        const frozen=JSON.stringify({patientId,amount,currency,invoiceId:invoiceId||undefined,planId:planId||undefined,
+          openingCurrency:openingCurrency||undefined,kind:"payment",method,note:note.trim()||undefined});
+        await similarity.check({patientId,amountMinor:minor,currency,onProceed:(review)=>postPayment(false,review,
+          JSON.stringify({...JSON.parse(frozen),similarityReview:review}))});
       }
     } catch {
       setError("تعذّر فحص السندات أو الاتصال بالخادم. لم يُؤكد تسجيل دفعة جديدة؛ راجع الحساب وأعد المحاولة.");
@@ -183,16 +186,6 @@ export function CollectPaymentModal({
     catch {setError("تعذّر إتمام عملية التحصيل. راجع الحساب قبل محاولة جديدة.");}
     finally {setBusy(false);}
   };
- }
-      onSuccess(result.acknowledgment.paymentId!);
-      money.consume(result.attempt);
-    } catch {
-      setError("تعذّر الاتصال بالخادم. أعد المحاولة — لن يُسجَّل السند مرتين.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div
       role="dialog"
