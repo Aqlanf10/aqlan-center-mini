@@ -215,9 +215,15 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
     const base=toBaseAmount(input.amountMinor,input.currency,CLINIC_BASE_CURRENCY,rate);
     const settlement=settlePaymentMinor({amountMinor:input.amountMinor,currency:input.currency,baseAmountMinor:base},a.currency);
     const account=await debtAccountDue(client,a.patient_id,a.currency);
-    if(!positive(settlement)||settlement>position.remainingMinor||settlement>account.due)fail("المبلغ يتجاوز متبقي المصدر أو الحساب.");
     const amendments=(await client.query<{delta_invoice_id:number;delta_minor:string}>(
       "SELECT delta_invoice_id,delta_minor::text FROM agreement_delta_amendments WHERE plan_id=$1 ORDER BY id",[input.planId])).rows;
+    const allowedRemaining=amendments.length
+      ? (await approvedAgreementPosition(input.planId,clinicDateString(new Date(),CLINIC_TIME_ZONE),client))
+      : null;
+    if(amendments.length&&!allowedRemaining?.available)
+      throw new DebtRepaymentError("stale","تغير مصدر الاتفاق بعد الترقية؛ أعد مراجعة كشف الحساب.");
+    if(!positive(settlement)||settlement>(allowedRemaining?.remainingMinor??position.remainingMinor)
+       ||settlement>account.due)fail("المبلغ يتجاوز متبقي المصدر أو الحساب.");
     if(amendments.length){
       // This first supported amendment flow accepts native agreement currency
       // only: one external FX receipt cannot be safely split and replayed.
