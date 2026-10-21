@@ -21,7 +21,7 @@ import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence"
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, computeDebtRows, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { payableAmountSql, payableSettledTotalSql, PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, computeDebtRows, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CHAIR_EVENT_ROW_CAP, REFERRAL_HISTORY_ROW_CAP, loadChairFlow, loadInternalReferrals } from "./reports-ops";
 import { REFERRAL_SPECIALTY_LABEL, WORKFLOW_STATE_LABEL, type ReferralSpecialty, type WorkflowState } from "./referrals";
 import { CATEGORY_LABEL } from "./services-catalog";
@@ -4652,13 +4652,9 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
     settled_minor: string; created_date: string;
   }>(
     `SELECT b.id, b.party_id, p.name AS party_name, p.kind AS party_kind,
-            b.description, b.due_date::text, b.currency, b.amount_minor::text,
-            (COALESCE((SELECT SUM(e.payable_settled_minor) FROM expenses e
-                        WHERE e.payable_id = b.id
-                          AND (e.created_at AT TIME ZONE $1)::date <= $2::date), 0)
-             + COALESCE((SELECT SUM(a.settled_minor) FROM expense_payable_allocations a
-                          WHERE a.payable_id = b.id
-                            AND (a.created_at AT TIME ZONE $1)::date <= $2::date), 0))::text AS settled_minor,
+            b.description, b.due_date::text, b.currency,
+            ${payableAmountSql("b", { timeZoneParam: "$1", dateParam: "$2" })}::text AS amount_minor,
+            ${payableSettledTotalSql("b", { timeZoneParam: "$1", dateParam: "$2" })}::text AS settled_minor,
             (b.created_at AT TIME ZONE $1)::date::text AS created_date
        FROM payables b
        JOIN parties p ON p.id = b.party_id
@@ -4717,7 +4713,8 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
     })),
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "المتبقي = أصل الالتزام − كل تسوياته حتى نهاية الفترة، بما فيها القيود العكسية.",
+      "المتبقي = أصل الالتزام وتصحيحاته المسجّلة − تسوياته حتى نهاية الفترة، بما فيها القيود العكسية.",
+      "هذا تقرير الالتزامات المفتوحة، وليس صافي كشف الجهة: لا يطرح الدفعات غير الموزّعة أو الأرصدة المقدّمة.",
       "الموردون والمختبرات يظهرون هنا؛ مستحقات الأطباء لها محرك العمولات المستقل.",
     ],
   };

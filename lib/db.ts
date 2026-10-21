@@ -12172,21 +12172,27 @@ function settledOnPayableSql(e: string, p: string): string {
   END)`;
 }
 
+/** Optional report cutoff; parameter placeholders are bound by the caller. */
+export interface PayableSqlCutoff { timeZoneParam: `$${number}`; dateParam: `$${number}` }
+function payableCutoffSql(alias: string, cutoff?: PayableSqlCutoff): string {
+  return cutoff ? ` AND (${alias}.created_at AT TIME ZONE ${cutoff.timeZoneParam})::date <= ${cutoff.dateParam}::date` : "";
+}
+
 /**
  * (P0-2) مجموع ما سُدّد من التزامٍ بعملته: سنداته المرتبطة به مباشرةً + ما وُزّع
  * عليه من سندات التسوية المجمّعة (expense_payable_allocations). الإبطالات بالسالب.
  */
-export function payableSettledTotalSql(p: string): string {
-  return `(COALESCE((SELECT SUM(${settledOnPayableSql("se", p)}) FROM expenses se WHERE se.payable_id = ${p}.id), 0)
-    + COALESCE((SELECT SUM(sa.settled_minor) FROM expense_payable_allocations sa WHERE sa.payable_id = ${p}.id), 0))`;
+export function payableSettledTotalSql(p: string, cutoff?: PayableSqlCutoff): string {
+  return `(COALESCE((SELECT SUM(${settledOnPayableSql("se", p)}) FROM expenses se WHERE se.payable_id = ${p}.id${payableCutoffSql("se", cutoff)}), 0)
+    + COALESCE((SELECT SUM(sa.settled_minor) FROM expense_payable_allocations sa WHERE sa.payable_id = ${p}.id${payableCutoffSql("sa", cutoff)}), 0))`;
 }
 
 /**
  * (FIA-1) قيمة الالتزام الفعلية بعملته: مبلغه الأصلي + تصحيحاته الإلحاقية. التصحيحات للرصيد
  * الافتتاحي وحده (payable_adjustments) — والتزام التشغيل بلا تصحيحات فقيمته مبلغه.
  */
-export function payableAmountSql(p: string): string {
-  return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id), 0))`;
+export function payableAmountSql(p: string, cutoff?: PayableSqlCutoff): string {
+  return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id${payableCutoffSql("pa", cutoff)}), 0))`;
 }
 
 /** (FIA-1) مكافئ الالتزام الأساسي الفعلي: مكافئه المسجَّل + تصحيحاته بسعره الأصلي نفسه. */
