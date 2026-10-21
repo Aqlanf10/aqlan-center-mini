@@ -232,7 +232,9 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
       const current=await approvedAgreementPosition(input.planId,clinicDateString(new Date(),CLINIC_TIME_ZONE),client);
       if(!current?.available)throw new DebtRepaymentError("stale","مصادر الترقية تغيرت؛ يلزم تحديث الاتفاق.");
       if(settlement>current.remainingMinor)fail("المبلغ يتجاوز متبقي الاتفاق المعدّل.");
-      const segments=[{invoiceId:a.invoice_id,remainingMinor:position.remainingMinor}];
+      const rootInvoiceId=a.invoice_id;
+      if(rootInvoiceId===null)fail("فاتورة أصل الاتفاق مفقودة.");
+      const segments:{invoiceId:number;remainingMinor:number}[]=[{invoiceId:rootInvoiceId,remainingMinor:position.remainingMinor}];
       for(const amendment of amendments){
         const delta=await readInvoiceSettlementPosition(client,{
           patientId:a.patient_id,invoiceId:amendment.delta_invoice_id,currency:a.currency});
