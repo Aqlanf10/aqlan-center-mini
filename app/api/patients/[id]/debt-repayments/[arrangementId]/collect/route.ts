@@ -15,7 +15,7 @@ export async function POST(request:Request,context:{params:Promise<{id:string;ar
     const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);const params=await context.params;
     if(!body||typeof body!=="object"||Array.isArray(body))throw new DebtRepaymentError("invalid","طلب غير صالح.");
     const source=body as Record<string,unknown>;
-    if(Object.keys(source).some(key=>!["amount","currency","method","note","expectedVersion"].includes(key))||!isCurrency(source.currency)
+    if(Object.keys(source).some(key=>!["amount","currency","method","note","expectedVersion","similarityReview"].includes(key))||!isCurrency(source.currency)
       ||typeof source.amount!=="string"||typeof source.expectedVersion!=="number"||source.method!=="cash"&&source.method!=="transfer"
       ||source.note!==null&&typeof source.note!=="string")throw new DebtRepaymentError("invalid","راجع مبلغ التحصيل وعملته وطريقته.");
     const amountMinor=parseAmount(source.amount,source.currency);if(amountMinor===null||amountMinor<=0)throw new DebtRepaymentError("invalid","اكتب مبلغًا موجبًا صحيحًا.");
