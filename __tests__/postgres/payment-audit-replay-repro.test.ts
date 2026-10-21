@@ -231,7 +231,13 @@ it('cancelled invoice retry preserves actor, patient, payload and current author
     expect((await POST(request({ ...f, key: f.key + '-new' }))).status).toBe(409);
     const noKey = request(f);
     noKey.headers.delete('idempotency-key');
-    expect((await POST(noKey)).status).toBe(409);
+    const beforeUnkeyed = await counts(f.key);
+    const drawerBeforeUnkeyed = (await getOpenShift())!.expected;
+    const refused = await POST(noKey);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ reason: 'idempotency_key_required' });
+    expect(await counts(f.key)).toEqual(beforeUnkeyed);
+    expect((await getOpenShift())!.expected).toEqual(drawerBeforeUnkeyed);
     const { rows: [count] } = await getPool().query("SELECT count(*)::int AS n FROM payments WHERE invoice_id=ANY($1::int[])", [[f.invoiceId, correction.corrected.id]]);
     expect(count.n).toBe(1);
 });

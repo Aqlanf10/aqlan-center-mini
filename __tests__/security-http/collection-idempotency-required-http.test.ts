@@ -30,8 +30,14 @@ function body(patientId: number, target: Record<string, unknown> = {}) {
 }
 async function financialSnapshot() {
   const snapshot: Record<string, unknown> = {};
-  for (const table of ["payments", "invoices", "invoice_items", "plan_installments", "treatment_plans", "audit_log", "patient_opening_balances"]) {
-    snapshot[table] = (await db.query(`SELECT md5(COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]')) AS digest FROM ${table} t`)).rows;
+  // Include the drawer and all persisted commission tables, not just receipts and installment rows.
+  const { rows: commissionTables } = await db.query<{ tablename: string }>(
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE '%commission%' ORDER BY tablename",
+  );
+  const tables = ["payments", "cashier_shifts", "invoices", "invoice_items", "plan_installments", "treatment_plans", "audit_log", "patient_opening_balances", ...commissionTables.map(row => row.tablename)];
+  for (const table of tables) {
+    if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw new Error("Unexpected SQL identifier in snapshot");
+    snapshot[table] = (await db.query(`SELECT md5(COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]')) AS digest FROM "${table}" t`)).rows;
   }
   return snapshot;
 }
@@ -79,8 +85,10 @@ it.each(["account", "invoice", "plan", "direct-plan"])("preserves same-key paral
   const replay = await send();
   expect(replay.status).toBe(200);
   expect((await receiptOf(await replay.json())).id).toBe(receipts[0].id);
+  const beforeConflict = await financialSnapshot();
   const changed = await send(key, requestBody.replace('"205000"', '"205001"'));
   expect(changed.status).toBe(409);
+  expect(await financialSnapshot()).toEqual(beforeConflict);
   const independent = await send({ "Idempotency-Key": `synthetic-other-${f.patientId}` });
   expect(independent.status).toBe(201);
   expect((await receiptOf(await independent.json())).id).not.toBe(receipts[0].id);
