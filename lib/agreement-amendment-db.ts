@@ -15,6 +15,9 @@ import { requireCurrency, settlePaymentMinor, type Currency } from "./money";
 import { clinicDateString } from "./schedule";
 import { CLINIC_TIME_ZONE } from "./db";
 import { getSettingsInTransaction } from "./db";
+import { decideAmendmentCommission, type AmendmentCommissionDecision } from "./agreement-amendment-commission";
+import { buildCaseOverrideResolver, type CaseOverrideRow } from "./commission";
+import { parseDoctorCommissionConfig } from "./doctor-permissions";
 
 type EventRow = {id:string;plan_id:number;plan_item_id:number;patient_id:number;
   delta_invoice_id:number;new_service_id:number;new_unit_minor:string;delta_minor:string;
@@ -79,6 +82,7 @@ async function snapshot(client:DbClient,planId:number){
  if(duplicateWork.length)fail("توجد فوترة أخرى للعمل؛ لا تُضاعف أصل العلاج.");
  const events=(await client.query<EventRow>("SELECT id,plan_id,plan_item_id,patient_id,delta_invoice_id,new_service_id,new_unit_minor::text,delta_minor::text,receipt FROM agreement_delta_amendments WHERE plan_id=$1 ORDER BY id",[planId])).rows;
  let total=safe(approval.total_minor),payments=0,refunds=0;
+ const documentProofs:{id:string;invoiceId:number;deltaMinor:string;proofHash:string}[]=[];
  const root=await readInvoiceSettlementPosition(client,{patientId:plan.patient_id,invoiceId:approval.invoice_id!,currency});
  if(!root.available||root.principalMinor!==safe(approval.total_minor))fail("تغطية الفاتورة الأصلية غير مثبتة.");
  const rootGross=paymentGross(root.sourceSnapshot,currency);
@@ -90,6 +94,7 @@ async function snapshot(client:DbClient,planId:number){
    if(!doc.available||doc.principalMinor!==safe(event.delta_minor))
       fail("فرق الاتفاق السابق لا يطابق مستند مديونيته.");
    const gross=paymentGross(doc.sourceSnapshot,currency);
+   documentProofs.push({id:event.id,invoiceId:event.delta_invoice_id,deltaMinor:event.delta_minor,proofHash:doc.proofHash});
    payments+=gross.payments;refunds+=gross.refunds;total+=safe(event.delta_minor);
    if(!amount(total)||!amount(payments)||!amount(refunds))fail("تجميع المبالغ خارج النطاق.");
  }
@@ -100,7 +105,7 @@ async function snapshot(client:DbClient,planId:number){
   currency,approvalInvoiceId:approval.invoice_id!,quantity:item.quantity,oldServiceId,oldUnitMinor,
   previousAgreementMinor:total,recordedPaymentsMinor:payments,recordedRefundsMinor:refunds,
   previousAmendmentId:events.length?safe(events[events.length-1].id):null,
-  sourceProof:root.proofHash,documentProofs:events.map(e=>({id:e.id,invoiceId:e.delta_invoice_id,deltaMinor:e.delta_minor})),
+  sourceProof:root.proofHash,documentProofs,
  };
  return {...result,sourceHash:debtRequestHash(result)};
 }
@@ -114,13 +119,49 @@ export async function readAgreementAmendment(planId:number,session:SessionPayloa
   return {...result,services};
  }catch(e){try{await client.query("ROLLBACK");}catch{destroy=true;}throw e;}finally{client.release(destroy);}
 }
+
+/** Canonical event-time doctor policy and case override. No client rates. */
+async function commissionAtAmendment(client:DbClient,
+ input:{doctorId:number|null;caseId:number|null;planId:number;service:ServiceRow}){
+ if(!input.doctorId)return {doctorId:null,historyId:null,overrideId:null,
+   decision:{state:"no_authorized_doctor"} as AmendmentCommissionDecision,automaticDoctorId:null};
+ const party=(await client.query<{id:number}>(
+   "SELECT id FROM parties WHERE id=$1 AND kind='doctor'",[input.doctorId])).rows[0];
+ if(!party)fail("الطبيب المسند غير مثبت في سجل الجهات؛ راجع هوية العمل.");
+ const atIso=new Date().toISOString();
+ const history=(await client.query<{id:number;percent:string;config:unknown}>(
+   "SELECT id,percent::text,config FROM doctor_commission_history WHERE party_id=$1 AND effective_from <= $2 ORDER BY effective_from DESC,id DESC LIMIT 1",
+   [party.id,atIso])).rows[0];
+ if(!history)return {doctorId:party.id,historyId:null,overrideId:null,
+   decision:{state:"no_authorized_doctor"} as AmendmentCommissionDecision,automaticDoctorId:null};
+ const percent=Number(history.percent);
+ if(!Number.isFinite(percent)||percent<0||percent>100)fail("سجل نسبة الطبيب غير صالح.");
+ const config=history.config===null?null:parseDoctorCommissionConfig(history.config,percent);
+ const overrides=(await client.query<{id:number;doctorId:number;caseId:number|null;planId:number|null;percent:string|null;action:"set"|"void";effectiveFrom:string}>(
+   'SELECT id,doctor_id AS "doctorId",case_id AS "caseId",plan_id AS "planId",percent::text,action,'+
+   'to_char(effective_from AT TIME ZONE \'UTC\',\'YYYY-MM-DD"T"HH24:MI:SS.US"Z"\') AS "effectiveFrom" '+
+   'FROM commission_case_overrides WHERE doctor_id=$1 AND effective_from <= $2 '+
+   'AND (case_id=$3 OR plan_id=$4) ORDER BY effective_from,id',
+   [party.id,atIso,input.caseId,input.planId])).rows;
+ const rules:CaseOverrideRow[]=overrides.map(row=>({...row,percent:row.percent===null?null:Number(row.percent)}));
+ const override=buildCaseOverrideResolver(rules)(party.id,{caseId:input.caseId??undefined,planId:input.planId},atIso);
+ const decision=decideAmendmentCommission({policy:{percent,config},atIso,
+   share:{category:input.service.category??undefined,serviceId:input.service.id,serviceName:input.service.name},override});
+ // Avoid a payable invoice line if cost evidence is missing or the separate
+ // case override cannot be attributed through an unmodified plan work item.
+ const automaticDoctorId=decision.state==="policy_resolved"&&!override?party.id:null;
+ return {doctorId:party.id,historyId:history.id,overrideId:override?.overrideId??null,
+   decision,automaticDoctorId};
+}
+
 export type AmendmentWrite={idempotencyKey:string;expectedSourceHash:string;newServiceId:number;newUnitMinor:number;reason:string;};
 export interface AgreementDeltaReceipt {
  planId:number;patientId:number;planItemId:number;caseId:number|null;originalInvoiceId:number;
  deltaInvoiceId:number;previousServiceId:number;newServiceId:number;currency:Currency;
  previousAgreementMinor:number;deltaMinor:number;revisedAgreementMinor:number;
  settledMinor:number;remainingMinor:number;idempotencyKey:string;
- commissionDecision:string;cashMovementMinor:0;
+ commissionDecision:AmendmentCommissionDecision;commissionHistoryId:number|null;
+ commissionOverrideId:number|null;doctorId:number|null;cashMovementMinor:0;
 }
 export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,session:SessionPayload){
  if(!positive(planId)||!record(input)||Object.keys(input).some(k=>!["idempotencyKey","expectedSourceHash","newServiceId","newUnitMinor","reason"].includes(k))
@@ -164,23 +205,24 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
   const nowDate=clinicDateString(new Date(),CLINIC_TIME_ZONE);
   if(settings["finance.locked_before"]?.trim()&&nowDate<settings["finance.locked_before"].trim())
     fail("الفترة المالية الحالية مقفلة.");
+  const commission=await commissionAtAmendment(client,{doctorId:before.doctorId,caseId:before.caseId,planId,service});
   const {rows:[deltaInvoice]}=await client.query<{id:number}>(`INSERT INTO invoices
     (invoice_number,patient_id,base_currency,total_minor,discount_minor,status,plan_id,note,created_by)
     VALUES(${documentNumberSql("invoice")},$1,$2,$3,0,'open',NULL,$4,$5) RETURNING id`,
     [before.patientId,before.currency,quote.deltaMinor,`فرق اتفاق الخطة #${planId} — ${input.reason.trim()}`,session.username]);
   await client.query(`INSERT INTO invoice_items
     (invoice_id,service_id,doctor_id,description,quantity,unit_price_minor,total_minor)
-    VALUES($1,$2,NULL,$3,1,$4,$4)`,
-    [deltaInvoice.id,input.newServiceId,`فرق ترقية العلاج — ${service.name}`,quote.deltaMinor]);
-  // Doctor_id intentionally null: no automatic accrued/earned commission
-  // before the canonical policy and incremental cost attribution are verified.
+    VALUES($1,$2,$3,$4,1,$5,$5)`,
+    [deltaInvoice.id,input.newServiceId,commission.automaticDoctorId,`فرق ترقية العلاج — ${service.name}`,quote.deltaMinor]);
+  // The event keeps the verified doctor, even if an unproven cost holds the invoice commission.
   const receipt:AgreementDeltaReceipt={planId,patientId:before.patientId,planItemId:before.itemId,caseId:before.caseId,
     originalInvoiceId:before.approvalInvoiceId,deltaInvoiceId:deltaInvoice.id,
     previousServiceId:before.oldServiceId,newServiceId:input.newServiceId,
     currency:before.currency,previousAgreementMinor:quote.previousAgreementMinor,
     deltaMinor:quote.deltaMinor,revisedAgreementMinor:quote.revisedAgreementMinor,
     settledMinor:quote.settledMinor,remainingMinor:quote.remainingMinor,
-    idempotencyKey:input.idempotencyKey,commissionDecision:"requires_policy_evaluation",cashMovementMinor:0};
+    idempotencyKey:input.idempotencyKey,commissionDecision:commission.decision,commissionHistoryId:commission.historyId,
+    commissionOverrideId:commission.overrideId,doctorId:commission.doctorId,cashMovementMinor:0};
   const row=(await client.query<{id:string}>(`INSERT INTO agreement_delta_amendments
    (plan_id,plan_item_id,patient_id,case_id,original_invoice_id,delta_invoice_id,previous_amendment_id,
     old_service_id,new_service_id,doctor_id,quantity,old_unit_minor,new_unit_minor,
@@ -198,7 +240,7 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
     beforeMinor:quote.previousAgreementMinor,afterMinor:quote.revisedAgreementMinor,
     deltaMinor:quote.deltaMinor,sourceProofHash:before.sourceHash,reason:input.reason.trim(),
     fromServiceId:before.oldServiceId,toServiceId:input.newServiceId,refundsPreserved:true,
-    originalInvoicesPreserved:true,cashMovementMinor:0}});
+    originalInvoicesPreserved:true,cashMovementMinor:0,commission}});
   await authorize(client,session);await client.query("COMMIT");
   return {...receipt,eventId:safe(row.id),replayed:false};
  }catch(e){try{await client.query("ROLLBACK");}catch{destroy=true;}throw e;}finally{client.release(destroy);}
