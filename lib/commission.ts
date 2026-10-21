@@ -278,7 +278,9 @@ export function allocateFifoByCurrency(
     let pool = Math.max(0, collectedByCurrency[currency] ?? 0);
     const ordered = invoices
       .filter((invoice) => invoice.currency === currency)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      // PostgreSQL NOW() may give several invoices the same timestamp. Input
+      // row order is not financial provenance: keep FIFO stable by invoice ID.
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
     for (const invoice of ordered) {
       const covered = Math.min(pool, Math.max(0, invoice.netMinor));
       allocation.set(invoice.id, covered);

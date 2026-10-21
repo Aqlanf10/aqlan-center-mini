@@ -13482,7 +13482,9 @@ export async function commissionReport(
     for (const currency of CURRENCIES) {
       const ordered = [...invoices.values()]
         .filter((invoice) => invoice.currency === currency)
-        .sort((a, b) => allocationTimeOfInvoice.get(a.id)!.localeCompare(allocationTimeOfInvoice.get(b.id)!));
+        // Equal issue instants must not let unordered SQL rows move collection
+        // (and commission) between performers. Match the invoice FIFO tie-break.
+        .sort((a, b) => allocationTimeOfInvoice.get(a.id)!.localeCompare(allocationTimeOfInvoice.get(b.id)!) || a.id - b.id);
       for (const invoice of ordered) {
         const net = Math.max(0, invoice.netMinor);
         if (net > 0) capacitiesByCurrency.get(currency)!.push({ invoiceId: invoice.id, remaining: net });
