@@ -35,7 +35,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      APP_SHA: 1c3ad5509a08d979ba3eaecff016fceaacef4570
+      APP_SHA: b4778bd5c384b2ad8f4a8925b23a810ab82c79ae
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
       TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
       SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
@@ -52,7 +52,7 @@ jobs:
       - name: Check out immutable application under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 1c3ad5509a08d979ba3eaecff016fceaacef4570
+          ref: b4778bd5c384b2ad8f4a8925b23a810ab82c79ae
           path: app
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -92,7 +92,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: invoice-correction-explanation-1c3ad5509
+          name: invoice-correction-explanation-b4778bd5c
           path: |
             app/artifacts/invoice-correction-explanation/provenance.txt
             app/artifacts/invoice-correction-explanation/price-warning-390.png
