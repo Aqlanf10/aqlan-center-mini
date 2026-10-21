@@ -41,6 +41,44 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
   try{return quoteAgreementAmendment({...view,previousServiceId:view.oldServiceId,selectedServiceId:Number(serviceId),
    previousUnitPriceMinor:view.oldUnitMinor,selectedUnitPriceMinor:price,reason});}catch{return null;}
  },[view,serviceId,unitPrice,reason]);
+  /** A 409 is NOT a no-save certificate. The status endpoint serializes with
+   * the writer and only a committed rejection tombstone can free the key.
+   * 'unresolved' and 403 retain the exact body, including after a lost reply.
+   */
+ const verifyAttempt=async(command:Pending)=>{
+   try{
+     const response=await fetch(`/api/plans/${planId}/agreement-amendment`,{
+       method:"PUT",headers:{"Content-Type":"application/json"},body:command.body,
+       cache:"no-store",redirect:"manual"});
+     const data:unknown=await response.json();
+     if(response.redirected||!response.ok||!data||typeof data!=="object"){
+       setMessage("تعذّر تأكيد حالة المحاولة لدى الخادم؛ ما زال المفتاح والطلب محفوظين.");
+       return;
+     }
+     const status=data as Record<string,unknown>;
+     if(status.state==="rejected_stale" && status.requestKey===command.key){
+       setRefused(true);
+       setMessage("ثبت من سجل الخادم أن هذه المحاولة رُفضت دون إنشاء فاتورة. حدّث المعاينة ثم صحّح الطلب.");
+     }else if(status.state==="committed"&&status.receipt&&typeof status.receipt==="object"){
+       const receipt=status.receipt as Record<string,unknown>;
+       const body=JSON.parse(command.body) as Record<string,unknown>;
+       if(receipt.idempotencyKey!==command.key||receipt.planId!==planId||
+         receipt.newServiceId!==body.newServiceId||!Number.isSafeInteger(receipt.deltaInvoiceId)){
+         setMessage("إقرار الخادم لا يطابق الطلب؛ احتفظ بالمفتاح وراجع السجلات.");
+         return;
+       }
+       await onChanged();
+       if(!active.current)return;
+       sessionStorage.removeItem(storageKey(planId));
+       setPending(null);setRefused(false);setView(null);setOpened(false);
+       setMessage("أكد الخادم أن التعديل محفوظ بالفعل. لم تُنشأ فاتورة فرق ثانية.");
+     }else{
+       setMessage("لا يوجد حتى الآن دليل نهائي لهذه المحاولة. أعد إرسال الطلب الأصلي نفسه؛ لا تنشئ مفتاحًا جديدًا.");
+     }
+   }catch{
+     setMessage("انقطع اتصال فحص الحالة. يحتفظ المتصفح بالطلب ومفتاحه دون تغيير.");
+   }
+ };
  const send=async()=>{
   if(submitting.current||(!pending&&(!view||!proposal||proposal.deltaMinor<=0)))return;
   submitting.current=true;setBusy(true);setMessage(null);setRefused(false);
@@ -70,7 +108,11 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
      const terminal=!response.redirected&&[400].includes(response.status)&&
        !!data&&typeof data==="object"&&"code" in data&&
        ["invalid","unauthorized","missing","stale","conflict"].includes(String(data.code));
-     if(terminal){
+     if(!response.redirected&&response.status===409&&
+       !!data&&typeof data==="object"&&"code" in data&&data.code==="stale"){
+       // Only the exact, committed server rejection releases this request key.
+       await verifyAttempt(command);
+     }else if(terminal){
        setRefused(true);
        setMessage("رفض نهائي مؤكد دون حفظ: "+("message" in data?String(data.message):"أعد مراجعة المصدر")+
          " يمكنك تحديث المعاينة وتصحيح الطلب بمفتاح جديد.");
@@ -113,6 +155,8 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
    </dl>:null}
    </>:null}
    {pending?<p role="status">هناك طلب سابق محفوظ بمفتاح {pending.key.slice(0,8)}… {refused?"رفضه الخادم نهائيًا ولم يحفظ.":"لا تغيّر الطلب حتى تتأكد نتيجته."}</p>:null}
+   {pending&&!refused?<button type="button" className="rounded-lg border px-3 py-2 font-bold" disabled={busy}
+     onClick={()=>void verifyAttempt(pending)}>تحقق من حالة طلب التعديل المحفوظ</button>:null}
    {pending&&refused?<button type="button" className="rounded-lg border px-3 py-2 font-bold" disabled={busy}
      onClick={refreshAfterRefusal}>تحديث المعاينة وتصحيح الطلب المرفوض</button>:null}
    {message?<p role="alert">{message}</p>:null}
