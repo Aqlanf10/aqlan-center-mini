@@ -237,3 +237,38 @@ it("preserves a populated historical statement before upgrade and after two-sour
  expect(await buildReport("patient-statement",filters)).toEqual(history);
  expect((await db.computeDebtRows([f.patientId])).find(r=>r.currency==="YER")?.dueMinor??0).toBe(0);
 });
+
+
+it("records a durable same-key stale rejection AFTER changed cash, never trusts a missing event",async()=>{
+ const f=await fixture("YER",180000),old=await command(f);
+ const before=await api.readAgreementAmendmentAttemptStatus(f.planId,old,session);
+ expect(before).toMatchObject({state:"unresolved"});
+ const changed=await approve.collectApprovedAgreement({
+  planId:f.planId,amountMinor:20000,currency:"YER",method:"cash",note:null,
+  idempotencyKey:`stale-proof-payment-${f.planId}`,session});
+ expect(changed.paymentId).toBeGreaterThan(0);
+ await expect(api.saveAgreementAmendment(f.planId,old,session)).rejects.toMatchObject({code:"stale"});
+ const status=await api.readAgreementAmendmentAttemptStatus(f.planId,old,session);
+ expect(status).toMatchObject({state:"rejected_stale",requestKey:old.idempotencyKey});
+ expect((await q("SELECT count(*)::int n FROM agreement_delta_attempt_rejections WHERE idempotency_key=$1",[old.idempotencyKey])).rows[0].n).toBe(1);
+ await expect(api.saveAgreementAmendment(f.planId,old,session)).rejects.toMatchObject({code:"stale"});
+ expect((await q("SELECT count(*)::int n FROM agreement_delta_amendments WHERE plan_id=$1",[f.planId])).rows[0].n).toBe(0);
+ const current=await command(f,`after-stale-${f.planId}`);
+ const saved=await api.saveAgreementAmendment(f.planId,current,session);
+ expect(saved).toMatchObject({revisedAgreementMinor:800000,settledMinor:200000,remainingMinor:600000});
+ expect(await api.readAgreementAmendmentAttemptStatus(f.planId,current,session)).toMatchObject({state:"committed",receipt:{deltaInvoiceId:saved.deltaInvoiceId}});
+ expect((await db.computeDebtRows([f.patientId])).find(x=>x.currency==="YER")?.dueMinor).toBe(600000);
+});
+it("status waits behind the exact command fence; an absent row is unresolved, never approved to reset",async()=>{
+ const f=await fixture("YER",0),intent=await command(f);
+ const client=await db.getPool().connect();
+ try{
+  await client.query("BEGIN");
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended('aqlan:agreement-delta:' || $1::text,0))",[intent.idempotencyKey]);
+  const state=api.readAgreementAmendmentAttemptStatus(f.planId,intent,session);
+  const early=await Promise.race([state.then(()=>true),new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),125))]);
+  expect(early).toBe(false);
+  await client.query("COMMIT");
+  expect(await state).toMatchObject({state:"unresolved"});
+ }finally{await client.query("ROLLBACK").catch(()=>{});client.release();}
+});
