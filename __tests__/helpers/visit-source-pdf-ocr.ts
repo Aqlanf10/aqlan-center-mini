@@ -76,7 +76,7 @@ export async function diagnoseVisitSourcePdfOcr(page:Page,browser:Browser,direct
     const crop={page:top.page,x:Math.ceil((left+2*scale)*dpi/72),y:Math.ceil((upper+2*scale)*dpi/72),width:Math.floor((spec.box.width-4)*scale*dpi/72),height:Math.floor((spec.box.height-4)*scale*dpi/72),dpi};
     if(crop.x<0||crop.y<0||crop.width<=0||crop.height<=0||crop.x+crop.width>top.pageWidth*dpi/72||crop.y+crop.height>top.pageHeight*dpi/72)throw new Error("crop_outside_page");
     result.geometry=crop;
-    execFileSync("pdftoppm",["-f",String(crop.page),"-l",String(crop.page),"-r",String(dpi),"-x",String(crop.x),"-y",String(crop.y),"-W",String(crop.width),"-H",String(crop.height),"-png","-singlefile",diagnosticPdf,`${directory}/actual-source-cell`],{maxBuffer:1024*1024});
+    execFileSync("pdftoppm",["-f",String(crop.page),"-l",String(crop.page),"-r",String(dpi),"-x",String(crop.x),"-y",String(crop.y),"-W",String(crop.width),"-H",String(crop.height),"-png","-singlefile",`${directory}/same-day-decisions.pdf`,`${directory}/actual-source-cell`],{maxBuffer:1024*1024});
     const controls=await browser.newContext({viewport:{width:1000,height:200},deviceScaleFactor:dpi/96});
     try{
       const controlPage=await controls.newPage();await controlPage.setContent('<html dir="rtl"><body style="margin:0;background:white"><span id="line" style="display:inline-block;white-space:nowrap;padding:2px;color:black;background:white"></span></body></html>');
