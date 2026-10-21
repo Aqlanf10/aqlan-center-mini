@@ -8,6 +8,8 @@ import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMoneyAttempt } from "./useMoneyAttempt";
 import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
+import {SimilarCollectionWarning,useSimilarCollectionWarning} from "./SimilarCollectionWarning";
+import type {SimilarCollectionReview} from "@/lib/similar-collection";
 import {
   CURRENCIES,
   CURRENCY_LABEL,
@@ -177,6 +179,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
   // DOT-PF-01: share pending collections with the patient collection modal.
   const money = useMoneyAttempt(`collection:${patientId}`, canSeeFinancial && !readUnavailable && !readDenied, `collection:${patientId}`, {patientId});
+  const similarity=useSimilarCollectionWarning(JSON.stringify([patientId,session?.username,session?.role,canSeeFinancial]));
 
   const itemGuards = useRef(new Map<number, () => boolean>());
   const registerItemGuard = useCallback((planId: number, guard: () => boolean) => {
@@ -205,32 +208,40 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
     onOpenClinicalContext({ patientId, planId, planItemId: item.id, ...(item.caseId != null ? { clinicalCaseId: item.caseId } : {}) }, target);
   };
 
-  const collect = async (plan?: Plan) => {
-    if (!readRef.current.active || busy) return;
-    const source = plan?.approvedAgreement;
-    const body = JSON.stringify({ patientId, kind: "payment", amount: payAmount, currency: payCurrency,
-      ...(source ? {invoiceId:source.invoiceId,openingCurrency:source.openingCurrency} : {planId:plan?.id}) });
-    setBusy(true);
+  const postPlanCollection = async (body?:string, review?:SimilarCollectionReview) => {
+    setBusy(true);setError(null);
     try {
-      const result = await money.run(plan ? { url: "/api/payments", body, operation: "payment" } : undefined);
-      if (!result || result.kind === "busy") return;
-      if (result.kind !== "confirmed") { setError(result.message); return; }
+      const fullBody=body?JSON.stringify({...JSON.parse(body),similarityReview:review}):undefined;
+      const result=await money.run(fullBody?{url:"/api/payments",body:fullBody,operation:"payment"}:undefined);
+      if(!result||result.kind==="busy")return;
+      if(result.kind!=="confirmed"){setError(result.message);return;}
       setLastReceipt(result.acknowledgment.paymentId);
-      setLastReceiptIsInstallment(result.attempt.request.operation === "installment");
+      setLastReceiptIsInstallment(result.attempt.request.operation==="installment");
       money.consume(result.attempt);
-      setPayFor(null);
-      setPayAmount("");
-      setError(null);
+      setPayFor(null);setPayAmount("");setError(null);
       await load();
-    } catch {
-      setError("تعذّر الاتصال بالخادم. أعد المحاولة — لن يُسجَّل القسط مرتين.");
-    } finally {
-      setBusy(false);
-    }
+    }catch{setError("تعذّر تأكيد التحصيل. راجع الحساب قبل تكرار الدفع.");}
+    finally{setBusy(false);}
+  };
+  const collect = async (plan?:Plan) => {
+    if(!readRef.current.active||busy||!money.ready)return;
+    if(!plan){await postPlanCollection();return;} // exact original key/body recovery
+    const minor=parseAmount(payAmount,payCurrency);
+    if(minor===null||minor<=0){setError("اكتب مبلغًا صحيحًا أكبر من صفر.");return;}
+    const source=plan.approvedAgreement;
+    const body=JSON.stringify({patientId,kind:"payment",amount:payAmount,currency:payCurrency,
+      ...(source?{invoiceId:source.invoiceId,openingCurrency:source.openingCurrency}:{planId:plan.id})});
+    setBusy(true);setError(null);
+    try {
+      await similarity.check({patientId,amountMinor:minor,currency:payCurrency,
+        onProceed:(review)=>postPlanCollection(body,review)});
+    }catch{setError("تعذّر فحص السندات السابقة. لم يبدأ التحصيل؛ أعد المحاولة.");}
+    finally{setBusy(false);}
   };
 
   return (
     <div data-testid="patient-plans-content">
+      <SimilarCollectionWarning pending={similarity.pending} onCancel={similarity.cancel} onConfirm={()=>void similarity.confirm()}/>
       <TreatmentFinancialContext patientId={patientId} authorityKey={financialAuthority} canView={canSeeFinancial && !loading && !readDenied && !readUnavailable}
         planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={context?.orthoCaseId}
         onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />

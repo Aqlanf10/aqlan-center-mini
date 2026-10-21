@@ -1,4 +1,6 @@
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
+import {findSimilarCollections,parseSimilarCollectionReview,reviewMatchesReceipts} from "@/lib/similar-collection";
+import {getPaymentByIdempotencyKey} from "@/lib/db";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -66,6 +68,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
 
+  if(Object.hasOwn(source,"similarityReview")){
+    const review=parseSimilarCollectionReview(source.similarityReview);
+    if(!review)return NextResponse.json({message:"تأكيد مراجعة السندات غير صالح."},{status:400});
+    try{
+      const replay=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
+      if(!replay&&!reviewMatchesReceipts(review,await findSimilarCollections(plan.patientId,amountMinor,currency)))
+        return NextResponse.json({reason:"similar_collection_review_required",message:"ظهر سند قبض مشابه؛ راجع السندات قبل تحصيل قسط آخر."},{status:409});
+    }catch{return NextResponse.json({message:"تعذّر فحص السندات السابقة؛ لم يبدأ التحصيل."},{status:503});}
+  }
   try {
     if (plan.approvedAgreement) {
       const result = await collectApprovedAgreement({planId,amountMinor,currency,method,note,idempotencyKey:idempotencyKey??"",session});
