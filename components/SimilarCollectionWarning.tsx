@@ -19,9 +19,10 @@ function validPreview(value:unknown):value is Preview{
 }
 /** Resolves a preview before invoking the exact captured post. Network uncertainty
  * in the read refuses to silently proceed; a stale server-side snapshot is 409. */
-export function useSimilarCollectionWarning(){
+export function useSimilarCollectionWarning(scope:string){
   const [pending,setPending]=useState<Pending|null>(null);
   const generation=useRef(0);
+  useEffect(()=>{generation.current++;setPending(null);},[scope]);
   useEffect(()=>()=>{generation.current++;},[]);
   const cancel=()=>{generation.current++;setPending(null);};
   const check=async(args:{patientId:number;amountMinor:number;currency:Currency;onProceed:(review:SimilarCollectionReview)=>Promise<void>})=>{
