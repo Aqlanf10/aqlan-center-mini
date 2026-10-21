@@ -25,7 +25,7 @@ jobs:
       github.repository == 'Aqlanf10/aqlan-center-mini' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'review/visit-source-acceptance-hosted' &&
-      github.event.pull_request.base.sha == '08642371fb137185c4becf9e09089b68fcc54ce6'
+      github.event.pull_request.base.ref == 'fix/visit-source-context'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -51,10 +51,10 @@ jobs:
       # Build the actual final product commit, NOT the historical acceptance head.
       # The supplemental test and its diagnostic helper are the ONLY files taken
       # from #386. Both checkouts are isolated and use read-only credentials.
-      - name: Check out exact final product commit
+      - name: Check out live product branch (must equal pinned final SHA)
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
       - name: Check out supplemental acceptance probes separately
         uses: actions/checkout@v7
@@ -65,9 +65,9 @@ jobs:
       - name: Verify product SHA and overlay test-only probes
         env:
           FINAL_APP_SHA: '08642371fb137185c4becf9e09089b68fcc54ce6'
-          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_BASE_REF: 'fix/visit-source-context'
         run: |
-          test "$EVENT_BASE_SHA" = "$FINAL_APP_SHA"
+          test "${{ github.event.pull_request.base.ref }}" = "$EXPECTED_BASE_REF"
           test "$(git rev-parse HEAD)" = "$FINAL_APP_SHA"
           cp visit-acceptance-probes/__tests__/security-http/invoice-clinic-continuity-journey.test.ts __tests__/security-http/invoice-clinic-continuity-journey.test.ts
           cp visit-acceptance-probes/__tests__/helpers/visit-source-pdf-ocr.ts __tests__/helpers/visit-source-pdf-ocr.ts
