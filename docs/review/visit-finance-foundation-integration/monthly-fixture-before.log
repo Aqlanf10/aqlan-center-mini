@@ -1,0 +1,38 @@
+
+ RUN  v4.1.11 /workspace/visit-finance-integration
+
+ ❯ __tests__/reports-monthly-measurement.test.ts (3 tests | 3 failed) 2673ms
+   × distinguishes discounted document, unpaid payable, later partial payments and refund at clinic midnight 54ms
+   × delivers identical measurement disclosures and amounts through API, screen and print without writes 25ms
+   × keeps comparison labels aligned and expense reversals on their recording date 27ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/reports-monthly-measurement.test.ts > distinguishes discounted document, unpaid payable, later partial payments and refund at clinic midnight
+ FAIL  __tests__/reports-monthly-measurement.test.ts > delivers identical measurement disclosures and amounts through API, screen and print without writes
+ FAIL  __tests__/reports-monthly-measurement.test.ts > keeps comparison labels aligned and expense reversals on their recording date
+error: relation "visit_procedures" does not exist
+ ❯ pe.Ue ../aqlan-center-mini/node_modules/@electric-sql/pg-protocol/src/parser.ts:442:10
+ ❯ pe.tt ../aqlan-center-mini/node_modules/@electric-sql/pg-protocol/src/parser.ts:220:15
+ ❯ pe.parse ../aqlan-center-mini/node_modules/@electric-sql/pg-protocol/src/parser.ts:104:20
+ ❯ N.qe ../aqlan-center-mini/node_modules/@electric-sql/pglite/src/pglite.ts:753:25
+ ❯ ../aqlan-center-mini/node_modules/@electric-sql/pglite/src/pglite.ts:706:13
+ ❯ null.<anonymous> wasm:/wasm/0267bb86:1:5922000
+ ❯ null.<anonymous> wasm:/wasm/0267bb86:1:2616044
+ ❯ null.<anonymous> wasm:/wasm/0267bb86:1:2648530
+ ❯ null.<anonymous> wasm:/wasm/0267bb86:1:2649134
+ ❯ null.<anonymous> wasm:/wasm/0267bb86:1:5569870
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  3 failed | 94 passed (97)
+   Start at  05:44:02
+   Duration  9.04s (transform 3.29s, setup 0ms, import 4.21s, tests 3.63s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -17,7 +17,7 @@ const visitId = 98312;
 const patientId = 98311;
 const doctorId = 98313;
 const clinicalPath = `/api/visits/${visitId}/clinical`;
-const signedDestination = `/patients/${patientId}?tab=account`;
+const signedDestination = `/patients/${patientId}?tab=today&checkoutVisit=${visitId}`;
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 function clinicalVisit(ortho = true) {
   return {
@@ -104,7 +104,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
     else if (path === "/api/auth/me") await json(route, { username: "secadmin", role: "admin" });
     else if (path.startsWith("/api/") || path.startsWith("/print/")) { unexpected.push(`${method} ${path}`); await json(route, { message: "Unexpected synthetic read blocked" }, 404); }
     else if (request.isNavigationRequest() && `${path}${url.search}` === signedDestination) {
-      // A canonical sign result carries this patient ID into account checkout.
+      // A validated sign result opens this patient’s Today checkout for this exact visit.
       // Keep that exact destination inert, then reopen the real visit to verify
       // its signed freeze without reading an unrelated synthetic patient page.
       await route.fulfill({ contentType: "text/html", body: "<html dir=rtl><body>وجهة تجريبية بعد التوقيع</body></html>" });
