@@ -144,6 +144,7 @@ it("settles 620000 once across original 320000 and delta 300000 and matches plan
  const before=(await db.getOpenShift())!.expected;
  const input={planId:f.planId,amountMinor:620000,currency:"YER" as const,method:"cash" as const,note:null,idempotencyKey:`whole-upgrade-${++serial}`,session};
  const received=await approve.collectApprovedAgreement(input);
+ if(!("paymentIds" in received)||!received.paymentIds)throw Error("Missing complete split payment identity");
  expect(received.paymentIds).toHaveLength(2);
  const receipts=(await q("SELECT invoice_id,amount_minor::int AS amount FROM payments WHERE id=ANY($1::int[]) ORDER BY id",[received.paymentIds])).rows;
  expect(receipts).toEqual([{invoice_id:f.originalInvoiceId,amount:320000},{invoice_id:saved.deltaInvoiceId,amount:300000}]);

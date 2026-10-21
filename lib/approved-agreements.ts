@@ -257,6 +257,8 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
           idempotencyKey:childKey,requestHash:debtRequestHash({
             hash,invoiceId:segment.invoiceId,portion})});
         if(child.kind==="reason")throw new DebtRepaymentError("stale",`تعذر توزيع التحصيل: ${child.reason}`);
+        if(typeof child.paymentId!=="number"||!positive(child.paymentId))
+          throw new DebtRepaymentError("conflict","تعذر إثبات سند توزيع التحصيل.");
         created.push({invoiceId:segment.invoiceId,paymentId:child.paymentId,amountMinor:portion});
         unallocated-=portion;
       }
