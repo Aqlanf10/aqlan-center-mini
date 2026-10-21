@@ -11,6 +11,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 
 export const dynamic = "force-dynamic";
 
@@ -137,11 +138,17 @@ export async function POST(request: Request) {
 
   /* (P1.5) مفتاح الإعادة من ترويسة الطلب: النقر المزدوج/إعادة الإرسال/انقطاع
      الشبكة كلها تنتج الطلب نفسه بالمفتاح نفسه → سند واحد فقط، والثاني replay
-     يعيد السند الأول نفسه (200 لا 201). بلا الترويسة يبقى السلوك كما كان. */
+     يعيد السند الأول نفسه (200 لا 201). الترويسة إلزامية قبل أي كتابة مالية. */
   const idempotencyKeyRaw = request.headers.get("idempotency-key");
   const idempotencyKey = idempotencyKeyRaw && idempotencyKeyRaw.trim()
     ? idempotencyKeyRaw.trim() : null;
-  if (idempotencyKey && !/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) {
+  if (!idempotencyKey) {
+    return NextResponse.json(
+      { reason: "idempotency_key_required", message: "مفتاح الإعادة (Idempotency-Key) مطلوب للتحصيل. أعد إرسال الطلب المحفوظ بالمفتاح نفسه." },
+      { status: 400 },
+    );
+  }
+  if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
     return NextResponse.json(
       { message: "مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -" },
       { status: 400 },
