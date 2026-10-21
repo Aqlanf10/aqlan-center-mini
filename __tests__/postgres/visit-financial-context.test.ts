@@ -155,6 +155,35 @@ it("deduplicates a completed session and direct plan-item path while preserving 
  const result=await getVisitFinancialContext(v,p);expect(result?.summary).toBe("verified");expect(result?.work).toHaveLength(1);
  await q("UPDATE invoices SET status='cancelled' WHERE id=$1",[inv]);expect((await getVisitFinancialContext(v,p))?.summary).toBe("unresolved");
 });
+it("keeps two same-patient plans and their exact invoice sources separate across signed visits",async()=>{
+ const p=await patient(),first=await visit(p),second=await visit(p);
+ async function separatePlan(visitId:number,title:string){
+  const [plan]=await q<{id:number}>("INSERT INTO treatment_plans(patient_id,title,total_minor,created_by) VALUES($1,$2,10000,'synthetic') RETURNING id",[p,title]);
+  const [item]=await q<{id:number}>("INSERT INTO plan_items(plan_id,service_id,service_name,category,tooth_code,quantity,unit_price_minor,status,visit_id,billing_status) VALUES($1,$2,'Synthetic separate-plan work','rct',16,1,10000,'done',$3,'billed') RETURNING id",[plan.id,serviceId,visitId]);
+  const inv=await invoice(p,0,"open",false);
+  await q("UPDATE invoice_items SET source_type='plan_item',source_id=$1::int,plan_item_id=$1::int WHERE invoice_id=$2",[item.id,inv]);
+  await q("UPDATE plan_items SET billed_invoice_id=$1,origin_invoice_id=$1 WHERE id=$2",[inv,item.id]);
+  return {planId:plan.id,itemId:item.id,invoiceId:inv};
+ }
+ const a=await separatePlan(first,"Synthetic independent plan A");
+ const b=await separatePlan(second,"Synthetic independent plan B");
+ expect(a.planId).not.toBe(b.planId);
+ const before=await snapshot();
+ const one=await getVisitFinancialContext(first,p),two=await getVisitFinancialContext(second,p);
+ expect(one?.summary).toBe("verified");
+ expect(two?.summary).toBe("verified");
+ expect(one?.work).toHaveLength(1);expect(two?.work).toHaveLength(1);
+ expect(one?.work[0].id).toBe(a.itemId);expect(two?.work[0].id).toBe(b.itemId);
+ expect(one?.work[0].references).toContainEqual(expect.objectContaining({kind:"invoice",id:a.invoiceId,state:"current"}));
+ expect(two?.work[0].references).toContainEqual(expect.objectContaining({kind:"invoice",id:b.invoiceId,state:"current"}));
+ expect(one?.work[0].references.some(source=>source.kind==="invoice"&&source.id===b.invoiceId)).toBe(false);
+ expect(two?.work[0].references.some(source=>source.kind==="invoice"&&source.id===a.invoiceId)).toBe(false);
+ expect(await snapshot()).toEqual(before);
+ await q("UPDATE invoices SET status='cancelled' WHERE id=$1",[a.invoiceId]);
+ expect((await getVisitFinancialContext(first,p))?.summary).toBe("unresolved");
+ expect((await getVisitFinancialContext(second,p))?.summary).toBe("verified");
+});
+
 it("keeps an approved plan principal documentary until its canonical current-source proof is integrated",async()=>{
  const p=await patient(),v=await visit(p);
  const [plan]=await q<{id:number}>("INSERT INTO treatment_plans(patient_id,title,total_minor,status,consent_at,created_by) VALUES($1,'Synthetic approved plan',10000,'active',NOW(),'synthetic') RETURNING id",[p]);
