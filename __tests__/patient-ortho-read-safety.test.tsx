@@ -528,6 +528,19 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     return { row, before };
   }
 
+  it("offers financial context as a disclosure only in the prescription view", async () => {
+    const { row, before } = await openPrescription({ bracketSystem: null });
+    const financial = one(node => node.props["data-testid"] === "ortho-financial-context");
+    expect(financial.type).toBe("details");
+    expect(financial.props.open).toBeUndefined();
+    expect(text(financial)).toContain("مرجع الحالة المالي وشمول الشدّة");
+    expect(text(prescriptionValue())).toBe("غير مسجّلة");
+    const tab = one(node => node.type === "button" && node.props["aria-label"] === "مسار الأسلاك والشدّات");
+    click(tab);
+    expect(one(node => node.props["data-testid"] === "ortho-financial-context").type).toBe("div");
+    expect(row).toEqual(before); expect(writes()).toEqual([]);
+  });
+
   it.each([null, "", "   "])("labels absent prescription %j as unrecorded rather than inventing Roth/MBT", async (bracketSystem) => {
     const { row, before } = await openPrescription({ bracketSystem });
     expect(text(prescriptionValue())).toBe("غير مسجّلة");
