@@ -27,3 +27,17 @@ git diff --check
 ## Limits
 
 The reviewer did not independently run HTTP/PostgreSQL, build, or Chromium. Headless hook tests mock React lifecycle and journal storage, so they do not establish actual browser reload/IndexedDB/multi-tab behavior. HTTP regression tests establish server replay identity; actual lost-response behavior is covered only by the controlled hook test here. No production data or reported-patient cause was investigated. Review requested updating the earlier deferred-fixture documentation; README.md now records the completed header-only delta and removes that blocker.
+
+## Correction to initial completeness assessment
+
+Hosted run `39640370875` subsequently exposed two successful collection fixtures in `__tests__/td05-owner-review.test.ts` using a dynamic route import without keys. Both the implementer audit and this initial independent audit missed them. The initial no-blocker/completeness assessment was therefore insufficient for the full suite. README.md preserves the failure and the authorized header-only correction; no earlier test result is represented as a full-suite pass.
+
+The reviewer repeated the source audit over static/dynamic handler imports, `new Request`, `jsonRequest`, `post`, `send`, `authedJson` and HTTP helpers. No additional successful collection fixture lacking a key was found. Remaining unkeyed owner-review calls at 287/302/365 and owner-review-2:269 exercise invalid foreign/dual targets; `payment-acknowledgment-evidence.test.ts:368` intentionally omits a correction key. The two fixed headers leave bodies/assertions unchanged.
+
+Reviewer independently ran:
+
+```sh
+npm test -- __tests__/td05-owner-review.test.ts __tests__/td05-owner-review-2.test.ts __tests__/inactive-plan-collections.test.ts __tests__/reversed-installment-recovery-routes.test.ts __tests__/collection-idempotency-boundary.test.ts
+```
+
+Result: **92/92 across five files passed**, exit 0; `git diff --check` passed. No further blocker found for this fixture-only correction. This remains a targeted review, not proof of a complete hosted/browser suite pass.
