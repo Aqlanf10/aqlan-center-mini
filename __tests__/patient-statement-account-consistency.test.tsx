@@ -53,7 +53,7 @@ function fixture(currency: Currency, discountMinor: number) {
   snapshot.invoices = ledger.invoices.map((row) => ({ id: row.id, patientId: row.patientId,
     planId: null, invoiceNumber: row.invoiceNumber, currency: row.baseCurrency,
     totalMinor: row.totalMinor, discountMinor: row.discountMinor, status: row.status }));
-  snapshot.receipts = ledger.payments.map((row) => ({ ...row }));
+  snapshot.receipts = ledger.payments.map((row) => ({ ...row, reversalOfId: row.reversalOfId ?? null }));
   return { ledger, snapshot, otherCurrency };
 }
 function summaryValues(html: string, label: string): string[] {
@@ -120,7 +120,7 @@ describe("statement and treatment-account cross-reader acceptance (synthetic, no
     const { ledger, snapshot } = fixture("YER", 3000);
     const cash = payment(1, "SAR"); // 5,000 SAR minor, stored equivalent 700,000 YER minor.
     const fxLedger: Ledger = { ...ledger, payments: [cash] };
-    snapshot.receipts = [cash];
+    snapshot.receipts = [{ ...cash, reversalOfId: cash.reversalOfId ?? null }];
     const account = projectTreatmentFinancialReferences(snapshot);
     const balances = ledgerBalancesByCurrency(10, fxLedger, new Map());
     expect(account.accountPositions).toEqual(balances);
