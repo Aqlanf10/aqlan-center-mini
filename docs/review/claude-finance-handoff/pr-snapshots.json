@@ -1,5 +1,5 @@
 {
-  "snapshot_utc": "2026-10-21T22:21:00Z",
+  "snapshot_utc": "2026-10-21T22:27:00Z",
   "note": "Connector snapshots, not CI or release approvals. base_sha may reflect the PR's recorded base rather than current main; fetch main independently.",
   "pull_requests": [
     {
@@ -94,6 +94,19 @@
       "merged": false
     },
     {
+      "number": 393,
+      "title": "feat(finance): warn staff before similar patient receipt (review only)",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/393",
+      "state": "open",
+      "draft": true,
+      "head": "feature/duplicate-collection-warning",
+      "head_sha": "7279a3bab5be8e5391ef3a4b990a2add3f368eec",
+      "base": "main",
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    },
+    {
       "number": 394,
       "title": "fix(deps): patch Vitest mocker advisories without tooling churn",
       "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/394",
@@ -116,6 +129,19 @@
       "head_sha": "414501aad810679efef0b844340db5d2b85faf3e",
       "base": "main",
       "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    },
+    {
+      "number": 397,
+      "title": "Handoff: reviewed synthetic U0 archive capture and validation",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/397",
+      "state": "open",
+      "draft": true,
+      "head": "handoff/u0-synthetic-capture-reviewed",
+      "head_sha": "d236bf435ae2736cf627a13317d28b8f800eff48",
+      "base": "feat/unpaid-currency-connected-candidate",
+      "base_sha": "f2c9c98c2ac8c7a6f3fd3fdf89bc8c7afcc37dc1",
       "mergeable": true,
       "merged": false
     }

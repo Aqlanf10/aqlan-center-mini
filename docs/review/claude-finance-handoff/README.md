@@ -25,9 +25,16 @@ The legacy contract assumes a trusted collector supplies complete child sets, ex
 - [#389](https://github.com/Aqlanf10/aqlan-center-mini/pull/389): correction refusals and historical balances, combined with key-related work. Compare with #388 to avoid duplicate application.
 - [#390](https://github.com/Aqlanf10/aqlan-center-mini/pull/390): externally authored dated agreement amendment, split settlement and stale recovery candidate; review its exact source independently.
 - [#391](https://github.com/Aqlanf10/aqlan-center-mini/pull/391): test-only browser acceptance for #389, not runtime implementation.
-- [#392](https://github.com/Aqlanf10/aqlan-center-mini/pull/392): pristine unpaid six-direction currency candidate; activation remains blocked. Exact composed recovery/restore artifacts are being published separately and are intentionally NOT duplicated here.
+- [#392](https://github.com/Aqlanf10/aqlan-center-mini/pull/392): pristine unpaid six-direction currency candidate; activation remains blocked. Exact composed recovery/capture artifacts are published separately in [#397](https://github.com/Aqlanf10/aqlan-center-mini/pull/397) and intentionally NOT duplicated here.
 - [#394](https://github.com/Aqlanf10/aqlan-center-mini/pull/394): Vitest mocker security repair.
 - [#395](https://github.com/Aqlanf10/aqlan-center-mini/pull/395): schema index owning-constraint catalog repair.
+
+## Additional handoff and pending review (2026-10-21 22:27 UTC)
+
+- [#397](https://github.com/Aqlanf10/aqlan-center-mini/pull/397): reviewed synthetic capture handoff, verified head `d236bf435ae2736cf627a13317d28b8f800eff48`, based on #392 `f2c9c98c2ac8c7a6f3fd3fdf89bc8c7afcc37dc1`. Source tree `1c7d6780a9f647e82ac18f0f6b917c7bc8fb2b47`; final tree with handoff documentation `d22f590edd3d9ca37623dd27ee7a4b0719dca14b`. Separate review reported verification of 156 unit tests and 6 real PostgreSQL tests. These results belong to that exact candidate, not current-main integration. No replay activation or Production permission follows.
+- [#393](https://github.com/Aqlanf10/aqlan-center-mini/pull/393): duplicate-collection advisory on `feature/duplicate-collection-warning`, verified head `7279a3bab5be8e5391ef3a4b990a2add3f368eec`, recorded base `2667b71f815ee14781cdac6b37ebad3b4f8e246d`. Independent read-only review is ongoing. Pre-write similarity-check atomicity/race behavior and the optional HTTP protocol are review questions, NOT proven defects. The user explicitly forbids merging or deploying #393.
+
+Claude remains the sole financial implementation/integration owner. Independent read-only review continues. These documentation links neither activate the candidates nor transfer authority to alter Production.
 
 ## Integration and release boundaries
 
