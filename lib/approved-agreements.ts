@@ -147,7 +147,7 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
 
 export async function approvedAgreementPosition(planId:number,today:string, reader?:DbClient):Promise<{
   planId:number;currency:Currency;totalMinor:number;paidMinor:number;remainingMinor:number;dueNowMinor:number;
-  invoiceId:number|null;openingCurrency:Currency|null;sourceKind:string;available:boolean;
+  invoiceId:number|null;openingCurrency:Currency|null;sourceKind:string;available:boolean;deltaInvoiceIds:number[];
 }|null> {
   if(!reader)return transaction(client=>approvedAgreementPosition(planId,today,client),true);
   const a=await readApprovedAgreement(reader,planId);if(!a)return null;
@@ -175,6 +175,7 @@ export async function approvedAgreementPosition(planId:number,today:string, read
   const dueNow=Math.min(remaining,Math.max(0,originalDue+deltaTotal-paid));
   return {planId,currency:a.currency,totalMinor:currentTotal,paidMinor:paid,remainingMinor:remaining,
     dueNowMinor:dueNow,invoiceId:a.invoice_id,openingCurrency:a.opening_currency,sourceKind:a.source_kind,
+    deltaInvoiceIds:deltas.map(event=>event.delta_invoice_id),
     available:position.available&&deltaAvailable&&approvedSourceMatches(position.sourceSnapshot,a.source_snapshot)};
 }
 
