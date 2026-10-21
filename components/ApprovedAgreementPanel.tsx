@@ -1,3 +1,4 @@
+import { AgreementAmendmentPanel } from "./AgreementAmendmentPanel";
 "use client";
 import { useRef, useState } from "react";
 import { formatMoney, parseAmount, type Currency } from "@/lib/money";
@@ -35,6 +36,7 @@ export function ApprovedAgreementPanel({planId,totalMinor,currency,position,canA
     <p className="text-xs">المصدر: {position.invoiceId?`فاتورة #${position.invoiceId}`:`رصيد افتتاحي ${currency}`} · التحصيل يخفض هذا المصدر.</p>
     {!position.available?<p role="alert">تغيّر المصدر؛ يلزم مراجعة مالية قبل التحصيل.</p>:null}
     <a className="mt-2 inline-block underline" href={`/print/plan/${planId}`} target="_blank" rel="noreferrer">طباعة الاتفاق ورصيده</a>
+    {isAdmin?<AgreementAmendmentPanel planId={planId} onChanged={onChanged}/>:null}
   </section>;
   if(!canApprove)return null;
   return <section className="mb-3 rounded-xl border border-slate-200 p-3 text-sm">
