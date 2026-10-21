@@ -9,7 +9,8 @@ const whitespace=(text:string)=>text.trim().replace(/\s+/g," ");
 const dpi=300;
 export type VisitSourceOcrDiagnostic={verdict:"inconclusive"|"correct_visible_phrase"|"wrong_visible_phrase";reason?:string;
   controls?:{correct:string;wrong:string};actual?:string;metadata?:{versions:string;modelSha256:string};
-  geometry?:{page:number;x:number;y:number;width:number;height:number;dpi:number}};
+  geometry?:{page:number;x:number;y:number;width:number;height:number;dpi:number};
+  calibration?:{topWidthErrorPt:number;bottomWidthErrorPt:number;xOffsetErrorPt:number;yOffsetErrorPt:number}};
 
 /** Diagnostic only: fresh synthetic PDF, fixed OCR, no extraction-word substitutions.
  * The source cell is selected by the report's verified row ordinal and column index,
@@ -40,7 +41,7 @@ export async function diagnoseVisitSourcePdfOcr(page:Page,browser:Browser,direct
       cell.dataset.ocrOldStyle=cell.getAttribute("style")??"";cell.dataset.ocrTarget="true";cell.style.position="relative";
       for(const [text,edge] of [[markerTop,"top"],[markerBottom,"bottom"]] as const){
         const span=document.createElement("span");span.dataset.ocrMarker=text;span.textContent=text;
-        Object.assign(span.style,{position:"absolute",fontFamily:"monospace",fontSize:"1px",lineHeight:"1px",direction:"ltr",whiteSpace:"nowrap",padding:"0",margin:"0",[edge]:"0",[edge==="top"?"left":"right"]:"0"});cell.append(span);
+        Object.assign(span.style,{position:"absolute",fontFamily:"monospace",fontSize:"8px",lineHeight:"8px",direction:"ltr",whiteSpace:"nowrap",padding:"0",margin:"0",[edge]:"0",[edge==="top"?"left":"right"]:"0"});cell.append(span);
       }
       const after=cell.getBoundingClientRect();
       if(after.x!==before.x||after.y!==before.y||after.width!==before.width||after.height!==before.height)throw new Error("markers_changed_layout");
@@ -61,9 +62,16 @@ export async function diagnoseVisitSourcePdfOcr(page:Page,browser:Browser,direct
     },{xml,markerTop,markerBottom});
     const scale=72/96,{top,bottom}=geometry;
     // One PDF point allows glyph bbox rounding, not a tunable image-similarity threshold.
-    if(Math.abs((top.x2-top.x1)-spec.top.width*scale)>1||Math.abs((bottom.x2-bottom.x1)-spec.bottom.width*scale)>1
-      ||Math.abs((bottom.x1-top.x1)-(spec.bottom.x-spec.top.x)*scale)>1
-      ||Math.abs((bottom.y1-top.y1)-(spec.bottom.y-spec.top.y)*scale)>1)throw new Error("pdf_dom_geometry_not_calibrated");
+    // Report numerical offsets from both independent anchors instead of
+    // labeling the original PDF text wrong when only the crop registration failed.
+    result.calibration={
+      topWidthErrorPt:Number(((top.x2-top.x1)-spec.top.width*scale).toFixed(3)),
+      bottomWidthErrorPt:Number(((bottom.x2-bottom.x1)-spec.bottom.width*scale).toFixed(3)),
+      xOffsetErrorPt:Number(((bottom.x1-top.x1)-(spec.bottom.x-spec.top.x)*scale).toFixed(3)),
+      yOffsetErrorPt:Number(((bottom.y1-top.y1)-(spec.bottom.y-spec.top.y)*scale).toFixed(3)),
+    };
+    if(Object.values(result.calibration).some(delta=>Math.abs(delta)>1))
+      throw new Error("pdf_dom_geometry_not_calibrated");
     const left=top.x1-spec.top.x*scale,upper=top.y1-spec.top.y*scale;
     const crop={page:top.page,x:Math.ceil((left+2*scale)*dpi/72),y:Math.ceil((upper+2*scale)*dpi/72),width:Math.floor((spec.box.width-4)*scale*dpi/72),height:Math.floor((spec.box.height-4)*scale*dpi/72),dpi};
     if(crop.x<0||crop.y<0||crop.width<=0||crop.height<=0||crop.x+crop.width>top.pageWidth*dpi/72||crop.y+crop.height>top.pageHeight*dpi/72)throw new Error("crop_outside_page");
