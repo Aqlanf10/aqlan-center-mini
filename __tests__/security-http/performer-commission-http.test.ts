@@ -1,36 +1,82 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { authedGet, harness } from "./_server";
 
-// Real HTTP only. No browser, permission changes or non-synthetic data.
+// This harness shares one server/database across files. Historical reporting
+// owns a closed shift; it must neither borrow nor close another fixture's till.
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
+let connected = false;
 let doctorA: number, doctorB: number;
+let patientId: number, shiftId: number;
+const paymentIds: number[] = [];
+const owner = `performer-http-${randomUUID()}`;
+let backgroundShiftId: number, ownedBackgroundShift: number | null = null;
+let priorShifts: unknown[] | undefined, backgroundBefore: unknown;
 const FROM = "2024-03-01", TO = "2024-03-31";
+const shifts = async () => (await db.query("SELECT to_jsonb(s) AS value FROM cashier_shifts s ORDER BY id")).rows;
+const background = async () => (await db.query(`SELECT to_jsonb(s) AS shift,
+  (SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.id),'[]'::jsonb) FROM payments p WHERE p.shift_id=s.id) AS payments
+  FROM cashier_shifts s WHERE s.id=$1`, [backgroundShiftId])).rows;
+async function id(sql: string, values: unknown[] = []) {
+  return Number((await db.query<{ id: number }>(sql, values)).rows[0].id);
+}
 
 beforeAll(async () => {
   h = await harness();
+  expect(new URL(h.seeded.dbUrl).hostname).toBe("127.0.0.1");
+  expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
-  await db.connect();
-  async function id(sql: string, values: unknown[] = []) {
-    return Number((await db.query<{ id: number }>(sql, values)).rows[0].id);
+  await db.connect(); connected = true;
+  priorShifts = await shifts();
+  const open = (await db.query<{ id: number }>("SELECT id FROM cashier_shifts WHERE status='open'")).rows;
+  expect(open.length).toBeLessThanOrEqual(1);
+  if (open.length) backgroundShiftId = open[0].id;
+  else {
+    // Standalone runs reproduce the earlier-file state too. Only this exact
+    // sentinel is ours to remove; an existing shared shift stays untouched.
+    ownedBackgroundShift = await id("INSERT INTO cashier_shifts(opened_by,opening_yer) VALUES($1,777) RETURNING id", [owner]);
+    backgroundShiftId = ownedBackgroundShift;
   }
-  doctorA = await id("INSERT INTO parties(name,kind,commission_percent) VALUES('SYNTHETIC FIFO A','doctor',30) RETURNING id");
-  doctorB = await id("INSERT INTO parties(name,kind,commission_percent) VALUES('SYNTHETIC FIFO B','doctor',40) RETURNING id");
-  const patientId = await id("INSERT INTO patients(patient_number,full_name) VALUES('HTTP-PERFORMER-FIFO','SYNTHETIC FIFO patient') RETURNING id");
-  const shift = await id("INSERT INTO cashier_shifts(opened_by) VALUES('secadmin') RETURNING id");
-  for (const [index, performer, currency, collected] of [[1, doctorA, "YER", 4000], [2, doctorB, "YER", 0], [3, doctorB, "USD", 2000]] as const) {
-    const invoice = await id(`INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,created_at)
-      VALUES($1,$2,10000,$3,'secadmin','2024-03-10T07:00:00Z') RETURNING id`, [`HTTP-PERFORMER-${index}`, patientId, currency]);
-    await db.query(`INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor,doctor_id)
-      VALUES($1,'SYNTHETIC FIFO work',1,10000,10000,$2)`, [invoice, performer]);
-    if (collected) await db.query(`INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,
-      exchange_rate,base_amount_minor,base_currency,method,created_by,created_at)
-      VALUES($1,$2,$3,$4,'payment',$5,$6,1,$5,$6,'cash','secadmin','2024-03-11T07:00:00Z')`,
-      [`HTTP-PERFORMER-R-${index}`, patientId, invoice, shift, collected, currency]);
-  }
+  backgroundBefore = await background();
+  await db.query("BEGIN");
+  try {
+    doctorA = await id("INSERT INTO parties(name,kind,commission_percent) VALUES('SYNTHETIC FIFO A','doctor',30) RETURNING id");
+    doctorB = await id("INSERT INTO parties(name,kind,commission_percent) VALUES('SYNTHETIC FIFO B','doctor',40) RETURNING id");
+    patientId = await id("INSERT INTO patients(patient_number,full_name) VALUES($1,'SYNTHETIC FIFO patient') RETURNING id", [owner]);
+    shiftId = await id(`INSERT INTO cashier_shifts(opened_by,status,opened_at,closed_by,closed_at,counted_yer,counted_sar,counted_usd)
+      VALUES($1,'closed','2024-03-10T06:00:00Z',$1,'2024-03-12T06:00:00Z',4000,0,2000) RETURNING id`, [owner]);
+    for (const [index, performer, currency, collected] of [[1, doctorA, "YER", 4000], [2, doctorB, "YER", 0], [3, doctorB, "USD", 2000]] as const) {
+      const invoice = await id(`INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,created_at)
+        VALUES($1,$2,10000,$3,'secadmin','2024-03-10T07:00:00Z') RETURNING id`, [`${owner}-I-${index}`, patientId, currency]);
+      await db.query(`INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor,doctor_id)
+        VALUES($1,'SYNTHETIC FIFO work',1,10000,10000,$2)`, [invoice, performer]);
+      if (collected) paymentIds.push(await id(`INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,
+        exchange_rate,base_amount_minor,base_currency,method,created_by,created_at)
+        VALUES($1,$2,$3,$4,'payment',$5,$6,1,$5,$6,'cash','secadmin','2024-03-11T07:00:00Z') RETURNING id`,
+        [`${owner}-R-${index}`, patientId, invoice, shiftId, collected, currency]));
+    }
+    await db.query("COMMIT");
+  } catch (error) { await db.query("ROLLBACK"); throw error; }
 });
-afterAll(async () => { await db?.end(); });
+
+afterAll(async () => {
+  if (!connected) return;
+  try {
+    await db.query("BEGIN");
+    // Financial rows are append-only. Their UUID-scoped patient/doctors and
+    // closed historical shift live until the harness drops its isolated DB.
+    // Only the empty sentinel we created is removed here.
+    if (backgroundBefore) expect(await background()).toEqual(backgroundBefore);
+    if (ownedBackgroundShift !== null) {
+      expect((await db.query("DELETE FROM cashier_shifts WHERE id=$1 AND opened_by=$2 AND status='open'", [ownedBackgroundShift, owner])).rowCount).toBe(1);
+    }
+    if (priorShifts) expect((await shifts()).filter((row) => row.value.id !== shiftId)).toEqual(priorShifts);
+    await db.query("COMMIT");
+  } catch (error) { await db.query("ROLLBACK"); throw error; }
+  finally { await db.end(); }
+});
 
 describe("performer commission HTTP projection", () => {
   it("returns stable per-performer per-currency totals", async () => {
@@ -55,4 +101,13 @@ describe("performer commission HTTP projection", () => {
     expect(body.rows).toHaveLength(1);
     expect(body.rows[0].earnedMinor).toBe(body.lines[0].earnedMinor);
   });
+});
+
+it("owns a closed historical shift without changing the earlier open shift or its receipts", async () => {
+  expect(await background()).toEqual(backgroundBefore);
+  expect((await db.query("SELECT status,opened_by FROM cashier_shifts WHERE id=$1", [shiftId])).rows)
+    .toEqual([{ status: "closed", opened_by: owner }]);
+  expect((await db.query("SELECT DISTINCT shift_id FROM payments WHERE id=ANY($1::int[])", [paymentIds])).rows)
+    .toEqual([{ shift_id: shiftId }]);
+  expect(shiftId).not.toBe(backgroundShiftId);
 });
