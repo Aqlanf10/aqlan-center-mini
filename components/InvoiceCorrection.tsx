@@ -15,6 +15,9 @@ import {lineLinkage,validateLineSite,caseSiteScope} from "@/lib/invoice-clinical
 import { useSession } from "./SessionProvider";
 
 type Draft={keep:boolean;quantity:string;price:string;serviceId:string;doctorId:string;tooth:string;surfaces:string};
+// Match the exact server refusal, never a generic conflict or an unknown outcome.
+const settlementConflict="توجد تسويات أخرى على الحساب؛ راجع تخصيص السندات قبل جدولة تحصيل إضافي.";
+const settlementConflictExplanation="رُفض هذا الطلب قبل حفظ التصحيح: المتبقي المخصص لهذه الفاتورة بعد التصحيح أكبر من المستحق على حساب المريض ككل بالعملة نفسها. تسويات الحساب ليست بالضرورة مخصصة لهذه الفاتورة. راجع تخصيص السندات؛ لا تُنقل الإيصالات القديمة تلقائيًا. هذا الرفض يخص هذا الطلب ولا يحسم نتيجة أي طلب سابق.";
 const button="min-h-11 rounded-xl border px-4 py-2 text-sm font-bold disabled:opacity-50";
 const input="mt-1 min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm";
 export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange,financialRecovery,onDone,onCancel}:{
@@ -85,7 +88,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       if(verified){await financialRecovery.acknowledge(durable);if(!lifetime.current.active)return;onRecoveryChange(null);
         onDone(`حُفظ التصحيح في ${verified.corrected.invoiceNumber}. بقيت إيصالات الأصل محفوظة.${verified.creditMinor>0?` رصيد لصالح المريض ${formatMoney(verified.creditMinor,verified.corrected.baseCurrency)}؛ لم يُصرف ردّ نقدي.`:""}`);
       }else{const refused=!response.redirected&&[400,409,404].includes(response.status)&&revisionRecord(payload)&&["invalid","stale","conflict","missing"].includes(String(payload.code))&&typeof payload.message==="string";
-        onRecoveryChange({...command,outcome:refused?"refused":"uncertain",message:refused?String((payload as Record<string,unknown>).message):"لم يكتمل تأكيد النتيجة. احتُفظ بالمبالغ والمفتاح لإعادة الطلب نفسه."});}
+        onRecoveryChange({...command,outcome:refused?"refused":"uncertain",message:refused?(response.status===409&&payload.code==="conflict"&&payload.message===settlementConflict?settlementConflictExplanation:String(payload.message)):"لم يكتمل تأكيد النتيجة. احتُفظ بالمبالغ والمفتاح لإعادة الطلب نفسه."});}
     }catch{if(lifetime.current.active)onRecoveryChange({...command,outcome:"uncertain",message:"انقطع الرد. أعد نفس طلب التصحيح للتحقق قبل إجراء أي تعديل آخر."});}
     finally{pending.current=false;if(lifetime.current.active)setBusy(false);}
   };
@@ -139,6 +142,8 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       {view.currencyCorrection?<p className="text-sm leading-7">{view.currencyCorrection.message}</p>:null}
       {changingCurrency?<p role="status" className="text-sm leading-7">تسوية مثبتة {formatMoney(settledMinor,currency)}. لا تُنشأ حركة نقدية، وتبقى أرقام السندات ومبالغها وأسعار صرفها الأصلية محفوظة.</p>:null}
       {view.invoice.items.map((item,index)=>{const draft=drafts[item.id];const work=view.work.find(row=>row.id===item.planItemId),clinical=work?.clinical_locked;
+        const priceMinor=draft?parseAmount(draft.price,currency):null;
+        const unchangedServicePriceEdit=!!draft?.keep&&!changingCurrency&&priceMinor!==null&&priceMinor!==item.unitPriceMinor&&draft.serviceId===String(item.serviceId??"");
         const canAmend=!locked&&!changingCurrency&&view.identityAmendmentAvailable===true&&!clinical&&!!view.identityCatalog;
         const oldCategory=work?.category??view.identityCatalog?.services.find(row=>row.id===item.serviceId)?.category??null;
         const choices=view.identityCatalog?.services.filter(row=>work?row.category===oldCategory:lineLinkage({serviceId:row.id,category:row.category}).kind==="financial")??[];
@@ -149,6 +154,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
           {clinical?<p className="text-xs leading-6 text-amber-900">له عمل أو مسودة سريرية؛ تبقى هويته وكميته محفوظتين.</p>:null}</div>
         <label className="min-w-0 text-xs font-bold">الكمية<input aria-label={`كمية التصحيح ${index+1}`} className={input} inputMode="numeric" disabled={locked||clinical||changingCurrency} value={draft?.quantity??""} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],quantity:event.target.value}}))}/></label>
         <label className="min-w-0 text-xs font-bold">السعر ({currency})<input aria-label={`سعر التصحيح ${index+1}`} className={input} inputMode="decimal" dir="ltr" value={draft?.price??""} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],price:event.target.value}}))}/></label>
+        {unchangedServicePriceEdit?<p role="status" data-testid="invoice-unchanged-service-warning" className="text-sm leading-7 text-amber-900 sm:col-span-3">الخدمة ستبقى «{item.description}». تغيير السعر أو كتابة سبب التصحيح لا يغيّر نوع الخدمة، مثل تحويلها إلى زركون. إذا كان المقصود خدمة أخرى، راجع اختيار الخدمة وشروط إتاحة تصحيح هويتها.</p>:null}
         <details className="min-w-0 text-xs sm:col-span-3"><summary className="min-h-11 cursor-pointer py-3 font-bold">تصحيح الخدمة والطبيب والموضع</summary>
           <p className="mb-2 leading-6">تُقبل قبل بدء العمل فقط. التحصيل أو المسودة السريرية أو العمولة المعتمدة يحفظ الهوية الأصلية؛ التصحيح المالي يبقى متاحًا.</p>
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
