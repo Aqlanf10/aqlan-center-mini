@@ -1,3 +1,4 @@
+import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
 import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt, type DbClient } from "./db";
 import { canHandleMoney } from "./roles";
 import { revalidateSessionInTransaction } from "./session";
@@ -149,11 +150,30 @@ export async function approvedAgreementPosition(planId:number,today:string, read
   if(!reader)return transaction(client=>approvedAgreementPosition(planId,today,client),true);
   const a=await readApprovedAgreement(reader,planId);if(!a)return null;
   const position=await readDebtPosition(reader,target(a));
-  const paid=Number(a.historical_paid_minor)+position.settledMinor;
-  const due=a.terms.installments.length?a.terms.installments.filter(i=>i.dueDate<=today).reduce((s,i)=>s+i.amountMinor,0):Number(a.total_minor);
-  return {planId,currency:a.currency,totalMinor:Number(a.total_minor),paidMinor:paid,remainingMinor:position.remainingMinor,
-    dueNowMinor:Math.min(position.remainingMinor,Math.max(0,due-paid)),invoiceId:a.invoice_id,openingCurrency:a.opening_currency,sourceKind:a.source_kind,
-    available:position.available&&approvedSourceMatches(position.sourceSnapshot,a.source_snapshot)};
+  // The immutable approval remains historical principal. Only explicit, dated
+  // difference documents raise today's agreement. No old receipt is reassigned.
+  const installed=(await reader.query<{present:boolean}>(
+    "SELECT to_regclass('public.agreement_delta_amendments') IS NOT NULL AS present")).rows[0]?.present;
+  const deltas=installed ? (await reader.query<{delta_invoice_id:number;delta_minor:string;patient_id:number}>(
+    "SELECT delta_invoice_id,delta_minor::text,patient_id FROM agreement_delta_amendments WHERE plan_id=$1 ORDER BY id",[planId])).rows : [];
+  let deltaTotal=0,deltaSettled=0,deltaAvailable=true;
+  for(const event of deltas){
+    if(event.patient_id!==a.patient_id||a.invoice_id===null)throw new Error("Unverifiable agreement amendment");
+    const doc=await readInvoiceSettlementPosition(reader,{patientId:a.patient_id,invoiceId:event.delta_invoice_id,currency:a.currency});
+    if(!doc.available||doc.principalMinor!==Number(event.delta_minor))deltaAvailable=false;
+    deltaTotal+=Number(event.delta_minor);
+    deltaSettled+=doc.settledMinor;
+  }
+  const currentTotal=Number(a.total_minor)+deltaTotal;
+  const paid=Number(a.historical_paid_minor)+position.settledMinor+deltaSettled;
+  const remaining=Math.max(0,currentTotal-paid);
+  if(![deltaTotal,deltaSettled,currentTotal,paid,remaining].every(Number.isSafeInteger))
+    throw new Error("Agreement amendment totals exceed safe monetary units");
+  const originalDue=a.terms.installments.length?a.terms.installments.filter(i=>i.dueDate<=today).reduce((s,i)=>s+i.amountMinor,0):Number(a.total_minor);
+  const dueNow=Math.min(remaining,Math.max(0,originalDue+deltaTotal-paid));
+  return {planId,currency:a.currency,totalMinor:currentTotal,paidMinor:paid,remainingMinor:remaining,
+    dueNowMinor:dueNow,invoiceId:a.invoice_id,openingCurrency:a.opening_currency,sourceKind:a.source_kind,
+    available:position.available&&deltaAvailable&&approvedSourceMatches(position.sourceSnapshot,a.source_snapshot)};
 }
 
 async function assertCollectionSession(client:DbClient,session:SessionPayload) {
