@@ -251,7 +251,7 @@ it("real browser refreshes a payment-stale preview ONLY after same-key committed
   const ledger=await fetch(`${baseUrl}/api/reports?report=patient-statement&preset=custom&from=2026-01-01&to=2099-12-31&patientId=${f.patientId}`,{headers:{cookie:h.sessions.admin.cookie}});
   expect(ledger.status,await ledger.clone().text()).toBe(200);
   const report=(await ledger.json()).result;
-  expect(report.kpis.find((k:{key:string})=>k.key==="balance-YER")?.minor).toBe(600000);
+  expect(report.kpis.find((k:{key:string})=>k.key==="balance")?.minor).toBe(600000);
  }finally{await context.close();}
 });
 it("losing an ACTUAL amendment commit reply survives user switch and retries the saved request without a second difference invoice",async()=>{
