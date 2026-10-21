@@ -16,7 +16,7 @@ Follow-up review also reproduced the specialty-filter mismatch: two visits displ
 
 At the baseline, `getClinicalVisit` returned the raw persisted invoice pointer and the clinical page advertised every non-null pointer as a print link. The report's new validation did not protect that separate path. Synthetic component witnesses reproduce misleading cancelled/unverified links, and a real PostgreSQL witness exercises cancelled and cross-patient pointers.
 
-`app/print/invoice/[id]/page.tsx` and `app/api/invoices/[id]/route.ts` enforce session plus `canViewMoney`: admin/reception/accountant may read financial documents; doctor and assistant cannot use that destination. They do **not** call `canAccessPatient` or verify that an incoming invoice ID belongs to the originating visit. This is a global finance-role read, not visit-scoped authorization. The print page marks cancelled invoices as cancelled and retains the historical document; this destination is not changed here.
+`app/print/invoice/[id]/page.tsx` and `app/api/invoices/[id]/route.ts` enforce session plus `canViewMoney`: the existing finance roles, including cashier, may read financial documents; doctor and assistant cannot use that destination. They do **not** call `canAccessPatient` or verify that an incoming invoice ID belongs to the originating visit. This is a global finance-role read, not visit-scoped authorization. The print page marks cancelled invoices as cancelled and retains the historical document; this destination is not changed here.
 
 The clinical reader now returns a separate money-free `invoiceReferenceState` from the same SELECT as the visit: `missing`, `current` (same-patient, non-cancelled documentary reference), `cancelled` (same-patient cancelled document), or `review` (unverified ownership). Raw persisted `invoiceId` remains unchanged for existing signing semantics. Neither `current` nor any other reference state determines treatment coverage or receipt status.
 
@@ -78,3 +78,15 @@ This is a bounded projection/navigation repair, not a complete historical financ
 Structured endodontic or orthodontic work without `visit_procedures` is not newly projected as a service by this patch. Existing invoice corrections, old package coverage, historical agreement identity, and mixed covered/uncovered visits require source-specific parity review with #371/#379 before adding a comprehensive visit coverage DTO. Cancellation of an existing documentary reference is not active coverage. No claim is made that these broader API/source cases are fully repaired.
 
 No merge, deployment, migration file, automatic backfill, historical data repair, eligibility change, receipt change, or debt change is included.
+
+## Reviewed signing-boundary contract follow-up
+
+CI gate `visit-workspace-contract` detected the intentional documentary-state reset in the protected `sign` slice. Comparing Production baseline `3f7b02b5` and `b48f2232`, its only change is insertion of `invoiceReferenceState: undefined` into the optimistic signed `setVisit` result, after `isClinicalSignResult` accepts the owner-bound response and before the canonical reread.
+
+The request URL/body, owner/read/command guards, financial-signature gate, response binding, unknown-outcome handling, callback payload and dependency array are byte-identical. Exact-visit navigation is outside this protected slice. No signing/pricing/database implementation changes are part of this contract follow-up.
+
+The test retains an exact full-slice SHA pin (`4e1cd839b93397762e4e96d0fa92467a877c6ea3864637a1d2e93ae353ca89f6`) AND an additional assertion that removing this sole insertion reproduces the original reviewed SHA (`ef28cfac2060d5b9e80e2e17a947a49287c3daf8c0c6efe5a6798504c45a698e`). This does not broadly normalize or ignore sign changes.
+
+A behavioral witness starts with invoice A's verified documentary state, accepts a valid sign response for invoice B, and holds the reread pending. It checks the unchanged sign request, verifies the optimistic invoice B has no inherited reference verification or print link, then resolves the canonical reread and checks only B's link and the bound callback payload are exposed. Existing malformed-response and retired-owner tests remain intact.
+
+Validation of this contract follow-up: Node 22.23.3; focused contract/ownership tests 66 passed; full unit suite 599 files and 10,557 tests passed with no skips; TypeScript and targeted lint passed. The initial full run had one preflight setup failure because shared symlinked dependencies resolved outside the worktree. A worktree-local lockfile install resolved that environment issue without changing or bypassing the artifact guard; the complete suite was then rerun successfully. The existing test session survived the environment disconnect notification without a restart. No application code changed in this follow-up.

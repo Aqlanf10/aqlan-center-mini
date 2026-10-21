@@ -702,3 +702,30 @@ it.each(["admin", "doctor"])("shows a verified documentary reference without wid
   expect(contents(render())).toContain("مرجع فاتورة #98001");
   expect(nodes().some(node => node.props.href === "/print/invoice/98001")).toBe(role === "admin");
 });
+
+it("clears stale documentary verification after sign until the exact response invoice is reread", async () => {
+  hooks.role = "admin";
+  stored.set(91001, { ...stored.get(91001), invoiceId: 98001, invoiceReferenceState: "current" });
+  await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+  const reread = deferred<Response>();
+  pendingWrite = async (_id, body) => {
+    expect(body).toEqual({ action: "sign", dependencyOverrideReason: null, outsideContractDecision: null, orthoSession: null });
+    reads.set(91001, () => reread.promise);
+    return response(200, { patientId: 92001, invoiceId: 98002, invoiceCurrency: "YER", duesMinor: 10000,
+      sessionsCompleted: 0, nextPlannedVisit: null });
+  };
+  const signing = invoke(find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
+  await flush();
+  const optimistic = hooks.values.find(value => value && typeof value === "object"
+    && "id" in value && value.id === 91001 && "status" in value && value.status === "signed") as Record<string, unknown>;
+  expect(optimistic).toMatchObject({ invoiceId: 98002, status: "signed" });
+  expect(optimistic.invoiceReferenceState).toBeUndefined();
+  expect(nodes().some(node => String(node.props.href ?? "").startsWith("/print/invoice/"))).toBe(false);
+  expect(onSigned).not.toHaveBeenCalled();
+  reread.resolve(response(200, { ...stored.get(91001), status: "signed", invoiceId: 98002, invoiceReferenceState: "current" }));
+  await signing; await flush();
+  expect(nodes().some(node => node.props.href === "/print/invoice/98001")).toBe(false);
+  expect(nodes().some(node => node.props.href === "/print/invoice/98002")).toBe(true);
+  expect(onSigned).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ patientId: 92001, invoiceId: 98002,
+    invoiceCurrency: "YER", duesMinor: 10000 }));
+});
