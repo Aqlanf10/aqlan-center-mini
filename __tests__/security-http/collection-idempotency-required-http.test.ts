@@ -65,7 +65,7 @@ it.each(["account", "invoice", "plan", "direct-plan"])("preserves same-key paral
   const path = door === "direct-plan" ? `/api/plans/${f.planId}` : "/api/payments";
   const requestBody = body(f.patientId, door === "invoice" ? { invoiceId: f.invoiceId } : door === "plan" ? { planId: f.planId } : {});
   const key = { "Idempotency-Key": `synthetic-key-${f.patientId}` };
-  const send = (headers = key, payload = requestBody) => authedMutation(path, h.sessions.reception, "POST", payload, headers);
+  const send = (headers: Record<string, string> = key, payload = requestBody) => authedMutation(path, h.sessions.reception, "POST", payload, headers);
   const responses = await Promise.all([send(), send(), send()]);
   expect(responses.map(response => response.status).sort()).toEqual([200, 200, 201]);
   type Receipt = { id: number; receiptNumber: string };
@@ -89,7 +89,17 @@ it.each(["account", "invoice", "plan", "direct-plan"])("preserves same-key paral
   const changed = await send(key, requestBody.replace('"205000"', '"205001"'));
   expect(changed.status).toBe(409);
   expect(await financialSnapshot()).toEqual(beforeConflict);
-  const independent = await send({ "Idempotency-Key": `synthetic-other-${f.patientId}` });
+  // A distinct key for the same patient/amount/currency within 24h is an independent payment only
+  // after the advisory review: first asked (nothing written), then recorded once confirmed.
+  const otherKey = { "Idempotency-Key": `synthetic-other-${f.patientId}` };
+  const beforeReview = await financialSnapshot();
+  const asked = await send(otherKey);
+  expect(asked.status).toBe(409);
+  const review = await asked.json() as { reason: string; receipts: { id: number }[] };
+  expect(review.reason).toBe("similar_collection_review_required");
+  expect(review.receipts.map(receipt => receipt.id)).toEqual([receipts[0].id]);
+  expect(await financialSnapshot()).toEqual(beforeReview);
+  const independent = await send({ ...otherKey, "x-collection-similarity-review": `ids:${receipts[0].id}` });
   expect(independent.status).toBe(201);
   expect((await receiptOf(await independent.json())).id).not.toBe(receipts[0].id);
   const { rows } = await db.query(`SELECT count(*)::int AS count, sum(amount_minor)::text AS total FROM payments WHERE patient_id = $1`, [f.patientId]);

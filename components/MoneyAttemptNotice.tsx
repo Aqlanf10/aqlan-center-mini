@@ -11,8 +11,10 @@ export function MoneyAttemptNotice({ attempt, onRetry, onSimilar, busy = false }
 }) {
   if (!attempt) return null;
   if (attempt.phase === "sending") return <p role="status" className="mb-3 text-sm">جارٍ انتظار إقرار العملية. لا تعِد تحميل الصفحة.</p>;
-  if (attempt.phase === "review" && attempt.similar && onSimilar) {
+  if (attempt.phase === "review" && attempt.similar) {
     const receipts = attempt.similar.receipts;
+    // One decision point: the screen that sent the request owns the review; others only report it.
+    if (!onSimilar) return <p role="status" className="mb-3 text-sm">بانتظار قرار مراجعة سند قبض مشابه في نافذة التحصيل؛ لم يُسجَّل شيء بعد.</p>;
     return <SimilarCollectionWarning receipts={receipts} busy={busy}
       onConfirm={() => onSimilar.confirm(receipts.map((receipt) => receipt.id))} onCancel={onSimilar.cancel} />;
   }

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedGet, authedMutation, baseUrl, harness } from "./_server";
+import { authedGet, authedMutation, baseUrl, confirmingSimilarCollection, harness } from "./_server";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -107,8 +107,9 @@ describe("backend-first explicit installment recovery through the real proxy and
     const { rows: [invoice] } = await db.query<{ id: number }>(`INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by)
       VALUES ($1, $2, 1000, 0, 'YER', 'synthetic') RETURNING id`, [`RECOVERY-ORDINARY-INV-${Date.now()}`, patient.id]);
     for (const invoiceId of [invoice.id, undefined]) {
-      const response = await authedMutation("/api/payments", h.sessions.reception, "POST",
-        JSON.stringify({ patientId: patient.id, invoiceId, amount: "1000", currency: "YER", method: "cash" }), { "Idempotency-Key": `ordinary-${patient.id}-${invoiceId ?? "account"}` });
+      // Two deliberate equal payments (invoice, then account): the second passes the advisory review explicitly.
+      const response = await confirmingSimilarCollection((extra) => authedMutation("/api/payments", h.sessions.reception, "POST",
+        JSON.stringify({ patientId: patient.id, invoiceId, amount: "1000", currency: "YER", method: "cash" }), { "Idempotency-Key": `ordinary-${patient.id}-${invoiceId ?? "account"}`, ...extra }));
       expect(response.status).toBe(201); expect(await response.json()).toMatchObject({ planId: null });
     }
   });

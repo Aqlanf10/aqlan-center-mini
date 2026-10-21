@@ -10261,11 +10261,6 @@ async function runPaymentTransaction(
         return { kind: "reason", reason: "idempotency_conflict" };
       }
     }
-    // Advisory review under the shift lock and after exact-key replay; a throw rolls back.
-    if (input.kind === "payment") {
-      await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
-        currency: input.currency, review: prepared.similarityReview });
-    }
 
     // No fabricated rate and no invalid base calculation just to reach replay.
     // For a genuinely new settings-owned key keep the original observed raw
@@ -10371,6 +10366,14 @@ async function runPaymentTransaction(
           await tx("ROLLBACK"); return { kind: "reason", reason: "issued_installment_recovery_required" };
         }
       }
+    }
+
+    // Advisory review: the last check before writing — under the shift lock, after exact-key
+    // replay and every refusal above, so a confirmed review is never followed by a refusal.
+    // Without an open shift nothing can be written (no_shift below), so no review is asked.
+    if (input.kind === "payment" && lockedShiftId !== null) {
+      await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+        currency: input.currency, review: prepared.similarityReview });
     }
 
     /* الإدراج محصور في الوردية المقفولة أعلاه — لا اكتشاف ولا قفل لوردية
@@ -10588,9 +10591,6 @@ async function runRecoveryTransaction(
     `SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR SHARE`, [input.patientId]);
   const afterShiftWait = await recoveryReplay(client, input, key, requestHash);
   if (afterShiftWait) return afterShiftWait;
-  // Advisory review under the shift lock and after exact-key replay; a throw rolls back.
-  await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
-    currency: input.currency, review: similarityReview });
   const current = (await readRecoveryDocumentStates(client, input.patientId)).find((state) => state.invoiceId === input.invoiceId);
   if (!current || current.snapshot.invoice.status === "cancelled") return { kind: "reason", reason: "invalid_invoice" };
   if (current.projection.kind === "review_required") return { kind: "reason", reason: "recovery_review_required" };
@@ -10627,7 +10627,9 @@ async function runRecoveryTransaction(
     patientId: input.patientId, invoiceId: target.invoiceId, planId: target.planId, openingCurrency: null,
     kind: "payment", amountMinor: input.amountMinor, currency: input.currency, baseCurrency: CLINIC_BASE_CURRENCY,
     exchangeRate, method: input.method, note: input.note, createdBy: input.createdBy,
-  }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: true, requestHashOverride: requestHash }, client);
+  }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: true, requestHashOverride: requestHash,
+    // Advisory review runs inside the shared payment writer, as its last check before the insert.
+    ...(similarityReview ? { similarityReview } : {}) }, client);
   if (outcome.kind === "reason") return outcome;
   if (outcome.kind === "replay") return await recoveryReplay(client, input, key, requestHash)
     ?? { kind: "reason", reason: "recovery_review_required" };
@@ -20570,9 +20572,6 @@ async function runPlanInstallmentTransaction(
       return { reason: "idempotency_conflict" };
     }
   }
-  // Advisory review under the shift lock and after exact-key replay; a throw rolls the caller back.
-  await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
-    currency: input.currency, review: input.similarityReview });
 
   // Existing invoice locks precede the plan lock. Never discover/acquire another
   // payment lock after shift; new/ambiguous evidence below aborts instead of billing.
@@ -20633,6 +20632,9 @@ async function runPlanInstallmentTransaction(
   } else {
     return { reason: "cross_currency_not_supported" };
   }
+  // Advisory review: last check before writing (shift held, replay and all refusals done); a throw rolls the caller back.
+  await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+    currency: input.currency, review: input.similarityReview });
 
   const description = `${input.planTitle} — قسط ${input.installmentNumber}`;
   const { rows: invoices } = await client.query<{ id: number }>(

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
-import { baseUrl, harness } from "./_server";
+import { baseUrl, confirmingSimilarCollection, harness } from "./_server";
 import { formatMoney } from "../../lib/money";
 
 /**
@@ -475,7 +475,9 @@ describe("رحلة المتصفح: شبّاك ما بعد الزيارة بال�
 /* ══════════════ مساعدات ══════════════ */
 
 async function authedJson(path: string, body: unknown, idempotencyKey?: string): Promise<Response> {
-  return fetch(`${baseUrl}${path}`, {
+  // Currency is this suite's subject; seeded patients are shared across files, so an equal receipt from
+  // another suite may trigger the advisory review. Answer it as the operator would (same request/key).
+  return confirmingSimilarCollection((extra) => fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: {
       Cookie: h.sessions.admin.cookie,
@@ -483,10 +485,11 @@ async function authedJson(path: string, body: unknown, idempotencyKey?: string):
       "Sec-Fetch-Site": "same-origin",
       "Content-Type": "application/json",
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      ...extra,
     },
     body: JSON.stringify(body),
     redirect: "manual",
-  });
+  }));
 }
 
 async function planItemCount(planId: number): Promise<number> {

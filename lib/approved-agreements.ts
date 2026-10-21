@@ -216,8 +216,6 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
     await lockDebtAccountForSchedule(client,a.patient_id);
     const groupedAfterLock=await groupReplay();if(groupedAfterLock)return groupedAfterLock;
     const waited=await replay();if(waited)return {paymentId:waited.id,replayed:true};
-    // Advisory review under the shift lock (lockDebtAccountForSchedule) and after exact-key replay.
-    await assertSimilarCollectionReviewed(client,{patientId:a.patient_id,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
     const position=await readDebtPosition(client,target(a),true);
     if(!position.available||!approvedSourceMatches(position.sourceSnapshot,a.source_snapshot))throw new DebtRepaymentError("stale","تغير مصدر الأصل؛ يلزم مراجعة مالية قبل التحصيل.");
     if(input.currency!==a.currency&&a.currency!==CLINIC_BASE_CURRENCY)fail("حصّل الاتفاق بعملته؛ لا يوجد تحويل مسجل بين هاتين العملتين.");
@@ -257,6 +255,8 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
       if(segments.reduce((n,x)=>n+x.remainingMinor,0)!==current.remainingMinor)
         throw new DebtRepaymentError("conflict","التزام الخطة ومصادر الفواتير غير متطابقة.");
       const created:{invoiceId:number;paymentId:number;amountMinor:number}[]=[];
+      // Advisory review: last check before writing (shift held via lockDebtAccountForSchedule, replay and refusals done).
+      await assertSimilarCollectionReviewed(client,{patientId:a.patient_id,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
       let unallocated=settlement;
       for(const segment of segments){
         const portion=Math.min(unallocated,segment.remainingMinor);
@@ -295,6 +295,8 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
       await assertCollectionSession(client,input.session);
       return {paymentId:paymentIds[0],paymentIds,collection:snapshot,replayed:false};
     }
+    // Advisory review: last check before writing (shift held via lockDebtAccountForSchedule, replay and refusals done).
+    await assertSimilarCollectionReviewed(client,{patientId:a.patient_id,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
     const result=await writeDebtCollectionReceipt(client,{patientId:a.patient_id,invoiceId:a.invoice_id,openingCurrency:a.opening_currency,
       amountMinor:input.amountMinor,currency:input.currency,exchangeRate:rate,method:input.method,note:input.note,createdBy:input.session.username,idempotencyKey:input.idempotencyKey,requestHash:hash});
     if(result.kind==="reason")throw new DebtRepaymentError("stale",`تعذر التحصيل: ${result.reason}`);
