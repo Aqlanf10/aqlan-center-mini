@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { documentEntryName, type ParsedArchive } from "./archive";
+import { documentEntryName, parseTarBytes, type ParsedArchive } from "./archive";
+import { SYNTHETIC_U0_PROFILE, SYNTHETIC_U0_ENTRY, verifySyntheticTrust, recoverySha256, type SyntheticRecoveryTrust } from './u0-synthetic-capture';
+import { validateSyntheticRepresentation, type SyntheticRepresentation } from './u0-synthetic-validation';
 import { resolveInsideBase, validateDestinationBatch, validateRelativePath } from "../safe-path";
 
 /**
@@ -22,6 +24,9 @@ export interface ManifestDocument {
 }
 
 export interface BackupManifest {
+  recoveryProfile?: typeof SYNTHETIC_U0_PROFILE;
+  recoverySha256?: string;
+  recoveryBytes?: number;
   format: string;
   version: number;
   createdAt: string;
@@ -39,6 +44,8 @@ export interface ValidatedDocument {
 }
 
 export interface ValidationOk {
+  /** Present only after in-process fixture trust and same-byte verification. Never ready for cutover. */
+  syntheticRecovery?: SyntheticRepresentation;
   ok: true;
   manifest: BackupManifest;
   sql: Uint8Array;
@@ -54,7 +61,7 @@ function sha256Hex(data: Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
-export function parseManifest(raw: unknown): { manifest: BackupManifest } | { errors: string[] } {
+export function parseManifest(raw: unknown, syntheticProfile?: typeof SYNTHETIC_U0_PROFILE): { manifest: BackupManifest } | { errors: string[] } {
   const errors: string[] = [];
   if (typeof raw !== "object" || raw === null) {
     return { errors: ["manifest ليس كائن JSON سليمًا"] };
@@ -63,7 +70,11 @@ export function parseManifest(raw: unknown): { manifest: BackupManifest } | { er
   if (manifest.format !== "aqlan-full-backup") {
     errors.push(`صيغة الأرشيف غير معروفة: ${String(manifest.format)}`);
   }
-  if (manifest.version !== 1) {
+  if (syntheticProfile) {
+    if (manifest.version !== 2 || manifest.recoveryProfile !== SYNTHETIC_U0_PROFILE
+      || typeof manifest.recoverySha256 !== 'string' || !/^[a-f0-9]{64}$/.test(manifest.recoverySha256)
+      || typeof manifest.recoveryBytes !== 'number' || !Number.isSafeInteger(manifest.recoveryBytes) || manifest.recoveryBytes <= 0) errors.push('Invalid synthetic recovery manifest');
+  } else if (manifest.version !== 1 || manifest.recoveryProfile !== undefined || manifest.recoverySha256 !== undefined || manifest.recoveryBytes !== undefined) {
     errors.push(`إصدار الأرشيف غير مدعوم: ${String(manifest.version)}`);
   }
   if (typeof manifest.databaseSha256 !== "string" || !/^[0-9a-f]{64}$/.test(manifest.databaseSha256)) {
@@ -128,9 +139,20 @@ export function parseManifest(raw: unknown): { manifest: BackupManifest } | { er
  */
 export function validateBackupArchive(
   archive: ParsedArchive,
-  options: { documentsDir: string } = { documentsDir: "/documents" },
+  options: { documentsDir: string; syntheticRecoveryTrust?: SyntheticRecoveryTrust } = { documentsDir: "/documents" },
 ): ValidationResult {
   const errors: string[] = [];
+  let trusted: ReturnType<typeof verifySyntheticTrust> | undefined;
+  if (options.syntheticRecoveryTrust) {
+    try {
+      if (!archive.capturedBytes) throw new Error('Original archive bytes required');
+      const captured = Buffer.from(archive.capturedBytes);
+      trusted = verifySyntheticTrust(captured, options.syntheticRecoveryTrust);
+      archive = parseTarBytes(captured); // consume exactly the independently verified bytes, never caller-mutated entry maps
+    } catch (error) { return { ok: false, errors: [error instanceof Error ? error.message : 'Synthetic trust failure'] }; }
+  } else if (archive.entries.has(SYNTHETIC_U0_ENTRY)) {
+    return { ok: false, errors: ['Synthetic recovery requires out-of-band fixture trust'] };
+  }
 
   // ١) البتر
   if (archive.truncated) {
@@ -154,7 +176,7 @@ export function validateBackupArchive(
   // ٣) المفتاح
   let manifest: BackupManifest;
   try {
-    const parsed = parseManifest(JSON.parse(Buffer.from(manifestEntry!.data).toString("utf8")));
+    const parsed = parseManifest(JSON.parse(Buffer.from(manifestEntry!.data).toString("utf8")), trusted ? SYNTHETIC_U0_PROFILE : undefined);
     if ("errors" in parsed) return { ok: false, errors: parsed.errors };
     manifest = parsed.manifest;
   } catch {
@@ -212,6 +234,21 @@ export function validateBackupArchive(
     errors.push(`وجهات مكررة أو غير آمنة في دفعة المستندات: ${batch.reason}`);
   }
 
+  let syntheticRecovery: SyntheticRepresentation | undefined;
+  if (trusted) {
+    try {
+      const entry = archive.entries.get(SYNTHETIC_U0_ENTRY);
+      if (!entry || entry.data.length !== manifest.recoveryBytes || recoverySha256(entry.data) !== manifest.recoverySha256
+        || recoverySha256(entry.data) !== trusted.envelopeSha256) throw new Error('Synthetic recovery entry mismatch');
+      const allowed = new Set(['database.sql', 'manifest.json', SYNTHETIC_U0_ENTRY, ...documents.map(doc => documentEntryName(doc.manifest.storageKey))]);
+      if ([...archive.entries.keys()].some(name => !allowed.has(name))) throw new Error('Unknown synthetic archive entry');
+      syntheticRecovery = validateSyntheticRepresentation(sql, JSON.parse(Buffer.from(entry.data).toString('utf8')));
+      const envelope = syntheticRecovery.envelope;
+      if (JSON.stringify(envelope.source) !== JSON.stringify(trusted.source) || envelope.captureId !== trusted.captureId
+        || envelope.schemaManifest !== trusted.schema || envelope.ownershipManifest !== trusted.ownership
+        || JSON.stringify(envelope.sequences) !== JSON.stringify(trusted.sequences)) throw new Error('Synthetic source/profile evidence mismatch');
+    } catch (error) { errors.push(error instanceof Error ? error.message : 'Synthetic recovery validation failure'); }
+  }
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, manifest, sql, sqlSha256, documents };
+  return { ok: true, manifest, sql, sqlSha256, documents, ...(syntheticRecovery ? { syntheticRecovery } : {}) };
 }
