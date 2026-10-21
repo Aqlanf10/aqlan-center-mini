@@ -576,7 +576,22 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
     await mkdir(directory, {recursive:true});
     const path = `${directory}/${label}.pdf`;
     await writeFile(path, await print.page.pdf({preferCSSPageSize:true,printBackground:true}));
-    expect(execFileSync("pdfinfo", [path], {encoding:"utf8"})).toMatch(/Pages:\s+[1-9]/);
+    expect(execFileSync("pdfinfo", [path], {encoding:"utf8"})).toMatch(/Pages:\\s+[1-9]/);
+    if(label==="same-day-decisions") {
+      // This is a fresh raster of the EXACT, unmodified PDF being asserted below,
+      // not a browser screenshot or an OCR re-render. The printed text expectation
+      // remains strictly unchanged. A reviewer must inspect this raster if
+      // Poppler's Arabic text extraction and the visible glyphs disagree.
+      execFileSync("pdftoppm",["-f","1","-l","1","-r","200","-png","-singlefile",
+        path,`${directory}/same-day-decisions-raster`],{maxBuffer:1024*1024});
+      const raw = execFileSync("pdftotext",["-raw",path,"-"],{encoding:"utf8"});
+      const exact=VISIT_SOURCE_SUMMARY.no_new_charge;
+      console.info("Bounded original PDF raw text inspection:",JSON.stringify({
+        exactPhraseInRaw:raw.includes(exact),
+        reversedPhraseInRaw:raw.includes("قرار بال رسوم مثبت للعمل المسجل"),
+        rasterOfOriginalPdf:"same-day-decisions-raster.png",
+      }));
+    }
     const noChargeRow=report.result.rows.findIndex(row=>row.workSource===VISIT_SOURCE_SUMMARY.no_new_charge);
     const ocrDiagnostic=label==="same-day-decisions" ? await diagnoseVisitSourcePdfOcr(print.page,browser,directory,noChargeRow,report.result.rows.length) : null;
     if(ocrDiagnostic) console.info("Bounded fresh PDF OCR diagnostic:",JSON.stringify(ocrDiagnostic));
