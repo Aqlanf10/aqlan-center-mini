@@ -25,7 +25,7 @@ jobs:
       github.repository == 'Aqlanf10/aqlan-center-mini' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'review/visit-source-acceptance-hosted' &&
-      github.event.pull_request.base.sha == '1948be2b56cddc7e14b34e1677fcb5dae6bb0635'
+      github.event.pull_request.base.sha == '08642371fb137185c4becf9e09089b68fcc54ce6'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -48,11 +48,41 @@ jobs:
       SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
       CLINIC_TIME_ZONE: Asia/Aden
     steps:
-      - name: Check out the acceptance PR head
+      # Build the actual final product commit, NOT the historical acceptance head.
+      # The supplemental test and its diagnostic helper are the ONLY files taken
+      # from #386. Both checkouts are isolated and use read-only credentials.
+      - name: Check out exact final product commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Check out supplemental acceptance probes separately
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          path: visit-acceptance-probes
           persist-credentials: false
+      - name: Verify product SHA and overlay test-only probes
+        env:
+          FINAL_APP_SHA: '08642371fb137185c4becf9e09089b68fcc54ce6'
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          test "$EVENT_BASE_SHA" = "$FINAL_APP_SHA"
+          test "$(git rev-parse HEAD)" = "$FINAL_APP_SHA"
+          cp visit-acceptance-probes/__tests__/security-http/invoice-clinic-continuity-journey.test.ts __tests__/security-http/invoice-clinic-continuity-journey.test.ts
+          cp visit-acceptance-probes/__tests__/helpers/visit-source-pdf-ocr.ts __tests__/helpers/visit-source-pdf-ocr.ts
+          rm -rf visit-acceptance-probes
+          test "$(git rev-parse HEAD)" = "$FINAL_APP_SHA"
+          # Only two acceptance probe paths may differ from the product commit.
+          python3 - <<'PY'
+          import subprocess
+          permitted={'__tests__/security-http/invoice-clinic-continuity-journey.test.ts','__tests__/helpers/visit-source-pdf-ocr.ts'}
+          names=set(subprocess.check_output(['git','status','--porcelain','--untracked-files=all'],text=True).splitlines())
+          changed={line[3:] for line in names}
+          if not changed or changed-permitted:
+              raise SystemExit(f'Unexpected acceptance overlay paths: {sorted(changed)}')
+          print('Accepted only test-only overlays:', sorted(changed))
+          PY
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
