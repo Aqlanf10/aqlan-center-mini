@@ -1,0 +1,1 @@
+scripts/generate-purchase-readiness.ts(4,44): error TS2307: Cannot find module '../__tests__/postgres/_safe-target' or its corresponding type declarations.

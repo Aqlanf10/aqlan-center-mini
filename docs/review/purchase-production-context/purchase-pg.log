@@ -1,0 +1,8 @@
+RUN  v4.1.11 /workspace/purchase-production-context
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  05:31:58
+   Duration  1.82s (transform 226ms, setup 0ms, import 373ms, tests 752ms, environment 0ms)
