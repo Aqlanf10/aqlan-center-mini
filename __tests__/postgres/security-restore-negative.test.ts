@@ -8,7 +8,7 @@ import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { fullBackupBlocks } from '../../lib/fullBackup';
 import { stagedRestore } from '../../lib/restore/staging';
-import { parseTarBytes } from '../../lib/restore/archive';
+import { parseTarBytes, documentEntryName } from '../../lib/restore/archive';
 import { storageKeyOf } from '../helpers/backup-blocks';
 import { tarGzBytes } from '../helpers/backup-tar';
 
@@ -110,7 +110,7 @@ it('PG18 partial staging-directory failure leaves isolated target unqualified; n
   const archived = parseTarBytes(gunzipSync(await readFile(validArchive)));
   const names = archived.order.filter((name) => name.startsWith('documents/'));
   expect(names).toHaveLength(2);
-  expect(archived.entries.has('documents/' + storageKey.replaceAll('/', '_')) || names[0].includes(storageKey.slice(6))).toBe(true);
+  expect(names).toEqual([documentEntryName(storageKey), documentEntryName(secondStorageKey)]);
   // SQL commits first, then the first attachment writes; the second write fails.
   await expect(stagedRestore({
     archivePath: validArchive,
