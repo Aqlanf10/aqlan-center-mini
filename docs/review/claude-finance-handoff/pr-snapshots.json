@@ -1,0 +1,123 @@
+{
+  "snapshot_utc": "2026-10-21T22:21:00Z",
+  "note": "Connector snapshots, not CI or release approvals. base_sha may reflect the PR's recorded base rather than current main; fetch main independently.",
+  "pull_requests": [
+    {
+      "number": 383,
+      "title": "fix: verify explicit visit financial sources in reports and clinical reader",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/383",
+      "state": "open",
+      "draft": true,
+      "head": "fix/visit-source-context",
+      "head_sha": "95367f465a60bbc68310df6ef138c2f8bfe1bfac",
+      "base": "main",
+      "base_sha": "f2b5eef97047994438729fe8a2da72e214cdf881",
+      "mergeable": false,
+      "merged": false
+    },
+    {
+      "number": 386,
+      "title": "test: supplemental hosted visit source acceptance",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/386",
+      "state": "open",
+      "draft": true,
+      "head": "review/visit-source-acceptance-hosted",
+      "head_sha": "b84ed1ad3049b95cc3b027082d9aeb0afbf9e61d",
+      "base": "fix/visit-source-context",
+      "base_sha": "1948be2b56cddc7e14b34e1677fcb5dae6bb0635",
+      "mergeable": true,
+      "merged": false
+    },
+    {
+      "number": 388,
+      "title": "fix: require idempotency keys for HTTP collections",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/388",
+      "state": "open",
+      "draft": true,
+      "head": "fix/require-collection-idempotency",
+      "head_sha": "877eb5f5323b890b46b594baba12759447b8db82",
+      "base": "main",
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    },
+    {
+      "number": 389,
+      "title": "fix(finance): clarify correction refusals and historical balances",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/389",
+      "state": "open",
+      "draft": true,
+      "head": "fix/finance-correction-clarity-native",
+      "head_sha": "48a48d7a39ccbea648e337d1dc93ff8c18d30956",
+      "base": "main",
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    },
+    {
+      "number": 390,
+      "title": "Draft(finance): dated treatment agreement upgrade, split settlement and verified stale recovery",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/390",
+      "state": "open",
+      "draft": true,
+      "head": "feat/agreement-delta-amendment-20261021",
+      "head_sha": "ff75e23c374954c69848eefcf5886888878e3ab2",
+      "base": "main",
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    },
+    {
+      "number": 391,
+      "title": "test: hosted browser acceptance for correction explanations (#389)",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/391",
+      "state": "open",
+      "draft": true,
+      "head": "test/correction-explanation-browser-acceptance",
+      "head_sha": "9383574c5fa0e2c39443764b8c484f7e5328245a",
+      "base": "main",
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    },
+    {
+      "number": 392,
+      "title": "WIP(finance): six-direction pristine unpaid correction candidate — activation blocked",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/392",
+      "state": "open",
+      "draft": true,
+      "head": "feat/unpaid-currency-connected-candidate",
+      "head_sha": "f2c9c98c2ac8c7a6f3fd3fdf89bc8c7afcc37dc1",
+      "base": "main",
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    },
+    {
+      "number": 394,
+      "title": "fix(deps): patch Vitest mocker advisories without tooling churn",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/394",
+      "state": "open",
+      "draft": true,
+      "head": "fix/vitest-mocker-security-4.1.12",
+      "head_sha": "cb8a9e4060c6682a7ff2da8e921e7a7a5b2084dc",
+      "base": "main",
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    },
+    {
+      "number": 395,
+      "title": "fix(schema): bind index metadata to owning constraints",
+      "url": "https://github.com/Aqlanf10/aqlan-center-mini/pull/395",
+      "state": "open",
+      "draft": true,
+      "head": "fix/schema-index-owning-constraints",
+      "head_sha": "414501aad810679efef0b844340db5d2b85faf3e",
+      "base": "main",
+      "base_sha": "2667b71f815ee14781cdac6b37ebad3b4f8e246d",
+      "mergeable": true,
+      "merged": false
+    }
+  ]
+}

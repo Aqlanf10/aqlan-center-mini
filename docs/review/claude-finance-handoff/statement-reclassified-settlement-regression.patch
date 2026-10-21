@@ -1,0 +1,96 @@
+diff --git a/__tests__/patient-statement-reclassified-settlement.test.tsx b/__tests__/patient-statement-reclassified-settlement.test.tsx
+new file mode 100644
+index 0000000..897c9b8
+--- /dev/null
++++ b/__tests__/patient-statement-reclassified-settlement.test.tsx
+@@ -0,0 +1,90 @@
++import { createElement } from "react";
++import { renderToStaticMarkup } from "react-dom/server";
++import { describe, expect, it, vi } from "vitest";
++
++const mocks = vi.hoisted(() => ({ ledger: vi.fn() }));
++vi.mock("@/lib/session", () => ({ requireSession: async () => ({ role: "admin", username: "synthetic" }) }));
++vi.mock("@/lib/db", async (original) => ({ ...await original<typeof import("../lib/db")>(),
++  getPatient: async () => ({ id: 10, fullName: "Synthetic reclassification patient", patientNumber: "SYN-RECLASS" }),
++  patientLedger: mocks.ledger, getSettingsSafe: async () => ({}),
++  patientPlanCurrencies: async () => new Map(), listPatientPlans: async () => [],
++}));
++vi.mock("@/components/PrintHeader", () => ({
++  PrintHeader: () => createElement("h1", null, "Synthetic statement"), PrintFooter: () => null,
++}));
++vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
++
++import StatementPage from "../app/print/statement/[id]/page";
++import { ledgerBalancesByCurrency, type Invoice, type Payment } from "../lib/db";
++import { CURRENCIES, formatMoney, type Currency } from "../lib/money";
++import { projectTreatmentFinancialReferences } from "../lib/treatment-financial-context";
++import { historicalSnapshot } from "./treatment-financial-historical-fixture";
++
++const date = "2026-09-03T10:00:00Z";
++function invoice(id: number, baseCurrency: Currency, totalMinor: number, discountMinor = 0): Invoice {
++  return { id, patientId: 10, patientName: "Synthetic reclassification patient", invoiceNumber: `SYN-RECLASS-INV-${id}`,
++    status: id === 1 ? "cancelled" : "open", totalMinor, discountMinor, baseCurrency, note: null, createdAt: date,
++    items: [{ id, serviceId: 900, doctorId: null, description: `SYN-RECLASS-TREATMENT-${id}`,
++      quantity: 1, unitPriceMinor: totalMinor, totalMinor }] };
++}
++function payment(id: number, amountMinor: number, kind: "payment" | "refund"): Payment {
++  const baseAmountMinor = amountMinor * 410 / 100;
++  return { id, patientId: 10, patientName: "Synthetic reclassification patient", receiptNumber: `SYN-RECLASS-REC-${id}`,
++    invoiceId: 1, planId: null, openingCurrency: null, shiftId: 1, kind, reversalOfId: kind === "refund" ? 1 : null,
++    currency: "SAR", amountMinor, baseAmountMinor, baseCurrency: "YER", exchangeRate: 410,
++    method: "cash", note: null, createdBy: "synthetic", createdAt: date,
++    settlementAllocation: { paymentId: id, sourceInvoiceId: 1, targetInvoiceId: 2,
++      sourceCurrency: "YER", targetCurrency: "SAR", sourceMinor: baseAmountMinor, targetMinor: amountMinor, documentId: 50 } };
++}
++function summaryValues(html: string, label: string) {
++  return [...html.matchAll(new RegExp(`<span>${label}</span><span class="num">([^<]+)</span>`, "g"))]
++    .map((match) => match[1]);
++}
++
++describe("verified non-cash reclassification across current statement and treatment account", () => {
++  it("moves settlement and partial reversal to SAR once, preserving cash and unrelated YER/USD positions", async () => {
++    // Verified allocation input represents the production loader's persisted proof, not a new cash receipt.
++    const ledger = {
++      invoices: [invoice(1, "YER", 1025000), invoice(2, "SAR", 270000, 20000), invoice(3, "USD", 9000)],
++      payments: [payment(1, 70000, "payment"), payment(2, 10000, "refund")],
++      openings: [{ patientId: 10, patientName: "Synthetic reclassification patient", phone: null, currency: "YER" as const,
++        amountMinor: 450000, asOfDate: "2026-09-01", note: null, createdBy: "synthetic", updatedAt: date }],
++    };
++    const snapshot = historicalSnapshot();
++    snapshot.invoices = ledger.invoices.map(row => ({ id: row.id, patientId: row.patientId, planId: null,
++      invoiceNumber: row.invoiceNumber, currency: row.baseCurrency, totalMinor: row.totalMinor,
++      discountMinor: row.discountMinor, status: row.status }));
++    snapshot.receipts = ledger.payments.map(row => ({ ...row, reversalOfId: row.reversalOfId ?? null }));
++    const before = structuredClone({ ledger, snapshot });
++    const balances = ledgerBalancesByCurrency(10, ledger, new Map());
++    const account = projectTreatmentFinancialReferences(snapshot);
++    expect(account.accountPositions).toEqual(balances);
++    expect(balances.YER).toMatchObject({ billedMinor: 0, openingMinor: 450000, collectedMinor: 0, dueMinor: 450000 });
++    expect(balances.SAR).toMatchObject({ billedMinor: 250000, openingMinor: 0, collectedMinor: 60000, dueMinor: 190000 });
++    expect(balances.USD).toMatchObject({ billedMinor: 9000, openingMinor: 0, collectedMinor: 0, dueMinor: 9000 });
++    expect(account.documents.find(row => row.invoiceId === 1)).toMatchObject({ status: "cancelled", netMinor: 0,
++      settlements: [
++        { receiptId: 1, originalCurrency: "SAR", originalAmountMinor: 70000, settlementCurrency: "SAR", settlementMinor: 70000 },
++        { receiptId: 2, reversalOfId: 1, originalCurrency: "SAR", originalAmountMinor: 10000, settlementCurrency: "SAR", settlementMinor: 10000 },
++      ] });
++    mocks.ledger.mockResolvedValue(ledger);
++    // Server-function rendering only: no claim of database, browser or authorization integration coverage.
++    const html = renderToStaticMarkup(await StatementPage({ params: Promise.resolve({ id: "10" }) }));
++    expect(summaryValues(html, "إجمالي المفوتر")).toEqual(CURRENCIES.map(key => formatMoney(balances[key].billedMinor, key)));
++    expect(summaryValues(html, "صافي المحصّل بعد الاستردادات وعكس السندات"))
++      .toEqual(CURRENCIES.map(key => formatMoney(balances[key].collectedMinor, key)));
++    expect(summaryValues(html, "الرصيد الحالي")).toEqual(CURRENCIES.map(key => `على المريض ${formatMoney(balances[key].dueMinor, key)}`));
++    expect(html).not.toContain("SYN-RECLASS-INV-1");
++    expect(html).not.toContain("SYN-RECLASS-TREATMENT-1");
++    expect(html).toContain("SYN-RECLASS-TREATMENT-2");
++    expect(html).toContain(`الخصم المسجل</td><td class="num">${formatMoney(20000, "SAR")}`);
++    expect(html).toContain("عكس سند SYN-RECLASS-REC-1");
++    for (const receipt of ledger.payments) {
++      expect(html.match(new RegExp(`<td dir="ltr">${receipt.receiptNumber}</td>`, "g"))).toHaveLength(1);
++      expect(html).toContain(`تسوية مصححة ${formatMoney(receipt.amountMinor, "SAR")}، دون نقد جديد`);
++      expect(html).toContain(formatMoney(receipt.baseAmountMinor, "YER"));
++    }
++    expect(account.historicalDocuments[0].remainingAtRevisionMinor).toBe(450000);
++    expect({ ledger, snapshot }).toEqual(before);
++  });
++});
