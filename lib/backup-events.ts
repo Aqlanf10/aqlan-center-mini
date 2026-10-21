@@ -68,7 +68,10 @@ function named(value: unknown): value is string { return typeof value === 'strin
  * Returned indexes bind links to exact unique source and referenced INSERTs.
  */
 export function validateBackupDeferredReferences(events: readonly BackupSnapshotEvent[]): ValidatedBackupDeferredReference[] {
-  if (!Array.isArray(events)) fail('event list');
+  // Check the runtime boundary without narrowing the typed readonly union
+  // to Array.isArray's any[] predicate and losing discriminated event types.
+  const input: unknown = events;
+  if (!Array.isArray(input)) fail('event list');
   let phase: 'header' | 'inserts' | 'links' | 'resets' | 'closed' = 'header';
   let lastReferenceKind = -1;
   const rows = new Map<string, { event: BackupInsertEvent; index: number }>();
