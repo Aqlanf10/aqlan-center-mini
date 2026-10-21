@@ -1,3 +1,4 @@
+import { UNVERIFIED_VISIT_INVOICE_LABEL } from "./visit-financial-presentation";
 import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
@@ -232,6 +233,8 @@ export interface ReportVisit {
   chair: number | null;
   /** أول زيارة مسجّلة لهذا المريض (مراجعٌ جديد). */
   firstVisit: boolean;
+  /** Recorded clinical work, independent of invoicing or payment. */
+  procedures?: { serviceId: number; description: string; category: string | null }[];
 }
 
 /**
@@ -1140,12 +1143,17 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
     phone: string | null; date: string; arrived_at: Date; called_at: Date | null; seated_at: Date | null;
     finished_at: Date | null; status: string; doctor_id: number | null; invoice_id: number | null;
     appointment_id: number | null; chair: number | null; first_visit: boolean;
+    procedures: NonNullable<ReportVisit["procedures"]>;
   }>(
     `SELECT v.id, v.patient_id, COALESCE(p.full_name, v.patient_name) AS patient_name,
             p.patient_number, COALESCE(p.phone, v.patient_phone) AS phone,
             (v.arrived_at AT TIME ZONE $1)::date::text AS date,
             v.arrived_at, v.called_at, v.seated_at, v.finished_at, v.status, v.doctor_id,
-            v.invoice_id, v.appointment_id, v.chair,
+            direct_invoice.id AS invoice_id, v.appointment_id, v.chair,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object(
+              'serviceId', vp.service_id, 'description', s.name, 'category', s.category) ORDER BY vp.id)
+              FROM visit_procedures vp JOIN services s ON s.id = vp.service_id
+              WHERE vp.visit_id = v.id), '[]'::jsonb) AS procedures,
             (v.patient_id IS NOT NULL AND NOT EXISTS (
                SELECT 1 FROM visits earlier
                 WHERE earlier.patient_id = v.patient_id
@@ -1153,6 +1161,8 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
             )) AS first_visit
        FROM visits v
        LEFT JOIN patients p ON p.id = v.patient_id
+       LEFT JOIN invoices direct_invoice ON direct_invoice.id = v.invoice_id
+         AND direct_invoice.patient_id = v.patient_id AND direct_invoice.status <> 'cancelled'
       WHERE (v.arrived_at AT TIME ZONE $1)::date <= $2::date
         AND ($3::int IS NULL OR v.patient_id = $3::int)
       ORDER BY v.arrived_at, v.id`,
@@ -1175,6 +1185,7 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
     appointmentId: row.appointment_id,
     chair: row.chair,
     firstVisit: row.first_visit,
+    procedures: row.procedures,
   }));
 }
 
@@ -1323,7 +1334,7 @@ function patientHasDoctor(m: PatientMovement, doctorId: number): boolean {
 /**
  * (تقارير R1) زيارات السجل داخل مدى وفلاتر التقرير. الطبيب بطبيب الزيارة نفسها لا
  * بعلاقة المريض التاريخية؛ والتخصص وحالة المريض بفلاتر المريض كما في بقية التقارير؛
- * والخدمة ببنود فاتورة الزيارة.
+ * والخدمة بإجراءات الزيارة المسجلة، أو بنود فاتورتها عند غيابها.
  */
 function visitsInRange(ctx: ReportContext, from: string, to: string): ReportVisit[] {
   const { filters } = ctx;
@@ -1338,7 +1349,8 @@ function visitsInRange(ctx: ReportContext, from: string, to: string): ReportVisi
     if (filters.specialty && patient && !patientHasSpecialty(patient, filters.specialty)) return false;
     if (filters.serviceId) {
       const invoice = visit.invoiceId !== null ? invoiceById.get(visit.invoiceId) : undefined;
-      if (!invoice || !invoice.lines.some((line) => line.serviceId === filters.serviceId)) return false;
+      const work = visit.procedures?.length ? visit.procedures : invoice?.lines ?? [];
+      if (!work.some((line) => line.serviceId === filters.serviceId)) return false;
     }
     return true;
   });
@@ -3182,7 +3194,8 @@ function visitsReport(ctx: ReportContext): ReportResult {
         : paid >= invoice.netMinor ? "مسدَّدة"
           : paid > 0 ? `جزئي (${formatMoney(paid, invoice.currency)})` : "غير محصّلة";
     }
-    const categories = invoice ? [...new Set(invoice.lines.map((line) => line.category).filter(Boolean))] as string[] : [];
+    const work = visit.procedures?.length ? visit.procedures : invoice?.lines ?? [];
+    const categories = [...new Set(work.map((line) => line.category).filter(Boolean))] as string[];
 
     rows.push({
       patientId: visit.patientId,
@@ -3201,8 +3214,8 @@ function visitsReport(ctx: ReportContext): ReportResult {
       waitMinutes: waitMinutes ?? "—",
       sessionMinutes: sessionMinutes ?? "—",
       statusLabel: VISIT_STATUS_LABEL[visit.status] ?? visit.status,
-      services: invoice && invoice.lines.length ? invoice.lines.map((line) => line.description).join("، ") : "—",
-      invoiceText: invoice ? formatMoney(invoice.netMinor, invoice.currency) : "بلا فاتورة",
+      services: work.length ? work.map((line) => line.description).join("، ") : "—",
+      invoiceText: invoice ? formatMoney(invoice.netMinor, invoice.currency) : UNVERIFIED_VISIT_INVOICE_LABEL,
       collection,
     });
   }
@@ -3220,8 +3233,8 @@ function visitsReport(ctx: ReportContext): ReportResult {
       countKpi("visitedPatients", "المرضى المراجعون", new Set(visits.map((visit) => visit.patientId ?? -visit.id)).size),
       countKpi("firstVisits", "مراجعون جدد", firstVisits, "good"),
       countKpi("completed", "زيارات منتهية", completed),
-      countKpi("invoiced", "زيارات مفوترة", invoiced),
-      countKpi("notInvoiced", "زيارات بلا فاتورة", visits.length - invoiced, visits.length - invoiced > 0 ? "warn" : "calm"),
+      countKpi("invoiced", "زيارات بفاتورة مباشرة", invoiced),
+      countKpi("notInvoiced", "زيارات دون فاتورة مباشرة مثبتة", visits.length - invoiced, visits.length - invoiced > 0 ? "warn" : "calm"),
       { key: "avgWait", label: "متوسط الانتظار (دقيقة)", text: waitCount ? String(Math.round(waitTotal / waitCount)) : "—" },
       { key: "avgSession", label: "متوسط الجلسة (دقيقة)", text: sessionCount ? String(Math.round(sessionTotal / sessionCount)) : "—" },
     ],
@@ -3249,7 +3262,9 @@ function visitsReport(ctx: ReportContext): ReportResult {
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
       "الطبيب طبيب الزيارة نفسها؛ و«مراجع جديد» أول زيارةٍ مسجّلة للمريض في السجل كله.",
-      "التحصيل: ما سُدّد من فاتورة الزيارة بعملتها.",
+      "الخدمات من إجراءات الزيارة المسجلة؛ عند غيابها تُعرض بنود الفاتورة المباشرة إن وجدت.",
+      "غياب فاتورة مباشرة لا يثبت دينًا أو مجانية أو تغطية باتفاق سابق؛ يلزم التحقق من المصدر المالي للعمل.",
+      "التحصيل: ما سُدّد من فاتورة الزيارة المباشرة بعملتها، وليس حالة سداد تغطية سابقة.",
     ],
   };
 }

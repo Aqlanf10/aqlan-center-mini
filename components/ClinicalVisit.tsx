@@ -1,5 +1,7 @@
 "use client";
 
+import { UNVERIFIED_VISIT_INVOICE_LABEL } from "@/lib/visit-financial-presentation";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
@@ -1249,7 +1251,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           {signed ? (
             <p className="text-[11px] font-semibold text-slate-500">
               وقّعها {visit.signedBy} · {visit.signedAt?.slice(0, 10)}
-              {visit.invoiceId ? ` · فاتورة #${visit.invoiceId}` : " · بلا فاتورة (كشف)"}
+              {visit.invoiceId ? ` · فاتورة #${visit.invoiceId}` : ` · ${UNVERIFIED_VISIT_INVOICE_LABEL}`}
             </p>
           ) : null}
         </div>

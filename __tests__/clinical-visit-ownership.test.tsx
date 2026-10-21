@@ -678,3 +678,11 @@ it("invalidates an in-flight read when a sign response has an unknown outcome", 
   expect(contents(render())).toContain("تعذّر تأكيد نتيجة التوقيع");
   expect(onSigned).not.toHaveBeenCalled();
 });
+
+it("does not describe a signed visit without a direct invoice as a consultation", async () => {
+  stored.set(91001, { ...stored.get(91001), status: "signed", signedAt: "2025-05-02T10:00:00Z", invoiceId: null });
+  await mount();
+  expect(contents(render())).not.toContain("بلا فاتورة (كشف)");
+  expect(contents(render())).toContain("لا فاتورة مباشرة مثبتة");
+  expect(nodes().some(node => String(node.props.href ?? "").startsWith("/print/invoice/"))).toBe(false);
+});
