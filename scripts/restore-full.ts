@@ -15,6 +15,7 @@
  *     npm run restore:full -- النسخة.tar.gz
  */
 import path from "node:path";
+import { validatedRestoreFullTarget } from "./security/restore-full-target-guard.mjs";
 
 async function main(): Promise<number> {
   const archivePath = process.argv[2];
@@ -31,12 +32,22 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  // Determine the *effective* connection target before reading archive or TLS
+  // files. The original URI must never reach the PostgreSQL client.
+  let checkedTarget: ReturnType<typeof validatedRestoreFullTarget>;
+  try {
+    checkedTarget = validatedRestoreFullTarget(targetUrl, process.env);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "RESTORE_FULL_UNSAFE_TARGET");
+    return 2;
+  }
+
   /* (P1-FIX-8) بوابة بنيوية قبل أي اتصال أو لمس: الاستعادة الكاملة
      تُرفض لproduction وunknown-remote مهما كانت بيئة جهاز التشغيل —
      التصنيف على الهدف (DATABASE_ENVIRONMENT الصريح أولًا). في P1 لا
      علم يتجاوزها. */
   const { classifyDbTarget } = await import("../lib/db-target");
-  const target = classifyDbTarget(targetUrl, process.env);
+  const target = classifyDbTarget(checkedTarget.connectionString, process.env);
   if (!target.allowsRestoreFull) {
     console.error(
       `رفض بنيوي: هدف الاستعادة مصنَّف «${target.environment}» — restore-full إلى الإنتاج أو إلى هدف بعيد غير مصنَّف ممنوع في P1.`,
@@ -48,7 +59,7 @@ async function main(): Promise<number> {
   const { stagedRestore } = await import("../lib/restore/staging");
   const result = await stagedRestore({
     archivePath,
-    targetUrl,
+    targetUrl: checkedTarget.connectionString,
     stagingDir,
     allowNonEmptyTarget: allowNonEmpty,
   });
