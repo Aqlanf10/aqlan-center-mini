@@ -9,6 +9,7 @@ import {
   LAB_IMPRESSION_LABEL,
   LAB_PRIORITY_LABEL,
   LAB_TOOTH_ROLE_META,
+  PRIMARY_FDI_TEETH,
   toLabDispatchExternal,
   labDispatchQrPayload,
 } from "@/lib/lab";
@@ -64,6 +65,12 @@ export default async function LabOrderPrintPage({
 
   const upperTeeth = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
   const lowerTeeth = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
+
+  const primaryArches = [
+    { label: "الأسنان اللبنية — الفك العلوي", teeth: [...PRIMARY_FDI_TEETH.upperRight, ...PRIMARY_FDI_TEETH.upperLeft] },
+    { label: "الأسنان اللبنية — الفك السفلي", teeth: [...PRIMARY_FDI_TEETH.lowerRight, ...PRIMARY_FDI_TEETH.lowerLeft] },
+  ];
+  const hasPrimaryTeeth = primaryArches.some((arch) => arch.teeth.some((code) => selectedTeethCodes.includes(code)));
 
   return (
     <>
@@ -320,6 +327,32 @@ export default async function LabOrderPrintPage({
               );
             })}
           </div>
+          {hasPrimaryTeeth && primaryArches.map((arch) => (
+            <section key={arch.label} aria-label={arch.label} style={{ marginTop: "2mm", breakInside: "avoid" }}>
+              <div style={{ textAlign: "center", fontSize: "8pt", color: "#475569", marginBottom: "1mm" }}>{arch.label}</div>
+              <div dir="ltr" style={{ display: "flex", justifyContent: "center", gap: "1mm" }}>
+                {arch.teeth.map((tooth) => {
+                  const isSelected = selectedTeethCodes.includes(tooth);
+                  return (
+                    <div
+                      key={tooth}
+                      data-primary-tooth={tooth}
+                      data-selected={isSelected}
+                      style={{
+                        width: "20px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "7.5pt", fontWeight: isSelected ? "900" : "500",
+                        backgroundColor: isSelected ? "#0284c7" : "#ffffff",
+                        color: isSelected ? "#ffffff" : "#64748b",
+                        border: isSelected ? "1.5px solid #0369a1" : "1px solid #cbd5e1", borderRadius: "3px",
+                      }}
+                    >
+                      {tooth}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </div>
 
         {/* توقيعات الطبيب ومندوب المعمل */}
