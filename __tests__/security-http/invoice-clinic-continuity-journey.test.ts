@@ -6,6 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { UNVERIFIED_VISIT_INVOICE_LABEL } from "../../lib/visit-financial-presentation";
 import { VISIT_SOURCE_SUMMARY, type VisitFinancialContext } from "../../lib/visit-financial-context";
+import { diagnoseVisitSourcePdfOcr } from "../helpers/visit-source-pdf-ocr";
 import { formatAmount } from "../../lib/money";
 
 /** Three independent journeys on the existing built-app/isolated PG harness.
@@ -576,11 +577,20 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
     const path = `${directory}/${label}.pdf`;
     await writeFile(path, await print.page.pdf({preferCSSPageSize:true,printBackground:true}));
     expect(execFileSync("pdfinfo", [path], {encoding:"utf8"})).toMatch(/Pages:\s+[1-9]/);
+    const noChargeRow=report.result.rows.findIndex(row=>row.workSource===VISIT_SOURCE_SUMMARY.no_new_charge);
+    const ocrDiagnostic=label==="same-day-decisions" ? await diagnoseVisitSourcePdfOcr(print.page,browser,directory,noChargeRow,report.result.rows.length) : null;
+    if(ocrDiagnostic) console.info("Bounded fresh PDF OCR diagnostic:",JSON.stringify(ocrDiagnostic));
     const text = execFileSync("pdftotext", ["-layout",path,"-"], {encoding:"utf8"}).replace(/[\u202a-\u202e]/g, "").replace(/\s+/g," ");
     expect(text).toContain("مصادر العمل");
-    for (const summary of new Set(visits.map(visit => VISIT_SOURCE_SUMMARY[visit.summary]))) {
-      expect(text).toContain(summary.replace(/\s+/g," "));
+    try {
+      for (const summary of new Set(visits.map(visit => VISIT_SOURCE_SUMMARY[visit.summary]))) {
+        expect(text).toContain(summary.replace(/\s+/g," "));
+      }
+    } catch(error) {
+      if(error instanceof Error && ocrDiagnostic) error.message += `\nBounded fresh PDF OCR diagnostic: ${JSON.stringify(ocrDiagnostic)}`;
+      throw error;
     }
+    if(ocrDiagnostic) expect(ocrDiagnostic.verdict,JSON.stringify(ocrDiagnostic)).toBe("correct_visible_phrase");
   } finally { await close(print.context); }
   expect(await q(`SELECT
     (SELECT count(*) FROM invoices WHERE patient_id=$1)::int AS invoices,
