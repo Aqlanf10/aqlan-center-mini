@@ -23,7 +23,12 @@ beforeEach(() => {
   mocks.session.mockResolvedValue({ role: "reception", username: "synthetic", userId: 1 });
   mocks.query.mockImplementation(async (sql: string, params: unknown[]) => {
     if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql))return {rows:[]};
-    if (sql.includes("FROM invoice_settlement_reclassification")) return {rows:[]};
+    if (sql.includes("COALESCE(to_jsonb(c)->>'currency_evidence_kind'")) {
+      expect(params).toEqual([[17]]);return {rows:[]};
+    }
+    if (sql.includes("to_regclass('invoice_unpaid_currency_claims')")) return {rows:[{installed:false}]};
+    if (sql.includes("FROM invoice_settlement_reclassification") && !sql.includes("'unpaid_root_v1'::text")) return {rows:[]};
+    if (sql.includes("AS issued_date")) return {rows:[]};
     if (sql.includes("AS today")) return { rows: [{ today: "2026-10-02" }] };
     if (sql.includes("FROM approved_agreement_principals")) return {rows:[]};
     if (sql.includes("FROM expenses")) return { rows: [] };

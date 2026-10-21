@@ -1,3 +1,4 @@
+import {CURRENCY_PRINCIPAL_RELATION} from "./invoice-currency-principal";
 import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
@@ -261,7 +262,7 @@ interface MovementPlan {
 }
 
 interface PatientMovement {
-  currencyCorrections?:{invoiceId:number;invoiceNumber:string;issuedDate:string;date:string;minor:number}[];
+  currencyCorrections?:{invoiceId:number;invoiceNumber:string;issuedDate:string;date:string;minor:number;sourceCurrency?:Currency}[];
   patientId: number; patientNumber: string; name: string; phone: string | null;
   createdDate: string | null; lastVisitDate: string | null;
   status: keyof typeof PATIENT_STATUS_LABEL;
@@ -331,7 +332,7 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
               (SELECT COALESCE(json_agg(DISTINCT it.description) FILTER (WHERE it.description IS NOT NULL), '[]'::json)
                  FROM invoice_items it WHERE it.invoice_id = i.id) AS items
          FROM invoices i
-        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections c JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections c JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=c.id
           WHERE c.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $1)::date>$3::date)) AND i.patient_id = ANY($2::int[])`,
       [CLINIC_TIME_ZONE, ids,opts.asOf??clinicTodayISO()],
     ),
@@ -395,7 +396,7 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
          JOIN invoices i ON i.id = it.invoice_id
          LEFT JOIN services s ON s.id = it.service_id
         WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections c
-          JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+          JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=c.id
           WHERE c.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $3)::date>$2::date))
           AND i.patient_id = ANY($1::int[])
         ORDER BY it.invoice_id, it.id`,
@@ -585,12 +586,12 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
     }
   }
 
-  const {rows:currencyCorrections}=await pool.query<{patient_id:number;invoice_id:number;invoice_number:string;issued_date:string;date:string;minor:string}>(`
-    SELECT d.patient_id,i.id AS invoice_id,i.invoice_number,(i.created_at AT TIME ZONE $1)::date::text AS issued_date,
+  const {rows:currencyCorrections}=await pool.query<{patient_id:number;invoice_id:number;invoice_number:string;issued_date:string;date:string;minor:string;source_currency:Currency}>(`
+    SELECT d.patient_id,d.source_currency,i.id AS invoice_id,i.invoice_number,(i.created_at AT TIME ZONE $1)::date::text AS issued_date,
       (d.created_at AT TIME ZONE $1)::date::text AS date,(i.total_minor-i.discount_minor)::text AS minor
-    FROM invoice_settlement_reclassifications d JOIN invoice_corrections c ON c.id=d.correction_id JOIN invoices i ON i.id=c.original_invoice_id
+    FROM ${CURRENCY_PRINCIPAL_RELATION} d JOIN invoice_corrections c ON c.id=d.correction_id JOIN invoices i ON i.id=c.original_invoice_id
     WHERE d.patient_id=ANY($2::int[]) AND (d.created_at AT TIME ZONE $1)::date<=$3::date`,[CLINIC_TIME_ZONE,ids,opts.asOf??clinicTodayISO()]);
-  for(const row of currencyCorrections){const patient=byId.get(row.patient_id);if(patient)(patient.currencyCorrections??=[]).push({invoiceId:row.invoice_id,invoiceNumber:row.invoice_number,issuedDate:row.issued_date,date:row.date,minor:num(row.minor)});}
+  for(const row of currencyCorrections){const patient=byId.get(row.patient_id);if(patient)(patient.currencyCorrections??=[]).push({invoiceId:row.invoice_id,invoiceNumber:row.invoice_number,issuedDate:row.issued_date,date:row.date,minor:num(row.minor),sourceCurrency:row.source_currency});}
 
   // Explicit approved sources affect current reference progress only, never add
   // a second ledger principal. Opening history is already net of prior cash.
@@ -643,7 +644,7 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
  * العملة الأساسية وحده. لا يجمع الرصيد بين الدلاء أبدًا.
  */
 export interface CurrencyAwareMovement {
-  currencyCorrections?:{invoiceId:number;issuedDate:string;date:string;minor:number}[];
+  currencyCorrections?:{invoiceId:number;issuedDate:string;date:string;minor:number;sourceCurrency?:Currency}[];
   /** (P1-5ب) الرصيد الافتتاحي بدلو عملته. */
   openings: OpeningsByCurrency;
   invoices: { date: string; netMinor: number; currency: Currency }[];
@@ -842,7 +843,7 @@ export function balancesByCurrencyAt(m: CurrencyAwareMovement, date: string): Re
       balances[prior?payment.allocation!.sourceCurrency:payment.settlementCurrency]-=(payment.kind==="refund"?-1:1)*(prior?payment.allocation!.sourceMinor:payment.settlementMinor);
     }
   }
-  for(const correction of m.currencyCorrections??[])if(correction.issuedDate<=date&&date<correction.date)balances.YER+=correction.minor;
+  for(const correction of m.currencyCorrections??[])if(correction.issuedDate<=date&&date<correction.date)balances[correction.sourceCurrency??"YER"]+=correction.minor;
   return balances;
 }
 
@@ -871,7 +872,8 @@ export function oldestUnpaidByCurrency(
         debts.push({ date: invoice.date, amount: invoice.netMinor });
       }
     }
-    if(currency==="YER")for(const correction of m.currencyCorrections??[]){
+    for(const correction of m.currencyCorrections??[]){
+      if((correction.sourceCurrency??"YER")!==currency)continue;
       if(correction.issuedDate<=asOf&&asOf<correction.date&&correction.minor>0)debts.push({date:correction.issuedDate,amount:correction.minor});
     }
     debts.sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -4212,8 +4214,8 @@ export function patientStatementReport(ctx: ReportContext): ReportResult {
     });
   }
   for(const correction of patient.currencyCorrections??[]){
-    events.push({date:correction.issuedDate,description:`الفاتورة الأصلية ${correction.invoiceNumber}`,currency:"YER",debit:correction.minor,credit:0});
-    events.push({date:correction.date,description:`إبطال عملة الفاتورة ${correction.invoiceNumber}`,currency:"YER",debit:0,credit:correction.minor});
+    events.push({date:correction.issuedDate,description:`الفاتورة الأصلية ${correction.invoiceNumber}`,currency:correction.sourceCurrency??"YER",debit:correction.minor,credit:0});
+    events.push({date:correction.date,description:`إبطال عملة الفاتورة ${correction.invoiceNumber}`,currency:correction.sourceCurrency??"YER",debit:0,credit:correction.minor});
   }
   for (const payment of payments) {
     if(payment.allocation){

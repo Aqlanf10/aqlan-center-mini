@@ -1,3 +1,4 @@
+import {CURRENCY_PRINCIPAL_RELATION} from "./invoice-currency-principal";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
 import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
 import { provePaymentCalculation, proveCorrectionAcknowledgment } from "./payment-acknowledgment-db";
@@ -13144,7 +13145,7 @@ export async function commissionReport(
            WITH RECURSIVE lineage(id) AS (SELECT i.id UNION
              SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id=l.id)
            SELECT original.created_at FROM invoice_corrections c
-           JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+           JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=c.id
            JOIN invoices original ON original.id=c.original_invoice_id
            WHERE c.corrected_invoice_id IN(SELECT id FROM lineage) ORDER BY d.id LIMIT 1
          ) currency_origin ON TRUE
@@ -13154,12 +13155,12 @@ export async function commissionReport(
          LEFT JOIN visit_procedures vp ON it.source_type = 'visit_procedure' AND vp.id = it.source_id
          LEFT JOIN plan_items pi ON pi.id = COALESCE(it.plan_item_id,
            CASE WHEN it.source_type = 'plan_item' THEN it.source_id END, vp.plan_item_id)
-        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=correction.id
           WHERE correction.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
           AND (currency_origin.created_at IS NULL OR (i.created_at AT TIME ZONE $1)::date <= $3::date)
           AND i.patient_id IN (
                 SELECT historical.patient_id FROM invoices historical
-                 WHERE (historical.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
+                 WHERE (historical.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=correction.id
                    WHERE correction.original_invoice_id=historical.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
                    AND (historical.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
@@ -13279,7 +13280,7 @@ export async function commissionReport(
        * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
       pool.query<{ id: number; patient_id: number; base_currency: string; settlement_leaf_id:number|null; reclassified_at_cutoff:boolean }>(
         `SELECT i.id, i.patient_id, i.base_currency,
-          EXISTS(SELECT 1 FROM invoice_settlement_reclassifications d
+          EXISTS(SELECT 1 FROM ${CURRENCY_PRINCIPAL_RELATION} d
             JOIN invoice_corrections c ON c.id=d.correction_id
             WHERE c.corrected_invoice_id=i.id AND d.patient_id=i.patient_id AND d.target_currency=i.base_currency
               AND (d.created_at AT TIME ZONE $2)::date <= $3::date) AS reclassified_at_cutoff,
@@ -15350,7 +15351,7 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       invoice_number: string; created_at: Date; full_name: string; base_currency: string;
       total_minor: string; discount_minor: string; status: string; currency_corrected:boolean;
     }>(
-      `SELECT i.invoice_number, i.created_at, p.full_name, i.base_currency, i.total_minor, i.discount_minor, i.status, EXISTS(SELECT 1 FROM invoice_corrections c JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id WHERE c.original_invoice_id=i.id) AS currency_corrected
+      `SELECT i.invoice_number, i.created_at, p.full_name, i.base_currency, i.total_minor, i.discount_minor, i.status, EXISTS(SELECT 1 FROM invoice_corrections c JOIN ${CURRENCY_PRINCIPAL_RELATION} d ON d.correction_id=c.id WHERE c.original_invoice_id=i.id) AS currency_corrected
          FROM invoices i JOIN patients p ON p.id = i.patient_id
         WHERE (i.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
       [CLINIC_TIME_ZONE, from, to],
