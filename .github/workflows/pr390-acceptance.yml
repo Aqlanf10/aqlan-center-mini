@@ -56,6 +56,8 @@ jobs:
       - name: Build exact production application
         run: npm run build
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        # Ubuntu Actions image provides browser system libraries. Do not depend on
+        # an unrelated third-party Microsoft apt source; fetch pinned browser only.
+        run: npx playwright install chromium
       - name: HTTP and browser acceptance using synthetic sessions
         run: npm run test:security-http -- __tests__/security-http/agreement-delta-upgrade-ui.test.ts
