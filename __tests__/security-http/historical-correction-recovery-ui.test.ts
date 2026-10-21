@@ -18,7 +18,7 @@ describe("historical editor retains actual collections and survives lost correct
     const source={patientId,currency,items:[{serviceId,quantity:1,price:amount(300000),catalogPriceMinor:300000,toothCode:16}],discount:"0",discountReason:null,previouslyPaidAmount:amount(120000),historicalAsOf:"2026-10-01",note:null,idempotencyKey:`history-ui-create-${patientId}`,
       repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:180000,repaymentVersion:0,repaymentSourceHash:null};
     const created=await authedMutation(`/api/patients/${patientId}/historical-documents`,h.sessions.admin,"POST",JSON.stringify(source));const initial=await created.json();expect(created.status,JSON.stringify(initial)).toBe(201);
-    const paid=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({patientId,amount:amount(20000),currency,openingCurrency:currency,kind:"payment",method:"cash"}));expect(paid.status,await paid.text()).toBe(201);
+    const paid=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({patientId,amount:amount(20000),currency,openingCurrency:currency,kind:"payment",method:"cash"}),{"Idempotency-Key":`history-ui-payment-${patientId}`});expect(paid.status,await paid.text()).toBe(201);
     const before=(await db.query("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1",[patientId])).rows;
     const context=await browser.newContext({viewport:{width,height:1000},locale:"ar-YE",serviceWorkers:"block"});const [name,...value]=h.sessions.admin.cookie.split("=");await context.addCookies([{name,value:value.join("="),url:baseUrl}]);
     const page=await context.newPage();page.on("dialog",dialog=>void dialog.accept());const bodies:string[]=[];
