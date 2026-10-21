@@ -12256,6 +12256,8 @@ async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBuc
 }
 
 export interface RecordExpenseInput {
+  /** Authenticated actor role for the mandatory standalone expense audit. */
+  actorRole?: string | null;
   /** Internal HR settlement context; HTTP callers never populate this field. */
   hrPayrollItemId?: number;
   category: ExpenseCategory;
@@ -12503,20 +12505,66 @@ export async function recordExpense(input: RecordExpenseInput): Promise<RecordEx
   await ensureSchema();
   const settingsRates = input.rates ?? ratesFromSettings(await getSettings());
   const client = await getPool().connect();
+  let discardClient = false;
+  const rollback = async () => {
+    try { await client.query("ROLLBACK"); } catch (error) { discardClient = true; throw error; }
+  };
   try {
     await client.query("BEGIN");
     const result = await recordExpenseInTx(client, input, settingsRates);
     if (result.id === null) {
-      await client.query("ROLLBACK");
+      await rollback();
       return { expense: null, reason: result.reason, quote: result.quote };
     }
+    // Read the receipt and insert required evidence before committing. A failed
+    // audit/read must not leave cash out with missing evidence or a false failure.
+    const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [result.id]);
+    if (!rows[0]) throw new Error("Expense receipt missing inside its transaction");
+    const expense = toExpense(rows[0]);
+    const quote = result.quote;
+    const context = { entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+      actor: input.createdBy, actorRole: input.actorRole ?? null };
+    await insertAuditRow(client, {
+      ...context, action: "expense.create",
+      details: {
+        البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
+        سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
+        الجهة: expense.partyId ?? expense.payeeText,
+        ...(expense.payableId !== null ? {
+          الالتزام: expense.payableId, عملة_الفاتورة: expense.payableCurrency,
+          قيمة_الفاتورة: expense.payableAmountMinor, سعر_الفاتورة: expense.payableExchangeRate,
+          المخصوم_من_الفاتورة: expense.payableSettledMinor,
+          المتبقي_بعد: quote?.payable?.remainingAfterMinor,
+        } : {}),
+      },
+    });
+    if (expense.rateOverrideReason) {
+      await insertAuditRow(client, {
+        ...context, action: "expense.rate_override",
+        details: {
+          العملة: expense.currency, سعر_الإعدادات: rateOf(expense.currency, settingsRates),
+          السعر_المستعمل: expense.exchangeRate, عملة_الفاتورة: expense.payableCurrency,
+          سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
+          سعر_الفاتورة_المستعمل: expense.payableExchangeRate, السبب: expense.rateOverrideReason,
+        },
+      });
+    }
+    if (quote?.party?.prepayment) {
+      await insertAuditRow(client, {
+        ...context, action: "expense.prepayment",
+        details: {
+          الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
+          المستحق_قبل: quote.party.outstandingBeforeMinor, السبب: input.prepaymentReason,
+        },
+      });
+    }
     await client.query("COMMIT");
-    return { expense: await getExpense(result.id), reason: null, quote: result.quote };
+    return { expense, reason: null, quote };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await rollback().catch(() => {});
     throw error;
   } finally {
-    client.release();
+    client.release(discardClient || undefined);
   }
 }
 

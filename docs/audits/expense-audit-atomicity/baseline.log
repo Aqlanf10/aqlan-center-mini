@@ -1,0 +1,98 @@
+(node:63) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.11 /workspace/scratch/cf319c8268ad/cash-commission-integrity
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+(node:99) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ __tests__/postgres/expense-create-audit-atomicity.test.ts (1 test | 1 failed) 1933ms
+   × rolls back the cash voucher and journal when its required creation audit fails 139ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/expense-create-audit-atomicity.test.ts > rolls back the cash voucher and journal when its required creation audit fails
+AssertionError: expected 201 to be 500 // Object.is equality
+
+- Expected
++ Received
+
+- 500
++ 201
+
+ ❯ __tests__/postgres/expense-create-audit-atomicity.test.ts:32:34
+     30|   try {
+     31|     const response = await POST(request(note));
+     32|     expect.soft(response.status).toBe(500);
+       |                                  ^
+     33|     expect.soft((await db.getPool().query("SELECT id FROM expenses WHE…
+     34|     expect.soft((await db.getOpenShift())!.expected).toEqual(before);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/postgres/expense-create-audit-atomicity.test.ts > rolls back the cash voucher and journal when its required creation audit fails
+AssertionError: expected [ { id: 1 } ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ __tests__/postgres/expense-create-audit-atomicity.test.ts:33:99
+     31|     const response = await POST(request(note));
+     32|     expect.soft(response.status).toBe(500);
+     33|     expect.soft((await db.getPool().query("SELECT id FROM expenses WHE…
+       |                                                                                                   ^
+     34|     expect.soft((await db.getOpenShift())!.expected).toEqual(before);
+     35|   } finally { await restoreAudit(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/postgres/expense-create-audit-atomicity.test.ts > rolls back the cash voucher and journal when its required creation audit fails
+AssertionError: expected { YER: 9900, SAR: 10000, USD: 10000 } to deeply equal { YER: 10000, SAR: 10000, USD: 10000 }
+
+- Expected
++ Received
+
+  {
+    "SAR": 10000,
+    "USD": 10000,
+-   "YER": 10000,
++   "YER": 9900,
+  }
+
+ ❯ __tests__/postgres/expense-create-audit-atomicity.test.ts:34:54
+     32|     expect.soft(response.status).toBe(500);
+     33|     expect.soft((await db.getPool().query("SELECT id FROM expenses WHE…
+     34|     expect.soft((await db.getOpenShift())!.expected).toEqual(before);
+       |                                                      ^
+     35|   } finally { await restoreAudit(); }
+     36|   const response = await POST(request(note));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  __tests__/postgres/expense-create-audit-atomicity.test.ts > rolls back the cash voucher and journal when its required creation audit fails
+AssertionError: expected [ { id: 1 }, { id: 2 } ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ __tests__/postgres/expense-create-audit-atomicity.test.ts:39:92
+     37|   expect(response.status).toBe(201);
+     38|   const expense = await response.json();
+     39|   expect((await db.getPool().query("SELECT id FROM expenses WHERE note…
+       |                                                                                            ^
+     40|   expect((await db.getPool().query("SELECT actor,actor_role FROM audit…
+     41|     .toEqual([{ actor: "expense-audit-ci", actor_role: "admin" }]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  02:53:29
+   Duration  11.90s (transform 6.58s, setup 0ms, import 8.59s, tests 1.93s, environment 0ms)
