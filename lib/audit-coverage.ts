@@ -25,6 +25,7 @@ export const AUDIT_EXEMPT: Readonly<Record<string, string>> = {
   "DELETE /api/portal/messages": "المريض يخفي رسالته من صندوقه — حالة على الرسالة نفسها.",
   "POST /api/reports/saved": "تقرير محفوظ: تفضيل شخصي لصاحبه (أعمدة وتصفية) بلا بيانات مالية أو سريرية.",
   "PATCH /api/reports/saved": "تعديل تقرير محفوظ شخصي.",
+  "PUT /api/plans/[id]/agreement-amendment": "استعلام قراءةٍ فقط عن حالة محاولة تعديل اتفاق بمفتاحها (محفوظة/مرفوضة لقِدمها/غير محسومة): PUT لحمل جسم البصمة، ولا يكتب صفًّا ولا يغيّر رصيدًا؛ قفل استشاري للمعاملة فقط. الكتابة نفسها في POST وتُدقَّق داخل معاملتها.",
   "DELETE /api/reports/saved": "حذف تقرير محفوظ شخصي.",
   "POST /api/invoices/clinical-preview": "معاينة الربط السريري للفاتورة قبل حفظها — قراءةٌ فقط لا تكتب شيئًا؛ الحفظ يُدقَّق في invoice.create.",
   "POST /api/hr/identity-preview": "معاينة هوية الطاقم بمعرفات صريحة داخل REPEATABLE READ READ ONLY؛ بلا حفظ أو تطبيق أو تخصيص تسلسل. اختبارات PostgreSQL وHTTP تقارن جميع الجداول والتسلسلات قبل المعاينة وبعدها.",
