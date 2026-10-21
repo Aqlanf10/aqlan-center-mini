@@ -15972,7 +15972,8 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
-import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
+import { backupSelectColumns, insertionOrder } from "./backup";
+import { renderBackupSnapshotEvent, type BackupSnapshotEvent } from "./backup-events";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -16012,6 +16013,12 @@ export async function* backupSqlLines(source?: Queryable): AsyncGenerator<string
  * ONLY واحدة** — والترتيب لا يتحقق إن كانت الإدارة هنا مبعثرة.
  */
 export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
+  for await (const event of backupSnapshotEvents(pool)) yield renderBackupSnapshotEvent(event);
+}
+
+/** Same canonical snapshot traversal as the legacy SQL export. Internal events
+ * are not a trusted recovery envelope and do not authorize any target writes. */
+export async function* backupSnapshotEvents(pool: Queryable): AsyncGenerator<BackupSnapshotEvent> {
 
   const { rows: tableRows } = (await pool.query(
     `SELECT table_name FROM information_schema.tables
@@ -16059,10 +16066,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
 
-  yield `-- نسخة احتياطية — انسياب العيادة\n`;
-  yield `-- أُخذت: ${new Date().toISOString()}\n`;
-  yield `-- الاستعادة: على قاعدة فارغة فتحها البرنامج مرة واحدة فأنشأ جداولها.\n`;
-  yield `BEGIN;\n`;
+  yield { kind: 'comment', text: 'نسخة احتياطية — انسياب العيادة', leadingSeparator: false };
+  yield { kind: 'comment', text: `أُخذت: ${new Date().toISOString()}`, leadingSeparator: false };
+  yield { kind: 'comment', text: 'الاستعادة: على قاعدة فارغة فتحها البرنامج مرة واحدة فأنشأ جداولها.', leadingSeparator: false };
+  yield { kind: 'begin' };
 
   // العدّادات تُعاد فقط لجداول لها عمود `id`. الجداول ذات المفتاح الطبيعي —
   // الإعدادات بمفتاحها النصّي، والأرصدة الافتتاحية برقم المريض — لا عدّاد لها،
@@ -16099,33 +16106,33 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       : table === "legacy_treatment_document_revisions" ? " ORDER BY document_id, version"
       : table === "hr_effective_revisions" ? " ORDER BY stream_id, revision" : "";
     const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"${restoreOrder}`);
-    yield `\n-- ${table} (${rows.length})\n`;
+    yield { kind: 'comment', text: `${table} (${rows.length})`, leadingSeparator: true };
     for (const row of rows) {
       if (table === "plan_items" && typeof row.id === "number" && typeof row.visit_id === "number") {
         planVisitLinks.push({itemId:row.id,visitId:row.visit_id});
-        yield `${insertStatement(table, columns, {...row,visit_id:null}, columnType, identityInsert)}\n`;
+        yield { kind: 'insert', table, columns, row: {...row,visit_id:null}, columnTypes: [...columnType], identityInsert };
       } else if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
         familyGuarantorLinks.push({ familyId: row.id, patientId: row.guarantor_patient_id });
-        yield `${insertStatement(table, columns, { ...row, guarantor_patient_id: null }, columnType, identityInsert)}\n`;
+        yield { kind: 'insert', table, columns, row: { ...row, guarantor_patient_id: null }, columnTypes: [...columnType], identityInsert };
       } else if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
         patientPhotoLinks.push({ patientId: row.id, documentId: row.photo_document_id });
-        yield `${insertStatement(table, columns, { ...row, photo_document_id: null }, columnType, identityInsert)}\n`;
+        yield { kind: 'insert', table, columns, row: { ...row, photo_document_id: null }, columnTypes: [...columnType], identityInsert };
       } else {
-        yield `${insertStatement(table, columns, row, columnType, identityInsert)}\n`;
+        yield { kind: 'insert', table, columns, row, columnTypes: [...columnType], identityInsert };
       }
     }
   }
 
-  yield `\n`;
-  for (const link of planVisitLinks) yield `UPDATE plan_items SET visit_id = ${link.visitId} WHERE id = ${link.itemId};\n`;
+  yield { kind: 'separator' };
+  for (const link of planVisitLinks) yield { kind: 'deferred-reference', reference: 'plan-visit', sourceId: link.itemId, targetId: link.visitId };
   for (const link of patientPhotoLinks) {
-    yield `UPDATE patients SET photo_document_id = ${link.documentId} WHERE id = ${link.patientId};\n`;
+    yield { kind: 'deferred-reference', reference: 'patient-photo', sourceId: link.patientId, targetId: link.documentId };
   }
   for (const link of familyGuarantorLinks) {
-    yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
+    yield { kind: 'deferred-reference', reference: 'family-guarantor', sourceId: link.familyId, targetId: link.patientId };
   }
-  for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
-  yield `COMMIT;\n`;
+  for (const table of withSerialId) yield { kind: 'sequence-reset', table };
+  yield { kind: 'commit' };
 }
 
 // ─── إعادة تقييم العملات الأجنبية ────────────────────────────────────────────
