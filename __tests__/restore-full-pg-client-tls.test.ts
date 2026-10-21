@@ -66,6 +66,7 @@ describe('restore:full effective node-postgres TLS configuration (without connec
     vi.stubEnv('PGSSL_ROOT_CERT_PEM', undefined);
     vi.stubEnv('PGSSL_ROOT_CERT', undefined);
     const target = validatedRestoreFullTarget(REMOTE_INPUT, {
+      NODE_ENV: 'test',
       DATABASE_ENVIRONMENT: 'staging',
       PGSSL_ROOT_CERT_PEM: CA,
     });
