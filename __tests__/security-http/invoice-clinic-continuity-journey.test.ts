@@ -576,7 +576,7 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
     await mkdir(directory, {recursive:true});
     const path = `${directory}/${label}.pdf`;
     await writeFile(path, await print.page.pdf({preferCSSPageSize:true,printBackground:true}));
-    expect(execFileSync("pdfinfo", [path], {encoding:"utf8"})).toMatch(/Pages:\\s+[1-9]/);
+    expect(execFileSync("pdfinfo", [path], {encoding:"utf8"})).toMatch(/Pages:\s+[1-9]/);
     if(label==="same-day-decisions") {
       // This is a fresh raster of the EXACT, unmodified PDF being asserted below,
       // not a browser screenshot or an OCR re-render. The printed text expectation
