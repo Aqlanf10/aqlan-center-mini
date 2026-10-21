@@ -1,4 +1,5 @@
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
+import {findSimilarCollections,parseSimilarCollectionReview,reviewMatchesReceipts} from "@/lib/similar-collection";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -163,6 +164,18 @@ export async function POST(request: Request) {
   // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
   const base = CLINIC_BASE_CURRENCY;
   const savedPayment=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
+  // Advisory warning protocol is opt-in for the human collection UI. Never gate
+  // a same-key replay; the canonical writer still checks the request fingerprint.
+  if(kind==="payment"&&Object.hasOwn(source,"similarityReview")&&!savedPayment){
+    const review=parseSimilarCollectionReview(source.similarityReview);
+    if(!review)return NextResponse.json({message:"تأكيد مراجعة السندات غير صالح."},{status:400});
+    try{
+      const matches=await findSimilarCollections(patientId,amountMinor,currency);
+      if(!reviewMatchesReceipts(review,matches))
+        return NextResponse.json({reason:"similar_collection_review_required",
+          message:"ظهر سند قبض مشابه أو تغيّر سجل التحصيل بعد المراجعة. أعد فحص السندات قبل تسجيل دفعة مستقلة."},{status:409});
+    }catch{return NextResponse.json({message:"تعذّر فحص السندات السابقة؛ لم يبدأ التحصيل."},{status:503});}
+  }
   const exchangeRate = savedPayment?.patientId===patientId&&savedPayment.createdBy===session.username&&savedPayment.currency===currency
     ?savedPayment.exchangeRate:rateFromSettings(settings, currency, base);
   const exchangeRateRequired = (includeReason = false) => NextResponse.json(
