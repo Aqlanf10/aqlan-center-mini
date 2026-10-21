@@ -662,6 +662,31 @@ it.each(["matching", "notes", "provider", "currency"])("adopts server-owned link
   }
 });
 
+it.each([
+  { name: "another visit of the same patient", id: 91002, patientId: 92001 },
+  { name: "another patient", id: 91001, patientId: 92002 },
+])("refuses checkout navigation for a successful sign response owned by $name", async ({ id, patientId }) => {
+  await mount(); await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+  const before = structuredClone(stored);
+  const readCount = fetchMock.mock.calls.filter(([url, options]) => url === "/api/visits/91001/clinical" && !options?.method).length;
+  // Exercise the real ClinicalVisit -> isClinicalSignResult boundary. A 200
+  // status must not publish a checkout callback for a foreign echoed identity.
+  pendingWrite = async (requestedVisitId, body) => {
+    expect(requestedVisitId).toBe(91001);
+    expect(body.action).toBe("sign");
+    return response(200, { id, patientId, status: "signed", invoiceId: null,
+      invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+  };
+  await invoke(find(node => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
+  await flush();
+  expect(onSigned).not.toHaveBeenCalled();
+  expect(window.location.href).toBe("/visits/91001");
+  expect(contents(render())).toContain("تعذّر تأكيد نتيجة التوقيع");
+  expect(fetchMock.mock.calls.filter(([url, options]) => url === "/api/visits/91001/clinical" && !options?.method)).toHaveLength(readCount);
+  expect(writes().filter(([, options]) => JSON.parse(String(options.body)).action === "sign")).toHaveLength(1);
+  expect(stored).toEqual(before);
+});
+
 it("invalidates an in-flight read when a sign response has an unknown outcome", async () => {
   reads.set(91001, async () => response(503, {})); await mount();
   const capturedRetry = button("أعد تحميل الزيارة"); reads.delete(91001);
