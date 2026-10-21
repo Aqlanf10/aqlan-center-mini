@@ -692,6 +692,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
             const wires = wiresFor(row.slot);
             const currentPillar: OrthoPillar = activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? "wires";
 
+            const FinancialContextContainer = currentPillar === "prescription" ? "details" : "div";
+
             return (
               <li
                 key={row.id}
@@ -738,12 +740,17 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   </div>
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
-                  <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
-                    planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
-                    onOpenClinicalContext={(reference) => onContextChange?.(reference)} />
-                  {(row.status === "active" || row.status === "retention")
-                    ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
-                        refreshRevision={onboardingRevision} onOpenAccount={onOpenAccount} /> : null}
+                  <FinancialContextContainer data-testid="ortho-financial-context" className={currentPillar === "prescription" ? "mt-2" : undefined}>
+                    {currentPillar === "prescription" ? <summary className="min-h-11 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs font-bold text-slate-700">
+                      مرجع الحالة المالي وشمول الشدّة
+                    </summary> : null}
+                    <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
+                      planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
+                      onOpenClinicalContext={(reference) => onContextChange?.(reference)} />
+                    {(row.status === "active" || row.status === "retention")
+                      ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
+                          refreshRevision={onboardingRevision} onOpenAccount={onOpenAccount} /> : null}
+                  </FinancialContextContainer>
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
                       <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">رابط خطة أقساط قديم · للتوافق فقط</summary>

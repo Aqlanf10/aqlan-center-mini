@@ -160,6 +160,12 @@ describe("legacy checklist confirmed-context refresh in the real parent", () => 
       expect(await f.checklist.innerText()).not.toContain(included);
       expect(await f.checklist.innerText()).not.toContain("تهيئة الحالة السابقة مكتملة");
       await capture(f.checklist, `.settings-ui-artifacts/legacy-checklist-unavailable-${width}.png`);
+      // Confirmed unlink reloads the parent, remounting native details closed.
+      // Reopen the compatibility reference before asserting its visible state.
+      const compatibility = f.page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact: true });
+      expect(await compatibility.locator("..").getAttribute("open")).toBeNull();
+      expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id = $1 AND patient_id = $2", [caseId, patientId])).rows).toEqual([{ plan_id: null }]);
+      await compatibility.click();
       await f.agreement.getByText("لا يوجد رابط خطة أقساط قديم", { exact: true }).waitFor();
       expect(await f.agreement.getByRole("button", { name: "اربط", exact: true }).count()).toBe(0);
       f.setMode("hold");
