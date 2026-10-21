@@ -69,7 +69,7 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
         return lifetime.current===token?{kind:"confirmed" as const,attempt:confirmed,acknowledgment}:null;}
       const message=payload&&typeof payload==="object"&&"message" in payload?payload.message:null;
       if(!response.redirected)failure=moneyRecoveryFailure(response.status,message);
-      if(!previous&&!response.redirected&&[400,401,403,404,409,422].includes(response.status)&&typeof message==="string"&&message.trim()){
+      if(!previous&&!response.redirected&&[400,404,422].includes(response.status)&&typeof message==="string"&&message.trim()){
         const retired=await acknowledgeFinancialCommand({actor,patientId},durable);publish(scope,{...current,revision:retired.revision,command:null});announce();return lifetime.current===token?{kind:"refused" as const,message}:null;}
     }catch{
       if(!reserved){

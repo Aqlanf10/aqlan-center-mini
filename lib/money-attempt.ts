@@ -1,4 +1,5 @@
 import { newIdempotencyKey } from "./idempotency-key";
+import {readSplitCollectionEvidence,type SplitCollectionEvidence} from "./agreement-split-collection";
 
 export const MONEY_UNCERTAIN = "تعذّر تأكيد نتيجة العملية. قد تكون سُجّلت ماليًا. أعد التحقق بنفس الطلب قبل تسجيل عملية أخرى.";
 /** A later refusal is diagnostic, never proof that the first write failed. */
@@ -13,7 +14,8 @@ export type MoneyRequest = Readonly<{
   operation: "payment" | "installment" | "correct" | "void";
 }>;
 type Receipt = { id: number; receiptNumber: string };
-export type MoneyAcknowledgment = { paymentId: number | null; reversal?: Receipt; replacement?: Receipt | null };
+export type MoneyAcknowledgment = { paymentId: number | null; reversal?: Receipt; replacement?: Receipt | null;
+  paymentIds?:number[];collection?:SplitCollectionEvidence };
 export type MoneyAttempt = Readonly<{
   request: MoneyRequest;
   key: string;
@@ -41,6 +43,10 @@ export function moneyAcknowledgment(operation: MoneyRequest["operation"], value:
   const row = object(value);
   if (!row) return null;
   if (operation === "payment" || operation === "installment") {
+    if(operation==="payment"&&Object.hasOwn(row,"collection")){
+      const split=readSplitCollectionEvidence(row);
+      return split?{paymentId:split.paymentIds[0],paymentIds:split.paymentIds,collection:split}:null;
+    }
     const paymentId = row[operation === "payment" ? "id" : "paymentId"];
     return id(paymentId) ? { paymentId } : null;
   }
@@ -104,7 +110,7 @@ export class MoneyAttemptStore {
       if (!response.redirected) failure = moneyRecoveryFailure(response.status, message);
       // These routes return their explicit pre-commit refusals as 4xx. Once a
       // reply was lost, even a later permission/shift/target refusal cannot clear it.
-      if (!previous && [400, 401, 403, 404, 409, 422].includes(response.status) && typeof message === "string" && message.trim()) {
+      if (!previous && [400, 404, 422].includes(response.status) && typeof message === "string" && message.trim()) {
         this.publish(scope, null);
         return { kind: "refused", message };
       }

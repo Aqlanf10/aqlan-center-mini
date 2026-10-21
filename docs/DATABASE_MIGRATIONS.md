@@ -535,3 +535,7 @@ writes. Demo reset refuses before backup when any committed or rejected outcome
 exists. Only a genuinely empty table may join the existing reset truncation under
 the reviewed serialization/table locks and an empty-table trigger recheck; receipts
 are not an unconditional wipe target. See [protocol and release limits](INVENTORY_PURCHASE_RETRY.md).
+
+### 0066_agreement_delta_amendments.sql
+
+Append-only agreement price-increase event and difference-only invoice lineage. A logical collection can allocate across the original source and difference invoices with an immutable group receipt. Existing invoices, receipts and historical records are not revised. Production rollout is blocked until the precise PG18, HTTP, chronology, statement, checkout and migration parity checks pass; neither this migration listing nor CI alone authorizes a production deploy.
