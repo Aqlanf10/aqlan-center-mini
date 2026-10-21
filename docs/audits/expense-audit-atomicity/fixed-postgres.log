@@ -1,0 +1,16 @@
+(node:45) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ RUN  v4.1.11 /workspace/scratch/cf319c8268ad/cash-commission-integrity
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+(node:81) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+
+ Test Files  2 passed (2)
+      Tests  25 passed (25)
+   Start at  03:03:38
+   Duration  20.18s (transform 8.16s, setup 0ms, import 10.76s, tests 6.58s, environment 0ms)

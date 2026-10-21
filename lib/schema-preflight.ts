@@ -3,6 +3,8 @@ import { projectDetailedSchemaReadOnly, type ReadOnlyCatalogClient, type Detaile
 import type { MigrationFile } from "./migration-files";
 import { fingerprintCatalog, type SchemaFingerprintDrilldown } from "./schema-fingerprint";
 
+import { inspectPurchaseSchemaReadiness, type PurchaseSchemaReadiness } from "./purchase-schema-readiness";
+
 export interface SchemaRegistrationPreflight {
   registryExists: boolean;
   versions: string[];
@@ -84,6 +86,7 @@ export interface SchemaPreflightReport {
   adoptionAssessment: "NOT_PERFORMED";
   schemaEquivalence: "NOT_ASSESSED";
   fingerprintDrilldown?: SchemaFingerprintDrilldown;
+  purchaseReceiptsReadiness?: PurchaseSchemaReadiness;
 }
 
 export type PreflightErrorCode =
@@ -124,7 +127,7 @@ function summarizeCatalog(catalog: DetailedSchemaCatalog): SchemaPreflightReport
 export async function inspectSchemaReadOnly(
   client: ReadOnlyCatalogClient,
   files: Pick<MigrationFile, "version" | "name" | "checksum">[],
-  options: { fingerprintDrilldown?: boolean } = {},
+  options: { fingerprintDrilldown?: boolean; purchaseReceiptsReadiness?: boolean } = {},
 ): Promise<SchemaPreflightReport> {
   if (!files.length || new Set(files.map((file) => file.version)).size !== files.length) {
     throw new SchemaPreflightError("PROVENANCE_INVALID", "Invalid migration provenance.");
@@ -205,6 +208,16 @@ export async function inspectSchemaReadOnly(
       adoptionAssessment: "NOT_PERFORMED", schemaEquivalence: "NOT_ASSESSED",
     };
     if (options.fingerprintDrilldown) report.fingerprintDrilldown = fingerprintCatalog(catalog, Number(rows[0].version));
+    if (options.purchaseReceiptsReadiness) {
+      // The general projector intentionally omits views/foreign relations. A
+      // same-name non-table must not masquerade as an absent 0065 table.
+      const { rows: receiptRelations } = await client.query<{ kind: string }>(
+        `SELECT c.relkind::text AS kind FROM pg_catalog.pg_class c
+           JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public' AND c.relname = 'inventory_purchase_receipts'`,
+      );
+      report.purchaseReceiptsReadiness = inspectPurchaseSchemaReadiness(catalog, files, receiptRelations.map(row => row.kind));
+    }
     await client.query("COMMIT");
     return report;
   } catch (error) {

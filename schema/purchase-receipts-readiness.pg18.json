@@ -1,0 +1,261 @@
+{
+  "formatVersion": 1,
+  "postgresMajor": 18,
+  "migrationName": "inventory_purchase_receipts",
+  "migrationSha256": "4b7c79f4ce7b334e0f052cbd73d7fd2346c91ed5200081551f1a9f0cfd4b7808",
+  "sections": {
+    "tables": [
+      {
+        "key": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts",
+        "table": "inventory_purchase_receipts",
+        "value": "{\"forceRowLevelSecurity\":false,\"isPartition\":false,\"kind\":\"r\",\"partitionKey\":null,\"partitionParent\":null,\"persistence\":\"p\",\"rowLevelSecurity\":false}"
+      }
+    ],
+    "columns": [
+      {
+        "key": "inventory_purchase_receipts.actor_user_id",
+        "table": "inventory_purchase_receipts",
+        "name": "actor_user_id",
+        "value": "{\"baseType\":\"integer\",\"characterMaximumLength\":null,\"collation\":null,\"datetimePrecision\":null,\"default\":null,\"formatType\":\"integer\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"int4\",\"nullable\":false,\"numericPrecision\":32,\"numericScale\":0,\"ordinal\":2,\"typeModifier\":-1}"
+      },
+      {
+        "key": "inventory_purchase_receipts.created_at",
+        "table": "inventory_purchase_receipts",
+        "name": "created_at",
+        "value": "{\"baseType\":\"timestamp with time zone\",\"characterMaximumLength\":null,\"collation\":null,\"datetimePrecision\":6,\"default\":\"clock_timestamp()\",\"formatType\":\"timestamp with time zone\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"timestamptz\",\"nullable\":false,\"numericPrecision\":null,\"numericScale\":null,\"ordinal\":9,\"typeModifier\":-1}"
+      },
+      {
+        "key": "inventory_purchase_receipts.fingerprint_version",
+        "table": "inventory_purchase_receipts",
+        "name": "fingerprint_version",
+        "value": "{\"baseType\":\"smallint\",\"characterMaximumLength\":null,\"collation\":null,\"datetimePrecision\":null,\"default\":null,\"formatType\":\"smallint\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"int2\",\"nullable\":false,\"numericPrecision\":16,\"numericScale\":0,\"ordinal\":3,\"typeModifier\":-1}"
+      },
+      {
+        "key": "inventory_purchase_receipts.movement_id",
+        "table": "inventory_purchase_receipts",
+        "name": "movement_id",
+        "value": "{\"baseType\":\"integer\",\"characterMaximumLength\":null,\"collation\":null,\"datetimePrecision\":null,\"default\":null,\"formatType\":\"integer\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"int4\",\"nullable\":true,\"numericPrecision\":32,\"numericScale\":0,\"ordinal\":6,\"typeModifier\":-1}"
+      },
+      {
+        "key": "inventory_purchase_receipts.outcome",
+        "table": "inventory_purchase_receipts",
+        "name": "outcome",
+        "value": "{\"baseType\":\"text\",\"characterMaximumLength\":null,\"collation\":\"default\",\"datetimePrecision\":null,\"default\":null,\"formatType\":\"text\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"text\",\"nullable\":false,\"numericPrecision\":null,\"numericScale\":null,\"ordinal\":5,\"typeModifier\":-1}"
+      },
+      {
+        "key": "inventory_purchase_receipts.request_digest",
+        "table": "inventory_purchase_receipts",
+        "name": "request_digest",
+        "value": "{\"baseType\":\"text\",\"characterMaximumLength\":null,\"collation\":\"default\",\"datetimePrecision\":null,\"default\":null,\"formatType\":\"text\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"text\",\"nullable\":false,\"numericPrecision\":null,\"numericScale\":null,\"ordinal\":4,\"typeModifier\":-1}"
+      },
+      {
+        "key": "inventory_purchase_receipts.request_key",
+        "table": "inventory_purchase_receipts",
+        "name": "request_key",
+        "value": "{\"baseType\":\"uuid\",\"characterMaximumLength\":null,\"collation\":null,\"datetimePrecision\":null,\"default\":null,\"formatType\":\"uuid\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"uuid\",\"nullable\":false,\"numericPrecision\":null,\"numericScale\":null,\"ordinal\":1,\"typeModifier\":-1}"
+      },
+      {
+        "key": "inventory_purchase_receipts.result_snapshot",
+        "table": "inventory_purchase_receipts",
+        "name": "result_snapshot",
+        "value": "{\"baseType\":\"jsonb\",\"characterMaximumLength\":null,\"collation\":null,\"datetimePrecision\":null,\"default\":null,\"formatType\":\"jsonb\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"jsonb\",\"nullable\":false,\"numericPrecision\":null,\"numericScale\":null,\"ordinal\":8,\"typeModifier\":-1}"
+      },
+      {
+        "key": "inventory_purchase_receipts.result_version",
+        "table": "inventory_purchase_receipts",
+        "name": "result_version",
+        "value": "{\"baseType\":\"smallint\",\"characterMaximumLength\":null,\"collation\":null,\"datetimePrecision\":null,\"default\":null,\"formatType\":\"smallint\",\"generated\":\"\",\"identity\":\"\",\"internalType\":\"int2\",\"nullable\":false,\"numericPrecision\":16,\"numericScale\":0,\"ordinal\":7,\"typeModifier\":-1}"
+      }
+    ],
+    "constraints": [
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipt_snapshot",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipt_snapshot",
+        "value": "{\"columns\":\"result_snapshot,outcome,movement_id\",\"deferrable\":false,\"definition\":\"CHECK ((jsonb_typeof(result_snapshot) = 'object'::text AND (outcome = 'committed'::text AND movement_id IS NOT NULL AND result_snapshot ?& ARRAY['balance'::text, 'movement'::text] AND (result_snapshot - ARRAY['balance'::text, 'movement'::text]) = '{}'::jsonb AND jsonb_typeof(result_snapshot -> 'balance'::text) = 'number'::text AND jsonb_typeof(result_snapshot -> 'movement'::text) = 'object'::text AND (result_snapshot -> 'movement'::text) ?& ARRAY['id'::text, 'itemId'::text, 'kind'::text, 'qty'::text, 'expiryDate'::text, 'reason'::text, 'visitId'::text, 'createdBy'::text, 'createdAt'::text, 'unitCostMinor'::text, 'isReturn'::text, 'partyId'::text, 'payableId'::text] AND ((result_snapshot -> 'movement'::text) - ARRAY['id'::text, 'itemId'::text, 'kind'::text, 'qty'::text, 'expiryDate'::text, 'reason'::text, 'visitId'::text, 'createdBy'::text, 'createdAt'::text, 'unitCostMinor'::text, 'isReturn'::text, 'partyId'::text, 'payableId'::text]) = '{}'::jsonb AND ((result_snapshot -> 'movement'::text) -> 'id'::text) = to_jsonb(movement_id) AND jsonb_typeof((result_snapshot -> 'movement'::text) -> 'itemId'::text) = 'number'::text AND ((result_snapshot -> 'movement'::text) ->> 'itemId'::text) ~ '^[1-9][0-9]*$'::text AND (((result_snapshot -> 'movement'::text) ->> 'itemId'::text)::numeric) <= 2147483647::numeric AND jsonb_typeof((result_snapshot -> 'movement'::text) -> 'qty'::text) = 'number'::text AND (((result_snapshot -> 'movement'::text) ->> 'qty'::text)::numeric) > 0::numeric AND (jsonb_typeof((result_snapshot -> 'movement'::text) -> 'expiryDate'::text) = ANY (ARRAY['null'::text, 'string'::text])) AND (jsonb_typeof((result_snapshot -> 'movement'::text) -> 'reason'::text) = ANY (ARRAY['null'::text, 'string'::text])) AND ((result_snapshot -> 'movement'::text) -> 'visitId'::text) = 'null'::jsonb AND jsonb_typeof((result_snapshot -> 'movement'::text) -> 'createdBy'::text) = 'string'::text AND jsonb_typeof((result_snapshot -> 'movement'::text) -> 'createdAt'::text) = 'string'::text AND ((result_snapshot -> 'movement'::text) ->> 'createdAt'::text) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'::text AND (((result_snapshot -> 'movement'::text) -> 'unitCostMinor'::text) = 'null'::jsonb OR jsonb_typeof((result_snapshot -> 'movement'::text) -> 'unitCostMinor'::text) = 'number'::text AND ((result_snapshot -> 'movement'::text) ->> 'unitCostMinor'::text) ~ '^[0-9]+$'::text AND (((result_snapshot -> 'movement'::text) ->> 'unitCostMinor'::text)::numeric) <= '9007199254740991'::bigint::numeric) AND (((result_snapshot -> 'movement'::text) -> 'partyId'::text) = 'null'::jsonb OR jsonb_typeof((result_snapshot -> 'movement'::text) -> 'partyId'::text) = 'number'::text AND ((result_snapshot -> 'movement'::text) ->> 'partyId'::text) ~ '^[1-9][0-9]*$'::text) AND (((result_snapshot -> 'movement'::text) -> 'payableId'::text) = 'null'::jsonb OR jsonb_typeof((result_snapshot -> 'movement'::text) -> 'payableId'::text) = 'number'::text AND ((result_snapshot -> 'movement'::text) ->> 'payableId'::text) ~ '^[1-9][0-9]*$'::text) AND ((result_snapshot -> 'movement'::text) ->> 'kind'::text) = 'in'::text AND ((result_snapshot -> 'movement'::text) -> 'isReturn'::text) = 'false'::jsonb OR outcome = 'rejected'::text AND movement_id IS NULL AND result_snapshot ?& ARRAY['message'::text, 'httpStatus'::text] AND (result_snapshot - ARRAY['message'::text, 'httpStatus'::text]) = '{}'::jsonb AND jsonb_typeof(result_snapshot -> 'message'::text) = 'string'::text AND length(result_snapshot ->> 'message'::text) >= 1 AND length(result_snapshot ->> 'message'::text) <= 500 AND ((result_snapshot -> 'httpStatus'::text) = ANY (ARRAY['400'::jsonb, '404'::jsonb, '409'::jsonb])))) IS TRUE)\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"c\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_actor_user_id_fkey",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_actor_user_id_fkey",
+        "value": "{\"columns\":\"actor_user_id\",\"deferrable\":false,\"definition\":\"FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE RESTRICT\",\"deleteAction\":\"r\",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\"s\",\"noInherit\":true,\"referencedColumns\":\"id\",\"referencedSchema\":\"public\",\"referencedTable\":\"users\",\"type\":\"f\",\"updateAction\":\"a\",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_actor_user_id_not_null",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_actor_user_id_not_null",
+        "value": "{\"columns\":\"actor_user_id\",\"deferrable\":false,\"definition\":\"NOT NULL actor_user_id\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"n\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_created_at_not_null",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_created_at_not_null",
+        "value": "{\"columns\":\"created_at\",\"deferrable\":false,\"definition\":\"NOT NULL created_at\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"n\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_fingerprint_version_check",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_fingerprint_version_check",
+        "value": "{\"columns\":\"fingerprint_version\",\"deferrable\":false,\"definition\":\"CHECK (fingerprint_version = 1)\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"c\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_fingerprint_version_not_null",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_fingerprint_version_not_null",
+        "value": "{\"columns\":\"fingerprint_version\",\"deferrable\":false,\"definition\":\"NOT NULL fingerprint_version\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"n\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_movement_id_fkey",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_movement_id_fkey",
+        "value": "{\"columns\":\"movement_id\",\"deferrable\":false,\"definition\":\"FOREIGN KEY (movement_id) REFERENCES public.inventory_movements(id) ON DELETE RESTRICT\",\"deleteAction\":\"r\",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\"s\",\"noInherit\":true,\"referencedColumns\":\"id\",\"referencedSchema\":\"public\",\"referencedTable\":\"inventory_movements\",\"type\":\"f\",\"updateAction\":\"a\",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_movement_id_key",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_movement_id_key",
+        "value": "{\"columns\":\"movement_id\",\"deferrable\":false,\"definition\":\"UNIQUE (movement_id)\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":true,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"u\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_outcome_check",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_outcome_check",
+        "value": "{\"columns\":\"outcome\",\"deferrable\":false,\"definition\":\"CHECK (outcome = ANY (ARRAY['committed'::text, 'rejected'::text]))\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"c\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_outcome_not_null",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_outcome_not_null",
+        "value": "{\"columns\":\"outcome\",\"deferrable\":false,\"definition\":\"NOT NULL outcome\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"n\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_pkey",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_pkey",
+        "value": "{\"columns\":\"request_key\",\"deferrable\":false,\"definition\":\"PRIMARY KEY (request_key)\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":true,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"p\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_request_digest_check",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_request_digest_check",
+        "value": "{\"columns\":\"request_digest\",\"deferrable\":false,\"definition\":\"CHECK (request_digest ~ '^[a-f0-9]{64}$'::text)\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"c\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_request_digest_not_null",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_request_digest_not_null",
+        "value": "{\"columns\":\"request_digest\",\"deferrable\":false,\"definition\":\"NOT NULL request_digest\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"n\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_request_key_not_null",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_request_key_not_null",
+        "value": "{\"columns\":\"request_key\",\"deferrable\":false,\"definition\":\"NOT NULL request_key\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"n\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_result_snapshot_not_null",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_result_snapshot_not_null",
+        "value": "{\"columns\":\"result_snapshot\",\"deferrable\":false,\"definition\":\"NOT NULL result_snapshot\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"n\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_result_version_check",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_result_version_check",
+        "value": "{\"columns\":\"result_version\",\"deferrable\":false,\"definition\":\"CHECK (result_version = 1)\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"c\",\"updateAction\":\" \",\"validated\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_result_version_not_null",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_result_version_not_null",
+        "value": "{\"columns\":\"result_version\",\"deferrable\":false,\"definition\":\"NOT NULL result_version\",\"deleteAction\":\" \",\"inheritedCount\":0,\"initiallyDeferred\":false,\"local\":true,\"matchType\":\" \",\"noInherit\":false,\"referencedColumns\":\"\",\"referencedSchema\":\"\",\"referencedTable\":\"\",\"type\":\"n\",\"updateAction\":\" \",\"validated\":true}"
+      }
+    ],
+    "indexes": [
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_movement_id_key",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_movement_id_key",
+        "value": "{\"accessMethod\":\"btree\",\"collations\":\"\",\"constraint\":\"inventory_purchase_receipts_movement_id_key\",\"definition\":\"CREATE UNIQUE INDEX inventory_purchase_receipts_movement_id_key ON public.inventory_purchase_receipts USING btree (movement_id)\",\"keyAttributes\":1,\"live\":true,\"opclasses\":\"int4_ops\",\"predicate\":null,\"primary\":false,\"ready\":true,\"totalAttributes\":1,\"unique\":true,\"valid\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_pkey",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_pkey",
+        "value": "{\"accessMethod\":\"btree\",\"collations\":\"\",\"constraint\":\"inventory_purchase_receipts_pkey\",\"definition\":\"CREATE UNIQUE INDEX inventory_purchase_receipts_pkey ON public.inventory_purchase_receipts USING btree (request_key)\",\"keyAttributes\":1,\"live\":true,\"opclasses\":\"uuid_ops\",\"predicate\":null,\"primary\":true,\"ready\":true,\"totalAttributes\":1,\"unique\":true,\"valid\":true}"
+      }
+    ],
+    "triggers": [
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_immutable",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_immutable",
+        "value": "{\"constraint\":null,\"definition\":\"CREATE TRIGGER inventory_purchase_receipts_immutable BEFORE DELETE OR UPDATE ON public.inventory_purchase_receipts FOR EACH ROW EXECUTE FUNCTION public.aqlan_inventory_purchase_receipt_immutable()\",\"enabled\":\"O\",\"function\":\"public.aqlan_inventory_purchase_receipt_immutable()\",\"internal\":false}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_no_truncate",
+        "table": "inventory_purchase_receipts",
+        "name": "inventory_purchase_receipts_no_truncate",
+        "value": "{\"constraint\":null,\"definition\":\"CREATE TRIGGER inventory_purchase_receipts_no_truncate BEFORE TRUNCATE ON public.inventory_purchase_receipts FOR EACH STATEMENT EXECUTE FUNCTION public.aqlan_inventory_purchase_receipt_immutable()\",\"enabled\":\"O\",\"function\":\"public.aqlan_inventory_purchase_receipt_immutable()\",\"internal\":false}"
+      }
+    ],
+    "internalTriggers": [
+      {
+        "key": "inventory_movements:inventory_purchase_receipts_movement_id_fkey:pg_catalog.RI_FKey_noaction_upd():17",
+        "table": "inventory_movements",
+        "name": "$INTERNAL_TRIGGER",
+        "value": "{\"constraint\":\"inventory_purchase_receipts_movement_id_fkey\",\"definition\":\"CREATE CONSTRAINT TRIGGER \\\"$INTERNAL_TRIGGER\\\" AFTER UPDATE ON public.inventory_movements FROM public.inventory_purchase_receipts NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \\\"RI_FKey_noaction_upd\\\"()\",\"enabled\":\"O\",\"function\":\"pg_catalog.RI_FKey_noaction_upd()\",\"internal\":true}"
+      },
+      {
+        "key": "inventory_movements:inventory_purchase_receipts_movement_id_fkey:pg_catalog.RI_FKey_restrict_del():9",
+        "table": "inventory_movements",
+        "name": "$INTERNAL_TRIGGER",
+        "value": "{\"constraint\":\"inventory_purchase_receipts_movement_id_fkey\",\"definition\":\"CREATE CONSTRAINT TRIGGER \\\"$INTERNAL_TRIGGER\\\" AFTER DELETE ON public.inventory_movements FROM public.inventory_purchase_receipts NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \\\"RI_FKey_restrict_del\\\"()\",\"enabled\":\"O\",\"function\":\"pg_catalog.RI_FKey_restrict_del()\",\"internal\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_actor_user_id_fkey:pg_catalog.RI_FKey_check_ins():5",
+        "table": "inventory_purchase_receipts",
+        "name": "$INTERNAL_TRIGGER",
+        "value": "{\"constraint\":\"inventory_purchase_receipts_actor_user_id_fkey\",\"definition\":\"CREATE CONSTRAINT TRIGGER \\\"$INTERNAL_TRIGGER\\\" AFTER INSERT ON public.inventory_purchase_receipts FROM public.users NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \\\"RI_FKey_check_ins\\\"()\",\"enabled\":\"O\",\"function\":\"pg_catalog.RI_FKey_check_ins()\",\"internal\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_actor_user_id_fkey:pg_catalog.RI_FKey_check_upd():17",
+        "table": "inventory_purchase_receipts",
+        "name": "$INTERNAL_TRIGGER",
+        "value": "{\"constraint\":\"inventory_purchase_receipts_actor_user_id_fkey\",\"definition\":\"CREATE CONSTRAINT TRIGGER \\\"$INTERNAL_TRIGGER\\\" AFTER UPDATE ON public.inventory_purchase_receipts FROM public.users NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \\\"RI_FKey_check_upd\\\"()\",\"enabled\":\"O\",\"function\":\"pg_catalog.RI_FKey_check_upd()\",\"internal\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_movement_id_fkey:pg_catalog.RI_FKey_check_ins():5",
+        "table": "inventory_purchase_receipts",
+        "name": "$INTERNAL_TRIGGER",
+        "value": "{\"constraint\":\"inventory_purchase_receipts_movement_id_fkey\",\"definition\":\"CREATE CONSTRAINT TRIGGER \\\"$INTERNAL_TRIGGER\\\" AFTER INSERT ON public.inventory_purchase_receipts FROM public.inventory_movements NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \\\"RI_FKey_check_ins\\\"()\",\"enabled\":\"O\",\"function\":\"pg_catalog.RI_FKey_check_ins()\",\"internal\":true}"
+      },
+      {
+        "key": "inventory_purchase_receipts:inventory_purchase_receipts_movement_id_fkey:pg_catalog.RI_FKey_check_upd():17",
+        "table": "inventory_purchase_receipts",
+        "name": "$INTERNAL_TRIGGER",
+        "value": "{\"constraint\":\"inventory_purchase_receipts_movement_id_fkey\",\"definition\":\"CREATE CONSTRAINT TRIGGER \\\"$INTERNAL_TRIGGER\\\" AFTER UPDATE ON public.inventory_purchase_receipts FROM public.inventory_movements NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \\\"RI_FKey_check_upd\\\"()\",\"enabled\":\"O\",\"function\":\"pg_catalog.RI_FKey_check_upd()\",\"internal\":true}"
+      },
+      {
+        "key": "users:inventory_purchase_receipts_actor_user_id_fkey:pg_catalog.RI_FKey_noaction_upd():17",
+        "table": "users",
+        "name": "$INTERNAL_TRIGGER",
+        "value": "{\"constraint\":\"inventory_purchase_receipts_actor_user_id_fkey\",\"definition\":\"CREATE CONSTRAINT TRIGGER \\\"$INTERNAL_TRIGGER\\\" AFTER UPDATE ON public.users FROM public.inventory_purchase_receipts NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \\\"RI_FKey_noaction_upd\\\"()\",\"enabled\":\"O\",\"function\":\"pg_catalog.RI_FKey_noaction_upd()\",\"internal\":true}"
+      },
+      {
+        "key": "users:inventory_purchase_receipts_actor_user_id_fkey:pg_catalog.RI_FKey_restrict_del():9",
+        "table": "users",
+        "name": "$INTERNAL_TRIGGER",
+        "value": "{\"constraint\":\"inventory_purchase_receipts_actor_user_id_fkey\",\"definition\":\"CREATE CONSTRAINT TRIGGER \\\"$INTERNAL_TRIGGER\\\" AFTER DELETE ON public.users FROM public.inventory_purchase_receipts NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \\\"RI_FKey_restrict_del\\\"()\",\"enabled\":\"O\",\"function\":\"pg_catalog.RI_FKey_restrict_del()\",\"internal\":true}"
+      }
+    ],
+    "functions": [
+      {
+        "key": "aqlan_inventory_purchase_receipt_immutable()",
+        "name": "aqlan_inventory_purchase_receipt_immutable",
+        "value": "{\"body\":\"\\nBEGIN\\n  -- TRUNCATE already holds ACCESS EXCLUSIVE: an empty-table reset removes no\\n  -- keys, and no concurrent INSERT can race this final defensive check.\\n  IF TG_OP = 'TRUNCATE' AND NOT EXISTS (SELECT 1 FROM inventory_purchase_receipts) THEN RETURN NULL; END IF;\\n  RAISE EXCEPTION 'inventory purchase receipts are immutable';\\nEND;\\n\",\"configuration\":\"\",\"definition\":\"CREATE OR REPLACE FUNCTION public.aqlan_inventory_purchase_receipt_immutable()\\n RETURNS trigger\\n LANGUAGE plpgsql\\nAS $function$\\nBEGIN\\n  -- TRUNCATE already holds ACCESS EXCLUSIVE: an empty-table reset removes no\\n  -- keys, and no concurrent INSERT can race this final defensive check.\\n  IF TG_OP = 'TRUNCATE' AND NOT EXISTS (SELECT 1 FROM inventory_purchase_receipts) THEN RETURN NULL; END IF;\\n  RAISE EXCEPTION 'inventory purchase receipts are immutable';\\nEND;\\n$function$\\n\",\"language\":\"plpgsql\",\"parallelSafety\":\"u\",\"resultType\":\"trigger\",\"securityDefiner\":false,\"strict\":false,\"volatility\":\"v\"}"
+      }
+    ]
+  }
+}

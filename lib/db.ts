@@ -12172,21 +12172,27 @@ function settledOnPayableSql(e: string, p: string): string {
   END)`;
 }
 
+/** Optional report cutoff; parameter placeholders are bound by the caller. */
+export interface PayableSqlCutoff { timeZoneParam: `$${number}`; dateParam: `$${number}` }
+function payableCutoffSql(alias: string, cutoff?: PayableSqlCutoff): string {
+  return cutoff ? ` AND (${alias}.created_at AT TIME ZONE ${cutoff.timeZoneParam})::date <= ${cutoff.dateParam}::date` : "";
+}
+
 /**
  * (P0-2) مجموع ما سُدّد من التزامٍ بعملته: سنداته المرتبطة به مباشرةً + ما وُزّع
  * عليه من سندات التسوية المجمّعة (expense_payable_allocations). الإبطالات بالسالب.
  */
-export function payableSettledTotalSql(p: string): string {
-  return `(COALESCE((SELECT SUM(${settledOnPayableSql("se", p)}) FROM expenses se WHERE se.payable_id = ${p}.id), 0)
-    + COALESCE((SELECT SUM(sa.settled_minor) FROM expense_payable_allocations sa WHERE sa.payable_id = ${p}.id), 0))`;
+export function payableSettledTotalSql(p: string, cutoff?: PayableSqlCutoff): string {
+  return `(COALESCE((SELECT SUM(${settledOnPayableSql("se", p)}) FROM expenses se WHERE se.payable_id = ${p}.id${payableCutoffSql("se", cutoff)}), 0)
+    + COALESCE((SELECT SUM(sa.settled_minor) FROM expense_payable_allocations sa WHERE sa.payable_id = ${p}.id${payableCutoffSql("sa", cutoff)}), 0))`;
 }
 
 /**
  * (FIA-1) قيمة الالتزام الفعلية بعملته: مبلغه الأصلي + تصحيحاته الإلحاقية. التصحيحات للرصيد
  * الافتتاحي وحده (payable_adjustments) — والتزام التشغيل بلا تصحيحات فقيمته مبلغه.
  */
-export function payableAmountSql(p: string): string {
-  return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id), 0))`;
+export function payableAmountSql(p: string, cutoff?: PayableSqlCutoff): string {
+  return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id${payableCutoffSql("pa", cutoff)}), 0))`;
 }
 
 /** (FIA-1) مكافئ الالتزام الأساسي الفعلي: مكافئه المسجَّل + تصحيحاته بسعره الأصلي نفسه. */
@@ -12256,6 +12262,8 @@ async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBuc
 }
 
 export interface RecordExpenseInput {
+  /** Authenticated actor role for the mandatory standalone expense audit. */
+  actorRole?: string | null;
   /** Internal HR settlement context; HTTP callers never populate this field. */
   hrPayrollItemId?: number;
   category: ExpenseCategory;
@@ -12503,20 +12511,66 @@ export async function recordExpense(input: RecordExpenseInput): Promise<RecordEx
   await ensureSchema();
   const settingsRates = input.rates ?? ratesFromSettings(await getSettings());
   const client = await getPool().connect();
+  let discardClient = false;
+  const rollback = async () => {
+    try { await client.query("ROLLBACK"); } catch (error) { discardClient = true; throw error; }
+  };
   try {
     await client.query("BEGIN");
     const result = await recordExpenseInTx(client, input, settingsRates);
     if (result.id === null) {
-      await client.query("ROLLBACK");
+      await rollback();
       return { expense: null, reason: result.reason, quote: result.quote };
     }
+    // Read the receipt and insert required evidence before committing. A failed
+    // audit/read must not leave cash out with missing evidence or a false failure.
+    const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [result.id]);
+    if (!rows[0]) throw new Error("Expense receipt missing inside its transaction");
+    const expense = toExpense(rows[0]);
+    const quote = result.quote;
+    const context = { entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+      actor: input.createdBy, actorRole: input.actorRole ?? null };
+    await insertAuditRow(client, {
+      ...context, action: "expense.create",
+      details: {
+        البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
+        سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
+        الجهة: expense.partyId ?? expense.payeeText,
+        ...(expense.payableId !== null ? {
+          الالتزام: expense.payableId, عملة_الفاتورة: expense.payableCurrency,
+          قيمة_الفاتورة: expense.payableAmountMinor, سعر_الفاتورة: expense.payableExchangeRate,
+          المخصوم_من_الفاتورة: expense.payableSettledMinor,
+          المتبقي_بعد: quote?.payable?.remainingAfterMinor,
+        } : {}),
+      },
+    });
+    if (expense.rateOverrideReason) {
+      await insertAuditRow(client, {
+        ...context, action: "expense.rate_override",
+        details: {
+          العملة: expense.currency, سعر_الإعدادات: rateOf(expense.currency, settingsRates),
+          السعر_المستعمل: expense.exchangeRate, عملة_الفاتورة: expense.payableCurrency,
+          سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
+          سعر_الفاتورة_المستعمل: expense.payableExchangeRate, السبب: expense.rateOverrideReason,
+        },
+      });
+    }
+    if (quote?.party?.prepayment) {
+      await insertAuditRow(client, {
+        ...context, action: "expense.prepayment",
+        details: {
+          الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
+          المستحق_قبل: quote.party.outstandingBeforeMinor, السبب: input.prepaymentReason,
+        },
+      });
+    }
     await client.query("COMMIT");
-    return { expense: await getExpense(result.id), reason: null, quote: result.quote };
+    return { expense, reason: null, quote };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await rollback().catch(() => {});
     throw error;
   } finally {
-    client.release();
+    client.release(discardClient || undefined);
   }
 }
 
@@ -13054,10 +13108,24 @@ export async function commissionReport(
       patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string; issued_at: Date; issued_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
-      case_id: number | null; plan_id: number | null;
+      case_id: number | null; plan_id: number | null; allocation_origin_id: number | null;
     }>(
       `SELECT i.patient_id,
               i.id AS invoice_id,
+              /* Follow persisted same-patient/currency edges, not MIN(id) or a note.
+                 A currency reissue starts a new allocation identity; its policy time is separate. */
+              (WITH RECURSIVE lineage(id) AS (
+                SELECT i.id UNION
+                SELECT original.id FROM invoice_corrections c
+                  JOIN lineage l ON c.corrected_invoice_id=l.id
+                  JOIN invoices original ON original.id=c.original_invoice_id
+                 WHERE c.patient_id=i.patient_id AND original.patient_id=i.patient_id
+                   AND original.base_currency=i.base_currency AND c.currency=i.base_currency
+                   AND COALESCE(c.original_currency,c.currency)=i.base_currency
+              ) SELECT l.id FROM lineage l WHERE NOT EXISTS (
+                SELECT 1 FROM invoice_corrections c WHERE c.corrected_invoice_id=l.id
+                  AND c.original_invoice_id IN(SELECT id FROM lineage)
+              )) AS allocation_origin_id,
               GREATEST(0, i.total_minor - i.discount_minor) AS net_minor,
               i.base_currency,
               i.created_at AS issued_at, to_char(i.created_at, 'US') AS issued_at_us,
@@ -13123,12 +13191,16 @@ export async function commissionReport(
   const clinicDateOfInvoice = new Map<number, string>();
   const allocationTimeOfInvoice = new Map<number, string>();
   for (const row of invoiceRows) {
+    if (typeof row.allocation_origin_id !== "number" || !Number.isSafeInteger(row.allocation_origin_id) || row.allocation_origin_id <= 0) {
+      throw new Error("تعذّر إثبات أصل ترتيب عمولة الفاتورة من سجل التصحيح.");
+    }
     // Policy time may remain the original YER issue; allocation starts at the actual issue.
     allocationTimeOfInvoice.set(row.invoice_id, commissionTimestampIso(row.issued_at, row.issued_at_us));
     clinicDateOfInvoice.set(row.invoice_id, dateText(row.clinic_date));
     const patientInvoices = byPatient.get(row.patient_id) ?? new Map<number, CommissionInvoice>();
     const invoice = patientInvoices.get(row.invoice_id) ?? {
       id: row.invoice_id,
+      allocationOriginId: row.allocation_origin_id,
       netMinor: toMinor(row.net_minor),
       currency: requireCurrency(row.base_currency, "فاتورة", row.invoice_id),
       createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
@@ -13482,7 +13554,10 @@ export async function commissionReport(
     for (const currency of CURRENCIES) {
       const ordered = [...invoices.values()]
         .filter((invoice) => invoice.currency === currency)
-        .sort((a, b) => allocationTimeOfInvoice.get(a.id)!.localeCompare(allocationTimeOfInvoice.get(b.id)!));
+        // Retain the persisted source's position through same-currency corrections.
+        // Explicit allocatedInvoiceId reservations below still bypass FIFO order.
+        .sort((a, b) => allocationTimeOfInvoice.get(a.id)!.localeCompare(allocationTimeOfInvoice.get(b.id)!)
+          || (a.allocationOriginId ?? a.id) - (b.allocationOriginId ?? b.id) || a.id - b.id);
       for (const invoice of ordered) {
         const net = Math.max(0, invoice.netMinor);
         if (net > 0) capacitiesByCurrency.get(currency)!.push({ invoiceId: invoice.id, remaining: net });
@@ -16900,7 +16975,7 @@ export const ORTHO_CASE_FUNDED_SQL =
     WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled')`;
 
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
-async function orthoAdjustmentBillingClass(
+export async function orthoAdjustmentBillingClass(
   db: DbClient | DbPool, caseId: number, patientId: number,
 ): Promise<BillingClassification> {
   const { rows: [evidence] } = await db.query<{

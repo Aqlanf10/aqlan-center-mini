@@ -9,6 +9,9 @@ import { requireCurrency } from "./money";
 import { projectTreatmentFinancialReferences, type FinancialReceiptEvidence, type FinancialOpeningEvidence } from "./treatment-financial-context";
 
 function minor(value: string | number): number {
+  if ((typeof value !== "number" && typeof value !== "string") || typeof value === "string" && !/^-?\d+$/.test(value)) {
+    throw new Error("Missing or malformed financial amount");
+  }
   const result = Number(value);
   if (!Number.isSafeInteger(result)) throw new Error("Unsafe financial amount");
   return result;
@@ -46,10 +49,10 @@ export async function listTreatmentFinancialReferences(patientId: number) {
          EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id) AS has_installments
        FROM treatment_plans t WHERE t.patient_id = $1 ORDER BY t.id`, [patientId]);
     const { rows: items } = await client.query<{
-      id: number; plan_id: number; patient_id: number; case_id: number | null; ortho_case_id: number | null;
+      id: number; plan_id: number; patient_id: number; case_id: number | null; owned_case_id: number | null; ortho_case_id: number | null;
       origin: string | null; origin_invoice_id: number | null; billed_invoice_id: number | null;
       billing_status: string; financial_review: boolean; invoice_lineage: boolean; legacy_lineage: boolean; legacy_context: unknown;
-    }>(`SELECT i.id, i.plan_id, t.patient_id, i.case_id, c.ortho_case_id, i.origin, i.origin_invoice_id,
+    }>(`SELECT i.id, i.plan_id, t.patient_id, i.case_id, c.id AS owned_case_id, c.ortho_case_id, i.origin, i.origin_invoice_id,
          i.billed_invoice_id, i.billing_status, ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review,
          ${PLAN_ITEM_INVOICE_LINEAGE_SQL} AS invoice_lineage, ${PLAN_ITEM_LEGACY_LINEAGE_SQL} AS legacy_lineage,
          ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context
@@ -76,11 +79,30 @@ export async function listTreatmentFinancialReferences(patientId: number) {
        FROM payments WHERE patient_id = $1 ORDER BY id`, [patientId]);
     const { rows: agreements } = await client.query<{
       id: number; patient_id: number; plan_item_id: number; case_id: number | null; currency: string;
-      agreed_minor: string; previously_paid_minor: string; remaining_minor: string; historical_as_of: string;
+      document_id: number | null; document_line: number | null;
+      agreed_minor: string; previously_paid_minor: string | null; remaining_minor: string | null; historical_as_of: string;
       opening_history_id: number | null; opening_effect: string; status: string;
-    }>(`SELECT id, patient_id, plan_item_id, case_id, currency, agreed_minor::text, previously_paid_minor::text,
+    }>(`SELECT id, patient_id, plan_item_id, case_id, currency, document_id, document_line, agreed_minor::text, previously_paid_minor::text,
          remaining_minor::text, historical_as_of::text, opening_history_id, opening_effect, status
        FROM legacy_treatment_agreements WHERE patient_id = $1 ORDER BY id`, [patientId]);
+    for (const agreement of agreements) {
+      if (agreement.case_id !== null && !items.some((item) => item.id === agreement.plan_item_id
+        && item.case_id === agreement.case_id && item.owned_case_id === agreement.case_id)) {
+        throw new Error("Historical clinical ownership needs review");
+      }
+    }
+    // LEFT JOIN preserves a document with no revision so the projection fails closed, not as zero debt.
+    const { rows: historicalDocuments } = await client.query<{
+      id: number; patient_id: number; currency: string; line_count: number; revision_id: number | null; version: number;
+      total_minor: string; discount_minor: string; previously_paid_minor: string; remaining_minor: string;
+      historical_as_of: string; lines: unknown;
+    }>(`SELECT d.id, d.patient_id, d.currency, d.line_count, r.id AS revision_id, r.version,
+         r.total_minor::text, r.discount_minor::text, r.previously_paid_minor::text, r.remaining_minor::text,
+         r.historical_as_of::text, r.lines
+       FROM legacy_treatment_documents d
+       LEFT JOIN LATERAL (SELECT * FROM legacy_treatment_document_revisions
+         WHERE document_id = d.id ORDER BY version DESC LIMIT 1) r ON TRUE
+       WHERE d.patient_id = $1 ORDER BY d.id`, [patientId]);
     const { rows: currencies } = await client.query<{ currency: string }>(
       "SELECT currency FROM patient_opening_balances WHERE patient_id = $1 ORDER BY currency", [patientId]);
     const openings: FinancialOpeningEvidence[] = [];
@@ -113,10 +135,17 @@ export async function listTreatmentFinancialReferences(patientId: number) {
         sourceType: row.source_type, sourceId: row.source_id === null ? null : minor(row.source_id), totalMinor: minor(row.total_minor) })),
       receipts: await attachCurrencyReclassifications(client,normalizedReceipts),
       legacyAgreements: agreements.map((row) => ({ id: row.id, patientId: row.patient_id, planItemId: row.plan_item_id,
-        clinicalCaseId: row.case_id, currency: requireCurrency(row.currency, "اتفاق تاريخي", row.id),
-        agreedMinor: minor(row.agreed_minor), previouslyPaidMinor: minor(row.previously_paid_minor),
-        remainingAtRegistrationMinor: minor(row.remaining_minor), historicalAsOf: row.historical_as_of,
+        clinicalCaseId: row.case_id, documentId: row.document_id, documentLine: row.document_line,
+        currency: requireCurrency(row.currency, "اتفاق تاريخي", row.id),
+        agreedMinor: minor(row.agreed_minor), previouslyPaidMinor: row.previously_paid_minor === null ? null : minor(row.previously_paid_minor),
+        remainingAtRegistrationMinor: row.remaining_minor === null ? null : minor(row.remaining_minor), historicalAsOf: row.historical_as_of,
         openingHistoryId: row.opening_history_id, openingEffect: row.opening_effect, status: agreementStatus(row.status) })),
+      historicalDocuments: historicalDocuments.map((row) => ({ id: row.id, patientId: row.patient_id,
+        currency: requireCurrency(row.currency, "مستند تاريخي", row.id), lineCount: row.line_count,
+        revision: row.revision_id === null ? null : { id: row.revision_id, version: row.version,
+          totalMinor: minor(row.total_minor), discountMinor: minor(row.discount_minor),
+          previouslyPaidMinor: minor(row.previously_paid_minor), remainingMinor: minor(row.remaining_minor),
+          historicalAsOf: row.historical_as_of, lines: row.lines } })),
       openings,
     });
     await client.query("COMMIT");

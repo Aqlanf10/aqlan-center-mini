@@ -1,0 +1,15 @@
+(node:11) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[BABEL] Note: The code generator has deoptimised the styling of /workspace/scratch/cf319c8268ad/cash-commission-integrity/lib/db.ts as it exceeds the max of 500KB.
+
+/workspace/scratch/cf319c8268ad/cash-commission-integrity/lib/db.ts
+     34:21  warning  'PoolClient' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+     42:8   warning  'fs' is defined but never used. Allowed unused vars must match /^_/u                     @typescript-eslint/no-unused-vars
+     43:8   warning  'path' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+    121:35  warning  'isCephMeasurementCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  10724:10  warning  'isUniqueViolation' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  16611:26  warning  'normalizeBillingRule' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  16611:48  warning  'normalizeSessionCount' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  16612:38  warning  'suggestVisitMinutes' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+✖ 8 problems (0 errors, 8 warnings)

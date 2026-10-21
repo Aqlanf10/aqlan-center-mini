@@ -21,7 +21,7 @@ import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence"
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, computeDebtRows, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { payableAmountSql, payableSettledTotalSql, PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, computeDebtRows, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CHAIR_EVENT_ROW_CAP, REFERRAL_HISTORY_ROW_CAP, loadChairFlow, loadInternalReferrals } from "./reports-ops";
 import { REFERRAL_SPECIALTY_LABEL, WORKFLOW_STATE_LABEL, type ReferralSpecialty, type WorkflowState } from "./referrals";
 import { CATEGORY_LABEL } from "./services-catalog";
@@ -1731,16 +1731,17 @@ function monthlyReport(ctx: ReportContext): ReportResult {
     countKpi("patients", "إجمالي المرضى", summary.patients),
     countKpi("new", "مرضى جدد", summary.newPatients, "good"),
     countKpi("visits", "الزيارات", summary.visits),
-    ...moneyKpis("invoiced", "قيمة الخدمات", summary.invoicedByCurrency),
-    ...moneyKpis("collected", "التحصيل", summary.collectedByCurrency, "good"),
+    ...moneyKpis("invoiced", "صافي الفواتير بعد الخصم", summary.invoicedByCurrency),
+    ...moneyKpis("collected", "التحصيل بعملة التسوية", summary.collectedByCurrency, "good"),
     ...moneyKpis("newDebt", "مديونية جديدة (صافي)", summary.newDebtByCurrency, "warn"),
     ...moneyKpis("oldDebt", "تحصيل ديون قديمة", summary.oldDebtByCurrency, "info"),
-    moneyKpi("expenses", "المصروفات", summary.expensesMinor, base, "bad"),
+    moneyKpi("expenses", "سندات الصرف (المكافئ الأساسي)", summary.expensesMinor, base, "bad",
+      "صافي السندات وعكسها حسب تاريخ التسجيل، بالقيمة الأساسية المحفوظة"),
     ...moneyKpis("outstanding", "المستحقات بنهاية الفترة", summary.outstandingEnd, "warn"),
-    // (P-01/D-1) الصافي بالأساس وحده: المصروف بعملة الأساس فلا يُطرح من فواتير
-    // عملةٍ أخرى — ذلك طرحٌ عابرٌ للعملات محظور.
-    moneyKpi("net", "صافي الإيراد (الأساس)", summary.invoicedByCurrency[base] - summary.expensesMinor, base, "info",
-      "قيمة الخدمات المسجلة بالأساس ناقص المصروفات — أساس الاستحقاق لا الصندوق"),
+    // Historical key and arithmetic retained for consumers; this mixed-source
+    // difference is neither accrual profit nor net cash flow.
+    moneyKpi("net", "فرق الفواتير وسندات الصرف (الأساس)", summary.invoicedByCurrency[base] - summary.expensesMinor, base, "info",
+      "صافي الفواتير بالعملة الأساسية ناقص مكافئ سندات الصرف؛ ليس صافي ربح أو تدفق نقدي"),
   ];
 
   let comparison: ReportResult["comparison"];
@@ -1767,9 +1768,9 @@ function monthlyReport(ctx: ReportContext): ReportResult {
     comparison = {
       title: compare.label,
       entries: [
-        ...entry("التحصيل", summary.collectedByCurrency, prev.collectedByCurrency),
-        ...entry("قيمة الخدمات", summary.invoicedByCurrency, prev.invoicedByCurrency),
-        ...entry("المصروفات", { YER: summary.expensesMinor, SAR: 0, USD: 0 }, { YER: prev.expensesMinor, SAR: 0, USD: 0 }),
+        ...entry("التحصيل بعملة التسوية", summary.collectedByCurrency, prev.collectedByCurrency),
+        ...entry("صافي الفواتير بعد الخصم", summary.invoicedByCurrency, prev.invoicedByCurrency),
+        ...entry("سندات الصرف (المكافئ الأساسي)", { YER: summary.expensesMinor, SAR: 0, USD: 0 }, { YER: prev.expensesMinor, SAR: 0, USD: 0 }),
         ...entry("المستحقات", summary.outstandingEnd, prev.outstandingEnd),
       ],
     };
@@ -1797,7 +1798,10 @@ function monthlyReport(ctx: ReportContext): ReportResult {
     })),
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "«صافي الإيراد» على أساس الاستحقاق: الإيراد من الفواتير بعملتها، والمصروف بالأساس عند نشوئه.",
+      "الفرق مؤشر مختلط المصادر، وليس صافي ربح على أساس الاستحقاق أو صافي تدفق نقدي؛ مستحقات الموردين غير المدفوعة لا تدخل فيه.",
+      `تُحدّد الفترة بتواريخ التسجيل في منطقة العيادة الزمنية (${CLINIC_TIME_ZONE}): تاريخ الفاتورة للفواتير، وتاريخ الدفعة أو الاسترداد للتحصيل، وتاريخ سند الصرف للصرف؛ وليس تاريخ استحقاق المورد.`,
+      "الفواتير بعد الخصم بعملة الفاتورة؛ التحصيل هو الدفعات ناقص الاستردادات بعملة التسوية وبالدليل المحفوظ، وليس بالضرورة عملة النقد المقبوض. الاسترداد يخفض التحصيل ولا يُطرح مرة أخرى من الفواتير أو يُضاف للصرف.",
+      `الفرق يستخدم فواتير ${base} وحدها ومكافئ سندات الصرف المحفوظ بعملة ${base}؛ لا يضم فواتير العملات الأخرى ولا يعيد تحويلها بسعر اليوم.`,
       "أكثر الخدمات مرتَّب داخل كل عملة — الخدمة نفسها بعملتين سطران بعملتيهما.",
     ],
   };
@@ -4652,13 +4656,9 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
     settled_minor: string; created_date: string;
   }>(
     `SELECT b.id, b.party_id, p.name AS party_name, p.kind AS party_kind,
-            b.description, b.due_date::text, b.currency, b.amount_minor::text,
-            (COALESCE((SELECT SUM(e.payable_settled_minor) FROM expenses e
-                        WHERE e.payable_id = b.id
-                          AND (e.created_at AT TIME ZONE $1)::date <= $2::date), 0)
-             + COALESCE((SELECT SUM(a.settled_minor) FROM expense_payable_allocations a
-                          WHERE a.payable_id = b.id
-                            AND (a.created_at AT TIME ZONE $1)::date <= $2::date), 0))::text AS settled_minor,
+            b.description, b.due_date::text, b.currency,
+            ${payableAmountSql("b", { timeZoneParam: "$1", dateParam: "$2" })}::text AS amount_minor,
+            ${payableSettledTotalSql("b", { timeZoneParam: "$1", dateParam: "$2" })}::text AS settled_minor,
             (b.created_at AT TIME ZONE $1)::date::text AS created_date
        FROM payables b
        JOIN parties p ON p.id = b.party_id
@@ -4717,7 +4717,8 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
     })),
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "المتبقي = أصل الالتزام − كل تسوياته حتى نهاية الفترة، بما فيها القيود العكسية.",
+      "المتبقي = أصل الالتزام وتصحيحاته المسجّلة − تسوياته حتى نهاية الفترة، بما فيها القيود العكسية.",
+      "هذا تقرير الالتزامات المفتوحة، وليس صافي كشف الجهة: لا يطرح الدفعات غير الموزّعة أو الأرصدة المقدّمة.",
       "الموردون والمختبرات يظهرون هنا؛ مستحقات الأطباء لها محرك العمولات المستقل.",
     ],
   };

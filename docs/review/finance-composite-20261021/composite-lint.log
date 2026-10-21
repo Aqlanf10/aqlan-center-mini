@@ -1,0 +1,26 @@
+[BABEL] Note: The code generator has deoptimised the styling of /workspace/finance-composed-acceptance/lib/db.ts as it exceeds the max of 500KB.
+
+/workspace/finance-composed-acceptance/components/PatientOrtho.tsx
+   302:51  warning  React Hook useMemo has unnecessary dependencies: 'authority', 'caseId', and 'patientId'. Either exclude them or remove the dependency array  react-hooks/exhaustive-deps
+   305:48  warning  React Hook useMemo has unnecessary dependencies: 'draft' and 'owner'. Either exclude them or remove the dependency array                     react-hooks/exhaustive-deps
+   394:44  warning  React Hook useMemo has unnecessary dependencies: 'authority' and 'patientId'. Either exclude them or remove the dependency array             react-hooks/exhaustive-deps
+  1253:54  warning  React Hook useMemo has unnecessary dependencies: 'booking' and 'form.draft'. Either exclude them or remove the dependency array              react-hooks/exhaustive-deps
+
+/workspace/finance-composed-acceptance/lib/db.ts
+     34:21  warning  'PoolClient' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+     42:8   warning  'fs' is defined but never used. Allowed unused vars must match /^_/u                     @typescript-eslint/no-unused-vars
+     43:8   warning  'path' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+    121:35  warning  'isCephMeasurementCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  10724:10  warning  'isUniqueViolation' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  16642:26  warning  'normalizeBillingRule' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  16642:48  warning  'normalizeSessionCount' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  16643:38  warning  'suggestVisitMinutes' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+/workspace/finance-composed-acceptance/lib/reports.ts
+  30:52  warning  'ReportColumn' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/finance-composed-acceptance/lib/restore/staging.ts
+  1:38  warning  'rm' is defined but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+  9:38  warning  'ValidationOk' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+✖ 15 problems (0 errors, 15 warnings)

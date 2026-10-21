@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import ts from "typescript";
 import { AUDIT_EXEMPT } from "@/lib/audit-coverage";
 
 const retired = vi.hoisted(() => ({ session: vi.fn(), user: vi.fn(), owns: vi.fn(), write: vi.fn() }));
@@ -55,7 +56,32 @@ function splitFunctions(source: string): Map<string, string> {
 }
 
 function callsIn(body: string): Set<string> {
-  return new Set([...body.matchAll(CALL)].map((match) => match[1]));
+  // recordExpense has a read-only quote branch that returns before its audit/write
+  // path. Do not count that edge as proof of auditing. Only a literal, unambiguous
+  // quoteOnly:true qualifies; dynamic options remain conservatively audited.
+  const source = ts.createSourceFile("audit-scan.ts", body, ts.ScriptTarget.Latest, true);
+  const quoteCalls = new Set<number>();
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
+      && node.expression.text === "recordExpense" && node.arguments.length === 1) {
+      const options = node.arguments[0];
+      if (ts.isObjectLiteralExpression(options) && options.properties.every(property =>
+        ts.isPropertyAssignment(property)
+        && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)))) {
+        const flags = options.properties.filter(property => ts.isPropertyAssignment(property)
+          && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+          && property.name.text === "quoteOnly");
+        if (flags.length === 1 && ts.isPropertyAssignment(flags[0])
+          && flags[0].initializer.kind === ts.SyntaxKind.TrueKeyword) {
+          quoteCalls.add(node.expression.getStart(source));
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return new Set([...body.matchAll(CALL)]
+    .filter(match => !quoteCalls.has(match.index!)).map(match => match[1]));
 }
 
 /** دوال lib التي تكتب سطر تدقيق — مباشرةً أو عبر دالةٍ تكتبه (نقطة ثابتة). */
@@ -120,6 +146,28 @@ const handlers = walk(join(ROOT, "app", "api"), (name) => name === "route.ts").f
 });
 
 describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
+  it("distinguishes the read-only expense quote from mandatory create auditing", () => {
+    expect(audited.has("recordExpense")).toBe(true);
+    expect(handlers.find(handler => handler.key === "POST /api/expenses")?.audits).toBe(true);
+    expect(handlers.find(handler => handler.key === "POST /api/expenses/quote")?.audits).toBe(false);
+    expect(AUDIT_EXEMPT).toHaveProperty("POST /api/expenses/quote");
+    expect(AUDIT_EXEMPT).not.toHaveProperty("POST /api/expenses");
+  });
+
+  it("only omits an unambiguous literal quote call, not writes or uncertain options", () => {
+    expect(callsIn('recordExpense({ amountMinor: value.amountMinor, quoteOnly: true });')
+      .has("recordExpense")).toBe(false);
+    for (const options of [
+      '{}', '{ quoteOnly: false }', '{ quoteOnly: value }', 'options',
+      '{ quoteOnly: true, ...options }', '{ ...options, quoteOnly: true }',
+      '{ quoteOnly: true, quoteOnly: false }', '{ [field]: false, quoteOnly: true }',
+    ]) expect(callsIn(`recordExpense(${options});`).has("recordExpense")).toBe(true);
+    expect(callsIn('recordExpense({ quoteOnly: true }); recordExpense({ quoteOnly: false });')
+      .has("recordExpense")).toBe(true);
+    expect(callsIn('recordExpense({ quoteOnly: true, amountMinor: recordAudit() });')
+      .has("recordAudit")).toBe(true);
+  });
+
   it("الحارس يرى أفعال الكتابة فعلًا (لا قائمة فارغة تمرّ صامتة)", () => {
     expect(handlers.length).toBeGreaterThan(150);
     expect(audited.has("recordPlanInstallment")).toBe(true);

@@ -6,6 +6,7 @@ import { OrthoPackageLink } from "../components/OrthoPackageLink";
 import type { SessionInfo } from "../components/SessionProvider";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
 import { legacyOnboarding } from "../lib/legacy-onboarding";
+import TreatmentFinancialContext from "../components/TreatmentFinancialContext";
 
 type Owner = {
   values: unknown[]; cursor: number; live: boolean;
@@ -210,7 +211,7 @@ function unknown(tree: ReactNode = checklist()) {
 async function drain() { for (let index = 0; index < 40; index += 1) await Promise.resolve(); }
 async function flush() { for (let pass = 0; pass < 4; pass += 1) { await drain(); render(); } }
 async function mount() { render(); await flush(); }
-const classifierCalls = () => fetchMock.mock.calls.filter(([url]) => url.endsWith("/legacy-onboarding"));
+const classifierCalls = () => fetchMock.mock.calls.filter(([url]) => url.includes("/legacy-onboarding?"));
 const writes = () => fetchMock.mock.calls.filter(([, init]) => !!init?.method);
 
 beforeEach(() => {
@@ -224,7 +225,7 @@ beforeEach(() => {
   fetchMock.mockImplementation(async (url, init) => {
     if (url === "/api/ortho/41" && init?.method === "PATCH") return patch(JSON.parse(String(init.body)));
     if (init?.method) throw new Error(`Unexpected synthetic mutation: ${url}`);
-    const legacy = url.match(/^\/api\/patients\/(\d+)\/legacy-onboarding$/);
+    const legacy = url.match(/^\/api\/patients\/(\d+)\/legacy-onboarding\?caseId=\d+$/);
     if (legacy) return classifierRead(Number(legacy[1]));
     if (url.startsWith("/api/ortho?patientId=")) return casesRead(Number(url.split("=")[1]));
     if (url.startsWith("/api/plans?patientId=")) return plansRead(Number(url.split("=")[1]));
@@ -236,12 +237,44 @@ beforeEach(() => {
 afterEach(() => { unmount(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("actual orthodontic parent, checklist and package composition", () => {
+  it("generic new-case entry displays the exact invoice source without requiring an old installment plan", async () => {
+    caseRow = fixture({ planId: null, baselineKind: null, legacyFinancialMode: null });
+    classifierRead = async () => response({ onboarding: { caseId: 41, ...legacyOnboarding({
+      legacy: false, financialMode: null, openingCurrencies: [], activeArrangementCurrencies: [], fundedPlan: false,
+      adjustmentClass: "OUTSIDE_CONTRACT", financialReference: { state: "linked", clinicalCaseIds: [71], hasRecordedSchedule: false,
+        sources: [{ kind: "invoice", sourceId: 81, planId: 51, planItemId: 61, clinicalCaseId: 71, current: true }] },
+    }) } });
+    await mount();
+    expect(text(checklist())).toContain("✓ مرجع مالي موثّق لهذه الحالة");
+    expect(text(checklist())).toContain("فاتورة #81"); expect(text(checklist())).toContain(OUTSIDE);
+    expect(text(render())).not.toContain("لا اتفاق مالي مربوط بالحالة");
+    expect(elements(section(PACKAGE_LABEL)).some(node => node.type === "select")).toBe(false);
+    const cards = elements(parentTree).filter(node => node.type === TreatmentFinancialContext);
+    expect(cards).toHaveLength(1); expect(cards[0].props).toMatchObject({ patientId: 19, orthoCaseId: 41, canView: false });
+    expect(writes()).toEqual([]);
+  });
+
+  it("generic historical entry uses its approved source without a second plan or invoice", async () => {
+    caseRow = fixture({ planId: null }); hooks.session = { username: "synthetic-admin", role: "admin" };
+    classifierRead = async () => response({ onboarding: { caseId: 41, ...legacyOnboarding({
+      legacy: true, financialMode: "installments", openingCurrencies: ["SAR"], activeArrangementCurrencies: [], fundedPlan: false,
+      adjustmentClass: "LEGACY_INCLUDED", financialReference: { state: "linked", clinicalCaseIds: [71], hasRecordedSchedule: true,
+        sources: [{ kind: "historical_agreement", sourceId: 81, planId: 51, planItemId: 61, clinicalCaseId: 71, current: true }] },
+    }) } });
+    await mount(); expect(text(checklist())).toContain("اتفاق سابق #81");
+    expect(text(checklist())).toContain("✓ تهيئة الحالة السابقة مكتملة");
+    expect(text(checklist())).toContain("الشدّة اليوم مشمولة بالعلاج السابق");
+    expect(text(checklist())).not.toMatch(/اربط خطة الأقساط|أنشئها|خطة أقساط مربوطة بالحالة/);
+    const cards = elements(parentTree).filter(node => node.type === TreatmentFinancialContext);
+    expect(cards).toHaveLength(1); expect(cards[0].props).toMatchObject({ patientId: 19, orthoCaseId: 41, canView: true });
+    expect(writes()).toEqual([]);
+  });
   it("keeps the classifier unknown until its own current read succeeds", async () => {
     const pending = deferred<MockResponse>(); classifierRead = () => pending.promise;
     await mount(); expect(checklist()).toBeDefined(); unknown();
-    expect(text(section(PACKAGE_LABEL))).toContain("✓ باقة تقويم");
+    expect(text(section(PACKAGE_LABEL))).toContain("✓ رابط اتفاق أقساط قديم");
     expect(classifierCalls()).toHaveLength(1);
-    expect(classifierCalls()[0]).toEqual(["/api/patients/19/legacy-onboarding", {
+    expect(classifierCalls()[0]).toEqual(["/api/patients/19/legacy-onboarding?caseId=41", {
       cache: "no-store", signal: expect.any(AbortSignal),
     }]);
     expect(checklistProps()).toMatchObject({ patientId: 19, caseId: 41, planId: 51 });
@@ -250,7 +283,7 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     expect(writes()).toEqual([]);
   });
 
-  it.each([51, null])("refreshes the same case after a real %s agreement transition", async (initialPlan) => {
+  it.each([51])("refreshes the same case after a real %s agreement transition", async (initialPlan) => {
     caseRow = fixture({ planId: initialPlan }); await mount();
     expect(text(checklist())).toContain(initialPlan === null ? OUTSIDE : INCLUDED);
     const pending = deferred<MockResponse>(); classifierRead = () => pending.promise;
@@ -263,10 +296,10 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     pending.resolve(response(classification(next !== null))); await flush();
     expect(text(checklist())).toContain(next === null ? OUTSIDE : INCLUDED);
     expect(text(checklist())).not.toContain(next === null ? INCLUDED : OUTSIDE);
-    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا اتفاق مالي مربوط بالحالة" : "✓ باقة تقويم");
+    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا يوجد رابط خطة أقساط قديم" : "✓ رابط اتفاق أقساط قديم");
   });
 
-  it.each([51, null])("withdraws parent references after a confirmed plan transition while the case reload stalls/fails, then restores the canonical classifier (%s)", async (initialPlan) => {
+  it.each([51])("withdraws parent references after a confirmed plan transition while the case reload stalls/fails, then restores the canonical classifier (%s)", async (initialPlan) => {
     caseRow = fixture({ planId: initialPlan }); await mount();
     const before = checklistProps(); const casesPending = deferred<MockResponse>(); const classifierPending = deferred<MockResponse>();
     casesRead = () => casesPending.promise; classifierRead = () => classifierPending.promise;
@@ -287,7 +320,7 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     classifierPending.resolve(response(classification(next !== null))); await flush();
     expect(text(checklist())).toContain(next === null ? OUTSIDE : INCLUDED);
     expect(text(checklist())).not.toContain(next === null ? INCLUDED : OUTSIDE);
-    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا اتفاق مالي مربوط بالحالة" : "✓ باقة تقويم");
+    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا يوجد رابط خطة أقساط قديم" : "✓ رابط اتفاق أقساط قديم");
     expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ planId: next }) }]]);
   });
@@ -303,7 +336,7 @@ describe("actual orthodontic parent, checklist and package composition", () => {
   it("preserves canonical INCLUDED when only the independent generic plans read fails", async () => {
     plansRead = async () => response({}, 503); await mount();
     expect(text(section(PACKAGE_LABEL))).toContain("تعذّر تحميل اتفاق التقويم");
-    expect(text(section(PACKAGE_LABEL))).not.toContain("✓ باقة تقويم");
+    expect(text(section(PACKAGE_LABEL))).not.toContain("✓ رابط اتفاق أقساط قديم");
     expect(text(checklist())).toContain(INCLUDED); expect(text(checklist())).toContain("✓ تهيئة الحالة السابقة مكتملة");
     expect(writes()).toEqual([]);
   });
@@ -335,7 +368,7 @@ describe("classifier failures and bounded retry", () => {
     const before = fetchMock.mock.calls.length;
     classifierRead = async () => response(classification(false)); retryChecklist(); await flush();
     expect(fetchMock.mock.calls.slice(before).map(([url, init]) => [url, init?.method ?? "GET"]))
-      .toEqual([["/api/patients/19/legacy-onboarding", "GET"]]);
+      .toEqual([["/api/patients/19/legacy-onboarding?caseId=41", "GET"]]);
     expect(text(checklist())).toContain(OUTSIDE); expect(writes()).toHaveLength(1);
   });
 
@@ -383,12 +416,13 @@ describe("classifier scope and stale completion retirement", () => {
     expect(writes()).toHaveLength(1);
   });
 
-  it("an older delayed denial cannot replace the current classifier after a real link", async () => {
+  it("an older delayed denial cannot replace the current classifier after an explicit refresh", async () => {
     caseRow = fixture({ planId: null }); const old = deferred<MockResponse>(); classifierRead = () => old.promise;
-    await mount(); classifierRead = async () => response(classification(true)); changeAgreement(51); await flush();
+    await mount(); classifierRead = async () => response(classification(true));
+    caseRow = fixture({ planId: 51 }); click(button("تحديث كابينة التقويم")); await flush();
     expect(text(checklist())).toContain(INCLUDED);
     old.resolve(response({}, 403)); await flush();
-    expect(text(checklist())).toContain(INCLUDED); expect(hooks.retiredWrites).toBe(0); expect(writes()).toHaveLength(1);
+    expect(text(checklist())).toContain(INCLUDED); expect(hooks.retiredWrites).toBe(0); expect(writes()).toEqual([]);
   });
 
   it.each(["patient", "principal", "role", "plan-permission", "payment-permission", "logout"])("retires accepted labels immediately on %s change", async (change) => {
@@ -423,7 +457,7 @@ describe("classifier scope and stale completion retirement", () => {
     click(staleButton); old.resolve(response(classification(true))); await flush(); unknown();
     expect(hooks.retiredWrites).toBe(0); expect(writes()).toHaveLength(1);
     expect(classifierCalls()).toHaveLength(before + (change === "logout" ? 0 : 1));
-    if (change === "patient") expect(classifierCalls().at(-1)?.[0]).toBe("/api/patients/20/legacy-onboarding");
+    if (change === "patient") expect(classifierCalls().at(-1)?.[0]).toBe("/api/patients/20/legacy-onboarding?caseId=41");
     if (change === "logout") expect(checklist()).toBeUndefined();
   });
 
