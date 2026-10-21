@@ -1,0 +1,7 @@
+RUN  v4.1.11 /workspace/purchase-production-context
+
+
+ Test Files  4 passed (4)
+      Tests  139 passed (139)
+   Start at  05:31:06
+   Duration  2.18s (transform 373ms, setup 0ms, import 790ms, tests 743ms, environment 0ms)

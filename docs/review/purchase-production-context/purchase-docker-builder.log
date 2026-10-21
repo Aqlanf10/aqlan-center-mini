@@ -1,0 +1,51 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 3.49kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/node:22-alpine
+#2 DONE 0.8s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 612B done
+#3 DONE 0.0s
+
+#4 [deps 1/5] FROM docker.io/library/node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
+#4 DONE 0.0s
+
+#5 [deps 2/5] WORKDIR /app
+#5 CACHED
+
+#6 [internal] load build context
+#6 transferring context: 145.01kB 0.1s done
+#6 DONE 0.1s
+
+#7 [deps 3/5] COPY package.json package-lock.json ./
+#7 CACHED
+
+#8 [deps 4/5] COPY vendor/braces-3.0.3-local.tgz ./vendor/braces-3.0.3-local.tgz
+#8 CACHED
+
+#9 [deps 5/5] RUN npm ci
+#9 141.7 npm error Exit handler never called!
+#9 141.7 npm error This is an error with npm itself. Please report this error at:
+#9 141.7 npm error   <https://github.com/npm/cli/issues>
+#9 141.7 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-10-21T05_31_35_195Z-debug-0.log
+#9 ERROR: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1
+------
+ > [deps 5/5] RUN npm ci:
+141.7 npm error Exit handler never called!
+141.7 npm error This is an error with npm itself. Please report this error at:
+141.7 npm error   <https://github.com/npm/cli/issues>
+141.7 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-10-21T05_31_35_195Z-debug-0.log
+------
+Dockerfile:19
+--------------------
+  17 |     # into this install layer and the runner stage remains standalone-only.
+  18 |     COPY vendor/braces-3.0.3-local.tgz ./vendor/braces-3.0.3-local.tgz
+  19 | >>> RUN npm ci
+  20 |
+  21 |     # ── البناء ───────────────────────────────────────────────────────────────────
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1
