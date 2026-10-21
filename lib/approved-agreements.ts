@@ -257,9 +257,10 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
           idempotencyKey:childKey,requestHash:debtRequestHash({
             hash,invoiceId:segment.invoiceId,portion})});
         if(child.kind==="reason")throw new DebtRepaymentError("stale",`تعذر توزيع التحصيل: ${child.reason}`);
-        if(typeof child.paymentId!=="number"||!positive(child.paymentId))
+        const postedId=child.paymentId;
+        if(typeof postedId!=="number"||!Number.isSafeInteger(postedId)||postedId<=0)
           throw new DebtRepaymentError("conflict","تعذر إثبات سند توزيع التحصيل.");
-        created.push({invoiceId:segment.invoiceId,paymentId:child.paymentId,amountMinor:portion});
+        created.push({invoiceId:segment.invoiceId,paymentId:postedId,amountMinor:portion});
         unallocated-=portion;
       }
       if(unallocated!==0||created.length===0)
