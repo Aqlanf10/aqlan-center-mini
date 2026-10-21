@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { Client } from "pg";
-import { authedGet, authedMutation, baseUrl, harness } from "./_server";
+import { authedGet, authedMutation, baseUrl, harness, loginStaff } from "./_server";
+import { mkdir, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { UNVERIFIED_VISIT_INVOICE_LABEL } from "../../lib/visit-financial-presentation";
+import { VISIT_SOURCE_SUMMARY, type VisitFinancialContext } from "../../lib/visit-financial-context";
 import { formatAmount } from "../../lib/money";
 
 /** Three independent journeys on the existing built-app/isolated PG harness.
@@ -27,6 +31,7 @@ let h: Awaited<ReturnType<typeof harness>>;
 let browser: Browser;
 let db: Client;
 let doctorId = 0;
+let sourceAssistant: {cookie:string};
 const stamp = Date.now();
 const services: Record<Category, number> = { ortho: 0, rct: 0, crown: 0 };
 const prices: Record<Category, number> = { ortho: 30000000, rct: 6000000, crown: 9000000 };
@@ -45,6 +50,12 @@ beforeAll(async () => {
   }
   await db.query(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
     SELECT 'invoice-clinic-acceptance', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`);
+  const assistantName = `sourceassist${stamp}`;
+  const assistantCreated = await authedMutation("/api/users", h.sessions.admin, "POST", JSON.stringify({
+    username:assistantName, displayName:"مساعد قبول المصادر", password:"SourceAssist#Pass11", role:"assistant",
+  }));
+  expect(assistantCreated.status).toBeLessThan(300);
+  sourceAssistant = await loginStaff(assistantName, "SourceAssist#Pass11");
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => {
@@ -62,8 +73,8 @@ async function mutate<T>(who: Who, method: "POST" | "PUT" | "PATCH", path: strin
   expect(response.status, `${method} ${path}: ${text}`).toBe(status);
   return JSON.parse(text) as T;
 }
-async function read<T>(who: Who, path: string): Promise<T> {
-  const response = await authedGet(path, h.sessions[who]);
+async function read<T>(who: Who | "assistant", path: string): Promise<T> {
+  const response = await authedGet(path, who === "assistant" ? sourceAssistant : h.sessions[who]);
   const text = await response.text();
   expect(response.status, `GET ${path}: ${text}`).toBe(200);
   return JSON.parse(text) as T;
@@ -72,10 +83,10 @@ async function patient(label: string): Promise<number> {
   return (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name, primary_doctor_id)
     VALUES ($1, $2, $3) RETURNING id`, [`ICJ-${stamp}-${label}`, `مريض قبول اصطناعي ${label}`, doctorId]))[0].id;
 }
-async function open(who: Who, patientId: number, tab = "account") {
+async function open(who: Who | "assistant", patientId: number, tab = "account") {
   const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE" });
   contexts.add(context);
-  const [name, ...value] = h.sessions[who].cookie.split("=");
+  const [name, ...value] = (who === "assistant" ? sourceAssistant : h.sessions[who]).cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
@@ -402,6 +413,7 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
     await stageThroughUi(patientId, visitId, created.clinical.links[0].planItemId, "rct", 36);
     await recordEndo(patientId, endo.id, visitId, "assessment", true);
     const signed = await signOnce(patientId, visitId, 1, created.clinical.links[0].planItemId, first);
+    await sourceAcceptance(patientId, [{ id: visitId, summary: "mixed" }], "mixed");
     const next = await nextAfterSign(created.clinical.links[0].planItemId, 2, first.id, signed);
     const [{ id: recordId }] = await q<{ id: number }>(`SELECT id FROM endo_visits WHERE visit_id = $1`, [visitId]);
     const path = `/api/patients/${patientId}/endo/${endo.id}/visits`;
@@ -459,4 +471,143 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
     expect(await q(`SELECT specialty, site FROM clinical_cases WHERE patient_id = $1 ORDER BY specialty`, [patientId]))
       .toEqual([{ specialty: "endodontics", site: "46" }, { specialty: "prosthodontics", site: "46" }]);
   }, 360_000);
+});
+
+/** Supplemental acceptance: all reads below reach the built server. No response interception.
+ * Only patient/catalogue bootstrap uses SQL; source identities, decisions and signatures use APIs.
+ * These checks intentionally do not turn source coverage into receipts or monetary totals.
+ */
+async function sourceAcceptance(patientId: number, visits: {id: number; summary: VisitFinancialContext["summary"]}[], label: string) {
+  const before = await q(`SELECT
+    (SELECT count(*) FROM invoices WHERE patient_id=$1)::int AS invoices,
+    (SELECT count(*) FROM payments WHERE patient_id=$1)::int AS payments,
+    (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM legacy_treatment_agreements a WHERE patient_id=$1) AS agreements`, [patientId]);
+  for (const visit of visits) {
+    for (const who of ["doctorA", "assistant", "reception", "admin"] as const) {
+      const financial = who === "reception" || who === "admin";
+      expect(await read<Clinical>(who, `/api/visits/${visit.id}/clinical`)).toMatchObject({id:visit.id,patientId,status:"signed",invoiceId:null});
+      const data = await read<VisitFinancialContext>(who, `/api/visits/${visit.id}/financial-context`);
+      expect(data).toMatchObject({ visitId: visit.id, patientId, signed: true, summary: visit.summary, directReference: null, directReferenceState: "missing" });
+      expect(JSON.stringify(data)).not.toMatch(/"[^" ]*(?:Minor|total|paid|remaining)[^" ]*"/i);
+      if (!financial) expect(data.work.every(line => line.references.length === 0)).toBe(true);
+      if (financial && visit.summary === "mixed") {
+        expect(data.work).toContainEqual(expect.objectContaining({coverage:"verified",references:expect.arrayContaining([expect.objectContaining({kind:"invoice",state:"current"})])}));
+        expect(data.work).toContainEqual(expect.objectContaining({kind:"endodontic_record",coverage:"unresolved"}));
+      }
+      const view = await open(who, patientId);
+      try {
+        await view.page.goto(`${baseUrl}/visits/${visit.id}`);
+        const panel = view.page.getByRole("region", {name: "مصادر عمل الزيارة"});
+        await panel.waitFor();
+        expect(await panel.innerText()).toContain(VISIT_SOURCE_SUMMARY[visit.summary]);
+        const invoices = data.work.flatMap(line => line.references).filter(source => source.kind === "invoice" && source.state === "current");
+        const expectedLinks = [...new Set(invoices.map(source => `/print/invoice/${source.id}`))];
+        const actualLinks = await panel.locator("a").evaluateAll(nodes => nodes.map(node => node.getAttribute("href")));
+        expect([...new Set(actualLinks)].sort()).toEqual(financial ? expectedLinks.sort() : []);
+        if (!financial) expect(await panel.innerText()).not.toMatch(/(?:فاتورة|اتفاق سابق|اتفاق معتمد|جدول خطة) #/);
+        for (const source of data.work.flatMap(line => line.references).filter(source => source.kind === "historical_agreement")) {
+          expect(await panel.innerText()).toContain(`اتفاق سابق #${source.id}`);
+          expect(await panel.locator(`a[href*="${source.id}"]`).count()).toBe(0);
+        }
+      } finally { await close(view.context); }
+    }
+  }
+  const params = new URLSearchParams({report:"visits",preset:"today",patientId:String(patientId)});
+  const report = await read<{result:{rows:{patientId:number;workSource:string;invoiceText:string;collection:string}[]}}>("admin", `/api/reports?${params}`);
+  // Exact visit IDs were asserted above. The report has no visit ID field; compare the complete multiset.
+  expect(report.result.rows).toHaveLength(visits.length);
+  expect(report.result.rows.map(row => row.workSource).sort()).toEqual(visits.map(visit => VISIT_SOURCE_SUMMARY[visit.summary]).sort());
+  expect(report.result.rows.every(row => row.patientId === patientId && row.collection === "—" && row.invoiceText === UNVERIFIED_VISIT_INVOICE_LABEL)).toBe(true);
+  const printParams = new URLSearchParams(params);
+  printParams.set("columns", "patientNumber,workSource,invoiceText,collection");
+  const print = await open("admin", patientId);
+  try {
+    const response = await print.page.goto(`${baseUrl}/print/report?${printParams}`);
+    expect(response?.status()).toBe(200);
+    await print.page.getByText("مصادر العمل — تحقق حالي", {exact:true}).waitFor();
+    for (const summary of new Set(visits.map(visit => VISIT_SOURCE_SUMMARY[visit.summary]))) {
+      expect(await print.page.getByRole("cell", {name:summary,exact:true}).count()).toBe(visits.filter(visit => VISIT_SOURCE_SUMMARY[visit.summary] === summary).length);
+    }
+    await print.page.emulateMedia({media:"print"});
+    await print.page.evaluate(() => document.fonts.ready);
+    const directory = "artifacts/visit-source-acceptance";
+    await mkdir(directory, {recursive:true});
+    const path = `${directory}/${label}.pdf`;
+    await writeFile(path, await print.page.pdf({preferCSSPageSize:true,printBackground:true}));
+    expect(execFileSync("pdfinfo", [path], {encoding:"utf8"})).toMatch(/Pages:\s+[1-9]/);
+    const text = execFileSync("pdftotext", ["-layout",path,"-"], {encoding:"utf8"}).replace(/[\u202a-\u202e]/g, "").replace(/\s+/g," ");
+    expect(text).toContain("مصادر العمل");
+    for (const summary of new Set(visits.map(visit => VISIT_SOURCE_SUMMARY[visit.summary]))) {
+      expect(text).toContain(summary.replace(/\s+/g," "));
+    }
+  } finally { await close(print.context); }
+  expect(await q(`SELECT
+    (SELECT count(*) FROM invoices WHERE patient_id=$1)::int AS invoices,
+    (SELECT count(*) FROM payments WHERE patient_id=$1)::int AS payments,
+    (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM legacy_treatment_agreements a WHERE patient_id=$1) AS agreements`, [patientId])).toEqual(before);
+}
+
+async function walkIn(patientId: number) {
+  const visit = await mutate<{id:number}>("reception", "POST", "/api/visits", {patientId,patientName:"قبول مصادر اصطناعي",doctorId}, 201);
+  await mutate("reception", "PATCH", `/api/visits/${visit.id}`, {action:"clear"});
+  const [{chair}] = await q<{chair:number}>(`SELECT n AS chair FROM generate_series(1,20) n WHERE NOT EXISTS
+    (SELECT 1 FROM visits WHERE chair=n AND status IN ('called','in_chair')) ORDER BY n LIMIT 1`);
+  await mutate("reception", "PATCH", `/api/visits/${visit.id}`, {action:"call",chair});
+  await mutate("reception", "PATCH", `/api/visits/${visit.id}`, {action:"seat",chair});
+  return visit.id;
+}
+
+describe("Supplemental visit source acceptance through canonical writers", () => {
+  it("distinguishes a signed unresolved adjustment from an explicit no-charge decision in same-day visits, reader and printed report", async () => {
+    const patientId = await patient("source-decisions");
+    const ortho = await mutate<{id:number}>("doctorA", "POST", "/api/ortho", {patientId,appliance:"fixed_metal",arches:"both",slot:"022",plannedMonths:18}, 201);
+    const visits: {id:number;summary:VisitFinancialContext["summary"]}[] = [];
+    for (const noCharge of [false,true]) {
+      const id = await walkIn(patientId);
+      const signed = await mutate<Clinical>("doctorA", "POST", `/api/visits/${id}/clinical`, {
+        action:"sign", orthoSession:{caseId:ortho.id,upperWire:"016 NiTi",lowerWire:null,elastics:"none",elasticNote:null,done:"متابعة قبول اصطناعية",nextWeeks:4},
+        outsideContractDecision:noCharge ? {decision:"no_charge",reason:"قرار متابعة اصطناعي صريح"} : null,
+      });
+      expect(signed).toMatchObject({id,invoiceId:null,status:"signed"});
+      visits.push({id,summary:noCharge ? "no_new_charge" : "unresolved"});
+    }
+    expect(visits[0].id).not.toBe(visits[1].id);
+    expect(await q(`SELECT count(DISTINCT (arrived_at AT TIME ZONE 'Asia/Aden')::date)::int AS days FROM visits WHERE id=ANY($1::int[])`,[visits.map(v=>v.id)])).toEqual([{days:1}]);
+    await sourceAcceptance(patientId,visits,"same-day-decisions");
+    const first = await read<VisitFinancialContext>("admin",`/api/visits/${visits[0].id}/financial-context`);
+    const second = await read<VisitFinancialContext>("admin",`/api/visits/${visits[1].id}/financial-context`);
+    expect(first.work.map(w=>w.decision)).toEqual(["none"]);
+    expect(second.work.map(w=>w.decision)).toEqual(["no_charge"]);
+    expect(first.work.some(a=>second.work.some(b=>a.key===b.key))).toBe(false);
+    expect(await q("SELECT id FROM invoices WHERE patient_id=$1",[patientId])).toEqual([]);
+  },240_000);
+
+  it("renders one valid historical agreement across two same-day signed visits without creating invoices or receipts", async () => {
+    const patientId = await patient("source-history");
+    const created = await mutate<{document:{id:number;lines:{planItemId:number;agreementId:number}[]}}>("admin","POST",`/api/patients/${patientId}/historical-documents`,{
+      patientId,currency:"YER",items:[{serviceId:services.rct,doctorId,quantity:1,sessions:3,price:String(prices.rct),catalogPriceMinor:prices.rct,toothCode:16}],
+      discount:"0",previouslyPaidAmount:String(prices.rct),historicalAsOf:"2026-10-01",idempotencyKey:`source-acceptance-${stamp}`,
+      repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:0,repaymentVersion:0,repaymentSourceHash:null,
+    },201);
+    const item = created.document.lines[0];
+    const principal = await q("SELECT id,agreed_minor,previously_paid_minor,remaining_minor FROM legacy_treatment_agreements WHERE patient_id=$1",[patientId]);
+    const [{plan_id:planId}] = await q<{plan_id:number}>("SELECT plan_id FROM plan_items WHERE id=$1",[item.planItemId]);
+    await consent(planId);
+    const visits: {id:number;summary:VisitFinancialContext["summary"]}[] = [];
+    for (let index=0;index<2;index++) {
+      const id = await walkIn(patientId);
+      await stageThroughUi(patientId,id,item.planItemId,"rct",16);
+      const signed = await mutate<Clinical>("doctorA","POST",`/api/visits/${id}/clinical`,{action:"sign"});
+      expect(signed).toMatchObject({id,invoiceId:null,status:"signed"});
+      const evidence = await read<VisitFinancialContext>("admin",`/api/visits/${id}/financial-context`);
+      expect(evidence.work).toHaveLength(1);
+      expect(evidence.work[0].references).toEqual([{kind:"historical_agreement",id:item.agreementId,state:"current",path:"plan_item"}]);
+      visits.push({id,summary:"verified"});
+    }
+    await sourceAcceptance(patientId,visits,"historical-agreement");
+    expect(await q("SELECT id FROM invoices WHERE patient_id=$1",[patientId])).toEqual([]);
+    expect(await q("SELECT id FROM payments WHERE patient_id=$1",[patientId])).toEqual([]);
+    expect(await q("SELECT id FROM legacy_treatment_agreements WHERE patient_id=$1",[patientId])).toEqual([{id:item.agreementId}]);
+    expect(await q("SELECT id,agreed_minor,previously_paid_minor,remaining_minor FROM legacy_treatment_agreements WHERE patient_id=$1",[patientId])).toEqual(principal);
+  },240_000);
 });
