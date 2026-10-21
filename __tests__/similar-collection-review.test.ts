@@ -2,7 +2,7 @@ import {describe,expect,it} from "vitest";
 import {parseSimilarCollectionReview,reviewMatchesReceipts,type SimilarCollectionReceipt} from "../lib/similar-collection";
 
 const row=(id:number):SimilarCollectionReceipt=>({
-  id,receiptNumber:`R-${id}`,amountMinor:20500000,currency:"YER",
+  id,receiptNumber:`R-${id}`,amountMinor:205000,currency:"YER",
   createdAt:"2026-10-14T11:44:00.000Z",method:"cash",invoiceId:169,planId:null,
   openingCurrency:null,createdBy:"synthetic-cashier",
 });
