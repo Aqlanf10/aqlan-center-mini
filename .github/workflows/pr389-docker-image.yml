@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          reviewed=a7a70cff6a6506c951f2702cb1966f83af4162bc
+          reviewed=00a944e502415bc0207974e147b2b3ec4de332db
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           git merge-base --is-ancestor "$reviewed" HEAD
           git diff --exit-code "$reviewed" HEAD -- \
