@@ -238,6 +238,50 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+
+  # Runs concurrently with quality: its own runner and disposable PostgreSQL 18.
+  # Nothing from the serial security suite is omitted or marked continue-on-error.
+  security_http:
+    name: Built-app HTTP security and hosted browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Upgrade npm to bulk advisory endpoint
+        run: npm install -g npm@11
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify environment contract
+        run: npm run verify:environment
+      - name: Production build for built-app HTTP tests
+        run: npm run build
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
@@ -1092,3 +1136,21 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+  # A failed, skipped or cancelled required job never produces a green gate.
+  required_completion:
+    name: Required CI gates (fail closed)
+    if: always()
+    needs: [quality, security_http]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify both required jobs finished successfully
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          HTTP_RESULT: ${{ needs.security_http.result }}
+        run: |
+          if [ "$QUALITY_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ]; then
+            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, security_http=$HTTP_RESULT"
+            exit 1
+          fi
