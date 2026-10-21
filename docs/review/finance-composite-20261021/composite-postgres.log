@@ -1,0 +1,15 @@
+
+ RUN  v4.1.11 /workspace/finance-composed-acceptance
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+(node:7167) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:7198) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+(node:7217) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+ Test Files  8 passed (8)
+      Tests  55 passed (55)
+   Start at  03:00:21
+   Duration  18.71s (transform 2.32s, setup 0ms, import 4.96s, tests 12.07s, environment 1ms)

@@ -1,0 +1,26 @@
+
+ RUN  v4.1.11 /workspace/finance-composed-acceptance
+
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+رحلة مصطنعة ساقطة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+
+ Test Files  613 passed (613)
+      Tests  10745 passed (10745)
+   Start at  02:59:37
+   Duration  297.56s (transform 12.68s, setup 0ms, import 54.78s, tests 175.38s, environment 48ms)

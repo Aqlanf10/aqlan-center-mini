@@ -1,0 +1,340 @@
+{
+  "base": "80a8bea3bc9a4acdb5affa3b5b9876bf35a8788d",
+  "baseTree": "af909d9b0195be626fcd78454ee9151a90021321",
+  "alreadyIncluded367": "f00061b60f297f16be6d90374077d8d509903064",
+  "excluded": [
+    "380/new visit context"
+  ],
+  "sources": [
+    {
+      "pr": "372",
+      "sourceBase": "af709ae57c5efbb52d70998dac751f3c07df0d7c",
+      "sourceHead": "725fe0de44f2d35b13b650df17d130215fd76970",
+      "sourceTree": "06847d5ec9df3ac228c18e35986abfc5f2e70c34",
+      "patchSha256": "27f8b3fc9638585545ac6e2b230f54cb6325e6699615d9835426a3b01d2e715a",
+      "patchId": "f2b3dd17a3307b3228d8b6cd3230d4cf7bd694a8",
+      "files": [
+        "__tests__/postgres/reports-expense-comparison.test.ts",
+        "__tests__/reports-monthly-measurement.test.ts",
+        "docs/finance/monthly-measurement-witness.md",
+        "lib/reports.ts"
+      ],
+      "beforeHead": "80a8bea3bc9a4acdb5affa3b5b9876bf35a8788d",
+      "composedHead": "c0a31638873c3f8a97c9423532bce8aaf88cc240",
+      "composedTree": "c25b58bd0b0acb370053e08797e9f4cb65863470"
+    },
+    {
+      "pr": "373",
+      "sourceBase": "af709ae57c5efbb52d70998dac751f3c07df0d7c",
+      "sourceHead": "0a3e8dbf641287c66b9ddcf7fe61df4cec2ee283",
+      "sourceTree": "8cdc0976377adf3d3fee4735d27ec0bd0733cb2e",
+      "patchSha256": "7c2d875fc8cdbfa88b37c8388031dc23f9d2539ac4cde43a01e1eb57f3f674e4",
+      "patchId": "12d5d82ccbfba3b98a1a68bb9d30d7c306033067",
+      "files": [
+        "__tests__/finance-lifecycle-runner.test.ts",
+        "__tests__/security-http/invoice-debt-lifecycle-http.test.ts",
+        "docs/review/finance-http-pg-acceptance/README.md",
+        "docs/review/finance-http-pg-acceptance/final-run.log",
+        "docs/review/finance-http-pg-acceptance/first-run.log",
+        "docs/review/finance-http-pg-acceptance/guard-pg18.log",
+        "docs/review/finance-http-pg-acceptance/guard-related.log",
+        "docs/review/finance-http-pg-acceptance/pg18-run.log",
+        "scripts/test-finance-lifecycle.d.mts",
+        "scripts/test-finance-lifecycle.mjs"
+      ],
+      "beforeHead": "c0a31638873c3f8a97c9423532bce8aaf88cc240",
+      "composedHead": "d20484eb087d7720ff8b600d77656640ff2881e2",
+      "composedTree": "55f10c61eb821224843747eae1bf103f5508350e"
+    },
+    {
+      "pr": "374",
+      "sourceBase": "af709ae57c5efbb52d70998dac751f3c07df0d7c",
+      "sourceHead": "b067e04385c34223c8d3648b7203d3f284255098",
+      "sourceTree": "53e134cdd9c06ada5490ff2daa6423d14cdce0fb",
+      "patchSha256": "515e13b31a250da207079f43660a4f40bbb071099eb7b96c0184163f022e821d",
+      "patchId": "3248134fc29507dbb01e3c4f748819e42552ff62",
+      "files": [
+        "__tests__/commission-fifo-order.test.ts",
+        "__tests__/postgres/performer-commission-reconciliation.test.ts",
+        "__tests__/security-http/performer-commission-http.test.ts",
+        "docs/PERFORMER_COMMISSION_RECONCILIATION_20261021.md",
+        "lib/commission.ts",
+        "lib/db.ts"
+      ],
+      "beforeHead": "d20484eb087d7720ff8b600d77656640ff2881e2",
+      "composedHead": "f3d6e8edb833e10a5010a00445089f04b909696a",
+      "composedTree": "848122c277600253bc1be9804d517c074f2fa69d"
+    },
+    {
+      "pr": "381",
+      "sourceBase": "4b4e12db484833cbedbc39c816b7324fa054eafa",
+      "sourceHead": "f596c019cc7f40b5f6b05d8b7512bd3c6cf9dc38",
+      "sourceTree": "063e7b3fd76c47f6541fc49e27b56f6d237023eb",
+      "patchSha256": "2aaae800ae985f4c4c46facdf86eb3fa2f4f3436e33fc677254505838d789a8e",
+      "patchId": "60273647d2971e77e71b8d82bb458726141c71b1",
+      "files": [
+        "__tests__/postgres/plan-consent-audit-atomic.test.ts",
+        "docs/review/plan-consent-audit-atomic/README.md",
+        "docs/review/plan-consent-audit-atomic/green.log",
+        "docs/review/plan-consent-audit-atomic/red.log",
+        "docs/review/plan-consent-audit-atomic/units.log",
+        "lib/db.ts"
+      ],
+      "beforeHead": "f3d6e8edb833e10a5010a00445089f04b909696a",
+      "composedHead": "75677d80d6157f33fb0af98a739076ccf8dbcf98",
+      "composedTree": "b59b790e7b211f33a33df32b929f9ffff6d75ae2"
+    },
+    {
+      "pr": "369",
+      "sourceBase": "13bfa0655dd69e75048c3d5698b861c7550010a2",
+      "sourceHead": "3f7b02b5a6cd31764543f466e3e58a1285f9efc5",
+      "sourceTree": "0f327e0b0d7f53d4d0d546ff61939ceecd05d2fb",
+      "patchSha256": "d54852d07b2198be190943ad91179229bf4aafbd9464a1804231cd0f8399d93d",
+      "patchId": "e93edf0291147c8afd5cb40bfb5a4c69c049beba",
+      "files": [
+        "__tests__/legacy-restore-cli-preflight.test.ts",
+        "__tests__/postgres/security-restore-negative.test.ts",
+        "scripts/restore.mjs",
+        "scripts/security/legacy-restore-cli.nodecheck.mjs",
+        "scripts/security/pg-probe-preload.mjs",
+        "scripts/security/synthetic-restore-target-guard.mjs",
+        "scripts/security/synthetic-restore-target-guard.nodecheck.mjs"
+      ],
+      "beforeHead": "75677d80d6157f33fb0af98a739076ccf8dbcf98",
+      "composedHead": "ab26b207cae3732f8ea8c170723c9816922da3be",
+      "composedTree": "6f12a662cdb8501aff4563c0fd15719f38068f55"
+    },
+    {
+      "pr": "375",
+      "sourceBase": "3f7b02b5a6cd31764543f466e3e58a1285f9efc5",
+      "sourceHead": "018a94127cbc475031ca00034f31f35ce4b92515",
+      "sourceTree": "2558d25e11b1fbfaf22eefd8b0650bdcbd969f0e",
+      "patchSha256": "b75db5f8381dbb638404661c9e7a22b3423a1c769fb258d64a4d7f725b647a9a",
+      "patchId": "6afe08b246eb66726e8b552c617c231abecd81b2",
+      "files": [
+        "__tests__/postgres/security-restore-full-cli.test.ts",
+        "__tests__/restore-full-pg-client-tls.test.ts",
+        "__tests__/restore-full-target-preflight.test.ts",
+        "lib/restore/client-config.ts",
+        "lib/restore/staging.ts",
+        "scripts/restore-full.ts",
+        "scripts/security/restore-full-cli.nodecheck.mjs",
+        "scripts/security/restore-full-target-guard.d.mts",
+        "scripts/security/restore-full-target-guard.mjs",
+        "scripts/security/restore-full-target-guard.nodecheck.mjs"
+      ],
+      "beforeHead": "ab26b207cae3732f8ea8c170723c9816922da3be",
+      "composedHead": "40278cbc4ce9ef308860f6bd291a093660718056",
+      "composedTree": "5cb2e856b060b15317250e357179952f2e9edd3b"
+    },
+    {
+      "pr": "382",
+      "sourceBase": "af709ae57c5efbb52d70998dac751f3c07df0d7c",
+      "sourceHead": "2b52888a06a9ea23a014a8913d4a3147a64f0c56",
+      "sourceTree": "98f450e8b1ed0a12b446c934860612cc1445fcd6",
+      "patchSha256": "fc2674b8bce1f5217dce9671a22a3b78bf7ec8bb6b42f57e9e5fa4bff0a06175",
+      "patchId": "2223c52408983ad91cde31d57ab6e7d13f651eaa",
+      "files": [
+        "__tests__/patient-ortho-read-safety.test.tsx",
+        "__tests__/security-http/legacy-onboarding-checklist-ui.test.ts",
+        "__tests__/security-http/ortho-prescription-truth-built-page.test.ts",
+        "components/PatientOrtho.tsx",
+        "docs/review/ortho-http-regressions/prescription-checklist-follow-up.md"
+      ],
+      "beforeHead": "40278cbc4ce9ef308860f6bd291a093660718056",
+      "composedHead": "281c44ca5771c53e6feea1101367cc727855a8f1",
+      "composedTree": "887f0fc66ec9f740e381f61eae6c32f7b0299ec1"
+    },
+    {
+      "pr": "374-fixture-follow-up",
+      "sourceBase": "b067e04385c34223c8d3648b7203d3f284255098",
+      "sourceHead": "5fbe96fd381443aa912933a1796f06145078da97",
+      "sourceTree": "709242726e2eb54d355f21461de2c5bfab80aac5",
+      "patchSha256": "112a1477cebe3c0d9a2fec131b5ba0de97bc9866d8e4025c1ed39391d390b4be",
+      "patchId": "4bcd3e70cc4192ed46c97517b698c08d7c8b9e82",
+      "files": [
+        "__tests__/security-http/performer-commission-http.test.ts"
+      ],
+      "beforeHead": "281c44ca5771c53e6feea1101367cc727855a8f1",
+      "composedHead": "85ebfc60eb56f7f189ae0463460571148e4bc0a9",
+      "composedTree": "3f34dbe1d9c59cdb5e8cec571573f46afcee1237"
+    }
+  ],
+  "pending": [
+    "Exact published-head hosted CI including browser acceptance",
+    "Independent parent composition review and integration decision"
+  ],
+  "securityMainSource": "018a94127cbc475031ca00034f31f35ce4b92515",
+  "verification": {
+    "sourcePatchIdsMatched": true,
+    "allPatchesReverseCheckFinalTree": "All except superseded #374 test-file hunk; exact follow-up patch and all latest exclusive blobs match their sources.",
+    "noMigrationOrWorkflowDelta": true,
+    "sharedFiles": [
+      "lib/db.ts",
+      "lib/reports.ts"
+    ],
+    "finalBlobs": {
+      "__tests__/postgres/reports-expense-comparison.test.ts": "39c32e2b55f93b786940fa342f5f598e0f2d615f",
+      "__tests__/reports-monthly-measurement.test.ts": "0cf3f84fd0061d6b35ab51ee7bf5ca37e060c063",
+      "docs/finance/monthly-measurement-witness.md": "c54c9b9bdd8799234c81d80dbf6f88ca6bf265f8",
+      "lib/reports.ts": "a3487da87a2000aa1b32a3fc1f4745c0264ddcc6",
+      "__tests__/finance-lifecycle-runner.test.ts": "645c8496b04100b26feff1366c2a01736c26d86b",
+      "__tests__/security-http/invoice-debt-lifecycle-http.test.ts": "7a9f80e09bd7ffdd0f521ef7fb89d48f0638d785",
+      "docs/review/finance-http-pg-acceptance/README.md": "86a91b050551fdbd67ea6df45623920ea2814cbc",
+      "docs/review/finance-http-pg-acceptance/final-run.log": "e66c998b7a7cd38227dccd29f783d861f057e65e",
+      "docs/review/finance-http-pg-acceptance/first-run.log": "2a2b506e9ccee3e375845cdae1b9d45f560252df",
+      "docs/review/finance-http-pg-acceptance/guard-pg18.log": "5704ee73ac93ae53df73d060ff4f1c9a595ad613",
+      "docs/review/finance-http-pg-acceptance/guard-related.log": "ce8396077feccad49477ab7e8efdd31b6126a466",
+      "docs/review/finance-http-pg-acceptance/pg18-run.log": "a98360af2648c1f353ce83541eb38dacc9d8a6fa",
+      "scripts/test-finance-lifecycle.d.mts": "441b2b8f2f1721d48b7ba7070176cab845672b24",
+      "scripts/test-finance-lifecycle.mjs": "a47afafdc22e38da2aa878a8e7d4e5c220c90f57",
+      "__tests__/commission-fifo-order.test.ts": "df19e1d98dad718a93e67d8d6f06f5eb0f18ca85",
+      "__tests__/postgres/performer-commission-reconciliation.test.ts": "36a92f148fa3df8881652057c7101e60a07c29dd",
+      "__tests__/security-http/performer-commission-http.test.ts": "68b65b0e8baac88da7514b2105b84a25b8b911e9",
+      "docs/PERFORMER_COMMISSION_RECONCILIATION_20261021.md": "b1eea363752498fc07c33cd2b5a0877a94ab43c0",
+      "lib/commission.ts": "2aa5a7b80eea20d57265b5a481f8aa73005b23bf",
+      "lib/db.ts": "62b9e37fe282504eae93b6fe70fbec9d771dd6bb",
+      "__tests__/postgres/plan-consent-audit-atomic.test.ts": "dc391700b83258f76a023e96672f3411ef074a14",
+      "docs/review/plan-consent-audit-atomic/README.md": "3c9d7945fe6d41c58ccf002be65935c45e34813c",
+      "docs/review/plan-consent-audit-atomic/green.log": "36ab343b55a4c3f5bde2f5b51d0c7f4288a25610",
+      "docs/review/plan-consent-audit-atomic/red.log": "00b586dbb20b849045fff382c342bbce79a27a65",
+      "docs/review/plan-consent-audit-atomic/units.log": "c75b7c806429456d4eb331058e26874c8c15cb71",
+      "__tests__/legacy-restore-cli-preflight.test.ts": "e907a001a1c9828fc26511183ebfa381507a4480",
+      "__tests__/postgres/security-restore-negative.test.ts": "5dc17068e9b832f5444f6be34ff2fddf0e1e5d04",
+      "scripts/restore.mjs": "e790ce73cb55e264cda8aa3009d7adedca47af06",
+      "scripts/security/legacy-restore-cli.nodecheck.mjs": "fb7a42842d5911bf88e519e585f5059122a3fa29",
+      "scripts/security/pg-probe-preload.mjs": "8284c276ed17e447196182ca274aeb18b1dd421b",
+      "scripts/security/synthetic-restore-target-guard.mjs": "59cfd79ed6446ac2880c8cea6766918d439a5442",
+      "scripts/security/synthetic-restore-target-guard.nodecheck.mjs": "37a08b746d380c9af084401490d93f8bc37e373e",
+      "__tests__/postgres/security-restore-full-cli.test.ts": "3d20e33b86e6182b48a2c0f28a783e59757692dc",
+      "__tests__/restore-full-pg-client-tls.test.ts": "d8fcb743881b3e45b53321053b4e2c3a97c3268e",
+      "__tests__/restore-full-target-preflight.test.ts": "ee213c0131d5239e6340b7a215924b6942a516da",
+      "lib/restore/client-config.ts": "02ce4d55c04aa8bffded5ae846acb5e105ebd86a",
+      "lib/restore/staging.ts": "209e9fd79d0c43ef246b41b88a9f929a631076ac",
+      "scripts/restore-full.ts": "64f53509c1fda239fb723a39273d9efff0e1c2c1",
+      "scripts/security/restore-full-cli.nodecheck.mjs": "8844629cb7539a76745e97e1a6a8cf65f211175f",
+      "scripts/security/restore-full-target-guard.d.mts": "6bd3e336f3d715dca12bb7e7bad4c647b0f9a847",
+      "scripts/security/restore-full-target-guard.mjs": "d011c271f41965ea9ea144e2f7f3b73d68f09b5e",
+      "scripts/security/restore-full-target-guard.nodecheck.mjs": "dda2825e829b0f566be5badc103c60703aea160d",
+      "__tests__/patient-ortho-read-safety.test.tsx": "9bc5d11a791923499c9ef01ec18a0cc1a5fbfcdc",
+      "__tests__/security-http/legacy-onboarding-checklist-ui.test.ts": "c8e20842d01b5f8cd72bcc945582b26a59259d66",
+      "__tests__/security-http/ortho-prescription-truth-built-page.test.ts": "a064e55cfb8a2b5284075fc07913f903a9a692b7",
+      "components/PatientOrtho.tsx": "0afb92a23fc38ede6666ee26d233ea99b189044a",
+      "docs/review/ortho-http-regressions/prescription-checklist-follow-up.md": "527ee062cadd7db399d39af459d31e58c611f40b"
+    },
+    "sharedFunctionSourceMatches": [
+      {
+        "function": "recordExpense",
+        "path": "lib/db.ts",
+        "source": "80a8bea3",
+        "sha256": "01dd53b92bfd58e56405f6089b9ca90a6d1c95fbddfe9f09ce0d12e2531dea10"
+      },
+      {
+        "function": "settledOnPayableSql",
+        "path": "lib/db.ts",
+        "source": "80a8bea3",
+        "sha256": "fd99a0e02ce6e7d84f052f676af7453364cab40acb659b9cf7b5a301e76d4af5"
+      },
+      {
+        "function": "commissionReport",
+        "path": "lib/db.ts",
+        "source": "b067e043",
+        "sha256": "73ff8669274174921a5f76265926388fc9c4e2cbd033d454afb12e66f6c9a0cc"
+      },
+      {
+        "function": "recordPlanConsent",
+        "path": "lib/db.ts",
+        "source": "f596c019",
+        "sha256": "5b244845fc90bebfca505c63764fbb464e900f373421b60396e2c5042f65344d"
+      },
+      {
+        "function": "monthlyReport",
+        "path": "lib/reports.ts",
+        "source": "725fe0de",
+        "sha256": "46d6a845c0b289f7628fe2099b2751e8eab80ee796fd4f3a8e33d33449ba91ac"
+      }
+    ]
+  },
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.6",
+    "server_version_num": 180006,
+    "container": "aqlan-composite-finance-pg18-synthetic",
+    "containerId": "5a9bb5605ac326512ea96ee7dff9317efd6a7968e820b8deb70b9eafc9ca625f",
+    "label": "aqlan.purpose=finance-composite-acceptance",
+    "endpoint": "127.0.0.1:55443",
+    "synthetic": true
+  },
+  "preFixtureValidation": {
+    "guards": {
+      "files": 2,
+      "passed": 86
+    },
+    "fullUnits": {
+      "files": 613,
+      "passed": 10745,
+      "seconds": 297.56
+    },
+    "focusedPostgres": {
+      "files": 8,
+      "passed": 55
+    },
+    "focusedHttp": {
+      "files": 3,
+      "passed": 14,
+      "excludedPendingRepair": "performer-commission-http fixture reviewed increment pending"
+    },
+    "fullTypecheck": "passed",
+    "freshBuild": "passed",
+    "scopedLint": {
+      "files": 23,
+      "errors": 0,
+      "existingWarnings": 15
+    },
+    "moneyAggregationGuard": "passed",
+    "whitespace": "5 inherited evidence-log EOF blank lines preserved verbatim; no code whitespace errors",
+    "hostedCi": "not triggered; final source freeze pending"
+  },
+  "sourceFreezeHead": "85ebfc60eb56f7f189ae0463460571148e4bc0a9",
+  "sourceFreezeTree": "3f34dbe1d9c59cdb5e8cec571573f46afcee1237",
+  "finalValidation": {
+    "sourceHead": "85ebfc60eb56f7f189ae0463460571148e4bc0a9",
+    "fullUnits": {
+      "files": 613,
+      "passed": 10745,
+      "seconds": 287.82
+    },
+    "combinedHttp": {
+      "files": 4,
+      "passed": 17,
+      "seconds": 11.81
+    },
+    "focusedPostgres": {
+      "files": 3,
+      "passed": 21,
+      "seconds": 8.98
+    },
+    "fullTypecheck": "passed, exit 0",
+    "fixtureLint": "passed, exit 0",
+    "fixtureBlobMatchesApprovedSource": true,
+    "buildInputsIdenticalToPreFixtureBuild": true,
+    "harnessDatabaseAbsentAfterRun": true
+  },
+  "evidenceLogs": {
+    "composite-final-fixture-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "composite-final-postgres.log": "5acb8e11f0cbb188ae3976e046c4d79f6d28f30ef8e5a933c06eab73dda5a1d5",
+    "composite-final-http.log": "96b925ee9f7fa2c4b33f82e93b147b55de73f67dfe9deaa9a41482f4d3deecd0",
+    "composite-final-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "composite-final-units.log": "ef52b7e29268388d3a7b19bf0d9300b6451109ac68b225943a4ba79dab05d9b3",
+    "composite-whitespace.log": "81c680557016ae3b9ef560f975b3f1fe3cc9d2dea5fb7c4397772295867434ad",
+    "composite-money-scan.log": "ddaaffde592d08d4932249d73d5f66552de6a67f9a418f3efb0557a3962137e9",
+    "composite-http.log": "55acc5d9f4bac9ef607863fb7ec154f36e67844380a1b73c6ca4f49ca4d66733",
+    "composite-lint.log": "e7ca533ae71e30234911d7ff22cab13e44558de696b6e3c6015d54743f7f2bd6",
+    "composite-build.log": "9115fdb01731a16c5b140a4010a8bd8fa385ac435a6df5f7755a24c8ba0480f4",
+    "composite-postgres.log": "f1e140b4004142c937a51b997f7224005a478f8291e07cc5da42594036afad51",
+    "composite-units.log": "1898bb7dd921c690527587df213a653c33073bef83834b1c7df3ecd4eeeeb485",
+    "composite-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "composite-guards.log": "776e99ef46698de4995870e1dab893e8ef5f665b417f8a07595f28cfaedf7f68"
+  },
+  "evidenceLogNormalization": "New copied logs trim trailing whitespace; original inherited evidence remains unchanged."
+}

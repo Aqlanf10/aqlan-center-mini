@@ -1,0 +1,8 @@
+
+ RUN  v4.1.11 /workspace/finance-composed-acceptance
+
+
+ Test Files  2 passed (2)
+      Tests  86 passed (86)
+   Start at  02:59:19
+   Duration  974ms (transform 164ms, setup 0ms, import 244ms, tests 79ms, environment 0ms)
