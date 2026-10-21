@@ -7,7 +7,7 @@ import { baseUrl, harness } from "./_server";
 // Mandatory built-app CI browser gate. Only the isolated security harness is
 // used. Synthetic patients, cases, plans and installments are seeded before
 // browsing. The plans GET is held or failed to exercise read states; successful
-// funded/empty recovery is always the real backend response, never a mock.
+// compatibility-link/empty recovery is always the real backend response, never a mock.
 // Every browser write and external request is blocked. No financial or clinical
 // submit is clicked, and full fixture/ledger snapshots must remain unchanged.
 let browser: Browser;
@@ -120,6 +120,7 @@ async function open(width: number, targetPatientId = patientId) {
     await page.goto(`${baseUrl}/patients/${targetPatientId}?tab=ortho`, { waitUntil: "domcontentloaded" });
     await expect.poll(() => pending.length).toBe(1);
     const panel = page.getByRole("region", { name: "اتفاق التقويم", exact: true });
+    await page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact: true }).click();
     await panel.waitFor();
     return {
       context, page, panel, pending,
@@ -179,21 +180,22 @@ async function captureReadablePanel(page: Page, panel: Locator, path: string) {
   await page.screenshot({ path });
 }
 
-async function expectFunded(f: Awaited<ReturnType<typeof open>>) {
+async function expectCompatibilityLink(f: Awaited<ReturnType<typeof open>>) {
   const payload = await f.realRead();
   const actual = payload.plans.find((plan) => plan.id === planId);
   expect(actual).toMatchObject({ id: planId, patientId, title: planTitle });
   expect(actual?.installments.map(({ number, amountMinor }) => ({ number, amountMinor }))).toEqual([
     { number: 1, amountMinor: 30000 }, { number: 2, amountMinor: 30000 },
   ]);
-  await f.panel.getByText(`✓ باقة تقويم: ${planTitle}`, { exact: true }).waitFor();
-  expect(await f.panel.innerText()).toContain("الشدّات مشمولة بالأقساط");
+  await f.panel.getByText(`✓ رابط اتفاق أقساط قديم: ${planTitle}`, { exact: true }).waitFor();
+  expect(await f.panel.innerText()).not.toContain("الشدّات مشمولة بالأقساط");
+  expect(await f.panel.innerText()).toContain("مرجع العلاج وشمول الشدّة يُعرضان بصورة مستقلة أعلاه");
   expect(await f.panel.innerText()).not.toContain("الخطة بلا أقساط");
   expect(await f.panel.getByRole("button", { name: "فكّ الربط", exact: true }).isEnabled()).toBe(true);
 }
 
 describe("orthodontic agreement read state in the real RTL UI", () => {
-  it.each([1280, 390])("keeps a linked legacy installment case unknown through delay/500/retry, then confirms the real agreement at %ipx", async (width) => {
+  it.each([1280, 390])("keeps a linked legacy installment case unknown through delay/500/retry, then confirms only the real compatibility link at %ipx", async (width) => {
     const before = await financialState();
     const f = await open(width);
     try {
@@ -209,7 +211,7 @@ describe("orthodontic agreement read state in the real RTL UI", () => {
       await expect.poll(() => f.pending.length).toBe(1);
       await f.panel.getByText(loadingText, { exact: false }).waitFor();
       await expectUnknown(f.panel);
-      await expectFunded(f);
+      await expectCompatibilityLink(f);
       await captureReadablePanel(f.page, f.panel, `.settings-ui-artifacts/ortho-package-funded-${width}.png`);
       f.assertIsolated();
       expect(await financialState()).toEqual(before);
@@ -242,7 +244,7 @@ describe("orthodontic agreement read state in the real RTL UI", () => {
       await f.panel.getByRole("button", { name: retryText, exact: true }).click();
       await expect.poll(() => f.pending.length).toBe(1);
       await expectUnknown(f.panel);
-      await expectFunded(f);
+      await expectCompatibilityLink(f);
       f.assertIsolated();
       expect(await financialState()).toEqual(before);
     } finally { await f.context.close(); }
@@ -258,7 +260,7 @@ describe("orthodontic agreement read state in the real RTL UI", () => {
       await expectUnknown(f.panel);
       await f.panel.getByRole("button", { name: retryText, exact: true }).click();
       await expect.poll(() => f.pending.length).toBe(1);
-      await expectFunded(f);
+      await expectCompatibilityLink(f);
       f.assertIsolated();
       expect(await financialState()).toEqual(before);
     } finally { await f.context.close(); }
@@ -272,9 +274,11 @@ describe("orthodontic agreement read state in the real RTL UI", () => {
       await expectUnknown(f.panel);
       const payload = await f.realRead();
       expect(payload.plans).toEqual([]);
-      await f.panel.getByText("لا اتفاق مالي مربوط بالحالة", { exact: true }).waitFor();
-      const create = f.panel.getByRole("link", { name: "أنشئ اتفاق تقويم من تبويب الخطط", exact: true });
-      expect(await create.getAttribute("href")).toBe(`/patients/${emptyPatientId}?tab=plans`);
+      await f.panel.getByText("لا يوجد رابط خطة أقساط قديم", { exact: true }).waitFor();
+      expect(await f.panel.innerText()).toContain("هذا الرابط ليس مطلوبًا للفاتورة أو الاتفاق السابق");
+      expect(await f.panel.innerText()).not.toContain("لا اتفاق مالي مربوط بالحالة");
+      expect(await f.panel.getByRole("link", { name: "أنشئ اتفاق تقويم من تبويب الخطط", exact: true }).count()).toBe(0);
+      expect(await f.panel.getByRole("button", { name: "اربط", exact: true }).count()).toBe(0);
       expect(await f.panel.getByRole("button", { name: retryText, exact: true }).count()).toBe(0);
       f.assertIsolated();
       expect(await financialState()).toEqual(before);
