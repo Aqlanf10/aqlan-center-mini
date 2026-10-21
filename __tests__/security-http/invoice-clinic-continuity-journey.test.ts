@@ -610,6 +610,8 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
     const text = execFileSync("pdftotext",["-layout",path,"-"],{encoding:"utf8"})
       .replace(/[\u202a-\u202e]/g,"").replace(/\s+/g," ");
     if (label === "same-day-decisions") {
+      // Regression for literal PDF copy/paste Unicode, not just visual glyphs.
+      expect(rawPdfText).toContain("بلا");
       // Deterministic Unicode/copy-order witness: no OCR, no correction or replaced expectations.
       const word = VISIT_SOURCE_SUMMARY.no_new_charge;
       console.info("PDF Unicode/copy audit:",JSON.stringify({
