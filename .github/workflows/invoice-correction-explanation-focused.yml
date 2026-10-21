@@ -1,0 +1,105 @@
+name: Focused invoice correction browser acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '__tests__/security-http/invoice-correction-explanation-ui.test.ts'
+      - '.github/workflows/invoice-correction-explanation-focused.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: invoice-correction-explanation-${{ github.ref }}
+  cancel-in-progress: true
+
+# Supplemental evidence for PR #389 only. Does not replace full required CI,
+# authorize a merge/deployment, or exercise any Production database.
+jobs:
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.6@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d aqlan_p1_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_SHA: 1c3ad5509a08d979ba3eaecff016fceaacef4570
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Check out acceptance source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: acceptance-source
+          persist-credentials: false
+      - name: Check out immutable application under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 1c3ad5509a08d979ba3eaecff016fceaacef4570
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.23.3'
+          package-manager-cache: false
+      - name: Verify app pin and install locked dependencies
+        run: |
+          test "$(git rev-parse HEAD)" = "$APP_SHA"
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build immutable application
+        run: npm run build
+      - name: Overlay only the focused acceptance test and record provenance
+        run: |
+          test "$(git rev-parse HEAD)" = "$APP_SHA"
+          git diff --exit-code -- app components lib package.json package-lock.json
+          cp ../acceptance-source/__tests__/security-http/invoice-correction-explanation-ui.test.ts __tests__/security-http/
+          mkdir -p artifacts/invoice-correction-explanation
+          {
+            printf 'app_sha=%s\n' "$APP_SHA"
+            printf 'acceptance_sha=%s\n' "$(git -C ../acceptance-source rev-parse HEAD)"
+            printf 'fixture=synthetic-isolated-aqlan_sec_http\n'
+            printf 'scope=UI response classification; intercepted correction POSTs; not server commit proof\n'
+            sha256sum __tests__/security-http/invoice-correction-explanation-ui.test.ts
+          } > artifacts/invoice-correction-explanation/provenance.txt
+      - name: Lint focused browser test
+        run: npx eslint __tests__/security-http/invoice-correction-explanation-ui.test.ts --max-warnings 0
+      - name: Transport and historical reader regressions
+        run: npm test -- __tests__/invoice-command-transport.test.ts __tests__/legacy-archive-route.test.ts __tests__/historical-correction-view.test.ts
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run focused browser acceptance
+        run: npm run test:security-http -- __tests__/security-http/invoice-correction-explanation-ui.test.ts
+      # Exact synthetic UI panels only. Never upload DBs, credentials, storage,
+      # traces, HARs, raw logs, previous artifacts, or a broad directory.
+      - name: Upload focused synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoice-correction-explanation-1c3ad5509
+          path: |
+            app/artifacts/invoice-correction-explanation/provenance.txt
+            app/artifacts/invoice-correction-explanation/price-warning-390.png
+            app/artifacts/invoice-correction-explanation/price-warning-1280.png
+            app/artifacts/invoice-correction-explanation/exact-refusal-390.png
+            app/artifacts/invoice-correction-explanation/uncertain-redirect-390.png
+            app/artifacts/invoice-correction-explanation/historical-labels-390.png
+            app/artifacts/invoice-correction-explanation/historical-labels-1280.png
+          if-no-files-found: error
+          retention-days: 7
