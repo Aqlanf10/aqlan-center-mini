@@ -163,6 +163,16 @@ html[data-reprint="true"] .reprint-mark {
   overflow-wrap: anywhere;
 }
 .report-table th { white-space: nowrap; }
+
+/* Chromium's DejaVuSans fallback shapes Arabic lam-alef correctly on screen but
+ * may export it as reversed Unicode (بلا -> بال) in a PDF. The hosted PDF
+ * witness verified both rendered glyphs and pdftotext copy order with these
+ * OpenType features off. Scope only to visits work-source cells; user column
+ * selection/order, other reports and their typography remain unchanged. */
+.sheet-report[data-report="visits"] .report-table td[data-report-column="workSource"] {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "rlig" 0;
+}
 .report-total-row td {
   border-top: 1.5px solid #000 !important;
   font-weight: 800;
