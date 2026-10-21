@@ -4,8 +4,8 @@ import { spawnSync } from 'node:child_process';
 it('actual restore-full and target policy refuse unsafe URI options before archive/network I/O', () => {
   const result = spawnSync(process.execPath, [
     '--test',
-    'scripts/security/restore-full-target-guard.test.mjs',
-    'scripts/security/restore-full-cli.test.mjs',
+    'scripts/security/restore-full-target-guard.nodecheck.mjs',
+    'scripts/security/restore-full-cli.nodecheck.mjs',
   ], {
     cwd: process.cwd(),
     env: { ...process.env, NODE_ENV: 'test' },
