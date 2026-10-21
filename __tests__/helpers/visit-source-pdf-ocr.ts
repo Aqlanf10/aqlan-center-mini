@@ -46,7 +46,7 @@ export async function diagnoseVisitSourcePdfOcr(page:Page,browser:Browser,direct
       const after=cell.getBoundingClientRect();
       if(after.x!==before.x||after.y!==before.y||after.width!==before.width||after.height!==before.height)throw new Error("markers_changed_layout");
       const marker=(name:string)=>{const element=cell.querySelector(`[data-ocr-marker="${name}"]`)!;const r=document.createRange();r.selectNodeContents(element);const b=r.getBoundingClientRect();return {width:b.width,height:b.height,x:b.x-box.x,y:b.y-box.y};};
-      return {box:before,top:marker(markerTop),bottom:marker(markerBottom),font:{fontFamily:css.fontFamily,fontSize:css.fontSize,fontWeight:css.fontWeight,fontStyle:css.fontStyle,letterSpacing:css.letterSpacing,lineHeight:css.lineHeight}};
+      return {box:before,ink:{x:ink.x-box.x,y:ink.y-box.y,width:ink.width,height:ink.height},top:marker(markerTop),bottom:marker(markerBottom),font:{fontFamily:css.fontFamily,fontSize:css.fontSize,fontWeight:css.fontWeight,fontStyle:css.fontStyle,letterSpacing:css.letterSpacing,lineHeight:css.lineHeight}};
     },{rowIndex,rowCount,markerTop,markerBottom});
     restore=async()=>{await page.evaluate(()=>{for(const cell of document.querySelectorAll<HTMLElement>('[data-ocr-target="true"]')){for(const marker of cell.querySelectorAll("[data-ocr-marker]"))marker.remove();const old=cell.dataset.ocrOldStyle??"";if(old)cell.setAttribute("style",old);else cell.removeAttribute("style");delete cell.dataset.ocrTarget;delete cell.dataset.ocrOldStyle;}});};
     const diagnosticPdf=`${directory}/fresh-ocr-diagnostic.pdf`;
@@ -73,7 +73,16 @@ export async function diagnoseVisitSourcePdfOcr(page:Page,browser:Browser,direct
     if(Object.values(result.calibration).some(delta=>Math.abs(delta)>1))
       throw new Error("pdf_dom_geometry_not_calibrated");
     const left=top.x1-spec.top.x*scale,upper=top.y1-spec.top.y*scale;
-    const crop={page:top.page,x:Math.ceil((left+2*scale)*dpi/72),y:Math.ceil((upper+2*scale)*dpi/72),width:Math.floor((spec.box.width-4)*scale*dpi/72),height:Math.floor((spec.box.height-4)*scale*dpi/72),dpi};
+    // Crop the original phrase's measured ink rectangle, not the whole cell:
+    // ASCII registration markers live in its margins and must not enter OCR.
+    // One CSS pixel on each side protects glyph antialiasing; there is no
+    // recognition-dependent crop or alteration of either Arabic string.
+    const margin=1,px=(pt:number)=>pt*dpi/72;
+    const crop={page:top.page,
+      x:Math.floor(px(left+(spec.ink.x-margin)*scale)),
+      y:Math.floor(px(upper+(spec.ink.y-margin)*scale)),
+      width:Math.ceil(px((spec.ink.width+2*margin)*scale)),
+      height:Math.ceil(px((spec.ink.height+2*margin)*scale)),dpi};
     if(crop.x<0||crop.y<0||crop.width<=0||crop.height<=0||crop.x+crop.width>top.pageWidth*dpi/72||crop.y+crop.height>top.pageHeight*dpi/72)throw new Error("crop_outside_page");
     result.geometry=crop;
     execFileSync("pdftoppm",["-f",String(crop.page),"-l",String(crop.page),"-r",String(dpi),"-x",String(crop.x),"-y",String(crop.y),"-W",String(crop.width),"-H",String(crop.height),"-png","-singlefile",`${directory}/same-day-decisions.pdf`,`${directory}/actual-source-cell`],{maxBuffer:1024*1024});
