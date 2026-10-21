@@ -41,7 +41,7 @@ export async function diagnoseVisitSourcePdfOcr(page:Page,browser:Browser,direct
       cell.dataset.ocrOldStyle=cell.getAttribute("style")??"";cell.dataset.ocrTarget="true";cell.style.position="relative";
       for(const [text,edge] of [[markerTop,"top"],[markerBottom,"bottom"]] as const){
         const span=document.createElement("span");span.dataset.ocrMarker=text;span.textContent=text;
-        Object.assign(span.style,{position:"absolute",fontFamily:"monospace",fontSize:"8px",lineHeight:"8px",direction:"ltr",whiteSpace:"nowrap",padding:"0",margin:"0",[edge]:"0",[edge==="top"?"left":"right"]:"0"});cell.append(span);
+        Object.assign(span.style,{position:"absolute",fontFamily:"monospace",fontSize:"8px",lineHeight:"8px",direction:"ltr",whiteSpace:"nowrap",padding:"0",margin:"0",[edge]:"0",left:"0"});cell.append(span);
       }
       const after=cell.getBoundingClientRect();
       if(after.x!==before.x||after.y!==before.y||after.width!==before.width||after.height!==before.height)throw new Error("markers_changed_layout");
