@@ -211,7 +211,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
     if (!readRef.current.active || busy) return;
     const source = plan?.approvedAgreement;
     const body = JSON.stringify({ patientId, kind: "payment", amount: payAmount, currency: payCurrency,
-      ...(source && source.deltaInvoiceIds.length>0
+      ...(source && (source.deltaInvoiceIds?.length??0)>0
         ? {planId:plan!.id}
         : source ? {invoiceId:source.invoiceId,openingCurrency:source.openingCurrency}
           : {planId:plan?.id}) });

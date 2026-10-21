@@ -93,3 +93,85 @@ it("browser confirmed 409 refusal can reset and refresh; interrupted responses p
   expect((await q("SELECT count(*)::int n FROM agreement_delta_amendments WHERE plan_id=$1",[f.planId])).rows[0].n).toBe(0);
  }finally{await context.close();}
 });
+
+it("the public /api/payments acknowledgment returns BOTH printable receipts and replays the exact allocations",async()=>{
+ const f=await fixture(),view=await preview(f.planId);
+ const body=JSON.stringify({idempotencyKey:`api-split-upgrade-${f.planId}`,expectedSourceHash:view.sourceHash,
+  newServiceId:f.newServiceId,newUnitMinor:80000,reason:"Synthetic witnessed replacement"});
+ const saved=await authedMutation(`/api/plans/${f.planId}/agreement-amendment`,h.sessions.admin,"POST",body);
+ expect(saved.status,await saved.clone().text()).toBe(201);
+ const key=`api-split-collection-${f.planId}`;
+ const request=JSON.stringify({patientId:f.patientId,planId:f.planId,
+  kind:"payment",amount:"620000",currency:"YER",method:"cash"});
+ const collect=()=>authedMutation("/api/payments",h.sessions.admin,"POST",request,{"Idempotency-Key":key});
+ const first=await collect();
+ expect(first.status,await first.clone().text()).toBe(201);
+ const payload=await first.json();
+ expect(payload.collection).toMatchObject({kind:"approved_agreement_split_v1",
+  patientId:f.patientId,planId:f.planId,currency:"YER",amountMinor:620000});
+ expect(payload.collection.paymentIds).toHaveLength(2);
+ expect(payload.collection.allocations.map((row:{amountMinor:number})=>row.amountMinor)).toEqual([320000,300000]);
+ expect(payload.collection.receipts).toHaveLength(2);
+ expect(payload.collection.receipts.map((row:{id:number})=>row.id)).toEqual(payload.collection.paymentIds);
+ expect(payload.collection.receipts.every((row:{receiptNumber:string})=>row.receiptNumber.length>0)).toBe(true);
+ expect(payload.collectionAmountMinor).toBe(620000);
+ const again=await collect();
+ expect(again.status,await again.clone().text()).toBe(200);
+ const replay=await again.json();
+ expect(replay.collection).toEqual(payload.collection);
+ expect(replay.paymentIds).toEqual(payload.paymentIds);
+ expect((await q("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n).toBe(3);
+});
+
+it("real browser PatientPlans retains the committed split when the reply is lost and another user is denied",async()=>{
+ const f=await fixture(),view=await preview(f.planId);
+ const change=await authedMutation(`/api/plans/${f.planId}/agreement-amendment`,h.sessions.admin,"POST",
+   JSON.stringify({idempotencyKey:`browser-upgrade-${f.planId}`,expectedSourceHash:view.sourceHash,
+     newServiceId:f.newServiceId,newUnitMinor:80000,reason:"Browser synthetic upgrade"}));
+ expect(change.status,await change.clone().text()).toBe(201);
+ const context=await browser.newContext({viewport:{width:1280,height:900},locale:"ar-YE",serviceWorkers:"block"});
+ const login=async(cookie:string)=>{
+  const [name,...parts]=cookie.split("=");
+  await context.clearCookies();
+  await context.addCookies([{name,value:parts.join("="),url:baseUrl}]);
+ };
+ await login(h.sessions.admin.cookie);
+ const page=await context.newPage();
+ const captured:{key:string;body:string}[]=[];let firstCommitted=false;
+ try{
+  await page.route("**/api/payments",async route=>{
+   if(route.request().method()!=="POST")return route.continue();
+   const key=route.request().headers()["idempotency-key"]??"",body=route.request().postData()??"";
+   captured.push({key,body});
+   if(!firstCommitted){
+    firstCommitted=true;
+    const backend=await route.fetch();
+    expect(backend.status(),await backend.text()).toBe(201);
+    // Server writes all receipts, but the browser loses the acknowledgement.
+    await route.abort("failed");
+   }else await route.continue();
+  });
+  await page.goto(`${baseUrl}/patients/${f.patientId}?tab=plans`,{waitUntil:"domcontentloaded"});
+  await page.getByRole("button",{name:"تحصيل قسط",exact:true}).click();
+  await page.getByLabel("مبلغ القسط").fill("620000");
+  await page.getByRole("button",{name:"سجّل القسط واطبع السند"}).click();
+  await expect.poll(()=>captured.length).toBe(1);
+  expect(JSON.parse(captured[0].body)).toMatchObject({planId:f.planId,amount:"620000",currency:"YER"});
+  await page.getByRole("button",{name:"إعادة التحقق من العملية السابقة"}).waitFor();
+  expect((await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n).toBe(3);
+  // Switching identity cannot erase the original user's durable IndexedDB record.
+  await login(h.sessions.doctorA.cookie);
+  await page.reload({waitUntil:"domcontentloaded"});
+  const denied=await authedMutation("/api/payments",h.sessions.doctorA,"POST",captured[0].body,
+    {"Idempotency-Key":captured[0].key});
+  expect(denied.status).toBe(403);
+  await login(h.sessions.admin.cookie);
+  await page.reload({waitUntil:"domcontentloaded"});
+  await page.getByRole("button",{name:"إعادة التحقق من العملية السابقة"}).click();
+  await expect.poll(()=>captured.length).toBe(2);
+  expect(captured[1]).toEqual(captured[0]);
+  await page.getByTestId("approved-split-receipts").getByRole("link",{name:/طباعة السند/}).first().waitFor();
+  await expect(page.getByTestId("approved-split-receipts").getByRole("link",{name:/طباعة السند/})).toHaveCount(2);
+  expect((await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n).toBe(3);
+ }finally{await context.close();}
+});
