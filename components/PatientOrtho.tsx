@@ -702,7 +702,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 }`}
               >
                 {/* رأس الحالة التقويمية */}
-                <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "p-3 sm:p-4" : "p-4"}`}>
+                <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "px-3 py-1 sm:p-4" : "p-4"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-navy-800 text-xs font-bold text-white">
@@ -832,7 +832,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 </div>
 
                 {/* محتوى الركن المختار */}
-                <div className={currentPillar === "prescription" ? "p-2 sm:p-4" : "p-4"}>
+                <div className={currentPillar === "prescription" ? "px-2 py-1 sm:p-4" : "p-4"}>
                   {/* ────────────────── الركن الأول: مسار الأسلاك والشدّات ────────────────── */}
                   {currentPillar === "wires" && (
                     <div className="space-y-4">
@@ -1038,8 +1038,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   {currentPillar === "prescription" && (
                     <div className="space-y-2 sm:space-y-4">
                       <OrthoStrategyPanel patientId={patientId} caseRow={row} />
-                      <div className="rounded-2xl border border-slate-200 bg-white p-2 sm:p-4">
-                        <h4 className="mb-2 text-xs sm:mb-3 font-black text-navy-900">
+                      <div className="rounded-2xl border border-slate-200 bg-white px-2 py-1 sm:p-4">
+                        <h4 className="mb-1 text-xs sm:mb-3 font-black text-navy-900">
                           وصفة الجهاز والمواصفات الميكانيكية
                         </h4>
                         <div className="grid grid-cols-1 gap-0.5 text-xs sm:grid-cols-3 sm:gap-3">
@@ -1072,8 +1072,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                         </div>
 
                         {row.note && (
-                          <div className="mt-2 rounded-xl bg-slate-50 p-2 sm:mt-3 sm:p-3 border border-slate-100 text-xs">
-                            <span className="block font-bold text-slate-500 mb-1">ملاحظات خطة العلاج والميكانيكا:</span>
+                          <div className="mt-2 rounded-xl bg-slate-50 px-2 py-1 sm:mt-3 sm:p-3 border border-slate-100 text-xs">
+                            <span className="block font-bold text-slate-500 sm:mb-1">ملاحظات خطة العلاج والميكانيكا:</span>
                             <p className="text-slate-800">{row.note}</p>
                           </div>
                         )}
