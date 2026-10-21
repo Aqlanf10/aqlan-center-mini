@@ -53,7 +53,7 @@ export async function findSimilarCollections(patientId:number,amountMinor:number
         WHERE r.reversal_of_id=p.id AND r.kind='refund' AND r.currency=p.currency
       ),0)
     ORDER BY p.created_at DESC,p.id DESC LIMIT $4
-  `,[patientId,amountMinor,currency,MATCH_LIMIT+1]);
+  `,[patientId,amountMinor,currency,MATCH_LIMIT]);
   return rows.map(row=>({
     id:row.id,receiptNumber:row.receipt_number,amountMinor:Number(row.amount_minor),
     currency:row.currency,createdAt:new Date(row.created_at).toISOString(),method:row.method,
