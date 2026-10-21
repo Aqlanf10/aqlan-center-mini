@@ -179,7 +179,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
   // DOT-PF-01: share pending collections with the patient collection modal.
   const money = useMoneyAttempt(`collection:${patientId}`, canSeeFinancial && !readUnavailable && !readDenied, `collection:${patientId}`, {patientId});
-  const similarity=useSimilarCollectionWarning();
+  const similarity=useSimilarCollectionWarning(JSON.stringify([patientId,session?.username,session?.role,canSeeFinancial]));
 
   const itemGuards = useRef(new Map<number, () => boolean>());
   const registerItemGuard = useCallback((planId: number, guard: () => boolean) => {
