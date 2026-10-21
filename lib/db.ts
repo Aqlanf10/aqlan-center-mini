@@ -16908,7 +16908,7 @@ export const ORTHO_CASE_FUNDED_SQL =
     WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled')`;
 
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
-async function orthoAdjustmentBillingClass(
+export async function orthoAdjustmentBillingClass(
   db: DbClient | DbPool, caseId: number, patientId: number,
 ): Promise<BillingClassification> {
   const { rows: [evidence] } = await db.query<{

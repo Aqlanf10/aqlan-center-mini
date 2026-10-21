@@ -86,7 +86,7 @@ function button(tree: ReactNode, label: string) {
 }
 function click(node: Element) { (node.props.onClick as () => void)(); }
 function unknown(tree: ReactNode) {
-  expect(text(tree)).not.toMatch(/الخطة بلا أقساط|لا اتفاق مالي مربوط|الشدّة تحتاج قرار فوترة|✓ باقة تقويم|الشدّات مشمولة/);
+  expect(text(tree)).not.toMatch(/الخطة بلا أقساط|لا اتفاق مالي مربوط|الشدّة تحتاج قرار فوترة|✓ رابط اتفاق أقساط قديم|الشدّات مشمولة/);
   expect(nodes(tree).filter((node) => ["a", "select", "input", "form"].includes(String(node.type)))).toEqual([]);
   expect(nodes(tree).filter((node) => node.type === "button" && ["اربط", "فكّ الربط"].includes(text(node).trim()))).toEqual([]);
 }
@@ -120,7 +120,7 @@ describe("orthodontic agreement read states", () => {
     fetchMock.mockResolvedValueOnce(response([], status)).mockResolvedValueOnce(response());
     render(); await settle(); unknown(render()); expect(text(render())).toContain("هذا لا يعني عدم وجود اتفاق أو أقساط");
     click(button(render(), "أعد تحميل اتفاق التقويم")); unknown(render()); await settle();
-    expect(text(render())).toContain("✓ باقة تقويم"); expect(text(render())).toContain("Synthetic existing agreement");
+    expect(text(render())).toContain("✓ رابط اتفاق أقساط قديم"); expect(text(render())).toContain("Synthetic existing agreement");
     expect(fetchMock).toHaveBeenCalledTimes(2); expect(writes()).toEqual([]);
   });
   it("shows a network failure without implying absence", async () => {
@@ -144,25 +144,26 @@ describe("orthodontic agreement read states", () => {
     fetchMock.mockResolvedValue(response([])); render(); await settle(); unknown(render());
     expect(text(render())).toContain("تعذّر العثور على الخطة المربوطة");
   });
-  it("shows confirmed no-link only after a successful empty read, preserving the existing Plans link", async () => {
+  it("reports only the missing legacy link, without an obsolete direct-plan creation link", async () => {
     fetchMock.mockResolvedValue(response([])); render({ planId: null }); await settle();
-    const tree = render({ planId: null }); expect(text(tree)).toContain("لا اتفاق مالي مربوط بالحالة");
-    const links = nodes(tree).filter((node) => node.type === "a"); expect(links).toHaveLength(1);
-    expect(links[0].props.href).toBe("/patients/19?tab=plans"); expect(writes()).toEqual([]);
+    const tree = render({ planId: null }); expect(text(tree)).toContain("لا يوجد رابط خطة أقساط قديم");
+    expect(text(tree)).not.toContain("لا اتفاق مالي مربوط بالحالة");
+    const links = nodes(tree).filter((node) => node.type === "a"); expect(links).toHaveLength(0);
+    expect(writes()).toEqual([]);
   });
   it("shows no-installments only for the verified linked plan, ignoring other agreements", async () => {
     fetchMock.mockResolvedValue(response([fixture({ installments: [] }), fixture({ id: 52 })])); render(); await settle();
-    expect(text(render())).toContain("الخطة بلا أقساط"); expect(text(render())).not.toContain("✓ باقة تقويم");
+    expect(text(render())).toContain("الخطة بلا أقساط"); expect(text(render())).not.toContain("✓ رابط اتفاق أقساط قديم");
     expect(writes()).toEqual([]);
   });
   it.each(["active", "completed"])("preserves canonical non-cancelled %s funding and discards monetary fields", async (status) => {
     fetchMock.mockResolvedValue(response([fixture({ status, paidMinor: 987654, note: "PRIVATE_DETAIL" })])); render(); await settle();
-    expect(text(render())).toContain("✓ باقة تقويم"); expect(text(render())).not.toMatch(/987654|PRIVATE_DETAIL/);
+    expect(text(render())).toContain("✓ رابط اتفاق أقساط قديم"); expect(text(render())).not.toMatch(/987654|PRIVATE_DETAIL/);
     expect(writes()).toEqual([]);
   });
   it("identifies a verified cancelled linked plan without calling it funded or installment-free", async () => {
     fetchMock.mockResolvedValue(response([fixture({ status: "cancelled" })])); render(); await settle();
-    expect(text(render())).toContain("الخطة المربوطة ملغاة"); expect(text(render())).not.toMatch(/✓ باقة تقويم|الخطة بلا أقساط/);
+    expect(text(render())).toContain("الخطة المربوطة ملغاة"); expect(text(render())).not.toMatch(/✓ رابط اتفاق أقساط قديم|الخطة بلا أقساط/);
   });
   it.each(["fetch", "body"])("times out a %s stall; late data cannot overwrite a retry", async (stage) => {
     vi.useFakeTimers(); const body = deferred<unknown>(); const request = deferred();
@@ -175,7 +176,7 @@ describe("orthodontic agreement read states", () => {
     click(button(render(), "أعد تحميل اتفاق التقويم")); render(); await settle();
     body.resolve({ plans: [fixture({ installments: [] })] });
     request.resolve(response([fixture({ installments: [] })])); await settle();
-    expect(text(render())).toContain("✓ باقة تقويم"); expect(text(render())).not.toContain("الخطة بلا أقساط");
+    expect(text(render())).toContain("✓ رابط اتفاق أقساط قديم"); expect(text(render())).not.toContain("الخطة بلا أقساط");
     expect(vi.getTimerCount()).toBe(0);
   });
 });
@@ -251,7 +252,7 @@ describe("existing explicit linking actions", () => {
   it("preserves explicit write errors without fabricating a successful unlink", async () => {
     fetchMock.mockResolvedValueOnce(response()).mockResolvedValueOnce(Response.json({ message: "Synthetic refusal" }, { status: 409 }));
     render(); await settle(); click(button(render(), "فكّ الربط")); await settle();
-    expect(text(render())).toContain("Synthetic refusal"); expect(text(render())).toContain("✓ باقة تقويم");
+    expect(text(render())).toContain("Synthetic refusal"); expect(text(render())).toContain("✓ رابط اتفاق أقساط قديم");
     expect(onChanged).not.toHaveBeenCalled();
   });
   it("has no mutation controls when linking is unavailable", async () => {

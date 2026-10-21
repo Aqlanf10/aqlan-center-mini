@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { LegacyOnboarding } from "@/lib/legacy-onboarding";
+import { readOrthoFinancialReference } from "@/lib/ortho-financial-reference";
 import { useSession } from "./SessionProvider";
 
 const CLASS_TEXT: Record<string, string> = {
@@ -19,6 +20,7 @@ type Props = {
   caseId: number;
   planId: number | null;
   refreshRevision: number;
+  onOpenAccount?: () => unknown;
 };
 type ReadState = { phase: "ready"; data: LegacyOnboarding }
   | { phase: "loading" | "error" | "denied" };
@@ -40,7 +42,7 @@ function readOnboarding(payload: unknown, caseId: number): LegacyOnboarding {
   const steps = row.steps.map((entry): LegacyOnboarding["steps"][number] => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("Invalid checklist step");
     const step = entry as Record<string, unknown>;
-    if (typeof step.key !== "string" || !["baseline", "financial_mode", "opening_balance", "arrangement", "plan"].includes(step.key)
+    if (typeof step.key !== "string" || !["baseline", "financial_mode", "opening_balance", "arrangement", "plan", "financial_source"].includes(step.key)
       || keys.has(step.key) || typeof step.label !== "string" || typeof step.done !== "boolean"
       || typeof step.optional !== "boolean" || (step.hint !== null && typeof step.hint !== "string")) {
       throw new Error("Invalid checklist step");
@@ -50,7 +52,8 @@ function readOnboarding(payload: unknown, caseId: number): LegacyOnboarding {
       done: step.done, optional: step.optional, hint: step.hint as string | null };
   });
   return { legacy: row.legacy, complete: row.complete, steps,
-    adjustmentClass: row.adjustmentClass as LegacyOnboarding["adjustmentClass"], warning: row.warning as string | null };
+    adjustmentClass: row.adjustmentClass as LegacyOnboarding["adjustmentClass"], warning: row.warning as string | null,
+    financialReference: readOrthoFinancialReference(row.financialReference) };
 }
 
 /** Read-only canonical classification, scoped to the case and confirmed changes. */
@@ -62,7 +65,7 @@ export function LegacyOnboardingChecklist(props: Props) {
   return <ScopedLegacyOnboardingChecklist key={scope} {...props} />;
 }
 
-function ScopedLegacyOnboardingChecklist({ patientId, caseId }: Props) {
+function ScopedLegacyOnboardingChecklist({ patientId, caseId, onOpenAccount }: Props) {
   const [read, setRead] = useState<ReadState>({ phase: "loading" });
   const [attempt, setAttempt] = useState(0);
   const mounted = useRef(false);
@@ -83,7 +86,7 @@ function ScopedLegacyOnboardingChecklist({ patientId, caseId }: Props) {
     }, LEGACY_ONBOARDING_READ_TIMEOUT_MS);
     void (async () => {
       try {
-        const response = await fetch(`/api/patients/${patientId}/legacy-onboarding`, {
+        const response = await fetch(`/api/patients/${patientId}/legacy-onboarding?caseId=${caseId}`, {
           cache: "no-store", signal: controller.signal,
         });
         if (!current()) return;
@@ -120,11 +123,27 @@ function ScopedLegacyOnboardingChecklist({ patientId, caseId }: Props) {
     </section>
   );
   const { data } = read;
-  if (!data.legacy) return null;
+  const reference = data.financialReference;
   return (
     <section className={`mt-2 rounded-xl border px-3 py-2 text-[11px] ${data.complete ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}
       aria-label="تهيئة الحالة السابقة">
-      <p className="mb-1 font-extrabold text-navy-900">
+      <div aria-label="مرجع الحالة المالي" className="space-y-1 border-b border-slate-200 pb-2 mb-2">
+        <p className="font-extrabold text-navy-900">{reference.state === "linked" ? "✓ مرجع مالي موثّق لهذه الحالة"
+          : reference.state === "review" ? "مرجع مالي محفوظ يحتاج مراجعة"
+            : reference.state === "restricted" ? "تفاصيل المرجع المالي غير متاحة بصلاحيتك"
+              : "لم يُثبت مرجع فاتورة أو اتفاق سابق عبر بند هذه الحالة"}</p>
+        {reference.sources.map((source) => <p key={`${source.kind}:${source.sourceId}:${source.planItemId}`}>
+          {source.kind === "invoice" ? "فاتورة" : "اتفاق سابق"} #{source.sourceId} · خطة #{source.planId} · بند #{source.planItemId} · حالة #{source.clinicalCaseId}
+          {source.current ? " · مرجع حالي" : " · محفوظ للمراجعة"}
+        </p>)}
+        <p>الفاتورة أو الاتفاق السابق هو المرجع المالي؛ جدول الأقساط ينظّم تحصيل الدين القائم ولا يثبت وحده شمول الشدّة.</p>
+        {reference.state === "missing" && <p>راجع الربط الموجود في الحساب قبل إنشاء أي مستند. لا تُنشئ فاتورة أو دينًا مكررًا لإصلاح الربط.</p>}
+        {reference.state === "review" && <p className="font-bold text-amber-800">يلزم التحقق من هوية المصدر وصلاحيته؛ لا يُعالج ذلك بإضافة جدول أقساط.</p>}
+        {onOpenAccount && reference.state !== "restricted" ? <button type="button" onClick={() => {
+          if (mounted.current) onOpenAccount();
+        }} className="font-bold text-sky-800 underline">مراجعة العلاج ومصدره في الحساب</button> : null}
+      </div>
+      {data.legacy ? <><p className="mb-1 font-extrabold text-navy-900">
         {data.complete ? "✓ تهيئة الحالة السابقة مكتملة" : "تهيئة الحالة السابقة — خطوات ناقصة"}
       </p>
       <ul className="space-y-0.5">
@@ -138,7 +157,7 @@ function ScopedLegacyOnboardingChecklist({ patientId, caseId }: Props) {
             </span>
           </li>
         ))}
-      </ul>
+      </ul></> : null}
       <p className="mt-1 font-bold text-slate-700">{CLASS_TEXT[data.adjustmentClass] ?? ""}</p>
       {data.warning ? <p className="mt-1 font-bold text-amber-800">{data.warning}</p> : null}
     </section>

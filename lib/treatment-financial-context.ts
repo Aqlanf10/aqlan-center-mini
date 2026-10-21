@@ -1,5 +1,5 @@
 import {
-  invoiceNet, patientBalancesByCurrency, settlePaymentMinor, toCurrencyPaymentLikes,
+  invoiceNet, isCurrency, patientBalancesByCurrency, settlePaymentMinor, toCurrencyPaymentLikes,
   type Currency, type PaymentLike,
 } from "./money";
 
@@ -35,8 +35,18 @@ export interface FinancialReceiptEvidence extends PaymentLike {
 }
 export interface FinancialLegacyEvidence {
   id: number; patientId: number; planItemId: number; clinicalCaseId: number | null;
-  currency: Currency; agreedMinor: number; previouslyPaidMinor: number; remainingAtRegistrationMinor: number;
+  /** Absent only for pre-document snapshot callers; normalized to explicit null in the projection. */
+  documentId?: number | null; documentLine?: number | null;
+  currency: Currency; agreedMinor: number; previouslyPaidMinor: number | null; remainingAtRegistrationMinor: number | null;
   historicalAsOf: string; openingHistoryId: number | null; openingEffect: string; status: "live" | "void";
+}
+export interface FinancialLegacyDocumentEvidence {
+  id: number; patientId: number; currency: Currency; lineCount: number;
+  /** The latest persisted revision in the same read snapshot, never a fallback revision. */
+  revision: {
+    id: number; version: number; totalMinor: number; discountMinor: number;
+    previouslyPaidMinor: number; remainingMinor: number; historicalAsOf: string; lines: unknown;
+  } | null;
 }
 export interface FinancialOpeningEvidence {
   currency: Currency; openingMinor: number; settledMinor: number; remainingMinor: number;
@@ -49,6 +59,7 @@ export interface TreatmentFinancialSnapshot {
   lines: FinancialLineEvidence[];
   receipts: FinancialReceiptEvidence[];
   legacyAgreements: FinancialLegacyEvidence[];
+  historicalDocuments?: FinancialLegacyDocumentEvidence[];
   openings: FinancialOpeningEvidence[];
 }
 
@@ -58,6 +69,80 @@ export type FinancialReferenceReason =
   | "opening_reference_missing" | "opening_allocation_unavailable" | "multiple_financial_sources"
   | "package_coverage_unspecified" | "item_settlement_allocation_unavailable" | "invoice_item_identity_conflict" | "installment_schedule_missing";
 
+const historicalId = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+const historicalAmount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const historicalDate = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+
+/** Document totals are not per-case debt. Validate every immutable line owner before exposing them. */
+function historicalDocumentReferences(snapshot: TreatmentFinancialSnapshot) {
+  const agreements = snapshot.legacyAgreements;
+  const source = snapshot.historicalDocuments ?? [];
+  if (new Set(source.map((document) => document.id)).size !== source.length
+    || new Set(agreements.map((agreement) => agreement.id)).size !== agreements.length) throw new Error("Duplicate historical reference");
+  const documents = source.map((document) => {
+    const revision = document.revision;
+    if (!historicalId(document.id) || document.patientId !== snapshot.patientId || !isCurrency(document.currency)
+      || !historicalId(document.lineCount) || document.lineCount > 40 || !revision
+      || !historicalId(revision.id) || !historicalId(revision.version)
+      || !historicalAmount(revision.totalMinor) || revision.totalMinor <= 0
+      || !historicalAmount(revision.discountMinor) || revision.discountMinor >= revision.totalMinor
+      || !historicalAmount(revision.previouslyPaidMinor) || !historicalAmount(revision.remainingMinor)
+      || revision.remainingMinor !== revision.totalMinor - revision.discountMinor - revision.previouslyPaidMinor
+      || !historicalDate(revision.historicalAsOf) || !Array.isArray(revision.lines)
+      || revision.lines.length !== document.lineCount) throw new Error("Historical document revision needs review");
+    const members = agreements.filter((agreement) => agreement.documentId === document.id);
+    if (members.length !== document.lineCount) throw new Error("Historical document membership needs review");
+    const lines = revision.lines.map((value: unknown, documentLine: number) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Historical document line needs review");
+      const line = value as Record<string, unknown>;
+      const member = members.find((agreement) => agreement.documentLine === documentLine);
+      const item = snapshot.items.find((item) => item.planItemId === line.planItemId);
+      const plan = snapshot.plans.find((plan) => plan.id === line.planId);
+      if (!member || !item || !plan || member.patientId !== snapshot.patientId || item.patientId !== snapshot.patientId
+        || plan.patientId !== snapshot.patientId || member.currency !== document.currency || plan.currency !== document.currency
+        || member.status !== "live" || line.agreementId !== member.id || line.planItemId !== member.planItemId
+        || line.caseId !== member.clinicalCaseId || line.caseId !== item.clinicalCaseId || line.planId !== item.planId
+        || !historicalAmount(line.unitPriceMinor) || line.unitPriceMinor <= 0 || !historicalAmount(line.discountMinor)
+        || !historicalAmount(line.netMinor) || line.netMinor !== line.unitPriceMinor - line.discountMinor) {
+        throw new Error("Historical document line ownership or amount needs review");
+      }
+      return { agreementId: member.id, documentLine, patientId: snapshot.patientId, planId: item.planId,
+        planItemId: item.planItemId, clinicalCaseId: item.clinicalCaseId };
+    });
+    const rawLines = revision.lines as Record<string, unknown>[];
+    const gross = rawLines.reduce((total, line) => total + BigInt(line.unitPriceMinor as number), 0n);
+    const discount = rawLines.reduce((total, line) => total + BigInt(line.discountMinor as number), 0n);
+    if (gross !== BigInt(revision.totalMinor) || discount !== BigInt(revision.discountMinor)) throw new Error("Historical document totals need review");
+    return { documentId: document.id, patientId: document.patientId, revisionId: revision.id, version: revision.version,
+      currency: document.currency, grossMinor: revision.totalMinor, discountMinor: revision.discountMinor,
+      agreedMinor: revision.totalMinor - revision.discountMinor, previouslyPaidMinor: revision.previouslyPaidMinor,
+      remainingAtRevisionMinor: revision.remainingMinor, historicalAsOf: revision.historicalAsOf, lines,
+      scope: "historical_document" as const, currentAllocatedRemainingMinor: null, allocationState: "not_allocated" as const };
+  });
+  for (const agreement of agreements) {
+    const documentId = agreement.documentId ?? null;
+    const documentLine = agreement.documentLine ?? null;
+    const item = snapshot.items.find((item) => item.planItemId === agreement.planItemId);
+    if (!item || item.clinicalCaseId !== agreement.clinicalCaseId || !historicalAmount(agreement.agreedMinor)
+      || !historicalDate(agreement.historicalAsOf)) throw new Error("Historical agreement identity or amount needs review");
+    if (documentId !== null) {
+      if (!historicalId(documentId) || !historicalAmount(documentLine)
+        || agreement.previouslyPaidMinor !== null || agreement.remainingAtRegistrationMinor !== null
+        || agreement.openingEffect !== "none" || agreement.openingHistoryId !== null
+        || !documents.some((document) => document.documentId === documentId
+          && document.lines.some((line) => line.agreementId === agreement.id && line.documentLine === documentLine))) {
+        throw new Error("Historical document reference needs review");
+      }
+    } else if (documentLine !== null || !historicalAmount(agreement.previouslyPaidMinor)
+      || !historicalAmount(agreement.remainingAtRegistrationMinor)
+      || agreement.remainingAtRegistrationMinor !== agreement.agreedMinor - agreement.previouslyPaidMinor) {
+      throw new Error("Historical agreement amounts need review");
+    }
+  }
+  return documents;
+}
+
 /** Document money is shown once in documents, never copied into item totals or a second ledger. */
 export function projectTreatmentFinancialReferences(snapshot: TreatmentFinancialSnapshot) {
   const patientId = snapshot.patientId;
@@ -65,6 +150,7 @@ export function projectTreatmentFinancialReferences(snapshot: TreatmentFinancial
   for (const row of [...snapshot.plans, ...snapshot.items, ...snapshot.invoices, ...snapshot.receipts, ...snapshot.legacyAgreements]) {
     if (row.patientId !== patientId) throw new Error("Cross-patient financial reference");
   }
+  const historicalDocuments = historicalDocumentReferences(snapshot);
   const plans = new Map(snapshot.plans.map((plan) => [plan.id, plan]));
   const invoices = new Map(snapshot.invoices.map((invoice) => [invoice.id, invoice]));
   const items = new Map(snapshot.items.map((item) => [item.planItemId, item]));
@@ -127,7 +213,7 @@ export function projectTreatmentFinancialReferences(snapshot: TreatmentFinancial
       if (agreement.status === "live" && hasOpening && !opening) reasons.add("opening_reference_missing");
       if (agreement.status === "live" && hasOpening) reasons.add("opening_allocation_unavailable");
       return {
-        ...agreement,
+        ...agreement, documentId: agreement.documentId ?? null, documentLine: agreement.documentLine ?? null,
         // This is a link to the patient/currency position below, not this agreement's allocated balance.
         openingPositionCurrency: hasOpening && opening ? agreement.currency : null,
         currentAgreementRemainingMinor: null,
@@ -164,7 +250,7 @@ export function projectTreatmentFinancialReferences(snapshot: TreatmentFinancial
     };
   });
   return {
-    patientId, references, documents, accountPositions,
+    patientId, references, documents, historicalDocuments, accountPositions,
     openingPositions: snapshot.openings.map((opening) => ({
       ...opening, scope: "patient_currency" as const,
       agreementIds: snapshot.legacyAgreements.filter((agreement) => agreement.currency === opening.currency
