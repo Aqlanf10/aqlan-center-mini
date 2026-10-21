@@ -76,7 +76,7 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
   const [note,setNote]=useState("");
   const [writing,setWriting]=useState(false);
   const [checkingSimilar,setCheckingSimilar]=useState(false);
-  const similarity=useSimilarCollectionWarning();
+  const similarity=useSimilarCollectionWarning(JSON.stringify([patientId,session?.username,session?.role,enabled]));
   const pending=useRef(false);
   const draftRevision=useRef(financialRecovery.revision);
   const lifetime=useRef({active:false,generation:0});
