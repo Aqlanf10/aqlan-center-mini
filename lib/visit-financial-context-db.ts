@@ -3,93 +3,97 @@ import { getPool, PLAN_ITEM_PREBILLED_SQL, PLAN_ITEM_LEGACY_COVERED_SQL, PLAN_IT
 import { withFinancialReadSnapshot } from "./financial-read-snapshot";
 import { legacyCoverageContains, legacyCoverageStateFromContext } from "./legacy-treatment-coverage";
 import { validateLineSite } from "./invoice-clinical-linkage";
-import { validVisitHistoricalDocument } from "./visit-historical-document-read";
+import { validVisitHistoricalDocuments } from "./visit-historical-document-read";
 import { projectVisitFinancialContext, type VisitSource, type VisitFinancialWork, type VisitFinancialContext } from "./visit-financial-context";
 
 type Runner = DbClient | DbPool;
 const work = (kind: VisitFinancialWork["kind"], id: number): VisitFinancialWork => ({ key: `${kind}:${id}`, kind, id,
   references: [], coverage: "unresolved", decision: "none", reasons: [] });
 
-/** Exact owned documentary reference only. Never find another invoice for the patient. */
-async function invoiceReference(db: Runner, id: number, patientId: number | null, path: string, cache: ReadCache): Promise<VisitSource | null> {
-  const key = `${patientId}:${id}`;
-  if (cache.invoices.has(key)) { const source=cache.invoices.get(key); return source ? {...source,path} : null; }
-  const { rows: [row] } = await db.query<{status:string}>("SELECT status FROM invoices WHERE id=$1 AND patient_id=$2",[id,patientId]);
-  const source: VisitSource | null = row ? { kind:"invoice", id, state:row.status === "cancelled" ? "historical" : "current", path } : null;
-  cache.invoices.set(key,source);
-  return source;
-}
-
-async function loadItemEvidence(db: Runner, itemId: number, patientId: number | null, line: VisitFinancialWork, cache: ReadCache) {
-  const { rows: [item] } = await db.query<{
-    id:number; plan_id:number; status:string; plan_status:string; billed_invoice_id:number|null; origin_invoice_id:number|null;
-    prebilled:boolean; legacy_covered:boolean; financial_review:boolean; legacy_context:unknown;
-    category:string|null; tooth_code:number|null; surfaces:string|null;
-  }>(`SELECT i.id,i.plan_id,i.status,t.status AS plan_status,i.billed_invoice_id,i.origin_invoice_id,i.category,i.tooth_code,i.surfaces,
-    ${PLAN_ITEM_PREBILLED_SQL} AS prebilled,${PLAN_ITEM_LEGACY_COVERED_SQL} AS legacy_covered,
-    ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review,${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context
-    FROM plan_items i JOIN treatment_plans t ON t.id=i.plan_id
-    WHERE i.id=$1 AND t.patient_id=$2 AND (i.case_id IS NULL OR EXISTS(
-      SELECT 1 FROM clinical_cases c WHERE c.id=i.case_id AND c.patient_id=t.patient_id))`,[itemId,patientId]);
-  if (!item) { line.reasons.push("plan_item_owner_unverified"); return; }
-  if (item.financial_review || item.status === "cancelled" || item.plan_status === "cancelled") line.reasons.push("plan_source_needs_review");
-  for (const id of new Set([item.billed_invoice_id,item.origin_invoice_id].filter((id):id is number=>id!==null))) {
-    const reference = await invoiceReference(db,id,patientId,"plan_item",cache);
-    if (reference) line.references.push(reference); else line.reasons.push("invoice_owner_unverified");
-  }
-  const { rows: agreements } = await db.query<{id:number;status:string;document_id:number|null}>(
-    "SELECT id,status,document_id FROM legacy_treatment_agreements WHERE plan_item_id=$1 AND patient_id=$2 ORDER BY id",[itemId,patientId]);
-  let legacyValid = false;
-  for (const agreement of agreements) {
-    const documentValid = agreement.document_id === null || patientId !== null && await documentEvidence(db,patientId,agreement.document_id,cache);
-    const legacyState=legacyCoverageStateFromContext(item.legacy_context);
-    const site=validateLineSite({category:item.category,toothCode:item.tooth_code,surfaces:item.surfaces});
-    const valid = item.legacy_covered && site.ok && legacyCoverageContains(legacyState,site.site) && documentValid && agreement.status === "live";
-    line.references.push({kind:"historical_agreement",id:agreement.id,state:valid ? "current" : agreement.status === "void" ? "historical" : "review",path:"plan_item"});
-    legacyValid ||= valid;
-    if (!valid) line.reasons.push("historical_source_needs_review");
-  }
-  // Approval terms may record item IDs, but membership alone does not validate the current backing source.
-  // Leave this documentary path unresolved; do not reconstruct coverage from plan/opening amounts.
-  const {rows: principals} = await db.query<{id:number}>(
-    "SELECT ap.plan_id AS id FROM approved_agreement_principals ap JOIN treatment_plans t ON t.id=ap.plan_id WHERE ap.plan_id=$1 AND ap.patient_id=$2 AND t.patient_id=$2",
-    [item.plan_id,patientId]);
-  for(const principal of principals) {
-    line.references.push({kind:"approved_agreement",id:principal.id,state:"review",path:"plan_item_plan"});
-    line.reasons.push("approved_source_unverified");
-  }
-  const {rows:[schedule]}=await db.query<{recorded:boolean}>("SELECT EXISTS(SELECT 1 FROM plan_installments WHERE plan_id=$1) AS recorded",[item.plan_id]);
-  const sources = Number(item.prebilled) + Number(legacyValid);
-  if (sources > 1) line.reasons.push("multiple_financial_sources");
-  if (sources === 1 && !line.reasons.length) line.coverage="verified";
-  if (!sources && schedule?.recorded) {
-    line.references.push({kind:"installment_plan",id:item.plan_id,state:"review",path:"plan_item_plan"});
-    line.reasons.push("installment_principal_unverified");
-  }
-}
-
-
-/** Caches live only for this caller-supplied snapshot, and include patient identity in every key. */
+/** Caches are populated in bounded bulk reads, only inside one caller-supplied snapshot. */
 type ReadCache = {
   invoices: Map<string, VisitSource | null>;
   items: Map<string, VisitFinancialWork>;
   documents: Map<string, boolean>;
 };
-async function documentEvidence(db: Runner, patientId: number, documentId: number, cache: ReadCache) {
-  const key=`${patientId}:${documentId}`;
-  if (!cache.documents.has(key)) cache.documents.set(key,await validVisitHistoricalDocument(db,patientId,documentId));
-  return cache.documents.get(key)!;
+function invoiceReference(id:number,patientId:number|null,path:string,cache:ReadCache):VisitSource|null {
+  const key=`${patientId}:${id}`;
+  if(!cache.invoices.has(key))throw new Error("Invoice evidence was not loaded");
+  const source=cache.invoices.get(key);return source?{...source,path}:null;
 }
-async function itemEvidence(db: Runner,itemId:number,patientId:number|null,line:VisitFinancialWork,cache:ReadCache) {
-  const key=`${patientId}:${itemId}`;
-  if (!cache.items.has(key)) {
-    const evidence=work("plan_item",itemId);
-    await loadItemEvidence(db,itemId,patientId,evidence,cache);
-    cache.items.set(key,evidence);
+async function loadInvoiceReferences(db:Runner,requests:readonly {id:number;patientId:number|null}[],cache:ReadCache){
+  const missing=[...new Map(requests.filter(row=>!cache.invoices.has(`${row.patientId}:${row.id}`))
+    .map(row=>[`${row.patientId}:${row.id}`,row])).values()];
+  for(let start=0;start<missing.length;start+=BATCH_SIZE){
+    const chunk=missing.slice(start,start+BATCH_SIZE);
+    const {rows}=await db.query<{id:number;patient_id:number;status:string}>("SELECT id,patient_id,status FROM invoices WHERE id=ANY($1::int[])",[[...new Set(chunk.map(row=>row.id))]]);
+    const invoices=new Map(rows.map(row=>[row.id,row]));
+    for(const request of chunk){const row=invoices.get(request.id);cache.invoices.set(`${request.patientId}:${request.id}`,
+      row&&row.patient_id===request.patientId?{kind:"invoice",id:row.id,state:row.status==="cancelled"?"historical":"current",path:"visit"}:null);}
   }
-  const evidence=cache.items.get(key)!;
-  line.coverage=evidence.coverage;
-  line.reasons.push(...evidence.reasons);
+}
+type ItemProof = {
+  id:number;patient_id:number;plan_id:number;status:string;plan_status:string;billed_invoice_id:number|null;origin_invoice_id:number|null;
+  prebilled:boolean;legacy_covered:boolean;financial_review:boolean;legacy_context:unknown;
+  category:string|null;tooth_code:number|null;surfaces:string|null;
+  agreements:{id:number;status:string;document_id:number|null}[];principal_recorded:boolean;schedule_recorded:boolean;
+};
+async function loadItemEvidence(db:Runner,requests:readonly {itemId:number;patientId:number|null}[],cache:ReadCache){
+  const missing=[...new Map(requests.filter(row=>!cache.items.has(`${row.patientId}:${row.itemId}`))
+    .map(row=>[`${row.patientId}:${row.itemId}`,row])).values()];
+  for(let start=0;start<missing.length;start+=BATCH_SIZE){
+    const chunk=missing.slice(start,start+BATCH_SIZE);
+    const {rows:items}=await db.query<ItemProof>(`SELECT i.id,t.patient_id,i.plan_id,i.status,t.status AS plan_status,
+      i.billed_invoice_id,i.origin_invoice_id,i.category,i.tooth_code,i.surfaces,
+      ${PLAN_ITEM_PREBILLED_SQL} AS prebilled,${PLAN_ITEM_LEGACY_COVERED_SQL} AS legacy_covered,
+      ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review,${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('id',la.id,'status',la.status,'document_id',la.document_id) ORDER BY la.id)
+        FROM legacy_treatment_agreements la WHERE la.plan_item_id=i.id AND la.patient_id=t.patient_id),'[]'::jsonb) AS agreements,
+      EXISTS(SELECT 1 FROM approved_agreement_principals ap WHERE ap.plan_id=i.plan_id AND ap.patient_id=t.patient_id) AS principal_recorded,
+      EXISTS(SELECT 1 FROM plan_installments pi WHERE pi.plan_id=i.plan_id) AS schedule_recorded
+      FROM unnest($1::int[],$2::int[]) requested(item_id,patient_id)
+      JOIN plan_items i ON i.id=requested.item_id JOIN treatment_plans t ON t.id=i.plan_id AND t.patient_id=requested.patient_id
+      WHERE i.case_id IS NULL OR EXISTS(SELECT 1 FROM clinical_cases c WHERE c.id=i.case_id AND c.patient_id=t.patient_id)`,
+      [chunk.map(row=>row.itemId),chunk.map(row=>row.patientId)]);
+    await loadInvoiceReferences(db,items.flatMap(item=>[item.billed_invoice_id,item.origin_invoice_id]
+      .filter((id):id is number=>id!==null).map(id=>({id,patientId:item.patient_id}))),cache);
+    const documentRequests=items.flatMap(item=>item.agreements.filter(agreement=>agreement.document_id!==null)
+      .map(agreement=>({patientId:item.patient_id,documentId:agreement.document_id!})))
+      .filter(row=>!cache.documents.has(`${row.patientId}:${row.documentId}`));
+    for(const [key,valid] of await validVisitHistoricalDocuments(db,documentRequests))cache.documents.set(key,valid);
+    // Negative results are also patient-qualified, so a foreign reference cannot borrow a valid owner's proof.
+    for(const request of chunk){const line=work("plan_item",request.itemId);line.reasons.push("plan_item_owner_unverified");cache.items.set(`${request.patientId}:${request.itemId}`,line);}
+    for(const item of items){
+      const line=work("plan_item",item.id);
+      if(item.financial_review||item.status==="cancelled"||item.plan_status==="cancelled")line.reasons.push("plan_source_needs_review");
+      for(const id of new Set([item.billed_invoice_id,item.origin_invoice_id].filter((id):id is number=>id!==null))){
+        const reference=invoiceReference(id,item.patient_id,"plan_item",cache);
+        if(reference)line.references.push(reference);else line.reasons.push("invoice_owner_unverified");
+      }
+      let legacyValid=false;
+      for(const agreement of item.agreements){
+        const documentValid=agreement.document_id===null||cache.documents.get(`${item.patient_id}:${agreement.document_id}`)===true;
+        const legacyState=legacyCoverageStateFromContext(item.legacy_context);
+        const site=validateLineSite({category:item.category,toothCode:item.tooth_code,surfaces:item.surfaces});
+        const valid=item.legacy_covered&&site.ok&&legacyCoverageContains(legacyState,site.site)&&documentValid&&agreement.status==="live";
+        line.references.push({kind:"historical_agreement",id:agreement.id,state:valid?"current":agreement.status==="void"?"historical":"review",path:"plan_item"});
+        legacyValid ||= valid;
+        if(!valid)line.reasons.push("historical_source_needs_review");
+      }
+      // Recorded principal membership alone is not canonical current backing-source proof.
+      if(item.principal_recorded){line.references.push({kind:"approved_agreement",id:item.plan_id,state:"review",path:"plan_item_plan"});line.reasons.push("approved_source_unverified");}
+      const sources=Number(item.prebilled)+Number(legacyValid);
+      if(sources>1)line.reasons.push("multiple_financial_sources");
+      if(sources===1&&!line.reasons.length)line.coverage="verified";
+      if(!sources&&item.schedule_recorded){line.references.push({kind:"installment_plan",id:item.plan_id,state:"review",path:"plan_item_plan"});line.reasons.push("installment_principal_unverified");}
+      cache.items.set(`${item.patient_id}:${item.id}`,line);
+    }
+  }
+}
+function itemEvidence(itemId:number,patientId:number|null,line:VisitFinancialWork,cache:ReadCache){
+  const evidence=cache.items.get(`${patientId}:${itemId}`);
+  if(!evidence)throw new Error("Item evidence was not loaded");
+  line.coverage=evidence.coverage;line.reasons.push(...evidence.reasons);
   line.references.push(...evidence.references.map(reference=>({...reference})));
 }
 type VisitRow={id:number;patient_id:number|null;signed_at:Date|null;invoice_id:number|null;billing_currency:string|null};
@@ -156,20 +160,18 @@ async function loadBatch(db:Runner,ids:number[],cache:ReadCache) {
   const requests=visits.filter(v=>v.invoice_id!==null).map(v=>({id:v.invoice_id!,patientId:v.patient_id}));
   const owners=new Map(visits.map(v=>[v.id,v.patient_id]));
   for(const row of adjustments)if(row.owned&&row.billing_invoice_id!==null)requests.push({id:row.billing_invoice_id,patientId:owners.get(row.visit_id)??null});
-  const missing=requests.filter(row=>!cache.invoices.has(`${row.patientId}:${row.id}`));
-  if(missing.length){
-    const {rows}=await db.query<{id:number;patient_id:number;status:string}>("SELECT id,patient_id,status FROM invoices WHERE id=ANY($1::int[])",[[...new Set(missing.map(row=>row.id))]]);
-    const invoices=new Map(rows.map(row=>[row.id,row]));
-    for(const request of missing){const row=invoices.get(request.id);cache.invoices.set(`${request.patientId}:${request.id}`,
-      row&&row.patient_id===request.patientId?{kind:"invoice",id:row.id,state:row.status==="cancelled"?"historical":"current",path:"visit"}:null);}
-  }
+  await loadInvoiceReferences(db,requests,cache);
+  const itemRequests=procedures.filter(row=>row.plan_item_id!==null&&row.item_matches)
+    .map(row=>({itemId:row.plan_item_id!,patientId:owners.get(row.visit_id)??null}));
+  for(const row of items)itemRequests.push({itemId:row.id,patientId:owners.get(row.visit_id)??null});
+  await loadItemEvidence(db,itemRequests,cache);
   return {visits,procedures:byKey(procedures,row=>row.visit_id),items:byKey(items,row=>row.visit_id),
     adjustments:byKey(adjustments,row=>row.visit_id),endo:byKey(endo,row=>row.visit_id),sourceLines:byKey(sourceLines,row=>Number(row.procedure_id))};
 }
 
-async function projectVisit(db:Runner,visit:VisitRow,batch:Awaited<ReturnType<typeof loadBatch>>,cache:ReadCache) {
+async function projectVisit(visit:VisitRow,batch:Awaited<ReturnType<typeof loadBatch>>,cache:ReadCache) {
   const visitId=visit.id;
-  const directReference=visit.invoice_id===null?null:await invoiceReference(db,visit.invoice_id,visit.patient_id,"visit",cache);
+  const directReference=visit.invoice_id===null?null:await invoiceReference(visit.invoice_id,visit.patient_id,"visit",cache);
   const lines:VisitFinancialWork[]=[];
   const representedItems=new Set<number>();
   for(const procedure of batch.procedures.get(visitId)??[]) {
@@ -190,7 +192,7 @@ async function projectVisit(db:Runner,visit:VisitRow,batch:Awaited<ReturnType<ty
     if(procedure.plan_item_id!==null) {
       representedItems.add(procedure.plan_item_id);
       if(!procedure.item_matches)line.reasons.push("procedure_plan_identity_conflict");
-      else await itemEvidence(db,procedure.plan_item_id,visit.patient_id,line,cache);
+      else await itemEvidence(procedure.plan_item_id,visit.patient_id,line,cache);
     }
     if(active===1&&line.coverage==="verified"&&line.references.some(reference=>
       reference.state==="current"&&(reference.kind!=="invoice"||!activeSources.has(reference.id))))line.reasons.push("multiple_financial_sources");
@@ -198,7 +200,7 @@ async function projectVisit(db:Runner,visit:VisitRow,batch:Awaited<ReturnType<ty
     if(line.reasons.length)line.coverage="unresolved";
   }
   for(const item of batch.items.get(visitId)??[])if(!representedItems.has(item.id)) {
-    const line=work("plan_item",item.id);await itemEvidence(db,item.id,visit.patient_id,line,cache);lines.push(line);
+    const line=work("plan_item",item.id);await itemEvidence(item.id,visit.patient_id,line,cache);lines.push(line);
   }
   for(const adjustment of batch.adjustments.get(visitId)??[]) {
     const line=work("orthodontic_adjustment",adjustment.id);lines.push(line);
@@ -208,7 +210,7 @@ async function projectVisit(db:Runner,visit:VisitRow,batch:Awaited<ReturnType<ty
       &&adjustment.billing_decided_by&&adjustment.billing_decided_at&&adjustment.billing_invoice_id===null)line.decision="no_charge";
     else if(adjustment.billing_decision==="billed") {
       line.decision="billed";
-      const reference=adjustment.billing_invoice_id===null?null:await invoiceReference(db,adjustment.billing_invoice_id,visit.patient_id,"adjustment_decision",cache);
+      const reference=adjustment.billing_invoice_id===null?null:await invoiceReference(adjustment.billing_invoice_id,visit.patient_id,"adjustment_decision",cache);
       if(reference)line.references.push(reference);
       line.reasons.push("adjustment_coverage_unverified");
     }else line.reasons.push("adjustment_source_unresolved");
@@ -235,7 +237,7 @@ export async function readVisitFinancialContexts(db:Runner,bindings:readonly {vi
   for(let start=0;start<ids.length;start+=BATCH_SIZE){
     const batch=await loadBatch(db,ids.slice(start,start+BATCH_SIZE),cache);
     for(const visit of batch.visits){const expected=requested.get(visit.id);if(expected!==undefined&&visit.patient_id!==expected)throw new Error("Visit owner changed");}
-    for(const visit of batch.visits)result.set(visit.id,await projectVisit(db,visit,batch,cache));
+    for(const visit of batch.visits)result.set(visit.id,await projectVisit(visit,batch,cache));
   }
   return result;
 }

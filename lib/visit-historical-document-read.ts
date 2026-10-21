@@ -3,9 +3,14 @@ import { historicalDocumentReferences } from "./treatment-financial-context";
 
 /** Validate only the explicitly referenced document, using #371's canonical validator.
  * Internal document amounts are validation inputs only, never visit totals or output. */
-export async function validVisitHistoricalDocument(db: DbClient | DbPool, patientId: number, documentId: number): Promise<boolean> {
-  const { rows: [snapshot] } = await db.query<Parameters<typeof historicalDocumentReferences>[0]>(`
-    SELECT d.patient_id AS "patientId",
+export async function validVisitHistoricalDocuments(db: DbClient | DbPool, requests: readonly {patientId:number;documentId:number}[]): Promise<Map<string,boolean>> {
+  const unique=new Map(requests.map(request=>[`${request.patientId}:${request.documentId}`,request]));
+  const result=new Map([...unique.keys()].map(key=>[key,false]));
+  const entries=[...unique.values()];
+  for(let start=0;start<entries.length;start+=200){
+  const chunk=entries.slice(start,start+200);
+  const { rows } = await db.query<Parameters<typeof historicalDocumentReferences>[0]&{documentId:number}>(`
+    SELECT d.id AS "documentId", d.patient_id AS "patientId",
       (SELECT jsonb_agg(jsonb_build_object('id',t.id,'patientId',t.patient_id,'currency',t.base_currency))
         FROM treatment_plans t WHERE t.id IN (SELECT i.plan_id FROM plan_items i JOIN legacy_treatment_agreements la
           ON la.plan_item_id=i.id WHERE la.document_id=d.id)) AS plans,
@@ -22,7 +27,17 @@ export async function validVisitHistoricalDocument(db: DbClient | DbPool, patien
         'revision',(SELECT jsonb_build_object('id',r.id,'version',r.version,'totalMinor',r.total_minor,'discountMinor',r.discount_minor,
           'previouslyPaidMinor',r.previously_paid_minor,'remainingMinor',r.remaining_minor,'historicalAsOf',r.historical_as_of::text,'lines',r.lines)
           FROM legacy_treatment_document_revisions r WHERE r.document_id=d.id ORDER BY version DESC LIMIT 1))) AS "historicalDocuments"
-    FROM legacy_treatment_documents d WHERE d.id=$1 AND d.patient_id=$2`, [documentId, patientId]);
-  if (!snapshot || !Array.isArray(snapshot.plans) || !Array.isArray(snapshot.items) || !Array.isArray(snapshot.legacyAgreements)) return false;
-  try { historicalDocumentReferences(snapshot); return true; } catch { return false; }
+    FROM legacy_treatment_documents d
+    JOIN unnest($1::int[],$2::int[]) requested(document_id,patient_id)
+      ON d.id=requested.document_id AND d.patient_id=requested.patient_id`,
+    [chunk.map(row=>row.documentId),chunk.map(row=>row.patientId)]);
+  for(const snapshot of rows){
+    if (!Array.isArray(snapshot.plans) || !Array.isArray(snapshot.items) || !Array.isArray(snapshot.legacyAgreements)) continue;
+    try { historicalDocumentReferences(snapshot); result.set(`${snapshot.patientId}:${snapshot.documentId}`,true); } catch { /* malformed proof stays false */ }
+  }
+  }
+  return result;
+}
+export async function validVisitHistoricalDocument(db:DbClient|DbPool,patientId:number,documentId:number):Promise<boolean>{
+  return (await validVisitHistoricalDocuments(db,[{patientId,documentId}])).get(`${patientId}:${documentId}`)===true;
 }

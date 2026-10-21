@@ -221,7 +221,46 @@ it("deduplicates repeated historical item/document reads across batch boundaries
   expect(context.summary).toBe("verified");expect(context.work).toHaveLength(1);
   expect(context.work[0].references).toContainEqual({kind:"historical_agreement",id:item.agreementId,state:"current",path:"plan_item"});
  }
- expect(reads).toBe(17);
+ expect(reads).toBe(14);
  await expect(readVisitFinancialContexts(counted,[{visitId:rows[0].id,expectedPatientId:p+99999}])).rejects.toThrow("Visit owner changed");
  }finally{await client.query("ROLLBACK");client.release();}
 });
+it("bounds 201 distinct item proofs, including distinct invoices and historical documents",async()=>{
+ const requests:{visitId:number;expectedPatientId:number}[]=[];
+ const [doctor]=await q<{id:number}>("INSERT INTO parties(name,kind) VALUES('Synthetic bulk doctor','doctor') RETURNING id");
+ for(let n=0;n<201;n++){
+  const p=await patient(),v=await visit(p);requests.push({visitId:v,expectedPatientId:p});
+  if(n%2){
+   const saved=await documents.createHistoricalDocument(p,{patientId:p,currency:"YER",items:[{serviceId,quantity:1,price:"10000",catalogPriceMinor:10000,toothCode:16}],discount:"0",previouslyPaidAmount:"10000",historicalAsOf:"2026-10-01",idempotencyKey:`source-distinct-history-${++serial}`,repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:0,repaymentVersion:0,repaymentSourceHash:null},session);
+   await procedure(v,saved.document.lines[0].planItemId,0);
+  }else{
+   const [plan]=await q<{id:number}>("INSERT INTO treatment_plans(patient_id,title,total_minor,created_by) VALUES($1,'Synthetic bulk prepaid',10000,'synthetic') RETURNING id",[p]);
+   const [item]=await q<{id:number}>("INSERT INTO plan_items(plan_id,service_id,service_name,category,tooth_code,doctor_id,quantity,unit_price_minor,billing_status) VALUES($1,$2,'Synthetic distinct prepaid','rct',16,$3,1,10000,'billed') RETURNING id",[plan.id,serviceId,doctor.id]);
+   const inv=await invoice(p,0,"open",false);
+   await q("UPDATE invoice_items SET source_type='plan_item',source_id=$1::int,plan_item_id=$1::int,doctor_id=$2 WHERE invoice_id=$3",[item.id,doctor.id,inv]);
+   await q("UPDATE plan_items SET billed_invoice_id=$1,origin_invoice_id=$1 WHERE id=$2",[inv,item.id]);
+   const proc=await procedure(v,item.id,0);await q("UPDATE visit_procedures SET doctor_id=$1 WHERE id=$2",[doctor.id,proc]);
+  }
+ }
+ const foreignPatient=await patient(),foreignVisit=await visit(foreignPatient);
+ const [firstItem]=await q<{plan_item_id:number}>("SELECT plan_item_id FROM visit_procedures WHERE visit_id=$1",[requests[0].visitId]);
+ await q("INSERT INTO treatment_sessions(plan_item_id,sequence,status,visit_id,completed_at,title) VALUES($1,1,'done',$2,NOW(),'Synthetic foreign edge')",[firstItem.plan_item_id,foreignVisit]);
+ const [historical]=await q<{document_id:number}>("SELECT la.document_id FROM legacy_treatment_agreements la JOIN visit_procedures p ON p.plan_item_id=la.plan_item_id WHERE p.visit_id=$1",[requests[1].visitId]);
+ const {readVisitFinancialContexts}=await import("../../lib/visit-financial-context-db");
+ const client=await db.getPool().connect();let reads=0;
+ const counted={query:async(...args:Parameters<typeof client.query>)=>{reads++;return client.query(...args);}} as typeof client;
+ try{await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+ const results=await readVisitFinancialContexts(counted,requests);
+ expect(results.size).toBe(201);for(const context of results.values())expect(context.summary).toBe("verified");
+ expect(reads).toBe(17);
+ // These additional projections are outside the scaling count and start fresh caches.
+ const isolated=await readVisitFinancialContexts(counted,[requests[0],{visitId:foreignVisit,expectedPatientId:foreignPatient}]);
+ expect(isolated.get(requests[0].visitId)).toEqual(results.get(requests[0].visitId));
+ expect(isolated.get(foreignVisit)).toMatchObject({summary:"unresolved",work:[{reasons:["plan_item_owner_unverified"],references:[]}]});
+ const {validVisitHistoricalDocuments}=await import("../../lib/visit-historical-document-read");
+ const proof=await validVisitHistoricalDocuments(client,[{patientId:requests[1].expectedPatientId,documentId:historical.document_id},{patientId:foreignPatient,documentId:historical.document_id}]);
+ expect(proof.get(`${requests[1].expectedPatientId}:${historical.document_id}`)).toBe(true);
+ expect(proof.get(`${foreignPatient}:${historical.document_id}`)).toBe(false);
+
+ }finally{await client.query("ROLLBACK");client.release();}
+},120000);
