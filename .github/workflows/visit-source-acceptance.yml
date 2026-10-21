@@ -91,6 +91,17 @@ jobs:
       # and launches the standalone server; no separate server or schema shortcut.
       - name: Run only the visit source journey file
         run: npm run test:security-http -- __tests__/security-http/invoice-clinic-continuity-journey.test.ts
+
+      # Visual evidence comes from pdftoppm on the exact synthetic PDF under test.
+      # This is not a browser DOM capture and does not replace the strict text assertion.
+      - name: Preserve original PDF visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visit-source-original-pdf-raster
+          path: artifacts/visit-source-acceptance/same-day-decisions-raster.png
+          if-no-files-found: warn
+          retention-days: 7
       - name: Preserve only the three synthetic report PDFs
         if: always()
         uses: actions/upload-artifact@v4
