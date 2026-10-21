@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { Client } from "pg";
 import { authedGet, authedMutation, baseUrl, harness, loginStaff } from "./_server";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { UNVERIFIED_VISIT_INVOICE_LABEL } from "../../lib/visit-financial-presentation";
 import { VISIT_SOURCE_SUMMARY, type VisitFinancialContext } from "../../lib/visit-financial-context";
@@ -599,6 +600,17 @@ async function sourceAcceptance(patientId: number, visits: {id: number; summary:
       execFileSync("pdftoppm",["-f","1","-l","1","-r","200","-png","-singlefile",
         path,`${directory}/same-day-decisions-raster`],{maxBuffer:1024*1024});
       const raw = execFileSync("pdftotext",["-raw",path,"-"],{encoding:"utf8"});
+      const proofFiles = [
+        "same-day-decisions.pdf", "same-day-decisions-preprint.png",
+        "same-day-decisions-preprint-cell.png", "same-day-decisions-raster.png",
+      ];
+      const fileHashes = Object.fromEntries(await Promise.all(proofFiles.map(async name => [
+        name, createHash("sha256").update(await readFile(`${directory}/${name}`)).digest("hex"),
+      ])));
+      const productCommit = execFileSync("git",["rev-parse","HEAD"],{encoding:"utf8"}).trim();
+      await writeFile(`${directory}/same-day-proof-manifest.json`,
+        JSON.stringify({productCommit,sourceText:VISIT_SOURCE_SUMMARY.no_new_charge,
+          generatedFrom:"single hosted Playwright print job",filesSha256:fileHashes},null,2)+"\\n");
       const exact=VISIT_SOURCE_SUMMARY.no_new_charge;
       console.info("Bounded original PDF raw text inspection:",JSON.stringify({
         exactPhraseInRaw:raw.includes(exact),
