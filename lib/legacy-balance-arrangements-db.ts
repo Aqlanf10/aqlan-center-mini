@@ -109,8 +109,9 @@ async function paidSince(
   patientId: number,
   currency: Currency,
   since: Date,
+  reader: Pick<DbClient, "query"> = getPool(),
 ): Promise<number> {
-  const { rows } = await getPool().query<{
+  const { rows } = await reader.query<{
     payment_currency: string;
     amount_minor: string;
     base_amount_minor: string;
@@ -138,10 +139,10 @@ async function paidSince(
   return Math.max(0, settled);
 }
 
-async function viewOf(row: ArrangementRow, today: string): Promise<LegacyBalanceArrangementView> {
+async function viewOf(row: ArrangementRow, today: string, reader: Pick<DbClient, "query"> = getPool()): Promise<LegacyBalanceArrangementView> {
   const arrangement = rowToArrangement(row);
-  const position = await openingPosition(getPool() as unknown as DbClient, arrangement.patientId, arrangement.currency);
-  const paid = await paidSince(arrangement.patientId, arrangement.currency, row.created_at);
+  const position = await openingPosition(reader, arrangement.patientId, arrangement.currency);
+  const paid = await paidSince(arrangement.patientId, arrangement.currency, row.created_at, reader);
   return {
     ...arrangement,
     progress: legacyArrangementProgress({
@@ -160,15 +161,19 @@ export async function listLegacyBalanceArrangements(
   patientId: number,
   today: string,
   includeCancelled = false,
+  reader?: DbClient,
 ): Promise<LegacyBalanceArrangementView[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<ArrangementRow>(
+  if (!reader) await ensureSchema();
+  const source = reader ?? getPool();
+  const { rows } = await source.query<ArrangementRow>(
     `SELECT * FROM legacy_balance_arrangements
       WHERE patient_id = $1 ${includeCancelled ? "" : "AND cancelled_at IS NULL"}
       ORDER BY created_at DESC, id DESC`,
     [patientId],
   );
-  return Promise.all(rows.map((row) => viewOf(row, today)));
+  const result: LegacyBalanceArrangementView[] = [];
+  for (const row of rows) result.push(await viewOf(row, today, source));
+  return result;
 }
 
 export type CreateLegacyArrangementResult =

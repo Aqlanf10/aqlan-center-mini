@@ -530,9 +530,11 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
     const totalB = moneyRow(checkout, "current-balance", "USD");
     await totalB.waitFor({ timeout: 30_000 });
     expect(await totalB.textContent()).toContain("2,500.00");
-    const checkoutText = await checkout.locator("dl").textContent();
+    const checkoutText = await checkout.locator('dl[aria-label="أرصدة دفتر الزيارة"]').textContent();
     expect(checkoutText).not.toContain("3,500");
+    expect(await checkout.innerText()).not.toContain("3,500");
     expect(checkoutText).not.toContain("4,000");
+    expect(await checkout.innerText()).not.toContain("4,000");
     // 2000 is now a legitimate prior reference, but never B's current debt.
     expect(await totalB.textContent()).not.toContain("2,000.00");
     await exactMoney(checkout, "current-balance", "USD", "2,500.00");

@@ -7,7 +7,8 @@ import type { CheckoutCurrencyLine } from "@/lib/checkout-summary";
 import type { BillingClassification } from "@/lib/billing-classification";
 import { WALKOUT_CLASS_LABEL as CLASS_LABEL, adjustmentLabel, lineNeedsReview, walkoutNeedsReview } from "@/lib/walkout-presentation";
 import { useSession } from "../SessionProvider";
-import { CollectPaymentModal } from "../CollectPaymentModal";
+import { CheckoutDueSummary } from "./CheckoutDueSummary";
+import type { CheckoutDueRecommendation } from "@/lib/checkout-due-recommendation";
 import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -79,6 +80,9 @@ interface CheckoutExtrasProps {
   expectedPatientId?: number;
   financialVerified?: boolean;
   financialRevision?: number;
+  dueRecommendation?: CheckoutDueRecommendation | null;
+  /** Finance belongs to the parent walkout snapshot, never this child's clinical refresh. */
+  financialSummary?: CheckoutCurrencyLine[] | null;
   collected: boolean;
   suggestedDate: string | null;
   durationMinutes: number | null;
@@ -93,14 +97,13 @@ export function CheckoutExtras(props: CheckoutExtrasProps) {
   const owner = JSON.stringify([props.visitId, props.expectedPatientId, session.username, session.role, session.permissions ?? null]);
   return <OwnedCheckoutExtras key={owner} {...props} />;
 }
-function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = true, financialRevision = 0, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
+function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = true, financialRevision = 0, dueRecommendation = null, financialSummary = null, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
   const mounted = useRef(true);
   const command = useRef(false);
   const [walkoutRead, setWalkout] = useState<CheckoutWalkout | null>(null);
   const walkout = walkoutRead?.visitId === visitId ? walkoutRead : null;
   const readRequest = useRef<AbortController | null>(null);
   const financialReviewRequired = walkout ? walkoutNeedsReview(walkout) : false;
-  const [collectLegacy, setCollectLegacy] = useState<CheckoutCurrencyLine | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [date, setDate] = useState(() => suggestedDate ?? addDays(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), 28));
@@ -114,7 +117,6 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
   const load = useCallback(async () => {
     if (!mounted.current) return;
     setWalkout(null);
-    setCollectLegacy(null);
     onFinancialReadChange?.({ visitId, reviewRequired: null });
     readRequest.current?.abort();
     const request = new AbortController();
@@ -224,7 +226,8 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
   };
 
   const deferred = walkout?.deferred === true;
-  const summary = financialVerified ? walkout?.summary ?? [] : [];
+  const parentFinanceAvailable = financialVerified && dueRecommendation !== null && dueRecommendation.patientId === expectedPatientId;
+  const summary = parentFinanceAvailable ? financialSummary ?? [] : [];
 
   return (
     <div className="mt-3 space-y-2">
@@ -256,30 +259,10 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
         className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-bold text-amber-900">
         توجد بنود تحتاج مراجعة مالية؛ لا تُعامل كمشمولة أو مجانية أو كمبلغ جديد للتحصيل. مبالغ الفواتير والأرصدة المثبتة أدناه مستقلة عن هذه المراجعة.
       </p> : null}
-      {/* (P0-G) ما يضيفه الشبّاك فوق لقطته المجمَّدة (TD-05): قسط الرصيد القديم المقترح، ومدفوع اليوم،
-          والمطلوب الآن — بكل عملة على حدة ومن الخادم. الرصيد السابق والإجمالي يبقيان في اللقطة أعلاه وحدها. */}
-      {summary.filter((line) => line.dueNowMinor > 0 || line.legacySuggestedMinor > 0 || line.paymentsTodayMinor > 0).map((line) => (
-        <section key={line.currency} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]"
-          aria-label={`المطلوب الآن ${CURRENCY_LABEL[line.currency]}`}>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-            {line.legacySuggestedMinor > 0 ? (<>
-              <span className="text-slate-600">قسط الرصيد القديم المقترح</span>
-              <span className="text-left font-bold">{formatMoney(line.legacySuggestedMinor, line.currency)}</span>
-            </>) : null}
-            {line.paymentsTodayMinor > 0 ? (<>
-              <span className="text-slate-600">مدفوع اليوم</span>
-              <span className="text-left font-bold">{formatMoney(line.paymentsTodayMinor, line.currency)}</span>
-            </>) : null}
-            <span className="font-extrabold text-navy-900">{financialReviewRequired ? "المطلوب من الفواتير والأرصدة المثبتة" : "المطلوب الآن"} · {CURRENCY_LABEL[line.currency]}</span>
-            <span className="text-left text-sm font-black text-navy-900">{formatMoney(line.dueNowMinor, line.currency)}</span>
-          </div>
-          {line.legacySuggestedMinor > 0 && walkout?.patientId ? (
-            <button type="button" onClick={() => { if (walkout) setCollectLegacy(line); }}
-              className="mt-2 w-full rounded-xl bg-violet-700 py-2 text-xs font-extrabold text-white">
-              تحصيل قسط الرصيد القديم {formatMoney(line.legacySuggestedMinor, line.currency)}
-            </button>
-          ) : null}
-        </section>
+      {financialVerified && dueRecommendation && dueRecommendation.patientId === expectedPatientId
+        ? <CheckoutDueSummary recommendation={dueRecommendation} /> : null}
+      {summary.filter(line => line.paymentsTodayMinor > 0).map(line => (
+        <p key={line.currency} className="text-xs text-slate-600">مدفوع يوم الزيارة · {CURRENCY_LABEL[line.currency]}: {formatMoney(line.paymentsTodayMinor, line.currency)}</p>
       ))}
       <div className="flex flex-wrap gap-2">
         {walkout?.receptionHandoff?.status === "pending" && typeof walkout.signedAt === "string"
@@ -334,20 +317,6 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
       ) : null}
       {walkout && !financialReviewRequired ? <p className="text-[10px] text-slate-400">بلا رسوم؟ يُعدَّل سعر الإجراء قبل التوقيع إلى صفر بسببٍ مكتوب.</p> : null}
 
-      {financialVerified && collectLegacy && walkout?.patientId ? (
-        <CollectPaymentModal
-          patientId={walkout.patientId}
-          patientName={walkout.patientName}
-          isOpen
-          onClose={() => setCollectLegacy(null)}
-          onSuccess={() => { if (mounted.current) { setCollectLegacy(null); void load(); onChanged(); } }}
-          suggestedMinor={collectLegacy.legacySuggestedMinor}
-          suggestedCurrency={collectLegacy.currency}
-          contextLabel="قسط الرصيد القديم — يُنقصه بلا فاتورة جديدة"
-          presetOpeningCurrency={collectLegacy.currency}
-          openings={[{ currency: collectLegacy.currency, dueMinor: collectLegacy.legacyRemainingMinor }]}
-        />
-      ) : null}
     </div>
   );
 }

@@ -197,8 +197,9 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
     expect(totalText).not.toContain("3,500");
 
     /* وباب الشبّاك كله لا يحوي الرقم المزدوج. */
-    const allText = await checkout.locator("dl").textContent();
+    const allText = await checkout.locator('dl[aria-label="أرصدة دفتر الزيارة"]').textContent();
     expect(allText).not.toContain("3,500");
+    expect(await checkout.innerText()).not.toContain("3,500");
   }, 300_000);
 
   it("بعد التحصيل: السابق المرجعي ٥٠٠ والحالي صفر دولار والرقم ٣٥٠٠ مستحيل", async () => {
@@ -251,8 +252,9 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
     await exactMoney(checkout, "current-balance", "SAR", "300.00");
 
     /* ولا يزال ٣٥٠٠ مستحيلًا في الشبّاك كله. */
-    const allText = await checkout.locator("dl").textContent();
+    const allText = await checkout.locator('dl[aria-label="أرصدة دفتر الزيارة"]').textContent();
     expect(allText).not.toContain("3,500");
+    expect(await checkout.innerText()).not.toContain("3,500");
   }, 300_000);
 });
 
@@ -307,8 +309,9 @@ describe("المراجعة الثانية ٦: سابق يمني + اليوم د�
     await otherCurrencies.waitFor({ timeout: 20_000 });
 
     /* ولا رقمٌ يجمع الدولار باليمني في الشبّاك كله. */
-    const allText = await checkout.locator("dl").textContent();
+    const allText = await checkout.locator('dl[aria-label="أرصدة دفتر الزيارة"]').textContent();
     expect(allText).not.toContain("3,000");
+    expect(await checkout.innerText()).not.toContain("3,000");
   }, 300_000);
 });
 

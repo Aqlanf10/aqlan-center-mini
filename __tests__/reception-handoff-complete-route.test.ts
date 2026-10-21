@@ -9,7 +9,10 @@ vi.mock("../lib/reception-handoff-db", () => ({ completeReceptionHandoff: state.
   isHandoffSignature: (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value }));
 vi.mock("../lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", visitWalkout: state.walkout, getVisitOwner: state.owner }));
-vi.mock("../lib/checkout-db", () => ({ visitCheckoutSummary: state.summary }));
+vi.mock("../lib/checkout-db", () => ({ readVisitCheckout: async (id: number) => {
+  const walkout = await state.walkout(id);
+  return walkout ? { walkout, summary: await state.summary(walkout), dueRecommendation: null, today: "2026-10-10" } : null;
+} }));
 const { POST } = await import("../app/api/visits/[id]/reception-handoff/route");
 const { GET } = await import("../app/api/visits/[id]/walkout/route");
 const signedAt = "2026-10-10T09:00:00.000Z";
