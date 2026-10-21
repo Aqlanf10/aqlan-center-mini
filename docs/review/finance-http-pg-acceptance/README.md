@@ -8,9 +8,44 @@ No application defect was reproduced by these journeys. This is a coverage-only
 change, with no production code, migration, owner permissions, or currency changes.
 No checkout test was changed. No browser or period-closing race was run.
 
-## Executed evidence
+## PostgreSQL 18 acceptance and guard follow-up — 2026-10-21 UTC
 
-2026-10-21 UTC, final verification on Node 22.23.3 (the repository engine), PostgreSQL 16.15 (official postgres:16 container),
+The unchanged nine HTTP journeys passed on actual **PostgreSQL 18.6 (Debian
+18.6-1.pgdg13+2), server_version_num=180006**, using **Node 22.23.3**.
+See `pg18-run.log`: 9/9 passed in 6.20 seconds. This supersedes PostgreSQL 16
+as the database-version acceptance evidence; it does not claim browser or full CI acceptance.
+The application build was unchanged from the earlier successful Node 22 default
+Turbopack build; only the runner, guard tests, declarations and evidence changed.
+
+The runner now reuses `validateOperationalVerificationEnvironment` and
+`validateLocalVerificationTarget` from the project policy, and
+`assertPostgresMajorOrThrow` / `postgresMajorFromVersionNum` from `lib/env-contract.ts`.
+Those shared project files and the supported-major value were not modified.
+Both explicit test classifications are mandatory before client construction;
+production, PG overrides and conflicting original aliases are rejected before
+any overwrite. Actual server major is verified before launching global setup.
+
+Before creating the PostgreSQL 18 container, the 40-case runner suite passed,
+including 39 refusal cases (28 original-environment cases plus 3 additional PG
+settings, 5 wrong/invalid versions and 3 target-state cases). Mocks prove no
+connection for unsafe environments and no setup launch for failed server checks;
+no database is created by these guard tests. Combined verification with the
+existing PostgreSQL-target suite passed 86/86 (`guard-related.log`). Full Node 22
+TypeScript, scoped ESLint, runner syntax and diff checks passed.
+
+Isolated target identity, checked before the HTTP harness initialized its database:
+- Container: `aqlan-finance-acceptance-pg18-synthetic`.
+- Container ID: `537ce8c5a8aba686c8a2e698bb69def56fd142d985a6ab982b368186066ccf98`.
+- Label: `aqlan.purpose=finance-http-pg18-synthetic`.
+- Image: `postgres:18`, digest `sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336`.
+- Bound only to `127.0.0.1:55439`; fresh admin DB `aqlan_finance_test`.
+- `aqlan_sec_http` absent before setup, created by the harness and dropped after testing.
+- Synthetic users/sessions only; no production target or data. Container identity
+  and harness absence are checked again before removing the task's container/volume.
+
+## Earlier PostgreSQL 16 evidence (not PostgreSQL 18 acceptance)
+
+2026-10-21 UTC, earlier verification on Node 22.23.3 (the repository engine), PostgreSQL 16.15 (official postgres:16 container),
 Next 16.3.8 built using the default Turbopack build. PostgreSQL was created for
 this task only, bound to 127.0.0.1:55439. The harness creates and drops its own
 `aqlan_sec_http`; all actors, sessions, patients, invoices and receipts are synthetic.
@@ -66,23 +101,29 @@ while a fresh foreign payment is rejected. No replacement exchange rate is inven
 
 ## Reproduce
 
-Use a fresh disposable local PostgreSQL instance. Never point this at an existing
+First run `node node_modules/vitest/vitest.mjs run __tests__/finance-lifecycle-runner.test.ts` on Node 22, before creating any database.
+Use a fresh disposable local PostgreSQL 18 instance. Never point this at an existing
 application server or production database. Install dependencies locally (`npm ci`)
 and build the exact candidate (`npm run build`) first. Example synthetic setup:
 
 ```sh
-docker run --name aqlan-finance-acceptance-synthetic \
+docker run --name aqlan-finance-acceptance-pg18-synthetic \
   -e POSTGRES_PASSWORD=synthetic-acceptance-only \
   -e POSTGRES_DB=aqlan_finance_test \
-  -p 127.0.0.1:55439:5432 -d postgres:16
-TEST_DATABASE_URL=postgresql://postgres:synthetic-acceptance-only@127.0.0.1:55439/aqlan_finance_test \
-  node scripts/test-finance-lifecycle.mjs
+  -p 127.0.0.1:55439:5432 -d postgres:18
+NODE_ENV=test DATABASE_ENVIRONMENT=test \
+  TEST_DATABASE_URL=postgresql://postgres:synthetic-acceptance-only@127.0.0.1:55439/aqlan_finance_test \
+  node --import tsx scripts/test-finance-lifecycle.mjs
 ```
 
-The runner rejects remote targets, absent URLs, nonempty admin databases, existing
-`aqlan_sec_http` databases, query parameters, and Railway environment markers
-before invoking the existing destructive global setup. It does not accept a
-`DATABASE_URL` fallback. Verify container identity and bindings before cleanup.
+The runner reuses the project target policy and PostgreSQL major contract. It requires
+both `NODE_ENV=test` and `DATABASE_ENVIRONMENT=test` in the original environment,
+and rejects production classification, conflicting database aliases, PG connection
+overrides, Railway markers, remote targets, query parameters and fragments before
+constructing a client. It reads `server_version_num` and rejects non-18 servers
+before global setup. Empty admin database and absent `aqlan_sec_http` checks remain
+mandatory. The database name alone does not authorize the run. No DATABASE_URL
+fallback is accepted; any supplied alias must equal the explicit test URL. Verify container identity and bindings before cleanup.
 
 Limits: HTTP/server-rendered statement assertions do not prove browser behavior,
 print layout, or an actual network transport failure; acknowledgement loss is
