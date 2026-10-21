@@ -69,6 +69,20 @@ async function openPrescription(card: Locator) {
 }
 async function capture(card: Locator, kind: "unrecorded" | "closed-custom", width: number) {
   const value = prescription(card);
+  const financial = card.getByTestId("ortho-financial-context");
+  expect(await financial.evaluate(element => element.tagName)).toBe("DETAILS");
+  expect(await financial.getAttribute("open")).toBeNull();
+  const summary = financial.locator(":scope > summary");
+  expect(await summary.innerText()).toBe("مرجع الحالة المالي وشمول الشدّة");
+  await summary.focus(); await card.page().keyboard.press("Enter");
+  await financial.getByRole("region", { name: "المراجع المالية للعلاج", exact: true }).waitFor();
+  expect(await financial.getAttribute("open")).not.toBeNull();
+  if (kind === "unrecorded") await financial.getByRole("region", { name: "تهيئة الحالة السابقة", exact: true }).waitFor();
+  const summaryBounds = await summary.boundingBox();
+  expect(summaryBounds?.height).toBeGreaterThanOrEqual(44);
+  expect(summaryBounds?.width).toBeGreaterThanOrEqual(44);
+  await summary.focus(); await card.page().keyboard.press("Enter");
+  expect(await financial.getAttribute("open")).toBeNull();
   const strategy = card.getByTestId("ortho-strategy-editor");
   const bridgeMessage = "هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.";
   await strategy.getByText(bridgeMessage, { exact: true }).waitFor();

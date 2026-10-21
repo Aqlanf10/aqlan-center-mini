@@ -1,4 +1,4 @@
-import { readVisitFinancialContext } from "./visit-financial-context-db";
+import { readVisitFinancialContexts } from "./visit-financial-context-db";
 import { VISIT_SOURCE_SUMMARY, type VisitFinancialContext } from "./visit-financial-context";
 import { UNVERIFIED_VISIT_INVOICE_LABEL } from "./visit-financial-presentation";
 import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
@@ -1222,14 +1222,10 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   if (report === "specialty") ctx.specialty = await loadSpecialtyExtras(filters);
 
   if (report === "visits") {
-    ctx.visitSources = await withFinancialReadSnapshot(getPool(), async runner => {
-      const sources = new Map<number, VisitFinancialContext>();
-      for (const visit of visitsInRange(ctx, filters.from, filters.to)) {
-        const source = await readVisitFinancialContext(runner, visit.id, visit.patientId);
-        if (source) sources.set(visit.id, source);
-      }
-      return sources;
-    }, usesSharedLocalDatabaseConnection());
+    // Only source evidence shares this snapshot; existing report context was loaded above.
+    ctx.visitSources = await withFinancialReadSnapshot(getPool(), runner =>
+      readVisitFinancialContexts(runner,visitsInRange(ctx,filters.from,filters.to).map(visit=>({visitId:visit.id,expectedPatientId:visit.patientId}))),
+      usesSharedLocalDatabaseConnection());
   }
   switch (report) {
     case "daily": return dailyReport(ctx);

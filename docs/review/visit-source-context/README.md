@@ -11,6 +11,7 @@ The separate branch `fix/visit-source-context` composes:
 - Main security #375: `018a94127cbc475031ca00034f31f35ce4b92515`.
 - #371 canonical identity/historical-document implementation: `af709ae57c5efbb52d70998dac751f3c07df0d7c`.
 - Composition checkpoint: `f7718b747fc6a7e29bcbf4dde57edcb9dc825c84`.
+- Review follow-up includes ONLY #382 delta `af709ae57c5efbb52d70998dac751f3c07df0d7c..2b52888a06a9ea23a014a8913d4a3147a64f0c56`; all five files are byte-identical to that reviewed increment. No whole branch was copied.
 - Reviewed #380 test-only contract repair `7567062df64bc62136adf2fa2ea18ec16440441e`, cherry-picked here as `9860093ac6375e20e08f5a32aa93ad10aa9462d0`.
 
 #380 remains frozen at `7567062df64bc62136adf2fa2ea18ec16440441e`. This composition is not independent of pending #371/#380 and must not be merged as an unreviewed replacement for those lanes. #379 was compared during the initial investigation; it supplies no additional source edge required here.
@@ -26,16 +27,16 @@ The synthetic PostgreSQL tests demonstrate both states together, mixed invoiced/
 | Path | Read result |
 | --- | --- |
 | Visit direct invoice ID | Owned documentary reference only; cancelled is historical; foreign/missing row is review. It never proves every work item is covered. |
-| Visit → procedure → invoice item source ID | Verify patient, service, quantity, recorded unit price/line value, doctor, and any plan-item ID. Active same-patient exact evidence can establish coverage. |
-| Original invoice item → correction line → replacement item | Follow only explicit correction IDs and matching parent invoice IDs/patient. Cancelled originals remain historical; active matching same-currency replacement can establish coverage. |
-| Visit → procedure plan-item ID | Also verify current service/tooth/surfaces/provider identity, patient/plan/case ownership. Reuse canonical `PLAN_ITEM_PREBILLED_SQL` and legacy predicates. |
+| Visit → procedure → invoice item source ID | Verify patient, denomination, service, quantity, recorded unit price/line value, doctor, and any plan-item ID. Denomination is the persisted visit billing currency for standalone work, or the explicit same-patient linked plan currency; there is no patient/default-currency fallback. Active same-patient exact evidence can establish coverage. |
+| Original invoice item → correction line → replacement item | Follow only explicit correction IDs and matching parent invoice IDs/patient, with correction metadata checked against both actual invoice denominations. Cancelled originals remain historical; active matching same-currency replacement can establish coverage. |
+| Visit → procedure plan-item ID | Also require linked-session quantity 1 (the existing `setVisitProcedures` contract) and verify current service/tooth/surfaces/provider identity, patient/plan/case ownership. Reuse canonical `PLAN_ITEM_PREBILLED_SQL` and legacy predicates. |
 | Visit → completed treatment session/item visit ID | Exact item edge, same ownership checks. Deduplicate an item already represented by a procedure, and duplicate item/session paths. |
 | Item → historical agreement/document | Reuse #371 `historicalDocumentReferences` unchanged, plus immutable coverage snapshot/site validation. No document total is allocated to a visit. |
 | Adjustment → recorded no-charge decision | Only signed work, explicit outside-contract class, reason, actor, decision timestamp, and no contradictory invoice ID. Missing price/invoice or a legacy class is not a decision. |
 
 `lib/visit-financial-context.ts` separates documentary reference, per-work coverage, recorded decision, and mixed/unresolved summary. The DB reader runs under the existing read-only snapshot helper and performs no schema bootstrap or writes. Document monetary values are internal inputs to the existing canonical document validator only; the new projection has no amounts, receipt status or monetary aggregation.
 
-`lib/reports.ts` loads source contexts only for selected visit rows and labels verification as current, not as-of the historical report end date. Existing report admission is unchanged. The clinical GET has the same patient and assistant-day gates as clinical GET, rechecks patient ownership in the snapshot, and applies an explicit output allowlist. Existing `canViewMoney` roles include cashier; that does not grant a new clinical-route admission to cashier/accountant. Existing restricted-role route gates still apply. Nonfinancial roles receive no new source IDs, money or finance links. Signing, callbacks and request semantics are untouched.
+`lib/reports.ts` loads source contexts only for selected visit rows and labels verification as current, not as-of the historical report end date. The evidence projection uses a repeatable-read snapshot, but the existing report context is loaded beforehand: the entire report is **not** claimed to be one atomic historical snapshot. Existing report admission is unchanged. The clinical GET has the same patient and assistant-day gates as clinical GET, rechecks patient ownership in the snapshot, and applies an explicit output allowlist. Existing `canViewMoney` roles include cashier; that does not grant a new clinical-route admission to cashier/accountant. Existing restricted-role route gates still apply. Nonfinancial roles receive no new source IDs, money or finance links. Signing, callbacks and request semantics are untouched.
 
 ## Deliberately unresolved edges
 
@@ -48,13 +49,21 @@ The synthetic PostgreSQL tests demonstrate both states together, mixed invoiced/
 - Unsigned drafts, zero prices, waived flags without an explicit decision, narrative-only work, missing/deleted source rows and ambiguous historical records remain unresolved. A legacy class is never treated as free work.
 - Receipt allocation/paid status, agreement balances, automatic repair, and account/checkout mutation semantics are outside this layer. Source references do not establish payment.
 
+## Independent review witnesses and repairs
+
+The frozen first source head `f19e4e7a630e9ad38d4ea6d4a820c742e3dd11e8` incorrectly returned verified coverage for a YER visit/exact SAR invoice with equal numeric amounts, for missing visit denomination, and for historical linked procedure quantity 2. These were actual failing PostgreSQL assertions before repair. The corrected cases are unresolved. Valid same-denomination evidence and an explicit SAR plan override on a YER visit remain verified; no pricing, signing, source row or eligibility is rewritten.
+
+Currency-changing correction fixtures retain the required settlement-reclassification document, even with no receipts. They stay unresolved. An isolated temporary-table malformed read snapshot demonstrates the separate correction-metadata gap: equal metadata strings alone accepted an edge whose actual invoice currencies disagreed. The corrected traversal checks both actual invoices. Legacy nullable original-currency metadata follows the existing correction guard's COALESCE semantics, with both actual denominations still checked. No public table or immutable guard is disabled for this witness.
+
+The old selected-visit loop issued **1,005 SELECT round trips for 201 empty visits** in the disposable DB. The shared batch reader now issues **10**, retaining all 201 visits. Batches are at most 200 requested visit IDs, not a row limit. Visit-local procedures, source lines, completed work, adjustments, endodontic records and direct documentary references are batched; item, invoice and historical-document results are cached only inside the same snapshot and keyed by patient/source. **201 visits sharing one agreement use 17 SELECT round trips**, with the same agreement reference on every visit. These are measured query counts, not Production latency measurements. Distinct treatment items still require their canonical validation; caching never bypasses ownership or identity checks.
+
 ## Validation
 
-- Owned PostgreSQL 18.4, Node 22: source, visits-report and canonical historical-document suites: 4 files, 56 tests passed.
-- Focused projection/route, signing contract and route-policy unit checks: 4 files, 35 tests passed.
-- Typecheck and lint: passed.
-- Full unit suite: 611 files, 10,691 tests passed (283.94 seconds).
-- Hosted browser/HTTP assertions added to existing real role-handoff and invoice/clinical-continuity journeys. Existing synthetic ortho browser fixture explicitly handles the new read. No local Chromium run; hosted proof remains required.
+- Owned PostgreSQL 18.4, Node 22: source, visits-report and canonical historical-document suites: 4 files, 64 tests passed.
+- Focused projection/route, signing and HTTP contracts, and #382 regression checks: 7 files, 203 tests passed.
+- Typecheck passed; lint completed with zero errors and 208 repository-wide warnings.
+- Final review-follow-up full unit suite: 611 files, 10,692 tests passed (269.84 seconds).
+- Hosted browser/HTTP assertions added to existing real role-handoff and invoice/clinical-continuity journeys. Existing synthetic ortho browser fixture explicitly handles the new read. #382 retains strict viewport/disclosure assertions. No local Chromium run; hosted proof remains required.
 
 The first full unit run found the missing new GET entry in the exhaustive HTTP matrix (610 other files passed); the route was registered with exactly the existing clinical GET roles and the complete rerun passed. Typecheck caught two test-only optional-row accesses, which were corrected.
 

@@ -13,6 +13,7 @@ const reasons: Record<string, string> = {
   approved_source_unverified: "مرجع اتفاق معتمد؛ لم تُثبت تغطية هذا العمل هنا",
   multiple_financial_sources: "توجد مصادر متعارضة تحتاج مراجعة",
   installment_principal_unverified: "جدول الأقساط وحده لا يثبت أصل التغطية",
+  invoice_denomination_unverified: "عملة الفاتورة لا تطابق عملة العمل المثبتة أو لم تُسجّل",
   invoice_item_identity_conflict: "هوية بند الفاتورة لا تطابق العمل المسجل",
   procedure_plan_identity_conflict: "الإجراء لا يطابق بند العلاج المرتبط",
   adjustment_owner_unverified: "تعذّر تثبيت ملكية جلسة التقويم",

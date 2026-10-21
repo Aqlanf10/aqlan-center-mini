@@ -18,10 +18,10 @@ beforeAll(async()=>{
 });
 afterAll(async()=>db.resetPoolForTesting());
 async function patient(){return (await q<{id:number}>("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic source patient') RETURNING id",[`SOURCE-${++serial}`]))[0].id;}
-async function visit(patientId:number){return (await q<{id:number}>("INSERT INTO visits(patient_name,patient_id,status,signed_at,arrived_at) VALUES('Synthetic source visit',$1,'done',NOW(),'2026-10-01 10:00+03') RETURNING id",[patientId]))[0].id;}
+async function visit(patientId:number,currency:string|null="YER"){return (await q<{id:number}>("INSERT INTO visits(patient_name,patient_id,status,signed_at,arrived_at,billing_currency) VALUES('Synthetic source visit',$1,'done',NOW(),'2026-10-01 10:00+03',$2) RETURNING id",[patientId,currency]))[0].id;}
 async function procedure(visitId:number,itemId:number|null=null,price=10000){return Number((await q<{id:string}>("INSERT INTO visit_procedures(visit_id,service_id,quantity,unit_price_minor,tooth_code,plan_item_id) VALUES($1,$2,1,$3,16,$4) RETURNING id::text",[visitId,serviceId,price,itemId]))[0].id);}
-async function invoice(patientId:number,procedureId:number,status="open",source=true){
- const [invoice]=await q<{id:number}>("INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,status) VALUES($1,$2,10000,'YER','synthetic',$3) RETURNING id",[`SOURCE-INV-${++serial}`,patientId,status]);
+async function invoice(patientId:number,procedureId:number,status="open",source=true,currency="YER"){
+ const [invoice]=await q<{id:number}>("INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,status) VALUES($1,$2,10000,$4,'synthetic',$3) RETURNING id",[`SOURCE-INV-${++serial}`,patientId,status,currency]);
  await q("INSERT INTO invoice_items(invoice_id,service_id,description,quantity,unit_price_minor,total_minor,source_type,source_id) VALUES($1,$2,'Synthetic source line',1,10000,10000,$4,$3)",[invoice.id,serviceId,source?procedureId:null,source?"visit_procedure":null]);return invoice.id;
 }
 const snapshot=()=>q("SELECT (SELECT count(*) FROM invoices)::int AS invoices,(SELECT count(*) FROM payments)::int AS payments,(SELECT count(*) FROM legacy_treatment_agreements)::int AS agreements,(SELECT jsonb_agg(to_jsonb(v) ORDER BY id) FROM visits v) AS visits");
@@ -54,6 +54,9 @@ it("reuses historical-document validation for one agreement across visits withou
  expect(result?.work[0].references).toContainEqual({kind:"historical_agreement",id:item.agreementId,state:"current",path:"plan_item"});
  expect(JSON.stringify(result)).not.toMatch(/Minor|total|paid|remaining/i);}
  expect(await snapshot()).toEqual(before);
+ await q("UPDATE visit_procedures SET quantity=2 WHERE visit_id=$1",[first]);
+ expect((await getVisitFinancialContext(first,p))?.summary).toBe("unresolved");
+ expect((await getVisitFinancialContext(second,p))?.summary).toBe("verified");
 
 });
 it("requires an explicit recorded no-charge decision, not a missing invoice or legacy class",async()=>{
@@ -73,23 +76,44 @@ it("redacts financial source identifiers and never introduces monetary fields",a
  const p=await patient(),v=await visit(p);await invoice(p,await procedure(v));const result=(await getVisitFinancialContext(v,p))!;
  expect(redactVisitFinancialContext(result,false).work[0].references).toEqual([]);expect(redactVisitFinancialContext(result,true).work[0].references).toHaveLength(1);
 });
-it("follows only explicit replacement line identities and keeps cancelled originals historical",async()=>{
+it.each(["YER","SAR"])("follows only explicit same-denomination replacement identities: %s",async currency=>{
  const p=await patient(),v=await visit(p),proc=await procedure(v),original=await invoice(p,proc,"cancelled");
- const replacement=await invoice(p,proc,"open",false);
+ const replacement=await invoice(p,proc,"open",false,currency);
  await q("UPDATE invoice_items SET source_type=NULL,source_id=NULL WHERE invoice_id=$1",[replacement]);
  expect((await getVisitFinancialContext(v,p))?.summary).toBe("unresolved");
  const client=await db.getPool().connect();
  try {
  await client.query("BEGIN");
  const cq=async<T=Record<string,unknown>>(sql:string,params:unknown[]=[]) => (await client.query(sql,params)).rows as T[];
- const [correction]=await cq<{id:number}>("INSERT INTO invoice_corrections(patient_id,currency,original_currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by) VALUES($1,'YER','YER',$2,$3,$4,$5,'Synthetic replacement','synthetic') RETURNING id",[p,original,replacement,`source-correction-${++serial}`,"a".repeat(64)]);
+ const [correction]=await cq<{id:number}>("INSERT INTO invoice_corrections(patient_id,currency,original_currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by) VALUES($1,$6,'YER',$2,$3,$4,$5,'Synthetic replacement','synthetic') RETURNING id",[p,original,replacement,`source-correction-${++serial}`,"a".repeat(64),currency]);
  await cq("INSERT INTO invoice_correction_lines(correction_id,original_item_id,corrected_item_id,approved_work) SELECT $1,a.id,b.id,'{}'::jsonb FROM invoice_items a,invoice_items b WHERE a.invoice_id=$2 AND b.invoice_id=$3",[correction.id,original,replacement]);
- await cq("INSERT INTO invoice_correction_receipts(correction_id,receipt) VALUES($1,$2::jsonb)",[correction.id,JSON.stringify({patientId:p,currency:"YER",idempotencyKey:`source-correction-${serial}`,createdBy:"synthetic",original:{id:original,patientId:p,baseCurrency:"YER"},corrected:{id:replacement,patientId:p,baseCurrency:"YER"}})]);
+ await cq("INSERT INTO invoice_correction_receipts(correction_id,receipt) VALUES($1,$2::jsonb)",[correction.id,JSON.stringify({patientId:p,currency,idempotencyKey:`source-correction-${serial}`,createdBy:"synthetic",original:{id:original,patientId:p,baseCurrency:"YER"},corrected:{id:replacement,patientId:p,baseCurrency:currency}})]);
+ if(currency!=="YER")await cq("INSERT INTO invoice_settlement_reclassifications(correction_id,patient_id,source_currency,target_currency,source_invoice_ids) VALUES($1,$2,'YER',$3,$4)",[correction.id,p,currency,[original]]);
  await client.query("COMMIT");
  } catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
  const result=await getVisitFinancialContext(v,p);
- expect(result?.summary).toBe("verified");expect(result?.work[0].references).toEqual(expect.arrayContaining([
+ expect(result?.summary).toBe(currency==="YER"?"verified":"unresolved");
+ if(currency==="YER")expect(result?.work[0].references).toEqual(expect.arrayContaining([
   expect.objectContaining({id:original,state:"historical"}),expect.objectContaining({id:replacement,state:"current"})]));
+ if(currency==="YER"){
+  // A malformed historical read snapshot: no application record or guard is changed.
+  const malformed=await db.getPool().connect();
+  try{
+   await malformed.query("BEGIN");
+   await malformed.query("CREATE TEMP TABLE invoice_corrections ON COMMIT DROP AS SELECT * FROM public.invoice_corrections");
+   await malformed.query("UPDATE pg_temp.invoice_corrections SET original_currency=NULL WHERE original_invoice_id=$1",[original]);
+   const {readVisitFinancialContext}=await import("../../lib/visit-financial-context-db");
+   // Legacy metadata follows the existing correction guard's COALESCE semantics,
+   // but both actual invoices must still prove the same denomination.
+   expect((await readVisitFinancialContext(malformed,v,p))?.summary).toBe("verified");
+   await malformed.query("UPDATE pg_temp.invoice_corrections SET currency='SAR',original_currency='SAR' WHERE original_invoice_id=$1",[original]);
+   // The old metadata-only equality accepted this edge despite actual YER invoice denominations.
+   const old=(await malformed.query("SELECT id FROM pg_temp.invoice_corrections WHERE original_invoice_id=$1 AND currency=original_currency",[original])).rows;
+   expect(old).toHaveLength(1);
+
+   expect((await readVisitFinancialContext(malformed,v,p))?.summary).toBe("unresolved");
+  }finally{await malformed.query("ROLLBACK");malformed.release();}
+ }
  await q("UPDATE invoices SET status='cancelled' WHERE id=$1",[replacement]);
  expect((await getVisitFinancialContext(v,p))?.summary).toBe("unresolved");
 });
@@ -155,4 +179,49 @@ it("retains a void standalone historical agreement as historical, never active c
  expect(await voidLegacyTreatment({patientId:p,agreementId:result.agreement.id,reason:"Synthetic void source",actor:session.username,actorRole:"admin"})).toMatchObject({ok:true});
  const context=await getVisitFinancialContext(v,p);expect(context?.summary).toBe("unresolved");
  expect(context?.work[0].references).toContainEqual(expect.objectContaining({kind:"historical_agreement",id:result.agreement.id,state:"historical"}));
+});
+
+it.each([{visitCurrency:"YER",invoiceCurrency:"YER",expected:"verified"},{visitCurrency:"YER",invoiceCurrency:"SAR",expected:"unresolved"},{visitCurrency:null,invoiceCurrency:"YER",expected:"unresolved"}])("requires explicit matching denominations: $visitCurrency / $invoiceCurrency",async({visitCurrency,invoiceCurrency,expected})=>{
+ const p=await patient(),v=await visit(p,visitCurrency),proc=await procedure(v),inv=await invoice(p,proc,"open",true,invoiceCurrency);
+ const context=await getVisitFinancialContext(v,p);
+ expect(context?.summary).toBe(expected);
+ expect(context?.work[0].coverage).toBe(expected);
+ if(expected==="unresolved")expect(context?.work[0].references).toContainEqual(expect.objectContaining({id:inv,state:"review"}));
+});
+
+it("bounds empty report source reads by batches rather than five queries per visit",async()=>{
+ const p=await patient();const rows=await q<{id:number}>("INSERT INTO visits(patient_name,patient_id,status,signed_at,billing_currency) SELECT 'Synthetic batch visit',$1,'done',NOW(),'YER' FROM generate_series(1,201) RETURNING id",[p]);
+ const {readVisitFinancialContexts}=await import("../../lib/visit-financial-context-db");
+ const client=await db.getPool().connect();let reads=0;
+ const counted={query:async(...args:Parameters<typeof client.query>)=>{reads++;return client.query(...args);}} as typeof client;
+ try{await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+ const results=[...(await readVisitFinancialContexts(counted,rows.map(row=>({visitId:row.id,expectedPatientId:p})))).values()];
+ expect(results).toHaveLength(201);expect(results.every(row=>row?.summary==="no_recorded_work")).toBe(true);
+ expect(reads).toBe(10);
+ }finally{await client.query("ROLLBACK");client.release();}
+});
+it.each(["SAR","YER"])("uses an explicitly linked SAR plan denomination, not the visit YER preference: invoice %s",async currency=>{
+ const p=await patient(),v=await visit(p,"YER");
+ const [plan]=await q<{id:number}>("INSERT INTO treatment_plans(patient_id,title,total_minor,base_currency,created_by) VALUES($1,'Synthetic SAR plan',10000,'SAR','synthetic') RETURNING id",[p]);
+ const [item]=await q<{id:number}>("INSERT INTO plan_items(plan_id,service_id,service_name,category,tooth_code,quantity,unit_price_minor,billing_status) VALUES($1,$2,'Synthetic SAR work','rct',16,1,10000,'unbilled') RETURNING id",[plan.id,serviceId]);
+ const proc=await procedure(v,item.id);await invoice(p,proc,"open",true,currency);
+ expect((await getVisitFinancialContext(v,p))?.summary).toBe(currency==="SAR"?"verified":"unresolved");
+});
+it("deduplicates repeated historical item/document reads across batch boundaries and retains every visit",async()=>{
+ const p=await patient();const saved=await documents.createHistoricalDocument(p,{patientId:p,currency:"YER",items:[{serviceId,quantity:1,price:"10000",catalogPriceMinor:10000,toothCode:16}],discount:"0",previouslyPaidAmount:"10000",historicalAsOf:"2026-10-01",idempotencyKey:`source-batched-history-${++serial}`,repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:0,repaymentVersion:0,repaymentSourceHash:null},session);
+ const item=saved.document.lines[0];
+ const rows=await q<{id:number}>("INSERT INTO visits(patient_name,patient_id,status,signed_at,billing_currency) SELECT 'Synthetic shared source visit',$1,'done',NOW(),'YER' FROM generate_series(1,201) RETURNING id",[p]);
+ await q("INSERT INTO visit_procedures(visit_id,service_id,quantity,unit_price_minor,tooth_code,plan_item_id) SELECT unnest($1::int[]),$2,1,0,16,$3",[rows.map(row=>row.id),serviceId,item.planItemId]);
+ const {readVisitFinancialContexts}=await import("../../lib/visit-financial-context-db");
+ const client=await db.getPool().connect();let reads=0;
+ const counted={query:async(...args:Parameters<typeof client.query>)=>{reads++;return client.query(...args);}} as typeof client;
+ try{await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+ const results=await readVisitFinancialContexts(counted,rows.map(row=>({visitId:row.id,expectedPatientId:p})));
+ expect(results.size).toBe(201);for(const context of results.values()){
+  expect(context.summary).toBe("verified");expect(context.work).toHaveLength(1);
+  expect(context.work[0].references).toContainEqual({kind:"historical_agreement",id:item.agreementId,state:"current",path:"plan_item"});
+ }
+ expect(reads).toBe(17);
+ await expect(readVisitFinancialContexts(counted,[{visitId:rows[0].id,expectedPatientId:p+99999}])).rejects.toThrow("Visit owner changed");
+ }finally{await client.query("ROLLBACK");client.release();}
 });
