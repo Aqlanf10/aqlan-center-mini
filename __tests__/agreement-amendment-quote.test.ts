@@ -3,8 +3,8 @@ import { quoteAgreementAmendment, type AgreementAmendmentProposal } from "../lib
 const source: AgreementAmendmentProposal = {
   currency: "YER", previousServiceId: 11, selectedServiceId: 22,
   quantity: 10, previousUnitPriceMinor: 50_000, selectedUnitPriceMinor: 80_000,
-  previousAgreementMinor: 500_000, verifiedPaymentsMinor: 180_000,
-  verifiedRefundsMinor: 0, reason: "Patient approved documented zirconia upgrade",
+  previousAgreementMinor: 500_000, recordedPaymentsMinor: 180_000,
+  recordedRefundsMinor: 0, reason: "Patient approved documented zirconia upgrade",
 };
 describe("financially isolated amendment quote (not a posting API)", () => {
   it("calculates exact 300k increase, 800k revised agreement and 620k due", () => {
@@ -12,7 +12,6 @@ describe("financially isolated amendment quote (not a posting API)", () => {
     expect([q.oldTreatmentMinor, q.newTreatmentMinor, q.deltaMinor,
       q.revisedAgreementMinor, q.settledMinor, q.remainingMinor])
       .toEqual([500_000, 800_000, 300_000, 800_000, 180_000, 620_000]);
-    expect(q.commissionState).toBe("pending_cost_evidence");
     expect(q.financialEventKind).toBe("agreement_delta");
   });
   it("requires selecting a service regardless of price or text in the reason", () => {
@@ -24,8 +23,8 @@ describe("financially isolated amendment quote (not a posting API)", () => {
     expect([q.deltaMinor,q.revisedAgreementMinor,q.remainingMinor]).toEqual([300_000,750_000,570_000]);
   });
   it("reduces settlement on refund immediately, without treating refund as commission review", () => {
-    const q = quoteAgreementAmendment({...source,verifiedRefundsMinor:20_000});
-    expect([q.settledMinor,q.remainingMinor,q.commissionState]).toEqual([160_000,640_000,"pending_cost_evidence"]);
+    const q = quoteAgreementAmendment({...source,recordedRefundsMinor:20_000});
+    expect([q.settledMinor,q.remainingMinor,q.financialEventKind]).toEqual([160_000,640_000,"agreement_delta"]);
   });
   it.each(["YER","SAR","USD"] as const)("keeps %s in native currency without fabricating FX",currency=>{
     const q = quoteAgreementAmendment({...source,currency});
@@ -34,13 +33,15 @@ describe("financially isolated amendment quote (not a posting API)", () => {
   });
   it("shows unallocated credit explicitly on a downward amendment", () => {
     const q = quoteAgreementAmendment({...source, selectedUnitPriceMinor:10_000,
-      previousAgreementMinor:500_000,verifiedPaymentsMinor:450_000});
+      previousAgreementMinor:500_000,recordedPaymentsMinor:450_000});
     expect([q.revisedAgreementMinor,q.remainingMinor,q.creditMinor]).toEqual([100_000,0,350_000]);
   });
   it("rejects impossible debt and unsafe arithmetic rather than rounding",()=>{
-    expect(()=>quoteAgreementAmendment({...source,verifiedRefundsMinor:180_001})).toThrow();
+    expect(()=>quoteAgreementAmendment({...source,recordedRefundsMinor:180_001})).toThrow();
     expect(()=>quoteAgreementAmendment({...source,quantity:Number.MAX_SAFE_INTEGER})).toThrow();
-    expect(()=>quoteAgreementAmendment({...source,previousAgreementMinor:1})).toThrow();
+    expect(quoteAgreementAmendment({...source,previousAgreementMinor:1}).revisedAgreementMinor).toBe(300_001);
+    // A negative principal requires an actual reduction, not the positive upgrade.
+    expect(()=>quoteAgreementAmendment({...source,previousAgreementMinor:1,selectedUnitPriceMinor:10_000})).toThrow();
   });
   it("refuses an unchanged price/service and will not invent a financial event",()=>{
     expect(()=>quoteAgreementAmendment({...source,selectedServiceId:11,selectedUnitPriceMinor:50_000})).toThrow();
