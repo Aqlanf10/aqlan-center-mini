@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
       - name: Verify product SHA and overlay test-only probes
         env:
-          FINAL_APP_SHA: 'fa0d8a994da9353cc4e24f9e799ec14605df34d0'
+          FINAL_APP_SHA: '9ad25d7c6f78da0bd807e64f69c478a1ef56669e'
           EXPECTED_BASE_REF: 'fix/visit-source-context'
         run: |
           test "${{ github.event.pull_request.base.ref }}" = "$EXPECTED_BASE_REF"
