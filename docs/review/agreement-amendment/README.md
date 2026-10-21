@@ -1,51 +1,26 @@
-# Treatment agreement amendment — guarded implementation handoff (Draft)
-Base: `2667b71f815ee14781cdac6b37ebad3b4f8e246d` (main, verified 2026-10-21).
-Branch: `feat/agreement-delta-amendment-20261021`.
-Prohibited PR branches #380, #383, #386, #388, #389 are untouched.
+# PR #390 — dated, append-only treatment upgrade (Draft; NO PRODUCTION DEPLOY)
+Base: `2667b71f815ee14781cdac6b37ebad3b4f8e246d`. Branch: `feat/agreement-delta-amendment-20261021`.
 
-## Current stage: **NOT IMPLEMENTED / DO NOT DEPLOY**
-The new pure quote and unit tests are only a contract. There is **no posting API, schema,
-ledger integration, visible patient screen, checkout guard or accounting reconciliation**.
-They must not be presented as a completed feature or treated as acceptance.
+## Supported scope
+- A single-item, explicitly approved, invoice-funded agreement; a **positive same-currency** replacement of the selected service/unit price. Other situations remain blocked for financial review, not inferred.
+- `migrations/0066_agreement_delta_amendments.sql` and the byte-identical runtime SQL define an immutable event, difference-only invoice and line, immutable split-collection receipt, and an immutable **stale-attempt rejection**. No alteration to the original invoice, historical payments, signed clinical work, settled payroll, or old commission history.
+- The upgrade writer validates the entire source and admin authority while holding patient/visit/shift/plan fences and a per-idempotency-key PostgreSQL advisory transaction lock. The same-key retry returns the original verified receipt.
+- When a payment changes the source between preview/save: the writer commits a **rejection record** keyed to actor, original body digest, plan and observed source hash; it does *not* post a difference invoice. The status `PUT /api/plans/[id]/agreement-amendment` authenticates an active admin and waits for the same key lock before returning one of:
+  - `committed` with the immutable receipt;
+  - `rejected_stale` with the committed rejection evidence (only case in which the UI enables a new preview and key);
+  - `unresolved` (absence alone never clears a possibly in-flight or delayed write).
+  - 401/403/409, lost reply, role switch or status transport failure never discard the saved request.
+- `PatientPlans` chooses the plan source when a delta exists. `/api/payments` returns a verified composite receipt with **every** invoice allocation, payment row, and print ID. Replayed requests return the same receipt IDs; the client requires all parts to match before acknowledging. Never display 320,000 as the full 620,000 collection.
+- Commission decision uses existing dated doctor/service/case policy and primary doctor fallback. Missing **required** incremental cost evidence blocks automatic doctor earnings. Other policies need no invented cost. No retroactive change to previous commissions.
 
-## Reviewed, existing sources
-- `lib/invoice-revision-db.ts` corrects by replacing an entire invoice and updating
-  associated plan items, which is NOT the desired append-only delta event.
-- `lib/invoice-identity-amendments.ts` deliberately refuses changing treatment
-  identity after settlements or protected clinical work. Do not remove that guard.
-- `migrations/0064_approved_agreement_principal.sql` freezes financial principal,
-  original invoice lines and plan terms, and rejects a second full-principal invoice.
-- `lib/approved-agreements.ts`, `lib/debt-installments-db.ts`,
-  `lib/invoice-settlement-position.ts`, `lib/debt-account-position.ts`,
-  `lib/plan-financial-position.ts` and `lib/checkout-due-recommendation-db.ts`
-  independently project balances from existing source evidence. A new event must
-  be consumed by ALL relevant readers, statements and historic as-of reports.
-- The policy engine is `lib/commission.ts`: it selects historical effective policy
-  and accounts for materials/lab deductions. No independent percentage calculation
-  or automatic entitlement for an unresolved cost allocation is allowed.
-- Draft #389 only clarifies refusal/history and must not be cherry-picked.
+## Acceptance and source-of-truth
+- `.github/workflows/pr390-acceptance.yml`: exact PR HEAD, real PostgreSQL 18, quote/schema, source/currency regressions, Next.js production build and Playwright browser against a synthetically seeded server.
+- `__tests__/postgres/agreement-delta-amendment.test.ts`: one 300,000 difference, total 800,000, paid 180,000, 620,000 collected once as **320,000 + 300,000**; replay/concurrency/rollback, refund and doctor, durable stale proof, locked in-flight status.
+- `__tests__/security-http/agreement-delta-upgrade-ui.test.ts`: server-backed preview→intervening payment→stale proof→refresh→single save, lost **amendment** response after DB commit + actor switch + UI retry, exact printed amount and invoice number on both receipts, and nonempty historical statement.
+- `package.json` / `package-lock.json`: Vitest and its @vitest packages (including mocker) pinned to 4.1.12 with SHA512 integrities. No changes to security audit rules, policy exceptions, or vendor patches.
 
-## Necessary atomic implementation contract (blocking)
-1. Versioned, immutable, explicitly plan/item/source-linked delta rows, with
-   idempotency uniqueness and immutable response receipt. Keep clinical history,
-   original invoice/line IDs, receipts, refunds, audit and paid payroll unchanged.
-2. A single SERIALIZABLE or ordered-lock transaction checks current admin
-   authority, verified settlement provenance, plan and visit ownership, all
-   overlapping drafts, source-hash freshness and the historic cut-off date.
-   Require explicit new service ID. Commit delta, new current agreement snapshot,
-   audit, patient debt evidence and receipt together; rollback on any error.
-3. Preserve time-sliced principal projections and every existing statement
-   report. New current net = prior net + delta; refunds immediately decrease net
-   settled amount. Never derive allocated credit from an unrelated bucket.
-4. Reuse existing commission effective-date policy and allocation lineage; post
-   difference commission **pending_cost_evidence** until expense attribution is
-   verified, preventing double lab/material deduction or payroll payout.
-5. Connect exact plan, case, visit, checkout, bill-once guard, signed-work
-   protection and the visible agreement editor. Preview old/new/delta/verified
-   payments/remaining and preserve body+key across uncertain HTTP outcomes.
-6. Run real PostgreSQL 18, HTTP, overlapping transactions/retries, admin
-   permissions, historical as-of statements, discounts/refunds/FX, cashbox,
-   commission policy changes and browser checkout before unlocking this Draft.
-
-No production data or secrets were used, no migration was introduced, and no
-service or production state was changed.
+## Guardrails, known limitations and rollout
+1. Continue to restrict nonpositive upgrades, multiple items, opening-source/unproven allocation, foreign-currency splits and any ambiguous funding. No broad finance redesign.
+2. **Draft means no merge/deploy.** A passing targeted suite is not equivalent to a green full CI, review of source ownership, or a staging rehearsal.
+3. Migration 0066 is an additive SQL-only schema addition, no backfill or old-data rewrite. Before rollout compare migration registry/checksums, schema preflight, active connections, and backups. Reverting the app after *live* writes requires forward-compatible reads/retain 0066 evidence, not dropping rows or reversing receipts.
+4. Only synthetic patient/test DBs and public repository sources may be used. Do not change Railway, production data or secrets.
