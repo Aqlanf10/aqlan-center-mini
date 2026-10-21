@@ -139,11 +139,16 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       const ledgerResponse=await context.request.get(`${baseUrl}/api/patients/${patientId}/ledger`);expect(ledgerResponse.status()).toBe(200);
       const ledger=await ledgerResponse.json();expect(ledger.balances.SAR).toMatchObject({billedMinor:150000,collectedMinor:0,dueMinor:150000});
       expect(ledger.balances.YER.dueMinor).toBe(0);expect(ledger.balances.USD.dueMinor).toBe(0);
-      const statement=await context.newPage();await statement.goto(`${baseUrl}/print/statement/${patientId}`,{waitUntil:"domcontentloaded"});
-      const statementInvoice=statement.locator("tbody tr").filter({hasText:ledger.invoices[0].invoiceNumber});await statementInvoice.waitFor();expect(await statementInvoice.count()).toBe(1);
-      expect(await statementInvoice.innerText()).toContain("1,500.00");
+      const statement=await context.newPage();const statementResponse=await statement.goto(`${baseUrl}/print/statement/${patientId}`,{waitUntil:"domcontentloaded"});
+      expect(statementResponse?.status()).toBe(200);
+      // Current statements group stored treatment lines in a table per invoice;
+      // the persisted invoice number is in its repeating header, not a body row.
+      const statementInvoice=statement.locator(`table.statement-invoice[data-invoice-id="${ledger.invoices[0].id}"]`);
+      await statementInvoice.waitFor();expect(await statementInvoice.count()).toBe(1);
+      expect(await statementInvoice.locator("thead").innerText()).toContain(ledger.invoices[0].invoiceNumber);
+      expect(await statementInvoice.locator("tbody tr").filter({hasText:"صافي الفاتورة بعد الخصم"}).innerText()).toContain("1,500.00");
       expect(await statement.locator(".line").filter({hasText:"إجمالي المفوتر"}).innerText()).toContain("1,500.00");
-      expect(await statement.locator(".line").filter({hasText:"إجمالي المحصّل"}).innerText()).toContain("0.00");
+      expect(await statement.locator(".line").filter({hasText:"صافي المحصّل بعد الاستردادات وعكس السندات"}).innerText()).toContain("0.00");
       await statement.emulateMedia({media:"print"});await statement.screenshot({path:`.settings-ui-artifacts/invoice-statement-${role}-${width}.png`,fullPage:true});await statement.close();
       const audit = (await db.query("SELECT details FROM audit_log WHERE action='invoice.create' AND details->>'المريض'=$1", [String(patientId)])).rows[0].details;
       expect(audit.invoicePriceSnapshots[0]).toMatchObject({ quote: { source: "converted", rate: 440, rounding: "nearest-major-unit", minor: 500 }, agreedPriceSource:"manual", requestedMinor: 150000, reason: "Synthetic explicit manual agreement" });
