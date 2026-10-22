@@ -13,13 +13,13 @@ beforeAll(async()=>{
  browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined});
 },180000);
 afterAll(async()=>{await browser?.close();await client?.end();});
-async function fixture(){
+async function fixture(doctorId:number|null=null){
  const marker=++serial;
  const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic delta HTTP patient') RETURNING id",[`UPG-HTTP-${Date.now()}-${marker}`])).rows[0].id as number;
  const originalServiceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES($1,50000,TRUE,TRUE,'prostho') RETURNING id",[`Synthetic original service ${marker}`])).rows[0].id as number;
  const newServiceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES($1,80000,TRUE,TRUE,'prostho') RETURNING id",[`Synthetic upgraded service ${marker}`])).rows[0].id as number;
- const planId=(await q("INSERT INTO treatment_plans(patient_id,title,total_minor,base_currency,start_date,consent_at,consent_by) VALUES($1,'Synthetic ten crowns',500000,'YER','2026-10-01',now(),'secadmin') RETURNING id",[patientId])).rows[0].id as number;
- await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,billing_rule,session_count) VALUES($1,$2,'Synthetic original service',10,50000,'once',1)",[planId,originalServiceId]);
+ const planId=(await q("INSERT INTO treatment_plans(patient_id,title,total_minor,base_currency,start_date,consent_at,consent_by,primary_doctor_id) VALUES($1,'Synthetic ten crowns',500000,'YER','2026-10-01',now(),'secadmin',$2) RETURNING id",[patientId,doctorId])).rows[0].id as number;
+ await q("INSERT INTO plan_items(plan_id,service_id,service_name,quantity,unit_price_minor,billing_rule,session_count,doctor_id) VALUES($1,$2,'Synthetic original service',10,50000,'once',1,$3)",[planId,originalServiceId,doctorId]);
  await q("INSERT INTO plan_installments(plan_id,number,due_date,amount_minor) VALUES($1,1,'2026-10-01',250000),($1,2,'2099-12-01',250000)",[planId]);
  const approval=await authedMutation(`/api/plans/${planId}/financial-approval`,h.sessions.admin,"POST",
  JSON.stringify({expectedTotalMinor:500000,currency:"YER",source:{kind:"new"},reason:"Synthetic full original approval"}),{"Idempotency-Key":`approved-http-${planId}`});
@@ -333,6 +333,144 @@ it("each PRINTED receipt proves its own original/difference invoice and cash amo
    expect((await page.locator(".sheet .amount-box").innerText()).trim())
      .toBe(formatMoney(allocation.amountMinor,"YER"));
    expect(allocation.amountMinor).toBe(index===0?320000:300000);
+  }
+ }finally{await context.close();}
+});
+/** Every stored financial fact this collection can touch, plus the derived statement, agreement and commission readers. */
+async function financialState(patientId:number,planId:number,doctorId:number){
+ const stored=(await q(`SELECT jsonb_build_object(
+   'payments',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM payments p WHERE patient_id=$1),
+   'invoices',(SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i WHERE patient_id=$1),
+   'items',(SELECT jsonb_agg(to_jsonb(ii) ORDER BY ii.id) FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE i.patient_id=$1),
+   'installments',(SELECT jsonb_agg(to_jsonb(x) ORDER BY id) FROM plan_installments x WHERE plan_id=$2),
+   'groups',(SELECT jsonb_agg(to_jsonb(g) ORDER BY idempotency_key) FROM agreement_delta_collection_receipts g WHERE patient_id=$1),
+   'amendments',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM agreement_delta_amendments a WHERE plan_id=$2),
+   'shift',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM cashier_shifts s WHERE status='open')) AS state`,[patientId,planId])).rows[0].state;
+ const statement=await fetch(`${baseUrl}/api/reports?report=patient-statement&preset=custom&from=2026-01-01&to=2099-12-31&patientId=${patientId}`,{headers:{cookie:h.sessions.admin.cookie}});
+ expect(statement.status,await statement.clone().text()).toBe(200);
+ const plans=await fetch(`${baseUrl}/api/patients/${patientId}/plans`,{headers:{cookie:h.sessions.admin.cookie}});
+ expect(plans.status,await plans.clone().text()).toBe(200);
+ const commission=await fetch(`${baseUrl}/api/finance/commissions?detail=1&from=1970-01-01&to=2099-12-31&doctorId=${doctorId}`,{headers:{cookie:h.sessions.admin.cookie}});
+ expect(commission.status,await commission.clone().text()).toBe(200);
+ const lines=((await commission.json()).lines as {patientId:number;accruedMinor:number;earnedMinor:number}[]).filter(line=>line.patientId===patientId);
+ return {stored,statement:(await statement.json()).result,agreement:(await plans.json()).plans.find((p:{id:number})=>p.id===planId).approvedAgreement,
+  commission:{lines,accruedMinor:lines.reduce((sum,line)=>sum+line.accruedMinor,0),earnedMinor:lines.reduce((sum,line)=>sum+line.earnedMinor,0)}};
+}
+const balanceOf=(state:Awaited<ReturnType<typeof financialState>>)=>(state.statement.kpis as {key:string;minor:number}[]).find(k=>k.key==="balance")?.minor;
+it("(#408 finding 2) split advisory: operation total, each receipt with its partial refund, both prints, confirmation whose reply is lost after commit, UI replay of the identical request, both new prints",async()=>{
+ // Existing canonical commission fixture: an ordinary 20% doctor who performs the agreement's items.
+ const doctorId=(await q("INSERT INTO parties(name,kind,commission_percent) VALUES($1,'doctor',20) RETURNING id",[`Synthetic advisory doctor ${Date.now()}`])).rows[0].id as number;
+ const f=await fixture(doctorId),view=await preview(f.planId);
+ const saved=await authedMutation(`/api/plans/${f.planId}/agreement-amendment`,h.sessions.admin,"POST",JSON.stringify({
+  idempotencyKey:`advisory-delta-${f.planId}`,expectedSourceHash:view.sourceHash,
+  newServiceId:f.newServiceId,newUnitMinor:80000,reason:"Signed synthetic advisory journey"}));
+ expect(saved.status,await saved.clone().text()).toBe(201);
+ // 330000 = 320000 on the original invoice + 10000 on the difference invoice.
+ const first=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({
+  patientId:f.patientId,planId:f.planId,kind:"payment",amount:"330000",currency:"YER",method:"cash"}),{"Idempotency-Key":`advisory-first-${f.planId}`});
+ expect(first.status,await first.clone().text()).toBe(201);
+ const group=(await first.json()).collection as {receipts:{id:number;receiptNumber:string}[];allocations:{amountMinor:number}[]};
+ expect(group.allocations.map(a=>a.amountMinor)).toEqual([320000,10000]);
+ // Partial reversal of the first receipt keeps the group alive and must be visible per receipt.
+ const refund=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({
+  patientId:f.patientId,kind:"refund",reversalOfId:group.receipts[0].id,amount:"40000",currency:"YER",method:"cash",note:"Synthetic partial reversal"}),
+  {"Idempotency-Key":`advisory-refund-${f.planId}`});
+ expect(refund.status,await refund.clone().text()).toBe(201);
+ const before=await financialState(f.patientId,f.planId,doctorId);
+ expect(before.stored.payments.length).toBe(4);
+ // Nonempty, positive state: 800000 agreement − (180000 + 330000 − 40000) collected = 330000 due; a positive entitlement.
+ expect(balanceOf(before)).toBe(330000);
+ expect(before.statement.rows.length).toBeGreaterThan(0);
+ expect(before.agreement).toMatchObject({totalMinor:800000,remainingMinor:330000});
+ expect(before.commission.lines.length).toBeGreaterThan(0);
+ expect(before.commission.accruedMinor).toBeGreaterThan(0);expect(before.commission.earnedMinor).toBeGreaterThan(0);
+ const lastId=Math.max(...before.stored.payments.map((p:{id:number})=>p.id));
+ const context=await browser.newContext({viewport:{width:1280,height:900},locale:"ar-YE",serviceWorkers:"block"});
+ const [name,...cookie]=h.sessions.admin.cookie.split("=");
+ await context.addCookies([{name,value:cookie.join("="),url:baseUrl}]);
+ const page=await context.newPage();
+ const posts:{key:string;body:string;review:string|undefined}[]=[];
+ const replies:{status:number;body:Record<string,unknown>}[]=[];
+ await page.route("**/api/payments",async route=>{
+  const request=route.request();
+  if(request.method()!=="POST")return route.continue();
+  posts.push({key:request.headers()["idempotency-key"]??"",body:request.postData()??"",review:request.headers()["x-collection-similarity-review"]});
+  const backend=await route.fetch();
+  replies.push({status:backend.status(),body:await backend.json()});
+  // The confirmation commits on the server, but its reply never reaches the browser.
+  if(posts.length===2)return route.abort("failed");
+  return route.fulfill({response:backend});
+ });
+ try{
+  await page.goto(`${baseUrl}/patients/${f.patientId}?tab=plans`,{waitUntil:"domcontentloaded"});
+  await page.getByRole("button",{name:"تحصيل قسط",exact:true}).click();
+  await page.getByLabel("مبلغ القسط").fill("330000");
+  await page.getByRole("button",{name:"سجّل القسط واطبع السند"}).click();
+  const warning=page.getByRole("alertdialog",{name:"تنبيه سند قبض مشابه"});
+  await warning.waitFor();
+  expect(replies[0].status).toBe(409);
+  const text=await warning.innerText();
+  expect(text).toContain("عملية تحصيل واحدة موزعة على 2 سندات");
+  expect(text).toContain(`إجمالي المدفوع ${formatMoney(330000,"YER")}`);
+  const items=warning.getByRole("list",{name:"سندات العملية"}).getByRole("listitem");
+  expect(await items.count()).toBe(2);
+  const firstItem=await items.nth(0).innerText(),secondItem=await items.nth(1).innerText();
+  expect(firstItem).toContain(`السند ${group.receipts[0].receiptNumber} · ${formatMoney(320000,"YER")}`);
+  expect(firstItem).toContain(`مسترد ${formatMoney(40000,"YER")}`);
+  expect(firstItem).not.toContain("(بالكامل)");
+  expect(secondItem).toContain(`السند ${group.receipts[1].receiptNumber} · ${formatMoney(10000,"YER")}`);
+  expect(secondItem).not.toContain("مسترد");
+  // Each advisory link opens its own receipt print, with that receipt's own amount.
+  for(const [index,receipt] of group.receipts.entries()){
+   const link=warning.getByRole("link",{name:`مراجعة السند ${receipt.receiptNumber}`});
+   expect(await link.getAttribute("href")).toBe(`/print/receipt/${receipt.id}`);
+   const [print]=await Promise.all([context.waitForEvent("page"),link.click()]);
+   await print.waitForLoadState("domcontentloaded");
+   expect(await print.locator(".sheet").innerText()).toContain(receipt.receiptNumber);
+   expect((await print.locator(".sheet .amount-box").innerText()).trim()).toBe(formatMoney(index===0?320000:10000,"YER"));
+   await print.close();
+  }
+  // Advisory and prints wrote nothing anywhere: receipts, invoices, schedule, groups, shift and derived totals.
+  expect(await financialState(f.patientId,f.planId,doctorId)).toEqual(before);
+  await warning.getByRole("button",{name:"تسجيل دفعة مستقلة"}).click();
+  await page.getByRole("button",{name:"إعادة التحقق من العملية السابقة"}).waitFor();
+  expect(replies[1].status).toBe(201);
+  const committed=(await q("SELECT id,receipt_number,amount_minor::int AS amount FROM payments WHERE patient_id=$1 AND id>$2 ORDER BY id",[f.patientId,lastId])).rows;
+  expect(committed.map(r=>r.amount)).toEqual([40000,290000]);
+  const afterCommit=await financialState(f.patientId,f.planId,doctorId);
+  expect(balanceOf(afterCommit)).toBe(0);
+  expect(afterCommit.agreement).toMatchObject({totalMinor:800000,remainingMinor:0});
+  // The committed cash earns more of the same accrued entitlement; nothing is accrued twice.
+  expect(afterCommit.commission.accruedMinor).toBe(before.commission.accruedMinor);
+  expect(afterCommit.commission.earnedMinor).toBeGreaterThan(before.commission.earnedMinor);
+  // Retry through the actual UI: the identical committed request under the same key.
+  await page.getByRole("button",{name:"إعادة التحقق من العملية السابقة"}).click();
+  const printLinks=page.getByTestId("approved-split-receipts").getByRole("link",{name:/طباعة السند/});
+  await printLinks.first().waitFor();
+  expect(posts).toHaveLength(3);
+  expect(posts[0].review).toBeUndefined();expect(posts[1].review).toBeTruthy();
+  expect(posts[1].key).toBe(posts[0].key);expect(posts[1].body).toBe(posts[0].body);
+  // Same fingerprint (key + body). The recovery send carries no review header: a committed key replays
+  // before any similarity check, and an uncommitted one would be asked to review again, never recorded unreviewed.
+  expect({key:posts[2].key,body:posts[2].body}).toEqual({key:posts[1].key,body:posts[1].body});
+  expect(posts[2].review).toBeUndefined();
+  expect(replies[2].status).toBe(200);
+  const replayed=replies[2].body as {paymentIds:number[];collection:{allocations:{paymentId:number;amountMinor:number}[]}};
+  expect(replayed.paymentIds).toEqual(committed.map(r=>r.id));
+  expect(replayed.collection.allocations.map(a=>[a.paymentId,a.amountMinor])).toEqual(committed.map(r=>[r.id,r.amount]));
+  expect((replies[1].body as {collection:unknown}).collection).toEqual(replayed.collection);
+  // The replay wrote nothing: state is exactly what the lost-reply commit left.
+  expect(await financialState(f.patientId,f.planId,doctorId)).toEqual(afterCommit);
+  expect(afterCommit.stored.payments.length).toBe(6);
+  // Both final receipt links, by actual clicks.
+  expect(await printLinks.count()).toBe(2);
+  for(const [index,row] of committed.entries()){
+   const [print]=await Promise.all([context.waitForEvent("page"),printLinks.nth(index).click()]);
+   await print.waitForLoadState("domcontentloaded");
+   expect(new URL(print.url()).pathname).toBe(`/print/receipt/${row.id}`);
+   expect(await print.locator(".sheet").innerText()).toContain(row.receipt_number);
+   expect((await print.locator(".sheet .amount-box").innerText()).trim()).toBe(formatMoney(row.amount,"YER"));
+   await print.close();
   }
  }finally{await context.close();}
 });
