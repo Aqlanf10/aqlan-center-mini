@@ -35,6 +35,27 @@ export type MoneyResult = { kind: "confirmed"; attempt: MoneyAttempt; acknowledg
   | { kind: "busy" };
 type Result = MoneyResult;
 
+/** Collections whose keys the server can prove (0068). Receipt corrections keep their own evidence path. */
+export const RECONCILABLE_OPERATIONS: ReadonlySet<MoneyRequest["operation"]> = new Set(["payment", "installment"]);
+export const MONEY_RETIRED = "ثبت من الخادم أن المحاولة السابقة لم تُحفظ ولن تُحفظ، فأُلغيت. يمكنك تصحيح الطلب وتسجيله من جديد.";
+/**
+ * Ask the server to prove a collection key's outcome. "retired": nothing was recorded and nothing
+ * can be recorded under this key any more. "committed": a receipt exists; replay the same request.
+ * null: not proven (network, permission, malformed answer) — keep the attempt.
+ */
+export async function retireMoneyAttempt(transport: typeof fetch, request: MoneyRequest, key: string): Promise<"retired" | "committed" | null> {
+  try {
+    // The retirement is bound to the patient of the saved request itself, never to the current screen.
+    const patientId = object(JSON.parse(request.body))?.patientId;
+    if (!id(patientId)) return null;
+    const response = await transport("/api/payments/attempts/retire", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idempotencyKey: key, patientId }) });
+    if (!response.ok || response.redirected) return null;
+    const state = object(await response.json())?.state;
+    return state === "retired" || state === "committed" ? state : null;
+  } catch { return null; }
+}
+
 /** Headers for a send; the review never enters the body, so the request/fingerprint stays identical. */
 export function moneyHeaders(key: string, review?: SimilarCollectionReview): Record<string, string> {
   return { "Content-Type": "application/json", "Idempotency-Key": key,
@@ -107,6 +128,17 @@ export class MoneyAttemptStore {
     this.publish(scope, { request: current.request, key: current.key, phase: "uncertain" });
     return "kept";
   }
+  /** Prove an uncertain collection's outcome: retire it only on server proof, replay it if it committed. */
+  async reconcile(scope: string): Promise<Result | { kind: "retired" }> {
+    const current = this.get(scope);
+    if (!current || current.phase !== "uncertain" || !RECONCILABLE_OPERATIONS.has(current.request.operation)) return { kind: "busy" };
+    this.publish(scope, { ...current, phase: "sending" }); // no concurrent resend while proving
+    const state = await retireMoneyAttempt(this.transport, current.request, current.key);
+    if (state === "retired") { this.publish(scope, null); return { kind: "retired" }; }
+    this.publish(scope, { ...current, phase: "uncertain" });
+    if (state === "committed") return this.run(scope);
+    return { kind: "uncertain", message: MONEY_UNCERTAIN };
+  }
   async run(scope: string, request?: MoneyRequest, review?: SimilarCollectionReview): Promise<Result> {
     const previous = this.get(scope);
     if (previous?.phase === "sending") return { kind: "busy" };
@@ -145,6 +177,13 @@ export class MoneyAttemptStore {
       // These routes return their explicit pre-commit refusals as 4xx. Once a
       // reply was lost, even a later permission/shift/target refusal cannot clear it.
       if (!previous && [400, 404, 422].includes(response.status) && typeof message === "string" && message.trim()) {
+        this.publish(scope, null);
+        return { kind: "refused", message };
+      }
+      // An ordinary 409 refusal of a first send is retired only on server proof that the key
+      // never committed and never can; otherwise it stays uncertain below.
+      if (!previous && !response.redirected && response.status === 409 && RECONCILABLE_OPERATIONS.has(attempt.request.operation)
+        && typeof message === "string" && message.trim() && await retireMoneyAttempt(this.transport, attempt.request, attempt.key) === "retired") {
         this.publish(scope, null);
         return { kind: "refused", message };
       }

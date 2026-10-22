@@ -358,3 +358,30 @@ it("a full backup with a recorded amendment, a stale rejection and a split colle
   expect((await isolated.sqlTarget.query("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgenabled<>'O'")).rows).toEqual([]);
  } finally { client.release(); await isolated.close(); }
 });
+
+it("similarity advisory evaluates a split collection as one operation across all its allocations and refunds", async () => {
+ const {findSimilarCollectionsOn} = await import("../../lib/similar-collection");
+ const f = await fixture("YER", 180000);
+ const saved = await api.saveAgreementAmendment(f.planId, await command(f), session);
+ const split = await approve.collectApprovedAgreement({planId: f.planId, amountMinor: 620000, currency: "YER", method: "cash", note: null, idempotencyKey: `similar-split-${f.planId}`, session});
+ if (!("paymentIds" in split) || !split.paymentIds) throw Error("Missing split identity");
+ const [original, delta] = split.paymentIds;
+ const find = (amount: number, currency: "YER" | "SAR" | "USD" = "YER") => findSimilarCollectionsOn(db.getPool(), f.patientId, amount, currency);
+ const refund = async (paymentId: number, amountMinor: number) => expect((await db.recordPayment({patientId: f.patientId, invoiceId: null, planId: null, openingCurrency: null,
+  kind: "refund", amountMinor, currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash", note: "Synthetic similarity refund", createdBy: session.username,
+  reversalOfId: paymentId, idempotencyKey: `similar-refund-${paymentId}-${amountMinor}-${++serial}`})).reason).toBeFalsy();
+ const operation = (refunded: [number, number]) => [expect.objectContaining({id: original, amountMinor: 620000, currency: "YER",
+  allocations: [{id: original, receiptNumber: expect.any(String), invoiceId: f.originalInvoiceId, amountMinor: 320000, refundedMinor: refunded[0]},
+   {id: delta, receiptNumber: expect.any(String), invoiceId: saved.deltaInvoiceId, amountMinor: 300000, refundedMinor: refunded[1]}]})];
+ expect(await find(620000)).toEqual(operation([0, 0]));
+ // A member is not a separate tender: a new 320,000 or 300,000 collection is not "the same" as this operation.
+ expect(await find(320000)).toEqual([]);
+ expect(await find(300000)).toEqual([]);
+ expect(await find(620000, "SAR")).toEqual([]);
+ await refund(delta, 1000);
+ expect(await find(620000)).toEqual(operation([0, 1000]));
+ await refund(original, 320000);
+ expect(await find(620000)).toEqual(operation([320000, 1000]));
+ await refund(delta, 299000);
+ expect(await find(620000)).toEqual([]);
+});

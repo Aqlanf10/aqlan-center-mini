@@ -539,3 +539,7 @@ are not an unconditional wipe target. See [protocol and release limits](INVENTOR
 ### 0066_agreement_delta_amendments.sql
 
 Append-only agreement price-increase event and difference-only invoice lineage. A logical collection can allocate across the original source and difference invoices with an immutable group receipt. Existing invoices, receipts and historical records are not revised. Production rollout is blocked until the precise PG18, HTTP, chronology, statement, checkout and migration parity checks pass; neither this migration listing nor CI alone authorizes a production deploy.
+
+### 0068_collection_attempt_retirements.sql
+
+Durable proof for a collection attempt key. `POST /api/payments/attempts/retire` records a key only when no receipt (`payments.idempotency_key`) and no split collection group carries it; afterwards no receipt or group may use that key. The retirement insert and every keyed receipt/group insert take the same per-key transaction advisory lock, so a send still in flight is waited for and reported as `committed`. Validation only: no rows are generated, so a backup replay passes; the table is wiped with receipts by the factory reset. Reserved on #408 before use; `0067` belongs to the nonfinancial appointment index (#417). Neither this listing nor CI authorizes a production deploy.

@@ -1,3 +1,4 @@
+import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
 import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
@@ -91,6 +92,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ...result.payment, idempotencyKey:recovery.idempotencyKey }, { status: result.replayed ? 200 : 201 });
     } catch (error) {
       if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+      if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة بالمفتاح نفسه." }, { status: 500 });
     }
   }
@@ -238,6 +240,7 @@ export async function POST(request: Request) {
       }
     } catch (error) {
       if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+      if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
       return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
     }
@@ -368,6 +371,7 @@ export async function POST(request: Request) {
       ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) }, { status: replayed ? 200 : 201 });
   } catch (error) {
     if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+    if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة." }, { status: 500 });
   }

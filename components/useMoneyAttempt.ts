@@ -24,5 +24,7 @@ export function useMoneyAttempt(owner: string, visible = true, viewKey = owner, 
   };
   const durable=useDurableMoneyAttempt(owner,durableContext??null,visible,viewKey);
   return durableContext?durable:{ attempt, run, consume: (confirmed: NonNullable<typeof attempt>) => moneyAttempts.consume(scope, confirmed),
-    dismiss: async () => moneyAttempts.dismiss(scope), ready:true,error:null };
+    dismiss: async () => moneyAttempts.dismiss(scope),
+    reconcile: async () => { if (!session || lifetime.current !== token) return null; const result = await moneyAttempts.reconcile(scope); return token === lifetime.current ? result : null; },
+    ready:true,error:null };
 }

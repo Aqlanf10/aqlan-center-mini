@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
-    "tables": 129,
-    "columns": 1658,
-    "constraints": 1883,
-    "indexes": 403,
-    "triggers": 76
+    "tables": 130,
+    "columns": 1662,
+    "constraints": 1891,
+    "indexes": 405,
+    "triggers": 80
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -495,6 +495,12 @@
           "timing": "BEFORE",
           "events": [
             "TRUNCATE"
+          ]
+        },
+        "collection_key_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
           ]
         }
       }
@@ -2251,6 +2257,75 @@
         }
       },
       "triggers": {}
+    },
+    "collection_attempt_retirements": {
+      "columns": {
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "retired_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "retired_by": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "idempotency_key"
+      ],
+      "unique": [],
+      "checks": [
+        "collection_attempt_retirements_idempotency_key_check",
+        "collection_attempt_retirements_retired_by_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "collection_attempt_retirements_patient_idx": {
+          "columns": [
+            "patient_id"
+          ],
+          "unique": false
+        },
+        "collection_attempt_retirements_pkey": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "collection_attempt_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "collection_attempt_retirement_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "commission_case_overrides": {
       "columns": {
@@ -12615,6 +12690,12 @@
         }
       },
       "triggers": {
+        "collection_key_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
         "invoice_reclassification_follow_refund": {
           "timing": "AFTER",
           "events": [

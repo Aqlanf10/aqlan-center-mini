@@ -7,6 +7,7 @@ import { readAgreementAmendment, saveAgreementAmendment, readAgreementAmendmentA
 export const dynamic="force-dynamic";
 type C={params:Promise<{id:string}>};
 const id=async(ctx:C)=>Number((await ctx.params).id);
+const ADMIN_ONLY="يتطلب تعديل اتفاق العلاج جلسة مدير سارية.";
 const errorResponse=(e:unknown)=>{
  const bounded=bodyErrorResponse(e);if(bounded)return bounded;
  if(e instanceof DebtRepaymentError)return NextResponse.json({message:e.message,code:e.code},
@@ -21,6 +22,8 @@ export async function GET(_request:Request,ctx:C){
 export async function POST(request:Request,ctx:C){
  const session=await requireSession();
  if(!session)return NextResponse.json({message:"يجب تسجيل الدخول"},{status:401});
+ // Authority before body shape: a non-admin is refused with 403 whatever it sends.
+ if(session.role!=="admin")return NextResponse.json({message:ADMIN_ONLY,code:"unauthorized"},{status:403});
  try{
   const data=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);
   if(!data||typeof data!=="object"||Array.isArray(data))return NextResponse.json({message:"طلب غير صالح"},{status:400});
@@ -34,6 +37,7 @@ export async function POST(request:Request,ctx:C){
 export async function PUT(request:Request,ctx:C){
  const session=await requireSession();
  if(!session)return NextResponse.json({message:"يجب تسجيل الدخول"},{status:401});
+ if(session.role!=="admin")return NextResponse.json({message:ADMIN_ONLY,code:"unauthorized"},{status:403});
  try{
   const value=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);
   if(!value||typeof value!=="object"||Array.isArray(value))

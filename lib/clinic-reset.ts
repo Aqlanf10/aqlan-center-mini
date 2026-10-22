@@ -97,6 +97,8 @@ export const RESET_WIPE_TABLES = [
   "invoice_settlement_reclassifications",
   "payments",
   "invoice_correction_lines",
+  // (0068) Retired collection keys fence receipts that are wiped with them.
+  "collection_attempt_retirements",
   "invoice_correction_receipts",
   "invoice_corrections",
   "legacy_treatment_document_revisions",
