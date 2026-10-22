@@ -4479,6 +4479,25 @@ export async function transitionAppointment(
   try {
     await client.query("BEGIN");
 
+    const result = await transitionAppointmentInTransaction(client, id, to, who, admission);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Shared lifecycle writer; the caller owns the transaction and commits all related writes together. */
+async function transitionAppointmentInTransaction(
+  client: DbClient,
+  id: number,
+  to: AppointmentStatus,
+  who: TransitionActor,
+  admission: { pastBookingOnly?: boolean } = {},
+): Promise<TransitionResult> {
     /* القفل أوّلًا: `FOR UPDATE` يُسلسل المتنافسين على الصفّ نفسه، فالقراءة التالية
        تصف حالًا لا يتغيّر تحت أيدينا حتى نُنهي. وبه يُعرف الحال السابق بيقين —
        وهو ما يحتاجه السجلّ — لا بتخمينه من شرط التحديث. */
@@ -4487,13 +4506,11 @@ export async function transitionAppointment(
       [id],
     );
     if (!locked[0]) {
-      await client.query("ROLLBACK");
       return { ok: false, message: "الموعد غير موجود.", current: null };
     }
     const from = locked[0].status as AppointmentStatus;
 
     if (!canTransition(from, to)) {
-      await client.query("ROLLBACK");
       return { ok: false, message: transitionRejectionMessage(from, to), current: from };
     }
 
@@ -4518,11 +4535,9 @@ export async function transitionAppointment(
         [id, CLINIC_TIME_ZONE],
       );
       if (admission.pastBookingOnly && (from !== "booked" || !eligibility.past_date)) {
-        await client.query("ROLLBACK");
         return { ok: false, message: "هذا الإجراء لموعد محجوز مضى يومه فقط.", current: from };
       }
       if (to === "no_show" && (!eligibility.started || eligibility.arrival_evidence || eligibility.visit_evidence)) {
-        await client.query("ROLLBACK");
         return { ok: false, message: "لا يُسجّل الغياب قبل وقت الموعد أو بعد تسجيل حضور المريض أو وجود زيارة مرتبطة به.", current: from };
       }
     }
@@ -4540,7 +4555,6 @@ export async function transitionAppointment(
       [id, to, allowedSources(to), who.reason ?? null],
     );
     if (!rowCount) {
-      await client.query("ROLLBACK");
       return { ok: false, message: transitionRejectionMessage(from, to), current: from };
     }
 
@@ -4564,18 +4578,11 @@ export async function transitionAppointment(
         referralId: linked[0]?.referral_id ?? null, visitId: linked[0]?.visit_id ?? null, who,
       });
     }
-    await client.query("COMMIT");
 
-    const { rows: fresh } = await getPool().query<AppointmentRow>(
+    const { rows: fresh } = await client.query<AppointmentRow>(
       `${APPOINTMENT_SELECT} WHERE a.id = $1`, [id],
     );
     return { ok: true, appointment: toAppointment(fresh[0]), from };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
 }
 
 export interface AppointmentStatusEntry {
@@ -21162,23 +21169,61 @@ class PlannedVisitRejected extends Error {
 export async function startVisitFromPlannedVisit(input: {
   plannedVisitId: number;
   actor: string;
-}): Promise<Visit | null | { alreadyActive: true; visitId: number }> {
+  actorRole?: string;
+}): Promise<Visit | null | { alreadyActive: true; visitId: number } | { appointmentConflict: true }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
 
+    // Appointment first, matching arrival/cancellation. Never acquire it while holding the plan.
+    const { rows: appointments } = await client.query<{ id: number; status: AppointmentStatus; patient_id: number; referral_id: number | null }>(
+      `SELECT a.id, a.status, a.patient_id, a.referral_id FROM appointments a
+        WHERE a.planned_visit_id = $1 OR a.id = (SELECT appointment_id FROM planned_visits WHERE id = $1)
+        ORDER BY a.id FOR UPDATE`, [input.plannedVisitId]);
+
     const { rows: plannedRows } = await client.query<{
       id: number; patient_id: number; full_name: string; phone: string | null;
-      title: string; doctor_id: number | null; status: string; visit_id: number | null;
+      title: string; doctor_id: number | null; status: string; visit_id: number | null; appointment_id: number | null;
     }>(
-      `SELECT v.id, v.patient_id, p.full_name, p.phone, v.title, v.doctor_id, v.status, v.visit_id
+      `SELECT v.id, v.patient_id, p.full_name, p.phone, v.title, v.doctor_id, v.status, v.visit_id, v.appointment_id
          FROM planned_visits v JOIN patients p ON p.id = v.patient_id
         WHERE v.id = $1 FOR UPDATE OF v`,
       [input.plannedVisitId],
     );
     const planned = plannedRows[0];
     if (!planned) { await client.query("ROLLBACK"); return null; }
+
+    // Recheck without taking new appointment locks: a concurrent scheduling/retarget
+    // operation may have committed while we waited for the plan. Retry via the API.
+    const { rows: currentLinks } = await client.query<{ id: number }>(
+      `SELECT id FROM appointments WHERE planned_visit_id = $1 OR id = $2 ORDER BY id`,
+      [input.plannedVisitId, planned.appointment_id]);
+    const appointment = appointments[0];
+    if (appointments.length > 1 || currentLinks.length !== appointments.length
+      || currentLinks.some((row, index) => row.id !== appointments[index]?.id)
+      || (appointment && (appointment.patient_id !== planned.patient_id
+        || !["booked", "arrived"].includes(appointment.status)))) {
+      await client.query("ROLLBACK");
+      return { appointmentConflict: true };
+    }
+    if (appointment) {
+      const { rows: linkedVisits } = await client.query<{
+        id: number; status: string; signed_at: Date | null; finished_at: Date | null;
+      }>(
+        `SELECT id, status, signed_at, finished_at FROM visits
+          WHERE appointment_id = $1 OR planned_visit_id = $2 OR id = $3 ORDER BY id`,
+        [appointment.id, input.plannedVisitId, planned.visit_id]);
+      if (linkedVisits.some(visit => visit.signed_at || visit.finished_at || visit.status === "done")) {
+        await client.query("ROLLBACK");
+        return { appointmentConflict: true };
+      }
+      const active = linkedVisits.find(visit => ["waiting", "called", "in_chair"].includes(visit.status));
+      if (active) {
+        await client.query("ROLLBACK");
+        return { alreadyActive: true, visitId: active.id };
+      }
+    }
 
     // زيارةٌ قائمة لهذه الزيارة المخطَّطة: لا ثانية — المريض على الكرسي مرةً واحدة.
     if (planned.visit_id) {
@@ -21197,10 +21242,10 @@ export async function startVisitFromPlannedVisit(input: {
     }
 
     const { rows: created } = await client.query<VisitRow>(
-      `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id, planned_visit_id)
-       VALUES ($1, $2, $3, $4, $5::int, $6) RETURNING *`,
+      `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id, planned_visit_id, appointment_id)
+       VALUES ($1, $2, $3, $4, $5::int, $6, $7) RETURNING *`,
       [planned.full_name, planned.phone, `مخطَّط: ${planned.title}`,
-       planned.patient_id, planned.doctor_id, input.plannedVisitId],
+       planned.patient_id, planned.doctor_id, input.plannedVisitId, appointment?.id ?? null],
     );
 
     await client.query(
@@ -21208,6 +21253,21 @@ export async function startVisitFromPlannedVisit(input: {
       [input.plannedVisitId, created[0].id],
     );
 
+    if (appointment?.status === "booked") {
+      const arrival = await transitionAppointmentInTransaction(client, appointment.id, "arrived", {
+        actor: input.actor, actorRole: input.actorRole,
+      });
+      if (!arrival.ok) {
+        await client.query("ROLLBACK");
+        return { appointmentConflict: true };
+      }
+    } else if (appointment) {
+      // An earlier arrival may have had no visit. Attach its case without repeating the transition.
+      await referralOnAppointmentArrived(client, {
+        referralId: appointment.referral_id, visitId: created[0].id,
+        who: { actor: input.actor, actorRole: input.actorRole },
+      });
+    }
     await client.query("COMMIT");
     return toVisit(created[0]);
   } catch (error) {
