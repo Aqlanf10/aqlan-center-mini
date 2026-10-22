@@ -17,6 +17,9 @@ vi.mock("@/lib/session", () => ({ requireSession: async () => auth.session }));
 
 const db = await import("../../lib/db");
 const { POST } = await import("../../app/api/payments/route");
+const { answeringSimilarReview } = await import("./_similar-review");
+// FX/audit replay is this suite's subject; equal amounts for one synthetic patient answer the advisory review as the operator would.
+const reviewedPOST = (request: Request) => answeringSimilarReview(POST, request);
 const { POST: correctPOST } = await import("../../app/api/payments/[id]/correct/route");
 const actor = "ci-settings-fx";
 const rawRate = 140.1234567;
@@ -144,7 +147,7 @@ async function insertHistorical(
 }
 
 async function createHttp(f: Fixture, overrides: Record<string, unknown> = {}) {
-  const response = await POST(request(f, overrides));
+  const response = await reviewedPOST(request(f, overrides));
   expect(response.status).toBe(201);
   return response.json();
 }
@@ -176,7 +179,7 @@ async function snapshot() {
 
 async function expectHttpReplay(f: Fixture, id: number, overrides: Record<string, unknown> = {}) {
   const before = await snapshot();
-  const response = await POST(request(f, overrides));
+  const response = await reviewedPOST(request(f, overrides));
   expect(response.status).toBe(200);
   expect((await response.json()).id).toBe(id);
   const after = await snapshot();
@@ -193,7 +196,7 @@ async function expectHttpReplay(f: Fixture, id: number, overrides: Record<string
 
 async function expectHttpRefusal(f: Fixture, overrides: Record<string, unknown> = {}, status = 409) {
   const before = await snapshot();
-  const response = await POST(request(f, overrides));
+  const response = await reviewedPOST(request(f, overrides));
   expect(response.status).toBe(status);
   expect(await snapshot()).toEqual(before);
   return response.json();

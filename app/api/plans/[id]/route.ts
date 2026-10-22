@@ -1,3 +1,5 @@
+import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
+import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
@@ -40,7 +42,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      السند الأول لا يُنشئ ثانيًا. */
   const idempotencyKeyRaw = request.headers.get("idempotency-key");
   const idempotencyKey = idempotencyKeyRaw && idempotencyKeyRaw.trim() ? idempotencyKeyRaw.trim() : null;
-  if (idempotencyKey && !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+  if (!idempotencyKey) {
+    return NextResponse.json(
+      { reason: "idempotency_key_required", message: "مفتاح الإعادة (Idempotency-Key) مطلوب للتحصيل. أعد إرسال الطلب المحفوظ بالمفتاح نفسه." },
+      { status: 400 },
+    );
+  }
+  if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
     return NextResponse.json(
       { message: "مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -" },
       { status: 400 },
@@ -65,10 +73,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const method = source.method === "transfer" ? "transfer" : "cash";
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
+  const similarityReview = parseSimilarCollectionReviewHeader(request.headers.get(SIMILAR_COLLECTION_REVIEW_HEADER));
+  if (!similarityReview) return NextResponse.json({ message: "مراجعة السندات المشابهة المرسلة غير صالحة. أعد فتح نافذة التحصيل." }, { status: 400 });
 
   try {
     if (plan.approvedAgreement) {
-      const result = await collectApprovedAgreement({planId,amountMinor,currency,method,note,idempotencyKey:idempotencyKey??"",session});
+      const result = await collectApprovedAgreement({planId,amountMinor,currency,method,note,idempotencyKey:idempotencyKey??"",session},{similarityReview});
       return NextResponse.json({...result,invoiceId:plan.approvedAgreement.invoiceId},{status:result.replayed?200:201});
     }
     const settings = await getSettings();
@@ -88,7 +98,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const result = await recordPlanInstallment({
       planId, patientId: plan.patientId, installmentNumber, planTitle: plan.title,
       amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
-      createdBy: session.username, actorRole: session.role, idempotencyKey,
+      createdBy: session.username, actorRole: session.role, idempotencyKey, similarityReview,
     });
     if ("reason" in result && (result.reason === "issued_installment_recovery_required" || result.reason === "installment_recovery_review_required")) {
       return NextResponse.json({
@@ -126,6 +136,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // إعادةٌ لسندٍ سُجّل سابقًا: 200 لا 201 — كما في /api/payments.
     return NextResponse.json(result, { status: result.replayed ? 200 : 201 });
   } catch (error) {
+    if(error instanceof SimilarCollectionReviewRequired)return NextResponse.json(similarCollectionRefusal(error),{status:409});
+    if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
   }

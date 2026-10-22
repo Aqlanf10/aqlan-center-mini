@@ -1,4 +1,7 @@
+import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
+import { AGREEMENT_DELTA_SQL } from "./agreement-delta-schema";
+import { COLLECTION_ATTEMPT_RETIREMENT_SQL } from "./collection-attempt-schema";
 import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
 import { provePaymentCalculation, proveCorrectionAcknowledgment } from "./payment-acknowledgment-db";
 import { JournalReadIntegrityError } from "./journal-read-integrity";
@@ -95,7 +98,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { PURCHASE_RESET_FENCE, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -2088,6 +2091,8 @@ export function ensureSchema(): Promise<void> {
     await ensureInvoiceCurrencySchema(getPool());
     await applyRuntimeMigrationFiles(getPool(), [{version:"0064",name:"approved_agreement_principal",filename:"0064_approved_agreement_principal.sql",sql:APPROVED_AGREEMENT_SQL,checksum:checksumOf(APPROVED_AGREEMENT_SQL)}]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0065", name: "inventory_purchase_receipts", filename: "0065_inventory_purchase_receipts.sql", sql: INVENTORY_PURCHASE_RECEIPTS_SQL, checksum: checksumOf(INVENTORY_PURCHASE_RECEIPTS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0066", name: "agreement_delta_amendments", filename: "0066_agreement_delta_amendments.sql", sql: AGREEMENT_DELTA_SQL, checksum: checksumOf(AGREEMENT_DELTA_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0068", name: "collection_attempt_retirements", filename: "0068_collection_attempt_retirements.sql", sql: COLLECTION_ATTEMPT_RETIREMENT_SQL, checksum: checksumOf(COLLECTION_ATTEMPT_RETIREMENT_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -5220,9 +5225,11 @@ export async function mergeDuplicatePatient(
     }
 
     const { rows: [footprint] } = await client.query<{
-      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number;
+      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number; collection_attempts: number;
     }>(
       `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
+              /* (0068) A retired collection key is permanent proof bound to this patient: it never moves. */
+              (SELECT COUNT(*)::int FROM collection_attempt_retirements WHERE patient_id = $1) AS collection_attempts,
               (SELECT COUNT(*)::int FROM inventory_movements
                 WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
               (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
@@ -5232,12 +5239,13 @@ export async function mergeDuplicatePatient(
       [sourceId],
     );
     if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0
-      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0) {
+      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0 || footprint.collection_attempts > 0) {
       await client.query("ROLLBACK");
       return {
         ok: false, reason: "source_has_financial_history",
         counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
-          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments },
+          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments,
+          ...(footprint.collection_attempts > 0 ? { collectionAttempts: footprint.collection_attempts } : {}) },
       };
     }
 
@@ -5590,7 +5598,9 @@ export async function deletePatientCascade(
       financial_links: string;
     }>(
       `SELECT
-         (SELECT COUNT(*) FROM payments WHERE patient_id = $1) AS payments,
+         /* (0068) Retired collection keys are permanent proof for this patient, like receipts. */
+         (SELECT COUNT(*) FROM payments WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM collection_attempt_retirements WHERE patient_id = $1) AS payments,
          (SELECT COUNT(*) FROM invoices WHERE patient_id = $1) AS invoices,
          /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
          (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
@@ -9521,6 +9531,8 @@ export async function recordPayment(input: {
    * مرفوض (refund_requires_origin). الرد الجزئي مسموح بما تبقى من الأصل.
    */
   reversalOfId?: number | null;
+  /** Human collection entry points only (HTTP). Undefined = no advisory review applies. */
+  similarityReview?: SimilarCollectionReview;
 }): Promise<{
   payment: Payment | null;
   reason:
@@ -9566,7 +9578,8 @@ export async function recordPayment(input: {
      مطالبات متزامنة على PostgreSQL حقيقي. */
   const outcome = await runPaymentTransaction(
     { ...input, planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
-    { idempotencyKey, reversalOfId, receiptAudit: { actorRole: input.actorRole ?? null } },
+    { idempotencyKey, reversalOfId, receiptAudit: { actorRole: input.actorRole ?? null },
+      ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}) },
   );
 
   /* الاتصال محرَّر الآن — الترطيب (قراءة السند كاملًا) خارج الحجز. */
@@ -9600,7 +9613,8 @@ export async function recordSettingsOwnedPayment(
     { ...input, kind: "payment", exchangeRate: observedExchangeRate,
       planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
     { idempotencyKey, reversalOfId: null, settingsOwnedFx: true,
-      receiptAudit: { actorRole: input.actorRole ?? null } },
+      receiptAudit: { actorRole: input.actorRole ?? null },
+      ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}) },
   );
   if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
   return { payment: await getPayment(outcome.paymentId), reason: null,
@@ -9967,6 +9981,8 @@ type PaymentTransactionPrepared = {
   requestHashOverride?: string;
   /** Only ordinary receipts request a generic atomic event; purpose callers own theirs. */
   receiptAudit?: { actorRole: string | null };
+  /** Human collection entry points only: advisory similar-receipt review (lib/similar-collection). */
+  similarityReview?: SimilarCollectionReview;
 };
 type SettingsPaymentOutcome = PaymentOutcome | { kind: "reason"; reason: "exchange_rate_required" };
 // Existing numeric-rate callers retain their outcome contract and cannot enable
@@ -10359,6 +10375,14 @@ async function runPaymentTransaction(
       }
     }
 
+    // Advisory review: the last check before writing — under the shift lock, after exact-key
+    // replay and every refusal above, so a confirmed review is never followed by a refusal.
+    // Without an open shift nothing can be written (no_shift below), so no review is asked.
+    if (input.kind === "payment" && lockedShiftId !== null) {
+      await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+        currency: input.currency, review: prepared.similarityReview });
+    }
+
     /* الإدراج محصور في الوردية المقفولة أعلاه — لا اكتشاف ولا قفل لوردية
        لاحقة بعد أقفال أهداف التسوية. المعرّف الفارغ لا يُنتج صفًا، فيبقى
        فحص مفتاح الإعادة الثاني أدناه قبل رفض no_shift كما هو. */
@@ -10529,6 +10553,7 @@ async function recoveryReplay(
 
 async function runRecoveryTransaction(
   client: DbClient, input: RecoveryWriteInput, key: string, requestHash: string,
+  similarityReview?: SimilarCollectionReview,
 ): Promise<RecoveryOutcome> {
   const previous = await recoveryReplay(client, input, key, requestHash);
   if (previous) return previous;
@@ -10609,7 +10634,9 @@ async function runRecoveryTransaction(
     patientId: input.patientId, invoiceId: target.invoiceId, planId: target.planId, openingCurrency: null,
     kind: "payment", amountMinor: input.amountMinor, currency: input.currency, baseCurrency: CLINIC_BASE_CURRENCY,
     exchangeRate, method: input.method, note: input.note, createdBy: input.createdBy,
-  }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: true, requestHashOverride: requestHash }, client);
+  }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: true, requestHashOverride: requestHash,
+    // Advisory review runs inside the shared payment writer, as its last check before the insert.
+    ...(similarityReview ? { similarityReview } : {}) }, client);
   if (outcome.kind === "reason") return outcome;
   if (outcome.kind === "replay") return await recoveryReplay(client, input, key, requestHash)
     ?? { kind: "reason", reason: "recovery_review_required" };
@@ -10641,7 +10668,8 @@ async function runRecoveryTransaction(
 /** Explicit, append-only recovery on an already issued invoice. Ordinary receipts
  * retain their existing target, fingerprint, overpayment and manual-status semantics.
  */
-export async function recordReversedInstallmentRecovery(input: RecoveryWriteInput & { idempotencyKey: string }): Promise<{
+export async function recordReversedInstallmentRecovery(input: RecoveryWriteInput & { idempotencyKey: string },
+  options: { similarityReview?: SimilarCollectionReview } = {}): Promise<{
   payment: Payment | null; reason: RecoveryPaymentRefusal | null; replayed?: boolean;
 }> {
   if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0 || !isCurrency(input.currency)
@@ -10655,7 +10683,7 @@ export async function recordReversedInstallmentRecovery(input: RecoveryWriteInpu
   let outcome: RecoveryOutcome;
   try {
     await client.query("BEGIN");
-    outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash);
+    outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash, options.similarityReview);
     await client.query(outcome.kind === "reason" ? "ROLLBACK" : "COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -20424,6 +20452,8 @@ export async function recordPlanInstallment(input: {
    * idempotency_conflict. بلا مفتاح يبقى السلوك كما كان.
    */
   idempotencyKey?: string | null;
+  /** Human collection entry points only (HTTP). Undefined = no advisory review applies. */
+  similarityReview?: SimilarCollectionReview;
 }): Promise<
   | { invoiceId: number; paymentId: number; replayed?: boolean }
   | { reason: "no_shift" | "cross_currency_not_supported" | "idempotency_conflict" | "inactive_plan"
@@ -20609,6 +20639,9 @@ async function runPlanInstallmentTransaction(
   } else {
     return { reason: "cross_currency_not_supported" };
   }
+  // Advisory review: last check before writing (shift held, replay and all refusals done); a throw rolls the caller back.
+  await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+    currency: input.currency, review: input.similarityReview });
 
   const description = `${input.planTitle} — قسط ${input.installmentNumber}`;
   const { rows: invoices } = await client.query<{ id: number }>(
@@ -26787,6 +26820,16 @@ export async function resetClinicData<F>(
       await client.query("LOCK TABLE inventory_purchase_receipts IN EXCLUSIVE MODE");
       const { rows: [purchaseHistory] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM inventory_purchase_receipts) AS exists");
       if (purchaseHistory.exists) throw new ProtectedPurchaseHistoryError();
+      // Agreement amendment history (0066) is protected the same way; EXCLUSIVE blocks new rows.
+      await client.query(`LOCK TABLE ${AGREEMENT_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [agreementHistory] } = await client.query<{ exists: boolean }>(
+        `SELECT ${AGREEMENT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
+      if (agreementHistory.exists) throw new ProtectedAgreementHistoryError();
+      // Retired collection keys (0068) are permanent proof; EXCLUSIVE blocks a concurrent retirement.
+      await client.query(`LOCK TABLE ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [attemptHistory] } = await client.query<{ exists: boolean }>(
+        `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
+      if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -26804,7 +26847,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }

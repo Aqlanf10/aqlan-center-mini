@@ -535,3 +535,11 @@ writes. Demo reset refuses before backup when any committed or rejected outcome
 exists. Only a genuinely empty table may join the existing reset truncation under
 the reviewed serialization/table locks and an empty-table trigger recheck; receipts
 are not an unconditional wipe target. See [protocol and release limits](INVENTORY_PURCHASE_RETRY.md).
+
+### 0066_agreement_delta_amendments.sql
+
+Append-only agreement price-increase event and difference-only invoice lineage. A logical collection can allocate across the original source and difference invoices with an immutable group receipt. Existing invoices, receipts and historical records are not revised. Production rollout is blocked until the precise PG18, HTTP, chronology, statement, checkout and migration parity checks pass; neither this migration listing nor CI alone authorizes a production deploy.
+
+### 0068_collection_attempt_retirements.sql
+
+Durable proof for a collection attempt key. `POST /api/payments/attempts/retire` records a key only when no receipt (`payments.idempotency_key`) and no split collection group carries it; afterwards no receipt or group may use that key. The retirement insert and every keyed receipt/group insert take the same per-key transaction advisory lock, so a send still in flight is waited for and reported as `committed`. Each row binds the proof to the attempt's patient, operation (`payment`/`installment`), SHA-256 of the exact saved request body and the user who sent it; only that user's live money session may retire it, and a repeat must present the identical attempt. Rows are permanent history: no update or delete, no patient cascade (patient delete and merge treat them as financial footprint), and TRUNCATE only of an empty table. A factory reset refuses before backup or deletion while any row exists (`protected-collection-attempt-history`), because a reset restarts identities while sessions survive. Validation only: no rows are generated, so a backup replay passes. Reserved on #408 before use; `0067` belongs to the nonfinancial appointment index (#417). Neither this listing nor CI authorizes a production deploy.

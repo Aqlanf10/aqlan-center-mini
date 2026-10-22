@@ -55,7 +55,7 @@ describe("POST /api/payments with a plan target", () => {
   it("a per-procedure plan without installments stays a plain plan payment (unchanged)", async () => {
     const planId = await planFor("per_procedure", false);
     const response = await authedMutation("/api/payments", h.sessions.reception, "POST",
-      JSON.stringify({ patientId, planId, amount: "20000", currency: "YER", method: "cash" }));
+      JSON.stringify({ patientId, planId, amount: "20000", currency: "YER", method: "cash" }), { "Idempotency-Key": `plain-plan-${planId}` });
     expect(response.status).toBe(201);
     const payment = await response.json() as { invoiceId: number | null; planId: number | null };
     expect(payment).toMatchObject({ planId, invoiceId: null });
