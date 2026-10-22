@@ -186,3 +186,10 @@ it("masked schedule existence is a real boolean, including a verified empty sche
   expect(withoutPlanPayments(plan).hasInstallments).toBe(true);
   expect(withoutPlanPayments({ ...plan, installments: [] }).hasInstallments).toBe(false);
 });
+
+it("FIN-INT-4: masked approval existence is a real boolean, never the approved amounts", () => {
+  expect(withoutPlanPayments(plan).agreementApproved).toBe(false);
+  const approved = withoutPlanPayments({ ...plan, agreementApproved: true, approvedAgreement: { remainingMinor: 765432 } as never });
+  expect(approved.agreementApproved).toBe(true);
+  expect(JSON.stringify(approved)).not.toMatch(/765432|approvedAgreement/);
+});
