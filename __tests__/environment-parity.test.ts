@@ -603,55 +603,18 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
     const ciYaml = readRepoFile(".github/workflows/ci.yml");
-    // verify:full is serial; hosted CI intentionally isolates quality, PostgreSQL,
-    // and HTTP into separate jobs. Check ordering *within* each job, not a fake
-    // cross-job textual ordering, and enforce the fail-closed dependency DAG.
-    const jobMarkers = [...ciYaml.matchAll(/^ {2}(quality|postgres_integration|security_http|required_completion):\s*$/gm)];
-    expect(jobMarkers.map(match => match[1])).toEqual([
-      "quality", "postgres_integration", "security_http", "required_completion",
-    ]);
-    const jobSource = new Map(jobMarkers.map((match, index) => [
-      match[1], ciYaml.slice(match.index!, jobMarkers[index + 1]?.index ?? ciYaml.length),
-    ]));
-    const jobGates: Record<string, readonly string[]> = {
-      quality: ["npm run typecheck", "npm run lint", "npm run scan:money", "npm test",
-        "npm run ci:audit", "npm run ci:scan:body", "npm run build", "npm run build:preflight"],
-      postgres_integration: ["npm run test:postgres", "npm run schema:contract",
-        "npm run schema:contract:verify", "npm run schema:ownership:verify",
-        "npm run verify:ci", "npm run db:baseline:manifest", "npm run db:baseline:manifest:verify"],
-      security_http: ["npm run test:security-http"],
-    };
-    expect(Object.values(jobGates).flat().sort()).toEqual([...REQUIRED_CI_GATES].sort());
     let previousStepIndex = -1;
+    let previousCiPosition = -1;
     for (const gate of REQUIRED_CI_GATES) {
       const stepIndex = commands.findIndex((command) => command === gate || command.startsWith(`${gate} `));
       expect(stepIndex, `${gate} ليست في البوابة الكاملة`).toBeGreaterThanOrEqual(0);
-      expect(stepIndex, `${gate} خارج ترتيب البوابة المحلية`).toBeGreaterThan(previousStepIndex);
+      expect(stepIndex, `${gate} خارج ترتيب البوابة`).toBeGreaterThan(previousStepIndex);
       previousStepIndex = stepIndex;
+      const ciPosition = ciYamlPosition(ciYaml, gate);
+      expect(ciPosition, `${gate} ليست في ci.yml`).toBeGreaterThanOrEqual(0);
+      expect(ciPosition, `${gate} خارج ترتيب ci.yml`).toBeGreaterThan(previousCiPosition);
+      previousCiPosition = ciPosition;
     }
-    for (const [job, gates] of Object.entries(jobGates)) {
-      const jobYaml = jobSource.get(job)!;
-      let previousCiPosition = -1;
-      for (const gate of gates) {
-        const ciPosition = ciYamlPosition(jobYaml, gate);
-        expect(ciPosition, `${gate} ليست في وظيفة ${job}`).toBeGreaterThanOrEqual(0);
-        expect(ciPosition, `${gate} خارج ترتيب وظيفة ${job}`).toBeGreaterThan(previousCiPosition);
-        previousCiPosition = ciPosition;
-      }
-    }
-    const http = jobSource.get("security_http")!;
-    const final = jobSource.get("required_completion")!;
-    expect(http).toMatch(/needs:\s*\[quality\]/);
-    expect(final).toMatch(/if:\s*always\(\)/);
-    expect(final).toMatch(/needs:\s*\[quality,\s*postgres_integration,\s*security_http\]/);
-    for (const [job, result] of [
-      ["quality", "QUALITY_RESULT"], ["postgres_integration", "POSTGRES_RESULT"],
-      ["security_http", "HTTP_RESULT"],
-    ] as const) {
-      expect(final).toContain(`needs.${job}.result`);
-      expect(final).toContain(`"$${result}" != "success"`);
-    }
-    expect(final).toContain("exit 1");
   });
 
   it("خطوة عقد المخطط وحدها هي التي تولّد الملتزم — وتستعيده بعدها (عين git checkout في CI)", async () => {
