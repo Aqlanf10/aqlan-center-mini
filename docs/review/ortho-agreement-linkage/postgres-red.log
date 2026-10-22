@@ -1,0 +1,55 @@
+
+ RUN  v4.1.12 <repo>
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Ubuntu 18.6-1.pgdg24.04+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-approved-agreement-funding.test.ts (4 tests | 2 failed) 1154ms
+     × includes the adjustment of a case on an approved agreement without a schedule; signing adds no invoice or dues 121ms
+     × linking afterwards reports the approved agreement as funding 93ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-approved-agreement-funding.test.ts > FIN-INT-4 approved agreement funds the orthodontic case > includes the adjustment of a case on an approved agreement without a schedule; signing adds no invoice or dues
+AssertionError: expected 'OUTSIDE_CONTRACT' to be 'INCLUDED' // Object.is equality
+
+Expected: "INCLUDED"
+Received: "OUTSIDE_CONTRACT"
+
+ ❯ __tests__/postgres/ortho-approved-agreement-funding.test.ts:87:82
+     85|     const visit = await db.addVisit({ patientName: name, patientPhone:…
+     86|     await adjust(opened.id);
+     87|     expect((await db.getClinicalVisit(visit.id))?.ortho?.adjustmentBil…
+       |                                                                                  ^
+     88|     const signed = await db.signClinicalVisit({ visitId: visit.id, bas…
+     89|     expect(signed).toMatchObject({ reason: null, invoiceId: null, dues…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/postgres/ortho-approved-agreement-funding.test.ts > FIN-INT-4 approved agreement funds the orthodontic case > linking afterwards reports the approved agreement as funding
+AssertionError: expected { ok: true, changed: true, …(1) } to deeply equal { ok: true, changed: true, …(1) }
+
+- Expected
++ Received
+
+  {
+    "changed": true,
+-   "funded": true,
++   "funded": false,
+    "ok": true,
+  }
+
+ ❯ __tests__/postgres/ortho-approved-agreement-funding.test.ts:103:8
+    101|     expect((await db.getClinicalVisit(visit.id))?.ortho?.adjustmentBil…
+    102|     expect(await db.linkOrthoCasePlan({ caseId: opened.id, planId, act…
+    103|       .toEqual({ ok: true, changed: true, funded: true });
+       |        ^
+    104|     expect((await db.getClinicalVisit(visit.id))?.ortho?.adjustmentBil…
+    105|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  05:43:08
+   Duration  5.37s (transform 2.70s, setup 0ms, import 3.31s, tests 1.15s, environment 0ms)
+
