@@ -134,7 +134,7 @@ export function sqlValueForColumn(value: unknown, dataType: string | undefined):
 /**
  * Preserve PostgreSQL calendar dates and timestamp precision before the driver
  * can create a JS Date. DATE is decoded at process-local midnight, so converting
- * that Date to UTC can move the calendar day (for example in Asia/Aden).
+ * that Date to UTC can move the calendar day in positive-offset timezones.
  * PostgreSQL's JSON datetime encoder emits ISO text independently of DateStyle,
  * retaining microseconds, timezone offsets and infinity. Extracting its scalar
  * text also preserves SQL NULL. Only backup SELECTs use this projection; normal
