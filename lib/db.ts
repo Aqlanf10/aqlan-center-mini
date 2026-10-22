@@ -16994,13 +16994,16 @@ async function visitSuggestionsFor(
  */
 /**
  * (P1-B) حالة التقويم «ممولة باتفاق» حين تربطها خطةٌ لنفس المريض، غير ملغاة، لها أقساط.
- * (INV-LINK) أو حين يكون بند التقويم في خطتها (أو في الحالة التخصصية المجسورة إليها) مفوترًا مسبقًا بفاتورةٍ حيّة:
- * الباقة مدفوعة بفاتورتها، فالشدّات مشمولة لا «خارج العقد».
+ * (FIN-INT-4) أو اعتمادٌ ماليٌّ صريح لكامل أصل الخطة: الفاتورة أو الاتفاق المعتمد هو الأصل،
+ * والأقساط جدول تحصيل فقط — فلا تصير الشدّة «خارج العقد» لغياب الجدول. هو الشرط نفسه في
+ * PLAN_FUNDED_BY_AGREEMENT_SQL. مرجع فاتورة بند وحده لا يموّل الشدّات.
  * الربط بخطة مريضٍ آخر مرفوضٌ عند الكتابة، والشرط هنا يكرّره قراءةً فلا يموّلها صفٌّ قديم.
  */
 export const ORTHO_CASE_FUNDED_SQL =
-  `EXISTS (SELECT 1 FROM treatment_plans fp JOIN plan_installments fpi ON fpi.plan_id = fp.id
-    WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled')`;
+  `EXISTS (SELECT 1 FROM treatment_plans fp
+    WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled'
+      AND (EXISTS (SELECT 1 FROM plan_installments fpi WHERE fpi.plan_id = fp.id)
+        OR EXISTS (SELECT 1 FROM approved_agreement_principals fap WHERE fap.plan_id = fp.id AND fap.patient_id = fp.patient_id)))`;
 
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
 export async function orthoAdjustmentBillingClass(
@@ -19549,6 +19552,8 @@ export interface TreatmentPlan {
   debtSource?: "approved_agreement" | "invoice" | "classic_installments" | null;
   invoiceFinancial?: import("./plan-financial-position").PlanInvoiceFinancialPosition | null;
   approvedAgreement?: Awaited<ReturnType<typeof import("./approved-agreements").approvedAgreementPosition>>;
+  /** Money-free: an explicit financial approval of the full principal exists (FIN-INT-4). */
+  agreementApproved?: boolean;
   id: number;
   patientId: number;
   patientName: string;
@@ -19677,7 +19682,7 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): P
     const paidMinor = approvedAgreement?.paidMinor ?? (invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.paidMinor : toMinor(row.paid_minor));
     const lastReminderAt = row.last_reminder_at ? row.last_reminder_at.toISOString() : null;
     return {
-      approvedAgreement, invoiceFinancial, debtSource,
+      approvedAgreement, invoiceFinancial, debtSource, agreementApproved: approvedIds.has(row.id),
       id: row.id,
       patientId: row.patient_id,
       patientName: row.full_name,

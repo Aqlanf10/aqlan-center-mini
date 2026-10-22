@@ -72,6 +72,7 @@ export async function GET(request: Request) {
       progress: plan.progress,
       invoiceFinancial: plan.invoiceFinancial,
       debtSource: plan.debtSource,
+      agreementApproved: plan.agreementApproved === true,
     })) : canSeeFinancial ? plans : plans.map((plan) => withoutPlanPayments(plan, true));
     return NextResponse.json({ plans: result, today, baseCurrency: CLINIC_BASE_CURRENCY, canSeeFinancial });
   } catch {
