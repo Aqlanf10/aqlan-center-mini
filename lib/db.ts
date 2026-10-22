@@ -2,6 +2,7 @@ import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from ".
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
 import { AGREEMENT_DELTA_SQL } from "./agreement-delta-schema";
 import { COLLECTION_ATTEMPT_RETIREMENT_SQL } from "./collection-attempt-schema";
+import { UNPAID_CURRENCY_TRANSITION_SQL } from "./unpaid-currency-schema";
 import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
 import { provePaymentCalculation, proveCorrectionAcknowledgment } from "./payment-acknowledgment-db";
 import { JournalReadIntegrityError } from "./journal-read-integrity";
@@ -2093,6 +2094,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0065", name: "inventory_purchase_receipts", filename: "0065_inventory_purchase_receipts.sql", sql: INVENTORY_PURCHASE_RECEIPTS_SQL, checksum: checksumOf(INVENTORY_PURCHASE_RECEIPTS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0066", name: "agreement_delta_amendments", filename: "0066_agreement_delta_amendments.sql", sql: AGREEMENT_DELTA_SQL, checksum: checksumOf(AGREEMENT_DELTA_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0068", name: "collection_attempt_retirements", filename: "0068_collection_attempt_retirements.sql", sql: COLLECTION_ATTEMPT_RETIREMENT_SQL, checksum: checksumOf(COLLECTION_ATTEMPT_RETIREMENT_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0069", name: "unpaid_currency_transitions", filename: "0069_unpaid_currency_transitions.sql", sql: UNPAID_CURRENCY_TRANSITION_SQL, checksum: checksumOf(UNPAID_CURRENCY_TRANSITION_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);

@@ -7,6 +7,10 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.length === 62 && files[61].version === "0069" &&
+      files[61].filename === "0069_unpaid_currency_transitions.sql") {
+    return periodontalCandidateMigrationVersion(files.slice(0, 61));
+  }
   if (files.length === 61 && files[60].version === "0068" &&
       files[60].filename === "0068_collection_attempt_retirements.sql") {
     return periodontalCandidateMigrationVersion(files.slice(0, 60));

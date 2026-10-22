@@ -62,7 +62,8 @@ function fixture(currency: Currency = "YER"): InvoiceRevisionView {
       items: [{ id: 19, serviceId: null, doctorId: null, description: "Synthetic", quantity: 1, unitPriceMinor: amount, totalMinor: amount, planItemId: null }] },
     sourceHash: "a".repeat(64), settledMinor: 0, remainingMinor: amount, accountDueMinor: amount, work: [],
     repaymentVersion: 0, repaymentTerms: { mode: "full", installments: [] },
-    ...(currency === "YER" ? { currencyCorrection: { available: true, targetCurrency: "SAR", settledMinor: 0, accountDueMinor: 0, message: "Synthetic eligible preview" } } : {}),
+    ...(currency === "YER" ? { currencyCorrection: { available: true, targetCurrency: "SAR", targets: ["SAR"], options: [{ currency: "SAR", settledMinor: 0, accountDueMinor: 0 }],
+      settledMinor: 0, accountDueMinor: 0, message: "Synthetic eligible preview" } } : {}),
   };
 }
 let recovery: InvoiceRevisionCommand | null = null;
@@ -121,6 +122,24 @@ describe("real editor currency readiness and retained write boundaries", () => {
     change("سبب التصحيح", "Synthetic correction"); click("تأكيد تصحيح الفاتورة"); await settle();
     expect(posts()).toHaveLength(1); expect(JSON.parse(posts()[0][1].body)).not.toHaveProperty("currency");
   });
+  it("an unpaid SAR→USD correction clears the amounts and sends only the amounts the owner typed in USD", async () => {
+    const view = fixture("SAR");
+    view.currencyCorrection = { available: true, targetCurrency: "YER", targets: ["YER", "USD"], message: "Synthetic unpaid preview",
+      options: [{ currency: "YER", settledMinor: 0, accountDueMinor: 0 }, { currency: "USD", settledMinor: 0, accountDueMinor: 0 }], settledMinor: 0, accountDueMinor: 0 };
+    get = async () => json(view); render(); await settle();
+    expect(states()).toContainEqual(["USD", "eligible"]);
+    change("عملة الفاتورة المصححة", "USD");
+    expect(label("عملة الفاتورة المصححة")?.props.value).toBe("USD");
+    expect(label("سعر التصحيح 1")?.props.value).toBe("");
+    expect(text(render())).toContain("لم يُحوَّل أي مبلغ تلقائيًا");
+    change("سبب التصحيح", "Synthetic wrong currency before payment"); click("تأكيد تصحيح الفاتورة"); await settle();
+    expect(posts()).toHaveLength(0);
+    change("سعر التصحيح 1", "80"); click("تأكيد تصحيح الفاتورة"); await settle();
+    expect(posts()).toHaveLength(1);
+    const body = JSON.parse(posts()[0][1].body);
+    expect(body).toMatchObject({ currency: "USD", lines: [{ itemId: 19, quantity: 1, unitPrice: "80" }], discount: "0", expectedRemainingMinor: 8000 });
+    expect(body).not.toHaveProperty("exchangeRate");
+  });
   it("retains numeric interpretation and the unchanged request format for eligible YER→SAR", async () => {
     render(); await settle(); change("عملة الفاتورة المصححة", "SAR");
     expect(label("سعر التصحيح 1")?.props.value).toBe("1000");
@@ -132,7 +151,7 @@ describe("real editor currency readiness and retained write boundaries", () => {
     expect(control.acknowledge).not.toHaveBeenCalled(); expect(done).not.toHaveBeenCalled();
   });
   it("does not unlock a refused or missing proof", async () => {
-    const view = fixture(); view.currencyCorrection = { ...view.currencyCorrection!, available: false, reasonCodes: ["INDEPENDENT_ITEM_SOURCE"] };
+    const view = fixture(); view.currencyCorrection = { ...view.currencyCorrection!, available: false, targets: [], options: [], reasonCodes: ["INDEPENDENT_ITEM_SOURCE"] };
     get = async () => json(view); render(); await settle();
     expect(states()).toContainEqual(["SAR", "review"]); expect(text(render())).toContain("مصدر مستقل");
     change("عملة الفاتورة المصححة", "SAR"); expect(label("عملة الفاتورة المصححة")?.props.value).toBe("YER");
@@ -158,7 +177,8 @@ describe("real editor currency readiness and retained write boundaries", () => {
     get = async () => json(fixture("USD")); click("إعادة قراءة الفاتورة"); await settle();
     resolve(json(fixture())); await settle();
     expect(label("عملة الفاتورة المصححة")?.props.value).toBe("USD");
-    expect(states()).toContainEqual(["SAR", "unsupported"]); expect(posts()).toHaveLength(0);
+    // The superseded YER proof is ignored; the USD read carried no proof, so SAR stays unverified.
+    expect(states()).toContainEqual(["SAR", "unverified"]); expect(posts()).toHaveLength(0);
   });
   it.each(["doctor", "reception", "cashier", "accountant"])("retains %s write denial even with a prior eligible preview", async role => {
     render(); await settle(); hooks.session = { username: "synthetic-other", role }; render();
