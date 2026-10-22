@@ -114,3 +114,10 @@ describe("invoice print document truthfulness", () => {
     expect(mocks.printCount).not.toHaveBeenCalled();
   });
 });
+
+it.each(["doctor", "assistant"])("denies %s invoice printing before reading financial data", async role => {
+  mocks.requireSession.mockResolvedValue({ role, username: "synthetic", userId: 1 });
+  await expect(render()).rejects.toThrow();
+  expect(mocks.getInvoice).not.toHaveBeenCalled();
+  expect(mocks.getPatient).not.toHaveBeenCalled();
+});

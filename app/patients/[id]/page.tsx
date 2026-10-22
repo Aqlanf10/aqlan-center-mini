@@ -67,7 +67,7 @@ import {
   type ClinicalNavigationContext, type PatientLocation, type PatientTab, type TreatmentSubTab,
 } from "@/lib/patient-navigation";
 
-import { useClinicalNavigationContext, readVerifiedClinicalContext } from "@/components/useClinicalNavigationContext";
+import { useClinicalNavigationContext, readVerifiedClinicalContext, clinicalNavigationVerificationMode } from "@/components/useClinicalNavigationContext";
 
 
 interface PatientFile {
@@ -211,7 +211,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const [location, setLocation] = useState<PatientLocation>(() =>
     readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
   const contextAuthority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
-  const clinicalContext = useClinicalNavigationContext(Number(id), location.context, !!location.contextError, contextAuthority);
+  const clinicalContext = useClinicalNavigationContext(Number(id), location.context, !!location.contextError, contextAuthority, clinicalNavigationVerificationMode(session, location.tab));
   const [contextNavigationError, setContextNavigationError] = useState<string | null>(null);
   const contextRequest = useRef(0);
   const tab = location.tab;
@@ -276,14 +276,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     return accepted;
   };
   const openClinicalContext = async (context: ClinicalNavigationContext, target?: string) => {
+    if (session?.role === "assistant" && context.patientId !== undefined && context.patientId !== Number(id)) return false;
     if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
     const ticket = ++contextRequest.current;
     const capturedOwner = alertOwner;
     setContextNavigationError(null);
     try {
-      const accepted = await readVerifiedClinicalContext(Number(id), { ...context, patientId: Number(id) });
+      const accepted = await readVerifiedClinicalContext(Number(id), { ...context, patientId: Number(id) }, undefined, clinicalNavigationVerificationMode(session, target ?? location.tab));
       if (!capturedOwner.active || ticket !== contextRequest.current) return false;
-      const destination = patientDestination(target ?? accepted.sub, { ...location, contextError: undefined }, accepted.context);
+      const destination = patientDestination(target ?? (session?.role === "assistant" ? "today" : accepted.sub), { ...location, contextError: undefined }, accepted.context);
       return navigation.current?.navigate(destination) ?? false;
     } catch {
       if (capturedOwner.active && ticket === contextRequest.current) setContextNavigationError("تعذّر فتح العلاج المحدد. لم يتم اختيار حالة بديلة.");
