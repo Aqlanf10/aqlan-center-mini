@@ -10,8 +10,9 @@ import {
   type ChatMessage,
 } from "@/components/Chat";
 import { messagePreview } from "@/lib/messages";
-import { CURRENCY_LABEL, activeBalanceCurrencies, formatMoney, type Balance, type Currency } from "@/lib/money";
+import { CURRENCY_LABEL, activeBalanceCurrencies, formatMoney } from "@/lib/money";
 import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
+import type { PortalStatement } from "@/lib/portal-statement";
 import { friendlyDate } from "@/lib/reminders";
 
 /**
@@ -46,20 +47,7 @@ interface PortalAppointmentView {
   confirmable: boolean;
 }
 
-interface StatementFeed {
-  invoices: {
-    invoiceNumber: string; createdAt: string; totalMinor: number;
-    discountMinor: number; status: string; baseCurrency?: Currency;
-  }[];
-  payments: {
-    receiptNumber: string; createdAt: string; amountMinor: number;
-    currency: "YER" | "SAR" | "USD"; kind: string;
-  }[];
-  /** (P1-5ب) الأرصدة الافتتاحية بعملاتها، والأرصدة لكل عملة — الريال والسعودي والدولار كلٌّ بدلوه. */
-  openings: { currency: Currency; amountMinor: number; asOfDate: string }[];
-  balances: Record<Currency, Balance>;
-  baseCurrency: Currency;
-}
+type StatementFeed = PortalStatement;
 
 export default function PortalPage() {
   const [session, setSession] = useState<{ fullName: string; patientNumber: string } | null>(null);
@@ -316,9 +304,12 @@ function StatementTab() {
               <li key={invoice.invoiceNumber} className="flex items-center justify-between py-2 text-sm">
                 <span className="font-bold">{invoice.invoiceNumber}</span>
                 <span className="text-slate-500">{friendlyDate(invoice.createdAt.slice(0, 10))}</span>
-                <span className="tabular-nums">{formatMoney(invoice.totalMinor, invoice.baseCurrency ?? feed.baseCurrency)}</span>
-                <span className={invoice.status === "cancelled" ? "text-danger-700" : "text-success-800"}>
-                  {invoice.status === "cancelled" ? "ملغاة" : "معتمدة"}
+                <span className="tabular-nums">
+                  {formatMoney(invoice.netMinor, invoice.baseCurrency)}
+                  {invoice.discountMinor > 0 && <small className="text-slate-500"> (بعد خصم {formatMoney(invoice.discountMinor, invoice.baseCurrency)})</small>}
+                </span>
+                <span className={invoice.status === "paid" ? "text-success-800" : "text-warning-700"}>
+                  {invoice.status === "paid" ? "مسدّدة" : "مفتوحة"}
                 </span>
               </li>
             ))}
@@ -336,6 +327,7 @@ function StatementTab() {
               <li key={payment.receiptNumber} className="flex items-center justify-between py-2 text-sm">
                 <span className="font-bold">{payment.receiptNumber}</span>
                 <span className="text-slate-500">{friendlyDate(payment.createdAt.slice(0, 10))}</span>
+                <span className="text-slate-600">{payment.label}</span>
                 <span className="tabular-nums">
                   {payment.kind === "refund" ? "−" : ""}{formatMoney(payment.amountMinor, payment.currency)}
                 </span>
