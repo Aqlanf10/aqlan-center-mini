@@ -1,3 +1,4 @@
+import { counterIdentifierBigintSql } from "./counter-identifier-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
 import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
@@ -1526,19 +1527,19 @@ export function ensureSchema(): Promise<void> {
       -- مستعمل، وهو ما يُفشل الإدراج بدل أن يُصلحه.
       SELECT setval('patient_number_seq', GREATEST(
         (SELECT last_value FROM patient_number_seq),
-        (SELECT COALESCE(MAX(NULLIF(regexp_replace(patient_number, '\\D', '', 'g'), '')::bigint), 0) FROM patients)
+        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("patient_number")}), 0) FROM patients)
       ), true);
       SELECT setval('invoice_number_seq', GREATEST(
         (SELECT last_value FROM invoice_number_seq),
-        (SELECT COALESCE(MAX(NULLIF(regexp_replace(invoice_number, '\\D', '', 'g'), '')::bigint), 0) FROM invoices)
+        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("invoice_number")}), 0) FROM invoices)
       ), true);
       SELECT setval('receipt_number_seq', GREATEST(
         (SELECT last_value FROM receipt_number_seq),
-        (SELECT COALESCE(MAX(NULLIF(regexp_replace(receipt_number, '\\D', '', 'g'), '')::bigint), 0) FROM payments)
+        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("receipt_number")}), 0) FROM payments)
       ), true);
       SELECT setval('voucher_number_seq', GREATEST(
         (SELECT last_value FROM voucher_number_seq),
-        (SELECT COALESCE(MAX(NULLIF(regexp_replace(voucher_number, '\\D', '', 'g'), '')::bigint), 0) FROM expenses)
+        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("voucher_number")}), 0) FROM expenses)
       ), true);
 
       -- طبعات المستندات المالية.
