@@ -4,7 +4,7 @@ import { checksumOf, loadMigrationFiles } from "../lib/migration-files";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../lib/patient-appointment-history-schema";
 
 describe("patient appointment history index provenance", () => {
-  it("uses identical numbered/runtime bytes, with reserved 0066 absent", async () => {
+  it("uses identical numbered/runtime bytes within the reviewed composed migration chain", async () => {
     const sql = readFileSync("migrations/0067_patient_appointment_history_index.sql", "utf8");
     expect(sql).toBe(PATIENT_APPOINTMENT_HISTORY_SQL);
     const files = await loadMigrationFiles();
@@ -12,7 +12,11 @@ describe("patient appointment history index provenance", () => {
       version: "0067", name: "patient_appointment_history_index",
       filename: "0067_patient_appointment_history_index.sql", sql, checksum: checksumOf(sql),
     });
-    expect(files.some(file => file.version === "0066")).toBe(false);
+    expect(files.filter(file => file.version >= "0066").map(file => file.filename)).toEqual([
+      "0066_agreement_delta_amendments.sql",
+      "0067_patient_appointment_history_index.sql",
+      "0068_collection_attempt_retirements.sql",
+    ]);
   });
 
   it("adds only the measured index, without adopting a same-name object or changing rows", () => {
