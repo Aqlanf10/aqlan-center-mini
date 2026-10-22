@@ -15,6 +15,8 @@ import { parseSpecialtyTemplates } from "./specialty-templates";
 import { parseBalanceWarning } from "./chair-readiness";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+export const CLINIC_HOURS_KEYS = ["clinic.day_start", "clinic.day_end", "clinic.shift2_start", "clinic.shift2_end"] as const;
+
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function integerProblem(definition: SettingDefinition, raw: string): string | null {
@@ -85,6 +87,7 @@ export function validateTypedSetting(key: string, raw: string): string | null {
       }
       break;
     case "TIME":
+      if (value === "" && (key === "clinic.shift2_start" || key === "clinic.shift2_end")) break;
       if (!TIME.test(value)) return `${definition.label}: الوقت بصيغة 08:30.`;
       break;
     case "DATE":
@@ -135,12 +138,20 @@ export function validateSettingSet(
       return "بادئات المستندات يجب أن تختلف: الفاتورة وسند القبض وسند الصرف وسند الإبطال كلٌّ ببادئته.";
     }
   }
-  const touchesDay = "clinic.day_start" in next || "clinic.day_end" in next;
-  if (touchesDay) {
-    const start = next["clinic.day_start"] ?? current["clinic.day_start"] ?? "";
-    const end = next["clinic.day_end"] ?? current["clinic.day_end"] ?? "";
-    if (TIME.test(start) && TIME.test(end) && end <= start) {
-      return "نهاية الدوام يجب أن تكون بعد بدايته.";
+  if (CLINIC_HOURS_KEYS.some((key) => key in next)) {
+    const [start, end, secondStart, secondEnd] = CLINIC_HOURS_KEYS.map((key) => (next[key] ?? current[key] ?? "").trim());
+    if (!TIME.test(start) || !TIME.test(end)) return "أدخل بداية ونهاية الفترة الأولى بصيغة 08:30.";
+    if (end <= start) return "نهاية الدوام يجب أن تكون بعد بدايته في اليوم نفسه.";
+    if (Boolean(secondStart) !== Boolean(secondEnd)) return "أدخل بداية ونهاية الفترة الثانية معًا، أو امسحهما للدوام المتواصل.";
+    if (secondStart || secondEnd) {
+      if (!TIME.test(secondStart) || !TIME.test(secondEnd)) return "أدخل وقتَي الفترة الثانية بصيغة 08:30.";
+      if (secondEnd <= secondStart) return "نهاية الفترة الثانية يجب أن تكون بعد بدايتها في اليوم نفسه.";
+      if (secondStart < end) return "بداية الفترة الثانية يجب ألا تسبق نهاية الفترة الأولى؛ لا يسمح بتداخل الفترتين.";
+    }
+    // Require a complete, version-guarded batch: independent partial writes can
+    // each pass a pre-transaction check yet jointly invalidate the schedule.
+    if (CLINIC_HOURS_KEYS.some((key) => !(key in next))) {
+      return "احفظ أوقات الدوام الأربعة معًا من محرر فترات الدوام، مع نسخة كل إعداد.";
     }
   }
   return null;

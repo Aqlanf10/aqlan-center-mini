@@ -574,10 +574,9 @@ function RecallCard({
               href={`https://wa.me/${number}?text=${encodeURIComponent(messageText)}`}
               target="_blank"
               rel="noopener"
-              onClick={() => onDone(row)}
               className="rounded-xl bg-[#25D366] px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:opacity-90"
             >
-              💬 واتساب
+              💬 فتح مسودة واتساب
             </a>
           ) : (
             <span className="rounded-xl border border-slate-200 px-2.5 py-1 text-xs font-bold text-amber-600">
@@ -586,6 +585,7 @@ function RecallCard({
           )}
 
           <button
+            type="button"
             onClick={() => onDone(row)}
             disabled={busy}
             className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
@@ -594,6 +594,9 @@ function RecallCard({
           </button>
         </div>
       </div>
+      <p className="mt-2 text-[11px] text-slate-500">
+        فتح مسودة واتساب لا يعني إرسال الرسالة. بعد إتمام التواصل، اضغط «تمت المتابعة» لتسجيلها.
+      </p>
     </li>
   );
 }

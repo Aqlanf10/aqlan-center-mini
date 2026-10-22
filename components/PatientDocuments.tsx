@@ -54,7 +54,12 @@ interface PatientDocumentsProps {
   onPhotoChange?: (patient: Patient) => void;
 }
 
-export function PatientDocuments({
+export function PatientDocuments(props: PatientDocumentsProps) {
+  // Patient navigation must discard selected files, previews and pending UI state.
+  return <PatientDocumentsForPatient key={props.patientId} {...props} />;
+}
+
+function PatientDocumentsForPatient({
   patientId,
   patientName = "المريض",
   patientPhone,
@@ -93,7 +98,7 @@ export function PatientDocuments({
   const [kind, setKind] = useState<DocumentKind>("xray");
   const [title, setTitle] = useState("");
   const [takenOn, setTakenOn] = useState(today);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<File | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const [photoStage, setPhotoStage] = useState<PhotoStage>("progress");
@@ -120,8 +125,8 @@ export function PatientDocuments({
 
   const upload = async (event: React.FormEvent) => {
     event.preventDefault();
-    // الكاميرا والملفّ مدخلان لكن مسار الرفع واحد: أيّهما مملوءٌ يُرفع.
-    const file = fileInput.current?.files?.[0] ?? cameraInput.current?.files?.[0];
+    // The displayed selection owns the bytes; never prefer a stale alternate picker.
+    const file = picked;
     if (!file || busy) return;
     setBusy(true);
     setError(null);
@@ -311,7 +316,11 @@ export function PatientDocuments({
         <div className="flex flex-wrap items-center gap-2">
           <input ref={fileInput} type="file" id="document-file" aria-label="ملف الأشعة"
             accept="image/jpeg,image/png,image/webp,application/pdf"
-            onChange={(event) => setPicked(event.target.files?.[0]?.name ?? null)}
+            disabled={busy}
+            onChange={(event) => {
+              setPicked(event.target.files?.[0] ?? null);
+              if (cameraInput.current) cameraInput.current.value = "";
+            }}
             className="sr-only" />
           <label htmlFor="document-file"
             className="cursor-pointer rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-800">
@@ -320,19 +329,20 @@ export function PatientDocuments({
           {/* كاميرا الجوال من داخل الملف: العنصر المخفي بـ`capture` يفتح الكاميرا
               مباشرة، والصورة تدخل مسار الرفع نفسه — لا مجلّد جوالٍ يضيع. */}
           <input ref={cameraInput} type="file" id="document-camera" aria-label="كاميرا التصوير"
-            accept="image/*" capture="environment"
+            accept="image/*" capture="environment" disabled={busy}
             onChange={(event) => {
               const cameraFile = event.target.files?.[0];
-              setPicked(cameraFile?.name ?? null);
+              setPicked(cameraFile ?? null);
+              if (fileInput.current) fileInput.current.value = "";
               if (cameraFile) setKind("photo");
             }}
             className="sr-only" />
-          <button type="button" onClick={() => cameraInput.current?.click()}
+          <button type="button" disabled={busy} onClick={() => cameraInput.current?.click()}
             className="rounded-lg bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white">
             📷 التقاط صورة الآن
           </button>
           <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
-            {picked ?? "لم يُختَر ملف بعد — صورة أو PDF"}
+            {picked?.name ?? "لم يُختَر ملف بعد — صورة أو PDF"}
           </span>
           <button type="submit" disabled={busy || !ready || !picked}
             className="rounded-lg bg-navy-800 px-4 py-1.5 text-xs font-extrabold text-white disabled:opacity-40">

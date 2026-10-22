@@ -1,3 +1,4 @@
+import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../../lib/patient-appointment-history-schema";
 import {APPROVED_AGREEMENT_SQL} from "../../lib/approved-agreement-schema";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "../../lib/inventory-purchase-schema";
 import {INVOICE_CURRENCY_MIGRATION} from "../../lib/invoice-currency-runtime";
@@ -32,6 +33,7 @@ it('runtime registers exact additive contracts without fabricating facts, receip
   const registered = (await fixture.source.query('SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version')).rows;
   expect(registered).toEqual([...ortho, ...bundled,INVOICE_CURRENCY_MIGRATION,{version:"0064",name:"approved_agreement_principal",checksum:createHash("sha256").update(APPROVED_AGREEMENT_SQL).digest("hex")},
     { version: "0065", name: "inventory_purchase_receipts", checksum: createHash("sha256").update(INVENTORY_PURCHASE_RECEIPTS_SQL).digest("hex") },
+    { version: "0067", name: "patient_appointment_history_index", checksum: createHash("sha256").update(PATIENT_APPOINTMENT_HISTORY_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

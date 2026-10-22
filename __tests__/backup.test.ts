@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets, sqlValue, sqlValueForColumn } from "../lib/backup";
 
 describe("النسخة الاحتياطية", () => {
-  it("projects only scalar timestamps as PostgreSQL ISO text before driver decoding", () => {
+  it("projects scalar dates and timestamps as PostgreSQL ISO text before driver decoding", () => {
     expect(backupSelectColumns([
       { column_name: "recorded_at", data_type: "timestamp with time zone" },
       { column_name: 'local"time', data_type: "timestamp without time zone" },
@@ -13,7 +13,22 @@ describe("النسخة الاحتياطية", () => {
       { column_name: "day", data_type: "date" },
     ])).toBe('(pg_catalog.to_json("recorded_at") #>> \'{}\') AS "recorded_at", '
       + '(pg_catalog.to_json("local""time") #>> \'{}\') AS "local""time", '
-      + '"id", "depth", "details", "tags", "day"');
+      + '"id", "depth", "details", "tags", '
+      + '(pg_catalog.to_json("day") #>> \'{}\') AS "day"');
+  });
+
+  it("projects DATE even when the table has no timestamp columns", () => {
+    expect(backupSelectColumns([
+      { column_name: "id", data_type: "integer" },
+      { column_name: 'hire"date', data_type: "date" },
+    ])).toBe('"id", (pg_catalog.to_json("hire""date") #>> \'{}\') AS "hire""date"');
+  });
+
+  it("serializes calendar dates, infinity and SQL NULL without Date conversion", () => {
+    for (const value of ["2020-01-01", "2028-02-29", "0099-12-31", "infinity", "-infinity"]) {
+      expect(sqlValueForColumn(value, "date")).toBe(`'${value}'`);
+    }
+    expect(sqlValueForColumn(null, "date")).toBe("NULL");
   });
 
   it("serializes exact timestamp text and SQL NULL without Date conversion", () => {
@@ -23,12 +38,11 @@ describe("النسخة الاحتياطية", () => {
     expect(sqlValueForColumn("infinity", "timestamp without time zone")).toBe("'infinity'");
   });
 
-  it("leaves the existing selection unchanged for tables without scalar timestamps", () => {
+  it("leaves the existing selection unchanged for tables without scalar dates or timestamps", () => {
     expect(backupSelectColumns([
       { column_name: "id", data_type: "integer" },
       { column_name: "details", data_type: "jsonb" },
       { column_name: "tags", data_type: "ARRAY" },
-      { column_name: "day", data_type: "date" },
     ])).toBe("*");
   });
 
