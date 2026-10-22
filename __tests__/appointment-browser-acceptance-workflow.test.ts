@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CI_REQUIRED_NPM_MAJOR } from "../lib/env-contract";
 
 const workflow = readFileSync(join(__dirname, "../.github/workflows/appointment-browser-acceptance.yml"), "utf8");
 const journeyPath = "__tests__/security-http/appointment-connected-acceptance.test.ts";
@@ -74,6 +75,19 @@ describe("isolated appointment hosted workflow", () => {
     expect(workflow).toContain(`run: npm run test:security-http -- ${journeyPath}`);
     expect(workflow).toContain("run: npm run build");
     expect(workflow).toContain("run: npx playwright install --with-deps chromium");
+  });
+  it("installs the live CI npm major before dependencies and keeps the environment verifier mandatory", () => {
+    const setup = workflow.indexOf("name: Set up Node.js");
+    const npm = workflow.indexOf(`run: npm install -g npm@${CI_REQUIRED_NPM_MAJOR}\n`);
+    const dependencies = workflow.indexOf("run: npm ci --ignore-scripts --no-audit --no-fund");
+    const verifier = workflow.indexOf("name: Verify environment contract\n        run: npm run verify:environment\n");
+    const build = workflow.indexOf("name: Build the unchanged pinned application");
+    expect(setup).toBeGreaterThan(-1);
+    expect(npm).toBeGreaterThan(setup);
+    expect(dependencies).toBeGreaterThan(npm);
+    expect(verifier).toBeGreaterThan(dependencies);
+    expect(build).toBeGreaterThan(verifier);
+    expect(workflow).not.toMatch(/\bCI:\s*["']?false|\bCI=false|verify:environment\s*\|\|/);
   });
   it.each([overlayStep, pgStep, proofStep])("uses valid fail-closed Bash for %s", name => {
     const source = shellBody(name);

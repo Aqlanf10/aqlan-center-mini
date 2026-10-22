@@ -5,7 +5,9 @@
 - Final published application pin and local base: `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`
   ([Draft PR #414](https://github.com/Aqlanf10/aqlan-center-mini/pull/414)).
 - Application tree: `e50552a2bdafab243439595a2b026b16ac7f753e`.
-- Hosted Chromium/PostgreSQL execution: **not run by local authoring**.
+- First hosted attempt `39709737846` on acceptance `636bc3df44b8f8fc7fb21e9a61c1401546f57654`
+  failed at the environment-contract step, before browser execution.
+- Hosted connected journeys: **pending**. No local Chromium/PostgreSQL execution.
 - Dedicated review branch: `review/appointment-browser-acceptance-hosted`.
 - Review base: `integration/nonfinancial-20261022`.
 
@@ -91,8 +93,8 @@ proof. Canonical SQL assertions, not only UI notices, determine success.
 On the final pinned source with these four test/review additions, Node 22.23.3:
 
 - Full `tsc --noEmit --incremental false`, `NODE_OPTIONS=--max-old-space-size=4096`: passed.
-- Workflow guards plus existing guarded-browser-routes regressions: 29/29 passed
-  (16 workflow cases, 13 route-lifecycle cases).
+- Workflow guards, existing route-lifecycle regressions, and environment-parity
+  regressions: 104/104 passed (17 workflow, 13 route-lifecycle, 74 environment).
 - Targeted ESLint on both added TypeScript files: passed.
 - YAML parsed as one read-only job with the exact final application pin.
 - `git diff --check`: passed; only the four acceptance files differ from the pin.
@@ -109,3 +111,22 @@ syntax, hosted containment and no-mocking/no-sleep invariants. Targeted lint and
 YAML parsing are separate checks. Neither these checks nor TypeScript compilation
 constitutes real browser acceptance; only a successful run on the final exact app
 SHA does.
+
+## Environment setup correction
+
+The first supplemental workflow omitted the npm upgrade already present in the
+pinned application's product CI. Its Node 22.23.3 distribution bundles npm 10.9.9,
+whereas `CI_REQUIRED_NPM_MAJOR` requires npm 11 whenever `CI=true`.
+
+A clean local environment using the same workflow values and the unchanged
+`npm run verify:environment` command reproduced exactly one failure:
+`[npm.ci-major]`, exit 1. Using the existing real npm 11.9.0 with the same
+Node 22.23.3 and other values passed, exit 0. The verifier is static and opened
+no PostgreSQL connection. No raw GitHub logs or artifacts were accessed.
+
+The correction adds the existing product-CI command `npm install -g npm@11`
+before dependency installation. A regression binds this step to the live npm
+major contract and requires setup → npm upgrade → dependencies → unchanged
+verifier → build ordering. The verifier is not removed or weakened, the app pin
+is unchanged, and no connected-journey expectations or browser interception
+rules changed. A passing hosted rerun is still required.
