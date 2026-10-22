@@ -6,15 +6,17 @@ vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden",
   OpeningBalanceExists: class extends Error {},
   OpeningBalanceChanged: class extends Error { constructor() { super("تغيّر الرصيد الافتتاحي. أعد تحميله وراجع التعديل."); } },
+  OpeningCorrectionRefused: class extends Error { constructor(readonly code: string, message: string) { super(message); } },
+  previewOpeningCorrection: vi.fn(),
   getSettings: vi.fn(), isPeriodLocked: vi.fn(), getPatientOpeningBalance: vi.fn(),
   setPatientOpeningBalance: vi.fn(), clearPatientOpeningBalance: vi.fn(), recordAudit: vi.fn(),
   listOpeningBalanceHistory: vi.fn(), listOpeningBalances: vi.fn(),
 }));
 
-import { POST, DELETE } from "@/app/api/opening-balances/route";
+import { GET, POST, DELETE } from "@/app/api/opening-balances/route";
 import { requireSession } from "@/lib/session";
 import {
-  OpeningBalanceChanged, OpeningBalanceExists, getSettings, isPeriodLocked, getPatientOpeningBalance,
+  OpeningBalanceChanged, OpeningBalanceExists, OpeningCorrectionRefused, previewOpeningCorrection, getSettings, isPeriodLocked, getPatientOpeningBalance,
   setPatientOpeningBalance, clearPatientOpeningBalance, recordAudit,
 } from "@/lib/db";
 
@@ -119,5 +121,39 @@ describe("opening mutation preflight ownership", () => {
     vi.mocked(clearPatientOpeningBalance).mockRejectedValue(new Error("Synthetic unavailable"));
     expect((await (action === "post" ? post() : clear())).status).toBe(500);
     expect(recordAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("FIN-INT legacy balance correction guard and dry run", () => {
+  const refusal = () => new OpeningCorrectionRefused("below_settled", "المبلغ المصحّح أقل من المحصّل المثبت على هذا الرصيد.");
+  it.each(["post", "clear"] as const)("maps a %s refusal to 409 with its code, without a success audit", async (action) => {
+    vi.mocked(setPatientOpeningBalance).mockRejectedValue(refusal());
+    vi.mocked(clearPatientOpeningBalance).mockRejectedValue(refusal());
+    const response = action === "post" ? await post() : await clear();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ message: "المبلغ المصحّح أقل من المحصّل المثبت على هذا الرصيد.", code: "below_settled" });
+    expect(recordAudit).not.toHaveBeenCalled();
+  });
+  const preview = (query: string) => GET(new Request(`https://synthetic.invalid/api/opening-balances?preview=1&${query}`));
+  it("previews a correction and a deletion without writing", async () => {
+    vi.mocked(previewOpeningCorrection).mockResolvedValue({ allowed: false } as Awaited<ReturnType<typeof previewOpeningCorrection>>);
+    expect((await preview("patientId=41&currency=SAR&amount=300")).status).toBe(200);
+    expect(previewOpeningCorrection).toHaveBeenLastCalledWith(41, "SAR", 30000);
+    expect((await preview("patientId=41&currency=SAR&clear=1")).status).toBe(200);
+    expect(previewOpeningCorrection).toHaveBeenLastCalledWith(41, "SAR", null);
+    noWrites();
+  });
+  it.each(["patientId=0&currency=SAR&amount=300", "patientId=41&currency=EUR&amount=300", "patientId=41&currency=SAR&amount=0", "patientId=41&currency=SAR"])(
+    "refuses an invalid dry run %s", async (query) => {
+      expect((await preview(query)).status).toBe(400); expect(previewOpeningCorrection).not.toHaveBeenCalled();
+    });
+  it.each(["reception", "doctor", "cashier"] as const)("keeps the dry run away from %s", async (role) => {
+    vi.mocked(requireSession).mockResolvedValue({ userId: 1, username: "synthetic-user", role, expiresAt: 4_102_444_800_000 });
+    expect((await preview("patientId=41&currency=SAR&amount=300")).status).toBe(403); expect(previewOpeningCorrection).not.toHaveBeenCalled();
+  });
+  it("does not leak a dry-run failure", async () => {
+    vi.mocked(previewOpeningCorrection).mockRejectedValue(new Error("Synthetic secret detail"));
+    const response = await preview("patientId=41&currency=SAR&amount=300");
+    expect(response.status).toBe(500); expect(JSON.stringify(await response.json())).not.toContain("Synthetic secret detail");
   });
 });
