@@ -377,6 +377,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           throw new Error("تعذّر التحقق من ملخص المريض. لا يُعدّ ذلك غيابًا للحالات أو الزيارة.");
         }
         setSummary({
+          today: data.today,
+          timeZone: data.timeZone,
           openVisit: data.openVisit ?? null,
           lastVisit: data.lastVisit ?? null,
           nextAppointment: data.nextAppointment ?? null,

@@ -2,9 +2,9 @@
 
 ## Status and source identity
 
-- Final published application pin and local base: `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`
+- Final published application pin and local base: `181cab90350c421d40fed24fb92a7c8fa0667b44`
   ([Draft PR #414](https://github.com/Aqlanf10/aqlan-center-mini/pull/414)).
-- Application tree: `ccd304ba6fe63dfe029df095f533d8810672006f`.
+- Application tree: `997dbdc0df5061dce079f19cb5728b2bdec8519a`.
 - First hosted attempt `39709737846` on acceptance `636bc3df44b8f8fc7fb21e9a61c1401546f57654`
   failed at the environment-contract step, before browser execution.
 - Prior hosted run `39711640521` succeeded on application `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`
@@ -13,7 +13,9 @@
   application `42b91977ea31bcbe61086f5f51717590a05f0ced`. This remains historical evidence for that exact app pin.
 - Root reports successful hosted acceptance from #415 head `a3eb` on
   application `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`. That result is historical evidence for the old pin only.
-- Fresh hosted acceptance on `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`: **pending**.
+- Root reports successful hosted acceptance from #415 head `06e2` on
+  application `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`. That result is historical evidence for the old pin only.
+- Fresh hosted acceptance on `181cab90350c421d40fed24fb92a7c8fa0667b44`: **pending**.
   None of the prior successes accepts this new SHA. No local Chromium/PostgreSQL execution.
 - Dedicated review branch: `review/appointment-browser-acceptance-hosted`.
 - Review base: `integration/nonfinancial-20261022`.
@@ -184,7 +186,7 @@ single permitted test overlay and read-only permissions remain in place.
 
 ## Bootstrap and test-interceptor repair repin
 
-The current application pin `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`, tree
+The previously pinned application `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`, tree
 `ccd304ba6fe63dfe029df095f533d8810672006f`, has parent
 `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`. Its seven-path delta contains the
 reviewed bounded-CASE counter-identifier bootstrap repair and test-only patient
@@ -193,11 +195,34 @@ source changes, so prior acceptance on `4286e104` cannot certify the new pin.
 
 Root reports 312 combined unit tests, source build, TypeScript compilation,
 20 PostgreSQL tests and 657 HTTP tests passing on the repaired source. These are
-separate release checks, not fresh hosted browser evidence. The eight connected
-acceptance journeys still require a successful hosted run on `a58e7fbd`.
+separate release checks. Root subsequently reported #415 head `06e2` passing
+on `a58e7fbd`; that success does not certify the later application source.
 
 This acceptance handoff changes only the pin, matching static guard, and evidence
 notes. It adds no runtime repair or test interceptor. The four-file supplement is
 rebased onto the exact new application commit; the journey bytes, npm11 setup,
 strict app/probe SHA verification, single-test overlay, read-only permissions,
 financial fingerprints and outbound interception remain unchanged.
+
+## Explicit planned-session rebooking repin
+
+The current application pin `181cab90350c421d40fed24fb92a7c8fa0667b44`, tree
+`997dbdc0df5061dce079f19cb5728b2bdec8519a`, has parent
+`a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`. Root reports independent review and
+all four #420 CI jobs passing in run `39734055353`, including the new real-browser
+planned-session rebooking journey. The integration branch was fast-forwarded to
+that exact commit, with no source rewrite, main merge, or Production action.
+Those gates do not substitute for this supplement's fresh run on the new pin.
+
+Static compatibility inspection found that `PatientAppointmentsPanel` and its
+appointments projection route are unchanged. The patient-page delta passes
+clinic day/zone into `SummaryTab`. This supplement seeds ordinary appointments
+without planned-visit links; rebooking mutations require deliberate interaction
+with the new planned-session controls. There is no evidence requiring a fixture
+change, and none was made. Fresh hosted execution remains the behavioral check.
+
+The four-file supplement is rebased onto the exact new app head. Only the pin,
+matching static guard, and evidence notes change for this handoff. Journey bytes,
+financial fingerprints, npm11 setup, strict app/probe source identity, the single
+test-only overlay, read-only permissions and outbound interception are unchanged.
+No build, full compiler, PostgreSQL instance or local browser was started.

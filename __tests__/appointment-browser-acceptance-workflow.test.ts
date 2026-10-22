@@ -64,7 +64,7 @@ afterEach(() => { for (const path of temporary.splice(0)) rmSync(path, { recursi
 describe("isolated appointment hosted workflow", () => {
   it("has a dedicated same-repository pull-request trigger and only read permission", () => {
     expect(workflow).toContain("branches: [integration/nonfinancial-20261022]");
-    expect(workflow).toContain("FINAL_APP_SHA: 'a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba'");
+    expect(workflow).toContain("FINAL_APP_SHA: '181cab90350c421d40fed24fb92a7c8fa0667b44'");
     expect(workflow).toContain("github.repository == 'Aqlanf10/aqlan-center-mini'");
     expect(workflow).toContain("github.event.pull_request.head.repo.full_name == github.repository");
     expect(workflow).toContain("github.event.pull_request.head.ref == 'review/appointment-browser-acceptance-hosted'");

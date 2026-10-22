@@ -11,6 +11,7 @@ import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { withoutPlanPayments } from "@/lib/plan-payment-projection";
+import { projectPlannedVisitRebooking } from "@/lib/planned-visit-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
     return NextResponse.json({
       plans: visiblePlans,
-      plannedVisits,
+      plannedVisits: plannedVisits.map(visit => projectPlannedVisitRebooking(visit, session)),
       today,
       baseCurrency: base === "SAR" || base === "USD" || base === "YER" ? base : "YER",
       canSeeFinancial: maySeeFinancial,

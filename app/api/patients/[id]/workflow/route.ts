@@ -5,6 +5,7 @@ import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { HTTP_PERMISSIONS } from "@/lib/http-permissions";
+import { projectPlannedVisitRebooking } from "@/lib/planned-visit-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         ...summary,
         ...caseProjection,
         today,
+        timeZone: CLINIC_TIME_ZONE,
         nextAppointment: null,
         plannedVisits: [],
         activePlans: [],
@@ -74,6 +76,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       ...summary,
       ...caseProjection,
       today,
+      timeZone: CLINIC_TIME_ZONE,
+      plannedVisits: summary.plannedVisits.map(visit => projectPlannedVisitRebooking(visit, session)),
       financial: maySeeFinancial ? summary.financial : null,
       canSeeFinancial: maySeeFinancial,
     });

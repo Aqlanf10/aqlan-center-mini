@@ -40,7 +40,7 @@ jobs:
     env:
       # Published application head of Draft PR #414, never the probe branch.
       # The live base must still equal this immutable pin or the run fails closed.
-      FINAL_APP_SHA: 'a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba'
+      FINAL_APP_SHA: '181cab90350c421d40fed24fb92a7c8fa0667b44'
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
       TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
       SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
