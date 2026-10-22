@@ -535,3 +535,22 @@ writes. Demo reset refuses before backup when any committed or rejected outcome
 exists. Only a genuinely empty table may join the existing reset truncation under
 the reviewed serialization/table locks and an empty-table trigger recheck; receipts
 are not an unconditional wipe target. See [protocol and release limits](INVENTORY_PURCHASE_RETRY.md).
+
+### 0067_patient_appointment_history_index.sql
+
+Adds only the nonunique B-tree `appointments_patient_history_idx` on
+`appointments (patient_id, scheduled_date, scheduled_time, id)` for patient-scoped
+keyset reads. Numbered and checksum-checked runtime registration use identical
+SQL. There are no table, row, financial-write, reader or reset-ownership changes.
+0066 remains reserved for the independent agreement-delta work in PR #408 and is
+not included in this branch. Both application orders were verified locally using
+the actual #408 SQL; re-run that proof if either migration's bytes change.
+
+This is ordinary transactional `CREATE INDEX`, not `CONCURRENTLY`: writes can
+wait during the build, existing writers can delay it, and application readiness
+waits for migration completion. Review actual database size, traffic, storage,
+lock/statement limits and a maintenance window before deployment. Keep the
+Production/unknown-remote CLI apply prohibition and all existing safeguards.
+The synthetic benchmark demonstrates reduced read work, not a reader correctness
+fix, a universal scan bound or a Production latency/zero-downtime promise. See
+[measurement, migration-order proof and deployment limits](../PATIENT_APPOINTMENT_HISTORY_INDEX.md).
