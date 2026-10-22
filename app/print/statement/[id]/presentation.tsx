@@ -3,7 +3,7 @@ import { formatMoney, invoiceNet } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { currentStatementInvoices } from "@/lib/statement-lines";
 
-export { currentStatementInvoices, statementPaymentLabel } from "@/lib/statement-lines";
+export { currentStatementInvoices, statementAgreements, statementPaymentLabel } from "@/lib/statement-lines";
 
 /** Stored invoice evidence, not a repricing of treatment against today's catalogue. */
 export function StatementInvoiceDetails({ invoices }: { invoices: readonly Invoice[] }) {
