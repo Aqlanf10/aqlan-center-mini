@@ -67,3 +67,56 @@ it('re-evaluates a changed schedule without mutating existing appointment data',
   expect(refusal(s, appointment.time)).toBe('outside_doctor_schedule');
   expect(appointment).toEqual({ date: '2026-10-25', time: '08:30', durationMinutes: 30 });
 });
+
+it.each([
+  ['2026-03-08', '02:30'],
+  ['2026-11-01', '01:30'],
+])('rejects an invalid actual start hidden by valid buffer endpoints on %s', (date, time) => {
+  const s = sources(); Object.assign(s.schedules[0], { start: '00:00', end: '06:00' });
+  const zone = 'America/New_York';
+  expect(doctorBookingRefusal(doctorBookingDay(s, 1, date, zone), {
+    date, time, durationMinutes: 30, before: 60, after: 60, zone,
+  })).toBe('unresolved_wall_time');
+});
+it.each([
+  ['2026-03-08', '01:30'],
+  ['2026-11-01', '00:30'],
+])('rejects an invalid actual end hidden by valid buffer endpoints on %s', (date, time) => {
+  const s = sources(); Object.assign(s.schedules[0], { start: '00:00', end: '06:00' });
+  const zone = 'America/New_York';
+  expect(doctorBookingRefusal(doctorBookingDay(s, 1, date, zone), {
+    date, time, durationMinutes: 60, before: 0, after: 120, zone,
+  })).toBe('unresolved_wall_time');
+});
+it('retains only the proven overnight tail after the last effective anchor date', () => {
+  const s = sources(); Object.assign(s.schedules[0], {
+    effectiveTo: '2026-10-24', start: '22:00', end: '04:00', crossesMidnight: true, scheduleType: 'night',
+  });
+  expect(doctorBookingDay(s, 1, '2026-10-25', 'Asia/Aden')).toEqual({ resolved: true, reason: null,
+    currentAssignmentMissing: true, windows: [{ start: 0, end: 240 }] });
+  expect(refusal(s, '03:30')).toBeNull();
+  expect(refusal(s, '04:00')).toBe('outside_doctor_schedule');
+  expect(refusal(s, '22:00')).toBe('outside_doctor_schedule');
+  expect(doctorBookingDay(s, 1, '2026-10-26', 'Asia/Aden')).toMatchObject({ resolved: false, reason: 'missing_schedule', windows: [] });
+});
+it.each([['2026-03-08', '03:30'], ['2026-11-01', '02:30']])('still rejects invalid buffer endpoints around valid actual clocks on %s', (date, time) => {
+  const s = sources(); Object.assign(s.schedules[0], { start: '00:00', end: '06:00' });
+  const zone = 'America/New_York';
+  expect(doctorBookingRefusal(doctorBookingDay(s, 1, date, zone), {
+    date, time, durationMinutes: 30, before: 60, after: 0, zone,
+  })).toBe('unresolved_wall_time');
+});
+it('does not use the expired schedule tail to bypass leave, inactive staff or ambiguous current assignments', () => {
+  const s = sources(); Object.assign(s.schedules[0], {
+    effectiveTo: '2026-10-24', start: '22:00', end: '04:00', crossesMidnight: true, scheduleType: 'night',
+  });
+  s.leaves.push({ id: 1, staffId: 1, startDate: '2026-10-25', endDate: '2026-10-25', status: 'approved', partial: false, updatedAt: 'v1' });
+  expect(doctorBookingDay(s, 1, '2026-10-25', 'Asia/Aden').windows).toEqual([]);
+  s.leaves[0].partial = true;
+  expect(doctorBookingDay(s, 1, '2026-10-25', 'Asia/Aden')).toMatchObject({ resolved: false, reason: 'unsupported_partial_leave', windows: [] });
+  s.leaves = []; s.staff[0].endDate = '2026-10-24';
+  expect(doctorBookingDay(s, 1, '2026-10-25', 'Asia/Aden')).toMatchObject({ resolved: false, reason: 'inactive_staff', windows: [] });
+  s.staff[0].endDate = null;
+  for (const id of [3, 4]) s.schedules.push({ ...s.schedules[0], id, effectiveFrom: '2026-10-25', effectiveTo: null });
+  expect(doctorBookingDay(s, 1, '2026-10-25', 'Asia/Aden')).toMatchObject({ resolved: false, reason: 'ambiguous_schedule', windows: [] });
+});

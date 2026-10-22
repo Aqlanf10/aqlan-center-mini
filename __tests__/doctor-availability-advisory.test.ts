@@ -9,13 +9,14 @@ beforeEach(() => {
   vi.clearAllMocks(); query.mockReset(); readSources.mockReset();
   query.mockResolvedValue({ rows: [] }); connect.mockResolvedValue({ query, release });
 });
-it('uses one explicit read-only repeatable snapshot and labels results as advisory', async () => {
+it.each([null, '2026-10-24'])('uses one read-only snapshot and distinguishes an expired anchor assignment: %s', async effectiveTo => {
   readSources.mockResolvedValue({ staff: [{ id: 1, userId: 1, department: 'doctors', workStatus: 'active', hireDate: null, endDate: null }],
     accounts: [{ id: 1, partyId: 7, active: true }], parties: [{ id: 7, kind: 'doctor', active: true }], partyLinks: null, leaves: [],
-    schedules: [{ id: 1, staffId: 1, department: null, active: true, effectiveFrom: '2026-01-01', effectiveTo: null,
+    schedules: [{ id: 1, staffId: 1, department: null, active: true, effectiveFrom: '2026-01-01', effectiveTo,
       workingDays: [6], start: '22:00', end: '04:00', secondStart: null, secondEnd: null, crossesMidnight: true, scheduleType: 'night', updatedAt: 'v1' }] });
   expect(await readDoctorAvailabilityAdvisory(7,'2026-10-25','Asia/Aden')).toEqual({ purpose: 'advisory_only', bookingGuaranteed: false,
-    doctorId: 7, date: '2026-10-25', timeZone: 'Asia/Aden', resolved: true, reason: null, windows: [{ start: 0, end: 240 }] });
+    doctorId: 7, date: '2026-10-25', timeZone: 'Asia/Aden', resolved: true, reason: null, windows: [{ start: 0, end: 240 }],
+    ...(effectiveTo ? { currentAssignmentMissing: true } : {}) });
   expect(connect).toHaveBeenCalledOnce(); expect(readSources).toHaveBeenCalledExactlyOnceWith({ query, release },7,'2026-10-25');
   expect(query.mock.calls.map(c => c[0])).toEqual(['BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY','COMMIT']);
   expect(release).toHaveBeenCalledWith(false);
