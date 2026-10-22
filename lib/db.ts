@@ -19542,7 +19542,7 @@ export interface OpeningCorrectionPreview {
 }
 
 async function openingCorrectionPreviewInTx(
-  client: DbClient, patientId: number, currency: Currency, afterAmountMinor: number | null,
+  client: DbClient | DbPool, patientId: number, currency: Currency, afterAmountMinor: number | null,
 ): Promise<OpeningCorrectionPreview> {
   const { rows: [opening] } = await client.query<{ amount_minor: string; as_of_date: string }>(
     `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`,
@@ -19581,16 +19581,9 @@ export async function previewOpeningCorrection(
   patientId: number, currency: Currency, afterAmountMinor: number | null,
 ): Promise<OpeningCorrectionPreview> {
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const preview = await openingCorrectionPreviewInTx(client, patientId, currency, afterAmountMinor);
-    await client.query("COMMIT");
-    return preview;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally { client.release(); }
+  // The shared snapshot helper keeps the original error and discards a client whose ROLLBACK failed.
+  return withFinancialReadSnapshot(getPool(), (runner) =>
+    openingCorrectionPreviewInTx(runner, patientId, currency, afterAmountMinor), usesSharedLocalDatabaseConnection());
 }
 
 async function assertOpeningCorrectionAllowedInTx(
