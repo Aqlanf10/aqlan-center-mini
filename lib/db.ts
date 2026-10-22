@@ -19466,11 +19466,102 @@ export async function setPatientOpeningBalanceInTx(
   return { patientId: rows[0].patient_id, historyId: history.id };
 }
 
+/**
+ * (FIN-INT legacy) A manual correction of a legacy balance never creates a credit or orphans
+ * receipts: the corrected principal must still cover the net receipts settled against it,
+ * and a balance that any receipt (even a later refunded one) references is not deleted.
+ */
+export type OpeningCorrectionRefusal = "below_settled" | "receipts_reference_opening";
+
+export class OpeningCorrectionRefused extends Error {
+  constructor(readonly code: OpeningCorrectionRefusal, message: string) { super(message); }
+}
+
+export interface OpeningCorrectionPreview {
+  patientId: number;
+  currency: Currency;
+  currentAmountMinor: number | null;
+  currentAsOfDate: string | null;
+  /** Net receipts settled against this balance, in its currency. */
+  settledMinor: number;
+  receiptCount: number;
+  /** null: delete the balance. */
+  afterAmountMinor: number | null;
+  currentRemainingMinor: number;
+  afterRemainingMinor: number;
+  allowed: boolean;
+  code: OpeningCorrectionRefusal | null;
+  message: string | null;
+}
+
+async function openingCorrectionPreviewInTx(
+  client: DbClient, patientId: number, currency: Currency, afterAmountMinor: number | null,
+): Promise<OpeningCorrectionPreview> {
+  const { rows: [opening] } = await client.query<{ amount_minor: string; as_of_date: string }>(
+    `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`,
+    [patientId, currency]);
+  const { rows: receipts } = await client.query<{ id: number; kind: string; amount_minor: string; base_amount_minor: string; currency: string }>(
+    `SELECT id, kind, amount_minor::text, base_amount_minor::text, currency FROM payments
+      WHERE patient_id = $1 AND opening_currency = $2 ORDER BY id`, [patientId, currency]);
+  let settledMinor = 0;
+  for (const receipt of receipts) {
+    const minor = settlePaymentMinor({ id: receipt.id, amountMinor: toMinor(receipt.amount_minor),
+      baseAmountMinor: toMinor(receipt.base_amount_minor), currency: requireCurrency(receipt.currency, "سند رصيد سابق", receipt.id) }, currency);
+    settledMinor += receipt.kind === "refund" ? -minor : minor;
+  }
+  if (!Number.isSafeInteger(settledMinor)) throw new Error("Invalid opening settlement");
+  const current = opening ? toMinor(opening.amount_minor) : null;
+  const after = afterAmountMinor ?? 0;
+  let code: OpeningCorrectionRefusal | null = null;
+  let message: string | null = null;
+  if (afterAmountMinor === null && receipts.length > 0) {
+    code = "receipts_reference_opening";
+    message = `على هذا الرصيد ${receipts.length} سند قبض أو استرداد مثبت؛ لا يُحذف حتى لا تبقى سندات بلا مصدر. صحّح المبلغ بدلًا من الحذف.`;
+  } else if (after < settledMinor) {
+    code = "below_settled";
+    message = `المبلغ المصحّح أقل من المحصّل المثبت على هذا الرصيد (${formatMoney(settledMinor, currency)})؛ لا يُنشأ رصيدٌ دائن بالتعديل. راجع السندات أو سجّل استردادًا صريحًا.`;
+  }
+  return {
+    patientId, currency, currentAmountMinor: current, currentAsOfDate: opening?.as_of_date ?? null,
+    settledMinor, receiptCount: receipts.length, afterAmountMinor,
+    currentRemainingMinor: Math.max(0, (current ?? 0) - settledMinor), afterRemainingMinor: Math.max(0, after - settledMinor),
+    allowed: code === null, code, message,
+  };
+}
+
+/** Dry run: the same rule the correction applies, from one read-only snapshot. Nothing is written. */
+export async function previewOpeningCorrection(
+  patientId: number, currency: Currency, afterAmountMinor: number | null,
+): Promise<OpeningCorrectionPreview> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const preview = await openingCorrectionPreviewInTx(client, patientId, currency, afterAmountMinor);
+    await client.query("COMMIT");
+    return preview;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
+}
+
+async function assertOpeningCorrectionAllowedInTx(
+  client: DbClient, patientId: number, currency: Currency, afterAmountMinor: number | null,
+): Promise<void> {
+  // The writer's own locks, taken first: a receipt against this balance waits behind them.
+  await lockedOpeningBalance(client, patientId, currency);
+  const preview = await openingCorrectionPreviewInTx(client, patientId, currency, afterAmountMinor);
+  if (!preview.allowed) throw new OpeningCorrectionRefused(preview.code!, preview.message!);
+}
+
 export async function setPatientOpeningBalance(input: SetOpeningBalanceInput): Promise<OpeningBalance | null> {
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
-  const saved = await withTransaction(getPool(), async (client): Promise<number | null> =>
-    (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null);
+  const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
+    if (!input.addOnly) await assertOpeningCorrectionAllowedInTx(client, input.patientId, currency, input.amountMinor);
+    return (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null;
+  });
   return saved === null ? null : getPatientOpeningBalance(saved, currency);
 }
 
@@ -19505,8 +19596,10 @@ export async function clearPatientOpeningBalance(
   expectedBefore?: OpeningBalanceExpectation | null,
 ): Promise<boolean> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client): Promise<boolean> =>
-    (await clearPatientOpeningBalanceInTx(client, patientId, actor, reason, currency, expectedBefore)) !== null);
+  return withTransaction(getPool(), async (client): Promise<boolean> => {
+    await assertOpeningCorrectionAllowedInTx(client, patientId, currency, null);
+    return (await clearPatientOpeningBalanceInTx(client, patientId, actor, reason, currency, expectedBefore)) !== null;
+  });
 }
 
 export async function listOpeningBalanceHistory(patientId: number): Promise<OpeningBalanceHistoryEntry[]> {
