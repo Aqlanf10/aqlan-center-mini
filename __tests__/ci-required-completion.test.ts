@@ -33,6 +33,7 @@ describe("required CI completion executes fail-closed shell", () => {
         encoding: "utf8",
         timeout: 5_000,
         env: {
+          NODE_ENV: "test",
           PATH: process.env.PATH,
           QUALITY_RESULT: quality,
           POSTGRES_RESULT: postgres,
