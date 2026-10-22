@@ -56,14 +56,16 @@ export async function prepareInvoiceCurrencyChange(client:DbClient,invoice:Invoi
       OR EXISTS(SELECT 1 FROM hr_payroll_items WHERE status<>'reversed' AND commissions_minor<>0) AS blocked`,[doctorIds]);
     if(commission.blocked)reject("توجد عمولات مصروفة أو معتمدة؛ يلزم تعديل عمولة صريح قبل إعادة تصنيف عملة الفاتورة.");
   }
+  // Non-receipt-backed directions were refused above when any receipt exists on the lineage.
   if(!receiptBacked)return {evidence:[],sourceMinor:0,settledMinor:0,remainingMinor:principalMinor,creditMinor:0,settlementDeltas:[],
-    lineageInvoiceIds:ids,planIds:plans.map(plan=>plan.id),sourceCurrency:source,targetCurrency};
+    lineageInvoiceIds:ids,planIds:plans.map(plan=>plan.id),sourceCurrency:source,targetCurrency,receiptCount:0};
   const {rows}=await client.query<{id:number;patient_id:number;invoice_id:number;kind:"payment"|"refund";reversal_of_id:number|null;currency:"SAR";base_currency:"YER";amount_minor:string;base_amount_minor:string;exchange_rate:string}>(
     "SELECT id,patient_id,invoice_id,kind,reversal_of_id,currency,base_currency,amount_minor::text,base_amount_minor::text,exchange_rate::text FROM payments WHERE invoice_id=ANY($1::int[]) ORDER BY id",[ids]);
   const payments:ReclassificationPayment[]=rows.map(row=>({id:row.id,patientId:row.patient_id,invoiceId:row.invoice_id,kind:row.kind,reversalOfId:row.reversal_of_id,currency:row.currency,baseCurrency:row.base_currency,amountMinor:Number(row.amount_minor),baseAmountMinor:Number(row.base_amount_minor),exchangeRate:Number(row.exchange_rate)}));
   let result:ReturnType<typeof planCurrencyReclassification>;
   try{result=planCurrencyReclassification({patientId:invoice.patientId,lineageInvoiceIds:ids,fromCurrency:"YER",toCurrency:"SAR",principalMinor,payments});}catch(error){if(error instanceof ReclassificationProofError)reject(error.message);throw error;}
-  return {...result,lineageInvoiceIds:ids,planIds:plans.map(plan=>plan.id),sourceCurrency:source,targetCurrency};
+  // Receipt history is reported from the recorded rows, not inferred from a zero net settlement.
+  return {...result,lineageInvoiceIds:ids,planIds:plans.map(plan=>plan.id),sourceCurrency:source,targetCurrency,receiptCount:payments.length};
 }
 export async function writeInvoiceCurrencyEvidence(client:DbClient,correctionId:number,patientId:number,lineageInvoiceIds:number[],direction:{sourceCurrency:Currency;targetCurrency:Currency}={sourceCurrency:"YER",targetCurrency:"SAR"}){
   const {rows:[document]}=await client.query<{id:number}>(`INSERT INTO invoice_settlement_reclassifications(correction_id,patient_id,source_currency,target_currency,source_invoice_ids)

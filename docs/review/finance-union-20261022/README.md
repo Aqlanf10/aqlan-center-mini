@@ -30,6 +30,19 @@ The schema contract and preflight disclosure were regenerated with the repositor
    - `lib/http-permissions.ts` and `lib/role-routes.ts` only gain the #424 read route (`/api/visits/[id]/financial-context`, GET). It does not grant cashier or accountant access, and it redacts financial identifiers for clinical roles.
    - All 14 appointment/cashier lines in `app/patients/[id]/page.tsx` are identical to `f8df350f`. #424's changes there add a stricter assistant check.
 
+## Review fixes made on this candidate
+- **#426 preview cleanup.** `previewOpeningCorrection` now uses the shared `withFinancialReadSnapshot` helper. A client whose `ROLLBACK` failed is discarded (`release(true)`), and the original error is kept.
+  - Test: `__tests__/postgres/opening-correction-preview-cleanup.test.ts`.
+  - All 3 cases fail on the old code: `preview-cleanup-red-before-fix.log`.
+  - The same defect is still on the #426 PR head; this candidate does not change that head.
+- **#423 zero-settlement wording.** The message is now chosen from the receipt rows actually recorded on the lineage, not from a zero net settlement:
+  - receipts settled → the existing transfer message;
+  - receipts recorded but net zero (for example, fully refunded) → «صافي تسوية السندات المسجّلة على الفاتورة صفر…»;
+  - no receipt at all → «لا يوجد سند…».
+  - The new-direction guard is unchanged: a fully refunded YER invoice still offers only `SAR`, and YER → USD is rejected with `conflict`, with no correction written.
+  - Test: `a YER invoice paid in SAR and then fully refunded…` in `invoice-revision.test.ts`.
+  - It fails on the old wording: `zero-settlement-red-before-fix.log`.
+
 ## Bounded wording
 - #426 dry run: the financial preview reads a read-only snapshot. It is not a claim of zero database writes, because `ensureSchema` may run during a cold bootstrap.
 

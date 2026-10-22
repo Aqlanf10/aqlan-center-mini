@@ -401,6 +401,26 @@ describe("six-direction currency correction of an unpaid, standalone invoice", (
     const {input} = await currencyCommand(invoice.id,"USD");
     await expect(revision.reviseInvoice(invoice.id,input,session)).rejects.toMatchObject({code:"conflict"});
   });
+  it("a YER invoice paid in SAR and then fully refunded reports zero net settlement, not an absent receipt, and stays out of the new directions", async () => {
+    const pristine = await revision.readInvoiceRevision((await fixture(0,"YER")).id,session);
+    expect(pristine.currencyCorrection.message).toMatch(/^لا يوجد سند على الفاتورة/);
+    const invoice = await fixture(0,"YER");
+    const paid = await db.recordPayment({patientId:invoice.patientId,invoiceId:invoice.id,kind:"payment",amountMinor:1000,currency:"SAR",baseCurrency:"YER",
+      exchangeRate:410,method:"cash",note:null,createdBy:session.username,idempotencyKey:`yer-net-zero-paid-${++serial}`});
+    expect(paid.reason).toBeNull();
+    const [receipt] = await q("SELECT id FROM payments WHERE invoice_id=$1",[invoice.id]);
+    const refund = await db.recordPayment({patientId:invoice.patientId,invoiceId:invoice.id,kind:"refund",amountMinor:1000,currency:"SAR",baseCurrency:"YER",
+      exchangeRate:410,method:"cash",note:null,createdBy:session.username,reversalOfId:receipt.id,idempotencyKey:`yer-net-zero-refund-${++serial}`});
+    expect(refund.reason).toBeNull();
+    const view = await revision.readInvoiceRevision(invoice.id,session);
+    expect(view.settledMinor).toBe(0);
+    expect(view.currencyCorrection).toMatchObject({available:true,targets:["SAR"],settledMinor:0});
+    expect(view.currencyCorrection.message).not.toMatch(/لا يوجد سند/);
+    expect(view.currencyCorrection.message).toMatch(/^صافي تسوية السندات المسجّلة على الفاتورة صفر/);
+    const {input} = await currencyCommand(invoice.id,"USD");
+    await expect(revision.reviseInvoice(invoice.id,input,session)).rejects.toMatchObject({code:"conflict"});
+    expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[invoice.patientId])).toEqual([]);
+  });
   it("committed corrections in all five new directions restore identically through the real backup path", async () => {
     const patients: number[] = [];
     for (const {from,to} of directions) {

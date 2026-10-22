@@ -59,17 +59,21 @@ async function contextInTx(client: DbClient, invoiceId: number) {
   // Every distinct target is checked independently. YER -> SAR may carry recorded SAR
   // receipts; any other direction is offered only for a lineage with no receipt at all.
   const options:{currency:Currency;settledMinor:number;accountDueMinor:number}[]=[];
+  const receiptCounts=new Map<Currency,number>();
   let refusal:{message:string;reasonCodes?:InvoiceCurrencyScopeReason[]}|null=null;
   for(const target of currencyCorrectionTargets(invoice.baseCurrency)){
     try{const planned=await prepareInvoiceCurrencyChange(client,invoice,0,target);
       options.push({currency:target,settledMinor:planned.settledMinor,accountDueMinor:(await debtAccountDue(client,invoice.patientId,target)).due});
+      receiptCounts.set(target,planned.receiptCount);
     }catch(error){refusal??={...(error instanceof InvoiceCurrencyScopeError?{reasonCodes:error.reasonCodes}:{}),message:error instanceof Error?error.message:"تعذر إثبات تسوية العملة."};}
   }
   const first=options[0];
   const currencyCorrection={available:options.length>0,targetCurrency:first?.currency??currencyCorrectionTargets(invoice.baseCurrency)[0],
     targets:options.map(option=>option.currency),options,settledMinor:first?.settledMinor??0,accountDueMinor:first?.accountDueMinor??0,
     message:!first?refusal?.message??"تعذر إثبات تسوية العملة."
-      :first.settledMinor>0?"تُنقل تسوية السندات السعودية المثبتة دون حركة نقدية.":"لا يوجد سند على الفاتورة؛ تصدر فاتورة بديلة بالعملة المختارة بالمبالغ التي تكتبها، دون تحويل بسعر صرف.",
+      :first.settledMinor>0?"تُنقل تسوية السندات السعودية المثبتة دون حركة نقدية."
+      :(receiptCounts.get(first.currency)??0)>0?"صافي تسوية السندات المسجّلة على الفاتورة صفر؛ تصدر فاتورة بديلة بالعملة المختارة بالمبالغ التي تكتبها، دون حركة نقدية ودون تحويل بسعر صرف."
+      :"لا يوجد سند على الفاتورة؛ تصدر فاتورة بديلة بالعملة المختارة بالمبالغ التي تكتبها، دون تحويل بسعر صرف.",
     ...(!first&&refusal?.reasonCodes?{reasonCodes:refusal.reasonCodes}:{})};
   const facts = { currencyCorrection, invoice, work,identityCatalog,identityAmendmentAvailable, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
     accountDueMinor,settlementProofHash:position.settlementProofHash, repaymentVersion: schedule?.version ?? 0, repaymentTerms: schedule?.status === "active" ? schedule.terms : { mode: "full", installments: [] } };
