@@ -1,0 +1,150 @@
+# Supplemental, dedicated review branch only. Do not merge this diagnostic
+# workflow into the product branch; full product CI remains independently required.
+name: Supplemental appointment browser acceptance
+
+on:
+  pull_request:
+    branches: [integration/nonfinancial-20261022]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appointment-browser-acceptance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  appointment-browser-acceptance:
+    if: >-
+      github.repository == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'review/appointment-browser-acceptance-hosted' &&
+      github.event.pull_request.base.ref == 'integration/nonfinancial-20261022'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:18.6@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d aqlan_p1_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Published application head of Draft PR #414, never the probe branch.
+      # The live base must still equal this immutable pin or the run fails closed.
+      FINAL_APP_SHA: 'e6bf8c179eb49723392aa843b2101c4b9f755f79'
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      # Same model as the existing #386 hosted acceptance: two isolated
+      # checkouts, a pinned real app, and one explicitly permitted test overlay.
+      - name: Check out live application branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Check out acceptance probes separately
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: appointment-acceptance-probes
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify pinned application and overlay only the journey
+        id: source
+        env:
+          EXPECTED_BASE_REF: integration/nonfinancial-20261022
+          ACTUAL_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EXPECTED_PROBE_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$FINAL_APP_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_PROBE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$ACTUAL_BASE_REF" = "$EXPECTED_BASE_REF"
+          test "$(git rev-parse HEAD)" = "$FINAL_APP_SHA"
+          test "$(git -C appointment-acceptance-probes rev-parse HEAD)" = "$EXPECTED_PROBE_SHA"
+          git diff --quiet HEAD --
+          git -C appointment-acceptance-probes diff --quiet HEAD --
+          probe=__tests__/security-http/appointment-connected-acceptance.test.ts
+          git -C appointment-acceptance-probes ls-files --error-unmatch "$probe" > /dev/null
+          test ! -L "appointment-acceptance-probes/$probe"
+          test ! -L "$probe"
+          cp "appointment-acceptance-probes/$probe" "$probe"
+          rm -rf appointment-acceptance-probes
+          test "$(git rev-parse HEAD)" = "$FINAL_APP_SHA"
+          python3 - <<'PY'
+          import subprocess
+          permitted = {'__tests__/security-http/appointment-connected-acceptance.test.ts'}
+          entries = subprocess.check_output(['git', 'status', '--porcelain=v1', '-z', '--untracked-files=all']).decode().split('\0')
+          changed = {entry[3:] for entry in entries if entry}
+          if not changed or changed - permitted:
+              raise SystemExit('Unexpected acceptance overlay paths: ' + ', '.join(sorted(changed)))
+          print('Verified exactly one test-only overlay; runtime source remains pinned.')
+          PY
+          printf 'app_sha=%s\nprobe_sha=%s\n' "$FINAL_APP_SHA" "$EXPECTED_PROBE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.23.3'
+          package-manager-cache: false
+      # Node 22 bundles npm 10, but the pinned app requires npm 11 in CI.
+      # Match the existing product CI setup; keep the verifier unchanged.
+      - name: Upgrade npm to bulk advisory endpoint
+        run: npm install -g npm@11
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify environment contract
+        run: npm run verify:environment
+      - name: Verify disposable PostgreSQL target and major
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { Client } from 'pg';
+          const url = new URL(process.env.TEST_DATABASE_URL);
+          if (url.protocol !== 'postgresql:' || url.hostname !== '127.0.0.1' || url.port !== '5432' || url.pathname !== '/aqlan_p1_test' || url.username !== 'ci') {
+            throw new Error('Unexpected synthetic database target');
+          }
+          const db = new Client({ connectionString: url.toString(), ssl: false });
+          await db.connect();
+          try {
+            const { rows } = await db.query('SHOW server_version_num');
+            if (Math.floor(Number(rows[0].server_version_num) / 10000) !== 18) throw new Error('PostgreSQL 18 required');
+          } finally { await db.end(); }
+          NODE
+      - name: Build the unchanged pinned application
+        run: npm run build
+      - name: Install hosted Chromium
+        run: npx playwright install --with-deps chromium
+      # Reuse the existing global setup, standalone server, authenticated role
+      # sessions, and synthetic database. No runtime source or new runner.
+      - name: Run connected appointment journeys
+        run: npm run test:security-http -- __tests__/security-http/appointment-connected-acceptance.test.ts
+      - name: Record bounded acceptance result
+        env:
+          VERIFIED_APP_SHA: ${{ steps.source.outputs.app_sha }}
+          VERIFIED_PROBE_SHA: ${{ steps.source.outputs.probe_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERIFIED_APP_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERIFIED_PROBE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          {
+            printf 'Application SHA: %s\n\nAcceptance SHA: %s\n\n' "$VERIFIED_APP_SHA" "$VERIFIED_PROBE_SHA"
+            printf 'PASS: connected appointment browser and HTTP journeys on isolated PostgreSQL 18.\n\n'
+            printf 'Canonical rows checked; seven financial-table fingerprints unchanged.\n\n'
+            printf 'All external browser destinations intercepted. Manual confirmation is staff attestation, not delivery proof.\n\n'
+            printf 'Supplemental only: no Production access, deployment, or replacement of required whole-product CI.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
