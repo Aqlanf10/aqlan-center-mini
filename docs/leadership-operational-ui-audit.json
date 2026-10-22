@@ -1,0 +1,8 @@
+{
+  "description": "Scoped review of the existing executive page and its new read-only operational panel, not a whole-application compliance profile. Use the same configuration on the baseline and candidate.",
+  "profile": "product-admin",
+  "sourceRoots": ["app/executive", "components/leadership"],
+  "canonicalMap": "LEADERSHIP_OPERATIONS.md",
+  "requiredCapabilities": ["Date"],
+  "ownership": { "Date": "native" }
+}

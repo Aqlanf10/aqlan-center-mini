@@ -64,3 +64,9 @@ The existing Summary inline feedback region remains the local feedback owner. Re
 - Never describe an uncertain request as a failed or successful booking.
 - Do not clear historical no-show/cancelled status, silently reschedule it, or start a visit from it.
 - Verify changes with the Summary SSR and rebooking hook tests. Browser checks are a separate release activity; static checks do not prove responsive layout or native picker behavior.
+
+## Leadership operational overview
+
+`components/leadership/LeadershipOperationalOverview.tsx` extends the existing executive page with a read-only panel, not another Today workflow. Source filters are labeled Appointments and Referrals; they never imply assignment. Status, a patient link, exact cohort totals, source freshness and unknown/error states remain visible. Scope/ownership explanations live in one native disclosure; individual rebooking evidence is optionally expandable.
+
+The existing native date control remains browser/OS-owned here as in the executive period and Summary controls. The app owns its visible label, ISO clinic-day value and validation. Native `details`/`summary` owns disclosure keyboard and expanded-state semantics. Preserve existing clinic typography, colors, focus styling and natural page flow. Narrow-screen browser acceptance remains a separate hosted gate.
