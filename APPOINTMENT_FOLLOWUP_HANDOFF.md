@@ -35,9 +35,9 @@ After PG18 evidence and review, proposed touch points are:
 
 - Read `AGENTS.md`, local Next route-handler guide, PostgreSQL global setup, safe-target guard and related rebooking/merge/reset tests.
 - `.agents/skills` was absent from this Git checkout, the authorized doctor checkout and inspected ancestor locations. No substitute repository skill instructions were invented.
-- After the expected-patient identity fix, focused follow-up and adjacent audit suites passed: **6 files, 52 tests** (Node 24.15.0). Repository requires Node 22, so this is provisional runtime evidence. No tests or SQL assertions were weakened.
+- After the combined review fixes, focused follow-up and adjacent audit suites passed: **6 files, 58 tests** (Node 24.15.0). Repository requires Node 22, so this is provisional runtime evidence. No tests or SQL assertions were weakened.
 - Focused ESLint: passed after repairing an incomplete npm install and fixing transaction cleanup structure.
-- Final full nonincremental typecheck after the expected-patient identity fix: passed (exit 0, empty diagnostic log), on the current foundation and test files. Node remains 24.15.0 rather than the repository-required Node 22.
+- Final full nonincremental typecheck after the combined lock/eligibility/input review fixes: passed (exit 0, empty diagnostic log), on the current foundation and test files. Node remains 24.15.0 rather than the repository-required Node 22.
 - PostgreSQL suite: **not executed**. The existing global setup refused startup because neither `TEST_DATABASE_URL` nor `DATABASE_URL` was configured. No alternate database, PGlite fallback, target-guard change, secret-file read or environment switch was used.
 - Locked dependency installation initially crashed and left a corrupt dependency. Retrying `npm ci --ignore-scripts --maxsockets=1` succeeded without package/lockfile changes.
 - Adjacent audit test initially failed solely because Windows checkout converted an unchanged migration to CRLF. That file was restored from Git with LF; no SQL/assertion was modified.
@@ -48,7 +48,7 @@ The authored PG suite covers concurrency, exact retries/content conflicts/actor 
 
 Still required: real reset integration (including saved and unsaved pre-reset intents and reused IDs), controlled clinic-midnight tests, merge/reset/session/attendance races, restored-backup identity, nonempty financial/clinical sentinel fingerprints, HTTP permission/CSRF tests and browser lost-response/actor-switch checks. The current fingerprint assertion includes several empty financial tables and is not sufficient release evidence by itself.
 
-There is no active API, recall editor, leadership panel, numbered migration, PR, deployment, merge, WhatsApp send or paid-service activation. `lib/db.ts`, reset registry, permissions, financial writers, booking guards and HR locks remain unchanged.
+There is no active API, recall editor, leadership panel, numbered migration, deployment, merge, WhatsApp send or paid-service activation. Draft #434 is for review/hosted CI only. `lib/db.ts`, reset registry, permissions, financial writers, booking guards and HR locks remain unchanged.
 
 ## Design review details
 
@@ -64,4 +64,13 @@ The same clone and branch were recovered without recreation. The old final TypeS
 
 ## Review delivery gate
 
-The owner authorized a local independent commit and a Draft PR only after available Node 22 checks pass. Only Node 24.15.0 was found on PATH and in the inspected standard version-manager locations (Roaming/nvm, Local/fnm, ~/.nvm, ~/.fnm, C:/tools/nodejs). No runtime was downloaded or system settings changed. Therefore no push or Draft PR is performed on this evidence. PG18 remains unexecuted. The eventual review title must explicitly state: schema unregistered, API/UI inactive, PG unexecuted; its base must be the #429 branch, not main.
+Only Node 24.15.0 was found on PATH and in the inspected standard version-manager locations (Roaming/nvm, Local/fnm, ~/.nvm, ~/.fnm, C:/tools/nodejs). No runtime was downloaded or system settings changed. The owner subsequently authorized push and Draft #434 so the existing hosted CI can establish Node 22/PG evidence. The PR targets #429's branch and explicitly states: schema unregistered, API/UI inactive, PG unverified. Local PG18 remains unexecuted.
+
+## Combined review fixes after 3a80d8a
+
+- The followup row lock is NOWAIT. The canonical patient merge locks patients then updates FKs alphabetically, so it can hold a followup before requesting its appointment. Refusing to wait at this exact point breaks the reverse wait edge and rolls back the followup transaction as FOLLOWUP_BUSY. No merge/booking/HR writer was changed.
+- A deterministic PG test calls the real mergeDuplicatePatient and pauses it with an AFTER UPDATE trigger plus an advisory barrier after acquiring the followup row. It observes pg_locks/pg_blocking_pids rather than relying on execution-time thresholds, expects FOLLOWUP_BUSY with unchanged task/event/receipt/audit snapshots, releases the barrier and expects merge completion. This is authored evidence only until hosted PG execution; no local red/green claim is made.
+- Writer and queue share a read-only eligibility predicate: both status-log directions, direct visits, source-linked planned rows in either pointer direction, their visit pointers and clinical completion witnesses. No sibling-plan scan is used. A canonical replacement's later visit does not become attendance for the original no_show; an inconsistent retained pointer requires review rather than silently reclassifying history. No lifecycle is changed.
+- Queue entries with contradictory attendance or other lost eligibility remain visible with source_ineligible_review_required and contactBlocked=true. Missing-source behavior and immutable history are retained.
+- Status must be a JSON string. Arrays and objects with non-callable toString are rejected as INVALID_FOLLOWUP before any database connection.
+- Remaining contract/design review, true PostgreSQL execution, reset integration, controlled midnight and broader concurrency/restore/HTTP/browser evidence are still open. These fixes are not a declaration that all findings are closed.

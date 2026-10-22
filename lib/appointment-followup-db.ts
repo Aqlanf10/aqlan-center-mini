@@ -6,6 +6,7 @@ import { canAccessPatient } from "./patient-access";
 import { PURCHASE_RESET_FENCE } from "./clinic-reset";
 import { PLANNED_REBOOK_GENERATION_SQL } from "./planned-visit-rebooking-contract";
 import { parseFollowupCommand, followupFingerprintInput } from "./appointment-followup-contract";
+import { followupEligibilitySql } from "./appointment-followup-eligibility";
 
 export class FollowupRejected extends Error {
   constructor(readonly status: 400 | 401 | 403 | 404 | 409, readonly code: string) { super(code); }
@@ -77,20 +78,21 @@ export async function readAppointmentFollowupQueue(admitted: SessionPayload) {
     const { rows } = await client.query<{
       id: number; revision: number; source_appointment_id: number; source_created_at: string; generation: string;
       assignee_user_id: number; due_at: Date; outcome: string; next_step: string; overdue: boolean;
-      patient_id: number | null; full_name: string | null;
+      patient_id: number | null; full_name: string | null; eligible: boolean;
     }>(`SELECT f.id,f.revision,f.source_appointment_id,f.source_created_at,f.generation,
       f.assignee_user_id,f.due_at,f.outcome,f.next_step,f.due_at < clock_timestamp() AS overdue,
-      p.id AS patient_id,p.full_name
+      p.id AS patient_id,p.full_name,${followupEligibilitySql("$1")} AS eligible
       FROM appointment_followups f
       LEFT JOIN appointments a ON a.id=f.appointment_id AND a.id=f.source_appointment_id
         AND EXTRACT(EPOCH FROM a.created_at)::text=f.source_created_at AND a.patient_id=f.patient_id
       LEFT JOIN patients p ON p.id=a.patient_id
       WHERE f.generation=${PLANNED_REBOOK_GENERATION_SQL} AND f.status='open'
-      ORDER BY f.due_at,f.id LIMIT 101`);
+      ORDER BY f.due_at,f.id LIMIT 101`, [CLINIC_TIME_ZONE]);
     if (session.expiresAt < Date.now()) reject(401, "FOLLOWUP_SESSION_CHANGED");
     return { items: rows.slice(0, 100).map(row => ({ ...row,
-      sourceState: row.patient_id === null ? "source_unavailable_review_required" as const : "available" as const,
-      contactBlocked: row.patient_id === null,
+      sourceState: row.patient_id === null ? "source_unavailable_review_required" as const
+        : !row.eligible ? "source_ineligible_review_required" as const : "available" as const,
+      contactBlocked: row.patient_id === null || !row.eligible,
       // First slice never claims a proved replacement booking.
       rebookingBlocked: true,
       sourceIdentity: row.patient_id === null ? null : {
@@ -102,7 +104,7 @@ export async function readAppointmentFollowupQueue(admitted: SessionPayload) {
 }
 
 /** No runtime schema bootstrap here. This foundation is dormant until registration.
- * Lock order: shared reset fence -> actor/key -> source -> task -> users NOWAIT ->
+ * Lock order: shared reset fence -> actor/key -> source -> task NOWAIT -> users NOWAIT ->
  * patient NOWAIT. Conflicting merge/session writers fail closed without lock inversion.
  * No booking, attendance, visit, payment or HR writer is invoked. */
 export async function saveAppointmentFollowup(value: unknown, admitted: SessionPayload): Promise<FollowupSaved> {
@@ -118,18 +120,17 @@ export async function saveAppointmentFollowup(value: unknown, admitted: SessionP
       await client.query("SELECT id FROM appointments WHERE id=$1 FOR UPDATE", [command.appointmentId]);
       const { rows: [source] } = await client.query<Source>(`SELECT a.id, a.patient_id,
         EXTRACT(EPOCH FROM a.created_at)::text AS source_created_at,
-        (a.status='no_show' AND a.arrived_at IS NULL AND a.started_at IS NULL
-          AND a.scheduled_date + a.scheduled_time <= clock_timestamp() AT TIME ZONE $2
-          AND NOT EXISTS (SELECT 1 FROM visits v WHERE v.appointment_id=a.id)
-          AND NOT EXISTS (SELECT 1 FROM appointment_status_log l WHERE l.appointment_id=a.id
-            AND l.to_status IN ('arrived','in_progress','done'))) AS eligible
+        ${followupEligibilitySql("$2")} AS eligible
         FROM appointments a WHERE a.id=$1`, [command.appointmentId, CLINIC_TIME_ZONE]);
       const { rows: [generation] } = await client.query<{ value: string }>(`SELECT ${PLANNED_REBOOK_GENERATION_SQL} AS value`);
       if (generation.value !== command.generation) reject(409, "FOLLOWUP_GENERATION_CHANGED");
       if (!source || source.source_created_at !== command.sourceCreatedAt
         || source.patient_id !== command.expectedPatientId) reject(409, "FOLLOWUP_SOURCE_CHANGED");
+      // Patient merge updates FKs alphabetically: followups before appointments.
+      // We already hold the appointment, so never wait on its followup row:
+      // abort with 55P03/FOLLOWUP_BUSY and release the source for the merge.
       const { rows: [task] } = await client.query<Task>(`SELECT id, patient_id, appointment_id, revision, status
-        FROM appointment_followups WHERE source_appointment_id=$1 AND source_created_at=$2 AND generation=$3 FOR UPDATE`,
+        FROM appointment_followups WHERE source_appointment_id=$1 AND source_created_at=$2 AND generation=$3 FOR UPDATE NOWAIT`,
       [command.appointmentId, command.sourceCreatedAt, command.generation]);
       if (task && (task.appointment_id !== source.id || task.patient_id !== source.patient_id)) reject(409, "FOLLOWUP_SOURCE_CHANGED");
       // Prelock accounts NOWAIT before canonical session revalidation (which uses SHARE).

@@ -32,7 +32,7 @@ export function parseFollowupCommand(value: unknown): FollowupCommand | null {
     || typeof v.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/.test(v.requestId)
     || typeof v.dueAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v.dueAt)
     || !Number.isFinite(Date.parse(v.dueAt)) || new Date(v.dueAt).toISOString() !== v.dueAt
-    || !["open", "closed"].includes(String(v.status))
+    || typeof v.status !== "string" || !["open", "closed"].includes(v.status)
     || !FOLLOWUP_OUTCOMES.includes(v.outcome as FollowupOutcome)
     || !FOLLOWUP_NEXT_STEPS.includes(v.nextStep as FollowupNextStep)) return null;
   const closed = v.status === "closed";

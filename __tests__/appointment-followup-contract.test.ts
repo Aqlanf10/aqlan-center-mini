@@ -16,6 +16,7 @@ describe("bounded patient-free followup contract", () => {
   it.each([
     { patientName: "Synthetic only" }, { phone: "synthetic" }, { note: "synthetic" }, { appointmentId: "1" },
     { expectedPatientId: undefined }, { expectedPatientId: "7" }, { expectedPatientId: 0 },
+    { status: ["open"] }, { status: { toString: null } },
     { sourceCreatedAt: "1700000000.123" }, { generation: "" }, { expectedRevision: -1 }, { expectedRevision: 2147483647 },
     { assigneeUserId: 0 }, { dueAt: "2030-02-30T00:00:00.000Z" }, { dueAt: "2030-01-01T00:00:00" },
     { outcome: "whatsapp_sent" }, { outcome: "rebooked" }, { status: "closed", outcome: "pending", nextStep: "none" },

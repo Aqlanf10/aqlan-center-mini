@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, expect, it } from "vitest";
+import { setTimeout as pause } from "node:timers/promises";
 import { assertRealPostgresUrl, stubPostgresEnv, dropPublicSchema } from "./_setup";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
@@ -111,6 +112,59 @@ it("rejects future no_show and attendance evidence", async () => {
   const g = await fixture(); await q("UPDATE appointments SET arrived_at=NOW() WHERE id=$1", [g.input.appointmentId]);
   await expect(save(g.input, reception)).rejects.toMatchObject({ code: "FOLLOWUP_SOURCE_NOT_NO_SHOW" });
 });
+const contradictoryEvidence = ["log_from", "log_to", "planned_inverse_visit", "planned_forward_visit", "planned_visit_pointer"] as const;
+async function addAttendanceEvidence(f: Awaited<ReturnType<typeof fixture>>, evidence: typeof contradictoryEvidence[number]) {
+  await q("UPDATE appointments SET arrived_at=NULL,started_at=NULL WHERE id=$1", [f.input.appointmentId]);
+  if (evidence === "log_from" || evidence === "log_to") {
+    await q(`INSERT INTO appointment_status_log(appointment_id,from_status,to_status,actor)
+      VALUES ($1,$2,$3,'synthetic')`, [f.input.appointmentId, evidence === "log_from" ? "arrived" : "booked", evidence === "log_from" ? "no_show" : "arrived"]);
+    return;
+  }
+  const [planned] = await q(`INSERT INTO planned_visits(patient_id,sequence,title,status,appointment_id)
+    VALUES ($1,1,'Synthetic source-linked session','scheduled',$2) RETURNING id`,
+  [f.patientId, evidence === "planned_forward_visit" ? null : f.input.appointmentId]);
+  if (evidence === "planned_forward_visit") await q("UPDATE appointments SET planned_visit_id=$2 WHERE id=$1", [f.input.appointmentId, planned.id]);
+  const [visit] = await q(`INSERT INTO visits(patient_id,patient_name,status,planned_visit_id)
+    VALUES ($1,'Synthetic attendance','waiting',$2) RETURNING id`, [f.patientId, evidence === "planned_visit_pointer" ? null : planned.id]);
+  if (evidence === "planned_visit_pointer") await q("UPDATE planned_visits SET visit_id=$2 WHERE id=$1", [planned.id, visit.id]);
+}
+it.each(contradictoryEvidence)("rejects source-linked %s evidence on creation without any partial write", async evidence => {
+  const f = await fixture(); await addAttendanceEvidence(f, evidence);
+  const before = await followupSnapshot();
+  await expect(save(f.input, reception)).rejects.toMatchObject({ status: 409, code: "FOLLOWUP_SOURCE_NOT_NO_SHOW" });
+  expect(await followupSnapshot()).toEqual(before);
+});
+it.each(contradictoryEvidence)("queue blocks contact on %s while preserving source history for review", async evidence => {
+  const f = await fixture(); const first = await save(f.input, reception);
+  await addAttendanceEvidence(f, evidence);
+  const before = await followupSnapshot();
+  expect((await queue(reception)).items.find(row => row.id === first.followupId)).toMatchObject({
+    sourceState: "source_ineligible_review_required", contactBlocked: true, rebookingBlocked: true,
+  });
+  expect(await followupSnapshot()).toEqual(before);
+});
+it.each([false, true])("replacement visit does not rewrite original no_show eligibility (existing followup=%s)", async existing => {
+  const f = await fixture();
+  if (existing) await save(f.input, reception);
+  const [replacement] = await q(`INSERT INTO appointments(patient_id,scheduled_date,scheduled_time,status,arrived_at)
+    VALUES ($1,'2000-01-02','10:00','arrived',NOW()) RETURNING id`, [f.patientId]);
+  // Final pointer shape of #420: the planned visit points to the replacement;
+  // the original appointment's planned_visit_id is detached, preserving history.
+  const [planned] = await q(`INSERT INTO planned_visits(patient_id,sequence,title,status,appointment_id)
+    VALUES ($1,1,'Synthetic replacement session','in_progress',$2) RETURNING id`, [f.patientId, replacement.id]);
+  await q("UPDATE appointments SET planned_visit_id=$2 WHERE id=$1", [replacement.id, planned.id]);
+  const [visit] = await q(`INSERT INTO visits(patient_id,patient_name,status,appointment_id,planned_visit_id)
+    VALUES ($1,'Synthetic replacement visit','waiting',$2,$3) RETURNING id`, [f.patientId, replacement.id, planned.id]);
+  await q("UPDATE planned_visits SET visit_id=$2 WHERE id=$1", [planned.id, visit.id]);
+  const sourceBefore = await q("SELECT to_jsonb(a) AS value FROM appointments a WHERE id=$1", [f.input.appointmentId]);
+  const result = await save({ ...f.input, expectedRevision: existing ? 1 : 0,
+    requestId: f.input.requestId + "-after-replacement" }, reception);
+  expect((await queue(reception)).items.find(row => row.id === result.followupId)).toMatchObject({ sourceState: "available", contactBlocked: false });
+  expect(await q("SELECT to_jsonb(a) AS value FROM appointments a WHERE id=$1", [f.input.appointmentId])).toEqual(sourceBefore);
+  // An ambiguous stale forward pointer requires review, not a claim of attendance.
+  await q("UPDATE appointments SET planned_visit_id=$2 WHERE id=$1", [f.input.appointmentId, planned.id]);
+  expect((await queue(reception)).items.find(row => row.id === result.followupId)).toMatchObject({ sourceState: "source_ineligible_review_required", contactBlocked: true });
+});
 it.each(["doctor", "assistant", "cashier", "accountant"])("does not expand access to %s", async role => {
   const f = await fixture(); await expect(save(f.input, await actor(role))).rejects.toMatchObject({ status: 403 });
 });
@@ -154,6 +208,65 @@ it("canonical patient merge moves live FKs without updating immutable events or 
   // Do not silently rewrite an old attempt to the merged patient's identity.
   await expect(save({ ...f.input, ...refreshed }, reception)).rejects.toMatchObject({ status: 409, code: "FOLLOWUP_KEY_CONFLICT" });
   expect(await followupSnapshot()).toEqual(afterMerge);
+});
+it("does not wait on the followup row held by canonical patient merge", async () => {
+  const f = await fixture(); const target = await fixture(); const first = await save(f.input, reception);
+  const before = await followupSnapshot();
+  const gate = await db.getPool().connect();
+  const gateClass = 737434;
+  let merging: ReturnType<typeof db.mergeDuplicatePatient> | undefined;
+  let saving: Promise<unknown> | undefined;
+  let blockedSavePid: number | undefined;
+  await gate.query("SELECT pg_advisory_lock($1,$2)", [gateClass, first.followupId]);
+  // AFTER UPDATE guarantees the merge owns the followup row before pausing,
+  // while its alphabetically later appointments update has not begun.
+  await q(`CREATE FUNCTION synthetic_followup_merge_gate() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN PERFORM pg_advisory_xact_lock(737434, NEW.id); RETURN NEW; END $$;
+    CREATE TRIGGER synthetic_followup_merge_gate AFTER UPDATE OF patient_id ON appointment_followups
+    FOR EACH ROW WHEN (OLD.patient_id IS DISTINCT FROM NEW.patient_id)
+    EXECUTE FUNCTION synthetic_followup_merge_gate()`);
+  try {
+    merging = db.mergeDuplicatePatient(f.patientId, target.patientId, { actor: "synthetic-admin" });
+    // Handle rejection immediately even if a setup assertion fails first.
+    void merging.catch(() => {});
+    let mergePid: number | undefined;
+    const gateDeadline = Date.now() + 10000;
+    while (!mergePid && Date.now() < gateDeadline) {
+      const [waiter] = await q(`SELECT pid FROM pg_locks WHERE locktype='advisory'
+        AND classid=$1::oid AND objid=$2::oid AND objsubid=2 AND NOT granted`, [gateClass, first.followupId]);
+      mergePid = waiter?.pid;
+      if (!mergePid) await pause(10);
+    }
+    expect(mergePid, "real merge reached the held followup row before appointments").toBeDefined();
+    let outcome: { error: unknown } | { value: unknown } | undefined;
+    saving = save({ ...f.input, expectedRevision: 1, requestId: f.input.requestId + "-merge-race", outcome: "no_answer" }, reception)
+      .then(value => { outcome = { value }; }, error => { outcome = { error }; });
+    const saveDeadline = Date.now() + 10000;
+    while (!outcome && !blockedSavePid && Date.now() < saveDeadline) {
+      const [blocked] = await q(`SELECT pid FROM pg_stat_activity WHERE datname=current_database()
+        AND $1::int = ANY(pg_blocking_pids(pid))
+        AND query LIKE '%FROM appointment_followups WHERE source_appointment_id%'`, [mergePid]);
+      blockedSavePid = blocked?.pid;
+      if (!outcome && !blockedSavePid) await pause(10);
+    }
+    // The old blocking FOR UPDATE is observably waiting here, before patient NOWAIT.
+    // This assertion is lock-state based, not a fragile elapsed-time threshold.
+    expect(blockedSavePid, "followup must not wait on merge while holding its appointment").toBeUndefined();
+    expect(outcome).toMatchObject({ error: { status: 409, code: "FOLLOWUP_BUSY" } });
+    expect(await followupSnapshot()).toEqual(before);
+    await gate.query("SELECT pg_advisory_unlock($1,$2)", [gateClass, first.followupId]);
+    expect(await merging).toMatchObject({ ok: true });
+    expect((await q("SELECT patient_id FROM appointments WHERE id=$1", [f.input.appointmentId]))[0].patient_id).toBe(target.patientId);
+    expect(await q("SELECT revision FROM appointment_followup_events WHERE followup_id=$1", [first.followupId])).toEqual([{ revision: 1 }]);
+    expect(await q("SELECT event_id FROM appointment_followup_receipts WHERE request_id=$1", [f.input.requestId + "-merge-race"])).toEqual([]);
+  } finally {
+    // On a regression, cancel only the observed test writer blocked by this merge.
+    if (blockedSavePid) await q("SELECT pg_cancel_backend($1)", [blockedSavePid]);
+    await gate.query("SELECT pg_advisory_unlock($1,$2)", [gateClass, first.followupId]);
+    gate.release();
+    await Promise.allSettled([...(saving ? [saving] : []), ...(merging ? [merging] : [])]);
+    await q("DROP TRIGGER synthetic_followup_merge_gate ON appointment_followups; DROP FUNCTION synthetic_followup_merge_gate()");
+  }
 });
 it("queue reads live context without creating tasks or counting a selected day", async () => {
   const f = await fixture(); const before = await q("SELECT count(*)::int AS n FROM appointment_followups");
