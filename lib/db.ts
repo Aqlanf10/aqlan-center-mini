@@ -4467,6 +4467,7 @@ export async function transitionAppointment(
   id: number,
   to: AppointmentStatus,
   who: TransitionActor,
+  admission: { pastBookingOnly?: boolean } = {},
 ): Promise<TransitionResult> {
   await ensureSchema();
 
@@ -4494,6 +4495,36 @@ export async function transitionAppointment(
     if (!canTransition(from, to)) {
       await client.query("ROLLBACK");
       return { ok: false, message: transitionRejectionMessage(from, to), current: from };
+    }
+
+    // Check admission only after acquiring the appointment lock. A separate
+    // statement also sees visits committed while that lock was waiting.
+    if (to === "no_show" || admission.pastBookingOnly) {
+      const { rows: [eligibility] } = await client.query<{
+        past_date: boolean; started: boolean; arrival_evidence: boolean; visit_evidence: boolean;
+      }>(
+        `SELECT scheduled_date < (clock_timestamp() AT TIME ZONE $2)::date AS past_date,
+                scheduled_date + scheduled_time <= (clock_timestamp() AT TIME ZONE $2) AS started,
+                (arrived_at IS NOT NULL OR started_at IS NOT NULL OR ended_at IS NOT NULL) AS arrival_evidence,
+                EXISTS (SELECT 1 FROM visits v
+                         WHERE (v.appointment_id = a.id OR EXISTS (
+                           SELECT 1 FROM planned_visits pv
+                            WHERE (pv.id = a.planned_visit_id OR pv.appointment_id = a.id)
+                              AND (pv.visit_id = v.id OR v.planned_visit_id = pv.id)
+                         ))
+                          AND (v.status IN ('waiting', 'called', 'in_chair', 'done')
+                            OR v.signed_at IS NOT NULL OR v.finished_at IS NOT NULL)) AS visit_evidence
+           FROM appointments a WHERE a.id = $1`,
+        [id, CLINIC_TIME_ZONE],
+      );
+      if (admission.pastBookingOnly && (from !== "booked" || !eligibility.past_date)) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "هذا الإجراء لموعد محجوز مضى يومه فقط.", current: from };
+      }
+      if (to === "no_show" && (!eligibility.started || eligibility.arrival_evidence || eligibility.visit_evidence)) {
+        await client.query("ROLLBACK");
+        return { ok: false, message: "لا يُسجّل الغياب قبل وقت الموعد أو بعد تسجيل حضور المريض أو وجود زيارة مرتبطة به.", current: from };
+      }
     }
 
     /* والشرط يبقى في الجملة مع ذلك: القفل يحمي من متزامنٍ على الصفّ، والشرط يحمي
@@ -7460,31 +7491,18 @@ export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]>
 
 /**
  * يُغلق موعدًا مضى: «تمّت» أو «لم يحضر».
- *
- * الشرطان في جملة الـUPDATE نفسها لا في فحصٍ قبلها: بين القراءة والكتابة قد تكون
- * الاستقبالُ سجّلت وصوله من شاشةٍ أخرى، فيُكتب «لم يحضر» على مريضٍ جالسٍ على
- * الكرسي — وتلك زيارةٌ حيّة معلّقة بموعدٍ يقول إن صاحبه لم يأتِ. وشرطُ «مضى»
- * يمنع إغلاق موعد الغد من قائمةٍ قديمة بقيت مفتوحة في متصفّح.
+ * فحص التاريخ والحالة تحت قفل الموعد في معاملة الانتقال نفسها، فلا يتجاوز
+ * نقلٌ متزامن إلى المستقبل هذا الحارس، ولا يكتب الغياب فوق وصول مسجّل.
  */
 export async function resolvePastBooking(
   id: number,
   outcome: "done" | "no_show",
   who: TransitionActor = { actor: "الاستقبال" },
 ): Promise<boolean> {
-  await ensureSchema();
-  /* شرطٌ زائدٌ على شرط الحالة: هذا الباب لِما **مضى** ولم يُغلَق. موعد اليوم يُغلق
-     من شاشة اليوم لا من قائمة المعلّقة، وإلّا أُغلق موعدٌ لم يحن بعد. */
-  const { rows } = await getPool().query<{ id: number }>(
-    `SELECT id FROM appointments
-      WHERE id = $1 AND status = 'booked'
-        AND scheduled_date < (NOW() AT TIME ZONE $2)::date`,
-    [id, CLINIC_TIME_ZONE],
-  );
-  if (!rows[0]) return false;
   const result = await transitionAppointment(id, outcome, {
     ...who,
     reason: who.reason ?? null,
-  });
+  }, { pastBookingOnly: true });
   return result.ok;
 }
 
