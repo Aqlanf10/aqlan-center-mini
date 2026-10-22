@@ -301,21 +301,54 @@ function StatementTab() {
         ) : (
           <ul className="divide-y divide-slate-100">
             {feed.invoices.map((invoice) => (
-              <li key={invoice.invoiceNumber} className="flex items-center justify-between py-2 text-sm">
-                <span className="font-bold">{invoice.invoiceNumber}</span>
-                <span className="text-slate-500">{friendlyDate(invoice.createdAt.slice(0, 10))}</span>
-                <span className="tabular-nums">
-                  {formatMoney(invoice.netMinor, invoice.baseCurrency)}
-                  {invoice.discountMinor > 0 && <small className="text-slate-500"> (بعد خصم {formatMoney(invoice.discountMinor, invoice.baseCurrency)})</small>}
-                </span>
-                <span className={invoice.status === "paid" ? "text-success-800" : "text-warning-700"}>
-                  {invoice.status === "paid" ? "مسدّدة" : "مفتوحة"}
-                </span>
+              <li key={invoice.invoiceNumber} className="py-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold">{invoice.invoiceNumber}</span>
+                  <span className="text-slate-500">{friendlyDate(invoice.createdAt.slice(0, 10))}</span>
+                  <span className="tabular-nums">
+                    {formatMoney(invoice.netMinor, invoice.baseCurrency)}
+                    {invoice.discountMinor > 0 && <small className="text-slate-500"> (بعد خصم {formatMoney(invoice.discountMinor, invoice.baseCurrency)})</small>}
+                  </span>
+                  <span className={invoice.status === "paid" ? "text-success-800" : "text-warning-700"}>
+                    {invoice.status === "paid" ? "مسدّدة" : "مفتوحة"}
+                  </span>
+                </div>
+                {/* The same treatment lines as the printed statement, at the stored invoice prices. */}
+                {invoice.items.length === 0 ? (
+                  <p className="mt-1 text-xs text-slate-500">تفاصيل البنود غير مسجلة لهذه الفاتورة</p>
+                ) : (
+                  <table className="mt-2 w-full table-fixed text-xs" aria-label={`بنود الفاتورة ${invoice.invoiceNumber}`}>
+                    <thead className="text-slate-500">
+                      <tr><th className="w-1/2 text-start font-bold">العلاج / البيان</th><th className="text-end font-bold">الكمية</th>
+                        <th className="text-end font-bold">سعر الوحدة</th><th className="text-end font-bold">إجمالي البند</th></tr>
+                    </thead>
+                    <tbody>
+                      {invoice.items.map((item, index) => (
+                        <tr key={index}>
+                          <td className="break-words">{item.description}</td>
+                          <td className="text-end tabular-nums">{item.quantity}</td>
+                          <td className="text-end tabular-nums">{formatMoney(item.unitPriceMinor, invoice.baseCurrency)}</td>
+                          <td className="text-end tabular-nums">{formatMoney(item.totalMinor, invoice.baseCurrency)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      {feed.agreements.map((agreement, index) => (
+        <div key={index} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
+          <h2 className="mb-2 text-sm font-black text-navy-900">اتفاق العلاج — {agreement.title}</h2>
+          <p className="flex justify-between"><span>إجمالي الاتفاق</span><span className="tabular-nums">{formatMoney(agreement.totalMinor, agreement.currency)}</span></p>
+          <p className="flex justify-between"><span>المسدّد من الاتفاق</span><span className="tabular-nums">{formatMoney(agreement.paidMinor, agreement.currency)}</span></p>
+          <p className="flex justify-between font-bold"><span>المتبقي من الاتفاق</span><span className="tabular-nums">{formatMoney(agreement.remainingMinor, agreement.currency)}</span></p>
+          <p className="mt-1 text-xs text-slate-500">المتبقي من الاتفاق يشمل الأقساط المستقبلية ولا يعني أن كامل المبلغ مستحق الآن.</p>
+        </div>
+      ))}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-black text-navy-900">الدفعات</h2>

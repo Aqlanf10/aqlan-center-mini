@@ -5,8 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * FIN-INT-8: the patient portal statement and the printed statement are the same
  * statement. A cancelled invoice is not listed, the invoice amount is its net after
- * the recorded discount, reversals carry the same label, and nothing internal (staff
- * usernames, notes, shifts, methods, row ids, line items) reaches the patient.
+ * the recorded discount, reversals carry the same label, the current invoices carry the
+ * printed treatment lines, active agreements carry the printed total/paid/remaining, and
+ * nothing internal (staff usernames, notes, shifts, methods, row, service, doctor or
+ * lineage ids, cancelled lines) reaches the patient.
  * Synthetic presentation evidence only: no live patient data or database writes.
  */
 
@@ -22,14 +24,14 @@ vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
 
 import { GET } from "../app/api/portal/statement/route";
 import StatementPage from "../app/print/statement/[id]/page";
-import type { Invoice, OpeningBalance, Payment } from "../lib/db";
+import type { Invoice, OpeningBalance, Payment, TreatmentPlan } from "../lib/db";
 import { ledgerBalancesByCurrency } from "../lib/db";
 import { formatMoney } from "../lib/money";
 import { portalStatementView } from "../lib/portal-statement";
 import { statementPaymentLabel as printLabel } from "../app/print/statement/[id]/presentation";
 
 const INTERNAL = ["STAFF-USERNAME-SECRET", "INTERNAL-RECEIPT-NOTE", "INTERNAL-INVOICE-NOTE", "INTERNAL-OPENING-NOTE",
-  "CANCELLED-OLD-TREATMENT", "SYN-CANCELLED-ORIGINAL", "LINE-ITEM-DETAIL", "+967-700-000-000"];
+  "CANCELLED-OLD-TREATMENT", "SYN-CANCELLED-ORIGINAL", "+967-700-000-000", "SUM-OF-ITEMS-PLAN", "COMPLETED-AGREEMENT"];
 
 function invoice(overrides: Partial<Invoice> = {}): Invoice {
   return { id: 2, invoiceNumber: "SYN-CORRECTED-2", patientId: 17, patientName: "Synthetic patient",
@@ -61,6 +63,17 @@ function ledger() {
     openings: [opening] };
 }
 
+/** Synthetic plans: one active agreement, one item-summed plan and one completed agreement. */
+function plans() {
+  const progress = (totalMinor: number, paidMinor: number) => ({ totalMinor, dueToDateMinor: totalMinor, paidMinor,
+    remainingMinor: totalMinor - paidMinor, overdueMinor: 0, nextDueDate: null, nextDueAmountMinor: 0, paidCount: 0 });
+  return [
+    { id: 41, title: "SYN-ORTHO-AGREEMENT", status: "active", totalFromItems: false, totalMinor: 300000, baseCurrency: "SAR", progress: progress(300000, 120000) },
+    { id: 42, title: "SUM-OF-ITEMS-PLAN", status: "active", totalFromItems: true, totalMinor: 50000, baseCurrency: "YER", progress: progress(50000, 0) },
+    { id: 43, title: "COMPLETED-AGREEMENT", status: "completed", totalFromItems: false, totalMinor: 90000, baseCurrency: "USD", progress: progress(90000, 90000) },
+  ] as unknown as TreatmentPlan[];
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.portal.mockResolvedValue({ patientId: 17 });
@@ -81,9 +94,10 @@ describe("portal statement is the printed statement, without internal data", () 
     const feed = await response.json();
     expect(feed.invoices).toEqual([
       { invoiceNumber: "SYN-CORRECTED-2", createdAt: "2026-09-03T10:00:00Z", totalMinor: 14000, discountMinor: 3000,
-        netMinor: 11000, status: "open", baseCurrency: "SAR" },
+        netMinor: 11000, status: "open", baseCurrency: "SAR",
+        items: [{ description: "LINE-ITEM-DETAIL", quantity: 2, unitPriceMinor: 7000, totalMinor: 14000 }] },
       { invoiceNumber: "SYN-PAID-3", createdAt: "2026-09-03T10:00:00Z", totalMinor: 9000, discountMinor: 0,
-        netMinor: 9000, status: "paid", baseCurrency: "YER" },
+        netMinor: 9000, status: "paid", baseCurrency: "YER", items: [] },
     ]);
     expect(source).toEqual(before);
   });
@@ -100,14 +114,20 @@ describe("portal statement is the printed statement, without internal data", () 
     expect(feed.baseCurrency).toBe("YER");
   });
 
-  it("sends nothing internal: exact keys, no staff names, notes, shifts, methods, ids or line items", async () => {
+  it("sends nothing internal: exact keys, no staff names, notes, shifts, methods, ids or cancelled lines", async () => {
     mocks.patientLedger.mockResolvedValue(ledger());
+    mocks.listPatientPlans.mockResolvedValue(plans());
     const body = await (await GET()).text();
     for (const secret of INTERNAL) expect(body).not.toContain(secret);
     const feed = JSON.parse(body);
-    expect(Object.keys(feed).sort()).toEqual(["balances", "baseCurrency", "invoices", "openings", "payments"]);
+    expect(Object.keys(feed).sort()).toEqual(["agreements", "balances", "baseCurrency", "invoices", "openings", "payments"]);
     for (const row of feed.invoices) expect(Object.keys(row).sort()).toEqual(
-      ["baseCurrency", "createdAt", "discountMinor", "invoiceNumber", "netMinor", "status", "totalMinor"]);
+      ["baseCurrency", "createdAt", "discountMinor", "invoiceNumber", "items", "netMinor", "status", "totalMinor"]);
+    // Treatment lines carry only what the print shows: no line, service, doctor or lineage ids.
+    for (const line of feed.invoices.flatMap((row: { items: object[] }) => row.items)) expect(Object.keys(line).sort()).toEqual(
+      ["description", "quantity", "totalMinor", "unitPriceMinor"]);
+    for (const row of feed.agreements) expect(Object.keys(row).sort()).toEqual(
+      ["currency", "paidMinor", "remainingMinor", "title", "totalMinor"]);
     for (const row of feed.payments) expect(Object.keys(row).sort()).toEqual(
       ["amountMinor", "createdAt", "currency", "kind", "label", "receiptNumber"]);
   });
@@ -126,12 +146,48 @@ describe("portal statement is the printed statement, without internal data", () 
     expect(html).toContain(formatMoney(feed.balances.SAR.dueMinor, "SAR"));
   });
 
+  it("shows each current invoice's printed treatment lines at the stored prices, never a cancelled line", async () => {
+    const source = ledger();
+    mocks.patientLedger.mockResolvedValue(source);
+    const feed = await (await GET()).json();
+    const html = renderToStaticMarkup(await StatementPage({ params: Promise.resolve({ id: "17" }) }));
+    const printed = source.invoices.filter((row) => row.status !== "cancelled");
+    expect(feed.invoices.map((row: { invoiceNumber: string }) => row.invoiceNumber)).toEqual(printed.map((row) => row.invoiceNumber));
+    feed.invoices.forEach((row: { items: { description: string; quantity: number; unitPriceMinor: number; totalMinor: number }[]; baseCurrency: "YER" | "SAR" | "USD" }, index: number) => {
+      expect(row.items).toEqual(printed[index].items.map(({ description, quantity, unitPriceMinor, totalMinor }) => ({ description, quantity, unitPriceMinor, totalMinor })));
+      for (const line of row.items) {
+        expect(html).toContain(line.description);
+        expect(html).toContain(formatMoney(line.unitPriceMinor, row.baseCurrency));
+        expect(html).toContain(formatMoney(line.totalMinor, row.baseCurrency));
+      }
+    });
+    expect(html).not.toContain("CANCELLED-OLD-TREATMENT");
+  });
+
+  it("shows the printed agreements only: active, agreed totals, in their own currency, from the canonical progress", async () => {
+    mocks.patientLedger.mockResolvedValue(ledger());
+    mocks.listPatientPlans.mockResolvedValue(plans());
+    const feed = await (await GET()).json();
+    expect(mocks.listPatientPlans).toHaveBeenCalledWith(17, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+    expect(feed.agreements).toEqual([
+      { title: "SYN-ORTHO-AGREEMENT", currency: "SAR", totalMinor: 300000, paidMinor: 120000, remainingMinor: 180000 },
+    ]);
+    const html = renderToStaticMarkup(await StatementPage({ params: Promise.resolve({ id: "17" }) }));
+    for (const row of feed.agreements) {
+      expect(html).toContain(row.title);
+      for (const amount of [row.totalMinor, row.paidMinor, row.remainingMinor]) expect(html).toContain(formatMoney(amount, row.currency));
+    }
+    expect(html).not.toContain("SUM-OF-ITEMS-PLAN");
+    expect(html).not.toContain("COMPLETED-AGREEMENT");
+  });
+
   it("an unauthenticated portal request is refused in Arabic and reads nothing", async () => {
     mocks.portal.mockResolvedValue(null);
     const response = await GET();
     expect(response.status).toBe(401);
     expect((await response.json()).message).toMatch(/[؀-ۿ]/);
     expect(mocks.patientLedger).not.toHaveBeenCalled();
+    expect(mocks.listPatientPlans).not.toHaveBeenCalled();
   });
 
   it("a ledger read failure is a generic Arabic 500 without exception detail", async () => {
@@ -147,7 +203,10 @@ describe("portal statement is the printed statement, without internal data", () 
     const source = ledger();
     const before = structuredClone(source);
     const balances = ledgerBalancesByCurrency(17, source, new Map());
-    portalStatementView(source, balances, "YER");
+    const agreements = plans();
+    const plansBefore = structuredClone(agreements);
+    portalStatementView(source, balances, "YER", agreements);
+    expect(agreements).toEqual(plansBefore);
     expect(source).toEqual(before);
   });
 });

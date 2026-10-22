@@ -1,4 +1,4 @@
-import { StatementInvoiceDetails, currentStatementInvoices, statementPaymentLabel } from "./presentation";
+import { StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, listPatientPlans, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import {
@@ -189,7 +189,7 @@ export default async function StatementPage({ params, searchParams }: {
           })}
         </div>
 
-        {plans.filter((plan) => plan.status === "active" && !plan.totalFromItems).map((plan) => <div key={plan.id} style={{ marginTop: "4mm" }}>
+        {statementAgreements(plans).map((plan) => <div key={plan.id} style={{ marginTop: "4mm" }}>
           <p style={{ fontWeight: 700 }}>اتفاق العلاج — {plan.title}</p>
           <div className="line"><span>إجمالي الاتفاق</span><span>{formatMoney(plan.totalMinor, plan.baseCurrency)}</span></div>
           <div className="line"><span>المسدّد من الاتفاق</span><span>{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</span></div>
