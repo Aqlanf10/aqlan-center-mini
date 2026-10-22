@@ -66,7 +66,11 @@ export async function POST(request: Request) {
       const started = await startVisitFromPlannedVisit({
         plannedVisitId: rawPlannedVisitId,
         actor: session.username,
+        actorRole: session.role,
       });
+      if (started && "appointmentConflict" in started) {
+        return failed("تغيّر الموعد المرتبط أو أُغلق. أعد الحجز قبل بدء الجلسة.", 409);
+      }
       if (started && "alreadyActive" in started) {
         return NextResponse.json(
           { message: "لهذه الجلسة زيارة قائمة سلفًا.", visitId: started.visitId },

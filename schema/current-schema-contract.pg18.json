@@ -7,7 +7,7 @@
     "tables": 126,
     "columns": 1616,
     "constraints": 1801,
-    "indexes": 395,
+    "indexes": 396,
     "triggers": 68
   },
   "tables": {
@@ -634,6 +634,15 @@
           "columns": [
             "scheduled_date",
             "is_new_patient"
+          ],
+          "unique": false
+        },
+        "appointments_patient_history_idx": {
+          "columns": [
+            "patient_id",
+            "scheduled_date",
+            "scheduled_time",
+            "id"
           ],
           "unique": false
         },
