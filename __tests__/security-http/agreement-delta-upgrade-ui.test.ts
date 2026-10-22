@@ -336,3 +336,84 @@ it("each PRINTED receipt proves its own original/difference invoice and cash amo
   }
  }finally{await context.close();}
 });
+it("(#408 finding 2) split advisory: operation total, each receipt with its partial refund, both prints, then same-key replay prints both new receipts",async()=>{
+ const f=await fixture(),view=await preview(f.planId);
+ const saved=await authedMutation(`/api/plans/${f.planId}/agreement-amendment`,h.sessions.admin,"POST",JSON.stringify({
+  idempotencyKey:`advisory-delta-${f.planId}`,expectedSourceHash:view.sourceHash,
+  newServiceId:f.newServiceId,newUnitMinor:80000,reason:"Signed synthetic advisory journey"}));
+ expect(saved.status,await saved.clone().text()).toBe(201);
+ // 330000 = 320000 on the original invoice + 10000 on the difference invoice.
+ const first=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({
+  patientId:f.patientId,planId:f.planId,kind:"payment",amount:"330000",currency:"YER",method:"cash"}),{"Idempotency-Key":`advisory-first-${f.planId}`});
+ expect(first.status,await first.clone().text()).toBe(201);
+ const group=(await first.json()).collection as {receipts:{id:number;receiptNumber:string}[];allocations:{amountMinor:number}[]};
+ expect(group.allocations.map(a=>a.amountMinor)).toEqual([320000,10000]);
+ // Partial reversal of the first receipt keeps the group alive and must be visible per receipt.
+ const refund=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({
+  patientId:f.patientId,kind:"refund",reversalOfId:group.receipts[0].id,amount:"40000",currency:"YER",method:"cash",note:"Synthetic partial reversal"}),
+  {"Idempotency-Key":`advisory-refund-${f.planId}`});
+ expect(refund.status,await refund.clone().text()).toBe(201);
+ const before=Number((await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n);
+ const lastId=Number((await q("SELECT max(id)::int m FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].m);
+ const context=await browser.newContext({viewport:{width:1280,height:900},locale:"ar-YE",serviceWorkers:"block"});
+ const [name,...cookie]=h.sessions.admin.cookie.split("=");
+ await context.addCookies([{name,value:cookie.join("="),url:baseUrl}]);
+ const page=await context.newPage();
+ const posts:{key:string;body:string;review:string|undefined}[]=[];
+ page.on("request",request=>{
+  if(request.method()==="POST"&&new URL(request.url()).pathname==="/api/payments")
+   posts.push({key:request.headers()["idempotency-key"]??"",body:request.postData()??"",review:request.headers()["x-collection-similarity-review"]});
+ });
+ try{
+  await page.goto(`${baseUrl}/patients/${f.patientId}?tab=plans`,{waitUntil:"domcontentloaded"});
+  await page.getByRole("button",{name:"تحصيل قسط",exact:true}).click();
+  await page.getByLabel("مبلغ القسط").fill("330000");
+  await page.getByRole("button",{name:"سجّل القسط واطبع السند"}).click();
+  const warning=page.getByRole("alertdialog",{name:"تنبيه سند قبض مشابه"});
+  await warning.waitFor();
+  expect(Number((await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n)).toBe(before);
+  const text=await warning.innerText();
+  expect(text).toContain("عملية تحصيل واحدة موزعة على 2 سندات");
+  expect(text).toContain(`إجمالي المدفوع ${formatMoney(330000,"YER")}`);
+  const items=warning.getByRole("list",{name:"سندات العملية"}).getByRole("listitem");
+  expect(await items.count()).toBe(2);
+  const firstItem=await items.nth(0).innerText(),secondItem=await items.nth(1).innerText();
+  expect(firstItem).toContain(`السند ${group.receipts[0].receiptNumber} · ${formatMoney(320000,"YER")}`);
+  expect(firstItem).toContain(`مسترد ${formatMoney(40000,"YER")}`);
+  expect(firstItem).not.toContain("(بالكامل)");
+  expect(secondItem).toContain(`السند ${group.receipts[1].receiptNumber} · ${formatMoney(10000,"YER")}`);
+  expect(secondItem).not.toContain("مسترد");
+  // Each link opens its own receipt print, with that receipt's own amount.
+  for(const [index,receipt] of group.receipts.entries()){
+   const link=warning.getByRole("link",{name:`مراجعة السند ${receipt.receiptNumber}`});
+   expect(await link.getAttribute("href")).toBe(`/print/receipt/${receipt.id}`);
+   const [print]=await Promise.all([context.waitForEvent("page"),link.click()]);
+   await print.waitForLoadState("domcontentloaded");
+   const sheet=await print.locator(".sheet").innerText();
+   expect(sheet).toContain(receipt.receiptNumber);
+   expect((await print.locator(".sheet .amount-box").innerText()).trim()).toBe(formatMoney(index===0?320000:10000,"YER"));
+   await print.close();
+  }
+  expect(Number((await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n)).toBe(before);
+  await warning.getByRole("button",{name:"تسجيل دفعة مستقلة"}).click();
+  await page.getByTestId("approved-split-receipts").getByRole("link",{name:/طباعة السند/}).first().waitFor();
+  // The confirmation is the same request under the same key; only the review header is added.
+  expect(posts).toHaveLength(2);
+  expect(posts[1].key).toBe(posts[0].key);expect(posts[1].body).toBe(posts[0].body);
+  expect(posts[0].review).toBeUndefined();expect(posts[1].review).toBeTruthy();
+  const fresh=(await q("SELECT id,receipt_number,amount_minor::int AS amount FROM payments WHERE patient_id=$1 AND id>$2 ORDER BY id",[f.patientId,lastId])).rows;
+  expect((await q("SELECT count(*)::int n FROM agreement_delta_collection_receipts WHERE idempotency_key=$1",[posts[0].key])).rows[0].n).toBe(1);
+  expect(fresh.map(r=>r.amount)).toEqual([40000,290000]);
+  expect(Number((await q("SELECT count(*)::int n FROM payments WHERE patient_id=$1",[f.patientId])).rows[0].n)).toBe(before+2);
+  const printLinks=page.getByTestId("approved-split-receipts").getByRole("link",{name:/طباعة السند/});
+  expect(await printLinks.count()).toBe(2);
+  for(const [index,row] of fresh.entries()){
+   expect(await printLinks.nth(index).getAttribute("href")).toContain(`/print/receipt/${row.id}`);
+   const print=await context.newPage();
+   await print.goto(`${baseUrl}/print/receipt/${row.id}`,{waitUntil:"domcontentloaded"});
+   expect(await print.locator(".sheet").innerText()).toContain(row.receipt_number);
+   expect((await print.locator(".sheet .amount-box").innerText()).trim()).toBe(formatMoney(row.amount,"YER"));
+   await print.close();
+  }
+ }finally{await context.close();}
+});
