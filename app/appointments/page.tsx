@@ -5,6 +5,7 @@ import { ArrivalPanel } from "@/components/ArrivalPanel";
 import {
   clinicDateString,
   dayLoad,
+  toMinutes,
   distributeAppointmentsToChairs,
   type Appointment,
   getAppointmentTypeLabel,
@@ -112,12 +113,13 @@ export default function AppointmentsPage() {
      إلى يومٍ آخر أثناء الانتظار. */
   const dateRef = useRef(today);
   const dateRevisionRef = useRef(0);
-  const [items, setItems] = useState<Appointment[]>([]);
+  const [dayList, setDayList] = useState<{
+    date: string; revision: number; request: number;
+    status: "loading" | "ready" | "error"; items: Appointment[]; error: string | null;
+  } | null>(null);
   /* (P0-D) المريض الذي سُجّل وصوله للتو — تُفتح له لوحة الوصول. */
   const [arrivalPatient, setArrivalPatient] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  /* خطأ تحميل القائمة وحده — يمسحه أي تحميلٍ ناجح. */
-  const [error, setError] = useState<string | null>(null);
+
   /* نتيجةُ آخر إجراءٍ مرفوض — حالةٌ مستقلّة عن تحميل القائمة: كانت مشتركة معه،
      فيرفض الخادم الإلغاء ثم يمسح تحديثُ القائمة الناجح سببَ الرفض في اللحظة نفسها.
      لا يمسحها إلا نجاحُ إجراءٍ لاحق أو إخفاؤها يدويًّا. */
@@ -128,6 +130,15 @@ export default function AppointmentsPage() {
   /* TD-REG-026 — لا تُسمح لاستجابة تحميل أقدم أن تكتب فوق أحدث يوم.
      الرقم يتزايد مع كل طلب؛ وحده أحدث طلب يملك حق تحديث items/error/loading. */
   const latestLoadRequestRef = useRef(0);
+  const mountedRef = useRef(false);
+  const readyRequestRef = useRef<number | null>(null);
+  // Ownership is checked during render, before the new date's effects run.
+  const ownsDayList = dayList?.date === date && dayList.revision === dateRevisionRef.current
+    && dayList.request === latestLoadRequestRef.current;
+  const ready = ownsDayList && dayList.status === "ready";
+  const loading = !ownsDayList || dayList.status === "loading";
+  const error = ownsDayList ? dayList.error : null;
+  const items = useMemo(() => ownsDayList && dayList.status === "ready" ? dayList.items : [], [ownsDayList, dayList]);
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -167,12 +178,19 @@ export default function AppointmentsPage() {
   const candidateInFlight = useRef(false);
   // A slot belongs to one displayed-day lifetime, including leaving and returning.
   useLayoutEffect(() => {
+    mountedRef.current = true;
     // Commit the date fence before browser events can use the previous panel.
     if (dateRef.current !== date) dateRevisionRef.current += 1;
     dateRef.current = date;
     candidateRequestRef.current += 1;
     setFreed(null);
     setCandidateNote(null);
+    return () => {
+      mountedRef.current = false;
+      readyRequestRef.current = null;
+      latestLoadRequestRef.current += 1;
+      candidateRequestRef.current += 1;
+    };
   }, [date]);
   /* نقلُ موعد — يفتح لوحةً صغيرة على الصفّ نفسه. وقبل هذا لم يكن في النظام نقل:
      كان يُلغى الموعد ويُحجز غيره، فيُحتسب المريض «ملغيًا» وهو لم يُلغِ. */
@@ -280,8 +298,15 @@ export default function AppointmentsPage() {
   }, []);
 
   const load = useCallback(async (target: string) => {
+    // A stale completion may request a refresh, but cannot revive a retired day.
+    if (!mountedRef.current || target !== dateRef.current) return;
     const requestId = ++latestLoadRequestRef.current;
-    setLoading(true);
+    const revision = dateRevisionRef.current;
+    const context = { date: target, revision, request: requestId };
+    const isCurrent = () => mountedRef.current && requestId === latestLoadRequestRef.current
+      && target === dateRef.current && revision === dateRevisionRef.current;
+    readyRequestRef.current = null;
+    setDayList({ ...context, status: "loading", items: [], error: null });
     /* رسالةٌ عربية من عندنا دائمًا: نصّ استثناء المتصفح («Failed to fetch» أو خطأ
        تحليل JSON) لا يُعرض للموظّف. */
     let failure = "تعذّر الاتصال بالخادم لتحديث القائمة.";
@@ -292,21 +317,25 @@ export default function AppointmentsPage() {
         failure = typeof payload?.message === "string" && payload.message ? payload.message : "تعذّر التحميل.";
         throw new Error(failure);
       }
-      if (!Array.isArray(payload)) {
+      if (!Array.isArray(payload) || payload.some((item) => !item || typeof item !== "object"
+        || item.scheduledDate !== target || !Number.isInteger(item.id) || item.id <= 0
+        || !Number.isInteger(item.patientId) || item.patientId <= 0
+        || typeof item.patientName !== "string" || typeof item.scheduledTime !== "string"
+        || toMinutes(item.scheduledTime) === null
+        || !Number.isInteger(item.durationMinutes) || item.durationMinutes <= 0
+        || typeof item.status !== "string" || !Object.hasOwn(STATUS_LABEL, item.status))) {
         failure = "وصل ردٌّ غير صالح من الخادم أثناء تحديث القائمة.";
         throw new Error(failure);
       }
 
       /* إن بدأ تحميل أحدث أثناء انتظار هذا الطلب فهذه الاستجابة stale:
          لا items ولا error ولا loading يجوز أن تعود بالواجهة إلى يومٍ سابق. */
-      if (requestId !== latestLoadRequestRef.current) return;
-      setItems(payload as Appointment[]);
-      setError(null);
+      if (!isCurrent()) return;
+      readyRequestRef.current = requestId;
+      setDayList({ ...context, status: "ready", items: payload as Appointment[], error: null });
     } catch {
-      if (requestId !== latestLoadRequestRef.current) return;
-      setError(failure);
-    } finally {
-      if (requestId === latestLoadRequestRef.current) setLoading(false);
+      if (!isCurrent()) return;
+      setDayList({ ...context, status: "error", items: [], error: failure });
     }
   }, []);
 
@@ -330,7 +359,9 @@ export default function AppointmentsPage() {
       after?: (context: { current: boolean }) => string | void,
       isSuccess: (payload: unknown) => boolean = isAppointmentPatchSuccess,
     ) => {
-      if (inFlight.current) return;
+      if (inFlight.current || !mountedRef.current || !dayList || dayList.status !== "ready"
+        || dayList.date !== dateRef.current || dayList.revision !== dateRevisionRef.current
+        || dayList.request !== readyRequestRef.current) return;
       inFlight.current = true;
       const actionDate = dateRef.current;
       const actionDateRevision = dateRevisionRef.current;
@@ -354,6 +385,7 @@ export default function AppointmentsPage() {
       }
 
       /* الخروج ثم العودة إلى اليوم نفسه سياقٌ أحدث أيضًا؛ لا يُحيي أثرًا قديمًا. */
+      if (!mountedRef.current) { inFlight.current = false; return; }
       const current = dateRef.current === actionDate && dateRevisionRef.current === actionDateRevision;
       let reloadDate = dateRef.current;
       if (failure === null) {
@@ -367,10 +399,10 @@ export default function AppointmentsPage() {
         await load(reloadDate);
       } finally {
         inFlight.current = false;
-        setBusy(false);
+        if (mountedRef.current) setBusy(false);
       }
     },
-    [load],
+    [load, dayList],
   );
 
   /* تنفيذُ النقل. والتاريخُ المعروض يتبع الموعد: إن نُقل إلى يومٍ آخر انتقلت
@@ -553,8 +585,9 @@ export default function AppointmentsPage() {
         </div>
       </div>
 
-      {/* شريط مؤشر حمولة اليوم وسعة الكراسي */}
-      <div
+      {/* شريط مؤشر حمولة اليوم وسعة الكراسي: المجهول ليس سعةً فارغة. */}
+      {ready ? <div
+        data-day-load="ready"
         className={`mb-4 rounded-2xl border p-3.5 shadow-xs transition-colors ${
           load_.percent >= 90
             ? "border-red-300 bg-red-50"
@@ -582,7 +615,11 @@ export default function AppointmentsPage() {
             style={{ width: `${Math.min(100, load_.percent)}%` }}
           />
         </div>
-      </div>
+      </div> : (
+        <div data-day-load="unknown" role="status" className="mb-4 rounded-2xl border border-slate-200 bg-white p-3.5 text-xs font-bold text-slate-500">
+          {loading ? "جارٍ تحميل استيعاب اليوم…" : "استيعاب اليوم غير متاح حتى تُحمّل المواعيد بنجاح."}
+        </div>
+      )}
 
       {freed && (
         <div
@@ -733,7 +770,7 @@ export default function AppointmentsPage() {
       ) : null}
       {error ? (
         <p role="alert" data-load-error className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
-          {actionError ? "وتعذّر أيضًا تحديث القائمة — ما يظهر قد لا يكون آخر حالة: " : null}
+          {actionError ? "وتعذّر أيضًا تحديث القائمة — أُخفيت المواعيد حتى ينجح التحميل: " : null}
           {error}
         </p>
       ) : null}
@@ -767,7 +804,7 @@ export default function AppointmentsPage() {
                     : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                {st === "all" ? "جميع الحالات" : STATUS_LABEL[st]} ({count})
+                {st === "all" ? "جميع الحالات" : STATUS_LABEL[st]} ({ready ? count : "؟"})
               </button>
             );
           })}
@@ -789,7 +826,7 @@ export default function AppointmentsPage() {
                     : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
             >
-              {label} ({count})
+              {label} ({ready ? count : "؟"})
             </button>
           ))}
 
@@ -823,6 +860,10 @@ export default function AppointmentsPage() {
         {loading ? (
           <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
             جارٍ تحميل المواعيد…
+          </p>
+        ) : error ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-500">
+            لم تُحمّل مواعيد هذا اليوم. <button type="button" onClick={() => void load(date)} className="font-bold underline">إعادة المحاولة</button>
           </p>
         ) : items.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
