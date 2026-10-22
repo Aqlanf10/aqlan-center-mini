@@ -2,9 +2,9 @@
 
 ## Status and source identity
 
-- Final published application pin and local base: `181cab90350c421d40fed24fb92a7c8fa0667b44`
+- Final published application pin and local base: `e6bf8c179eb49723392aa843b2101c4b9f755f79`
   ([Draft PR #414](https://github.com/Aqlanf10/aqlan-center-mini/pull/414)).
-- Application tree: `997dbdc0df5061dce079f19cb5728b2bdec8519a`.
+- Application tree: `fd539697fac7244a3075988766a0fcd96946d4b5`.
 - First hosted attempt `39709737846` on acceptance `636bc3df44b8f8fc7fb21e9a61c1401546f57654`
   failed at the environment-contract step, before browser execution.
 - Prior hosted run `39711640521` succeeded on application `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`
@@ -15,7 +15,10 @@
   application `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`. That result is historical evidence for the old pin only.
 - Root reports successful hosted acceptance from #415 head `06e2` on
   application `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`. That result is historical evidence for the old pin only.
-- Fresh hosted acceptance on `181cab90350c421d40fed24fb92a7c8fa0667b44`: **pending**.
+- Root reports successful hosted acceptance run `39739163073` from #415 head
+  `682a411433a5e24d6b44e1bb0058433e910a2480` on application `181cab90350c421d40fed24fb92a7c8fa0667b44`.
+  That result is historical evidence for the old pin only.
+- Fresh hosted acceptance on `e6bf8c179eb49723392aa843b2101c4b9f755f79`: **pending**.
   None of the prior successes accepts this new SHA. No local Chromium/PostgreSQL execution.
 - Dedicated review branch: `review/appointment-browser-acceptance-hosted`.
 - Review base: `integration/nonfinancial-20261022`.
@@ -206,13 +209,14 @@ financial fingerprints and outbound interception remain unchanged.
 
 ## Explicit planned-session rebooking repin
 
-The current application pin `181cab90350c421d40fed24fb92a7c8fa0667b44`, tree
+The previously pinned application `181cab90350c421d40fed24fb92a7c8fa0667b44`, tree
 `997dbdc0df5061dce079f19cb5728b2bdec8519a`, has parent
 `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`. Root reports independent review and
 all four #420 CI jobs passing in run `39734055353`, including the new real-browser
 planned-session rebooking journey. The integration branch was fast-forwarded to
 that exact commit, with no source rewrite, main merge, or Production action.
-Those gates do not substitute for this supplement's fresh run on the new pin.
+Root subsequently reported this supplement passing in run `39739163073` on
+`181cab90`; that success does not certify the later application source.
 
 Static compatibility inspection found that `PatientAppointmentsPanel` and its
 appointments projection route are unchanged. The patient-page delta passes
@@ -226,3 +230,22 @@ matching static guard, and evidence notes change for this handoff. Journey bytes
 financial fingerprints, npm11 setup, strict app/probe source identity, the single
 test-only overlay, read-only permissions and outbound interception are unchanged.
 No build, full compiler, PostgreSQL instance or local browser was started.
+
+## Leadership-operations candidate repin
+
+The current application pin `e6bf8c179eb49723392aa843b2101c4b9f755f79`, tree
+`fd539697fac7244a3075988766a0fcd96946d4b5`, has parent
+`181cab90350c421d40fed24fb92a7c8fa0667b44`. Root reports #421 full CI green before
+fast-forwarding #414 to that exact head. This application's delta adds the
+leadership operational overview and its authorized read endpoint, with associated
+regressions and documentation. These gates do not substitute for a fresh run of
+this supplement on the new pin.
+
+The appointment, settings, doctor-work and patient-panel journey surfaces are
+unchanged by this delta. No acceptance fixture or journey expectation is changed.
+Only the exact app pin, matching static assertion and evidence notes differ from
+the previous supplement; the complete four-file overlay is based on the new head.
+Journey bytes, npm11 setup, mandatory environment verification, app/probe SHA
+checks, single-test overlay, read-only permissions, populated financial
+fingerprints and outbound interception are retained. Fresh hosted acceptance is
+pending; no local browser, build, compiler or PostgreSQL run was performed.
