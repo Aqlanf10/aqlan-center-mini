@@ -149,7 +149,7 @@ describe("purchase receipt installation and upgrade", () => {
     const before = await state(fixture.pool);
     expect((await fixture.pool.query("SELECT to_regclass('public.inventory_purchase_receipts') AS name")).rows[0].name).toBeNull();
     if (path === "numbered") {
-      expect((await migrate(fixture.pool, { apply: true, files })).appliedVersions).toEqual(["0065"]);
+      expect((await migrate(fixture.pool, { apply: true, files })).appliedVersions).toEqual(["0065", "0067"]);
     } else await runtimeAt(fixture.url);
     expect(await state(fixture.pool)).toEqual(before);
     expect(await registry(fixture.pool)).toEqual(expectedRegistry());
@@ -165,7 +165,7 @@ describe("purchase receipt installation and upgrade", () => {
     const competitor = new Pool({ connectionString: fixture.url, ssl: false });
     try {
       const [startup, cli] = await Promise.all([applyRuntimeMigrationFiles(fixture.pool, [purchase]), migrate(competitor, { apply: true, files })]);
-      expect([...startup, ...cli.appliedVersions]).toEqual(["0065"]);
+      expect([...startup, ...cli.appliedVersions]).toEqual(["0065", "0067"]);
       expect(await registry(fixture.pool)).toEqual(expectedRegistry());
     } finally { await competitor.end(); }
   });

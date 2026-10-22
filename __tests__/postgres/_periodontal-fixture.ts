@@ -7,6 +7,9 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.length === 60 && files[59].version === "0067" && files[59].filename === "0067_patient_appointment_history_index.sql") {
+    return periodontalCandidateMigrationVersion(files.slice(0, 59));
+  }
   if (files.length === 59 && files[58].version === "0065" && files[58].filename === "0065_inventory_purchase_receipts.sql") {
     return periodontalCandidateMigrationVersion(files.slice(0, 58));
   }
