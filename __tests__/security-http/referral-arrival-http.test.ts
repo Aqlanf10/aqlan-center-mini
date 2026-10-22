@@ -58,6 +58,9 @@ describe("REF-2 — arrival, no-show and «عملي السريري» over HTTP",
   it("a no-show returns it to waiting for booking with «لم يحضر»", async () => {
     const appointmentId = await bookToday("08:00");
     expect((await post("reception", `/api/referrals/${referralId}/transition`, { action: "schedule", appointmentId })).status).toBe(200);
+    // Model elapsed appointment time, independent of when this HTTP suite runs.
+    await db.query(`UPDATE appointments SET scheduled_date = (NOW() AT TIME ZONE 'Asia/Aden')::date - 1
+      WHERE id = $1`, [appointmentId]);
     expect((await patch("reception", `/api/appointments/${appointmentId}`, { action: "no_show" })).status).toBe(200);
     const list = await authedGet(`/api/patients/${patientId}/referrals`, h.sessions.reception);
     const referral = (await list.json() as { id: number; workflowState: string; missedAppointment: string | null }[])

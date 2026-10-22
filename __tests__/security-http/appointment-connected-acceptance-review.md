@@ -2,12 +2,15 @@
 
 ## Status and source identity
 
-- Final published application pin and local base: `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`
+- Final published application pin and local base: `42b91977ea31bcbe61086f5f51717590a05f0ced`
   ([Draft PR #414](https://github.com/Aqlanf10/aqlan-center-mini/pull/414)).
-- Application tree: `e50552a2bdafab243439595a2b026b16ac7f753e`.
+- Application tree: `7bea78d71e0c73ace70abd8b2fe447033c73299d`.
 - First hosted attempt `39709737846` on acceptance `636bc3df44b8f8fc7fb21e9a61c1401546f57654`
   failed at the environment-contract step, before browser execution.
-- Hosted connected journeys: **pending**. No local Chromium/PostgreSQL execution.
+- Prior hosted run `39711640521` succeeded on application `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`
+  with acceptance head `73c6d443` after the npm11 setup correction.
+- Fresh hosted acceptance on `42b91977ea31bcbe61086f5f51717590a05f0ced`: **pending**.
+  The earlier success is not acceptance of this new SHA. No local Chromium/PostgreSQL execution.
 - Dedicated review branch: `review/appointment-browser-acceptance-hosted`.
 - Review base: `integration/nonfinancial-20261022`.
 
@@ -90,9 +93,12 @@ proof. Canonical SQL assertions, not only UI notices, determine success.
 
 ## Local static evidence
 
-On the final pinned source with these four test/review additions, Node 22.23.3:
+On the newly pinned source with these four test/review additions, Node 22.23.3:
 
-- Full `tsc --noEmit --incremental false`, `NODE_OPTIONS=--max-old-space-size=4096`: passed.
+- Full compilation was not rerun for this repin while another worker owns the
+  compiler. The last full check passed on prior app `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`.
+
+  Command: `tsc --noEmit --incremental false`, `NODE_OPTIONS=--max-old-space-size=4096`.
 - Workflow guards, existing route-lifecycle regressions, and environment-parity
   regressions: 104/104 passed (17 workflow, 13 route-lifecycle, 74 environment).
 - Targeted ESLint on both added TypeScript files: passed.
@@ -129,4 +135,20 @@ before dependency installation. A regression binds this step to the live npm
 major contract and requires setup → npm upgrade → dependencies → unchanged
 verifier → build ordering. The verifier is not removed or weakened, the app pin
 is unchanged, and no connected-journey expectations or browser interception
-rules changed. A passing hosted rerun is still required.
+rules changed. Hosted run `39711640521` subsequently passed on the prior app pin.
+The new application SHA still requires its own passing hosted acceptance run.
+
+## Test-fixture-only application repin
+
+Application `42b91977ea31bcbe61086f5f51717590a05f0ced` changes only three synthetic
+aging lines in `__tests__/security-http/referral-arrival-http.test.ts` relative to
+`0fd0cc7c6f167ea366de3aa69103058b0390bc3d`. The application runtime tree is unchanged.
+The fixture now puts the absence target in the past rather than assuming today's
+08:00 appointment is already eligible before that time. Root reported the focused
+real-HTTP comparison as 2 passing/3 failing before and 20/20 passing after the fix.
+This is separate from the eight browser journeys and does not substitute for a
+fresh hosted run on the new immutable pin.
+
+The repin changes the workflow's exact SHA, the matching static assertion, and
+these evidence notes. The connected journey, npm11 setup, source-isolation checks,
+read-only permissions, and outbound interception remain unchanged.
