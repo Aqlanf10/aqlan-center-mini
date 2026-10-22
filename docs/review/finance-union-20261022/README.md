@@ -22,9 +22,10 @@ The schema contract and preflight disclosure were regenerated with the repositor
    - Result: #424's projection still reports that adjustment as **unresolved** (`adjustment_source_unresolved`), not covered, with no current reference.
    - An approved-agreement plan item stays `approved_source_unverified`; that case is already covered in `visit-financial-context.test.ts`.
 2. **#423 + #424.**
-   - #423 **refuses** a currency correction for an invoice whose line has a visit-procedure source (`INDEPENDENT_ITEM_SOURCE`, Arabic message). Nothing is written, and the visit keeps its single exact current source.
-   - Separately, the projection's correction-lineage query only follows same-currency corrections. A cross-currency lineage could not be inferred even if one existed.
-   - The control (exact same-currency source, verified) proves the test can see coverage.
+   - **Read side:** `readInvoiceRevision` offers no cross-currency correction for an invoice whose line has a visit-procedure source (`INDEPENDENT_ITEM_SOURCE`, Arabic message). This shows readiness refusal only.
+   - **Writer:** `reviseInvoice` for an unpaid SAR → USD correction of that visit-bound invoice is rejected with `conflict` / `INDEPENDENT_ITEM_SOURCE`. Invoices, items, payments, corrections, reclassifications and repayment arrangements are byte-identical before and after. The visit keeps its single exact current source.
+   - **Projection:** the correction-lineage query only follows same-currency corrections, so no cross-currency lineage could be inferred.
+   - **Control:** an exact same-currency source is verified, which shows the test can see coverage.
 3. **#422 restrictions.**
    - `lib/http-permissions.ts` and `lib/role-routes.ts` only gain the #424 read route (`/api/visits/[id]/financial-context`, GET). It does not grant cashier or accountant access, and it redacts financial identifiers for clinical roles.
    - All 14 appointment/cashier lines in `app/patients/[id]/page.tsx` are identical to `f8df350f`. #424's changes there add a stricter assistant check.

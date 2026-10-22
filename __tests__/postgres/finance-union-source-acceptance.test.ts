@@ -101,14 +101,37 @@ describe("#424 projection stays conservative with #423 cross-currency correction
     expect(context?.work[0].references).toContainEqual({ kind: "invoice", id: invoiceId, state: "current", path: "visit_procedure" });
   });
 
-  it("#423 refuses a cross-currency correction for a visit-bound invoice, so no unproven lineage can reach the visit", async () => {
+  it("read side: #423 offers no cross-currency correction for a visit-bound invoice, and the visit keeps its exact source", async () => {
     const { owner, visitId, invoiceId } = await procedureInvoice("SAR");
     const view = await revision.readInvoiceRevision(invoiceId, session);
     expect(view.currencyCorrection).toMatchObject({ available: false, targets: [], reasonCodes: ["INDEPENDENT_ITEM_SOURCE"] });
     expect(view.currencyCorrection?.message).toMatch(/[\u0600-\u06FF]/);
-    // Nothing is written; the exact original source remains the only, current one.
+    // Read-side readiness only (the writer is exercised below); the exact original source remains the only, current one.
     expect(await q(`SELECT count(*)::int AS n FROM invoices WHERE patient_id = $1`, [owner.id])).toEqual([{ n: 1 }]);
     expect(await q(`SELECT count(*)::int AS n FROM invoice_corrections WHERE patient_id = $1`, [owner.id])).toEqual([{ n: 0 }]);
+    const context = await getVisitFinancialContext(visitId, owner.id);
+    expect(context?.summary).toBe("verified");
+    expect(context?.work[0].references).toEqual([{ kind: "invoice", id: invoiceId, state: "current", path: "visit_procedure" }]);
+  });
+  it("writer: reviseInvoice rejects an unpaid SAR → USD correction of a visit-bound invoice and writes nothing", async () => {
+    const { owner, visitId, invoiceId } = await procedureInvoice("SAR");
+    const view = await revision.readInvoiceRevision(invoiceId, session);
+    const state = async () => ({
+      invoices: await q(`SELECT to_jsonb(i) AS row FROM invoices i WHERE patient_id = $1 ORDER BY id`, [owner.id]),
+      items: await q(`SELECT to_jsonb(ii) AS row FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.patient_id = $1 ORDER BY ii.id`, [owner.id]),
+      payments: await q(`SELECT to_jsonb(p) AS row FROM payments p WHERE patient_id = $1 ORDER BY id`, [owner.id]),
+      corrections: await q(`SELECT to_jsonb(c) AS row FROM invoice_corrections c WHERE patient_id = $1 ORDER BY id`, [owner.id]),
+      reclassifications: await q(`SELECT id FROM invoice_settlement_reclassifications WHERE patient_id = $1`, [owner.id]),
+      arrangements: await q(`SELECT id FROM debt_repayment_arrangements WHERE patient_id = $1`, [owner.id]),
+    });
+    const before = await state();
+    const attempt = revision.reviseInvoice(invoiceId, { idempotencyKey: `union-writer-${++serial}`, expectedSourceHash: view.sourceHash,
+      currency: "USD", reason: "Synthetic: a visit-bound invoice must not change currency",
+      lines: view.invoice.items.map(item => ({ itemId: item.id, quantity: 1, unitPrice: "80" })),
+      discount: "0", repaymentTerms: { mode: "installments", installments: [{ dueDate: "2026-11-14", kind: "installment", amountMinor: 8000 }] },
+      expectedRemainingMinor: 8000 }, session);
+    await expect(attempt).rejects.toMatchObject({ code: "conflict", reasonCodes: ["INDEPENDENT_ITEM_SOURCE"] });
+    expect(await state()).toEqual(before);
     const context = await getVisitFinancialContext(visitId, owner.id);
     expect(context?.summary).toBe("verified");
     expect(context?.work[0].references).toEqual([{ kind: "invoice", id: invoiceId, state: "current", path: "visit_procedure" }]);
