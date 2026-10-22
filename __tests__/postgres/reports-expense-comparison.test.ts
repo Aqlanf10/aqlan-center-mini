@@ -1,3 +1,4 @@
+import { REPORT_VISIT_TEMP_SCHEMA } from "./_report-visit-temp-schema";
 import {CURRENCY_READ_TEMP_SCHEMA} from "./_currency-read-temp-schema";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
@@ -34,7 +35,7 @@ const { CLINIC_TIME_ZONE } = await import("../../lib/db");
 const client = new Client({ connectionString, ssl: false });
 const fixtureTables = [
   "approved_agreement_principals", "expenses", "payments", "patient_opening_balances", "invoice_items", "invoices",
-  "visits", "plan_items", "treatment_plans", "services", "patients",
+  "visit_procedures", "visits", "plan_items", "treatment_plans", "services", "patients",
 ] as const;
 
 beforeAll(async () => {
@@ -88,6 +89,7 @@ beforeAll(async () => {
     );
   `);
   await client.query(CURRENCY_READ_TEMP_SCHEMA);
+  await client.query(REPORT_VISIT_TEMP_SCHEMA);
 });
 
 beforeEach(async () => {

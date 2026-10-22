@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { beforeAll, afterAll, beforeEach, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { REPORT_VISIT_TEMP_SCHEMA } from "./postgres/_report-visit-temp-schema";
 import { CURRENCY_READ_TEMP_SCHEMA } from "./postgres/_currency-read-temp-schema";
 import { ReportView } from "../components/reports/ReportView";
 import { PrintableReportDocument } from "../components/reports/PrintableReportDocument";
@@ -76,6 +77,7 @@ beforeAll(async () => {
     );
   `);
   await db.exec(CURRENCY_READ_TEMP_SCHEMA);
+  await db.exec(REPORT_VISIT_TEMP_SCHEMA);
   await db.exec(`CREATE TEMP TABLE payables (id integer, created_at timestamptz, due_date date, amount_minor bigint, currency text);
     ALTER TABLE expenses ADD COLUMN payable_id integer;
     ALTER TABLE expenses ADD COLUMN amount_minor bigint;
@@ -83,7 +85,7 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { harness.db = null; await db.close(); });
 beforeEach(async () => {
-  await db.exec(`TRUNCATE patients, invoices, invoice_items, payments, expenses, payables;
+  await db.exec(`TRUNCATE visit_procedures, patients, invoices, invoice_items, payments, expenses, payables;
     INSERT INTO patients (id, patient_number, full_name, created_at) VALUES (1, 'SYN-1', 'Synthetic', '2026-01-01Z');
     INSERT INTO invoices (id, patient_id, created_at, total_minor, discount_minor, base_currency, status)
       VALUES (1, 1, '2026-09-30T20:59:59Z', 10000, 1000, 'YER', 'issued'),
@@ -124,7 +126,7 @@ it("distinguishes discounted document, unpaid payable, later partial payments an
 });
 it("delivers identical measurement disclosures and amounts through API, screen and print without writes", async () => {
   await partialPayment();
-  const snapshot = () => db.query("SELECT (SELECT jsonb_agg(t) FROM invoices t) invoices, (SELECT jsonb_agg(t) FROM payables t) payables, (SELECT jsonb_agg(t) FROM expenses t) expenses, (SELECT jsonb_agg(t) FROM payments t) payments");
+  const snapshot = () => db.query("SELECT (SELECT jsonb_agg(t) FROM visit_procedures t) visit_procedures, (SELECT jsonb_agg(t) FROM invoices t) invoices, (SELECT jsonb_agg(t) FROM payables t) payables, (SELECT jsonb_agg(t) FROM expenses t) expenses, (SELECT jsonb_agg(t) FROM payments t) payments");
   const before = await snapshot();
   const expected = await read("2026-09-01", "2026-10-31");
   const response = await GET(new Request("https://synthetic.invalid/api/reports?report=monthly&preset=custom&from=2026-09-01&to=2026-10-31&compare=none"));

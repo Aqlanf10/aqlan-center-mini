@@ -18,14 +18,14 @@ export default function VisitPage({ params }: { params: Promise<{ id: string }> 
     <main className="mx-auto max-w-3xl p-4 pb-24">
       <PageHeader
         title="الزيارة السريرية"
-        subtitle="التوثيق والإجراءات — والتوقيع يُصدر الفاتورة ويحدّث المخطط"
+        subtitle="التوثيق والإجراءات — والاستحقاق حسب مصادر العمل عند التوقيع"
         back={{ href: "/", label: "اللوحة" }}
       />
       {Number.isInteger(visitId) && visitId > 0 ? (
         <ClinicalVisit visitId={visitId} onSigned={(result) => {
           /* (VISIT-2) بعد الإنهاء يُفتح ملف المريض (ولو أُنشئ للتوّ عند التوقيع) — فيه الفاتورة
              والتحصيل وحجز الجلسة القادمة؛ واللوحة تبقى على بعد نقرة. */
-          window.location.href = result.patientId ? `/patients/${result.patientId}?tab=account` : "/";
+          window.location.href = result.patientId ? `/patients/${result.patientId}?tab=today&checkoutVisit=${visitId}` : "/";
         }} />
       ) : (
         <p className="rounded-2xl border border-danger-300 bg-danger-50 p-4 text-center text-sm font-semibold text-danger-700">

@@ -154,6 +154,7 @@ const ASSISTANT_RULES: Rule[] = [
   { path: "/api/visits" },
   { path: "/api/visits/readiness" },
   { path: "/api/visits/[id]" },
+  { path: "/api/visits/[id]/financial-context", methods: ["GET", "HEAD"] },
   { path: "/api/visits/[id]/clinical", methods: ["GET", "HEAD", "POST"] },
   { path: "/api/patients/[id]" },
   { path: "/api/patients/[id]/workflow" },

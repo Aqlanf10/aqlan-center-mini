@@ -283,6 +283,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/visits": { GET: ["admin", "reception", "doctor", "assistant"], POST: CLINIC },
   "/api/visits/[id]": { PATCH: CLINIC, DELETE: ADMIN },
   "/api/visits/[id]/billing-preview": { GET: CLINIC },
+  "/api/visits/[id]/financial-context": { GET: ["admin", "reception", "doctor", "assistant"] },
   "/api/visits/[id]/clinical": { GET: ["admin", "reception", "doctor", "assistant"], POST: ["admin", "doctor", "assistant"] },
   "/api/visits/[id]/materials": { GET: CLINIC },
   "/api/visits/[id]/next": { POST: CLINIC },
