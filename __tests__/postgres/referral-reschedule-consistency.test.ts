@@ -359,6 +359,10 @@ describe("internal-referral rescheduling consistency", () => {
     expect(await booking.rescheduleAppointment({
       appointmentId: f.appointmentId, date: f.date, time: "11:00", reason: "Synthetic time change",
     }, reception)).toMatchObject({ ok: true });
+    // The real move above is future-dated. Advance this synthetic fixture to
+    // its missed-appointment phase without weakening the production time guard.
+    await q(`UPDATE appointments SET scheduled_date = (NOW() AT TIME ZONE $2)::date - 1 WHERE id = $1`,
+      [f.appointmentId, db.CLINIC_TIME_ZONE]);
     expect(await db.closeBookedAppointment(f.appointmentId, "no_show", {
       actor: reception.username, actorRole: reception.role,
     })).toBe(true);
