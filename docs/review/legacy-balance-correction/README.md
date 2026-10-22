@@ -20,7 +20,7 @@ The historical-document flow already refused the first case ("المتبقي ا�
   - **below_settled**: the corrected principal must cover the net receipts settled against the balance. Refunds are netted with the historical receipt base amounts, using `settlePaymentMinor`.
   - **receipts_reference_opening**: a balance that any receipt references is not deleted, even when payment and refund net to zero. A net-zero balance is not pristine. The admin corrects the amount instead.
 - Refusals return 409 with an Arabic `message` and a `code`, and write no history or audit.
-- **Dry run.** `GET /api/opening-balances?preview=1&patientId=&currency=&amount=` (or `&clear=1`) applies the same rule from a `REPEATABLE READ READ ONLY` snapshot and writes nothing. It is limited to admin/accountant, like the list. The patient ledger's correction form shows: current principal, settled receipts and count, remaining now → after, and the refusal before saving. The save rechecks under its lock.
+- **Dry run.** `GET /api/opening-balances?preview=1&patientId=&currency=&amount=` (or `&clear=1`) applies the same rule from a `REPEATABLE READ READ ONLY` snapshot and writes no financial data. (Bounded claim: `ensureSchema` runs before the preview and may write during a cold bootstrap, so this is not a claim of zero database writes.) It is limited to admin/accountant, like the list. The patient ledger's correction form shows: current principal, settled receipts and count, remaining now → after, and the refusal before saving. The save rechecks under its lock.
 
 ## Tests
 
