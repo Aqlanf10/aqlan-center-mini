@@ -12,6 +12,7 @@ import {
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { useMoneyAttempt } from "./useMoneyAttempt";
 import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
+import { MONEY_RETIRED } from "@/lib/money-attempt";
 
 /**
  * التحصيل الموحَّد — مكونٌ واحد ومسارٌ واحد (المواصفة §٢٦ و AC-09).
@@ -174,6 +175,18 @@ export function CollectPaymentModal({
     }
   };
 
+  const reconcile = async () => {
+    setBusy(true); setError(null);
+    try {
+      const result = await money.reconcile();
+      if (!result || result.kind === "busy" || result.kind === "similar") return;
+      if (result.kind === "retired") { setError(MONEY_RETIRED); return; }
+      if (result.kind !== "confirmed") { setError(result.message); return; }
+      onSuccess(result.acknowledgment.paymentId!);
+      money.consume(result.attempt);
+    } finally { setBusy(false); }
+  };
+
   return (
     <div
       role="dialog"
@@ -198,7 +211,7 @@ export function CollectPaymentModal({
         </header>
 
         <CurrentCollectionGuidance />
-        <MoneyAttemptNotice attempt={money.attempt} busy={busy} onRetry={() => void submit(true)}
+        <MoneyAttemptNotice attempt={money.attempt} busy={busy} onRetry={() => void submit(true)} onReconcile={() => void reconcile()}
           onSimilar={{ confirm: (observedReceiptIds) => void submit(true, { observedReceiptIds }),
             cancel: () => void money.dismiss() }} />
         {money.error?<p role="alert" className="mb-3 text-sm text-rose-800">{money.error}</p>:null}

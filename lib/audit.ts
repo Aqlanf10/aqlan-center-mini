@@ -17,7 +17,7 @@
 export type AuditAction =
   | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status"
   | "payment.create" | "payment.refund" | "payment.idempotent_replay"
-  | "payment.recover_installment"
+  | "payment.recover_installment" | "payment.attempt_retire"
   | "debt_repayment.create" | "debt_repayment.revise" | "debt_repayment.cancel" | "debt_repayment.collect"
   /* (RC-1) تصحيح سند قبض خطأ: عكسٌ + سندٌ بديل (أو إبطالٌ وحده) — بسببٍ مكتوب. */
   | "payment.correct"
@@ -180,6 +180,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.correct": "تصحيح فاتورة",
   "invoice.status": "تغيير حالة فاتورة يدويًّا",
   "payment.recover_installment": "استعادة تحصيل قسط معكوس على فاتورته الأصلية",
+  "payment.attempt_retire": "إلغاء محاولة تحصيل ثبت أنها لم تُحفظ",
   "debt_repayment.create": "توزيع سداد دين قائم",
   "debt_repayment.revise": "مراجعة جدول سداد دين قائم",
   "debt_repayment.cancel": "إلغاء جدول سداد دون إلغاء الدين",
