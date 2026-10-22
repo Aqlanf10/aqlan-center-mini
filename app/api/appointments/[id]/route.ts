@@ -87,7 +87,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ ok: true });
     }
     if (action === "reminded") {
-      // يُستدعى بعد فتح واتساب لا قبله: التسجيل قبل الفتح يزعم إرسالًا لم يحدث.
+      // إفادة صريحة من الموظف بأنه ذكّر المريض؛ فتح مسودة واتساب لا يستدعي هذا الإجراء.
       const ok = await markReminderSent(id);
       if (!ok) return NextResponse.json({ message: "الموعد غير موجود." }, { status: 404 });
       return NextResponse.json({ ok: true });

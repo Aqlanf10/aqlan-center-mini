@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AppointmentsPage from "../app/appointments/page";
+import { AppointmentReminder } from "../components/AppointmentReminder";
 
 // Real rendered handlers with synthetic transport. This is not browser acceptance.
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, effects: [] as (() => void)[], cleanups: new Map<number, () => void>() }));
@@ -53,6 +54,7 @@ vi.mock("react", async (original) => {
     },
   };
 });
+
 vi.mock("@/components/ArrivalPanel", () => ({ ArrivalPanel: () => null }));
 vi.mock("@/components/QuickAppointmentModal", () => ({ QuickAppointmentModal: () => null }));
 vi.mock("@/components/SettingsProvider", () => ({ useChairCount: () => 3, useSetting: () => "09:00" }));
@@ -280,5 +282,59 @@ describe("appointment day result ownership (actual page handlers, synthetic tran
     reads[1].pending.resolve(response([appointment])); await flush();
     expect(hooks.values).toEqual(state);
     await oldAction(); expect(writes()).toHaveLength(0);
+  });
+});
+
+describe("manual reminder page wiring (shared control, synthetic transport)", () => {
+  function reminder() { return find((node) => node.type === AppointmentReminder); }
+  function confirmReminder() { return reminder().props.onConfirmed as () => Promise<void>; }
+  function ownsReminder() { return (reminder().props.isCurrent as () => boolean)(); }
+
+  it.each(["list", "chairs"])("records a staff-confirmed reminder through the existing action gate in %s view", async (view) => {
+    if (view === "chairs") click("🪑 كراسي (3)");
+    expect(ownsReminder()).toBe(true);
+    const pending = confirmReminder()(); await flush();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][0]).toBe("/api/appointments/7");
+    expect(JSON.parse(writes()[0][1].body)).toEqual({ action: "reminded" });
+    reads[1].pending.resolve(response([{ ...appointment, reminderSentAt: "2026-10-22T06:00:00Z" }]));
+    await pending;
+    expect((reminder().props.item as { reminderSentAt: string }).reminderSentAt).toBe("2026-10-22T06:00:00Z");
+  });
+
+  it.each(["http", "network", "json", "shape"])("does not report success after %s failure and allows a fresh explicit retry", async (kind) => {
+    fetchMock.mockImplementationOnce(async () => {
+      if (kind === "network") throw new Error("Synthetic network failure");
+      if (kind === "json") return { ok: true, json: async () => { throw new Error("Synthetic malformed JSON"); } };
+      return kind === "http" ? response({ message: "Synthetic reminder refusal" }, false) : response({});
+    });
+    const pending = confirmReminder()(); await flush();
+    reads[1].pending.resolve(response([appointment])); await pending;
+    expect(render().some((node) => node.props["data-action-error"] !== undefined)).toBe(true);
+    expect((reminder().props.item as { reminderSentAt?: string }).reminderSentAt).toBeUndefined();
+    expect(writes()).toHaveLength(1); // No automatic retry on an uncertain outcome.
+    const retry = confirmReminder()(); await flush();
+    reads[2].pending.resolve(response([{ ...appointment, reminderSentAt: "2026-10-22T06:00:00Z" }])); await retry;
+    expect(writes()).toHaveLength(2);
+    expect(render().some((node) => node.props["data-action-error"] !== undefined)).toBe(false);
+  });
+
+  it.each(["date", "refresh", "unmount"])("rejects a captured confirmation after parent %s retirement", async (kind) => {
+    const control = reminder();
+    const old = control.props.onConfirmed as () => Promise<void>;
+    const owns = control.props.isCurrent as () => boolean;
+    if (kind === "date") changeDate(nextDay);
+    else if (kind === "refresh") refresh();
+    else hooks.cleanups.forEach((cleanup) => cleanup());
+    expect(owns()).toBe(false); await old(); expect(writes()).toHaveLength(0);
+  });
+
+  it("does not revive a reminder confirmation after leaving and returning to the same day", async () => {
+    const old = confirmReminder(); changeDate(nextDay); changeDate(day);
+    reads[2].pending.resolve(response([{ ...appointment, id: 9 }])); await flush();
+    await old(); expect(writes()).toHaveLength(0);
+    const fresh = confirmReminder()(); await flush();
+    expect(writes().map(([url]) => url)).toEqual(["/api/appointments/9"]);
+    reads[3].pending.resolve(response([])); await fresh;
   });
 });

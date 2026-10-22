@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrivalPanel } from "@/components/ArrivalPanel";
+import { AppointmentReminder } from "@/components/AppointmentReminder";
 import {
   clinicDateString,
   dayLoad,
@@ -14,7 +15,7 @@ import {
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { URGENCY_LABEL, describeWindow, type WaitingEntry } from "@/lib/waiting-list";
 
-import { awaitsReminder, whatsAppLink, friendlyDateLong, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
+import { awaitsReminder, friendlyDateLong, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
 import { useChairCount, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -346,6 +347,11 @@ export default function AppointmentsPage() {
 
   const load_ = useMemo(() => dayLoad(items, date, CHAIRS, dayStart, dayEnd), [items, date, CHAIRS, dayStart, dayEnd]);
 
+  const canActOnDay = useCallback(() => !inFlight.current && mountedRef.current && !!dayList
+    && dayList.status === "ready" && dayList.date === dateRef.current
+    && dayList.revision === dateRevisionRef.current && dayList.request === readyRequestRef.current,
+  [dayList]);
+
   /* تنفيذُ إجراءٍ على موعد ثم تحديثُ القائمة.
      - نتيجةُ الإجراء في actionError، وخطأُ التحديث في error: نجاحُ التحديث لا يمحو
        سببَ الرفض، وفشلُه لا يُخفيه — يظهر الاثنان معًا.
@@ -359,9 +365,7 @@ export default function AppointmentsPage() {
       after?: (context: { current: boolean }) => string | void,
       isSuccess: (payload: unknown) => boolean = isAppointmentPatchSuccess,
     ) => {
-      if (inFlight.current || !mountedRef.current || !dayList || dayList.status !== "ready"
-        || dayList.date !== dateRef.current || dayList.revision !== dateRevisionRef.current
-        || dayList.request !== readyRequestRef.current) return;
+      if (!canActOnDay()) return;
       inFlight.current = true;
       const actionDate = dateRef.current;
       const actionDateRevision = dateRevisionRef.current;
@@ -402,7 +406,7 @@ export default function AppointmentsPage() {
         if (mountedRef.current) setBusy(false);
       }
     },
-    [load, dayList],
+    [load, canActOnDay],
   );
 
   /* تنفيذُ النقل. والتاريخُ المعروض يتبع الموعد: إن نُقل إلى يومٍ آخر انتقلت
@@ -934,9 +938,11 @@ export default function AppointmentsPage() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     {item.status === "booked" || item.status === "no_show" ? (
                       <>
-                        <ReminderButton
+                        <AppointmentReminder
                           item={item}
-                          onSent={() =>
+                          busy={busy}
+                          isCurrent={canActOnDay}
+                          onConfirmed={() =>
                             act(() =>
                               fetch(`/api/appointments/${item.id}`, {
                                 method: "PATCH",
@@ -1218,7 +1224,16 @@ export default function AppointmentsPage() {
                               🪑 إدخال
                             </button>
                           )}
-                          <ReminderButton item={item} onSent={() => void load(date)} />
+                          <AppointmentReminder
+                            item={item}
+                            busy={busy}
+                            isCurrent={canActOnDay}
+                            onConfirmed={() => act(() => fetch(`/api/appointments/${item.id}`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ action: "reminded" }),
+                            }))}
+                          />
                           <ConfirmationButton item={item} />
                         </div>
                       </div>
@@ -1295,37 +1310,3 @@ function ConfirmationButton({ item }: { item: Appointment }) {
     </a>
   );
 }
-
-function ReminderButton({ item, onSent }: { item: Appointment; onSent: () => void }) {
-  const link = whatsAppLink(item, item.status === "no_show" ? "missed" : "upcoming");
-  if (!link) {
-    return <span className="rounded-xl bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-400">بلا رقم</span>;
-  }
-  const reminded = Boolean(item.reminderSentAt);
-  // قاعدة الاثنتي عشرة ساعة: الضغطة الثانية قبل مرور النافذة تسأل قبل أن تُرسل —
-  // رسالتان في دقيقتين تقولان للمريض إن العيادة روبوت.
-  const needsOverride = reminderNeedsOverride(item.reminderSentAt);
-  return (
-    <a
-      href={link}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={(event) => {
-        if (needsOverride && !window.confirm("ذُكِّر هذا المريض قبل أقل من ١٢ ساعة. أرسل تذكيرًا ثانيًا رغم ذلك؟")) {
-          event.preventDefault();
-          return;
-        }
-        onSent();
-      }}
-      title={reminded && item.reminderSentAt ? `آخر تذكير: ${new Date(item.reminderSentAt).toLocaleString("ar", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" })}` : undefined}
-      className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-opacity hover:opacity-90 ${
-        needsOverride || reminded
-          ? "border border-emerald-300 bg-emerald-50 text-emerald-700"
-          : "bg-[#25D366] text-white shadow-2xs"
-      }`}
-    >
-      {needsOverride ? "إعادة تذكير؟" : reminded ? "ذُكِّر ✓" : "💬 تذكير واتساب"}
-    </a>
-  );
-}
-

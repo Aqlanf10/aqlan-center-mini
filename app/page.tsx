@@ -930,10 +930,9 @@ export default function FlowBoard() {
               href={nextBooked.link}
               target="_blank"
               rel="noopener"
-              onClick={() => setNextBooked(null)}
               className="mt-2 inline-block rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white"
             >
-              أرسل الموعد بواتساب
+              فتح مسودة الموعد بواتساب
             </a>
           ) : (
             <p className="mt-1 text-sm text-emerald-700">لا يوجد رقم صالح — ذكّره هاتفيًا.</p>
