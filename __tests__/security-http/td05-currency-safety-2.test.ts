@@ -27,6 +27,8 @@ let page: Page;
 const PATIENT_B_NAME = "مريض الأمن ب";
 
 let usdServiceId = 0;
+/** The 2,000 USD receipt recorded in the collection journey; later cases pin clinic days to it. */
+let usdReceiptId = 0;
 /** عنوان→معرّف الخطة التي أنشأها beforeAll — الزيارات تُبنى عند الطلب أدناه. */
 const planIds = new Map<string, number>();
 const USD_CHECKOUT_PLAN = "تقويم دولاري — شبّاك المراجعة الثانية";
@@ -240,6 +242,14 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
       return payment ? `${payment.amountMinor}:${payment.currency}` : null;
     }, { timeout: 60_000 }).toBe("200000:USD");
 
+    // The prior reference excludes receipts dated on the visit's clinic arrival day.
+    // Bind that relationship to the receipt itself, not to the wall clock, then re-read.
+    usdReceiptId = (await db.query<{ id: number }>(
+      `SELECT id FROM payments WHERE invoice_id = $1 ORDER BY id DESC LIMIT 1`, [todayInvoice.invoice_id],
+    )).rows[0].id;
+    await pinArrivalToReceipt(await visitOfInvoice(todayInvoice.invoice_id), usdReceiptId);
+    await page.reload();
+
     /* Previous reference remains 500; canonical current USD debt is now zero, not frozen 2000. */
     await verifiedCheckout(checkout);
     const previousRow = moneyRow(checkout, "previous-balance", "USD");
@@ -281,6 +291,8 @@ describe("المراجعة الثانية ٦: شبّاك السعودي — سا
 describe("المراجعة الثانية ٦: سابق يمني + اليوم دولاري — عملتان منفصلتان لا مجموع واحد", () => {
   it("التوقيع ⇒ السابق باليمني سطره، واليوم بالدولار سطره، ولا إجمالي عبر العملتين", async () => {
     const yerUsdCheckoutVisitId = await linkedVisit(YER_USD_CHECKOUT_PLAN);
+    expect(usdReceiptId).toBeGreaterThan(0);
+    await pinArrivalToReceipt(yerUsdCheckoutVisitId, usdReceiptId);
     await signVisit(yerUsdCheckoutVisitId);
 
     const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
@@ -311,6 +323,19 @@ describe("المراجعة الثانية ٦: سابق يمني + اليوم د�
     /* ولا رقمٌ يجمع الدولار باليمني في الشبّاك كله. */
     const allText = await checkout.locator('dl[aria-label="أرصدة دفتر الزيارة"]').textContent();
     expect(allText).not.toContain("3,000");
+    expect(await checkout.innerText()).not.toContain("3,000");
+
+    // Adjacent-day control: the same visit arriving on the next clinic day (Asia/Aden has
+    // no DST, so +24 h is exactly one clinic day) treats the 2,000 USD receipt as prior.
+    // The prior USD reference nets to zero and is not rendered; current debts are unchanged.
+    await pinArrivalToReceipt(yerUsdCheckoutVisitId, usdReceiptId, 1);
+    await page.reload();
+    await verifiedCheckout(checkout);
+    await exactMoney(checkout, "previous-balance", "YER", "25,000");
+    await expect.poll(() => moneyRow(checkout, "previous-balance", "USD").count(), { timeout: 30_000 }).toBe(0);
+    await exactMoney(checkout, "current-balance", "USD", "1,500.00");
+    await exactMoney(checkout, "current-balance", "YER", "25,000");
+    await exactMoney(checkout, "current-balance", "SAR", "1,800.00");
     expect(await checkout.innerText()).not.toContain("3,000");
   }, 300_000);
 });
@@ -420,6 +445,23 @@ async function signVisit(visitId: number): Promise<void> {
     console.log("SIGN DEBUG visit:", JSON.stringify(rows), "alerts:", JSON.stringify(alert), "procs:", JSON.stringify(procs));
     throw new Error(`sign failed: ${JSON.stringify(rows)} alerts=${JSON.stringify(alert)}`);
   }
+}
+
+/** Sets the visit's arrival to the receipt's instant, shifted by whole clinic days. */
+async function pinArrivalToReceipt(visitId: number, receiptId: number, dayOffset = 0): Promise<void> {
+  const { rowCount } = await db.query(
+    `UPDATE visits SET arrived_at = (SELECT created_at FROM payments WHERE id = $2) + ($3 || ' days')::interval
+      WHERE id = $1 AND patient_id = $4`,
+    [visitId, receiptId, String(dayOffset), h.seeded.patientBId],
+  );
+  expect(rowCount).toBe(1);
+}
+
+async function visitOfInvoice(invoiceId: number): Promise<number> {
+  const { rows: [row] } = await db.query<{ id: number }>(
+    `SELECT id FROM visits WHERE invoice_id = $1 AND patient_id = $2`, [invoiceId, h.seeded.patientBId],
+  );
+  return row.id;
 }
 
 async function paymentCountOn(invoiceId: number): Promise<number> {
