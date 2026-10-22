@@ -98,7 +98,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { AGREEMENT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -5225,9 +5225,11 @@ export async function mergeDuplicatePatient(
     }
 
     const { rows: [footprint] } = await client.query<{
-      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number;
+      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number; collection_attempts: number;
     }>(
       `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
+              /* (0068) A retired collection key is permanent proof bound to this patient: it never moves. */
+              (SELECT COUNT(*)::int FROM collection_attempt_retirements WHERE patient_id = $1) AS collection_attempts,
               (SELECT COUNT(*)::int FROM inventory_movements
                 WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
               (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
@@ -5237,12 +5239,13 @@ export async function mergeDuplicatePatient(
       [sourceId],
     );
     if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0
-      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0) {
+      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0 || footprint.collection_attempts > 0) {
       await client.query("ROLLBACK");
       return {
         ok: false, reason: "source_has_financial_history",
         counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
-          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments },
+          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments,
+          ...(footprint.collection_attempts > 0 ? { collectionAttempts: footprint.collection_attempts } : {}) },
       };
     }
 
@@ -5595,7 +5598,9 @@ export async function deletePatientCascade(
       financial_links: string;
     }>(
       `SELECT
-         (SELECT COUNT(*) FROM payments WHERE patient_id = $1) AS payments,
+         /* (0068) Retired collection keys are permanent proof for this patient, like receipts. */
+         (SELECT COUNT(*) FROM payments WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM collection_attempt_retirements WHERE patient_id = $1) AS payments,
          (SELECT COUNT(*) FROM invoices WHERE patient_id = $1) AS invoices,
          /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
          (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
@@ -26828,6 +26833,11 @@ export async function resetClinicData<F>(
       const { rows: [agreementHistory] } = await client.query<{ exists: boolean }>(
         `SELECT ${AGREEMENT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (agreementHistory.exists) throw new ProtectedAgreementHistoryError();
+      // Retired collection keys (0068) are permanent proof; EXCLUSIVE blocks a concurrent retirement.
+      await client.query(`LOCK TABLE ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [attemptHistory] } = await client.query<{ exists: boolean }>(
+        `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
+      if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -26845,7 +26855,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }
