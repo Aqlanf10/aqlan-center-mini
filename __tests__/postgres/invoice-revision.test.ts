@@ -389,15 +389,35 @@ describe("six-direction currency correction of an unpaid, standalone invoice", (
         [correction,invoice.patientId,[invoice.id]])).rejects.toThrow(/receipt/);
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
-  it("an unpaid SAR -> USD correction restores identically through the real backup path", async () => {
-    const invoice = await fixture(0,"SAR");
+  it("a lineage paid and then fully refunded (net zero) is not pristine: only YER -> SAR may still move its receipts", async () => {
+    const invoice = await fixture(1000,"SAR");
+    const [paid] = await q("SELECT id FROM payments WHERE invoice_id=$1",[invoice.id]);
+    const refund = await db.recordPayment({patientId:invoice.patientId,invoiceId:invoice.id,kind:"refund",amountMinor:1000,currency:"SAR",baseCurrency:"SAR",
+      exchangeRate:1,method:"cash",note:null,createdBy:session.username,reversalOfId:paid.id,idempotencyKey:`net-zero-refund-${++serial}`});
+    expect(refund.reason).toBeNull();
+    const view = await revision.readInvoiceRevision(invoice.id,session);
+    expect(view.settledMinor).toBe(0);
+    expect(view.currencyCorrection).toMatchObject({available:false,targets:[]});
     const {input} = await currencyCommand(invoice.id,"USD");
-    await revision.reviseInvoice(invoice.id,input,session);
+    await expect(revision.reviseInvoice(invoice.id,input,session)).rejects.toMatchObject({code:"conflict"});
+  });
+  it("committed corrections in all five new directions restore identically through the real backup path", async () => {
+    const patients: number[] = [];
+    for (const {from,to} of directions) {
+      const invoice = await fixture(0,from);
+      const {input} = await currencyCommand(invoice.id,to);
+      await revision.reviseInvoice(invoice.id,input,session);
+      patients.push(invoice.patientId);
+    }
+    const invoice = { patientId: patients };
     const evidence = async (run: (sql: string, values?: unknown[]) => Promise<{rows: unknown[]}>) => (await run(`SELECT
-      (SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i WHERE patient_id=$1) AS invoices,
-      (SELECT jsonb_agg(to_jsonb(c) ORDER BY id) FROM invoice_corrections c WHERE patient_id=$1) AS corrections,
-      (SELECT jsonb_agg(to_jsonb(d) ORDER BY id) FROM invoice_settlement_reclassifications d WHERE patient_id=$1) AS documents,
-      (SELECT jsonb_agg(r.receipt ORDER BY r.correction_id) FROM invoice_correction_receipts r JOIN invoice_corrections c ON c.id=r.correction_id WHERE c.patient_id=$1) AS receipts`,[invoice.patientId])).rows[0];
+      (SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i WHERE patient_id=ANY($1)) AS invoices,
+      (SELECT jsonb_agg(to_jsonb(i) ORDER BY i.id) FROM invoice_items i JOIN invoices v ON v.id=i.invoice_id WHERE v.patient_id=ANY($1)) AS items,
+      (SELECT jsonb_agg(to_jsonb(c) ORDER BY id) FROM invoice_corrections c WHERE patient_id=ANY($1)) AS corrections,
+      (SELECT jsonb_agg(to_jsonb(l) ORDER BY l.id) FROM invoice_correction_lines l JOIN invoice_corrections c ON c.id=l.correction_id WHERE c.patient_id=ANY($1)) AS lines,
+      (SELECT jsonb_agg(to_jsonb(d) ORDER BY id) FROM invoice_settlement_reclassifications d WHERE patient_id=ANY($1)) AS documents,
+      (SELECT jsonb_agg(r.receipt ORDER BY r.correction_id) FROM invoice_correction_receipts r JOIN invoice_corrections c ON c.id=r.correction_id WHERE c.patient_id=ANY($1)) AS receipts,
+      (SELECT count(*)::int FROM payments WHERE patient_id=ANY($1)) AS payments`,[invoice.patientId])).rows[0];
     const expected = await evidence((sql,values)=>db.getPool().query(sql,values));
     const client = await db.getPool().connect(); const parts: string[] = [];
     try { await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"); for await (const line of db.backupSnapshotSqlLines(client)) parts.push(line); await client.query("COMMIT"); }
@@ -407,7 +427,10 @@ describe("six-direction currency correction of an unpaid, standalone invoice", (
     try {
       await migrate(isolated.sqlTarget,{apply:true,files:await loadMigrationFiles()});
       await isolated.sqlTarget.query(prepareBackupSql(parts.join("")).sql);
-      expect(await evidence((sql,values)=>isolated.sqlTarget.query(sql,values))).toEqual(expected);
+      const restored = await evidence((sql,values)=>isolated.sqlTarget.query(sql,values));
+      expect(restored).toEqual(expected);
+      expect((restored as {documents:unknown[]}).documents).toHaveLength(5);
+      expect((restored as {payments:number}).payments).toBe(0);
     } finally { await isolated.close(); }
   });
 });
