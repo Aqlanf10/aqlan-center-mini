@@ -9,6 +9,7 @@ export async function canAccessPatient(
   patientId: number,
   permission?: keyof DoctorPermissions,
   client?: DbClient,
+  ownershipLockMode?: "nowait",
 ): Promise<boolean> {
   if (client && session.expiresAt < Date.now()) return false;
   if (session.role === "admin" || session.role === "reception") return true;
@@ -25,9 +26,14 @@ export async function canAccessPatient(
     if (permission && user.permissions?.[permission] !== true) return false;
     if (user.permissions?.canViewAllPatients) return true;
     if (!user.partyId) return false;
-    const allowed = await (client ? doctorOwnsPatient(user.partyId, patientId, client) : doctorOwnsPatient(user.partyId, patientId));
+    const allowed = await (client ? (ownershipLockMode ? doctorOwnsPatient(user.partyId, patientId, client, ownershipLockMode) : doctorOwnsPatient(user.partyId, patientId, client)) : doctorOwnsPatient(user.partyId, patientId));
     return allowed && (!client || session.expiresAt >= Date.now());
-  } catch { return false; }
+  } catch (error) {
+    // A composed writer may already hold another planned row. Its ownership
+    // witnesses must fail closed without waiting in the opposite row order.
+    if (ownershipLockMode === "nowait" && (error as { code?: string }).code === "55P03") throw error;
+    return false;
+  }
 }
 
 /**

@@ -4,13 +4,507 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 126,
-    "columns": 1616,
-    "constraints": 1801,
-    "indexes": 395,
-    "triggers": 68
+    "tables": 130,
+    "columns": 1664,
+    "constraints": 1895,
+    "indexes": 406,
+    "triggers": 80
   },
   "tables": {
+    "agreement_delta_amendments": {
+      "columns": {
+        "actor_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "actor_username": {
+          "type": "text",
+          "nullable": false
+        },
+        "case_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "delta_invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "delta_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "doctor_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "new_service_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "new_unit_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "occurred_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "old_service_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "old_unit_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "original_invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_item_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "previous_agreement_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "previous_amendment_id": {
+          "type": "int8",
+          "nullable": true
+        },
+        "quantity": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "receipt": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "revised_agreement_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "settled_snapshot_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "source_hash": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "delta_invoice_id"
+        ],
+        [
+          "idempotency_key"
+        ]
+      ],
+      "checks": [
+        "agreement_delta_amendments_check",
+        "agreement_delta_amendments_delta_minor_check",
+        "agreement_delta_amendments_idempotency_key_check",
+        "agreement_delta_amendments_new_unit_minor_check",
+        "agreement_delta_amendments_old_unit_minor_check",
+        "agreement_delta_amendments_previous_agreement_minor_check",
+        "agreement_delta_amendments_quantity_check",
+        "agreement_delta_amendments_reason_check",
+        "agreement_delta_amendments_receipt_check",
+        "agreement_delta_amendments_request_hash_check",
+        "agreement_delta_amendments_settled_snapshot_minor_check",
+        "agreement_delta_amendments_source_hash_check",
+        "amendment_positive_delta"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "previous_amendment_id"
+          ],
+          "refTable": "agreement_delta_amendments",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "delta_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "original_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "doctor_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "new_service_id"
+          ],
+          "refTable": "services",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "old_service_id"
+          ],
+          "refTable": "services",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_id"
+          ],
+          "refTable": "treatment_plans",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "agreement_delta_amendments_delta_invoice_id_key": {
+          "columns": [
+            "delta_invoice_id"
+          ],
+          "unique": true
+        },
+        "agreement_delta_amendments_idempotency_key_key": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "agreement_delta_amendments_next_unique": {
+          "columns": [
+            "previous_amendment_id"
+          ],
+          "unique": true
+        },
+        "agreement_delta_amendments_patient_time_idx": {
+          "columns": [
+            "patient_id",
+            "occurred_at",
+            "id"
+          ],
+          "unique": false
+        },
+        "agreement_delta_amendments_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "agreement_delta_amendments_plan_time_idx": {
+          "columns": [
+            "plan_id",
+            "occurred_at",
+            "id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "agreement_delta_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "agreement_delta_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "agreement_delta_attempt_rejections": {
+      "columns": {
+        "actor_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "expected_source_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "observed_source_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "rejected_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "idempotency_key"
+      ],
+      "unique": [],
+      "checks": [
+        "agreement_delta_attempt_rejections_expected_source_hash_check",
+        "agreement_delta_attempt_rejections_idempotency_key_check",
+        "agreement_delta_attempt_rejections_observed_source_hash_check",
+        "agreement_delta_attempt_rejections_request_hash_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_id"
+          ],
+          "refTable": "treatment_plans",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "agreement_delta_attempt_rejections_pkey": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "agreement_delta_attempt_rejections_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "agreement_delta_attempt_rejections_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "agreement_delta_collection_receipts": {
+      "columns": {
+        "actor_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "payment_ids": {
+          "type": "_int4",
+          "nullable": false
+        },
+        "plan_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "result_snapshot": {
+          "type": "jsonb",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "idempotency_key"
+      ],
+      "unique": [],
+      "checks": [
+        "agreement_delta_collection_receipts_idempotency_key_check",
+        "agreement_delta_collection_receipts_payment_ids_check",
+        "agreement_delta_collection_receipts_request_hash_check",
+        "agreement_delta_collection_receipts_result_snapshot_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_id"
+          ],
+          "refTable": "treatment_plans",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "agreement_delta_collection_receipts_pkey": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "agreement_delta_collection_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "agreement_delta_collection_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        },
+        "collection_key_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        }
+      }
+    },
     "ai_confirmation_claims": {
       "columns": {
         "claimed_at": {
@@ -634,6 +1128,15 @@
           "columns": [
             "scheduled_date",
             "is_new_patient"
+          ],
+          "unique": false
+        },
+        "appointments_patient_history_idx": {
+          "columns": [
+            "patient_id",
+            "scheduled_date",
+            "scheduled_time",
+            "id"
           ],
           "unique": false
         },
@@ -1763,6 +2266,85 @@
         }
       },
       "triggers": {}
+    },
+    "collection_attempt_retirements": {
+      "columns": {
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "operation": {
+          "type": "text",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "retired_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "retired_by": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "idempotency_key"
+      ],
+      "unique": [],
+      "checks": [
+        "collection_attempt_retirements_idempotency_key_check",
+        "collection_attempt_retirements_operation_check",
+        "collection_attempt_retirements_request_hash_check",
+        "collection_attempt_retirements_retired_by_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "collection_attempt_retirements_patient_idx": {
+          "columns": [
+            "patient_id"
+          ],
+          "unique": false
+        },
+        "collection_attempt_retirements_pkey": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "collection_attempt_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "collection_attempt_retirement_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "commission_case_overrides": {
       "columns": {
@@ -6833,6 +7415,14 @@
         }
       },
       "triggers": {
+        "agreement_delta_item_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
         "approved_invoice_items_source_guard": {
           "timing": "BEFORE",
           "events": [
@@ -7159,6 +7749,13 @@
         }
       },
       "triggers": {
+        "agreement_delta_invoice_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
         "approved_invoice_source_guard": {
           "timing": "BEFORE",
           "events": [
@@ -12112,6 +12709,12 @@
         }
       },
       "triggers": {
+        "collection_key_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
         "invoice_reclassification_follow_refund": {
           "timing": "AFTER",
           "events": [

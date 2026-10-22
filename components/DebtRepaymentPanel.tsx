@@ -11,12 +11,17 @@ import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "@/lib/debt-
 import { DebtRepaymentEditor, readDebtRepaymentDraft, type DebtRepaymentDraft } from "./DebtRepaymentEditor";
 import { useSession } from "./SessionProvider";
 import { FinancialRecoveryError, type FinancialCommand, type FinancialRecoveryControl } from "@/lib/financial-command-journal";
+import { moneyHeaders } from "@/lib/money-attempt";
+import { readSimilarCollectionRefusal, type SimilarCollectionReceipt, type SimilarCollectionReview } from "@/lib/similar-collection";
+import { SimilarCollectionWarning } from "./SimilarCollectionWarning";
 
 /** Retained by the patient/actor owner above this panel, including A -> B -> A. */
 export interface DebtRepaymentCommand {
   url:string;body:string;key:string;target:DebtRepaymentTarget;actor:string;
   expected:{kind:"schedule";version:number;terms:DebtRepaymentTerms;status:"active"|"cancelled"}|{kind:"collection";amountMinor:number;currency:Currency;method:string};
-  outcome:"pending"|"uncertain"|"refused";message:string;
+  outcome:"pending"|"uncertain"|"refused"|"review";message:string;
+  /** outcome "review": nothing was written; `proven` = no earlier send of this key can still land. */
+  similar?:{receipts:SimilarCollectionReceipt[];proven:boolean};
 }
 function durableDebtCommand(command: DebtRepaymentCommand): FinancialCommand {
   const { url, body, key, target, actor, expected } = command;
@@ -95,14 +100,16 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
   },[enabled,patientId]);
   useEffect(()=>{void load();},[load,refreshKey]);
   const allowed=enabled&&financialRecovery.ready&&!!session&&["admin","reception"].includes(session.role);
-  const send=async(command:DebtRepaymentCommand)=>{
+  const send=async(command:DebtRepaymentCommand,review?:SimilarCollectionReview)=>{
     if(!allowed||pending.current||!lifetime.current.active||command.actor!==session.username||command.target.patientId!==patientId)return;
     pending.current=true;setWriting(true);onHold(true);setNotice(null);setReceiptId(null);
-    onRecoveryChange({...command,outcome:"pending",message:"جارٍ حفظ الطلب…"});
+    // A brand-new command (never sent) or a proven review: every earlier send of this key was answered.
+    const proven=command.outcome==="pending"||command.outcome==="review"&&command.similar?.proven===true;
+    onRecoveryChange({...command,similar:undefined,outcome:"pending",message:"جارٍ حفظ الطلب…"});
     try{
       const durable=durableDebtCommand(command);
       if(!await financialRecovery.reserve(durable,draftRevision.current)||!lifetime.current.active)return;
-      const {response,payload}=await readInvoiceCommandResponse(signal=>fetch(command.url,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":command.key},body:command.body,signal}),response=>{
+      const {response,payload}=await readInvoiceCommandResponse(signal=>fetch(command.url,{method:"POST",headers:moneyHeaders(command.key,review),body:command.body,signal}),response=>{
         if(lifetime.current.active&&(response.status===401||response.status===403))setData(null);
       });
       if(!lifetime.current.active)return;
@@ -113,12 +120,24 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
         setNotice(command.expected.kind==="collection"?"ثُبّت التحصيل بسند قبض.":"حُفظ ترتيب سداد الدين القائم؛ لم تُنشأ فاتورة أو دفعة.");
         if(verified>0)setReceiptId(verified);
         onChanged();void load();
+      }else if(!response.redirected&&response.status===409&&readSimilarCollectionRefusal(payload)){
+        onRecoveryChange({...command,outcome:"review",similar:{receipts:readSimilarCollectionRefusal(payload)!,proven},
+          message:"لم يُسجَّل التحصيل بعد: يوجد سند قبض مشابه. راجعه ثم ألغِ أو سجّل دفعة مستقلة."});
       }else{
         const refused=!response.redirected&&[400,409].includes(response.status)&&debtRecord(payload)&&typeof payload.message==="string"&&["invalid","stale","conflict","missing"].includes(String(payload.code));
         onRecoveryChange({...command,outcome:refused?"refused":"uncertain",message:refused?String((payload as Record<string,unknown>).message):"نتيجة الطلب غير مؤكدة. أعد الطلب نفسه للتحقق قبل أي تحصيل أو تعديل جديد."});
       }
     }catch{if(lifetime.current.active)onRecoveryChange({...command,outcome:"uncertain",message:"انقطع الاتصال أو لم يكتمل الرد. البيانات والمفتاح محفوظان لإعادة التحقق."});}
     finally{pending.current=false;if(lifetime.current.active)setWriting(false);}
+  };
+  /** Cancel an advisory review. Retire the saved command only when no send of this key can still land. */
+  const cancelSimilar=async(command:DebtRepaymentCommand)=>{
+    if(pending.current||command.outcome!=="review")return;
+    if(command.similar?.proven){
+      try{await financialRecovery.acknowledge(durableDebtCommand(command));onRecoveryChange(null);setCollecting(null);setNotice("أُلغي التحصيل؛ لم يُسجَّل سند جديد.");return;}
+      catch{/* journal unavailable: keep the command */}
+    }
+    onRecoveryChange({...command,similar:undefined,outcome:"uncertain",message:"نتيجة محاولة سابقة بالمفتاح نفسه غير محسومة. أعد التحقق بنفس الطلب قبل أي تحصيل جديد."});
   };
   const startEdit=(target:DebtRepaymentChoice)=>{
     if(!allowed||recovery||pending.current)return;
@@ -153,7 +172,10 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
     {receiptId?<a className={button+" inline-flex items-center"} href={`/print/receipt/${receiptId}`} target="_blank" rel="noopener">طباعة سند التحصيل</a>:null}
     {recovery?<div role="status" data-testid="debt-command-recovery" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">
       <p>{writing?"جارٍ حفظ الطلب…":recovery.message||"يوجد طلب محفوظ يحتاج إعادة التحقق."}</p>
-      <button type="button" className={button} disabled={writing||!allowed} onClick={()=>void send(recovery)}>إعادة نفس طلب السداد</button>
+      {recovery.outcome==="review"&&recovery.similar?<SimilarCollectionWarning receipts={recovery.similar.receipts} busy={writing}
+        onConfirm={()=>void send(recovery,{observedReceiptIds:recovery.similar!.receipts.map(receipt=>receipt.id)})}
+        onCancel={()=>void cancelSimilar(recovery)}/>
+      :<button type="button" className={button} disabled={writing||!allowed} onClick={()=>void send(recovery)}>إعادة نفس طلب السداد</button>}
       {recovery.outcome==="refused"?<button type="button" className={button} disabled={writing} onClick={()=>{void load();}}>مراجعة الحساب بعد الرفض</button>:null}
     </div>:null}
     {!enabled?<p role="status" className="text-xs text-slate-500">تُراجع ترتيبات السداد بعد إغلاق إدخال العلاج والتحقق من الحساب.</p>:null}

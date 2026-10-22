@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { DoctorDailyScheduleCard } from "@/components/DoctorDailyScheduleCard";
 import { PageHeader } from "@/components/PageHeader";
 import {
   MISSED_APPOINTMENT_LABEL, REFERRAL_SPECIALTY_LABEL, REFERRAL_URGENCY_LABEL, WORKFLOW_STATE_LABEL,
@@ -15,15 +16,7 @@ import {
  */
 
 type Row = Referral & { patientName: string };
-interface TodayRow {
-  appointmentId: number; patientId: number; patientName: string; time: string; status: string;
-  referralId: number | null; referralReason: string | null; referredBy: string | null;
-}
-interface Feed { toMe: Row[]; sentOpen: Row[]; returnedToMe: Row[]; today: TodayRow[] }
-
-const APPOINTMENT_STATUS: Record<string, string> = {
-  booked: "محجوز", arrived: "وصل", done: "تمّ", no_show: "لم يحضر", cancelled: "أُلغي",
-};
+interface Feed { toMe: Row[]; sentOpen: Row[]; returnedToMe: Row[] }
 
 function ageDays(iso: string): number {
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000));
@@ -75,7 +68,7 @@ export default function MyWorkPage() {
       const response = await fetch("/api/referrals/mine", { cache: "no-store" });
       const payload = await response.json().catch(() => null) as (Feed & { message?: string }) | null;
       if (!response.ok || !payload) { setError(payload?.message ?? "تعذّر تحميل عملك السريري."); return; }
-      setFeed({ toMe: payload.toMe ?? [], sentOpen: payload.sentOpen ?? [], returnedToMe: payload.returnedToMe ?? [], today: payload.today ?? [] });
+      setFeed({ toMe: payload.toMe ?? [], sentOpen: payload.sentOpen ?? [], returnedToMe: payload.returnedToMe ?? [] });
       setError(null);
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -86,7 +79,8 @@ export default function MyWorkPage() {
 
   return (
     <main dir="rtl" className="mx-auto max-w-4xl p-4 pb-24">
-      <PageHeader title="عملي السريري" subtitle="الإحالات إليك ومنك، وما عاد إليك، ومرضاك اليوم" />
+      <PageHeader title="عملي السريري" subtitle="الإحالات إليك ومنك، وما عاد إليك، وجدول مواعيدك" />
+      <DoctorDailyScheduleCard />
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</p>
       ) : null}
@@ -98,20 +92,6 @@ export default function MyWorkPage() {
           </Section>
           <Section title="أُحيلت إليك" empty="لا إحالات مفتوحة إليك." count={feed.toMe.length}>
             {feed.toMe.map((row) => <ReferralLine key={row.id} row={row} side="to" />)}
-          </Section>
-          <Section title="مرضاك اليوم" empty="لا مواعيد لك اليوم." count={feed.today.length}>
-            {feed.today.map((row) => (
-              <li key={row.appointmentId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
-                {/* (REF-3) من وصل يُفتح ملفه على «زيارة اليوم» مباشرةً — فيها لافتة الإحالة وسياق حالتها. */}
-                <a href={`/patients/${row.patientId}${row.status === "arrived" ? "?tab=today" : ""}`} className="text-sm font-extrabold text-navy-900 hover:underline">
-                  <span dir="ltr" className="ml-2 text-xs text-slate-500">{row.time}</span>{row.patientName}
-                </a>
-                <span className="text-[11px] font-bold text-slate-600">
-                  {APPOINTMENT_STATUS[row.status] ?? row.status}
-                  {row.referralId ? ` · 📨 إحالة${row.referredBy ? ` من ${row.referredBy}` : ""}: ${row.referralReason ?? ""}` : ""}
-                </span>
-              </li>
-            ))}
           </Section>
           <Section title="أحلتَها ولم تعد بعد" empty="لا إحالات مفتوحة منك." count={feed.sentOpen.length}>
             {feed.sentOpen.map((row) => <ReferralLine key={row.id} row={row} side="from" />)}

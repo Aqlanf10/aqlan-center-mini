@@ -76,7 +76,8 @@ export function ReceiptCorrection({ receipt, patientId=receipt.patientId, remain
       const result = await money.run(retry ? undefined : {
         url: `/api/payments/${receipt.id}/correct`, body: JSON.stringify(body), operation: mode,
       });
-      if (!result || result.kind === "busy") return;
+      // Corrections are not advisory-reviewed; the correction route never answers "similar".
+      if (!result || result.kind === "busy" || result.kind === "similar") return;
       if (result.kind !== "confirmed") { setError(result.message); return; }
       const { reversal, replacement } = result.acknowledgment;
       onDone(
