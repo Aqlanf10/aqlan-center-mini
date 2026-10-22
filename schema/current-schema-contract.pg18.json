@@ -5,8 +5,8 @@
   "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
     "tables": 130,
-    "columns": 1662,
-    "constraints": 1890,
+    "columns": 1664,
+    "constraints": 1894,
     "indexes": 405,
     "triggers": 82
   },
@@ -2264,8 +2264,16 @@
           "type": "text",
           "nullable": false
         },
+        "operation": {
+          "type": "text",
+          "nullable": false
+        },
         "patient_id": {
           "type": "int4",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
           "nullable": false
         },
         "retired_at": {
@@ -2283,6 +2291,8 @@
       "unique": [],
       "checks": [
         "collection_attempt_retirements_idempotency_key_check",
+        "collection_attempt_retirements_operation_check",
+        "collection_attempt_retirements_request_hash_check",
         "collection_attempt_retirements_retired_by_check"
       ],
       "foreignKeys": [

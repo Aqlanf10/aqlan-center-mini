@@ -15,7 +15,8 @@ export async function POST(request: Request) {
   try {
     const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
     const fields = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
-    const state = await retireCollectionAttempt(fields.idempotencyKey, fields.patientId, session);
+    const state = await retireCollectionAttempt({ idempotencyKey: fields.idempotencyKey, patientId: fields.patientId,
+      operation: fields.operation, requestBody: fields.requestBody, originalActor: fields.originalActor }, session);
     return NextResponse.json({ state }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const bounded = bodyErrorResponse(error); if (bounded) return bounded;
