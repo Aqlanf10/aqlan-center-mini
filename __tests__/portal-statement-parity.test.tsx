@@ -18,7 +18,10 @@ vi.mock("@/lib/portal-server", () => ({ requirePortalSession: mocks.portal }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.staff }));
 vi.mock("@/lib/db", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/db")>(),
   getPatient: mocks.getPatient, patientLedger: mocks.patientLedger, getSettingsSafe: mocks.getSettingsSafe,
-  patientPlanCurrencies: mocks.patientPlanCurrencies, listPatientPlans: mocks.listPatientPlans }));
+  patientPlanCurrencies: mocks.patientPlanCurrencies, listPatientPlans: mocks.listPatientPlans,
+  // The portal reads the same three sources in one snapshot; here it composes the same mocks.
+  patientStatementSnapshot: async (patientId: number, today: string) => ({ ledger: await mocks.patientLedger(patientId),
+    planCurrencies: await mocks.patientPlanCurrencies(patientId), plans: await mocks.listPatientPlans(patientId, today) }) }));
 vi.mock("@/components/PrintHeader", () => ({ PrintHeader: ({ title }: { title: string }) => createElement("h1", null, title), PrintFooter: () => null }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, ledgerBalancesByCurrency, listPatientPlans, patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { CLINIC_TIME_ZONE, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
 import { requirePortalSession } from "@/lib/portal-server";
 import { portalStatementView } from "@/lib/portal-statement";
 import { clinicDateString } from "@/lib/schedule";
@@ -20,12 +20,10 @@ export async function GET() {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   try {
-    // The same readers as the printed statement, including its agreement progress as of today.
-    const [{ invoices, payments, openings }, planCurrencies, plans] = await Promise.all([
-      patientLedger(session.patientId),
-      patientPlanCurrencies(session.patientId),
-      listPatientPlans(session.patientId, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
-    ]);
+    // The printed statement's readers, in one snapshot: balances and agreement progress
+    // in a response always describe the same committed state.
+    const { ledger: { invoices, payments, openings }, planCurrencies, plans } =
+      await patientStatementSnapshot(session.patientId, clinicDateString(new Date(), CLINIC_TIME_ZONE));
     /* (TD-05 · P1-5ب) بوابة المريض ترى ما يراه الصندوق: أرصدةً بعملاتها المستقلة —
        بالقاعدة نفسها التي يقرأ بها كشف الحساب (ledgerBalancesByCurrency). */
     const balances = ledgerBalancesByCurrency(session.patientId, { invoices, payments, openings }, planCurrencies);

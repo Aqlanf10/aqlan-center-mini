@@ -138,3 +138,95 @@ describe("portal statement detail matches the printed statement on real data", (
     expect((await refused.json()).message).toMatch(/[؀-ۿ]/);
   });
 });
+
+describe("one coherent read boundary for the portal statement", () => {
+  type Feed = { balances: Record<string, { collectedMinor: number }>; agreements: { paidMinor: number }[] };
+  const sqlOf = (args: unknown[]) => typeof args[0] === "string" ? args[0] : String((args[0] as { text?: string }).text ?? "");
+  const until = async (ready: () => boolean) => { for (let i = 0; i < 500 && !ready(); i++) await new Promise(r => setTimeout(r, 10)); expect(ready()).toBe(true); };
+
+  /**
+   * Commits a real on-account agreement payment after the request has listed the patient's
+   * receipts and before it reads the plans. Readers sharing one snapshot see neither or both.
+   */
+  async function interleavedFeed(amountMinor: number) {
+    const pool = db.getPool();
+    const original = pool.connect.bind(pool) as (...args: unknown[]) => unknown;
+    let paymentsListed = false, injected = false;
+    const spy = vi.spyOn(pool, "connect").mockImplementation(((...args: unknown[]) => {
+      // pool.query() connects in callback style; pass those through uninstrumented.
+      if (typeof args[0] === "function") return original(...args);
+      return instrument(original() as Promise<import("pg").PoolClient>);
+    }) as unknown as typeof pool.connect);
+    async function instrument(pending: Promise<import("pg").PoolClient>) {
+      const client = await pending;
+      const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+      const release = client.release.bind(client);
+      client.query = (async (...args: unknown[]) => {
+        const sql = sqlOf(args);
+        if (sql.includes("WHERE y.patient_id = $1 ORDER BY y.created_at DESC, y.id DESC")) {
+          const result = await query(...args); paymentsListed = true; return result;
+        }
+        if (!injected && sql.includes("t.total_from_items, t.consent_at") && sql.includes("t.patient_id=$1")) {
+          injected = true;
+          await until(() => paymentsListed);
+          await pay({ planId: agreementPlanId, amountMinor, currency: "SAR" });
+        }
+        return query(...args);
+      }) as typeof client.query;
+      client.release = ((destroy?: boolean | Error) => { client.query = query as typeof client.query; client.release = release; return release(destroy); }) as typeof client.release;
+      return client;
+    }
+    try {
+      const { feed } = await portalFeed();
+      expect(injected).toBe(true);
+      return feed as Feed;
+    } finally { spy.mockRestore(); }
+  }
+
+  it("a payment committed between the reads never splits balances from agreement progress", async () => {
+    const { feed: before } = await portalFeed();
+    const during = await interleavedFeed(5_000);
+    const collected = during.balances.SAR.collectedMinor - (before as Feed).balances.SAR.collectedMinor;
+    const paid = during.agreements[0].paidMinor - (before as Feed).agreements[0].paidMinor;
+    expect(collected).toBe(paid);
+    // Afterwards both sides show the committed payment together.
+    const { feed: after } = await portalFeed();
+    expect((after as Feed).balances.SAR.collectedMinor - (before as Feed).balances.SAR.collectedMinor).toBe(5_000);
+    expect((after as Feed).agreements[0].paidMinor - (before as Feed).agreements[0].paidMinor).toBe(5_000);
+  });
+
+  it("the shared snapshot keeps the original error and discards a client whose ROLLBACK failed", async () => {
+    const pool = db.getPool();
+    const original = pool.connect.bind(pool) as (...args: unknown[]) => unknown;
+    const released: unknown[] = [];
+    const spy = vi.spyOn(pool, "connect").mockImplementationOnce((async () => {
+      const client = await (original() as Promise<import("pg").PoolClient>);
+      const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+      const release = client.release.bind(client);
+      let began = false;
+      client.query = (async (...args: unknown[]) => {
+        const sql = sqlOf(args);
+        if (sql.startsWith("BEGIN")) { began = true; return query(...args); }
+        if (sql === "ROLLBACK") throw new Error("synthetic rollback failure");
+        if (began) throw new Error("synthetic statement read failure");
+        return query(...args);
+      }) as typeof client.query;
+      client.release = ((destroy?: boolean | Error) => { released.push(destroy); client.query = query as typeof client.query; client.release = release; return release(destroy); }) as typeof client.release;
+      return client;
+    }) as unknown as typeof pool.connect);
+    try {
+      await expect(db.patientStatementSnapshot(patientId, "2026-10-22")).rejects.toThrow("synthetic statement read failure");
+      expect(released).toEqual([true]);
+      expect((await pool.query<{ ok: number }>("SELECT 1 AS ok")).rows).toEqual([{ ok: 1 }]);
+    } finally { spy.mockRestore(); }
+  });
+
+  it("an unauthenticated request opens no database connection at all", async () => {
+    const spy = vi.spyOn(db.getPool(), "connect");
+    try {
+      gates.portalPatientId = 0;
+      expect((await GET()).status).toBe(401);
+      expect(spy).not.toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+  });
+});
