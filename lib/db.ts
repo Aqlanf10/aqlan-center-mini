@@ -26005,6 +26005,11 @@ export async function listProviderBlocks(
      اتصالًا يحجزه بعضُها بعضًا. */
   if (!client) await ensureSchema();
   const runner: Pick<DbClient, "query"> = client ?? getPool();
+  // Match clinic-day-sql: broad indexed bounds, then exact local dates. Midnight
+  // can repeat (e.g. Havana), so AT TIME ZONE alone may miss its first occurrence.
+  // Each date boundary is converted independently; a clinic day need not be 24h.
+  // PostgreSQL timestamps have microsecond precision: the last included instant
+  // of [starts_at, ends_at) keeps a block ending at midnight out of the next day.
   const { rows } = await runner.query<{
     id: string; provider_id: number; starts_at: Date; ends_at: Date; reason: string;
     cancelled_at: Date | null; created_by: string; created_at: Date;
@@ -26012,10 +26017,12 @@ export async function listProviderBlocks(
     `SELECT id::text, provider_id, starts_at, ends_at, reason, cancelled_at, created_by, created_at
        FROM provider_blocks
       WHERE provider_id = $1 AND cancelled_at IS NULL
-        AND starts_at < ($2::date + 1)::timestamptz
-        AND ends_at > $2::timestamptz
+        AND starts_at < (($2::date + 1)::timestamp AT TIME ZONE $3) + INTERVAL '1 day'
+        AND ends_at > ($2::date::timestamp AT TIME ZONE $3) - INTERVAL '1 day'
+        AND (starts_at AT TIME ZONE $3)::date <= $2::date
+        AND ((ends_at - INTERVAL '1 microsecond') AT TIME ZONE $3)::date >= $2::date
       ORDER BY starts_at`,
-    [providerId, date],
+    [providerId, date, CLINIC_TIME_ZONE],
   );
   return rows.map((row) => ({
     id: row.id, providerId: row.provider_id,
