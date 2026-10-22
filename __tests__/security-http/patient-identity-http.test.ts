@@ -10,6 +10,7 @@ import { authedGet, authedMutation, harness } from "./_server";
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let patientId = 0;
+// Reserve this fixture's phone: the audit suite uses 771234567 (same normalized contact as 967771234567).
 const arabic = /[؀-ۿ]/;
 
 beforeAll(async () => {
@@ -17,7 +18,7 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
   ({ rows: [{ id: patientId }] } = await db.query<{ id: number }>(
-    `INSERT INTO patients (patient_number, full_name, phone) VALUES ($1, 'مريض التواصل', '967771234567') RETURNING id`,
+    `INSERT INTO patients (patient_number, full_name, phone) VALUES ($1, 'مريض التواصل', '967770000391') RETURNING id`,
     [`IDH-${Date.now()}`]));
 }, 120_000);
 afterAll(async () => { await db?.end(); });
@@ -67,7 +68,7 @@ describe("(PAT-3) /api/patients/[id]/contact", () => {
     expect(send.status).toBe(409);
     expect((await send.json() as { message: string }).message).toContain("سحب موافقته");
     const direct = await authedMutation(`/api/messages/outbound`, h.sessions.reception, "POST",
-      JSON.stringify({ channel: "whatsapp", to: "967771234567", body: "مرحبا" }));
+      JSON.stringify({ channel: "whatsapp", to: "967770000391", body: "مرحبا" }));
     expect(direct.status).toBe(409);
     expect((await direct.json() as { message: string }).message).toContain("سحب موافقته");
   });
@@ -95,13 +96,13 @@ describe("(PAT-3) /api/patients/[id]/contact", () => {
   });
 
   it("does not accept a client-declared reply without a matching inbound message", async () => {
-    const payload = { channel: "whatsapp", patientId, to: "967771234567", body: "رد", purpose: "reply" };
+    const payload = { channel: "whatsapp", patientId, to: "967770000391", body: "رد", purpose: "reply" };
     expect((await authedMutation("/api/messages/outbound", h.sessions.reception, "POST",
       JSON.stringify(payload))).status).toBe(400);
     const { rows: [inbound] } = await db.query<{ id: number }>(
       `INSERT INTO message_deliveries
         (channel, direction, patient_id, counterpart, body, purpose, status)
-       VALUES ('whatsapp', 'in', $1, '967771234567', 'رسالة واردة', 'inbound', 'received') RETURNING id`,
+       VALUES ('whatsapp', 'in', $1, '967770000391', 'رسالة واردة', 'inbound', 'received') RETURNING id`,
       [patientId]);
     expect((await authedMutation("/api/messages/outbound", h.sessions.reception, "POST",
       JSON.stringify({ ...payload, replyToInboundId: inbound.id, to: "967771234568" }))).status).toBe(400);

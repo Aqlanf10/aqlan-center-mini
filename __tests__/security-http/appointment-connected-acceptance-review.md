@@ -2,15 +2,17 @@
 
 ## Status and source identity
 
-- Final published application pin and local base: `42b91977ea31bcbe61086f5f51717590a05f0ced`
+- Final published application pin and local base: `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`
   ([Draft PR #414](https://github.com/Aqlanf10/aqlan-center-mini/pull/414)).
-- Application tree: `7bea78d71e0c73ace70abd8b2fe447033c73299d`.
+- Application tree: `03e7b233da7982c79ed02d00ddb67d3de511a110`.
 - First hosted attempt `39709737846` on acceptance `636bc3df44b8f8fc7fb21e9a61c1401546f57654`
   failed at the environment-contract step, before browser execution.
 - Prior hosted run `39711640521` succeeded on application `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`
   with acceptance head `73c6d443` after the npm11 setup correction.
-- Fresh hosted acceptance on `42b91977ea31bcbe61086f5f51717590a05f0ced`: **pending**.
-  The earlier success is not acceptance of this new SHA. No local Chromium/PostgreSQL execution.
+- Root also reports successful hosted acceptance from #415 head `922f` on
+  application `42b91977ea31bcbe61086f5f51717590a05f0ced`. This remains historical evidence for that exact app pin.
+- Fresh hosted acceptance on `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`: **pending**.
+  Neither prior success is acceptance of this new SHA. No local Chromium/PostgreSQL execution.
 - Dedicated review branch: `review/appointment-browser-acceptance-hosted`.
 - Review base: `integration/nonfinancial-20261022`.
 
@@ -95,8 +97,8 @@ proof. Canonical SQL assertions, not only UI notices, determine success.
 
 On the newly pinned source with these four test/review additions, Node 22.23.3:
 
-- Full compilation was not rerun for this repin while another worker owns the
-  compiler. The last full check passed on prior app `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`.
+- Full compilation was not rerun for this pin-only handoff. This worker's last
+  full check passed on prior app `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`.
 
   Command: `tsc --noEmit --incremental false`, `NODE_OPTIONS=--max-old-space-size=4096`.
 - Workflow guards, existing route-lifecycle regressions, and environment-parity
@@ -146,9 +148,33 @@ aging lines in `__tests__/security-http/referral-arrival-http.test.ts` relative 
 The fixture now puts the absence target in the past rather than assuming today's
 08:00 appointment is already eligible before that time. Root reported the focused
 real-HTTP comparison as 2 passing/3 failing before and 20/20 passing after the fix.
-This is separate from the eight browser journeys and does not substitute for a
-fresh hosted run on the new immutable pin.
+This was separate from the eight browser journeys. Root subsequently reported
+#415 head `922f` passing on this `42b91977` app pin; that does not establish
+acceptance of any later application SHA.
 
 The repin changes the workflow's exact SHA, the matching static assertion, and
 these evidence notes. The connected journey, npm11 setup, source-isolation checks,
 read-only permissions, and outbound interception remain unchanged.
+
+## Composed application repin
+
+The current application pin `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6` includes the
+reviewed doctor-bookability, patient-history index `0067`, planned-visit lifecycle,
+DATE backup preservation, and unique-consent fixture changes. The acceptance
+branch is rebased onto that exact composed commit, retaining its original parents
+and application tree rather than copying or replacing runtime source.
+
+Root reports 390 unit tests, 248 PostgreSQL tests, full TypeScript compilation and
+lint passing on the local union. The reported 657 HTTP tests in 93 files
+passed on the #418 runtime plus fixture, not on the complete union. These results
+are separate from hosted browser acceptance, which is pending on the current pin.
+
+Inspection found no hardcoded migration/index-registry chain in the acceptance
+workflow, its guard tests, or connected journey. The existing harness initializes
+the schema from the pinned app, including its current registry and index. No
+older-chain assertion was removed, weakened, or bypassed.
+
+Only the exact pin, its matching guard assertion, and this evidence record change
+for this handoff. The journey remains byte-identical, including populated financial
+fingerprints and outbound interception. npm11 setup, app/probe SHA checks, the
+single permitted test overlay and read-only permissions remain in place.
