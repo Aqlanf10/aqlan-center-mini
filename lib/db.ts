@@ -1,3 +1,4 @@
+import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
@@ -4286,6 +4287,8 @@ export async function deleteAppointment(
  */
 export async function writeAppointmentInDay<T>(input: {
   date: string;
+  /** Optional composed-writer fence, before day or table locks. */
+  beforeLocks?: (client: DbClient) => Promise<void>;
   judge: (day: Appointment[], client: DbClient) =>
     | ({ ok: true } | { ok: false; conflict: unknown })
     | Promise<{ ok: true } | { ok: false; conflict: unknown }>;
@@ -4295,6 +4298,7 @@ export async function writeAppointmentInDay<T>(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await input.beforeLocks?.(client);
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`,
       [input.date],
@@ -15127,7 +15131,9 @@ export async function patientHasVisitToday(patientId: number, client?: DbClient)
     : rows[0]?.ok === true;
 }
 
-export async function doctorOwnsPatient(partyId: number, patientId: number, client?: DbClient): Promise<boolean> {
+export async function doctorOwnsPatient(
+  partyId: number, patientId: number, client?: DbClient, ownershipLockMode?: "nowait",
+): Promise<boolean> {
   if (!client) await ensureSchema();
   // One canonical definition: the legacy EXISTS and transactional witness locks use
   // identical predicates. Any one protected positive witness is sufficient.
@@ -15142,7 +15148,7 @@ export async function doctorOwnsPatient(partyId: number, patientId: number, clie
   if (client) {
     for (const { table, alias, predicate } of witnesses) {
       const { rows } = await client.query(`SELECT ${alias}.id FROM ${table} ${alias}
-        WHERE ${predicate} ORDER BY ${alias}.id LIMIT 1 FOR SHARE`, [partyId, patientId]);
+        WHERE ${predicate} ORDER BY ${alias}.id LIMIT 1 FOR SHARE${ownershipLockMode === "nowait" ? " NOWAIT" : ""}`, [partyId, patientId]);
       if (rows[0]) return true;
     }
     return false;
@@ -20965,6 +20971,13 @@ export interface PlannedVisitView {
   appointmentId: number | null;
   appointmentDate: string | null;
   appointmentTime: string | null;
+  appointmentStatus: AppointmentStatus | null;
+  canRebook: boolean;
+  rebookGeneration: string;
+  rebookBlockedReason: string | null;
+  /** Internal authority hints: API projections strip these before responding. */
+  rebookHasReferral: boolean;
+  rebookReferralReceiverId: number | null;
   visitId: number | null;
   note: string | null;
   createdAt: string;
@@ -20975,6 +20988,8 @@ interface PlannedVisitRow {
   title: string; doctor_id: number | null; doctor_name: string | null;
   duration_minutes: number; status: string; appointment_id: number | null;
   scheduled_date: string | null; scheduled_time: string | null;
+  appointment_status: AppointmentStatus | null; rebook_block_reason: PlannedRebookBlockReason | null;
+  rebook_generation: string; rebook_has_referral: boolean; rebook_referral_receiver_id: number | null;
   visit_id: number | null; note: string | null; created_at: Date;
 }
 
@@ -20982,11 +20997,15 @@ const PLANNED_VISIT_SELECT = `
   SELECT v.id, v.patient_id, v.plan_id, t.title AS plan_title, v.sequence, v.title, v.doctor_id,
          d.name AS doctor_name, v.duration_minutes, v.status, v.appointment_id,
          a.scheduled_date::text AS scheduled_date, a.scheduled_time::text AS scheduled_time,
+         a.status AS appointment_status, ${PLANNED_REBOOK_BLOCK_REASON_SQL} AS rebook_block_reason,
+         ${PLANNED_REBOOK_GENERATION_SQL} AS rebook_generation,
+         a.referral_id IS NOT NULL AS rebook_has_referral, r.to_party_id AS rebook_referral_receiver_id,
          v.visit_id, v.note, v.created_at
     FROM planned_visits v
     LEFT JOIN treatment_plans t ON t.id = v.plan_id
     LEFT JOIN parties d ON d.id = v.doctor_id
-    LEFT JOIN appointments a ON a.id = v.appointment_id`;
+    LEFT JOIN appointments a ON a.id = v.appointment_id
+    LEFT JOIN patient_referrals r ON r.id = a.referral_id`;
 
 function toPlannedVisit(row: PlannedVisitRow): PlannedVisitView {
   return {
@@ -20996,6 +21015,12 @@ function toPlannedVisit(row: PlannedVisitRow): PlannedVisitView {
     appointmentId: row.appointment_id,
     appointmentDate: row.scheduled_date,
     appointmentTime: row.scheduled_time?.slice(0, 5) ?? null,
+    appointmentStatus: row.appointment_status,
+    canRebook: row.rebook_block_reason === null,
+    rebookGeneration: row.rebook_generation,
+    rebookBlockedReason: row.rebook_block_reason ? PLANNED_REBOOK_REASONS[row.rebook_block_reason] : null,
+    rebookHasReferral: row.rebook_has_referral,
+    rebookReferralReceiverId: row.rebook_referral_receiver_id,
     visitId: row.visit_id, note: row.note, createdAt: row.created_at.toISOString(),
   };
 }
@@ -28215,72 +28240,100 @@ const REFERRAL_ACTION_AUDIT = {
  * والحالة القديمة تتبعها في الكتابة نفسها (والقيد في القاعدة يرفض أي افتراق)، والتدقيق معها.
  * «الحجز» يربط موعدًا قائمًا للمريض نفسه بالإحالة.
  */
-export async function transitionInternalReferral(input: ReferralTransition & {
-  id: number; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "external" | "invalid_transition" | "bad_appointment" }> {
+type InternalReferralTransitionInput = ReferralTransition & { id: number; actor: string; actorRole?: string | null };
+type InternalReferralTransitionResult = { ok: true } | { ok: false; reason: "not_found" | "external" | "invalid_transition" | "bad_appointment" };
+
+/** Apply the canonical referral validation, linkage and audit on the caller's transaction.
+ * Existing appointment locks must precede planned/referral locks. Callers composing
+ * with a planned session pass the complete ascending locked set, including their
+ * newly inserted appointment; no second transaction or pool read is opened here. */
+export async function transitionInternalReferralOnClient(
+  client: DbClient,
+  input: InternalReferralTransitionInput,
+  options?: {
+    lockedAppointmentIds?: readonly number[];
+    authorize?: (current: { patient_id: number; to_party_id: number | null; doctor_party_id: number | null }) => Promise<void>;
+  },
+): Promise<InternalReferralTransitionResult> {
+  /* (REF-2) المواعيد قبل الإحالة — الترتيب نفسه في الوصول والإلغاء — فلا يتقاطع قفلان: الموعد الجديد
+       وكل موعدٍ مربوطٍ بالإحالة الآن (فكّ ربط القديم يلمسه)، مرتّبةً بالرقم. */
+  const lockedAppointmentIds = options?.lockedAppointmentIds ?? (input.action === "schedule"
+    ? (await client.query<{ id: number }>(
+      `SELECT id FROM appointments WHERE id = $1 OR referral_id = $2 ORDER BY id FOR UPDATE`,
+      [input.appointmentId, input.id])).rows.map(row => row.id) : []);
+  const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string; to_party_id: number | null; doctor_party_id: number | null }>(
+    `SELECT patient_id, kind, workflow_state, to_name, to_party_id, doctor_party_id FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);
+  const current = rows[0];
+  if (!current) { return { ok: false, reason: "not_found" }; }
+  if (current.kind !== "internal" || !current.workflow_state) { return { ok: false, reason: "external" }; }
+  await options?.authorize?.(current);
+  // A referral may have acquired another appointment while its row lock waited.
+  // Do not take a newly discovered appointment lock after a planned/referral lock.
+  if (input.action === "schedule") {
+    const { rows: links } = await client.query<{ id: number }>(
+      `SELECT id FROM appointments WHERE id = $1 OR referral_id = $2 ORDER BY id`,
+      [input.appointmentId, input.id]);
+    if (links.some(row => !lockedAppointmentIds.includes(row.id))) return { ok: false, reason: "bad_appointment" };
+  }
+  const next = nextReferralState(current.workflow_state, input.action);
+  if (!next) { return { ok: false, reason: "invalid_transition" }; }
+
+  if (input.action === "schedule") {
+    /* موعدٌ قادم («محجوز»، اليوم أو بعده بتاريخ العيادة) للمريض نفسه مع الطبيب المحال إليه، غير مربوطٍ بإحالةٍ أخرى.
+     * موعدٌ مضى وبقي «محجوزًا» سهوًا لا يُحتسب حجزًا للإحالة. */
+    const { rows: appointment } = await client.query(
+      `SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND doctor_id = $4
+          AND (referral_id IS NULL OR referral_id = $3) AND scheduled_date >= $5::date FOR UPDATE`,
+      [input.appointmentId, current.patient_id, input.id, current.to_party_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)]);
+    if (!appointment[0]) { return { ok: false, reason: "bad_appointment" }; }
+    await client.query(`UPDATE appointments SET referral_id = $2 WHERE id = $1`, [input.appointmentId, input.id]);
+    /* إعادة الحجز تنقل الرابط: موعدٌ محجوزٌ سابقٌ لهذه الإحالة لم يعد موعدها (يبقى موعدًا عاديًّا). */
+    await client.query(
+      `UPDATE appointments SET referral_id = NULL WHERE referral_id = $2 AND id <> $1 AND status = 'booked'`,
+      [input.appointmentId, input.id]);
+  }
+
+  const legacy = legacyStatusOf(next);
+  const closing = legacy !== "sent";
+  await client.query(
+    `UPDATE patient_referrals
+        SET workflow_state = $2, status = $3,
+            closed_at = CASE WHEN $4 THEN COALESCE(closed_at, NOW()) ELSE NULL END,
+            closed_by = CASE WHEN $4 THEN COALESCE(closed_by, $5) ELSE NULL END,
+            accepted_by = CASE WHEN $2 = 'accepted' THEN $5 ELSE accepted_by END,
+            accepted_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE accepted_at END,
+            completed_by = CASE WHEN $2 = 'completed' THEN $5 ELSE completed_by END,
+            completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE completed_at END,
+            returned_at = CASE WHEN $2 = 'returned_to_referrer' THEN NOW() ELSE returned_at END,
+            procedure_performed = CASE WHEN $2 = 'completed' THEN $6::text ELSE procedure_performed END,
+            followup_required = CASE WHEN $2 = 'completed' THEN $7::boolean ELSE followup_required END,
+            may_return = CASE WHEN $2 = 'completed' THEN $8::boolean ELSE may_return END,
+            outcome_note = CASE WHEN $9::text IS NOT NULL AND $2 IN ('completed', 'declined', 'cancelled') THEN $9::text ELSE outcome_note END
+      WHERE id = $1`,
+    [input.id, next, legacy, closing, input.actor, input.procedurePerformed, input.followupRequired,
+      input.mayReturn, input.note],
+  );
+  await insertAuditRow(client, {
+    action: REFERRAL_ACTION_AUDIT[input.action], entity: "patient", entityId: current.patient_id, entityLabel: current.to_name,
+    details: {
+      الإحالة: input.id, من: current.workflow_state, إلى: next, الملاحظة: input.note ?? "—",
+      ...(input.appointmentId ? { الموعد: input.appointmentId } : {}),
+      ...(input.procedurePerformed ? { ما_أُنجز: input.procedurePerformed } : {}),
+    },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+export async function transitionInternalReferral(input: InternalReferralTransitionInput): Promise<
+  { ok: true; referral: Referral } | Exclude<InternalReferralTransitionResult, { ok: true }>
+> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    /* (REF-2) المواعيد قبل الإحالة — الترتيب نفسه في الوصول والإلغاء — فلا يتقاطع قفلان: الموعد الجديد
-       وكل موعدٍ مربوطٍ بالإحالة الآن (فكّ ربط القديم يلمسه)، مرتّبةً بالرقم. */
-    if (input.action === "schedule") {
-      await client.query(
-        `SELECT id FROM appointments WHERE id = $1 OR referral_id = $2 ORDER BY id FOR UPDATE`,
-        [input.appointmentId, input.id]);
-    }
-    const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string; to_party_id: number | null }>(
-      `SELECT patient_id, kind, workflow_state, to_name, to_party_id FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);
-    const current = rows[0];
-    if (!current) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (current.kind !== "internal" || !current.workflow_state) { await client.query("ROLLBACK"); return { ok: false, reason: "external" }; }
-    const next = nextReferralState(current.workflow_state, input.action);
-    if (!next) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
-
-    if (input.action === "schedule") {
-      /* موعدٌ قادم («محجوز»، اليوم أو بعده بتاريخ العيادة) للمريض نفسه مع الطبيب المحال إليه، غير مربوطٍ بإحالةٍ أخرى.
-       * موعدٌ مضى وبقي «محجوزًا» سهوًا لا يُحتسب حجزًا للإحالة. */
-      const { rows: appointment } = await client.query(
-        `SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND doctor_id = $4
-            AND (referral_id IS NULL OR referral_id = $3) AND scheduled_date >= $5::date FOR UPDATE`,
-        [input.appointmentId, current.patient_id, input.id, current.to_party_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)]);
-      if (!appointment[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_appointment" }; }
-      await client.query(`UPDATE appointments SET referral_id = $2 WHERE id = $1`, [input.appointmentId, input.id]);
-      /* إعادة الحجز تنقل الرابط: موعدٌ محجوزٌ سابقٌ لهذه الإحالة لم يعد موعدها (يبقى موعدًا عاديًّا). */
-      await client.query(
-        `UPDATE appointments SET referral_id = NULL WHERE referral_id = $2 AND id <> $1 AND status = 'booked'`,
-        [input.appointmentId, input.id]);
-    }
-
-    const legacy = legacyStatusOf(next);
-    const closing = legacy !== "sent";
-    await client.query(
-      `UPDATE patient_referrals
-          SET workflow_state = $2, status = $3,
-              closed_at = CASE WHEN $4 THEN COALESCE(closed_at, NOW()) ELSE NULL END,
-              closed_by = CASE WHEN $4 THEN COALESCE(closed_by, $5) ELSE NULL END,
-              accepted_by = CASE WHEN $2 = 'accepted' THEN $5 ELSE accepted_by END,
-              accepted_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE accepted_at END,
-              completed_by = CASE WHEN $2 = 'completed' THEN $5 ELSE completed_by END,
-              completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE completed_at END,
-              returned_at = CASE WHEN $2 = 'returned_to_referrer' THEN NOW() ELSE returned_at END,
-              procedure_performed = CASE WHEN $2 = 'completed' THEN $6::text ELSE procedure_performed END,
-              followup_required = CASE WHEN $2 = 'completed' THEN $7::boolean ELSE followup_required END,
-              may_return = CASE WHEN $2 = 'completed' THEN $8::boolean ELSE may_return END,
-              outcome_note = CASE WHEN $9::text IS NOT NULL AND $2 IN ('completed', 'declined', 'cancelled') THEN $9::text ELSE outcome_note END
-        WHERE id = $1`,
-      [input.id, next, legacy, closing, input.actor, input.procedurePerformed, input.followupRequired,
-        input.mayReturn, input.note],
-    );
-    await insertAuditRow(client, {
-      action: REFERRAL_ACTION_AUDIT[input.action], entity: "patient", entityId: current.patient_id, entityLabel: current.to_name,
-      details: {
-        الإحالة: input.id, من: current.workflow_state, إلى: next, الملاحظة: input.note ?? "—",
-        ...(input.appointmentId ? { الموعد: input.appointmentId } : {}),
-        ...(input.procedurePerformed ? { ما_أُنجز: input.procedurePerformed } : {}),
-      },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await transitionInternalReferralOnClient(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
     return { ok: true, referral: (await getReferral(input.id))! };
   } catch (error) {
