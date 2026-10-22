@@ -121,7 +121,8 @@ describe("ordinary and explicit manager void share immutable financial lineage",
     await db.setPatientOpeningBalance({ patientId: id, currency: "YER", amountMinor: 100000,
       asOfDate: "2020-01-01", note: null, createdBy: actor.actor });
     await collect(id, 1000);
-    await db.clearPatientOpeningBalance(id, actor.actor, "Synthetic missing-opening historical fixture", "YER");
+    // Data from before the manual-correction guard: the writer now refuses to orphan these receipts.
+    await q("DELETE FROM patient_opening_balances WHERE patient_id=$1 AND currency='YER'", [id]);
     const before = await state(id);
     expect(await ordinary(id, agreement.id)).toEqual({ ok: false, reason: "opening_collected" });
     expect(await manager(id, agreement.id)).toEqual({ ok: false, reason: "opening_settled" });
