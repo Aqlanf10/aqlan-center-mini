@@ -1,7 +1,7 @@
 import {beforeAll,afterAll,describe,it,expect} from "vitest";
 import {assertRealPostgresUrl,stubPostgresEnv,createIsolatedDatabase} from "./_setup";
 import type {SessionPayload} from "../../lib/auth";
-import {applyRuntimeMigrationFiles,loadMigrationFiles} from "../../lib/migrations";
+import {applyRuntimeMigrationFiles,loadMigrationFiles,migrate} from "../../lib/migrations";
 import {AGREEMENT_DELTA_SQL} from "../../lib/agreement-delta-schema";
 assertRealPostgresUrl();stubPostgresEnv();
 process.env.DATABASE_URL=await createIsolatedDatabase("aqlan_agreement_delta_test");
@@ -316,4 +316,45 @@ it("owner acceptance example: 19 crowns from 50,000 to 80,000 posts one 570,000 
  expect((await db.getOpenShift())!.expected.YER - before).toBe(1320000);
  expect(await approve.approvedAgreementPosition(f.planId, "2026-10-21")).toMatchObject({ totalMinor: 1520000, paidMinor: 1520000, remainingMinor: 0 });
  expect((await db.computeDebtRows([f.patientId])).find(row => row.currency === "YER")?.dueMinor ?? 0).toBe(0);
+});
+
+it("a full backup with a recorded amendment, a stale rejection and a split collection restores identically through the real restore path", async () => {
+ const {openBackupTimestampFixture} = await import("./_backup-timestamp-fixture");
+ const {prepareBackupSql} = await import("../../lib/restore/sql.mjs");
+ const f = await fixture("YER", 180000);
+ const stale = await command(f);
+ await approve.collectApprovedAgreement({planId: f.planId, amountMinor: 20000, currency: "YER", method: "cash", note: null, idempotencyKey: `restore-change-${f.planId}`, session});
+ await expect(api.saveAgreementAmendment(f.planId, stale, session)).rejects.toMatchObject({code: "stale"});
+ const saved = await api.saveAgreementAmendment(f.planId, await command(f), session);
+ const split = await approve.collectApprovedAgreement({planId: f.planId, amountMinor: 600000, currency: "YER", method: "cash", note: null, idempotencyKey: `restore-split-${f.planId}`, session});
+ expect("paymentIds" in split && split.paymentIds).toHaveLength(2);
+ const evidence = async (run: (sql: string, values?: unknown[]) => Promise<{rows: unknown[]}>) => (await run(`SELECT
+   (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM agreement_delta_amendments a WHERE plan_id=$1) AS amendments,
+   (SELECT jsonb_agg(to_jsonb(r) ORDER BY idempotency_key) FROM agreement_delta_attempt_rejections r WHERE plan_id=$1) AS rejections,
+   (SELECT jsonb_agg(to_jsonb(c) ORDER BY idempotency_key) FROM agreement_delta_collection_receipts c WHERE plan_id=$1) AS collections,
+   (SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i WHERE patient_id=$2) AS invoices,
+   (SELECT jsonb_agg(to_jsonb(i) ORDER BY i.id) FROM invoice_items i JOIN invoices v ON v.id=i.invoice_id WHERE v.patient_id=$2) AS items,
+   (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM payments p WHERE patient_id=$2) AS payments`, [f.planId, f.patientId])).rows[0] as Record<string, unknown[] | null>;
+ const expected = await evidence((sql, values) => q(sql, values));
+ expect(expected.amendments).toHaveLength(1);
+ expect(expected.rejections).toHaveLength(1);
+ expect(expected.collections).toHaveLength(1);
+ expect(expected.invoices?.map(row => (row as {id: number}).id)).toEqual([f.originalInvoiceId, saved.deltaInvoiceId]);
+ const isolated = await openBackupTimestampFixture({...process.env});
+ const client = await db.getPool().connect();
+ try {
+  await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  const parts: string[] = [];
+  for await (const line of db.backupSnapshotSqlLines(client)) parts.push(line);
+  await client.query("COMMIT");
+  const sql = prepareBackupSql(parts.join("")).sql;
+  for (const table of ["agreement_delta_amendments", "agreement_delta_attempt_rejections", "agreement_delta_collection_receipts"])
+   expect(sql.indexOf(`INSERT INTO ${table} `), table).toBeGreaterThan(-1);
+  await migrate(isolated.sqlTarget, {apply: true, files: await loadMigrationFiles()});
+  await isolated.sqlTarget.query(sql);
+  expect(await evidence((text, values) => isolated.sqlTarget.query(text, values))).toEqual(expected);
+  // Restored history keeps its protection: a restored amendment is still immutable.
+  await expect(isolated.sqlTarget.query("UPDATE agreement_delta_amendments SET reason=reason WHERE plan_id=$1", [f.planId])).rejects.toThrow("immutable");
+  expect((await isolated.sqlTarget.query("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgenabled<>'O'")).rows).toEqual([]);
+ } finally { client.release(); await isolated.close(); }
 });
