@@ -37,6 +37,10 @@ beforeAll(async () => {
   expect((await fixture.source.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065']);
   await fixture.source.query("INSERT INTO users(id,username,display_name,password_hash,role) VALUES(710,'composed-admin','Synthetic administrator','synthetic-hash','admin')");
   await fixture.source.query("INSERT INTO hr_staff(id,full_name,created_by,contract_kind,salary_amount_minor,salary_currency,salary_period,salary_effective_on,hire_date) VALUES(810,'Synthetic receptionist','test','salary',90000,'YER','monthly','2020-01-01','2020-01-01')");
+  // A real financial DATE must survive both supported restore entry points too.
+  // Synthetic fixture rows only; no financial calculation or posting is changed.
+  await fixture.source.query("INSERT INTO parties(id,name,kind) VALUES(820,'Synthetic backup supplier','supplier')");
+  await fixture.source.query("INSERT INTO payables(id,party_id,description,amount_minor,currency,base_amount_minor,due_date,created_by) VALUES(830,820,'Synthetic backup due date',12345,'YER',12345,'2028-02-29','test')");
   await fixture.source.query("SELECT setval(pg_get_serial_sequence('hr_effective_streams','id'),91000,true)");
   actor = { userId:710,username:'composed-admin',role:'admin',expiresAt:Date.now()+3600000,credentialVersion:sessionCredentialVersion('synthetic-hash') };
   originalCommand = parseHrHistoryCommand({ requestId:'composed-durable-request-0001',expectedUsername:actor.username,expectedRevision:0,reason:'Synthetic approved employment dates',supersedeIds:[],append:[{id:'active-1',kind:'known',from:'2020-01-01',to:null,value:{status:'active'}}] },'employment',810);
