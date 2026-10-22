@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE } from "../lib/clinic-reset";
+import { ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE } from "../lib/clinic-reset";
 
 const state = vi.hoisted(() => ({
   session: { username: "synthetic-owner", role: "admin" } as { username: string; role: string } | null,
@@ -31,6 +31,14 @@ describe("purchase history reset refusal preserves existing reset admission", ()
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: "protected-purchase-history" });
     expect(state.reset).toHaveBeenCalledTimes(1);
+    expect(state.backup).not.toHaveBeenCalled(); expect(state.remove).not.toHaveBeenCalled();
+  });
+  it("(0068) retired collection keys refuse a reset with their own typed 409, before any backup", async () => {
+    state.reset.mockRejectedValue(new ProtectedCollectionAttemptHistoryError());
+    const response = await POST(request());
+    if (!response) throw new Error("Reset POST did not return a response");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ message: new ProtectedCollectionAttemptHistoryError().message, code: "protected-collection-attempt-history" });
     expect(state.backup).not.toHaveBeenCalled(); expect(state.remove).not.toHaveBeenCalled();
   });
   it("keeps the existing preview response and confirmation phrase unchanged", async () => {

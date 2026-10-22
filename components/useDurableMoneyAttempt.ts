@@ -78,8 +78,9 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
         const retired=await acknowledgeFinancialCommand({actor,patientId},durable);publish(scope,{...current,revision:retired.revision,command:null});announce();return lifetime.current===token?{kind:"refused" as const,message}:null;}
       // An ordinary 409 refusal of a first send is retired only on server proof (0068) that the key
       // never committed and never can; otherwise it stays uncertain below.
+      // Issue the extra mutation, and alter the journal, only while the sending principal's view is current.
       if(!previous&&!response.redirected&&response.status===409&&RECONCILABLE_OPERATIONS.has(command.attempt.request.operation)&&typeof message==="string"&&message.trim()
-        &&await retireMoneyAttempt(fetch,command.attempt.request,command.attempt.key)==="retired"){
+        &&lifetime.current===token&&await retireMoneyAttempt(fetch,command.attempt.request,command.attempt.key,command.actor)==="retired"&&lifetime.current===token){
         const retired=await acknowledgeFinancialCommand({actor,patientId},durable);publish(scope,{...current,revision:retired.revision,command:null});announce();return lifetime.current===token?{kind:"refused" as const,message}:null;}
     }catch{
       if(!reserved){
@@ -110,8 +111,10 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
     if(!context||!actor||lifetime.current!==token||!current||!command||command.owner!==owner||command.attempt.phase!=="uncertain"
       ||!RECONCILABLE_OPERATIONS.has(command.attempt.request.operation))return null;
     publish(scope,{...current,command:{...command,attempt:{...command.attempt,phase:"sending"}}});
-    const state=await retireMoneyAttempt(fetch,command.attempt.request,command.attempt.key);
+    const state=await retireMoneyAttempt(fetch,command.attempt.request,command.attempt.key,command.actor);
     publish(scope,{...current,command});
+    // A replaced or closed principal keeps the saved attempt; its owner proves it again later.
+    if(lifetime.current!==token)return null;
     if(state==="retired"){
       try{const retired=await acknowledgeFinancialCommand({actor,patientId},durableMoneyCommand(command));publish(scope,{...current,revision:retired.revision,command:null});announce();}
       catch{return {kind:"uncertain" as const,message:"ثبت أن المحاولة لم تُحفظ، لكن تعذّر تحديث الطلب المحفوظ في هذا الجهاز؛ أعد المحاولة."};}

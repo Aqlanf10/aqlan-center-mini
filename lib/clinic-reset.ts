@@ -97,8 +97,6 @@ export const RESET_WIPE_TABLES = [
   "invoice_settlement_reclassifications",
   "payments",
   "invoice_correction_lines",
-  // (0068) Retired collection keys fence receipts that are wiped with them.
-  "collection_attempt_retirements",
   "invoice_correction_receipts",
   "invoice_corrections",
   "legacy_treatment_document_revisions",
@@ -139,10 +137,22 @@ export class ProtectedAgreementHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد تسجيل تعديلات اتفاق علاج أو تحصيلات موزّعة عليها. لم يُمسح شيء؛ يجب الاحتفاظ بسجل تعديلات الاتفاق ومفاتيحها."); this.name = "ProtectedAgreementHistoryError"; }
 }
 
+/**
+ * (0068) A retired collection key is a permanent "never commits" proof. A reset restarts
+ * patient, invoice and shift identities while sessions survive, so a delayed original send
+ * could land on a reused identity once the proof is gone. A reset therefore refuses before
+ * backup or deletion while any proof exists, like purchase and amendment history.
+ */
+export const COLLECTION_ATTEMPT_HISTORY_TABLES = ["collection_attempt_retirements"] as const;
+export class ProtectedCollectionAttemptHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد إثبات إلغاء محاولات تحصيل؛ يجب الاحتفاظ بمفاتيحها حتى لا تُسجَّل محاولة متأخرة بعد إعادة الضبط. لم يُمسح شيء."); this.name = "ProtectedCollectionAttemptHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,
+  ...COLLECTION_ATTEMPT_HISTORY_TABLES,
   "users",
   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
   "hr_staff",

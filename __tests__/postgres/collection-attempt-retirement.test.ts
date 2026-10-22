@@ -48,11 +48,16 @@ const pay = async (body: Record<string, unknown>, k: string) => {
     body: JSON.stringify({ kind: "payment", method: "cash", ...body }) }));
   return { status: response.status, body: await response.json() as Record<string, unknown> };
 };
-const retire = async (k: unknown, patientId: unknown) => {
+/** The attempt exactly as the client saved it: patient, operation, body and the user who sent it. */
+const identity = (k: unknown, patientId: unknown, extra: Record<string, unknown> = {}) => ({ idempotencyKey: k, patientId,
+  operation: "payment", requestBody: JSON.stringify({ patientId, amount: "1000", currency: "YER" }), originalActor: session.username, ...extra });
+const retire = async (k: unknown, patientId: unknown, extra: Record<string, unknown> = {}) => {
   const response = await retireRoute.POST(new Request("http://localhost/api/payments/attempts/retire", { method: "POST",
-    headers: { "content-type": "application/json" }, body: JSON.stringify({ idempotencyKey: k, patientId }) }));
+    headers: { "content-type": "application/json" }, body: JSON.stringify(identity(k, patientId, extra)) }));
   return { status: response.status, body: await response.json() as Record<string, unknown> };
 };
+const retireDirect = (k: string, patientId: number) => attempts.retireCollectionAttempt(identity(k, patientId), session);
+const HASH = "a".repeat(64);
 const rawPayment = (c: Client, patientId: number, invoiceId: number, k: string) => c.query(
   `INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by,idempotency_key)
    VALUES($1,$2,$3,$4,'payment',1000,'YER',1,1000,'YER','cash','synthetic',$5)`, [key("raw"), patientId, invoiceId, shiftId, k]);
@@ -79,8 +84,8 @@ describe("collection attempt retirement (0068)", () => {
     expect(late.body).toMatchObject({ reason: "collection_attempt_retired", message: attempts.RETIRED_COLLECTION_MESSAGE });
     expect(await q("SELECT id FROM payments WHERE idempotency_key=$1", [k])).toEqual([]);
     expect(await retire(k, p)).toEqual({ status: 200, body: { state: "retired" } });
-    // A lost reply after the retirement: asking again gives the same proven answer, for this patient only.
-    expect((await retire(k, await patient())).status).toBe(400);
+    // A lost reply after the retirement: asking again gives the same proven answer, for this attempt only.
+    expect((await retire(k, await patient())).status).toBe(409);
     expect(await q("SELECT action FROM audit_log WHERE action='payment.attempt_retire' AND details->>'idempotencyKey'=$1", [k])).toHaveLength(1);
   });
   it("a committed key is reported committed and never retired; the client then replays the same request", async () => {
@@ -98,7 +103,7 @@ describe("collection attempt retirement (0068)", () => {
       await writer.query("BEGIN");
       await rawPayment(writer, p, invoiceId, k); // holds the per-key lock, uncommitted
       const pid = (await writer.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
-      const pending = attempts.retireCollectionAttempt(k, p, session);
+      const pending = retireDirect(k, p);
       await waitForLock(monitor, pid);
       await writer.query("COMMIT");
       expect(await pending).toBe("committed");
@@ -110,7 +115,7 @@ describe("collection attempt retirement (0068)", () => {
     const retirer = await connection(), writer = await connection(), monitor = await connection();
     try {
       await retirer.query("BEGIN");
-      await retirer.query("INSERT INTO collection_attempt_retirements(idempotency_key,patient_id,retired_by) VALUES($1,$2,'synthetic')", [k, p]);
+      await retirer.query("INSERT INTO collection_attempt_retirements(idempotency_key,patient_id,operation,request_hash,retired_by) VALUES($1,$2,'payment',$3,'synthetic')", [k, p, HASH]);
       const pid = (await retirer.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
       const pending = rawPayment(writer, p, invoiceId, k).then(() => "inserted", (error: Error) => error.message);
       await waitForLock(monitor, pid);
@@ -124,17 +129,42 @@ describe("collection attempt retirement (0068)", () => {
     const retirer = await connection();
     try {
       await retirer.query("BEGIN");
-      await retirer.query("INSERT INTO collection_attempt_retirements(idempotency_key,patient_id,retired_by) VALUES($1,$2,'synthetic')", [k, p]);
+      await retirer.query("INSERT INTO collection_attempt_retirements(idempotency_key,patient_id,operation,request_hash,retired_by) VALUES($1,$2,'payment',$3,'synthetic')", [k, p, HASH]);
     } finally { await retirer.query("ROLLBACK"); await retirer.end(); }
     expect(await q("SELECT idempotency_key FROM collection_attempt_retirements WHERE idempotency_key=$1", [k])).toEqual([]);
     expect((await pay({ patientId: p, invoiceId, amount: "1000", currency: "YER" }, k)).status).toBe(201);
     expect(await retire(k, p)).toEqual({ status: 200, body: { state: "committed" } });
   });
-  it("a deleted patient takes its own retirement rows with it, and only then", async () => {
+  it("a retired key is permanent patient history: no cascade, no deletion, no merge moves it", async () => {
     const p = await patient(), k = key("delete");
-    expect(await attempts.retireCollectionAttempt(k, p, session)).toBe("retired");
-    await q("DELETE FROM patients WHERE id=$1", [p]);
+    expect(await retireDirect(k, p)).toBe("retired");
+    await expect(q("DELETE FROM patients WHERE id=$1", [p])).rejects.toThrow(/foreign key/);
+    expect(await db.deletePatientCascade(p, { actor: "synthetic-admin", actorRole: "admin" })).toMatchObject({ ok: false, reason: "has_financial_history" });
+    expect(await db.mergeDuplicatePatient(p, await patient(), { actor: "synthetic-admin", actorRole: "admin" }))
+      .toMatchObject({ ok: false, reason: "source_has_financial_history", counts: { collectionAttempts: 1 } });
+    expect(await q("SELECT patient_id FROM collection_attempt_retirements WHERE idempotency_key=$1", [k])).toEqual([{ patient_id: p }]);
+  });
+  it("a replaced session never retires another user's attempt; the proof is bound to the saved request", async () => {
+    const p = await patient(), k = key("principal");
+    const hash = await authLib.hashPassword("synthetic-second-cashier");
+    const [other] = await q<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role,is_active) VALUES($1,'Synthetic second',$2,'reception',TRUE) RETURNING id", [key("second"), hash]);
+    const [{ username }] = await q<{ username: string }>("SELECT username FROM users WHERE id=$1", [other.id]);
+    auth.session = { userId: other.id, username, role: "reception", credentialVersion: authLib.sessionCredentialVersion(hash), expiresAt: Date.now() + 3_600_000 };
+    try {
+      // Same saved attempt (sent by the first user) presented from the replacing session.
+      expect(await retire(k, p)).toEqual({ status: 409, body: { message: attempts.ATTEMPT_OWNER_CHANGED } });
+    } finally { auth.session = session; }
     expect(await q("SELECT idempotency_key FROM collection_attempt_retirements WHERE idempotency_key=$1", [k])).toEqual([]);
+    expect(await retire(k, p)).toEqual({ status: 200, body: { state: "retired" } });
+    expect(await q("SELECT operation, retired_by, length(request_hash) AS n FROM collection_attempt_retirements WHERE idempotency_key=$1", [k]))
+      .toEqual([{ operation: "payment", retired_by: session.username, n: 64 }]);
+    // A lost reply asks again with the identical attempt: same answer. Any other request under the key is refused.
+    expect(await retire(k, p)).toEqual({ status: 200, body: { state: "retired" } });
+    expect((await retire(k, p, { requestBody: JSON.stringify({ patientId: p, amount: "2000", currency: "YER" }) })).status).toBe(409);
+    expect((await retire(k, p, { operation: "installment" })).status).toBe(409);
+    expect((await retire(key("foreign-body"), p, { requestBody: JSON.stringify({ patientId: p + 1 }) })).status).toBe(400);
+    expect((await retire(key("no-actor"), p, { originalActor: "" })).status).toBe(400);
+    expect((await retire(key("correction"), p, { operation: "void" })).status).toBe(400);
   });
   it("refuses an invalid key, an unauthorized role and any change to a retired key", async () => {
     const p = await patient();
@@ -144,7 +174,7 @@ describe("collection attempt retirement (0068)", () => {
     auth.session = doctor;
     try { expect((await retire(key("doctor"), p)).status).toBe(403); } finally { auth.session = session; }
     const k = key("immutable");
-    expect(await attempts.retireCollectionAttempt(k, p, session)).toBe("retired");
+    expect(await retireDirect(k, p)).toBe("retired");
     await expect(q("UPDATE collection_attempt_retirements SET retired_by='x' WHERE idempotency_key=$1", [k])).rejects.toThrow("immutable");
     await expect(q("DELETE FROM collection_attempt_retirements WHERE idempotency_key=$1", [k])).rejects.toThrow("immutable");
   });
@@ -157,7 +187,7 @@ describe("0068 operational compatibility", () => {
     const { loadMigrationFiles, migrate } = await import("../../lib/migrations");
     const p = await patient(), done = key("restore-done"), gone = key("restore-gone");
     expect((await pay({ patientId: p, invoiceId: await invoice(p), amount: "1000", currency: "YER" }, done)).status).toBe(201);
-    expect(await attempts.retireCollectionAttempt(gone, p, session)).toBe("retired");
+    expect(await retireDirect(gone, p)).toBe("retired");
     const evidence = async (run: (sql: string, values?: unknown[]) => Promise<{ rows: unknown[] }>) => (await run(`SELECT
       (SELECT jsonb_agg(to_jsonb(r) ORDER BY idempotency_key) FROM collection_attempt_retirements r WHERE idempotency_key = ANY($1)) AS retired,
       (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM payments p WHERE idempotency_key = ANY($1)) AS receipts`, [[done, gone]])).rows[0];
@@ -170,19 +200,27 @@ describe("0068 operational compatibility", () => {
       await migrate(isolated.sqlTarget, { apply: true, files: await loadMigrationFiles() });
       await isolated.sqlTarget.query(prepareBackupSql(parts.join("")).sql);
       expect(await evidence((sql, values) => isolated.sqlTarget.query(sql, values))).toEqual(expected);
-      await expect(isolated.sqlTarget.query("INSERT INTO collection_attempt_retirements(idempotency_key,patient_id,retired_by) VALUES($1,$2,'synthetic')", [done, p])).rejects.toThrow(attempts.COLLECTION_KEY_COMMITTED);
+      await expect(isolated.sqlTarget.query("INSERT INTO collection_attempt_retirements(idempotency_key,patient_id,operation,request_hash,retired_by) VALUES($1,$2,'payment',$3,'synthetic')", [done, p, HASH])).rejects.toThrow(attempts.COLLECTION_KEY_COMMITTED);
     } finally { await isolated.close(); }
   });
-  it("the factory reset wipes retired keys together with the receipts they fenced", async () => {
-    const { RESET_WIPE_TABLES } = await import("../../lib/clinic-reset");
-    expect(RESET_WIPE_TABLES).toContain("collection_attempt_retirements");
-    const k = key("reset");
-    expect(await attempts.retireCollectionAttempt(k, await patient(), session)).toBe("retired");
+  it("a factory reset refuses before backup or deletion while any retired key exists; a late send stays refused", async () => {
+    const { RESET_WIPE_TABLES, RESET_KEEP_TABLES, ProtectedCollectionAttemptHistoryError } = await import("../../lib/clinic-reset");
+    expect(RESET_WIPE_TABLES).not.toContain("collection_attempt_retirements");
+    expect(RESET_KEEP_TABLES).toContain("collection_attempt_retirements");
+    const p = await patient(), k = key("reset");
+    // An ordinary refusal (wrong-patient invoice) proven and retired, as the client would after a 409.
+    expect((await pay({ patientId: p, invoiceId: await invoice(await patient()), amount: "1000", currency: "YER" }, k)).status).toBeGreaterThanOrEqual(400);
+    expect(await retireDirect(k, p)).toBe("retired");
+    const before = await q<{ patients: number; retired: number }>("SELECT (SELECT count(*)::int FROM patients) AS patients, (SELECT count(*)::int FROM collection_attempt_retirements) AS retired");
+    const backup = vi.fn(async () => ({ ok: true as const, backupId: "synthetic" }));
+    await expect(db.resetClinicData({ actor: "synthetic-admin", actorRole: "admin" }, backup)).rejects.toBeInstanceOf(ProtectedCollectionAttemptHistoryError);
+    expect(backup).not.toHaveBeenCalled();
+    expect(await q("SELECT (SELECT count(*)::int FROM patients) AS patients, (SELECT count(*)::int FROM collection_attempt_retirements) AS retired")).toEqual(before);
+    // Identities were not restarted, and the delayed original send is still refused rather than recorded.
+    const late = await pay({ patientId: p, invoiceId: await invoice(p), amount: "1000", currency: "YER" }, k);
+    expect(late).toMatchObject({ status: 409, body: { reason: "collection_attempt_retired" } });
+    // Direct TRUNCATE of retained proof is refused as well; only an empty table truncates.
     const c = await connection();
-    try {
-      await c.query("BEGIN");
-      await c.query("TRUNCATE collection_attempt_retirements");
-      expect((await c.query("SELECT count(*)::int AS n FROM collection_attempt_retirements")).rows[0].n).toBe(0);
-    } finally { await c.query("ROLLBACK"); await c.end(); }
+    try { await expect(c.query("TRUNCATE collection_attempt_retirements")).rejects.toThrow("immutable"); } finally { await c.end(); }
   });
 });
