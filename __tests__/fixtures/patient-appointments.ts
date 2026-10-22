@@ -1,0 +1,2 @@
+export const appointment = () => ({ id: 7, patientId: 31, patientName: "Synthetic patient", patientPhone: "770123456", scheduledDate: "2026-10-22", scheduledTime: "10:00", durationMinutes: 30, status: "booked", doctorId: 5, doctorName: "Synthetic doctor", cancelReason: null, reminderSentAt: null, note: null });
+export const payload = () => ({ patientId: 31, view: "upcoming", requestCursor: null, today: "2026-10-22", timeZone: "Asia/Aden", generatedAt: "2026-10-22T06:00:00Z", canRemind: true, appointments: [appointment()], nextCursor: null });

@@ -16,6 +16,11 @@ const denied = () =>
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Keep the existing array contract while carrying the canonical display zone. */
+const appointmentListResponse = (list: Appointment[]) => NextResponse.json(list, {
+  headers: { "X-Clinic-Time-Zone": CLINIC_TIME_ZONE },
+});
+
 /**
  * جاهزية أعمال المختبر بجانب كل موعد — «هل وصلت التركيبة؟» (lib/lab-readiness.ts).
  *
@@ -52,15 +57,15 @@ export async function GET(request: Request) {
         if (doctorPartyId) {
           const candidateIds = Array.from(new Set(list.map((a) => a.patientId)));
           const owned = await doctorOwnedPatientIds(doctorPartyId, candidateIds).catch(() => new Set<number>());
-          return NextResponse.json(await withLabReadiness(
+          return appointmentListResponse(await withLabReadiness(
             list.filter((a) => !a.doctorId || a.doctorId === doctorPartyId || owned.has(a.patientId)),
             date,
           ));
         }
-        return NextResponse.json([]);
+        return appointmentListResponse([]);
       }
     }
-    return NextResponse.json(await withLabReadiness(list, date));
+    return appointmentListResponse(await withLabReadiness(list, date));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل مواعيد اليوم." }, { status: 500 });
   }
