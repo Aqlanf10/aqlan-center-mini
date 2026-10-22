@@ -2,17 +2,19 @@
 
 ## Status and source identity
 
-- Final published application pin and local base: `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`
+- Final published application pin and local base: `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`
   ([Draft PR #414](https://github.com/Aqlanf10/aqlan-center-mini/pull/414)).
-- Application tree: `03e7b233da7982c79ed02d00ddb67d3de511a110`.
+- Application tree: `ccd304ba6fe63dfe029df095f533d8810672006f`.
 - First hosted attempt `39709737846` on acceptance `636bc3df44b8f8fc7fb21e9a61c1401546f57654`
   failed at the environment-contract step, before browser execution.
 - Prior hosted run `39711640521` succeeded on application `0fd0cc7c6f167ea366de3aa69103058b0390bc3d`
   with acceptance head `73c6d443` after the npm11 setup correction.
 - Root also reports successful hosted acceptance from #415 head `922f` on
   application `42b91977ea31bcbe61086f5f51717590a05f0ced`. This remains historical evidence for that exact app pin.
-- Fresh hosted acceptance on `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`: **pending**.
-  Neither prior success is acceptance of this new SHA. No local Chromium/PostgreSQL execution.
+- Root reports successful hosted acceptance from #415 head `a3eb` on
+  application `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`. That result is historical evidence for the old pin only.
+- Fresh hosted acceptance on `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`: **pending**.
+  None of the prior successes accepts this new SHA. No local Chromium/PostgreSQL execution.
 - Dedicated review branch: `review/appointment-browser-acceptance-hosted`.
 - Review base: `integration/nonfinancial-20261022`.
 
@@ -158,7 +160,7 @@ read-only permissions, and outbound interception remain unchanged.
 
 ## Composed application repin
 
-The current application pin `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6` includes the
+The previously pinned application `4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6` included the
 reviewed doctor-bookability, patient-history index `0067`, planned-visit lifecycle,
 DATE backup preservation, and unique-consent fixture changes. The acceptance
 branch is rebased onto that exact composed commit, retaining its original parents
@@ -167,7 +169,8 @@ and application tree rather than copying or replacing runtime source.
 Root reports 390 unit tests, 248 PostgreSQL tests, full TypeScript compilation and
 lint passing on the local union. The reported 657 HTTP tests in 93 files
 passed on the #418 runtime plus fixture, not on the complete union. These results
-are separate from hosted browser acceptance, which is pending on the current pin.
+were separate from hosted browser acceptance. Root subsequently reported #415
+head `a3eb` passing on `4286e104`; that success is not acceptance of later source.
 
 Inspection found no hardcoded migration/index-registry chain in the acceptance
 workflow, its guard tests, or connected journey. The existing harness initializes
@@ -178,3 +181,23 @@ Only the exact pin, its matching guard assertion, and this evidence record chang
 for this handoff. The journey remains byte-identical, including populated financial
 fingerprints and outbound interception. npm11 setup, app/probe SHA checks, the
 single permitted test overlay and read-only permissions remain in place.
+
+## Bootstrap and test-interceptor repair repin
+
+The current application pin `a58e7fbd37e7ab6a029a385367ee602ac1d0d9ba`, tree
+`ccd304ba6fe63dfe029df095f533d8810672006f`, has parent
+`4286e1047eb262f5a1ececcb3fd86c0dfaf12cd6`. Its seven-path delta contains the
+reviewed bounded-CASE counter-identifier bootstrap repair and test-only patient
+projection interceptor repairs, plus their regressions. These are application
+source changes, so prior acceptance on `4286e104` cannot certify the new pin.
+
+Root reports 312 combined unit tests, source build, TypeScript compilation,
+20 PostgreSQL tests and 657 HTTP tests passing on the repaired source. These are
+separate release checks, not fresh hosted browser evidence. The eight connected
+acceptance journeys still require a successful hosted run on `a58e7fbd`.
+
+This acceptance handoff changes only the pin, matching static guard, and evidence
+notes. It adds no runtime repair or test interceptor. The four-file supplement is
+rebased onto the exact new application commit; the journey bytes, npm11 setup,
+strict app/probe SHA verification, single-test overlay, read-only permissions,
+financial fingerprints and outbound interception remain unchanged.
