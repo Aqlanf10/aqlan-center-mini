@@ -52,7 +52,7 @@ it.each([
     throw new Error(`Unexpected statement: ${sql}`);
   });
   const result = await readInvoiceRevision(12, session);
-  expect(result.currencyCorrection).toEqual({ available: false, targetCurrency: "SAR", settledMinor: 0, accountDueMinor: 0, reasonCodes: [reason], message: INVOICE_CURRENCY_SCOPE_MESSAGES[reason] });
+  expect(result.currencyCorrection).toEqual({ available: false, targetCurrency: "SAR", targets: [], options: [], settledMinor: 0, accountDueMinor: 0, reasonCodes: [reason], message: INVOICE_CURRENCY_SCOPE_MESSAGES[reason] });
   expect(mocks.hash).toHaveBeenCalledWith(expect.objectContaining({ currencyCorrection: result.currencyCorrection }));
   expect(mocks.authority).toHaveBeenCalledWith(session, expect.objectContaining({ query: mocks.query }));
   expect(mocks.authority.mock.invocationCallOrder[0]).toBeLessThan(mocks.invoice.mock.invocationCallOrder[0]);

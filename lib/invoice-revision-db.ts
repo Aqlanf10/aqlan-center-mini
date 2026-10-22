@@ -1,5 +1,5 @@
 import type { InvoiceCurrencyScopeReason } from "./invoice-currency-scope";
-import {prepareInvoiceCurrencyChange,writeInvoiceCurrencyEvidence,InvoiceCurrencyScopeError} from "./invoice-currency-plan";
+import {currencyCorrectionTargets,prepareInvoiceCurrencyChange,writeInvoiceCurrencyEvidence,InvoiceCurrencyScopeError} from "./invoice-currency-plan";
 import {invoiceQuantityAllowed} from "./invoice-clinical-linkage";
 import {invoiceIdentityCatalog,validateInvoiceIdentityAmendments} from "./invoice-identity-amendments";
 import type { SessionPayload } from "./auth";
@@ -9,7 +9,7 @@ import { debtAccountDue, lockDebtAccountForSchedule } from "./debt-account-posit
 import { DebtRepaymentError, debtRequestHash, readDebtPosition, writeDebtRepaymentInTransaction } from "./debt-installments-db";
 import { validateDebtRepaymentTerms } from "./debt-installments";
 import { planInvoiceRevision } from "./invoice-correction";
-import { parseAmount } from "./money";
+import { parseAmount, type Currency } from "./money";
 import { clinicDateString } from "./schedule";
 import { revalidateSessionInTransaction } from "./session";
 import { INVOICE_APPROVED_WORK_SQL } from "./invoice-correction-coverage";
@@ -56,13 +56,22 @@ async function contextInTx(client: DbClient, invoiceId: number) {
   const identityCatalog=await invoiceIdentityCatalog(client);
   const {rows:[bound]}=await client.query<{bound:boolean}>("SELECT EXISTS(SELECT 1 FROM invoice_items WHERE invoice_id=$1 AND (source_type IS NOT NULL OR source_id IS NOT NULL) AND source_type IS DISTINCT FROM 'plan_item') AS bound",[invoiceId]);
   const identityAmendmentAvailable=Array.isArray(position.sourceSnapshot.payments)&&position.sourceSnapshot.payments.length===0&&!bound.bound;
-  let currencyCorrection:{available:boolean;targetCurrency:"SAR";settledMinor:number;accountDueMinor:number;message:string;reasonCodes?:InvoiceCurrencyScopeReason[]} | undefined;
-  if(invoice.baseCurrency==="YER"){
-    try{const planned=await prepareInvoiceCurrencyChange(client,invoice,0);
-      currencyCorrection={available:true,targetCurrency:"SAR",settledMinor:planned.settledMinor,accountDueMinor:(await debtAccountDue(client,invoice.patientId,"SAR")).due,message:"تُنقل تسوية السندات السعودية المثبتة دون حركة نقدية."};
-    }catch(error){currencyCorrection={...(error instanceof InvoiceCurrencyScopeError?{reasonCodes:error.reasonCodes}:{}),available:false,targetCurrency:"SAR",settledMinor:0,accountDueMinor:0,message:error instanceof Error?error.message:"تعذر إثبات تسوية العملة."};}
+  // Every distinct target is checked independently. YER -> SAR may carry recorded SAR
+  // receipts; any other direction is offered only for a lineage with no receipt at all.
+  const options:{currency:Currency;settledMinor:number;accountDueMinor:number}[]=[];
+  let refusal:{message:string;reasonCodes?:InvoiceCurrencyScopeReason[]}|null=null;
+  for(const target of currencyCorrectionTargets(invoice.baseCurrency)){
+    try{const planned=await prepareInvoiceCurrencyChange(client,invoice,0,target);
+      options.push({currency:target,settledMinor:planned.settledMinor,accountDueMinor:(await debtAccountDue(client,invoice.patientId,target)).due});
+    }catch(error){refusal??={...(error instanceof InvoiceCurrencyScopeError?{reasonCodes:error.reasonCodes}:{}),message:error instanceof Error?error.message:"تعذر إثبات تسوية العملة."};}
   }
-  const facts = { ...(currencyCorrection?{currencyCorrection}:{}), invoice, work,identityCatalog,identityAmendmentAvailable, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
+  const first=options[0];
+  const currencyCorrection={available:options.length>0,targetCurrency:first?.currency??currencyCorrectionTargets(invoice.baseCurrency)[0],
+    targets:options.map(option=>option.currency),options,settledMinor:first?.settledMinor??0,accountDueMinor:first?.accountDueMinor??0,
+    message:!first?refusal?.message??"تعذر إثبات تسوية العملة."
+      :first.settledMinor>0?"تُنقل تسوية السندات السعودية المثبتة دون حركة نقدية.":"لا يوجد سند على الفاتورة؛ تصدر فاتورة بديلة بالعملة المختارة بالمبالغ التي تكتبها، دون تحويل بسعر صرف.",
+    ...(!first&&refusal?.reasonCodes?{reasonCodes:refusal.reasonCodes}:{})};
+  const facts = { currencyCorrection, invoice, work,identityCatalog,identityAmendmentAvailable, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
     accountDueMinor,settlementProofHash:position.settlementProofHash, repaymentVersion: schedule?.version ?? 0, repaymentTerms: schedule?.status === "active" ? schedule.terms : { mode: "full", installments: [] } };
   return { ...facts, sourceHash: debtRequestHash(facts), schedule, target };
 }
@@ -106,7 +115,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     // patient, receipt or shift locks to avoid reversing their lock order.
     // Calculation writes its run before reading commissions and inserting items.
     // Fence that first write too, including a run with no items yet.
-    if(source.currency==="SAR")await client.query("LOCK TABLE expenses,hr_payroll_runs,hr_payroll_items IN SHARE MODE");
+    if(typeof source.currency==="string")await client.query("LOCK TABLE expenses,hr_payroll_runs,hr_payroll_items IN SHARE MODE");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [owner.patient_id]);
     // Event foreign keys need receipt KEY SHARE locks. Refunds/corrections lock
     // their original receipt before shift, so acquire these compatible read-only
@@ -114,7 +123,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     const receiptFenceSql=`WITH RECURSIVE lineage(id) AS (SELECT $1::int UNION
       SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id=l.id)
       SELECT p.id FROM payments p WHERE p.invoice_id IN(SELECT id FROM lineage) AND p.patient_id=$2 ORDER BY p.id`;
-    const receiptFence=source.currency==="SAR"?(await client.query<{id:number}>(receiptFenceSql+" FOR KEY SHARE OF p",[invoiceId,owner.patient_id])).rows:null;
+    const receiptFence=typeof source.currency==="string"?(await client.query<{id:number}>(receiptFenceSql+" FOR KEY SHARE OF p",[invoiceId,owner.patient_id])).rows:null;
     await client.query("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id FOR UPDATE");
     // A new receipt may commit between the receipt scan and shift acquisition.
     // Never take its receipt lock after shift: require a fresh preview instead.
@@ -141,9 +150,9 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     if (settings["finance.locked_before"]?.trim() && date < settings["finance.locked_before"].trim()) bad("الفاتورة في فترة مقفلة؛ يلزم تصحيح معتمد في فترة مفتوحة.", "conflict");
     if (!Array.isArray(source.lines) || source.lines.length > 200 || !source.lines.every(record)) bad("بنود التصحيح غير صالحة.");
     const currency=source.currency===undefined?before.invoice.baseCurrency:source.currency;
-    if(currency!==before.invoice.baseCurrency&&!(before.invoice.baseCurrency==="YER"&&currency==="SAR"))bad("انتقال العملة غير مدعوم.");
+    if(currency!=="YER"&&currency!=="SAR"&&currency!=="USD")bad("انتقال العملة غير مدعوم.");
     const changingCurrency=currency!==before.invoice.baseCurrency;
-    const currencyPlan=changingCurrency?await prepareInvoiceCurrencyChange(client,before.invoice,0):null;
+    const currencyPlan=changingCurrency?await prepareInvoiceCurrencyChange(client,before.invoice,0,currency):null;
     const settledMinor=currencyPlan?.settledMinor??before.settledMinor;
     if(changingCurrency&&(source.lines.length!==before.invoice.items.length||source.lines.some(line=>before.invoice.items.find(item=>item.id===line.itemId)?.quantity!==line.quantity)))bad("عند تصحيح العملة يجب إبقاء جميع بنود العلاج وكمياتها.");
     const lines = source.lines.map(line => {
@@ -163,7 +172,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     const remainingMinor = Math.max(0,netMinor-settledMinor);
     const terms = validateDebtRepaymentTerms(source.repaymentTerms,remainingMinor); if (!terms.ok) bad(terms.message);
     if (source.expectedRemainingMinor !== remainingMinor) bad("توزيع الأقساط لا يطابق المتبقي بعد التصحيح.", "stale");
-    const afterDueMinor = changingCurrency?(await debtAccountDue(client,owner.patient_id,"SAR")).due+netMinor-settledMinor:before.accountDueMinor + netMinor - (before.invoice.totalMinor-before.invoice.discountMinor);
+    const afterDueMinor = changingCurrency?(await debtAccountDue(client,owner.patient_id,currency)).due+netMinor-settledMinor:before.accountDueMinor + netMinor - (before.invoice.totalMinor-before.invoice.discountMinor);
     if (remainingMinor > Math.max(0,afterDueMinor)) bad("توجد تسويات أخرى على الحساب؛ راجع تخصيص السندات قبل جدولة تحصيل إضافي.", "conflict");
     for (const work of before.work) {
       const original = before.invoice.items.find(item=>item.planItemId===work.id);
@@ -177,7 +186,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       await writeDebtRepaymentInTransaction(client,{target:before.target,terms:{mode:"full",installments:[]},expectedVersion:before.repaymentVersion,
         expectedRemainingMinor:before.remainingMinor,cancel:true,reason,idempotencyKey:`invoice-revision:${hash}:old-terms`,session});
     }
-    const result = await correctInvoiceInTransaction(client,{invoiceId,lines,reason,actor:session.username,actorRole:session.role},{discountMinor,amendments,...(changingCurrency?{currency:"SAR" as const}: {})});
+    const result = await correctInvoiceInTransaction(client,{invoiceId,lines,reason,actor:session.username,actorRole:session.role},{discountMinor,amendments,...(changingCurrency?{currency}: {})});
     if (!result.ok) bad(result.message,result.reason === "not_found" ? "missing" : "conflict");
     // Require one exact inserted identity for every retained source line before
     // using the handoff. The pair set is internal, not part of the saved receipt.
@@ -194,8 +203,9 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       `INSERT INTO invoice_corrections(patient_id,currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by,original_currency)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [owner.patient_id,currency,invoiceId,result.correctedId,key,hash,reason,session.username,changingCurrency?before.invoice.baseCurrency:null]);
-    const reclassificationId=currencyPlan?await writeInvoiceCurrencyEvidence(client,revision.id,owner.patient_id,currencyPlan.lineageInvoiceIds):null;
-    if(currencyPlan?.planIds.length)await client.query("UPDATE treatment_plans SET base_currency='SAR' WHERE id=ANY($1::int[])",[currencyPlan.planIds]);
+    const reclassificationId=currencyPlan?await writeInvoiceCurrencyEvidence(client,revision.id,owner.patient_id,currencyPlan.lineageInvoiceIds,
+      {sourceCurrency:before.invoice.baseCurrency,targetCurrency:currency}):null;
+    if(currencyPlan?.planIds.length)await client.query("UPDATE treatment_plans SET base_currency=$2 WHERE id=ANY($1::int[])",[currencyPlan.planIds,currency]);
     const affectedPlans = new Set<number>();
     for (const work of before.work) {
       const original = before.invoice.items.find(item=>item.planItemId===work.id)!;

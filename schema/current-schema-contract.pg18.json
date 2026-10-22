@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6",
+  "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
     "tables": 130,
     "columns": 1664,
-    "constraints": 1895,
+    "constraints": 1894,
     "indexes": 406,
-    "triggers": 80
+    "triggers": 82
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -7523,6 +7523,12 @@
         }
       },
       "triggers": {
+        "invoice_reclassification_event_direction_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
         "invoice_reclassification_event_guard": {
           "timing": "BEFORE",
           "events": [
@@ -7573,9 +7579,8 @@
         ]
       ],
       "checks": [
-        "invoice_settlement_reclassifications_source_currency_check",
-        "invoice_settlement_reclassifications_source_invoice_ids_check",
-        "invoice_settlement_reclassifications_target_currency_check"
+        "invoice_settlement_reclassifications_direction_check",
+        "invoice_settlement_reclassifications_source_invoice_ids_check"
       ],
       "foreignKeys": [
         {
@@ -7618,6 +7623,12 @@
         }
       },
       "triggers": {
+        "invoice_reclassification_direction_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
         "invoice_reclassification_guard": {
           "timing": "BEFORE",
           "events": [

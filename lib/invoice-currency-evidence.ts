@@ -6,7 +6,8 @@ export interface SettlementReclassification {
   sourceCurrency:"YER";targetCurrency:"SAR";sourceMinor:number;targetMinor:number;
   direction:1|-1;createdAt:string;
 }
-/** A recorded receipt remains the cash authority. This projection carries only
+/** A recorded receipt remains the cash authority. Receipt events exist only on
+ * YER -> SAR documents; other directions (0069) carry no settlement. This projection carries only
  * an independently verified, append-only settlement allocation. Read in the
  * same snapshot as the invoices/payments consuming it. */
 export async function readCurrencyReclassificationEvidence(client:Pick<DbClient,"query">,patientId:number|readonly number[]):Promise<SettlementReclassification[]>{
@@ -14,7 +15,10 @@ export async function readCurrencyReclassificationEvidence(client:Pick<DbClient,
   if(!patientIds.length)return [];
   const {rows:documents}=await client.query<{id:number;correction_id:number;source_invoice_ids:number[];valid:boolean}>(`
     SELECT d.id,d.correction_id,d.source_invoice_ids,
-      (d.patient_id=c.patient_id AND d.source_currency='YER' AND d.target_currency='SAR'
+      (d.patient_id=c.patient_id AND d.source_currency<>d.target_currency
+       -- 0069: a direction other than YER -> SAR documents an unpaid lineage only.
+       AND ((d.source_currency='YER' AND d.target_currency='SAR')
+         OR NOT EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=ANY(d.source_invoice_ids)))
        AND c.original_currency=d.source_currency AND c.currency=d.target_currency
        AND i.patient_id=d.patient_id AND i.base_currency=d.source_currency AND i.status='cancelled'
        AND n.patient_id=d.patient_id AND n.base_currency=d.target_currency
@@ -41,7 +45,8 @@ export async function readCurrencyReclassificationEvidence(client:Pick<DbClient,
          AND NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id)) AS target_invoice_id,
       e.source_minor::text,e.target_minor::text,e.direction,
       to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,
-      (e.payment_snapshot=to_jsonb(p) AND p.patient_id=d.patient_id AND p.invoice_id=ANY(d.source_invoice_ids)
+      (d.source_currency='YER' AND d.target_currency='SAR'
+       AND e.payment_snapshot=to_jsonb(p) AND p.patient_id=d.patient_id AND p.invoice_id=ANY(d.source_invoice_ids)
        AND p.currency=d.target_currency AND p.base_currency=d.source_currency
        AND e.source_minor=p.base_amount_minor AND e.target_minor=p.amount_minor
        AND e.direction=(CASE WHEN p.kind='payment' THEN 1 WHEN p.kind='refund' THEN -1 ELSE 0 END)
