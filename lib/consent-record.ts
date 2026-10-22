@@ -6,8 +6,14 @@
  */
 import type { ConsentTemplate } from "./consent-templates";
 
-/** حدّ الملاحظة في مسار رفع المستندات (`/api/patients/[id]/documents`) — يُقصّ ما بعده. */
+/** حدّ الملاحظة الحرّة في مسار رفع المستندات (`/api/patients/[id]/documents`) — يُقصّ ما بعده. */
 export const DOCUMENT_NOTE_LIMIT = 300;
+
+/**
+ * حدّ سجل الإقرار المنظَّم (JSON من شاشة التوقيع) في المسار نفسه. يُحفظ كاملًا حتى هذا الحد ولا يُقصّ أبدًا:
+ * سجلٌّ مقصوص JSON غير صالح، فيرفض القارئ الصارم طباعته. ما يتجاوزه أو لا يُقرأ يُرفض قبل أي كتابة.
+ */
+export const CONSENT_RECORD_NOTE_LIMIT = 8000;
 
 /** قسمٌ من نص الإقرار: محفوظٌ بقائمته (قد تكون فارغة صراحةً)، أو غير محفوظ/غير مقروء. */
 export type StoredSection = { state: "stored"; items: string[] } | { state: "missing" } | { state: "malformed" };
