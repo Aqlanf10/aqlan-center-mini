@@ -1,3 +1,5 @@
+import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
+import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
@@ -11,6 +13,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +56,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
   }
 
+  // Advisory similar-receipt review for every NEW collection (never refunds); checked inside
+  // each writer's transaction after its shift lock and exact-key replay (lib/similar-collection).
+  const similarityReview = parseSimilarCollectionReviewHeader(request.headers.get(SIMILAR_COLLECTION_REVIEW_HEADER));
+  if (!similarityReview) return NextResponse.json({ message: "مراجعة السندات المشابهة المرسلة غير صالحة. أعد فتح نافذة التحصيل." }, { status: 400 });
+
   // Opt-in mode: replay/FX/audit belong to its canonical transaction. No generic
   // invoice-only write or post-commit audit may run for this purpose.
   const recovery = parseRecoveryIntent(body, request.headers.get("idempotency-key"));
@@ -64,7 +72,7 @@ export async function POST(request: Request) {
       const result = await recordReversedInstallmentRecovery({
         ...recovery.intent, idempotencyKey: recovery.idempotencyKey,
         createdBy: session.username, actorRole: session.role,
-      });
+      }, { similarityReview });
       if (result.reason || !result.payment) {
         const messages: Record<string, string> = {
           invalid_recovery_request: "طلب إعادة تحصيل القسط غير صالح.",
@@ -82,7 +90,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ reason: result.reason, message: messages[result.reason ?? ""] ?? "تعذّرت إعادة تحصيل القسط. راجع الحساب قبل المحاولة." }, { status: result.reason === "invalid_recovery_request" ? 400 : 409 });
       }
       return NextResponse.json({ ...result.payment, idempotencyKey:recovery.idempotencyKey }, { status: result.replayed ? 200 : 201 });
-    } catch {
+    } catch (error) {
+      if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+      if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة بالمفتاح نفسه." }, { status: 500 });
     }
   }
@@ -137,11 +147,17 @@ export async function POST(request: Request) {
 
   /* (P1.5) مفتاح الإعادة من ترويسة الطلب: النقر المزدوج/إعادة الإرسال/انقطاع
      الشبكة كلها تنتج الطلب نفسه بالمفتاح نفسه → سند واحد فقط، والثاني replay
-     يعيد السند الأول نفسه (200 لا 201). بلا الترويسة يبقى السلوك كما كان. */
+     يعيد السند الأول نفسه (200 لا 201). الترويسة إلزامية قبل أي كتابة مالية. */
   const idempotencyKeyRaw = request.headers.get("idempotency-key");
   const idempotencyKey = idempotencyKeyRaw && idempotencyKeyRaw.trim()
     ? idempotencyKeyRaw.trim() : null;
-  if (idempotencyKey && !/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) {
+  if (!idempotencyKey) {
+    return NextResponse.json(
+      { reason: "idempotency_key_required", message: "مفتاح الإعادة (Idempotency-Key) مطلوب للتحصيل. أعد إرسال الطلب المحفوظ بالمفتاح نفسه." },
+      { status: 400 },
+    );
+  }
+  if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
     return NextResponse.json(
       { message: "مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -" },
       { status: 400 },
@@ -182,14 +198,28 @@ export async function POST(request: Request) {
         const plan = await getPlan(planId, clinicDateString(new Date(), CLINIC_TIME_ZONE));
         if (plan && plan.patientId === patientId) {
           if(plan.approvedAgreement) {
-            const result=await collectApprovedAgreement({planId,amountMinor,currency,method:method==="transfer"?"transfer":"cash",note,idempotencyKey:idempotencyKey??"",session});
-            return NextResponse.json({...result.payment,idempotencyKey},{status:result.replayed?200:201});
+            const result=await collectApprovedAgreement({planId,amountMinor,currency,method:method==="transfer"?"transfer":"cash",note,idempotencyKey:idempotencyKey??"",session},{similarityReview});
+            // Split receipts are one logical collection, not one payment for the whole amount.
+            // The first receipt remains the backward-compatible top-level identity.
+            const split="collection" in result && result.collection && "payments" in result && Array.isArray(result.payments);
+            return NextResponse.json({
+              ...result.payment,idempotencyKey,
+              ...(split?{
+                collection:{
+                  kind:"approved_agreement_split_v1",...result.collection,
+                  receipts:result.payments,
+                },
+                paymentIds:result.paymentIds,
+                allocations:result.collection.allocations,
+                collectionAmountMinor:result.collection.amountMinor,
+              }:{}),
+            },{status:result.replayed?200:201});
           }
           const installmentNumber = Math.min(plan.progress.paidCount + 1, plan.installments.length || 1);
           const result = await recordPlanInstallment({
             planId, patientId, installmentNumber, planTitle: plan.title,
             amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
-            createdBy: session.username, actorRole: session.role, idempotencyKey,
+            createdBy: session.username, actorRole: session.role, idempotencyKey, similarityReview,
           });
           if ("reason" in result) {
             const messages = {
@@ -209,6 +239,8 @@ export async function POST(request: Request) {
         }
       }
     } catch (error) {
+      if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+      if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
       return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
     }
@@ -232,7 +264,7 @@ export async function POST(request: Request) {
     // retain their inherited origin snapshot and their existing route FX gate.
     if (kind === "refund" && exchangeRate === null) return exchangeRateRequired();
     const result = kind === "payment"
-      ? await recordSettingsOwnedPayment(receiptInput, settings)
+      ? await recordSettingsOwnedPayment({ ...receiptInput, similarityReview }, settings)
       : await recordPayment({ ...receiptInput, kind, exchangeRate: exchangeRate!, reversalOfId });
     const { payment, reason, replayed } = result;
     const acknowledgmentEvidence = "acknowledgmentEvidence" in result ? result.acknowledgmentEvidence : undefined;
@@ -338,6 +370,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...payment, idempotencyKey,
       ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) }, { status: replayed ? 200 : 201 });
   } catch (error) {
+    if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+    if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة." }, { status: 500 });
   }

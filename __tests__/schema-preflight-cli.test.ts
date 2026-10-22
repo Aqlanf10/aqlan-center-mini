@@ -74,9 +74,9 @@ describe("read-only preflight connection contract", () => {
   it("uses the immutable filesystem loader without importing the runtime/probe graph", async () => {
     const files = await loadMigrationFiles();
     expect(files[0].version).toBe("0001");
-    expect(files).toHaveLength(60);
-    expect(files.at(-1)?.filename).toBe("0067_patient_appointment_history_index.sql");
-    expect(files.slice(43).map(file => file.version)).toEqual(['0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0067']);
+    expect(files).toHaveLength(62);
+    expect(files.at(-1)?.filename).toBe("0068_collection_attempt_retirements.sql");
+    expect(files.slice(43).map(file => file.version)).toEqual(['0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068']);
     for (const file of ["lib/migration-files.ts", "lib/schema-preflight.ts", "lib/schema-manifest.ts", "lib/schema-fingerprint.ts", "lib/preflight-provenance.ts", "scripts/db-preflight.ts"]) {
       const source = await readFile(file, "utf8");
       const imports = source.split("\n").filter((line) => /^import\b/.test(line)).join("\n");

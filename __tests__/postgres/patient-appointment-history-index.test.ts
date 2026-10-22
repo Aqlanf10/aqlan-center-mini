@@ -92,7 +92,7 @@ it("serializes numbered/runtime racers and retries idempotently on a populated 0
   const competitor = new Pool({ connectionString: pool.options.connectionString!, ssl: false });
   try {
     const [runtime, numbered] = await Promise.all([applyRuntimeMigrationFiles(pool, [index]), migrate(competitor, { apply: true, files })]);
-    expect([...runtime, ...numbered.appliedVersions]).toEqual(["0067"]);
+    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068"]);
   } finally { await competitor.end(); }
   const oid = (await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows;
   expect(await applyRuntimeMigrationFiles(pool, [index])).toEqual([]);
@@ -109,7 +109,7 @@ it("upgrades through actual runtime and fresh runtime with the exact index, no f
   for (const pool of [fixture.source, fixture.sqlTarget, fixture.archiveTarget]) {
     expect(await registry(pool)).toEqual(expectedRegistry());
     expect(await catalog(pool)).toEqual([{ definition, valid: true, ready: true, unique: false, unfiltered: true }]);
-    expect((await pool.query("SELECT to_regclass('public.agreement_delta_amendments') AS name")).rows[0].name).toBeNull();
+    expect((await pool.query("SELECT to_regclass('public.agreement_delta_amendments') AS name")).rows[0].name).toBe("agreement_delta_amendments");
   }
   const comparison = compareDetailedSchemaCatalogs(await projectDetailedSchemaReadOnly(fixture.source), await projectDetailedSchemaReadOnly(fixture.archiveTarget));
   const classified = classifyOpenFindings(comparison, parseOpenFindingsManifest(openFindings));

@@ -8,7 +8,7 @@ This additive optimization creates exactly one ordinary B-tree index:
 
 There are no predicate, uniqueness, included-column, table, row, reader, reminder, or financial-write changes. Existing indexes remain. The numbered file and runtime SQL must be byte-identical; both use the existing migration advisory lock, checksum checks, and per-file transaction. An unregistered same-name object fails closed rather than being adopted with `IF NOT EXISTS`.
 
-0067 is reserved for this slice. 0066 remains owned by the separate agreement-delta work in PR #408; it is not part of this branch's files or runtime. Other reserved gaps remain unused. The migrator tests exact version membership, not a maximum-version watermark: the cross-branch verification must cover both 0065 → 0067 → 0066 and 0065 → 0066 → 0067 using the actual reviewed #408 SQL. Those compatibility tests are not authority to deploy or register #408 here. Re-run the order proof if either migration's bytes change.
+0067 is owned by this slice. 0066 and 0068 remain owned by the separate finance work in PR #408; this integration includes their unchanged files and runtime registrations. Other reserved gaps remain unused. The migrator tests exact version membership, not a maximum-version watermark: the composed verification must cover both 0065 → 0067 → 0066 → 0068 and 0065 → 0066 → 0068 → 0067 using the actual reviewed #408 SQL. Those compatibility tests are not authority to deploy #408. Re-run the order proof if either migration's bytes change.
 
 No reset table classification or backup policy changes are needed for an index on an existing table. Schema ownership must retain the same 16 reviewed pre-existing convergence findings, without new findings. The source-generated current-schema contract gains only this index; the source-generated preflight disclosure covers columns, constraints, and internal triggers, so its bytes should remain unchanged. Neither baseline adoption nor existing runtime registration debt is claimed resolved.
 
@@ -26,8 +26,25 @@ Before any separately approved Production rollout, review the actual table size,
 
 A concurrent build would require a separately reviewed non-transactional migration/registration design; simply adding `CONCURRENTLY` to this transactional engine is invalid. Do not pre-create an index and fabricate its registration. This slice neither selects nor executes an actual Production deployment procedure. Application rollback does not require dropping this additive index; any removal is a separate reviewed operation.
 
-## Local migration-order evidence
+## Original branch-only migration-order evidence
 
-Both orders above passed on disposable PostgreSQL 18.6 databases using #408 commit `ee10eb1544b3e9027db5110e886241650f0fcad9`, SQL blob `291d11d896f5cdd5d1bd6f9e5cdbc1ac5b4d01eb` (SHA-256 `28bd13b5ca9f34d9a9010aade759d91fb398b47f30a78433e5e663ce90464dac`). The finance bytes were supplied only to the ephemeral test, never copied into this branch's application migration set.
+The original 0065 → 0067 → 0066 and 0065 → 0066 → 0067 orders passed on disposable PostgreSQL 18.6 databases using #408 commit `ee10eb1544b3e9027db5110e886241650f0fcad9`, SQL blob `291d11d896f5cdd5d1bd6f9e5cdbc1ac5b4d01eb` (SHA-256 `28bd13b5ca9f34d9a9010aade759d91fb398b47f30a78433e5e663ce90464dac`). The finance bytes were supplied only to the ephemeral test, never copied into this branch's application migration set.
 
 Each order preserved every existing application table's row snapshot, including synthetic patients, appointments, invoices, invoice items, payments, and cashier shifts. Both ended with identical detailed catalogs, all 61 exact registration rows, a valid/ready nonunique unfiltered index, consistent migration status, and empty idempotent reruns. The index migration SHA-256 was `4717e0a68ee8ba9aee745000c8561d4b9d6481f48f41c094518fac76c1bdacc6`. This does not approve or validate all business behavior of the separate finance feature.
+
+## Composed local integration evidence
+
+The isolated candidate combines nonfinancial `e6bf8c179eb49723392aa843b2101c4b9f755f79`
+with finance `60abcd95e9b25a89ce743252687a45cb24f2ff74`, preserving both ancestries.
+On disposable PostgreSQL 18.6, both `0065 → 0067 → 0066 → 0068` and
+`0065 → 0066 → 0068 → 0067` preserved every existing application-table row
+snapshot, produced identical detailed catalogs and 62 exact registry entries,
+and reran idempotently. The 0068 SHA-256 is
+`07864df6fb6fb98742fd35efebcd2f33f23a1b26c90fb7df16f54605cf62aa42`;
+0066 and 0067 retain the hashes reported above. All four newly added finance
+tables remained empty during this migration-order proof.
+
+Canonical schema regeneration and ownership characterization retained exactly
+16 pre-existing open convergence findings and zero unexpected differences.
+This compatibility proof does not establish financial business acceptance,
+Docker/full CI, release approval, or Production readiness of either input.

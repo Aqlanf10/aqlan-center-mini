@@ -87,6 +87,30 @@ describe("legacy history compatible identity and protected read lifecycle", () =
   it("hides an explicitly successful empty archive", async () => {
     fetchMock.mockResolvedValue(response(history())); render(); await settle(); expect(render()).toBeNull();
   });
+  it("distinguishes each original historical amount from current debt without changing values", async () => {
+    fetchMock.mockResolvedValue(response(history(treatment()))); render(); await settle(); expand(render());
+    const tree = render();
+    expect(text(tree)).toContain("السعر التاريخي");
+    expect(text(tree)).toContain("المدفوع تاريخيًا");
+    expect(text(tree)).toContain("المتبقي تاريخيًا");
+    expect(text(tree)).toContain("ليس دينًا إضافيًا على الرصيد الحالي");
+    expect(text(tree)).toMatch(/600[.,]00/);
+    expect(text(tree)).toMatch(/250[.,]00/);
+    expect(text(tree)).toMatch(/350[.,]00/);
+  });
+  it("explains aggregate import provenance without assigning an opening amount to a historical row", async () => {
+    fetchMock.mockResolvedValue(response(history(treatment()))); render(); await settle();
+    const copy = text(render());
+    expect(copy).toContain("الأرصدة المستوردة تُجمّع حسب المريض والعملة");
+    expect(copy).toContain("لا يحدد هذا العرض حصة كل معالجة من الرصيد الحالي");
+    expect(copy).toContain("تصحيح السجل التاريخي وحده لا يصحح الرصيد الافتتاحي تلقائيًا");
+  });
+  it("does not claim manual-only history was imported", async () => {
+    fetchMock.mockResolvedValue(response(history(treatment(52, true)))); render(); await settle();
+    const copy = text(render());
+    expect(copy).toContain("تصحيح السجل التاريخي وحده لا يصحح الرصيد الافتتاحي تلقائيًا");
+    expect(copy).not.toContain("الأرصدة المستوردة تُجمّع");
+  });
   it("retires loaded money immediately on A→B→A and cannot revive the first A's data", async () => {
     const b = deferred(); const secondA = deferred();
     fetchMock.mockResolvedValueOnce(response(history(treatment()))).mockReturnValueOnce(b.promise).mockReturnValueOnce(secondA.promise);

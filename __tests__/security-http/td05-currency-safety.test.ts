@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
-import { baseUrl, harness } from "./_server";
+import { baseUrl, confirmingSimilarCollection, harness } from "./_server";
 import { formatMoney } from "../../lib/money";
 
 /**
@@ -243,7 +243,7 @@ describe("مسار HTTP المباشر: الدفع الأجنبي بلا هدف 
     const response = await authedJson("/api/payments", {
       patientId: h.seeded.patientAId, amount: "100", currency: "USD",
       kind: "payment", method: "cash",
-    });
+    }, "td05-collection-1");
     expect(response.status).toBe(400);
     const payload = await response.json();
     expect(payload.message).toContain("هدف");
@@ -254,7 +254,7 @@ describe("مسار HTTP المباشر: الدفع الأجنبي بلا هدف 
     const response = await authedJson("/api/payments", {
       patientId: h.seeded.patientAId, amount: "100", currency: "USD",
       kind: "payment", method: "cash", planId: usdPlanId,
-    });
+    }, "td05-collection-2");
     expect(response.status).toBe(201);
     const payment = await response.json();
     expect(payment.planId).toBe(usdPlanId);
@@ -265,7 +265,7 @@ describe("مسار HTTP المباشر: الدفع الأجنبي بلا هدف 
     const response = await authedJson("/api/payments", {
       patientId: h.seeded.patientAId, amount: "1000", currency: "YER",
       kind: "payment", method: "cash",
-    });
+    }, "td05-collection-3");
     expect(response.status).toBe(201);
   });
 });
@@ -293,7 +293,7 @@ describe("رحلة الشبّاك على HTTP: توقيع دولاري → تح�
     const response = await authedJson("/api/payments", {
       patientId: h.seeded.patientAId, amount: "100", currency: "USD",
       kind: "payment", method: "cash", invoiceId: signInvoiceId,
-    });
+    }, "td05-collection-4");
     expect(response.status).toBe(201);
     const payment = await response.json();
     expect(payment.invoiceId).toBe(signInvoiceId);
@@ -312,7 +312,7 @@ describe("رحلة الشبّاك على HTTP: توقيع دولاري → تح�
     const response = await authedJson("/api/payments", {
       patientId: h.seeded.patientAId, amount: "40", currency: "USD",
       kind: "refund", method: "cash", reversalOfId: paid.id,
-    });
+    }, "td05-collection-5");
     expect(response.status).toBe(201);
     const refund = await response.json();
     expect(refund.invoiceId).toBe(signInvoiceId);
@@ -474,18 +474,22 @@ describe("رحلة المتصفح: شبّاك ما بعد الزيارة بال�
 
 /* ══════════════ مساعدات ══════════════ */
 
-async function authedJson(path: string, body: unknown): Promise<Response> {
-  return fetch(`${baseUrl}${path}`, {
+async function authedJson(path: string, body: unknown, idempotencyKey?: string): Promise<Response> {
+  // Currency is this suite's subject; seeded patients are shared across files, so an equal receipt from
+  // another suite may trigger the advisory review. Answer it as the operator would (same request/key).
+  return confirmingSimilarCollection((extra) => fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: {
       Cookie: h.sessions.admin.cookie,
       Origin: baseUrl,
       "Sec-Fetch-Site": "same-origin",
       "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      ...extra,
     },
     body: JSON.stringify(body),
     redirect: "manual",
-  });
+  }));
 }
 
 async function planItemCount(planId: number): Promise<number> {

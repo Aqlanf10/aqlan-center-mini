@@ -677,6 +677,7 @@ export async function projectDetailedSchemaReadOnly(
        JOIN pg_namespace n ON n.oid = tbl.relnamespace
        JOIN pg_am am ON am.oid = idx.relam
        LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid
+        AND con.conrelid = i.indrelid AND con.contype IN ('p','u','x')
       WHERE n.nspname = $1
       ORDER BY tbl.relname, idx.relname`,
     [schema],

@@ -49,19 +49,19 @@ describe("P1-5b — an old balance stays in its currency", () => {
 
   it("reception collects the SAR opening in SAR; a USD payment against it is refused in Arabic", async () => {
     const paid = await authedMutation("/api/payments", h.sessions.reception, "POST",
-      JSON.stringify({ patientId, amount: "300", currency: "SAR", openingCurrency: "SAR", method: "cash" }));
+      JSON.stringify({ patientId, amount: "300", currency: "SAR", openingCurrency: "SAR", method: "cash" }), { "Idempotency-Key": `opening-paid-${patientId}` });
     expect(paid.status).toBe(201);
     const book = await ledger();
     expect(book.balances.SAR.dueMinor).toBe(49300);
     expect(book.balances.YER.dueMinor).toBe(50000);
 
     const wrong = await authedMutation("/api/payments", h.sessions.reception, "POST",
-      JSON.stringify({ patientId, amount: "10", currency: "USD", openingCurrency: "SAR", method: "cash" }));
+      JSON.stringify({ patientId, amount: "10", currency: "USD", openingCurrency: "SAR", method: "cash" }), { "Idempotency-Key": `opening-wrong-${patientId}` });
     expect(wrong.status).toBe(409);
     expect((await wrong.json() as { message: string }).message).toMatch(/[؀-ۿ]/);
 
     const none = await authedMutation("/api/payments", h.sessions.reception, "POST",
-      JSON.stringify({ patientId, amount: "10", currency: "USD", openingCurrency: "USD", method: "cash" }));
+      JSON.stringify({ patientId, amount: "10", currency: "USD", openingCurrency: "USD", method: "cash" }), { "Idempotency-Key": `opening-none-${patientId}` });
     expect(none.status).toBe(409);
     expect((await none.json() as { message: string }).message).toBe("لا يوجد على المريض رصيد سابق بهذه العملة.");
   });

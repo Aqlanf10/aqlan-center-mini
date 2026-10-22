@@ -44,7 +44,22 @@ describe("ordinary invoice recovery and persistent repayment workspace",()=>{
         await panel.getByRole("button",{name:"تحصيل دفعة فعلية",exact:true}).click();await panel.getByLabel("مبلغ تحصيل القسط",{exact:true}).fill("20");
         const collectionResponse=page.waitForResponse(response=>response.url().endsWith("/collect")&&response.request().method()==="POST");
         await panel.getByRole("button",{name:"تأكيد التحصيل وإصدار السند",exact:true}).click();
-        const collection=await collectionResponse;const collectionBody=await collection.json();expect(collection.status(),JSON.stringify(collectionBody)).toBe(201);
+        let collection=await collectionResponse;let collectionBody=await collection.json();
+        if(step>1){
+          // Same patient/amount/currency today: the advisory review shows the earlier receipt; nothing was written.
+          expect(collection.status(),JSON.stringify(collectionBody)).toBe(409);
+          expect(collectionBody.reason).toBe("similar_collection_review_required");
+          expect((await db.query("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1",[patientId])).rows[0].n).toBe(step-1);
+          const warning=panel.getByRole("alertdialog",{name:"تنبيه سند قبض مشابه"});await warning.waitFor();
+          const refusedKey=collection.request().headers()["idempotency-key"];
+          const confirmed=page.waitForResponse(response=>response.url().endsWith("/collect")&&response.request().method()==="POST");
+          await warning.getByRole("button",{name:"تسجيل دفعة مستقلة",exact:true}).click();
+          collection=await confirmed;collectionBody=await collection.json();
+          // Confirmation resends the SAME request and key, with the reviewed receipt IDs.
+          expect(collection.request().headers()["idempotency-key"]).toBe(refusedKey);
+          expect(collection.request().headers()["x-collection-similarity-review"]).toMatch(/^ids:\d+/);
+        }
+        expect(collection.status(),JSON.stringify(collectionBody)).toBe(201);
         keys.push(collection.request().headers()["idempotency-key"]);
         await panel.getByRole("link",{name:"طباعة سند التحصيل",exact:true}).waitFor();
         await expect.poll(()=>panel.innerText()).toContain((123.45-step*20).toFixed(2));

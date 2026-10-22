@@ -7,7 +7,14 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
-  if (files.length === 60 && files[59].version === "0067" && files[59].filename === "0067_patient_appointment_history_index.sql") {
+  const reviewedAdditions: Record<string, string> = {
+    "0066": "0066_agreement_delta_amendments.sql",
+    "0067": "0067_patient_appointment_history_index.sql",
+    "0068": "0068_collection_attempt_retirements.sql",
+  };
+  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068"];
+  if (files.length > 59 && reviewedTails.includes(files.slice(59).map(file => file.version).join(",")) &&
+      files.slice(59).every(file => reviewedAdditions[file.version] === file.filename)) {
     return periodontalCandidateMigrationVersion(files.slice(0, 59));
   }
   if (files.length === 59 && files[58].version === "0065" && files[58].filename === "0065_inventory_purchase_receipts.sql") {
