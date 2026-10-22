@@ -13,7 +13,8 @@ const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sq
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("accepts 0066 only after the reviewed 0065 chain, retaining sentinel 9000", async () => {
     const files = await loadMigrationFiles();
-    expect(files).toHaveLength(60);
+    expect(files).toHaveLength(61);
+    expect(files[60]).toMatchObject({version:"0068",filename:"0068_collection_attempt_retirements.sql"});
     expect(files[59]).toMatchObject({version:"0066",filename:"0066_agreement_delta_amendments.sql"});
     expect(files[58]).toMatchObject({ version: "0065", filename: "0065_inventory_purchase_receipts.sql" });
     expect(files[57]).toMatchObject({version:"0064",filename:"0064_approved_agreement_principal.sql"});

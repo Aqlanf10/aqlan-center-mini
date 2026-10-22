@@ -1,12 +1,14 @@
 "use client";
 
-import { MONEY_UNCERTAIN, type MoneyAttempt } from "@/lib/money-attempt";
+import { MONEY_UNCERTAIN, RECONCILABLE_OPERATIONS, type MoneyAttempt } from "@/lib/money-attempt";
 import { SimilarCollectionWarning } from "./SimilarCollectionWarning";
 
 /** `onSimilar` answers an advisory similar-receipt review: confirm resends the same request/key
  * with the reviewed receipt IDs; cancel retires the attempt only when nothing can still land. */
-export function MoneyAttemptNotice({ attempt, onRetry, onSimilar, busy = false }: {
+export function MoneyAttemptNotice({ attempt, onRetry, onSimilar, onReconcile, busy = false }: {
   attempt: MoneyAttempt | null; onRetry: () => void; busy?: boolean;
+  /** Server proof (0068): retire an uncertain collection only if it never committed; replay it if it did. */
+  onReconcile?: () => void;
   onSimilar?: { confirm: (observedReceiptIds: number[]) => void; cancel: () => void };
 }) {
   if (!attempt) return null;
@@ -29,6 +31,13 @@ export function MoneyAttemptNotice({ attempt, onRetry, onSimilar, busy = false }
         className="mt-2 rounded-lg border border-amber-600 px-3 py-2 font-bold disabled:opacity-50">
         {attempt.phase === "confirmed" ? "عرض نتيجة العملية السابقة" : "إعادة التحقق من العملية السابقة"}
       </button>
+      {attempt.phase === "uncertain" && onReconcile && RECONCILABLE_OPERATIONS.has(attempt.request.operation) ? <>
+        <button type="button" onClick={onReconcile} disabled={busy} data-testid="money-attempt-reconcile"
+          className="mt-2 ms-2 rounded-lg border border-slate-400 bg-white px-3 py-2 font-bold disabled:opacity-50">
+          التحقق من الخادم وإلغاء المحاولة إن لم تُحفظ
+        </button>
+        <p className="mt-1 text-xs text-slate-600">لا يُرسل الطلب المالي. إن كانت المحاولة محفوظة تُعرض نتيجتها؛ وإلا تُلغى نهائيًا ويمكنك تصحيح الطلب.</p>
+      </> : null}
     </div>
   );
 }

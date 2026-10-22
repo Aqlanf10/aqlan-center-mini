@@ -208,6 +208,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/import/legacy": { POST: ADMIN },
   "/api/payables": { GET: ["admin", "reception", "accountant"], POST: FRONT_DESK },
   "/api/payments": { GET: ["admin", "reception", "cashier", "accountant"], POST: ["admin", "reception", "cashier"] },
+  "/api/payments/attempts/retire": { POST: ["admin", "reception", "cashier"] },
   "/api/payments/[id]/correct": { POST: ADMIN },
   "/api/ping": { GET: PUBLIC },
   "/api/plan-items/[id]/case": { PUT: CLINIC },

@@ -35,6 +35,7 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { LegacyOrthoPlanContext } from "./LegacyOrthoPlanContext";
 import { hasLegacyHistory, legacyCoverageIsLive, ordinaryPlanProgress, planConsentIsCurrent, type HistoricalPlanItem } from "./legacy-treatment-view";
 import { LegacyPlanHistory } from "./LegacyPlanHistory";
+import { MONEY_RETIRED } from "@/lib/money-attempt";
 
 /** Existing plans and clinical drafts remain here. New financial treatment is
  * created only through the Account invoice / historical-agreement entry. */
@@ -236,6 +237,23 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
     }
   };
 
+  const reconcile = async () => {
+    if (!readRef.current.active || busy) return;
+    setBusy(true);
+    try {
+      const result = await money.reconcile();
+      if (!result || result.kind === "busy" || result.kind === "similar") return;
+      if (result.kind === "retired") { setError(MONEY_RETIRED); return; }
+      if (result.kind !== "confirmed") { setError(result.message); return; }
+      setLastReceipt(result.acknowledgment.paymentId);
+      setLastSplit(result.acknowledgment.collection??null);
+      setLastReceiptIsInstallment(result.attempt.request.operation === "installment");
+      money.consume(result.attempt);
+      setError(null);
+      await load();
+    } finally { setBusy(false); }
+  };
+
   return (
     <div data-testid="patient-plans-content">
       <TreatmentFinancialContext patientId={patientId} authorityKey={financialAuthority} canView={canSeeFinancial && !loading && !readDenied && !readUnavailable}
@@ -243,7 +261,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
         onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
       {!loading && !readDenied && !readUnavailable && visiblePlans.length === 0 && (context?.planId !== undefined || context?.planItemId !== undefined || context?.clinicalCaseId !== undefined) ? <p role="status" data-testid="plan-context-unavailable" className="rounded-xl border border-amber-300 p-3 text-sm">لا توجد خطة متاحة مرتبطة بهذا المرجع. لم يتم اختيار خطة أخرى.</p> : null}
       {canSeeFinancial && !readUnavailable && !readDenied ? (
-        <><MoneyAttemptNotice attempt={money.attempt} busy={busy} onRetry={() => void collect()}
+        <><MoneyAttemptNotice attempt={money.attempt} busy={busy} onRetry={() => void collect()} onReconcile={() => void reconcile()}
           onSimilar={{ confirm: (observedReceiptIds) => void collect(undefined, { observedReceiptIds }), cancel: () => void money.dismiss() }} />
         {money.error ? <p role="alert">{money.error}</p> : null}</>
       ) : null}

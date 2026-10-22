@@ -3,7 +3,7 @@
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useSyncExternalStore} from "react";
 import {acknowledgeFinancialCommand,readFinancialJournal,reserveFinancialCommand,FinancialRecoveryError,type FinancialCommand} from "@/lib/financial-command-journal";
 import {durableMoneyCommand,restoreMoneyCommand,readDurableMoneyAcknowledgment,type DurableMoneyCommand,type MoneyReceiptContext} from "@/lib/durable-money-command";
-import {MONEY_UNCERTAIN,moneyHeaders,moneyRecoveryFailure,similarReview,type MoneyAttempt,type MoneyRequest} from "@/lib/money-attempt";
+import {MONEY_UNCERTAIN,RECONCILABLE_OPERATIONS,moneyHeaders,moneyRecoveryFailure,retireMoneyAttempt,similarReview,type MoneyAttempt,type MoneyRequest} from "@/lib/money-attempt";
 import type {SimilarCollectionReview} from "@/lib/similar-collection";
 import {newIdempotencyKey} from "@/lib/idempotency-key";
 import {readInvoiceCommandResponse} from "@/lib/invoice-command-transport";
@@ -76,6 +76,11 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
       if(!response.redirected)failure=moneyRecoveryFailure(response.status,message);
       if(!previous&&!response.redirected&&[400,404,422].includes(response.status)&&typeof message==="string"&&message.trim()){
         const retired=await acknowledgeFinancialCommand({actor,patientId},durable);publish(scope,{...current,revision:retired.revision,command:null});announce();return lifetime.current===token?{kind:"refused" as const,message}:null;}
+      // An ordinary 409 refusal of a first send is retired only on server proof (0068) that the key
+      // never committed and never can; otherwise it stays uncertain below.
+      if(!previous&&!response.redirected&&response.status===409&&RECONCILABLE_OPERATIONS.has(command.attempt.request.operation)&&typeof message==="string"&&message.trim()
+        &&await retireMoneyAttempt(fetch,command.attempt.request,command.attempt.key)==="retired"){
+        const retired=await acknowledgeFinancialCommand({actor,patientId},durable);publish(scope,{...current,revision:retired.revision,command:null});announce();return lifetime.current===token?{kind:"refused" as const,message}:null;}
     }catch{
       if(!reserved){
         try{const saved=await readFinancialJournal({actor,patientId});adopt(scope,saved.command,saved.revision,patientId,actor);
@@ -99,6 +104,22 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
     publish(scope,{...current,command:{...command,attempt:{request:command.attempt.request,key:command.attempt.key,phase:"uncertain"}}});
     return "kept";
   };
+  /** Prove an uncertain collection's outcome: retire only on server proof, replay if it committed. */
+  const reconcile=async()=>{
+    const current=states.get(scope);const command=current?.command;
+    if(!context||!actor||lifetime.current!==token||!current||!command||command.owner!==owner||command.attempt.phase!=="uncertain"
+      ||!RECONCILABLE_OPERATIONS.has(command.attempt.request.operation))return null;
+    publish(scope,{...current,command:{...command,attempt:{...command.attempt,phase:"sending"}}});
+    const state=await retireMoneyAttempt(fetch,command.attempt.request,command.attempt.key);
+    publish(scope,{...current,command});
+    if(state==="retired"){
+      try{const retired=await acknowledgeFinancialCommand({actor,patientId},durableMoneyCommand(command));publish(scope,{...current,revision:retired.revision,command:null});announce();}
+      catch{return {kind:"uncertain" as const,message:"ثبت أن المحاولة لم تُحفظ، لكن تعذّر تحديث الطلب المحفوظ في هذا الجهاز؛ أعد المحاولة."};}
+      return lifetime.current===token?{kind:"retired" as const}:null;
+    }
+    if(state==="committed")return run();
+    return {kind:"uncertain" as const,message:MONEY_UNCERTAIN};
+  };
   const consume=(attempt:MoneyAttempt)=>{const current=states.get(scope);if(current?.command?.attempt===attempt&&attempt.phase==="confirmed"){publish(scope,{...current,command:null});announce();}};
-  return {attempt:own?.attempt??null,run,consume,dismiss,ready:state.ready&&!blocked&&!state.error,error:state.error??(blocked?"يوجد طلب مالي سابق لهذا المريض. استعده من الحساب قبل تسجيل عملية جديدة.":null)};
+  return {attempt:own?.attempt??null,run,reconcile,consume,dismiss,ready:state.ready&&!blocked&&!state.error,error:state.error??(blocked?"يوجد طلب مالي سابق لهذا المريض. استعده من الحساب قبل تسجيل عملية جديدة.":null)};
 }

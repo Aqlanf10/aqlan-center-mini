@@ -19,10 +19,19 @@ export function SimilarCollectionWarning({receipts,busy,onConfirm,onCancel}:{
       ?"لم تعد هناك سندات بالمبلغ والعملة نفسيهما خلال آخر 24 ساعة. لم يُسجَّل شيء بعد؛ تابع إن كان التحصيل مقصودًا."
       :`سُجّل لهذا المريض تحصيل بالمبلغ والعملة نفسيهما خلال آخر ${SIMILAR_COLLECTION_WINDOW_HOURS} ساعة. لم يُسجَّل شيء بعد. تأكد أن المبلغ لم يُحصَّل سابقًا.`}</p>
     {receipts.slice(0,6).map(r=><div key={r.id} className="rounded-lg border border-amber-200 bg-white p-2">
-      <p className="font-extrabold">السند {r.receiptNumber} · {formatMoney(r.amountMinor,r.currency)}</p>
+      {r.allocations
+        ?<p className="font-extrabold">عملية تحصيل واحدة موزعة على {r.allocations.length} سندات · إجمالي المدفوع {formatMoney(r.amountMinor,r.currency)}</p>
+        :<p className="font-extrabold">السند {r.receiptNumber} · {formatMoney(r.amountMinor,r.currency)}</p>}
       <p>الوقت: {new Date(r.createdAt).toLocaleString("ar-YE",{timeZone:CLINIC_ZONE_FALLBACK})}</p>
-      <p>الطريقة: {r.method==="transfer"?"تحويل":"نقدًا"}{r.invoiceId?` · الفاتورة #${r.invoiceId}`:r.planId?` · الخطة #${r.planId}`:""} · الموظف: {r.createdBy}</p>
-      <a href={`/print/receipt/${r.id}`} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-800 underline">مراجعة السند</a>
+      <p>الطريقة: {r.method==="transfer"?"تحويل":"نقدًا"}{r.allocations?"":r.invoiceId?` · الفاتورة #${r.invoiceId}`:r.planId?` · الخطة #${r.planId}`:""} · الموظف: {r.createdBy}</p>
+      {r.allocations
+        // Each receipt keeps its own amount and link; the operation total is never attributed to one receipt.
+        ?<ul className="mt-1 space-y-1" aria-label="سندات العملية">{r.allocations.map(a=><li key={a.id}>
+          السند {a.receiptNumber} · {formatMoney(a.amountMinor,r.currency)}{a.invoiceId?` · الفاتورة #${a.invoiceId}`:""}
+          {a.refundedMinor>0?` · مسترد ${formatMoney(a.refundedMinor,r.currency)}${a.refundedMinor===a.amountMinor?" (بالكامل)":""}`:""}
+          {" "}<a href={`/print/receipt/${a.id}`} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-800 underline">مراجعة السند {a.receiptNumber}</a>
+        </li>)}</ul>
+        :<a href={`/print/receipt/${r.id}`} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-800 underline">مراجعة السند</a>}
     </div>)}
     {receipts.length>6?<p className="text-xs text-amber-900">توجد سندات مشابهة أخرى؛ راجع كشف الحساب.</p>:null}
     <div className="flex gap-2">
