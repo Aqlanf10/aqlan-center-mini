@@ -3,10 +3,15 @@
 -- proves the outcome. Retiring writes this row only when no receipt and no split
 -- collection group carries the key; afterwards no receipt or group may use it. Both
 -- sides take the same per-key transaction lock, so the check and the insert cannot
--- interleave. Validation only: a backup replay re-inserts consistent rows and passes.
+-- interleave. The row binds the proof to the attempt's patient, operation, request
+-- fingerprint and originating user. It is permanent history: no update, no delete, no
+-- patient cascade, and TRUNCATE only of an empty table (factory reset refuses first).
+-- Validation only: a backup replay re-inserts consistent rows and passes.
 CREATE TABLE collection_attempt_retirements (
   idempotency_key TEXT PRIMARY KEY CHECK(idempotency_key ~ '^[A-Za-z0-9._:-]{8,128}$'),
-  patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  operation TEXT NOT NULL CHECK(operation IN ('payment', 'installment')),
+  request_hash TEXT NOT NULL CHECK(request_hash ~ '^[a-f0-9]{64}$'),
   retired_by TEXT NOT NULL CHECK(length(btrim(retired_by)) BETWEEN 1 AND 200),
   retired_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -15,13 +20,12 @@ CREATE OR REPLACE FUNCTION aqlan_collection_key_fence() RETURNS TRIGGER AS $$
 DECLARE attempt_key TEXT;
 BEGIN
   IF TG_OP = 'TRUNCATE' THEN
-    -- Factory reset may empty the table together with every receipt it fenced.
-    RETURN NULL;
+    -- TRUNCATE holds ACCESS EXCLUSIVE: an empty table loses no proof and no insert can race.
+    IF NOT EXISTS(SELECT 1 FROM collection_attempt_retirements) THEN RETURN NULL; END IF;
+    RAISE EXCEPTION 'retired collection keys are immutable';
   END IF;
-  IF TG_TABLE_NAME = 'collection_attempt_retirements' THEN
-    -- Only the cascade of a deleted patient may remove its own retirement rows.
-    IF TG_OP = 'DELETE' AND NOT EXISTS(SELECT 1 FROM patients WHERE id = OLD.patient_id) THEN RETURN OLD; END IF;
-    IF TG_OP <> 'INSERT' THEN RAISE EXCEPTION 'retired collection keys are immutable'; END IF;
+  IF TG_TABLE_NAME = 'collection_attempt_retirements' AND TG_OP <> 'INSERT' THEN
+    RAISE EXCEPTION 'retired collection keys are immutable';
   END IF;
   attempt_key := NEW.idempotency_key;
   IF attempt_key IS NULL THEN RETURN NEW; END IF;

@@ -25,6 +25,8 @@ export type MoneyAcknowledgment = { paymentId: number | null; reversal?: Receipt
 export type MoneyAttempt = Readonly<{
   request: MoneyRequest;
   key: string;
+  /** The signed-in user who first sent this key; only that user's live session may retire it. */
+  actor?: string;
   phase: "sending" | "uncertain" | "confirmed" | "review";
   acknowledgment?: MoneyAcknowledgment;
   similar?: Readonly<{ receipts: SimilarCollectionReceipt[]; proven: boolean }>;
@@ -43,13 +45,15 @@ export const MONEY_RETIRED = "ثبت من الخادم أن المحاولة ا�
  * can be recorded under this key any more. "committed": a receipt exists; replay the same request.
  * null: not proven (network, permission, malformed answer) — keep the attempt.
  */
-export async function retireMoneyAttempt(transport: typeof fetch, request: MoneyRequest, key: string): Promise<"retired" | "committed" | null> {
+export async function retireMoneyAttempt(transport: typeof fetch, request: MoneyRequest, key: string, actor: string | undefined): Promise<"retired" | "committed" | null> {
   try {
-    // The retirement is bound to the patient of the saved request itself, never to the current screen.
+    // Bound to the saved request itself (patient, operation, exact body) and to the user who sent it,
+    // never to the current screen. Without a recorded sender nothing is retired.
     const patientId = object(JSON.parse(request.body))?.patientId;
-    if (!id(patientId)) return null;
+    if (!id(patientId) || !actor || !RECONCILABLE_OPERATIONS.has(request.operation)) return null;
     const response = await transport("/api/payments/attempts/retire", { method: "POST",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idempotencyKey: key, patientId }) });
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idempotencyKey: key, patientId, operation: request.operation, requestBody: request.body, originalActor: actor }) });
     if (!response.ok || response.redirected) return null;
     const state = object(await response.json())?.state;
     return state === "retired" || state === "committed" ? state : null;
@@ -125,21 +129,23 @@ export class MoneyAttemptStore {
     const current = this.get(scope);
     if (!current || current.phase !== "review") return null;
     if (current.similar?.proven) { this.publish(scope, null); return "retired"; }
-    this.publish(scope, { request: current.request, key: current.key, phase: "uncertain" });
+    this.publish(scope, { request: current.request, key: current.key, actor: current.actor, phase: "uncertain" });
     return "kept";
   }
   /** Prove an uncertain collection's outcome: retire it only on server proof, replay it if it committed. */
-  async reconcile(scope: string): Promise<Result | { kind: "retired" }> {
+  async reconcile(scope: string, stillCurrent: () => boolean = () => true): Promise<Result | { kind: "retired" }> {
     const current = this.get(scope);
-    if (!current || current.phase !== "uncertain" || !RECONCILABLE_OPERATIONS.has(current.request.operation)) return { kind: "busy" };
+    if (!current || current.phase !== "uncertain" || !RECONCILABLE_OPERATIONS.has(current.request.operation) || !stillCurrent()) return { kind: "busy" };
     this.publish(scope, { ...current, phase: "sending" }); // no concurrent resend while proving
-    const state = await retireMoneyAttempt(this.transport, current.request, current.key);
-    if (state === "retired") { this.publish(scope, null); return { kind: "retired" }; }
+    const state = await retireMoneyAttempt(this.transport, current.request, current.key, current.actor);
+    // A replaced or closed principal keeps the attempt; its own owner proves it again later.
+    if (state === "retired" && stillCurrent()) { this.publish(scope, null); return { kind: "retired" }; }
     this.publish(scope, { ...current, phase: "uncertain" });
     if (state === "committed") return this.run(scope);
     return { kind: "uncertain", message: MONEY_UNCERTAIN };
   }
-  async run(scope: string, request?: MoneyRequest, review?: SimilarCollectionReview): Promise<Result> {
+  async run(scope: string, request?: MoneyRequest, review?: SimilarCollectionReview,
+    actor?: string, stillCurrent: () => boolean = () => true): Promise<Result> {
     const previous = this.get(scope);
     if (previous?.phase === "sending") return { kind: "busy" };
     if (previous && request && (previous.request.url !== request.url || previous.request.body !== request.body || previous.request.operation !== request.operation)) {
@@ -150,8 +156,8 @@ export class MoneyAttemptStore {
     }
     if (!previous && !request) return { kind: "busy" };
     const attempt: MoneyAttempt = previous
-      ? { request: previous.request, key: previous.key, phase: "sending" }
-      : { request: { ...request! }, key: this.key(), phase: "sending" };
+      ? { request: previous.request, key: previous.key, actor: previous.actor, phase: "sending" }
+      : { request: { ...request! }, key: this.key(), actor, phase: "sending" };
     this.publish(scope, attempt); // synchronous lock, before fetch/React renders
     let failure = MONEY_UNCERTAIN;
     try {
@@ -182,8 +188,10 @@ export class MoneyAttemptStore {
       }
       // An ordinary 409 refusal of a first send is retired only on server proof that the key
       // never committed and never can; otherwise it stays uncertain below.
+      // The extra mutation is issued, and the attempt dropped, only while the sender's view is still current.
       if (!previous && !response.redirected && response.status === 409 && RECONCILABLE_OPERATIONS.has(attempt.request.operation)
-        && typeof message === "string" && message.trim() && await retireMoneyAttempt(this.transport, attempt.request, attempt.key) === "retired") {
+        && typeof message === "string" && message.trim() && stillCurrent()
+        && await retireMoneyAttempt(this.transport, attempt.request, attempt.key, attempt.actor) === "retired" && stillCurrent()) {
         this.publish(scope, null);
         return { kind: "refused", message };
       }

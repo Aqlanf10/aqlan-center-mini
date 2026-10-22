@@ -7,12 +7,14 @@ import type { MoneyRequest } from "../lib/money-attempt";
 const mock = vi.hoisted(() => ({
   journal: { revision: 0, command: null } as FinancialJournal,
   read: vi.fn(), reserve: vi.fn(), acknowledge: vi.fn(), fetch: vi.fn(),
+  /** Layout cleanups: running them models an unmount or a replaced principal. */
+  cleanups: [] as (() => void)[],
 }));
 vi.mock("react", () => ({
   useCallback: (fn: unknown) => fn,
   useMemo: (fn: () => unknown) => fn(),
   useRef: (current: unknown) => ({ current }),
-  useLayoutEffect: (fn: () => unknown) => { fn(); },
+  useLayoutEffect: (fn: () => unknown) => { const cleanup = fn(); if (typeof cleanup === "function") mock.cleanups.push(cleanup as () => void); },
   useEffect: (fn: () => unknown) => { fn(); },
   useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
 }));
@@ -38,7 +40,7 @@ function receipt(key: string) {
 }
 beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks();
-  mock.journal = { revision: 0, command: null };
+  mock.journal = { revision: 0, command: null }; mock.cleanups = [];
   mock.read.mockImplementation(async () => structuredClone(mock.journal));
   mock.reserve.mockImplementation(async (_scope: unknown, revision: number, command: FinancialCommand) => {
     if (mock.journal.command && mock.journal.command.original !== command.original || !mock.journal.command && revision !== mock.journal.revision) throw new Error("CAS changed");
@@ -84,5 +86,33 @@ it("keeps exact key and body after a lost response and a fresh module mount (rel
   expect(retryInit.body).toBe(firstInit.body);
   expect(retryInit.headers).toEqual(firstInit.headers);
   expect(mock.fetch.mock.calls[1][0]).toBe(mock.fetch.mock.calls[0][0]);
+  expect(mock.journal.command).toBeNull();
+});
+
+it("a delayed first 409 after the principal was replaced issues no retirement and keeps the saved attempt", async () => {
+  let reply!: (response: Response) => void;
+  mock.fetch.mockImplementationOnce(() => new Promise<Response>(resolve => { reply = resolve; }));
+  const hook = await mount();
+  const pending = hook.run(request);
+  await vi.waitFor(() => expect(mock.fetch).toHaveBeenCalledTimes(1));
+  const saved = structuredClone(mock.journal.command!);
+  // Session switch / unmount while the original send is in flight.
+  mock.cleanups.splice(0).forEach(cleanup => cleanup());
+  reply(Response.json({ message: "لا توجد وردية مفتوحة." }, { status: 409 }));
+  expect(await pending).toBeNull();
+  expect(mock.fetch.mock.calls.map(call => call[0])).toEqual(["/api/payments"]);
+  expect(mock.acknowledge).not.toHaveBeenCalled();
+  expect(mock.journal.command).toEqual(saved);
+});
+
+it("the owner's own delayed 409 retires only with the saved request and sender bound to the proof", async () => {
+  mock.fetch.mockResolvedValueOnce(Response.json({ message: "لا توجد وردية مفتوحة." }, { status: 409 }))
+    .mockResolvedValueOnce(Response.json({ state: "retired" }));
+  const hook = await mount();
+  expect(await hook.run(request)).toMatchObject({ kind: "refused" });
+  const [url, init] = mock.fetch.mock.calls[1] as [string, RequestInit];
+  expect(url).toBe("/api/payments/attempts/retire");
+  expect(JSON.parse(init.body as string)).toEqual({ idempotencyKey: expect.any(String), patientId: 9, operation: "payment",
+    requestBody: request.body, originalActor: "synthetic-owner" });
   expect(mock.journal.command).toBeNull();
 });
