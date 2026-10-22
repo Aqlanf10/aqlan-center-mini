@@ -22,6 +22,11 @@ describe("bounded patient-free followup contract", () => {
     { outcome: "whatsapp_sent" }, { outcome: "rebooked" }, { status: "closed", outcome: "pending", nextStep: "none" },
     { status: "open", outcome: "resolved" }, { status: "open", nextStep: "none" }, { outcome: "no_answer" },
   ])("rejects invalid creation %j", edit => expect(parseFollowupCommand({ ...input, ...edit })).toBeNull());
+  it.each(['["open"]', '{"toString":null}'])("rejects JSON update status %s without coercion", json => {
+    const update = { ...input, expectedRevision: 1 };
+    expect(parseFollowupCommand(update)).not.toBeNull();
+    expect(parseFollowupCommand({ ...update, status: JSON.parse(json) })).toBeNull();
+  });
   it.each(["no_answer", "awaiting_reply"])("%s remains open with a next step", outcome => {
     const value = { ...input, expectedRevision: 1, outcome };
     expect(parseFollowupCommand(value)).not.toBeNull();

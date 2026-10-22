@@ -11,9 +11,9 @@ const command = { appointmentId: 10, expectedPatientId: 20, sourceCreatedAt: "17
   assigneeUserId: 30, dueAt: "2030-01-01T00:00:00.000Z", status: "open", outcome: "pending", nextStep: "call" };
 const actor = { userId: 30, username: "synthetic", role: "reception", expiresAt: Date.now() + 3600000 } as SessionPayload;
 
-it.each(['["open"]', '{"toString":null}'])("rejects JSON status %s cleanly before connecting", async json => {
+it.each(['["open"]', '{"toString":null}'])("rejects JSON update status %s cleanly before connecting", async json => {
   vi.mocked(getPool).mockClear();
-  await expect(saveAppointmentFollowup({ ...command, status: JSON.parse(json) }, actor))
+  await expect(saveAppointmentFollowup({ ...command, expectedRevision: 1, status: JSON.parse(json) }, actor))
     .rejects.toMatchObject({ status: 400, code: "INVALID_FOLLOWUP" });
   expect(getPool).not.toHaveBeenCalled();
 });

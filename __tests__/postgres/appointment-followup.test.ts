@@ -112,7 +112,9 @@ it("rejects future no_show and attendance evidence", async () => {
   const g = await fixture(); await q("UPDATE appointments SET arrived_at=NOW() WHERE id=$1", [g.input.appointmentId]);
   await expect(save(g.input, reception)).rejects.toMatchObject({ code: "FOLLOWUP_SOURCE_NOT_NO_SHOW" });
 });
-const contradictoryEvidence = ["log_from", "log_to", "planned_inverse_visit", "planned_forward_visit", "planned_visit_pointer"] as const;
+const contradictoryEvidence = ["log_from", "log_to", "planned_inverse_visit", "planned_forward_visit", "planned_visit_pointer",
+  "linked_in_progress", "linked_completed", "session_status", "session_completed_at", "session_visit",
+  "item_done", "item_cancelled", "item_done_at", "item_visit"] as const;
 async function addAttendanceEvidence(f: Awaited<ReturnType<typeof fixture>>, evidence: typeof contradictoryEvidence[number]) {
   await q("UPDATE appointments SET arrived_at=NULL,started_at=NULL WHERE id=$1", [f.input.appointmentId]);
   if (evidence === "log_from" || evidence === "log_to") {
@@ -124,6 +126,28 @@ async function addAttendanceEvidence(f: Awaited<ReturnType<typeof fixture>>, evi
     VALUES ($1,1,'Synthetic source-linked session','scheduled',$2) RETURNING id`,
   [f.patientId, evidence === "planned_forward_visit" ? null : f.input.appointmentId]);
   if (evidence === "planned_forward_visit") await q("UPDATE appointments SET planned_visit_id=$2 WHERE id=$1", [f.input.appointmentId, planned.id]);
+  // Each fixture isolates one predicate branch: no appointment stamps/logs,
+  // no planned visit pointer and no directly linked visit hide the witness.
+  if (evidence === "linked_in_progress" || evidence === "linked_completed") {
+    await q("UPDATE planned_visits SET status=$2 WHERE id=$1", [planned.id, evidence === "linked_in_progress" ? "in_progress" : "completed"]);
+    return;
+  }
+  if (evidence.startsWith("session_") || evidence.startsWith("item_")) {
+    const [plan] = await q("INSERT INTO treatment_plans(patient_id,title,total_minor,status) VALUES ($1,'Synthetic witness plan',0,'active') RETURNING id", [f.patientId]);
+    await q("UPDATE planned_visits SET plan_id=$2 WHERE id=$1", [planned.id, plan.id]);
+    const [item] = await q("INSERT INTO plan_items(plan_id,service_name,unit_price_minor) VALUES ($1,'Synthetic witness item',0) RETURNING id", [plan.id]);
+    const [session] = await q("INSERT INTO treatment_sessions(plan_item_id,sequence,planned_visit_id) VALUES ($1,1,$2) RETURNING id", [item.id, planned.id]);
+    if (evidence === "session_status") await q("UPDATE treatment_sessions SET status='done' WHERE id=$1", [session.id]);
+    if (evidence === "session_completed_at") await q("UPDATE treatment_sessions SET completed_at=NOW() WHERE id=$1", [session.id]);
+    if (evidence === "item_done" || evidence === "item_cancelled") await q("UPDATE plan_items SET status=$2 WHERE id=$1", [item.id, evidence === "item_done" ? "done" : "cancelled"]);
+    if (evidence === "item_done_at") await q("UPDATE plan_items SET done_at=NOW() WHERE id=$1", [item.id]);
+    if (evidence === "session_visit" || evidence === "item_visit") {
+      const [witness] = await q("INSERT INTO visits(patient_id,patient_name,status) VALUES ($1,'Synthetic clinical witness','waiting') RETURNING id", [f.patientId]);
+      if (evidence === "session_visit") await q("UPDATE treatment_sessions SET visit_id=$2 WHERE id=$1", [session.id, witness.id]);
+      else await q("UPDATE plan_items SET visit_id=$2 WHERE id=$1", [item.id, witness.id]);
+    }
+    return;
+  }
   const [visit] = await q(`INSERT INTO visits(patient_id,patient_name,status,planned_visit_id)
     VALUES ($1,'Synthetic attendance','waiting',$2) RETURNING id`, [f.patientId, evidence === "planned_visit_pointer" ? null : planned.id]);
   if (evidence === "planned_visit_pointer") await q("UPDATE planned_visits SET visit_id=$2 WHERE id=$1", [planned.id, visit.id]);
