@@ -26,15 +26,20 @@ export function invoiceCurrencyReadiness(input: {
     if (currency === input.sourceCurrency) return {
       currency, status: "current", selectable: true, message: "عملة الفاتورة الحالية؛ لا تغيير للعملة.",
     };
-    if (input.sourceCurrency !== "YER" || currency !== "SAR") return {
-      currency, status: "unsupported", selectable: false, message: "هذا الاتجاه غير مدعوم في النسخة الحالية؛ لا يمكن تأكيده.",
-    };
     const proof = input.correction;
-    if (!proof || proof.targetCurrency !== "SAR") return {
+    if (!proof || !Array.isArray(proof.targets)) return {
       currency, status: "unverified", selectable: false, message: "لم يكتمل إثبات إتاحة تصحيح العملة؛ أعد قراءة الفاتورة.",
     };
+    // Contradictory or refused proof fails closed before any target is considered.
+    if (proof.available && !proof.reasonCodes?.length && proof.targets.includes(currency)) return {
+      currency, status: "eligible", selectable: true,
+      message: input.sourceCurrency === "YER" && currency === "SAR"
+        ? "متاح وفق المعاينة الحالية، مع إعادة التحقق عند التأكيد."
+        : "متاح لأن الفاتورة بلا سندات؛ اكتب أسعار البنود بهذه العملة. لا تحويل بسعر صرف، ويُعاد التحقق عند التأكيد.",
+    };
     if (proof.available && !proof.reasonCodes?.length) return {
-      currency, status: "eligible", selectable: true, message: "متاح وفق المعاينة الحالية، مع إعادة التحقق عند التأكيد.",
+      currency, status: "unsupported", selectable: false,
+      message: "هذا الاتجاه متاح فقط لفاتورة لم يُسجَّل عليها أي سند؛ لا يمكن تأكيده لهذه الفاتورة.",
     };
     return {
       currency, status: "review", selectable: false,

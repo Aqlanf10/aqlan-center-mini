@@ -1,6 +1,6 @@
 import { isInvoiceCurrencyScopeReason, type InvoiceCurrencyScopeReason } from "./invoice-currency-scope";
 import type { Invoice, InvoiceItem } from "./db";
-import { isCurrency, parseAmount } from "./money";
+import { isCurrency, parseAmount, type Currency } from "./money";
 import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
 import { FinancialRecoveryError, type FinancialCommand } from "./financial-command-journal";
 
@@ -9,6 +9,16 @@ const integer = (value: unknown): value is number => typeof value === "number" &
 const minor = (value: unknown): value is number => integer(value) && value >= 0;
 const id = (value: unknown): value is number => integer(value) && value > 0;
 const nullableId = (value: unknown) => value === null || id(value);
+/** Targets are distinct from the invoice currency, unique, and each has its own option. */
+function validCurrencyCorrection(value:unknown,invoice:unknown):boolean{
+  if(!revisionRecord(value)||!revisionRecord(invoice)||typeof value.available!=="boolean"||!isCurrency(value.targetCurrency)
+    ||value.targetCurrency===invoice.baseCurrency||!minor(value.settledMinor)||!integer(value.accountDueMinor)||typeof value.message!=="string"
+    ||!Array.isArray(value.targets)||!Array.isArray(value.options))return false;
+  const targets:unknown[]=value.targets,options:unknown[]=value.options;
+  if(targets.length!==options.length||value.available!==(targets.length>0)||new Set(targets).size!==targets.length)return false;
+  return options.every((option,index)=>revisionRecord(option)&&isCurrency(option.currency)&&option.currency===targets[index]
+    &&option.currency!==invoice.baseCurrency&&minor(option.settledMinor)&&integer(option.accountDueMinor));
+}
 function sameTerms(left:unknown,right:unknown,remaining:number):boolean {
   const a=validateDebtRepaymentTerms(left,remaining),b=validateDebtRepaymentTerms(right,remaining);
   return a.ok&&b.ok&&JSON.stringify(a.value)===JSON.stringify(b.value);
@@ -28,7 +38,8 @@ export interface InvoiceRevisionView {
   invoice: Invoice; sourceHash: string; settledMinor: number; remainingMinor: number; accountDueMinor: number;
   repaymentVersion: number; repaymentTerms: DebtRepaymentTerms;
   work: { id:number; clinical_locked:boolean; category?:string|null; case_site?:string|null }[];
-  currencyCorrection?:{available:boolean;targetCurrency:"SAR";settledMinor:number;accountDueMinor:number;message:string;reasonCodes?:InvoiceCurrencyScopeReason[]};
+  currencyCorrection?:{available:boolean;targetCurrency:Currency;targets:Currency[];options:{currency:Currency;settledMinor:number;accountDueMinor:number}[];
+    settledMinor:number;accountDueMinor:number;message:string;reasonCodes?:InvoiceCurrencyScopeReason[]};
   identityAmendmentAvailable?:boolean;
   identityCatalog?:{services:{id:number;name:string;category:string|null}[];doctors:{id:number;name:string}[]};
 }
@@ -37,7 +48,7 @@ export function readInvoiceRevisionView(value: unknown, patientId: number, invoi
     || typeof value.sourceHash !== "string" || !/^[a-f0-9]{64}$/.test(value.sourceHash) || !integer(value.settledMinor)
     || !minor(value.remainingMinor) || !integer(value.accountDueMinor) || !minor(value.repaymentVersion)
     || !Array.isArray(value.work) || !value.work.every(row=>revisionRecord(row)&&id(row.id)&&typeof row.clinical_locked==="boolean")) return null;
-  if(value.currencyCorrection!==undefined&&(!revisionRecord(value.currencyCorrection)||typeof value.currencyCorrection.available!=="boolean"||value.currencyCorrection.targetCurrency!=="SAR"||!integer(value.currencyCorrection.settledMinor)||!integer(value.currencyCorrection.accountDueMinor)||typeof value.currencyCorrection.message!=="string"))return null;
+  if(value.currencyCorrection!==undefined&&!validCurrencyCorrection(value.currencyCorrection,value.invoice))return null;
   if(revisionRecord(value.currencyCorrection)&&value.currencyCorrection.reasonCodes!==undefined&&(!Array.isArray(value.currencyCorrection.reasonCodes)||!value.currencyCorrection.reasonCodes.every(isInvoiceCurrencyScopeReason)))return null;
   if(value.identityAmendmentAvailable!==undefined&&typeof value.identityAmendmentAvailable!=="boolean")return null;
   if(value.identityCatalog!==undefined&&(!revisionRecord(value.identityCatalog)||!Array.isArray(value.identityCatalog.services)||!Array.isArray(value.identityCatalog.doctors)
@@ -66,7 +77,7 @@ export function restoreInvoiceRevision(command:FinancialCommand,patientId:number
     || !Array.isArray(value.expected.lines) || !minor(value.expected.discountMinor) || !integer(value.expected.settledMinor) || !integer(value.expected.accountDueMinor)) throw new FinancialRecoveryError("invalid");
   const body:unknown=JSON.parse(value.body);
   const currency=value.expected.currency??value.expected.original.baseCurrency;
-  if(!isCurrency(currency)||currency!==value.expected.original.baseCurrency&&!(currency==="SAR"&&value.expected.original.baseCurrency==="YER"))throw new FinancialRecoveryError("invalid");
+  if(!isCurrency(currency))throw new FinancialRecoveryError("invalid");
   if(!revisionRecord(body)||(body.currency??value.expected.original.baseCurrency)!==currency||body.idempotencyKey!==command.key||!Array.isArray(body.lines)||body.lines.length!==value.expected.lines.length
     ||parseAmount(String(body.discount),currency)!==value.expected.discountMinor)throw new FinancialRecoveryError("invalid");
   const original=value.expected.original,bodyLines=body.lines;

@@ -50,7 +50,10 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
   },[invoiceId,patientId]);
   useEffect(()=>{if(!initialRecovery.current)void load();},[load]); // Restored original intent does not depend on a fresh mutable snapshot.
   const changingCurrency=!!view&&currency!==view.invoice.baseCurrency;
-  const settledMinor=changingCurrency?view?.currencyCorrection?.settledMinor??0:view?.settledMinor??0;
+  const currencyOption=changingCurrency?view?.currencyCorrection?.options.find(option=>option.currency===currency)??null:null;
+  // Only YER -> SAR reads the same numerals in SAR; any other direction needs amounts typed in the target currency.
+  const retypeAmounts=changingCurrency&&!(view?.invoice.baseCurrency==="YER"&&currency==="SAR");
+  const settledMinor=changingCurrency?currencyOption?.settledMinor??0:view?.settledMinor??0;
   const preview=useMemo(()=>{
     if(!view)return null;const lines=[];let total=0;
     for(const item of view.invoice.items){const draft=drafts[item.id];if(!draft?.keep)continue;
@@ -93,11 +96,11 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
     finally{pending.current=false;if(lifetime.current.active)setBusy(false);}
   };
   const submit=()=>{
-    if(!view||!preview||!checked?.ok||recovery||!allowed||pending.current||!currencyOptions.some(option=>option.currency===currency&&option.selectable)||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3)return;
+    if(!view||!preview||!checked?.ok||recovery||!allowed||pending.current||changingCurrency&&!currencyOption||!currencyOptions.some(option=>option.currency===currency&&option.selectable)||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3)return;
     const key=newIdempotencyKey();draftRevision.current=financialRecovery.revision;
     const body={...(changingCurrency?{currency}:{}),idempotencyKey:key,expectedSourceHash:view.sourceHash,reason:reason.trim(),lines:preview.lines.map(item=>({itemId:item.id,quantity:item.quantity,unitPrice:toInputAmount(item.unitPriceMinor,currency),serviceId:item.serviceId,doctorId:item.doctorId,toothCode:item.toothCode??null,surfaces:item.surfaces??null})),
       discount:toInputAmount(preview.discountMinor,currency),discountReason:discountReason.trim()||null,repaymentTerms:checked.value,expectedRemainingMinor:preview.remaining};
-    void send({key,actor:session.username,patientId,invoiceId,body:JSON.stringify(body),expected:{...(changingCurrency?{currency}:{}),original:view.invoice,lines:preview.lines,discountMinor:preview.discountMinor,settledMinor,accountDueMinor:changingCurrency?view.currencyCorrection!.accountDueMinor:view.accountDueMinor,terms:checked.value},outcome:"pending",message:""});
+    void send({key,actor:session.username,patientId,invoiceId,body:JSON.stringify(body),expected:{...(changingCurrency?{currency}:{}),original:view.invoice,lines:preview.lines,discountMinor:preview.discountMinor,settledMinor,accountDueMinor:changingCurrency?currencyOption!.accountDueMinor:view.accountDueMinor,terms:checked.value},outcome:"pending",message:""});
   };
   const clearRefused=async()=>{if(!recovery||recovery.outcome!=="refused"||busy)return;try{await financialRecovery.acknowledge(durableInvoiceRevision(recovery));if(lifetime.current.active){onRecoveryChange(null);setReason("");await load();}}catch{setError("تعذّر إغلاق الطلب المرفوض بأمان؛ أعد المحاولة.");}};
   const changeCurrency=(next:Currency)=>{
@@ -112,6 +115,10 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       return;
     }
     setError(null);setCurrency(next);setTerms({mode:"full",rows:[]});
+    const retype=next!==view.invoice.baseCurrency&&!(view.invoice.baseCurrency==="YER"&&next==="SAR");
+    setDrafts(current=>Object.fromEntries(view.invoice.items.map(item=>[item.id,{...current[item.id],
+      price:retype?"":toInputAmount(item.unitPriceMinor,view.invoice.baseCurrency)}])));
+    setDiscount(retype?"0":toInputAmount(view.invoice.discountMinor,view.invoice.baseCurrency));
   };
   const locked=busy||!!recovery||!allowed;
   const invoice=view?.invoice??recovery?.expected.original;
@@ -127,7 +134,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       <ul className="space-y-2">{currencyOptions.map(option=><li key={option.currency} data-currency={option.currency} data-readiness={option.status} className="min-w-0 break-words leading-7">
         <strong>{CURRENCY_LABEL[option.currency]} ({option.currency}): </strong>{option.message}
       </li>)}</ul>
-      <p>تغيير العملة ليس تحويلًا بسعر صرف: يبقى الرقم المكتوب ويُقرأ بالعملة المختارة. راجع السعر والخصم والأقساط قبل التأكيد؛ لا تُنشأ حركة نقدية جديدة.</p>
+      <p>تغيير العملة ليس تحويلًا بسعر صرف. من اليمني إلى السعودي يبقى الرقم المكتوب ويُقرأ بالعملة المختارة؛ في أي اتجاه آخر تُفرَّغ الأسعار لتكتبها بالعملة الجديدة. راجع السعر والخصم والأقساط قبل التأكيد؛ لا تُنشأ حركة نقدية جديدة.</p>
     </div>
     {!view&&!recovery?<button className={button} type="button" onClick={()=>void load()}>إعادة قراءة الفاتورة</button>:null}
     {recovery?<div role="status" data-testid="invoice-revision-recovery" className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
@@ -141,6 +148,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       </select></label>
       {view.currencyCorrection?<p className="text-sm leading-7">{view.currencyCorrection.message}</p>:null}
       {changingCurrency?<p role="status" className="text-sm leading-7">تسوية مثبتة {formatMoney(settledMinor,currency)}. لا تُنشأ حركة نقدية، وتبقى أرقام السندات ومبالغها وأسعار صرفها الأصلية محفوظة.</p>:null}
+      {retypeAmounts?<p role="status" data-testid="invoice-currency-retype" className="text-sm leading-7 text-amber-900">اكتب سعر كل بند والخصم بـ{CURRENCY_LABEL[currency]}. لم يُحوَّل أي مبلغ تلقائيًا، ولن يُحفظ التصحيح قبل كتابتها.</p>:null}
       {view.invoice.items.map((item,index)=>{const draft=drafts[item.id];const work=view.work.find(row=>row.id===item.planItemId),clinical=work?.clinical_locked;
         const priceMinor=draft?parseAmount(draft.price,currency):null;
         const unchangedServicePriceEdit=!!draft?.keep&&!changingCurrency&&priceMinor!==null&&priceMinor!==item.unitPriceMinor&&draft.serviceId===String(item.serviceId??"");

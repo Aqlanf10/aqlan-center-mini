@@ -4,16 +4,28 @@ import { invoiceCurrencyReadiness } from "../lib/invoice-currency-readiness";
 import { INVOICE_CURRENCY_SCOPE_MESSAGES } from "../lib/invoice-currency-scope";
 import type { InvoiceRevisionView } from "../lib/invoice-revision-view";
 
+// A YER invoice whose SAR receipts the server proved: only YER -> SAR is admitted.
 const eligible: NonNullable<InvoiceRevisionView["currencyCorrection"]> = {
-  available: true, targetCurrency: "SAR", settledMinor: 0, accountDueMinor: 0, message: "Synthetic valid preview",
+  available: true, targetCurrency: "SAR", targets: ["SAR"], options: [{ currency: "SAR", settledMinor: 0, accountDueMinor: 0 }],
+  settledMinor: 0, accountDueMinor: 0, message: "Synthetic valid preview",
 };
-describe("existing currency correction readiness, not six-direction authority", () => {
-  it.each(CURRENCIES)("shows every target for %s but admits only the existing direction", sourceCurrency => {
-    const rows = invoiceCurrencyReadiness({ sourceCurrency, preview: "ready", correction: eligible });
+const unpaid = (source: (typeof CURRENCIES)[number]): NonNullable<InvoiceRevisionView["currencyCorrection"]> => {
+  const targets = CURRENCIES.filter(currency => currency !== source);
+  return { available: true, targetCurrency: targets[0], targets, options: targets.map(currency => ({ currency, settledMinor: 0, accountDueMinor: 0 })),
+    settledMinor: 0, accountDueMinor: 0, message: "Synthetic unpaid preview" };
+};
+describe("currency correction readiness follows the server-proven targets only", () => {
+  it("a receipt-backed YER invoice admits only SAR; the other direction is explained, not offered", () => {
+    const rows = invoiceCurrencyReadiness({ sourceCurrency: "YER", preview: "ready", correction: eligible });
+    expect(rows.map(row => [row.currency, row.status, row.selectable])).toEqual([["YER", "current", true], ["SAR", "eligible", true], ["USD", "unsupported", false]]);
+  });
+  it.each(CURRENCIES)("an unpaid %s invoice admits both other currencies, each with an explicit-amount explanation", sourceCurrency => {
+    const rows = invoiceCurrencyReadiness({ sourceCurrency, preview: "ready", correction: unpaid(sourceCurrency) });
     expect(rows.map(row => row.currency)).toEqual(CURRENCIES);
     for (const row of rows) {
-      expect(row.selectable).toBe(row.currency === sourceCurrency || sourceCurrency === "YER" && row.currency === "SAR");
-      expect(row.status).toBe(row.currency === sourceCurrency ? "current" : sourceCurrency === "YER" && row.currency === "SAR" ? "eligible" : "unsupported");
+      expect(row.selectable).toBe(true);
+      expect(row.status).toBe(row.currency === sourceCurrency ? "current" : "eligible");
+      if (row.currency !== sourceCurrency && !(sourceCurrency === "YER" && row.currency === "SAR")) expect(row.message).toContain("لا تحويل بسعر صرف");
     }
   });
   it.each(["loading", "unavailable", "recovery"] as const)("never derives eligibility during %s, even from stale successful proof", preview => {
