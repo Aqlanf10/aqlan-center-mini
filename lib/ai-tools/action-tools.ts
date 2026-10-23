@@ -6,7 +6,7 @@
  * 1. تسجيل وإضافة مريض جديد (create_patient)
  * 2. حجز موعد مباشر لمريض (book_appointment)
  * 3. تعديل حالة موعد / وصول / إلغاء (update_appointment_status)
- * 4. تسجيل سند قبض ودفعات مالية (record_patient_payment)
+ * 4. تسجيل سند قبض ودفعات مالية (record_patient_payment) — موقوف تنفيذه (احتواء سلامة مالية، contained-tools.ts)
  * 5. تسجيل وتحديث التنبيه الطبي والحساسية (add_patient_medical_alert)
  * 6. إنشاء أمر وحالة معمل جديدة (create_lab_order)
  * 7. تسجيل حركات المخزون والإدخال والصرف (record_inventory_movement)
@@ -24,7 +24,6 @@ import {
   getAppointment,
   transitionAppointment,
   deleteAppointment,
-  recordPayment,
   getSettings,
   createLabOrder,
   listLabNames,
@@ -36,12 +35,13 @@ import {
 } from "../db";
 import { bookAppointment } from "../book-appointment";
 import { findWaitingCandidatesForSlot } from "../waiting-list-match";
-import { parseAmount, formatMoney, type Currency, CLINIC_BASE_CURRENCY } from "../money";
+import { type Currency, CLINIC_BASE_CURRENCY } from "../money";
 import { rateFromSettings } from "../settings";
 import { addDays, clinicDateString } from "../schedule";
 import { toWhatsAppNumber } from "../reminders";
-import { canHandleMoney, canManageInventory, isAdmin } from "../roles";
+import { canManageInventory, isAdmin } from "../roles";
 import type { AiToolContext, ToolExecutionResult, KpiCard, ActionButton } from "./types";
+import { containedToolRefusal } from "./contained-tools";
 
 
 /** مجال بحث المرضى حسب دور المستخدم: الطبيب بلا منحٍ عامة يبحث في مرضاه فقط. */
@@ -496,7 +496,7 @@ export async function updateAppointmentStatusAction(
 // ─── 4. تسجيل دفعة مالية وسند قبض ─────────────────────────────────────────────
 
 export async function recordPatientPaymentAction(
-  params: {
+  _params: {
     patientId?: number;
     patientName?: string;
     amount: number | string;
@@ -505,130 +505,12 @@ export async function recordPatientPaymentAction(
     invoiceId?: number;
     note?: string;
   },
-  context: AiToolContext,
+  _context: AiToolContext,
 ): Promise<ToolExecutionResult> {
-  const role = context.role || context.userRole || "reception";
-  if (!canHandleMoney(role)) {
-    return {
-      success: false,
-      textSummary: "🔒 **تنبيه أمني:** تسجيل المقبوضات وسندات الصندوق مقتصر حصراً على موظف الاستقبال أو المدير المالي.",
-      warnings: ["صلاحية مالية مفقودة"],
-    };
-  }
-
-  const currency: Currency = params.currency || "YER";
-  const amountMinor = parseAmount(String(params.amount || ""), currency);
-  if (!amountMinor || amountMinor <= 0) {
-    return {
-      success: false,
-      textSummary: "❌ يرجى كتابة مبلغ صالح أكبر من الصفر لتسجيل سند القبض.",
-    };
-  }
-
-  if (!context.isDbConnected) {
-    return {
-      success: true,
-      textSummary: `💵 **[وضع تجريبي] تم تسجيل سند القبض بنجاح:**\n• **المريض:** ${params.patientName || "مريض تجريبي"}\n• **المبلغ:** ${formatMoney(amountMinor, currency)}\n• **طريقة الدفع:** ${params.method === "transfer" ? "تحويل بنكي" : "نقداً بالصندوق"}\n• **رقم السند:** R-DEMO-001`,
-      cards: [
-        { title: "سند القبض", value: formatMoney(amountMinor, currency), tone: "good" },
-        { title: "طريقة القبض", value: params.method === "transfer" ? "تحويل" : "نقد", tone: "info" },
-      ],
-    };
-  }
-
-  try {
-    let patientId = params.patientId;
-    let patientName = params.patientName || "";
-
-    if (!patientId && params.patientName) {
-      const matches = await scopedSearchPatients(params.patientName, 2, context);
-      if (matches.length === 1) {
-        patientId = matches[0].id;
-        patientName = matches[0].fullName;
-      } else if (matches.length > 1) {
-        return {
-          success: false,
-          textSummary: `🔍 يوجد أكثر من مريض يطابق «${params.patientName}». يرجى كتابة رقم ملف المريض لتسجيل السند المالي بدقة.`,
-        };
-      } else {
-        return {
-          success: false,
-          textSummary: `❌ لم يتم العثور على مريض مسجل باسم «${params.patientName}».`,
-        };
-      }
-    } else if (patientId) {
-      const p = await getPatient(patientId);
-      if (p) patientName = p.fullName;
-    }
-
-    if (!patientId) {
-      return { success: false, textSummary: "❌ يرجى تحديد المريض لتسجيل القبض المالي." };
-    }
-
-    const settings = await getSettings();
-    // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
-    const base = CLINIC_BASE_CURRENCY;
-
-    const exchangeRate = rateFromSettings(settings, currency, base);
-    if (exchangeRate === null) {
-      return { success: false, textSummary: "سعر صرف العملة غير مضبوط في إعدادات النظام." };
-    }
-
-    const { payment, reason } = await recordPayment({
-      patientId,
-      invoiceId: params.invoiceId || null,
-      kind: "payment",
-      amountMinor,
-      currency,
-      baseCurrency: base,
-      exchangeRate,
-      method: params.method || "cash",
-      note: params.note || "سند قبض مسجل عبر المساعد الذكي",
-      createdBy: context.username || "admin",
-      actorRole: role,
-    });
-
-    if (reason === "no_shift") {
-      return {
-        success: false,
-        textSummary: "⚠️ **تنبيه وردية الصندوق:** لا توجد وردية صندوق مفتوحة حالياً. يرجى فتح الوردية من شاشة الصندوق أولاً لتسجيل أي حركة مالية موثقة.",
-        actions: [{ label: "فتح شاشة الصندوق والورديات", href: "/finance/shifts", actionType: "navigate" }],
-      };
-    }
-
-    if (!payment) {
-      return { success: false, textSummary: "❌ تعذّر حفظ سند القبض في قاعدة البيانات." };
-    }
-
-    // recordPayment owns the atomic receipt audit; do not emit a duplicate here.
-
-    const cards: KpiCard[] = [
-      { title: "سند القبض", value: payment.receiptNumber, tone: "good" },
-      { title: "المبلغ المقبوض", value: formatMoney(payment.amountMinor, payment.currency), tone: "good" },
-      { title: "المريض", value: patientName, tone: "info" },
-    ];
-
-    const actions: ActionButton[] = [
-      { label: "عرض كشف حساب المريض", href: `/patients/${patientId}?tab=ledger`, actionType: "navigate" },
-      { label: "طباعة سند القبض", href: `/receipts/${payment.id}`, actionType: "navigate" },
-    ];
-
-    const textSummary = `✅ **تم بنجاح تسجيل سند القبض المالي وتوريده للصندوق:**\n• **رقم السند:** \`${payment.receiptNumber}\`\n• **المريض:** **${patientName}**\n• **المبلغ:** 💵 **${formatMoney(payment.amountMinor, payment.currency)}** (${payment.method === "transfer" ? "تحويل بنكي" : "نقداً بالصندوق"})\n• **التاريخ:** ${payment.createdAt}\n\nتم تحديث رصيد المريض وإدراجه في كشف الوردية الجارية.`;
-
-    return {
-      success: true,
-      textSummary,
-      cards,
-      actions,
-      patientIdAccessed: patientId,
-      data: payment,
-    };
-  } catch (err) {
-    return {
-      success: false,
-      textSummary: `❌ تعذّر تسجيل الدفعة: ${(err as Error).message}`,
-    };
-  }
+  // (CORE-SAFETY) Backstop of the containment in the central executor: whatever reaches this
+  // action (direct call, legacy token, demo mode), no receipt is written and no demo success is
+  // claimed. Collection happens only on the guarded screen (retry key + similar-receipt review).
+  return containedToolRefusal();
 }
 
 // ─── 5. إضافة تنبيه طبي أو حساسية لمريض ────────────────────────────────────────
