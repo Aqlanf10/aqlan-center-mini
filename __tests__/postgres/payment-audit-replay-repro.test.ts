@@ -200,15 +200,18 @@ it('caller-owned correction keeps only its one purpose audit, not generic receip
     expect(await auditRows(origin.id, 'payment.correct')).toHaveLength(1);
     expect(await auditRows(origin.id)).toHaveLength(1);
 });
-it('the existing alternate adapter emits exactly one canonical receipt event', async () => {
+it('the contained assistant adapter (no retry key, no similar review) writes no receipt and no receipt event', async () => {
+    // CORE-SAFETY containment (lib/ai-tools/contained-tools.ts): this alternate adapter used to emit one
+    // canonical receipt event; it is now withdrawn and collection happens only on the guarded screen.
     const f = await fixture();
     const { recordPatientPaymentAction } = await import('../../lib/ai-tools/action-tools');
+    const audits = async () => Number((await getPool().query('SELECT count(*) AS n FROM audit_log')).rows[0].n);
+    const auditsBefore = await audits();
     const result = await recordPatientPaymentAction({ patientId, invoiceId: f.invoiceId, amount: '100', currency: 'YER' },
         { username: 'ci', role: 'admin', isDbConnected: true });
-    expect(result.success).toBe(true);
-    const { rows: [receipt] } = await getPool().query('SELECT id FROM payments WHERE invoice_id=$1', [f.invoiceId]);
-    expect(await auditRows(receipt.id)).toHaveLength(1);
-    expect((await auditRows(receipt.id))[0]).toMatchObject({ actor: 'ci', actor_role: 'admin' });
+    expect(result.success).toBe(false);
+    expect((await getPool().query('SELECT id FROM payments WHERE invoice_id=$1', [f.invoiceId])).rows).toEqual([]);
+    expect(await audits()).toBe(auditsBefore);
 });
 it('identical successful payment request should replay after canonical invoice correction', async () => { const f = await fixture(); const first = await reviewedPOST(request(f)); expect(first.status).toBe(201); const receipt = await first.json(); const correction = await correctInvoice({ invoiceId: f.invoiceId, reason: 'Synthetic invoice correction', actor: 'ci', actorRole: 'admin', lines: [{ itemId: f.itemId, quantity: 1, unitPriceMinor: 9000 }] }); expect(correction.ok).toBe(true); const retry = await reviewedPOST(request(f)); const body = await retry.json(); console.log('REPLAY_AFTER_CORRECTION', JSON.stringify({ firstStatus: first.status, retryStatus: retry.status, body, originalReceiptId: receipt.id })); expect(retry.status).toBe(200); expect(body.id).toBe(receipt.id); });
 it('cancelled invoice retry preserves actor, patient, payload and current authorization gates', async () => {
