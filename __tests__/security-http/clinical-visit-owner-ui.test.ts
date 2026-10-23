@@ -3,6 +3,7 @@ import { chromium, type Browser, type Dialog, type Page, type Route } from "play
 import { mkdir } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
 import { emptyPatientAppointmentsFixtureRead, isPatientFileFixtureRead } from "../helpers/patient-file-fixture-route";
+import { emptyFollowupsFixtureRead } from "../helpers/followups-fixture-route";
 
 // Remote CI acceptance only. The real built patient/Today composition is used;
 // no fixture component, React hook replacement, Production URL or real patient.
@@ -144,6 +145,7 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean; holdR
       return;
     }
     const appointmentsPage = emptyPatientAppointmentsFixtureRead(url, patientId);
+    const followups = emptyFollowupsFixtureRead(url, method, baseUrl, patientId);
     if (clinicalOwner !== undefined) {
       const read = { route, visitId: clinicalOwner };
       reads.push(read);
@@ -153,6 +155,7 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean; holdR
       else await json(route, snapshots.get(clinicalOwner));
     } else if (isPatientFileFixtureRead(url, patientId)) await json(route, { patient, visits: [], appointments: [] });
     else if (appointmentsPage) await json(route, appointmentsPage);
+    else if (followups) await json(route, followups);
     else if (path === `${patientPath}/workflow`) { workflowReads += 1; await json(route, workflow(activeVisit)); }
     else if (path === "/api/visits/readiness") await json(route, { visit: {
       visitId: activeVisit, status: "in_chair", chair: 1, signedAt: null, cleared: true,
