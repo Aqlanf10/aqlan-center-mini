@@ -9,6 +9,20 @@ import { PLANNED_REBOOK_GENERATION_SQL } from "./planned-visit-rebooking-contrac
 import { parseFollowupCommand, followupFingerprintInput } from "./appointment-followup-contract";
 import { followupEligibilitySql } from "./appointment-followup-eligibility";
 
+/** Shared with isolated EXPLAIN acceptance; limits and generation remain bound parameters. */
+export const FOLLOWUP_QUEUE_SQL = `SELECT f.id,f.revision,f.source_appointment_id,f.source_created_at,f.generation,
+      f.assignee_user_id,f.due_at,f.outcome,f.next_step,f.due_at < clock_timestamp() AS overdue,
+      p.id AS patient_id,p.full_name,to_char(f.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_due,${followupEligibilitySql("$1")} AS eligible
+      FROM appointment_followups f
+      LEFT JOIN appointment_followup_links l ON l.followup_id=f.id
+      LEFT JOIN appointments a ON a.id=l.appointment_id AND a.id=f.source_appointment_id
+        AND EXTRACT(EPOCH FROM a.created_at)::text=f.source_created_at AND a.patient_id=l.patient_id
+      LEFT JOIN patients p ON p.id=a.patient_id
+      WHERE f.generation=$6 AND f.status='open'
+      AND ($2::int IS NULL OR p.id=$2)
+      AND ($3::timestamptz IS NULL OR (f.due_at,f.id)>($3::timestamptz,$4::int))
+      ORDER BY f.due_at,f.id LIMIT $5`;
+
 export class FollowupRejected extends Error {
   constructor(readonly status: 400 | 401 | 403 | 404 | 409, readonly code: string) { super(code); }
 }
@@ -85,18 +99,7 @@ export async function readAppointmentFollowupQueue(admitted: SessionPayload, opt
       id: number; revision: number; source_appointment_id: number; source_created_at: string; generation: string;
       assignee_user_id: number; due_at: Date; outcome: string; next_step: string; overdue: boolean;
       patient_id: number | null; full_name: string | null; eligible: boolean; cursor_due: string;
-    }>(`SELECT f.id,f.revision,f.source_appointment_id,f.source_created_at,f.generation,
-      f.assignee_user_id,f.due_at,f.outcome,f.next_step,f.due_at < clock_timestamp() AS overdue,
-      p.id AS patient_id,p.full_name,to_char(f.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_due,${followupEligibilitySql("$1")} AS eligible
-      FROM appointment_followups f
-      LEFT JOIN appointment_followup_links l ON l.followup_id=f.id
-      LEFT JOIN appointments a ON a.id=l.appointment_id AND a.id=f.source_appointment_id
-        AND EXTRACT(EPOCH FROM a.created_at)::text=f.source_created_at AND a.patient_id=l.patient_id
-      LEFT JOIN patients p ON p.id=a.patient_id
-      WHERE f.generation=${PLANNED_REBOOK_GENERATION_SQL} AND f.status='open'
-      AND ($2::int IS NULL OR p.id=$2)
-      AND ($3::timestamptz IS NULL OR (f.due_at,f.id)>($3::timestamptz,$4::int))
-      ORDER BY f.due_at,f.id LIMIT $5`, [CLINIC_TIME_ZONE, options.patientId, options.cursor?.due ?? null, options.cursor?.id ?? null, options.limit + 1]);
+    }>(FOLLOWUP_QUEUE_SQL, [CLINIC_TIME_ZONE, options.patientId, options.cursor?.due ?? null, options.cursor?.id ?? null, options.limit + 1, generation.value]);
     if (session.expiresAt < Date.now()) reject(401, "FOLLOWUP_SESSION_CHANGED");
     const selected = rows.slice(0, options.limit);
     const last = selected.at(-1);

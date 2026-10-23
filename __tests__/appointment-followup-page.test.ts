@@ -16,3 +16,9 @@ it('roundtrips exact microseconds and binds patient scope', () => {
 it('numbered migration and runtime DDL are byte identical', () => {
   expect(readFileSync('migrations/0070_appointment_followups.sql','utf8')).toBe(APPOINTMENT_FOLLOWUP_SQL);
 });
+it('0071 has byte-identical runtime SQL, preserving 0070 as a separate predecessor', async () => {
+  const { APPOINTMENT_FOLLOWUP_QUERY_SQL } = await import('../lib/appointment-followup-query-schema');
+  expect(readFileSync('migrations/0071_appointment_followup_query_indexes.sql','utf8')).toBe(APPOINTMENT_FOLLOWUP_QUERY_SQL);
+  expect(APPOINTMENT_FOLLOWUP_QUERY_SQL).toContain('DROP INDEX appointment_followups_queue_idx');
+  expect(APPOINTMENT_FOLLOWUP_QUERY_SQL).not.toMatch(/\b(?:UPDATE|DELETE|INSERT|TRUNCATE)\b/);
+});

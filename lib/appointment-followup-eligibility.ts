@@ -2,6 +2,8 @@
  * Only source-linked planned rows are inspected, never sibling visits in a plan.
  * A moved planned pointer is ambiguous, not proof of original attendance.
  * ended_at alone is not attendance: no_show legitimately stamps it.
+ * Scalar LIMIT 1 probes keep direct attendance checks parameterized per source;
+ * a hashed EXISTS alternative would scan the whole clinic before a small page.
  * Only internal parameter positions are accepted; the clinic zone stays bound. */
 export function followupEligibilitySql(zoneParameter: "$1" | "$2" | "$5"): string {
   return `COALESCE((a.id IS NOT NULL AND a.status='no_show'
@@ -9,13 +11,14 @@ export function followupEligibilitySql(zoneParameter: "$1" | "$2" | "$5"): strin
     AND a.scheduled_date + a.scheduled_time <= clock_timestamp() AT TIME ZONE ${zoneParameter}
     AND NOT EXISTS (SELECT 1 FROM planned_visits moved WHERE moved.id=a.planned_visit_id
       AND moved.appointment_id IS NOT NULL AND moved.appointment_id<>a.id)
-    AND NOT EXISTS (SELECT 1 FROM appointment_status_log attendance WHERE attendance.appointment_id=a.id
+    AND (SELECT 1 FROM appointment_status_log attendance WHERE attendance.appointment_id=a.id
       AND (attendance.from_status IN ('arrived','in_progress','done')
-        OR attendance.to_status IN ('arrived','in_progress','done')))
-    AND NOT EXISTS (SELECT 1 FROM visits attendance WHERE attendance.appointment_id=a.id
-      OR EXISTS (SELECT 1 FROM planned_visits linked
-        WHERE (linked.appointment_id=a.id OR (linked.id=a.planned_visit_id AND linked.appointment_id IS NULL))
-          AND (attendance.planned_visit_id=linked.id OR attendance.id=linked.visit_id)))
+        OR attendance.to_status IN ('arrived','in_progress','done')) LIMIT 1) IS NULL
+    AND (SELECT 1 FROM visits attendance WHERE attendance.appointment_id=a.id LIMIT 1) IS NULL
+    AND NOT EXISTS (SELECT 1 FROM planned_visits linked
+      WHERE (linked.appointment_id=a.id OR (linked.id=a.planned_visit_id AND linked.appointment_id IS NULL))
+        AND EXISTS (SELECT 1 FROM visits attendance
+          WHERE attendance.planned_visit_id=linked.id OR attendance.id=linked.visit_id))
     AND NOT EXISTS (SELECT 1 FROM planned_visits linked
       WHERE (linked.appointment_id=a.id OR (linked.id=a.planned_visit_id AND linked.appointment_id IS NULL))
         AND (linked.visit_id IS NOT NULL OR linked.status IN ('in_progress','completed')

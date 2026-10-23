@@ -7,7 +7,7 @@
     "tables": 134,
     "columns": 1696,
     "constraints": 1960,
-    "indexes": 416,
+    "indexes": 419,
     "triggers": 88
   },
   "tables": {
@@ -1124,18 +1124,19 @@
         }
       ],
       "indexes": {
+        "appointment_followups_generation_queue_idx": {
+          "columns": [
+            "generation",
+            "due_at",
+            "id"
+          ],
+          "unique": false
+        },
         "appointment_followups_pkey": {
           "columns": [
             "id"
           ],
           "unique": true
-        },
-        "appointment_followups_queue_idx": {
-          "columns": [
-            "due_at",
-            "id"
-          ],
-          "unique": false
         },
         "appointment_followups_source_appointment_id_source_created__key": {
           "columns": [
@@ -13655,6 +13656,12 @@
         }
       ],
       "indexes": {
+        "planned_visits_followup_appointment_idx": {
+          "columns": [
+            "appointment_id"
+          ],
+          "unique": false
+        },
         "planned_visits_patient_idx": {
           "columns": [
             "patient_id",
@@ -14952,6 +14959,18 @@
         "visits_doctor_idx": {
           "columns": [
             "doctor_id"
+          ],
+          "unique": false
+        },
+        "visits_followup_appointment_idx": {
+          "columns": [
+            "appointment_id"
+          ],
+          "unique": false
+        },
+        "visits_followup_planned_idx": {
+          "columns": [
+            "planned_visit_id"
           ],
           "unique": false
         },

@@ -1,0 +1,80 @@
+
+> aqlan-center@0.1.0 ci:audit
+> node --import tsx scripts/ci-audit.mjs
+
+----- RAW npm audit (attempt 1; exit 0) -----
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {},
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "dependencies": {
+      "prod": 62,
+      "dev": 305,
+      "optional": 91,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 404
+    }
+  }
+}
+
+[محاولة 1/3] لم يكتمل التدقيق أو كان التقرير غير صالح: BRACES_EXCEPTION_REJECTED: known advisory disappeared; remove/review the exception
+----- RAW npm audit (attempt 2; exit 0) -----
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {},
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "dependencies": {
+      "prod": 62,
+      "dev": 305,
+      "optional": 91,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 404
+    }
+  }
+}
+
+[محاولة 2/3] لم يكتمل التدقيق أو كان التقرير غير صالح: BRACES_EXCEPTION_REJECTED: known advisory disappeared; remove/review the exception
+----- RAW npm audit (attempt 3; exit 0) -----
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {},
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "dependencies": {
+      "prod": 62,
+      "dev": 305,
+      "optional": 91,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 404
+    }
+  }
+}
+
+[محاولة 3/3] لم يكتمل التدقيق أو كان التقرير غير صالح: BRACES_EXCEPTION_REJECTED: known advisory disappeared; remove/review the exception
+بوابة التدقيق مرفوضة بعد 3 محاولات: BRACES_EXCEPTION_REJECTED: known advisory disappeared; remove/review the exception

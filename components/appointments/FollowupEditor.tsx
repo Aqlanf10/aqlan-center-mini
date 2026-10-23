@@ -74,7 +74,10 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
         const contextResponse = await fetch(`/api/appointments/${appointmentId}/followup?patientId=${patientId}`, { cache: "no-store" });
         const fresh = await contextResponse.json() as Editor & { message?: string };
         if (!active.current) return;
-        if (!contextResponse.ok) throw new Error(fresh.message ?? "تعذّر التحقق من سياق المتابعة.");
+        if (!contextResponse.ok) {
+          if (contextResponse.status === 401 || contextResponse.status === 403) { setAttempt(null); setData(null); }
+          throw new Error(fresh.message ?? "تعذّر التحقق من سياق المتابعة.");
+        }
         if (fresh.actorUserId !== data.actorUserId) {
           setAttempt(null); setData(null);
           setMessage("تغيّرت الجلسة. أعد تحميل الصفحة؛ بقي طلب المستخدم السابق محفوظاً دون إرسال أو حذف."); return;
@@ -118,7 +121,9 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
         const result = await response.json();
         if (!active.current) return; // Keep evidence after session/owner replacement.
         if (!response.ok) throw new Error((result.message ?? "تعذّر تأكيد الحفظ.") + " الطلب محفوظ؛ تحديث السياق لا يمحوه.");
-        if (!Number.isInteger(result.followupId) || result.revision !== command.expectedRevision + 1) throw new Error("نتيجة الحفظ غير مؤكدة. أعد الطلب نفسه.");
+        if (!Number.isInteger(result.followupId) || result.followupId <= 0 || result.followupId > 2147483647
+          || result.revision !== command.expectedRevision + 1 || typeof result.replayed !== "boolean"
+          || ![200, 201].includes(response.status) || (response.status === 200) !== result.replayed) throw new Error("نتيجة الحفظ غير مؤكدة. أعد الطلب نفسه.");
         if (!removeOwnedFollowupAttempt(localStorage, storageKey, raw!)) throw new Error("تأكد الحفظ، لكن توجد محاولة أخرى محفوظة؛ لم تُحذف. حدّث السياق.");
         setAttempt(null); notifyFollowupAttemptChanged(storageKey);
         setMessage("حُفظت المتابعة. لا يُعدّ هذا إثبات إرسال رسالة أو تسليمها."); setReload(value => value + 1);
