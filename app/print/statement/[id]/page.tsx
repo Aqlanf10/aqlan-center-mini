@@ -1,4 +1,4 @@
-import { StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
+import { StatementHistoricalDetails, StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
 import {
@@ -13,6 +13,7 @@ import { PrintableReportDocument } from "@/components/reports/PrintableReportDoc
 import { buildReport, parseFilters, ReportInputError } from "@/lib/reports";
 import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { historicalOpeningBuckets } from "@/lib/statement-historical-details";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +73,7 @@ export default async function StatementPage({ params, searchParams }: {
   // The existing no-query print remains the current, all-history ledger and plan agreement view.
   // Its ledger, plan currencies and agreement progress come from one read-only snapshot, so the
   // receipts, balances and agreement on one sheet always describe the same committed state.
-  const [patient, settings, { ledger, planCurrencies, plans }] = await Promise.all([
+  const [patient, settings, { ledger, planCurrencies, plans, historicalAgreements }] = await Promise.all([
     getPatient(id), getSettingsSafe(), patientStatementSnapshot(id, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
   ]);
   if (!patient) notFound();
@@ -81,6 +82,7 @@ export default async function StatementPage({ params, searchParams }: {
      فاتورةٌ بعملتها، ورصيدٌ لكل عملة — لا رقمٌ واحد يمزج الريال بالسعودي بالدولار. */
   const base = CLINIC_BASE_CURRENCY;
   const balances = ledgerBalancesByCurrency(id, ledger, planCurrencies);
+  const historicalBuckets = historicalOpeningBuckets(historicalAgreements, ledger.openings, ledger.payments);
   const activeCurrencies = CURRENCIES.filter((currency: Currency) => {
     const bucket: Balance = balances[currency];
     return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0
@@ -127,6 +129,8 @@ export default async function StatementPage({ params, searchParams }: {
             <span className="num">{formatMoney(opening.amountMinor, opening.currency)}</span>
           </div>
         ))}
+
+        <StatementHistoricalDetails buckets={historicalBuckets} />
 
         <StatementInvoiceDetails invoices={ledger.invoices} />
 

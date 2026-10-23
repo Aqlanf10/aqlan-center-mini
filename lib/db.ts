@@ -10859,6 +10859,7 @@ export { MINOR_UNITS };
 
 import type { ExpenseCategory, PartyKind } from "./expenses";
 import { partyStatementTotals, type PartyCurrencyTotals } from "./party-statement";
+import { readStatementHistoricalAgreements } from "./statement-historical-details";
 
 export interface Party {
   id: number;
@@ -19932,7 +19933,10 @@ export async function patientStatementSnapshot(patientId:number,today:string){
     const ledger=await patientLedgerInSnapshot(patientId,client);
     const planCurrencies=await patientPlanCurrencies(patientId,client);
     const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
-    return {ledger,planCurrencies,plans:await hydratePlans(rows,today,client)};
+    const plans=await hydratePlans(rows,today,client);
+    // Historical agreements are saved facts read on this same snapshot client (no separate transaction).
+    const historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
+    return {ledger,planCurrencies,plans,historicalAgreements};
   });
 }
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {

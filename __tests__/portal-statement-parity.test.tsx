@@ -21,7 +21,7 @@ vi.mock("@/lib/db", async (importOriginal) => ({ ...await importOriginal<typeof 
   patientPlanCurrencies: mocks.patientPlanCurrencies, listPatientPlans: mocks.listPatientPlans,
   // The portal reads the same three sources in one snapshot; here it composes the same mocks.
   patientStatementSnapshot: async (patientId: number, today: string) => ({ ledger: await mocks.patientLedger(patientId),
-    planCurrencies: await mocks.patientPlanCurrencies(patientId), plans: await mocks.listPatientPlans(patientId, today) }) }));
+    planCurrencies: await mocks.patientPlanCurrencies(patientId), plans: await mocks.listPatientPlans(patientId, today), historicalAgreements: [] }) }));
 vi.mock("@/components/PrintHeader", () => ({ PrintHeader: ({ title }: { title: string }) => createElement("h1", null, title), PrintFooter: () => null }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
 
