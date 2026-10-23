@@ -120,3 +120,14 @@ it('suppresses source-drift schedule progress after unrelated account credit',as
  const plan=await db.getPlan(f.planId,'2026-10-19');
  expect(plan).toMatchObject({debtSource:'invoice',progress:{remainingMinor:1000,overdueMinor:0},invoiceFinancial:{schedules:[{requiresReview:true,progress:null}]}});
 });
+
+it('keeps statement-batched positions identical for all populated financial source cases',async()=>{
+ const patients=await q('SELECT DISTINCT patient_id FROM treatment_plans ORDER BY patient_id');
+ expect(patients.length).toBeGreaterThan(10);
+ for(const {patient_id} of patients){
+  const standalone=await db.listPatientPlans(patient_id,'2026-10-19');
+  const snapshot=await db.patientStatementSnapshot(patient_id,'2026-10-19');
+  expect(snapshot.plans).toEqual(standalone);
+  expect(snapshot.planCurrencies).toEqual(await db.patientPlanCurrencies(patient_id));
+ }
+});

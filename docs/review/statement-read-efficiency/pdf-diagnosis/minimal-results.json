@@ -1,0 +1,47 @@
+[
+  {
+    "name": "naskh",
+    "font": "Noto Naskh Arabic",
+    "dom": "صافي المحصّل بعد الاستردادات وعكس السندات",
+    "domExact": true,
+    "extracted": " 1,300.00ر.س   صافي المحّص ل بعد الاستردادات وعكس السندات\n\f",
+    "matches": 0,
+    "unchangedPredicatePass": false
+  },
+  {
+    "name": "sans",
+    "font": "Noto Sans Arabic",
+    "dom": "صافي المحصّل بعد الاستردادات وعكس السندات",
+    "domExact": true,
+    "extracted": " 1,300.00ر.س   صافي المحّص ل بعد االستردادات وعكس السندات\n\f",
+    "matches": 0,
+    "unchangedPredicatePass": false
+  },
+  {
+    "name": "dejavu",
+    "font": "DejaVu Sans",
+    "dom": "صافي المحصّل بعد الاستردادات وعكس السندات",
+    "domExact": true,
+    "extracted": " 1,300.00ر.س   صافي المحّصل بعد االستردادات وعكس السندات\n\f",
+    "matches": 1,
+    "unchangedPredicatePass": true
+  },
+  {
+    "name": "dejavu-no-ligatures",
+    "font": "DejaVu Sans",
+    "dom": "صافي المحصّل بعد الاستردادات وعكس السندات",
+    "domExact": true,
+    "extracted": " 1,300.00ر.س   صافي المحّصل بعد الاستردادات وعكس السندات\n\f",
+    "matches": 1,
+    "unchangedPredicatePass": true
+  },
+  {
+    "name": "naskh-no-ligatures",
+    "font": "Noto Naskh Arabic",
+    "dom": "صافي المحصّل بعد الاستردادات وعكس السندات",
+    "domExact": true,
+    "extracted": " 1,300.00ر.س   صافي المحّص ل بعد الاستردادات وعكس السندات\n\f",
+    "matches": 0,
+    "unchangedPredicatePass": false
+  }
+]

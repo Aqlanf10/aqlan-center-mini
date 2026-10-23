@@ -19766,7 +19766,7 @@ const PLAN_SELECT = `
                      FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor
     FROM treatment_plans t JOIN patients p ON p.id = t.patient_id`;
 
-async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): Promise<TreatmentPlan[]> {
+async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient, batchInvoiceSources = false): Promise<TreatmentPlan[]> {
   if (rows.length === 0) return [];
   const { rows: installmentRows } = await reader.query<{
     id: number; plan_id: number; number: number; due_date: Date; amount_minor: string;
@@ -19800,9 +19800,12 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): P
   }
 
   const approvedIds = new Set((await reader.query<{plan_id:number}>("SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])",[rows.map(r=>r.id)])).rows.map(r=>r.plan_id));
+  // Statement-only batching keeps every ownership/source check on this same snapshot.
+  const invoiceSources = batchInvoiceSources ? await (await import("./plan-financial-position")).readPlanInvoiceFinancialPositions(reader,
+    rows.filter(row=>!approvedIds.has(row.id)).map(row=>({id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)})),today) : null;
   return Promise.all(rows.map(async (row) => {
     const approvedAgreement = approvedIds.has(row.id) ? await (await import("./approved-agreements")).approvedAgreementPosition(row.id,today,reader) : null;
-    const invoiceSource = approvedAgreement ? null : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
+    const invoiceSource = approvedAgreement ? null : invoiceSources?.has(row.id) ? invoiceSources.get(row.id)! : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
     const invoiceFinancial = invoiceSource?.kind === "classic_installments" ? null : invoiceSource;
     const debtSource = approvedAgreement ? (approvedAgreement.available ? "approved_agreement" as const : null)
       : invoiceSource?.kind === "classic_installments" ? "classic_installments" as const
@@ -19930,9 +19933,11 @@ export async function patientStatementSnapshot(patientId:number,today:string){
   return withFinancialReadSnapshot(getPool(),async runner=>{
     const client=runner as DbClient;
     const ledger=await patientLedgerInSnapshot(patientId,client);
-    const planCurrencies=await patientPlanCurrencies(patientId,client);
     const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
-    return {ledger,planCurrencies,plans:await hydratePlans(rows,today,client)};
+    // The same complete patient plan set and fail-closed currency validation as
+    // patientPlanCurrencies; reuse rows already required for statement details.
+    const planCurrencies=new Map(rows.map(row=>[row.id,{patientId,currency:requireCurrency(row.base_currency,"خطة علاج",row.id)}]));
+    return {ledger,planCurrencies,plans:await hydratePlans(rows,today,client,true)};
   });
 }
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
