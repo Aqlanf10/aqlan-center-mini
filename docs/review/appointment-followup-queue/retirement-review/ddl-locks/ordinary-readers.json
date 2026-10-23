@@ -1,0 +1,28 @@
+{
+  "synthetic": true,
+  "migrationSha256": "7475f2f97b74d50ca033927af9c746f13612ea4424b4e7ef9acd91834bf16be1",
+  "lockTimeoutMs": 1500,
+  "elapsedMs": 18.50764799999888,
+  "locks": [
+    {
+      "pid": 60,
+      "relation": "appointment_followup_events",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 60,
+      "relation": "appointment_followup_receipts",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 60,
+      "relation": "users",
+      "mode": "AccessShareLock",
+      "granted": true
+    }
+  ],
+  "readerTransactionStillOpen": true,
+  "historyPreserved": true
+}

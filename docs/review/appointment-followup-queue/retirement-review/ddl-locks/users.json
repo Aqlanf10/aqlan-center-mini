@@ -1,0 +1,34 @@
+{
+  "synthetic": true,
+  "migrationSha256": "7475f2f97b74d50ca033927af9c746f13612ea4424b4e7ef9acd91834bf16be1",
+  "lockTimeoutMs": 1500,
+  "elapsedMs": 1511.97281,
+  "ordinaryReadMs": 0.6322600000000875,
+  "errorCode": "55P03",
+  "locks": [
+    {
+      "pid": 42,
+      "relation": "users",
+      "mode": "RowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 43,
+      "relation": "users",
+      "mode": "ShareRowExclusiveLock",
+      "granted": false
+    }
+  ],
+  "blockers": [
+    42
+  ],
+  "rolledBack": {
+    "table_name": null,
+    "function_name": null,
+    "triggers": 0,
+    "registry_rows": 0
+  },
+  "retryMs": 10.067885999999817,
+  "writerCommitted": true,
+  "historyPreserved": true
+}
