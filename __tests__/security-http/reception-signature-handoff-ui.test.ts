@@ -6,6 +6,7 @@ import { chromium, type Browser, type BrowserContext, type Page, type Route } fr
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+import { emptyFollowupsFixtureRead } from "../helpers/followups-fixture-route";
 
 const RECEPTION_EVIDENCE_MARKER = "AQLAN_RECEPTION_UI_PNG_V1";
 const RECEPTION_EVIDENCE_SUITE = "__tests__/security-http/reception-signature-handoff-ui.test.ts";
@@ -69,6 +70,10 @@ async function contextFor(cookie: string, width = 1280): Promise<BrowserContext>
 const SAFE_API = new Set(["/api/visits", "/api/visits/readiness", "/api/appointments", "/api/parties", "/api/booking-requests", "/api/display/notice", "/api/lab", "/api/messages", "/api/auth/me"]);
 async function allowBuiltBoardRead(route: Route, unexpected: string[]) {
   const request = route.request(), url = new URL(request.url()), method = request.method();
+  const followups = emptyFollowupsFixtureRead(url, method, baseUrl, null);
+  if (followups) {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(followups) }); return;
+  }
   if (url.origin === baseUrl && ["GET", "HEAD"].includes(method)
     && (SAFE_API.has(url.pathname) || url.pathname === "/" || url.pathname.startsWith("/_next/")
       || ["/logo.png", "/favicon.ico", "/icon.png", "/apple-icon.png", "/manifest.webmanifest", "/sw.js"].includes(url.pathname))) {
