@@ -1,0 +1,64 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/appointment-followup-shared-retry.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/appointment-followup-shared-retry.test.ts (2 tests | 2 failed) 7426ms
+   × two editors cannot replace or delete a lost-response attempt; reload replays exactly once 2870ms
+   × two tabs cannot replace or delete a lost-response attempt; reload replays exactly once 2837ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/appointment-followup-shared-retry.test.ts > two editors cannot replace or delete a lost-response attempt; reload replays exactly once
+AssertionError: expected '{"appointmentId":1,"expectedPatientId…' to be '{"appointmentId":1,"expectedPatientId…' // Object.is equality
+
+Expected: "{"appointmentId":1,"expectedPatientId":1,"sourceCreatedAt":"1792778718.940551","generation":"3f9c146b391fe5980c788663fd42ce3d","requestId":"e4f402cb-a23e-410f-9a37-d2bfdbdb00eb","expectedRevision":1,"assigneeUserId":4,"dueAt":"2026-10-24T18:05:20.635Z","status":"open","outcome":"no_answer","nextStep":"call"}"
+Received: "{"appointmentId":1,"expectedPatientId":1,"sourceCreatedAt":"1792778718.940551","generation":"3f9c146b391fe5980c788663fd42ce3d","requestId":"5416713d-f6b1-4d04-a379-6f698f2dadcc","expectedRevision":1,"assigneeUserId":4,"dueAt":"2026-10-24T18:05:20.718Z","status":"open","outcome":"no_answer","nextStep":"call"}"
+
+ ❯ __tests__/security-http/appointment-followup-shared-retry.test.ts:61:71
+     59|     await expect.poll(async()=> (await db.query('SELECT revision FROM …
+     60|     await bEditor.getByRole('button',{name:'حفظ نتيجة المتابعة',exact:…
+     61|     await expect.poll(()=>b.evaluate(k=>localStorage.getItem(k),key)).…
+       |                                                                       ^
+     62|     release();
+     63|     await expect.poll(()=>aEditor.getByRole('button',{name:'إعادة المح…
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ __tests__/security-http/appointment-followup-shared-retry.test.ts:61:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/appointment-followup-shared-retry.test.ts > two tabs cannot replace or delete a lost-response attempt; reload replays exactly once
+AssertionError: expected '{"appointmentId":2,"expectedPatientId…' to be '{"appointmentId":2,"expectedPatientId…' // Object.is equality
+
+Expected: "{"appointmentId":2,"expectedPatientId":1,"sourceCreatedAt":"1792778721.804945","generation":"3f9c146b391fe5980c788663fd42ce3d","requestId":"a30c6d25-5593-4d6d-ac12-420f1c71a900","expectedRevision":1,"assigneeUserId":4,"dueAt":"2026-10-24T18:05:23.486Z","status":"open","outcome":"no_answer","nextStep":"call"}"
+Received: "{"appointmentId":2,"expectedPatientId":1,"sourceCreatedAt":"1792778721.804945","generation":"3f9c146b391fe5980c788663fd42ce3d","requestId":"8b9d6b4c-2bb2-4996-ba05-bcad49290894","expectedRevision":1,"assigneeUserId":4,"dueAt":"2026-10-24T18:05:23.569Z","status":"open","outcome":"no_answer","nextStep":"call"}"
+
+ ❯ __tests__/security-http/appointment-followup-shared-retry.test.ts:61:71
+     59|     await expect.poll(async()=> (await db.query('SELECT revision FROM …
+     60|     await bEditor.getByRole('button',{name:'حفظ نتيجة المتابعة',exact:…
+     61|     await expect.poll(()=>b.evaluate(k=>localStorage.getItem(k),key)).…
+       |                                                                       ^
+     62|     release();
+     63|     await expect.poll(()=>aEditor.getByRole('button',{name:'إعادة المح…
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ __tests__/security-http/appointment-followup-shared-retry.test.ts:61:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  18:05:11
+   Duration  12.75s (transform 23ms, setup 0ms, import 441ms, tests 7.43s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

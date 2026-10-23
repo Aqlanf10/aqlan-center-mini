@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
 import { parseFollowupCommand, type FollowupCommand, type FollowupOutcome } from "@/lib/appointment-followup-contract";
+import { FOLLOWUP_ATTEMPT_CHANGED, followupAttemptKey, readFollowupAttempt, removeOwnedFollowupAttempt, withFollowupAttemptLock, notifyFollowupAttemptChanged } from "@/lib/appointment-followup-attempt";
 import type { readAppointmentFollowupEditor } from "@/lib/appointment-followup-db";
 type Editor = Awaited<ReturnType<typeof readAppointmentFollowupEditor>>;
 let sequence = 0;
@@ -19,14 +20,13 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState<FollowupCommand | null>(null);
-  const [rejected, setRejected] = useState(false);
   const [outcome, setOutcome] = useState<FollowupOutcome>("no_answer");
   const [assignee, setAssignee] = useState(0);
   const [hours, setHours] = useState("24");
   const [reload, setReload] = useState(0);
   const active = useRef(false);
   const pending = useRef(false);
-  const storageKey = data ? `appointment-followup:v1:${data.actorUserId}:${patientId}:${appointmentId}` : null;
+  const storageKey = data ? followupAttemptKey(data.actorUserId, patientId, appointmentId) : null;
   useEffect(() => {
     active.current = true;
     const controller = new AbortController();
@@ -39,38 +39,92 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
         if (!response.ok) throw new Error(body.message ?? "تعذّر تحميل سياق المتابعة.");
         const context = body as Editor;
         if (context.source?.appointmentId !== appointmentId || context.source.expectedPatientId !== patientId || !Number.isInteger(context.actorUserId)) throw new Error("تعذّر التحقق من سياق المتابعة.");
-        const saved = localStorage.getItem(`appointment-followup:v1:${context.actorUserId}:${patientId}:${appointmentId}`);
-        const command = saved ? parseFollowupCommand(JSON.parse(saved)) : null;
-        if (saved && (!command || command.appointmentId !== appointmentId || command.expectedPatientId !== patientId)) throw new Error("طلب محفوظ غير صالح. يلزم مراجعته قبل أي إجراء جديد.");
-        setAttempt(command); setAssignee(context.assigneeUserId); setData(context);
+        const saved = readFollowupAttempt(localStorage, followupAttemptKey(context.actorUserId, patientId, appointmentId), patientId, appointmentId);
+        setAttempt(saved?.command ?? null); setAssignee(context.assigneeUserId); setData(context);
       } catch (error) { if (active.current && !controller.signal.aborted) setMessage(error instanceof Error ? error.message : "تعذّر تحميل المتابعة."); }
     })();
     return () => { active.current = false; controller.abort(); };
   }, [appointmentId, patientId, reload]);
+  // Advisory synchronization improves both editors' UI. The lock below is still
+  // required if events are delayed, missed, or delivered after a stale click.
+  useEffect(() => {
+    if (!storageKey) return;
+    const sync = () => {
+      if (!active.current || pending.current) return;
+      try {
+        const saved = readFollowupAttempt(localStorage, storageKey, patientId, appointmentId);
+        setAttempt(saved?.command ?? null);
+        if (!saved) setReload(value => value + 1);
+      } catch (error) { setMessage(error instanceof Error ? error.message : "تعذّر قراءة الطلب المحفوظ."); }
+    };
+    const changed = (event: Event) => { if ((event as CustomEvent<string>).detail === storageKey) sync(); };
+    const storage = (event: StorageEvent) => { if (event.key === storageKey || event.key === null) sync(); };
+    window.addEventListener(FOLLOWUP_ATTEMPT_CHANGED, changed);
+    window.addEventListener("storage", storage);
+    return () => { window.removeEventListener(FOLLOWUP_ATTEMPT_CHANGED, changed); window.removeEventListener("storage", storage); };
+  }, [storageKey, patientId, appointmentId]);
   async function save() {
     if (!data || !storageKey || pending.current || (!attempt && (data.blocked || data.closed))) return;
-    const closed = outcome === "resolved" || outcome === "declined";
-    const command = attempt ?? parseFollowupCommand({ ...data.source, requestId: crypto.randomUUID(), expectedRevision: data.revision,
-      assigneeUserId: assignee, dueAt: new Date(Date.now() + Number(hours) * 3600000).toISOString(),
-      status: data.revision === 0 ? "open" : closed ? "closed" : "open",
-      outcome: data.revision === 0 ? "pending" : outcome,
-      nextStep: data.revision !== 0 && closed ? "none" : outcome === "rebooking_review" ? "review" : "call" });
-    if (!command) { setMessage("راجع بيانات المتابعة."); return; }
-    pending.current = true; setBusy(true); setRejected(false);
+    pending.current = true; setBusy(true);
     try {
-      // Persist BEFORE sending. Storage failure prevents a non-recoverable mutation.
-      localStorage.setItem(storageKey, JSON.stringify(command)); setAttempt(command);
-      const response = await fetch(`/api/appointments/${appointmentId}/followup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
-      const result = await response.json();
-      if (!active.current) return;
-      if (!response.ok) {
-        setRejected([400, 404, 409].includes(response.status));
-        throw new Error(result.message ?? "تعذّر تأكيد الحفظ. أعد الطلب نفسه.");
-      }
-      if (!Number.isInteger(result.followupId) || result.revision !== command.expectedRevision + 1) throw new Error("نتيجة الحفظ غير مؤكدة. أعد الطلب نفسه.");
-      localStorage.removeItem(storageKey); setAttempt(null);
-      setMessage("حُفظت المتابعة. لا يُعدّ هذا إثبات إرسال رسالة أو تسليمها."); setReload(value => value + 1);
-      window.dispatchEvent(new Event("appointment-followup-changed"));
+      const acquired = await withFollowupAttemptLock(storageKey, async () => {
+        if (!active.current) return;
+        // Refresh authority even for a replay: a cookie/account may have changed
+        // in another tab without replacing this tab's SessionProvider yet.
+        const contextResponse = await fetch(`/api/appointments/${appointmentId}/followup?patientId=${patientId}`, { cache: "no-store" });
+        const fresh = await contextResponse.json() as Editor & { message?: string };
+        if (!active.current) return;
+        if (!contextResponse.ok) throw new Error(fresh.message ?? "تعذّر التحقق من سياق المتابعة.");
+        if (fresh.actorUserId !== data.actorUserId) {
+          setAttempt(null); setData(null);
+          setMessage("تغيّرت الجلسة. أعد تحميل الصفحة؛ بقي طلب المستخدم السابق محفوظاً دون إرسال أو حذف."); return;
+        }
+        const saved = readFollowupAttempt(localStorage, storageKey, patientId, appointmentId);
+        if (saved && (!attempt || JSON.stringify(saved.command) !== JSON.stringify(attempt))) {
+          setAttempt(saved.command);
+          setMessage("هناك محاولة محفوظة لهذا الموعد. أعد المحاولة نفسها للتحقق؛ لم تُستبدل ببيانات هذا المحرر.");
+          return;
+        }
+        if (!saved && attempt) {
+          setAttempt(null); setReload(value => value + 1);
+          setMessage("تغيّرت ملكية المحاولة في محرر آخر. حدّث السياق قبل إجراء جديد.");
+          return;
+        }
+        let command = saved?.command;
+        let raw = saved?.raw;
+        if (!command) {
+          // A stale editor may have missed another tab's acknowledged save and
+          // removal. Re-read the server revision while holding the shared lock,
+          // before persisting any new intent. Never auto-apply old form choices.
+          if (fresh.revision !== data.revision
+            || JSON.stringify(fresh.source) !== JSON.stringify(data.source) || fresh.blocked || fresh.closed) {
+            setReload(value => value + 1); setMessage("تغيّر المستخدم أو سياق المتابعة. راجع البيانات المحدثة قبل إجراء جديد."); return;
+          }
+          const closed = outcome === "resolved" || outcome === "declined";
+          command = parseFollowupCommand({ ...data.source, requestId: crypto.randomUUID(), expectedRevision: data.revision,
+            assigneeUserId: assignee, dueAt: new Date(Date.now() + Number(hours) * 3600000).toISOString(),
+            status: data.revision === 0 ? "open" : closed ? "closed" : "open",
+            outcome: data.revision === 0 ? "pending" : outcome,
+            nextStep: data.revision !== 0 && closed ? "none" : outcome === "rebooking_review" ? "review" : "call" }) ?? undefined;
+          if (!command) throw new Error("راجع بيانات المتابعة.");
+          raw = JSON.stringify(command);
+          // No other cooperating editor can write this slot until ack/unknown.
+          // Also refuse a non-cooperating writer that changed it during the GET.
+          if (localStorage.getItem(storageKey) !== null) throw new Error("ظهرت محاولة محفوظة في محرر آخر. حدّث السياق مع إبقاء الطلب.");
+          localStorage.setItem(storageKey, raw); setAttempt(command);
+          notifyFollowupAttemptChanged(storageKey);
+        }
+        const response = await fetch(`/api/appointments/${appointmentId}/followup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: raw });
+        const result = await response.json();
+        if (!active.current) return; // Keep evidence after session/owner replacement.
+        if (!response.ok) throw new Error((result.message ?? "تعذّر تأكيد الحفظ.") + " الطلب محفوظ؛ تحديث السياق لا يمحوه.");
+        if (!Number.isInteger(result.followupId) || result.revision !== command.expectedRevision + 1) throw new Error("نتيجة الحفظ غير مؤكدة. أعد الطلب نفسه.");
+        if (!removeOwnedFollowupAttempt(localStorage, storageKey, raw!)) throw new Error("تأكد الحفظ، لكن توجد محاولة أخرى محفوظة؛ لم تُحذف. حدّث السياق.");
+        setAttempt(null); notifyFollowupAttemptChanged(storageKey);
+        setMessage("حُفظت المتابعة. لا يُعدّ هذا إثبات إرسال رسالة أو تسليمها."); setReload(value => value + 1);
+        window.dispatchEvent(new Event("appointment-followup-changed"));
+      });
+      if (!acquired && active.current) setMessage("يجري التحقق من محاولة هذا الموعد في محرر آخر. انتظر ثم أعد التحقق؛ لم يُرسل طلب جديد.");
     } catch (error) { if (active.current) setMessage(error instanceof Error ? error.message : "النتيجة غير مؤكدة. أعد الطلب نفسه دون تعديل."); }
     finally { pending.current = false; if (active.current) setBusy(false); }
   }
@@ -89,7 +143,7 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
       </fieldset>
       <div className="flex flex-wrap gap-2">
         <button className={`${button} bg-navy-900 text-white`} disabled={busy || (!attempt && (data.blocked || data.closed))} onClick={() => void save()}>{busy ? "جارٍ التحقق…" : attempt ? "إعادة المحاولة نفسها" : data.revision === 0 ? "فتح متابعة" : "حفظ نتيجة المتابعة"}</button>
-        {rejected && !busy ? <button className={button} onClick={() => { if (storageKey) localStorage.removeItem(storageKey); setAttempt(null); setRejected(false); setReload(v => v + 1); }}>تحديث السياق بعد الرفض</button> : null}
+        {attempt && !busy ? <button className={button} onClick={() => setReload(value => value + 1)}>تحديث السياق مع إبقاء الطلب</button> : null}
         {!data.blocked ? <a className={button} href={`/patients/${patientId}?tab=summary`}>ملف المريض وإعادة حجز الجلسة</a> : null}
       </div>
       <p className="text-xs text-slate-600">إعادة حجز الجلسة تتم من ملخص المريض عبر الحجز المعتمد، وتبقي الموعد السابق محفوظاً. هذه المتابعة لا تنشئ موعداً ولا تغيّر الحضور.</p>
