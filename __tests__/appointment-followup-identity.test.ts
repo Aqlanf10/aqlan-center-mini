@@ -18,14 +18,19 @@ it.each(['["open"]', '{"toString":null}'])("rejects JSON update status %s cleanl
   expect(getPool).not.toHaveBeenCalled();
 });
 
-it.each([false, true])("followup lock conflict rolls back before FOLLOWUP_BUSY (rollback fails=%s)", async rollbackFails => {
+it.each([["task", false], ["task", true], ["link", false], ["link", true]] as const)("%s lock conflict rolls back before FOLLOWUP_BUSY (rollback fails=%s)", async (target, rollbackFails) => {
   const lockError = Object.assign(new Error("synthetic row lock conflict"), { code: "55P03" });
   const statements: string[] = [];
   const client = { query: vi.fn(async (sql: string) => {
     statements.push(sql);
     if (sql.includes("FROM appointments a")) return { rows: [{ id: 10, patient_id: 20, source_created_at: command.sourceCreatedAt, eligible: true }] };
     if (sql.includes("AS value")) return { rows: [{ value: command.generation }] };
-    if (sql.includes("FROM appointment_followups WHERE")) { expect(sql).toContain("FOR UPDATE NOWAIT"); throw lockError; }
+    if (sql.includes("FROM appointment_followups WHERE")) {
+      expect(sql).toContain("FOR UPDATE NOWAIT");
+      if (target === "task") throw lockError;
+      return { rows: [{ id: 1, revision: 1, status: "open" }] };
+    }
+    if (sql.includes("FROM appointment_followup_links WHERE")) { expect(sql).toContain("FOR UPDATE NOWAIT"); throw lockError; }
     if (sql === "ROLLBACK" && rollbackFails) throw new Error("secondary rollback failure");
     if (/^\s*(INSERT|UPDATE|DELETE)/.test(sql)) throw new Error("unexpected partial write");
     return { rows: [] };
@@ -65,3 +70,21 @@ it.each([
   expect(insertAuditRow).not.toHaveBeenCalled();
   expect(client.release).toHaveBeenCalledWith(false);
 });
+
+it.each([undefined, { appointment_id: null, patient_id: 20 }, { appointment_id: 10, patient_id: 21 }])(
+  "rejects absent or mismatched live link before receipt access", async link => {
+    const statements: string[] = [];
+    const client = { query: vi.fn(async (sql: string) => {
+      statements.push(sql);
+      if (sql.includes("FROM appointments a")) return { rows: [{ id: 10, patient_id: 20, source_created_at: command.sourceCreatedAt, eligible: true }] };
+      if (sql.includes("AS value")) return { rows: [{ value: command.generation }] };
+      if (sql.includes("FROM appointment_followups WHERE")) return { rows: [{ id: 1, revision: 1, status: "open" }] };
+      if (sql.includes("FROM appointment_followup_links WHERE")) return { rows: link ? [link] : [] };
+      if (sql.includes("appointment_followup_receipts") || /^\s*(INSERT|UPDATE|DELETE)/.test(sql)) throw new Error("unexpected receipt or write");
+      return { rows: [] };
+    }), release: vi.fn() };
+    vi.mocked(getPool).mockReturnValue({ connect: async () => client as DbClient } as DbPool);
+    await expect(saveAppointmentFollowup(command, actor)).rejects.toMatchObject({ status: 409, code: "FOLLOWUP_SOURCE_CHANGED" });
+    expect(statements.at(-1)).toBe("ROLLBACK");
+    expect(statements).not.toContain("COMMIT");
+  });

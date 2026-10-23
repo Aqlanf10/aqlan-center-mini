@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, expect, it } from "vitest";
+import { beforeAll, afterAll, expect, it, vi } from "vitest";
 import { setTimeout as pause } from "node:timers/promises";
 import { assertRealPostgresUrl, stubPostgresEnv, dropPublicSchema } from "./_setup";
 import { validatePostgresTestTarget } from "./_safe-target";
@@ -6,6 +6,16 @@ import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import { APPOINTMENT_FOLLOWUP_SQL } from "../../lib/appointment-followup-schema";
 import { PLANNED_REBOOK_GENERATION_SQL } from "../../lib/planned-visit-rebooking-contract";
 import type { FollowupCommand } from "../../lib/appointment-followup-contract";
+
+// Candidate registration only in this isolated guarded PG suite. Production
+// arrays remain unchanged until schema bootstrap/manifest are approved together.
+vi.mock("../../lib/clinic-reset", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../lib/clinic-reset")>();
+  return { ...actual,
+    RESET_WIPE_TABLES: [...actual.RESET_WIPE_TABLES, ...actual.APPOINTMENT_FOLLOWUP_RESET_WIPE_TABLES],
+    RESET_KEEP_TABLES: [...actual.RESET_KEEP_TABLES, ...actual.APPOINTMENT_FOLLOWUP_RESET_KEEP_TABLES],
+  };
+});
 
 // Validate the original environment BEFORE helpers replace it. No fallback target.
 validatePostgresTestTarget(process.env);
@@ -46,7 +56,7 @@ async function fingerprint() {
 }
 async function followupSnapshot() {
   const result: Record<string, unknown> = {};
-  for (const table of ["appointment_followups", "appointment_followup_events", "appointment_followup_receipts"])
+  for (const table of ["appointment_followups", "appointment_followup_links", "appointment_followup_events", "appointment_followup_receipts"])
     result[table] = await q(`SELECT to_jsonb(t) AS value FROM ${table} t ORDER BY to_jsonb(t)::text`);
   result.audit = await q("SELECT to_jsonb(a) AS value FROM audit_log a WHERE entity='appointment_followup' ORDER BY id");
   return result;
@@ -208,9 +218,9 @@ it("detects patient reassignment; a merge-shaped FK update preserves immutable h
   await expect(save({ ...f.input, expectedRevision: 1, requestId: f.input.requestId + "-edit" }, reception))
     .rejects.toMatchObject({ status: 409, code: "FOLLOWUP_SOURCE_CHANGED" });
   expect(await followupSnapshot()).toEqual(before);
-  // Mirrors FK-driven merge without editing events. Actual merge entrypoint remains a release gate.
+  // Isolated FK movement; the next test exercises the canonical merge entrypoint.
   const history = await q("SELECT to_jsonb(e) AS value FROM appointment_followup_events e WHERE followup_id=$1", [first.followupId]);
-  await q("UPDATE appointment_followups SET patient_id=$2 WHERE id=$1", [first.followupId, g.patientId]);
+  await q("UPDATE appointment_followup_links SET patient_id=$2 WHERE followup_id=$1", [first.followupId, g.patientId]);
   const afterMove = await followupSnapshot();
   await expect(save(f.input, reception)).rejects.toMatchObject({ status: 409, code: "FOLLOWUP_SOURCE_CHANGED" });
   expect(await followupSnapshot()).toEqual(afterMove);
@@ -218,12 +228,15 @@ it("detects patient reassignment; a merge-shaped FK update preserves immutable h
 });
 it("canonical patient merge moves live FKs without updating immutable events or receipts", async () => {
   const f = await fixture(); const target = await fixture(); const first = await save(f.input, reception);
+  const taskBefore = await q("SELECT to_jsonb(f) AS value FROM appointment_followups f WHERE id=$1", [first.followupId]);
   const events = await q("SELECT to_jsonb(e) AS value FROM appointment_followup_events e WHERE followup_id=$1", [first.followupId]);
   const receipts = await q("SELECT to_jsonb(r) AS value FROM appointment_followup_receipts r WHERE request_id=$1", [f.input.requestId]);
   expect(await db.mergeDuplicatePatient(f.patientId, target.patientId, { actor: "synthetic-admin" })).toMatchObject({ ok: true });
-  expect((await q("SELECT patient_id FROM appointment_followups WHERE id=$1", [first.followupId]))[0].patient_id).toBe(target.patientId);
+  expect((await q("SELECT patient_id FROM appointment_followup_links WHERE followup_id=$1", [first.followupId]))[0].patient_id).toBe(target.patientId);
+  expect((await queue(reception)).items.find(row => row.id === first.followupId)).toMatchObject({ patient_id: target.patientId, contactBlocked: false });
   expect(await q("SELECT to_jsonb(e) AS value FROM appointment_followup_events e WHERE followup_id=$1", [first.followupId])).toEqual(events);
   expect(await q("SELECT to_jsonb(r) AS value FROM appointment_followup_receipts r WHERE request_id=$1", [f.input.requestId])).toEqual(receipts);
+  expect(await q("SELECT to_jsonb(f) AS value FROM appointment_followups f WHERE id=$1", [first.followupId])).toEqual(taskBefore);
   const afterMerge = await followupSnapshot();
   await expect(save(f.input, reception)).rejects.toMatchObject({ status: 409, code: "FOLLOWUP_SOURCE_CHANGED" });
   expect(await followupSnapshot()).toEqual(afterMerge);
@@ -233,7 +246,7 @@ it("canonical patient merge moves live FKs without updating immutable events or 
   await expect(save({ ...f.input, ...refreshed }, reception)).rejects.toMatchObject({ status: 409, code: "FOLLOWUP_KEY_CONFLICT" });
   expect(await followupSnapshot()).toEqual(afterMerge);
 });
-it("does not wait on the followup row held by canonical patient merge", async () => {
+it("does not wait on the live link held by canonical patient merge", async () => {
   const f = await fixture(); const target = await fixture(); const first = await save(f.input, reception);
   const before = await followupSnapshot();
   const gate = await db.getPool().connect();
@@ -242,11 +255,11 @@ it("does not wait on the followup row held by canonical patient merge", async ()
   let saving: Promise<unknown> | undefined;
   let blockedSavePid: number | undefined;
   await gate.query("SELECT pg_advisory_lock($1,$2)", [gateClass, first.followupId]);
-  // AFTER UPDATE guarantees the merge owns the followup row before pausing,
+  // AFTER UPDATE guarantees the merge owns the live link before pausing,
   // while its alphabetically later appointments update has not begun.
   await q(`CREATE FUNCTION synthetic_followup_merge_gate() RETURNS trigger LANGUAGE plpgsql AS $$
-    BEGIN PERFORM pg_advisory_xact_lock(737434, NEW.id); RETURN NEW; END $$;
-    CREATE TRIGGER synthetic_followup_merge_gate AFTER UPDATE OF patient_id ON appointment_followups
+    BEGIN PERFORM pg_advisory_xact_lock(737434, NEW.followup_id); RETURN NEW; END $$;
+    CREATE TRIGGER synthetic_followup_merge_gate AFTER UPDATE OF patient_id ON appointment_followup_links
     FOR EACH ROW WHEN (OLD.patient_id IS DISTINCT FROM NEW.patient_id)
     EXECUTE FUNCTION synthetic_followup_merge_gate()`);
   try {
@@ -261,7 +274,7 @@ it("does not wait on the followup row held by canonical patient merge", async ()
       mergePid = waiter?.pid;
       if (!mergePid) await pause(10);
     }
-    expect(mergePid, "real merge reached the held followup row before appointments").toBeDefined();
+    expect(mergePid, "real merge reached the held live link before appointments").toBeDefined();
     let outcome: { error: unknown } | { value: unknown } | undefined;
     saving = save({ ...f.input, expectedRevision: 1, requestId: f.input.requestId + "-merge-race", outcome: "no_answer" }, reception)
       .then(value => { outcome = { value }; }, error => { outcome = { error }; });
@@ -269,7 +282,7 @@ it("does not wait on the followup row held by canonical patient merge", async ()
     while (!outcome && !blockedSavePid && Date.now() < saveDeadline) {
       const [blocked] = await q(`SELECT pid FROM pg_stat_activity WHERE datname=current_database()
         AND $1::int = ANY(pg_blocking_pids(pid))
-        AND query LIKE '%FROM appointment_followups WHERE source_appointment_id%'`, [mergePid]);
+        AND query LIKE '%FROM appointment_followup_links WHERE followup_id%'`, [mergePid]);
       blockedSavePid = blocked?.pid;
       if (!outcome && !blockedSavePid) await pause(10);
     }
@@ -289,7 +302,7 @@ it("does not wait on the followup row held by canonical patient merge", async ()
     await gate.query("SELECT pg_advisory_unlock($1,$2)", [gateClass, first.followupId]);
     gate.release();
     await Promise.allSettled([...(saving ? [saving] : []), ...(merging ? [merging] : [])]);
-    await q("DROP TRIGGER synthetic_followup_merge_gate ON appointment_followups; DROP FUNCTION synthetic_followup_merge_gate()");
+    await q("DROP TRIGGER synthetic_followup_merge_gate ON appointment_followup_links; DROP FUNCTION synthetic_followup_merge_gate()");
   }
 });
 it("queue reads live context without creating tasks or counting a selected day", async () => {
@@ -318,11 +331,11 @@ it("closes only explicitly and another missed appointment creates separate histo
 it("does not attach history to a deleted/reused appointment number", async () => {
   const f = await fixture(); const first = await save(f.input, reception);
   await q("DELETE FROM appointments WHERE id=$1", [f.input.appointmentId]);
-  expect((await q("SELECT appointment_id FROM appointment_followups WHERE id=$1", [first.followupId]))[0].appointment_id).toBeNull();
+  expect((await q("SELECT appointment_id FROM appointment_followup_links WHERE followup_id=$1", [first.followupId]))[0].appointment_id).toBeNull();
   await expect(save(f.input, reception)).rejects.toMatchObject({ code: "FOLLOWUP_SOURCE_CHANGED" });
-  await q("INSERT INTO appointments(id,patient_id,scheduled_date,scheduled_time,status) VALUES ($1,$2,'2000-01-01','10:00','no_show')", [f.input.appointmentId, f.patientId]);
+  await q("INSERT INTO appointments(id,patient_id,scheduled_date,scheduled_time,status,created_at) VALUES ($1,$2,'2000-01-01','10:00','no_show','2020-01-01T00:00:00.123456Z')", [f.input.appointmentId, f.patientId]);
   await expect(save(f.input, reception)).rejects.toMatchObject({ code: "FOLLOWUP_SOURCE_CHANGED" });
-  await expect(q("UPDATE appointment_followups SET appointment_id=$2 WHERE id=$1", [first.followupId, f.input.appointmentId])).rejects.toThrow("immutable");
+  await expect(q("UPDATE appointment_followup_links SET appointment_id=$2 WHERE followup_id=$1", [first.followupId, f.input.appointmentId])).rejects.toThrow("immutable");
 });
 it("rejects sub-millisecond identity mismatch and old reset generation", async () => {
   const f = await fixture();
@@ -350,11 +363,11 @@ it("database prevents history mutation, source substitution and patient FKs in h
   await expect(q("UPDATE appointment_followup_events SET outcome='pending' WHERE followup_id=$1", [result.followupId])).rejects.toThrow("append-only");
   await expect(q("DELETE FROM appointment_followup_receipts WHERE actor_user_id=$1", [reception.userId])).rejects.toThrow("append-only");
   await expect(q("TRUNCATE appointment_followup_receipts")).rejects.toThrow("append-only");
-  expect(await q(`SELECT conname FROM pg_constraint WHERE contype='f' AND confrelid='patients'::regclass
-    AND conrelid IN ('appointment_followup_events'::regclass,'appointment_followup_receipts'::regclass)`)).toEqual([]);
+  expect(await q(`SELECT conname FROM pg_constraint WHERE contype='f' AND confrelid IN ('patients'::regclass,'appointments'::regclass,'appointment_followup_links'::regclass)
+    AND conrelid IN ('appointment_followups'::regclass,'appointment_followup_events'::regclass,'appointment_followup_receipts'::regclass)`)).toEqual([]);
 });
 it("audit failure rolls back task, event and receipt and leaves source untouched", async () => {
-  const f = await fixture(); const before = await fingerprint();
+  const f = await fixture(); const before = await fingerprint(); const followupBefore = await followupSnapshot();
   await q(`CREATE FUNCTION synthetic_fail_followup_audit() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN IF NEW.entity='appointment_followup' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END $$;
     CREATE TRIGGER synthetic_fail_followup_audit BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION synthetic_fail_followup_audit()`);
@@ -363,4 +376,77 @@ it("audit failure rolls back task, event and receipt and leaves source untouched
   expect(await q("SELECT id FROM appointment_followups WHERE source_appointment_id=$1", [f.input.appointmentId])).toEqual([]);
   expect(await q("SELECT event_id FROM appointment_followup_receipts WHERE actor_user_id=$1 AND request_id=$2", [reception.userId, f.input.requestId])).toEqual([]);
   expect(await fingerprint()).toEqual(before);
+  expect(await followupSnapshot()).toEqual(followupBefore);
+});
+
+it("missing live link never reconstructs context or recreates a link on save/replay", async () => {
+  const f = await fixture(); const first = await save(f.input, reception);
+  await q("DELETE FROM appointment_followup_links WHERE followup_id=$1", [first.followupId]);
+  const before = await followupSnapshot();
+  expect((await queue(reception)).items.find(row => row.id === first.followupId)).toMatchObject({
+    sourceState: "source_unavailable_review_required", contactBlocked: true, sourceIdentity: null,
+  });
+  await expect(save(f.input, reception)).rejects.toMatchObject({ status: 409, code: "FOLLOWUP_SOURCE_CHANGED" });
+  await expect(save({ ...f.input, expectedRevision: 1, requestId: f.input.requestId + "-missing" }, reception))
+    .rejects.toMatchObject({ status: 409, code: "FOLLOWUP_SOURCE_CHANGED" });
+  await expect(q("INSERT INTO appointment_followup_links(followup_id,appointment_id,patient_id) VALUES ($1,$2,$3)",
+    [first.followupId, f.input.appointmentId, f.patientId])).rejects.toThrow("immutable");
+  expect(await followupSnapshot()).toEqual(before);
+});
+
+it("canonical reset retains nonempty generation history, wipes links and rejects reused-ID intent", async () => {
+  const f = await fixture(); const first = await save(f.input, reception);
+  const unsaved = await fixture();
+  const before = await followupSnapshot();
+  const { RESET_WIPE_TABLES, RESET_KEEP_TABLES } = await import("../../lib/clinic-reset");
+  expect(RESET_WIPE_TABLES).toContain("appointment_followup_links");
+  for (const table of ["appointment_followups", "appointment_followup_events", "appointment_followup_receipts"]) {
+    expect(RESET_KEEP_TABLES).toContain(table);
+    expect(RESET_WIPE_TABLES).not.toContain(table);
+  }
+  const reset = await db.resetClinicData({ actor: "synthetic-reset", actorRole: "admin" },
+    async () => ({ ok: true, backupId: "synthetic-followup-reset" }));
+  expect(reset.ok).toBe(true);
+  const after = await followupSnapshot();
+  expect(after).toEqual({ ...before, appointment_followup_links: [] });
+  const [generation] = await q(`SELECT ${PLANNED_REBOOK_GENERATION_SQL} AS value`);
+  expect(generation.value).not.toBe(f.input.generation);
+  expect((await queue(reception)).items).toEqual([]);
+  // Reuse both identities AND the exact source timestamp, in the new generation.
+  for (const old of [f, unsaved]) {
+    await q("INSERT INTO patients(id,patient_number,full_name) VALUES ($1,$2,'Synthetic reused identity')",
+      [old.patientId, `SYN-REUSED-${old.patientId}`]);
+    await q(`INSERT INTO appointments(id,patient_id,scheduled_date,scheduled_time,status,created_at)
+      VALUES ($1,$2,'2000-01-01','10:00','no_show','2020-01-01T00:00:00.123456Z')`, [old.input.appointmentId, old.patientId]);
+    await expect(save(old.input, reception)).rejects.toMatchObject({ status: 409, code: "FOLLOWUP_GENERATION_CHANGED" });
+  }
+  expect(await followupSnapshot()).toEqual(after);
+  const fresh = await context(f.input.appointmentId, reception);
+  const next = await save({ ...f.input, ...fresh, requestId: f.input.requestId + "-new-generation" }, reception);
+  expect(next.followupId).not.toBe(first.followupId);
+  expect(await q("SELECT followup_id FROM appointment_followup_links WHERE followup_id=$1", [first.followupId])).toEqual([]);
+  expect((await queue(reception)).items.map(row => row.id)).toEqual([next.followupId]);
+  expect(await q("SELECT revision FROM appointment_followup_events WHERE followup_id=$1", [first.followupId])).toEqual([{ revision: 1 }]);
+  // Explicit IDs above must not affect subsequent synthetic fixtures.
+  await q("SELECT setval(pg_get_serial_sequence('patients','id'),(SELECT max(id) FROM patients))");
+  await q("SELECT setval(pg_get_serial_sequence('appointments','id'),(SELECT max(id) FROM appointments))");
+});
+
+it("canonical reset failure after truncate rolls back links, history, sources and generation", async () => {
+  const f = await fixture(); await save(f.input, reception);
+  const before = await followupSnapshot(); const clinicalBefore = await fingerprint();
+  const generationBefore = await q(`SELECT ${PLANNED_REBOOK_GENERATION_SQL} AS value`);
+  const patientsBefore = await q("SELECT to_jsonb(p) AS value FROM patients p ORDER BY id");
+  await q(`CREATE FUNCTION synthetic_fail_followup_reset() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF NEW.action='system.reset' THEN RAISE EXCEPTION 'synthetic reset audit failure'; END IF; RETURN NEW; END $$;
+    CREATE TRIGGER synthetic_fail_followup_reset BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION synthetic_fail_followup_reset()`);
+  try {
+    await expect(db.resetClinicData({ actor: "synthetic-reset", actorRole: "admin" },
+      async () => ({ ok: true, backupId: "synthetic-rollback" }))).rejects.toThrow("synthetic reset audit failure");
+  } finally { await q("DROP TRIGGER synthetic_fail_followup_reset ON audit_log; DROP FUNCTION synthetic_fail_followup_reset()"); }
+  expect(await followupSnapshot()).toEqual(before);
+  expect(await fingerprint()).toEqual(clinicalBefore);
+  expect(await q("SELECT to_jsonb(p) AS value FROM patients p ORDER BY id")).toEqual(patientsBefore);
+  expect(await q(`SELECT ${PLANNED_REBOOK_GENERATION_SQL} AS value`)).toEqual(generationBefore);
+  expect(await save(f.input, reception)).toMatchObject({ replayed: true });
 });

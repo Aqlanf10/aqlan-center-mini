@@ -38,7 +38,8 @@ export async function followupTransaction<T>(pool: DbPool, work: (client: DbClie
 }
 
 interface Source { id: number; patient_id: number; source_created_at: string; eligible: boolean }
-interface Task { id: number; patient_id: number | null; appointment_id: number | null; revision: number; status: string }
+interface Task { id: number; revision: number; status: string }
+interface LiveLink { patient_id: number | null; appointment_id: number | null }
 export interface FollowupSaved { followupId: number; revision: number; replayed: boolean }
 
 /** Server-produced draft identity. A later command must still revalidate these
@@ -83,8 +84,9 @@ export async function readAppointmentFollowupQueue(admitted: SessionPayload) {
       f.assignee_user_id,f.due_at,f.outcome,f.next_step,f.due_at < clock_timestamp() AS overdue,
       p.id AS patient_id,p.full_name,${followupEligibilitySql("$1")} AS eligible
       FROM appointment_followups f
-      LEFT JOIN appointments a ON a.id=f.appointment_id AND a.id=f.source_appointment_id
-        AND EXTRACT(EPOCH FROM a.created_at)::text=f.source_created_at AND a.patient_id=f.patient_id
+      LEFT JOIN appointment_followup_links l ON l.followup_id=f.id
+      LEFT JOIN appointments a ON a.id=l.appointment_id AND a.id=f.source_appointment_id
+        AND EXTRACT(EPOCH FROM a.created_at)::text=f.source_created_at AND a.patient_id=l.patient_id
       LEFT JOIN patients p ON p.id=a.patient_id
       WHERE f.generation=${PLANNED_REBOOK_GENERATION_SQL} AND f.status='open'
       ORDER BY f.due_at,f.id LIMIT 101`, [CLINIC_TIME_ZONE]);
@@ -104,7 +106,7 @@ export async function readAppointmentFollowupQueue(admitted: SessionPayload) {
 }
 
 /** No runtime schema bootstrap here. This foundation is dormant until registration.
- * Lock order: shared reset fence -> actor/key -> source -> task NOWAIT -> users NOWAIT ->
+ * Lock order: shared reset fence -> actor/key -> source -> task/link NOWAIT -> users NOWAIT ->
  * patient NOWAIT. Conflicting merge/session writers fail closed without lock inversion.
  * No booking, attendance, visit, payment or HR writer is invoked. */
 export async function saveAppointmentFollowup(value: unknown, admitted: SessionPayload): Promise<FollowupSaved> {
@@ -126,13 +128,18 @@ export async function saveAppointmentFollowup(value: unknown, admitted: SessionP
       if (generation.value !== command.generation) reject(409, "FOLLOWUP_GENERATION_CHANGED");
       if (!source || source.source_created_at !== command.sourceCreatedAt
         || source.patient_id !== command.expectedPatientId) reject(409, "FOLLOWUP_SOURCE_CHANGED");
-      // Patient merge updates FKs alphabetically: followups before appointments.
-      // We already hold the appointment, so never wait on its followup row:
+      // Patient merge updates FKs alphabetically: followup_links before appointments.
+      // We already hold the appointment, so never wait on its task or live link:
       // abort with 55P03/FOLLOWUP_BUSY and release the source for the merge.
-      const { rows: [task] } = await client.query<Task>(`SELECT id, patient_id, appointment_id, revision, status
+      const { rows: [task] } = await client.query<Task>(`SELECT id, revision, status
         FROM appointment_followups WHERE source_appointment_id=$1 AND source_created_at=$2 AND generation=$3 FOR UPDATE NOWAIT`,
       [command.appointmentId, command.sourceCreatedAt, command.generation]);
-      if (task && (task.appointment_id !== source.id || task.patient_id !== source.patient_id)) reject(409, "FOLLOWUP_SOURCE_CHANGED");
+      if (task) {
+        const { rows: [link] } = await client.query<LiveLink>(
+          "SELECT appointment_id, patient_id FROM appointment_followup_links WHERE followup_id=$1 FOR UPDATE NOWAIT", [task.id]);
+        // Never reconstruct a vanished link from the immutable numeric source ID.
+        if (!link || link.appointment_id !== source.id || link.patient_id !== source.patient_id) reject(409, "FOLLOWUP_SOURCE_CHANGED");
+      }
       // Prelock accounts NOWAIT before canonical session revalidation (which uses SHARE).
       const { rows: users } = await client.query<{ id: number; role: string; is_active: boolean }>(
         "SELECT id, role, is_active FROM users WHERE id=ANY($1::int[]) ORDER BY id FOR SHARE NOWAIT",
@@ -165,10 +172,12 @@ export async function saveAppointmentFollowup(value: unknown, admitted: SessionP
           next_step=$5,revision=$6,updated_at=clock_timestamp() WHERE id=$7`, [...state, task.id]);
       } else {
         const { rows: [created] } = await client.query<{ id: number }>(`INSERT INTO appointment_followups
-          (assignee_user_id,due_at,status,outcome,next_step,revision,source_appointment_id,source_created_at,generation,appointment_id,patient_id)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$7,$10) RETURNING id`,
-        [...state, source.id, command.sourceCreatedAt, command.generation, source.patient_id]);
+          (assignee_user_id,due_at,status,outcome,next_step,revision,source_appointment_id,source_created_at,generation)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+        [...state, source.id, command.sourceCreatedAt, command.generation]);
         followupId = created.id;
+        await client.query(`INSERT INTO appointment_followup_links (followup_id,appointment_id,patient_id)
+          VALUES ($1,$2,$3)`, [followupId, source.id, source.patient_id]);
       }
       const { rows: [event] } = await client.query<{ id: number }>(`INSERT INTO appointment_followup_events
         (assignee_user_id,due_at,status,outcome,next_step,revision,followup_id,actor_user_id,request_id,fingerprint)

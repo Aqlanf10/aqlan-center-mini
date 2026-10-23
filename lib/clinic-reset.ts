@@ -227,3 +227,10 @@ export const RESET_PREVIEW_GROUPS: { label: string; table: (typeof RESET_WIPE_TA
 export function isResetPhrase(value: unknown): boolean {
   return typeof value === "string" && value.trim().replace(/\s+/g, " ") === RESET_CONFIRM_PHRASE;
 }
+
+/** Dormant follow-up schema: apply these classifications together with bootstrap.
+ * Do not add the absent links table to active reset/preview queries before then. */
+export const APPOINTMENT_FOLLOWUP_RESET_WIPE_TABLES = ["appointment_followup_links"] as const;
+export const APPOINTMENT_FOLLOWUP_RESET_KEEP_TABLES = [
+  "appointment_followups", "appointment_followup_events", "appointment_followup_receipts",
+] as const;

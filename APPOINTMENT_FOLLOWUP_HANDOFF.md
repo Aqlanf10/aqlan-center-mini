@@ -1,76 +1,50 @@
-# Appointment follow-up foundation — dormant, not release-ready
+# Appointment follow-up foundation � dormant review candidate
 
-Independent clone: `task-2/appointment-followup`; branch: `feat/appointment-followup`.
-Base: PR #429, `bc5cae2bed642069dda2326e353fa1d17c3ada40`, verified against GitHub.
-PR #420 head `181cab90350c421d40fed24fb92a7c8fa0667b44` is an ancestor.
-The source doctor-availability checkout was read only; its uncommitted work was not copied or changed.
+Independent clone: `task-2/appointment-followup`; branch `feat/appointment-followup`, Draft #434.
+Base #429: `bc5cae2bed642069dda2326e353fa1d17c3ada40`; #420 rebooking commit `181cab90350c421d40fed24fb92a7c8fa0667b44` is an ancestor.
+The doctor-availability checkout, financial writers, booking/merge writers and HR locks are unchanged.
 
-## Implemented candidate
+## Current design
 
-- Strict command contract with an expected patient ID witness; no arbitrary notes, patient names, phone numbers, diagnoses or treatment text.
-- Unnumbered schema in `lib/appointment-followup-schema.ts`, installed only by its PostgreSQL test. **No runtime registration.**
-- One task per original appointment ID + exact PostgreSQL creation epoch (six fractional digits) + existing reset generation. Immutable source identity, nullable live appointment/patient references, and revision control.
-- `readAppointmentFollowupSource` produces the draft's appointment ID, expected patient ID, full-precision timestamp and generation from live server context after current authorization. The writer compares all of them with the locked source before creation or receipt lookup. Patient identity is included in the request digest, not copied into history FKs. A pre-merge or pre-reassignment draft fails with 409, including a lost-response retry; changing its witness with the same request key also conflicts.
-- Append-only structured events and actor-scoped request receipts; no patient FK in either history table. Current task patient FK can follow the canonical patient merge.
-- `saveAppointmentFollowup` performs source locking, current session and patient access checks, assignee validation, revision check, task write, event, receipt and canonical audit in one transaction. It uses the existing shared reset fence without modifying it or any booking/HR/financial writer.
-- Per-actor request locking serializes exact retries; source row locking serializes competing creation. Exact replay returns the original revision after current session/source validation. Another actor cannot receive the first actor's receipt.
-- Explicit creation for a past/current, recorded `no_show`, with no attendance/visit evidence. Elapsed time alone creates nothing. `no_answer`/`awaiting_reply` stay open and need future due time. Rebooking remains `rebooking_review`; no arbitrary appointment link or “rebooked” closure is accepted.
-- `readAppointmentFollowupQueue` is a bounded current-generation open backlog, with live patient context joined only after admin/reception session authorization. Missing, reassigned or reused source identities return no patient context. It has no selected-day filter, no auto-creation, and no HTTP endpoint yet.
-- Transaction cleanup destroys connections after failed BEGIN, uncertain COMMIT or failed ROLLBACK, and preserves the original failure even if release also fails.
-- Two audit action labels, without changing the audit writer.
+- Explicit work for an eligible recorded no_show only. No automatic GET writes or inferred absence from elapsed time. Admin/reception only. Contact does not change attendance, treatment or financial lifecycle.
+- Strict structured command: assignee, due time, status, outcome, next step, revision, frozen request key and server-produced identity witnesses. No free text, names, phones, diagnoses or treatment text in task/event/receipt history.
+- `appointment_followups` holds immutable original appointment ID + exact six-decimal creation epoch + reset generation. It has no FK to patients, appointments or links.
+- `appointment_followup_links` alone has the nullable live appointment/patient FKs (ON DELETE SET NULL), and points to its task. No preserved history table points back to links. The link trigger forbids appointment replacement/rebinding after NULL and forbids recreating a link once an event exists.
+- Events and receipts remain append-only with UPDATE/DELETE/nonempty TRUNCATE guards. Actor-scoped keys bind the exact event, fingerprint and revision. Their FKs do not follow patient merges.
+- Writer checks generation, exact source timestamp and expected patient against the locked appointment before any receipt access. Existing tasks require their original live link; missing links are never reconstructed from numeric source IDs. Current session/permissions and assignee are checked. Task + link + event + receipt + canonical audit commit atomically.
+- Lock order: shared existing reset fence, actor/key, source, task NOWAIT, link NOWAIT, users NOWAIT, patient NOWAIT. Merge's alphabetic FK update can hold links before appointments; NOWAIT fails closed with FOLLOWUP_BUSY and rollback. No merge writer change.
+- Canonical merge moves only the live link's patient FK and appointment FK through its existing mechanism. Old displayed-patient attempts reject before replay; changing the witness cannot reuse the same key. Explicitly refreshed context permits subsequent work with a new key.
+- Queue is a current-generation backlog, independent of selected-day KPIs. Missing link/source yields source_unavailable_review_required, no patient context, and blocked contact/rebooking. Conflicting attendance yields source_ineligible_review_required and blocked contact, preserving history.
+- Shared eligibility reads both attendance-log directions, direct and source-specific planned links, and linked session/item witnesses. It does not scan sibling plan visits. A replacement visit does not rewrite the original absence; ambiguous moved pointers require review.
+- No-answer/awaiting-reply stay open with later due work. Rebooking stays under review pending proven #420 linkage. Another missed appointment is separate history.
+- Transaction cleanup discards uncertain connections and preserves the original error through rollback/release failures.
 
-## Coordination proposal — not applied
+## Reset design approved for implementation/testing, not activation
 
-Last migration present in the verified base: `0069_unpaid_currency_transitions.sql`. No `0070+` number reserved or assigned here. Recheck remote work before allocating one.
+The three history tables are KEEP. Only links are RESET_WIPE. Successful reset wipes links, preserves historical generations, and advances the existing audit-derived generation. Old generations do not appear in active backlog; reused patient/appointment IDs cannot reattach old work or replay old requests.
 
-After PG18 evidence and review, proposed touch points are:
+`lib/clinic-reset.ts` exports the candidate classifications separately. They are deliberately not spread into the active arrays yet: existing preview/reset queries reference every wipe table unconditionally, while this schema is still unregistered. Activating that entry alone would break reset on databases without the table.
 
-1. An agreed numbered migration, byte-identical runtime registration in `lib/db.ts`, chain counts/manifests/schema contract regenerated through existing generators.
-2. Explicit reset classification for the three tables. The earlier protected-history refusal proposal changes existing operational behavior and is **not an approved or final policy**. Reset policy requires owner review before any registration. **Nulling live references alone does not solve PostgreSQL TRUNCATE FK dependencies**; do not add these tables to a wipe list or bypass immutable triggers. No reset change has been made.
-3. Backup/restore and schema-ownership coverage for all three tables/functions/triggers; restore ordering task → event → receipt; patient merge/deletion compatibility evidence.
-4. Narrow admin/reception API routing/permission registration with existing bounded body/CSRF conventions, then recall editor/queue. UI must retain the frozen attempt/key across lost responses and isolate responses after actor/patient changes. A WhatsApp draft is not contact or delivery.
-5. Separate leadership backlog panel after the underlying slice passes. No selected-day KPI substitution.
+The guarded PG suite installs candidate SQL and composes only those classifications via a test-local module mock, then calls the real `resetClinicData`. The reset algorithm and financial history protections are unchanged. No ProtectedFollowupHistoryError, CASCADE, trigger bypass or real reset is introduced.
 
-## Verification and blockers
+Authored tests cover canonical reset with nonempty history, link deletion, changed generation, saved/unsaved stale intents with exact reused IDs/timestamps, new-generation work, and reset-audit failure after TRUNCATE rolling back links/history/sources/generation. They also adapt the deterministic real-merge race to the links table, assert merge leaves history unchanged, reject missing/recreated links and verify no retained-history FK targets patients/appointments/links. These tests require execution on this new head; old-schema results do not establish them.
 
-- Read `AGENTS.md`, local Next route-handler guide, PostgreSQL global setup, safe-target guard and related rebooking/merge/reset tests.
-- `.agents/skills` was absent from this Git checkout, the authorized doctor checkout and inspected ancestor locations. No substitute repository skill instructions were invented.
-- After the combined review fixes, focused follow-up and adjacent audit suites passed: **6 files, 58 tests** (Node 24.15.0). Repository requires Node 22, so this is provisional runtime evidence. No tests or SQL assertions were weakened.
-- Focused ESLint: passed after repairing an incomplete npm install and fixing transaction cleanup structure.
-- Final full nonincremental typecheck after the combined lock/eligibility/input review fixes: passed (exit 0, empty diagnostic log), on the current foundation and test files. Node remains 24.15.0 rather than the repository-required Node 22.
-- PostgreSQL suite: **not executed**. The existing global setup refused startup because neither `TEST_DATABASE_URL` nor `DATABASE_URL` was configured. No alternate database, PGlite fallback, target-guard change, secret-file read or environment switch was used.
-- Locked dependency installation initially crashed and left a corrupt dependency. Retrying `npm ci --ignore-scripts --maxsockets=1` succeeded without package/lockfile changes.
-- Adjacent audit test initially failed solely because Windows checkout converted an unchanged migration to CRLF. That file was restored from Git with LF; no SQL/assertion was modified.
+## Proposed bootstrap / manifest touch points � awaiting review
 
-## Required evidence before activation
+1. Coordinate a numbered migration only after rechecking concurrent work. This clone's latest migration remains `0069_unpaid_currency_transitions.sql`; no number is reserved. The old candidate schema was never registered; do not assume an installed old shape or silently ALTER real databases.
+2. Register the agreed DDL through the repository migration/runtime mechanism in `lib/db.ts` in the same reviewed release as spreading the candidate reset classifications into active RESET_WIPE_TABLES/RESET_KEEP_TABLES. Preserve existing reset algorithm and financial refusal guards.
+3. Regenerate `schema/current-schema-contract.pg18.json` through `scripts/generate-current-schema-contract.ts` against guarded isolated PG18, and verify migration-chain/runtime ownership parity. Include all four tables, constraints, queue index, source/link/history functions and triggers. Do not rewrite the immutable 0001 baseline manifest or weaken ownership findings to hide drift.
+4. Verify `lib/fullBackup.ts` / `lib/productionBackup.ts` and restore staging preserve all four tables, serial sequence positions, generation audit history and constraints/triggers. Verify restore population/trigger ordering does not conflict with the link insert guard. Test old-generation history, missing links, deleted sources and coherent restore identity. No backup/restore file changed here.
+5. Add explicit schema readiness/permission/CSRF routing only after schema and PG acceptance; then implement recall editor/queue and a separate leadership backlog view. Browser attempts must survive lost responses and isolate actor/context switches. Opening WhatsApp is not delivery or contact.
 
-The authored PG suite covers concurrency, exact retries/content conflicts/actor scope, stale revision, changed sessions/roles, invalid source states/future sources, no-answer/waiting, source microsecond identity, deletion/ID reuse, patient reassignment, canonical patient merge, append-only constraints, live-context queue, explicit closure/separate replacement history and audit rollback. **None of these database cases is claimed to have passed.**
+## Evidence and limits
 
-Still required: real reset integration (including saved and unsaved pre-reset intents and reused IDs), controlled clinic-midnight tests, merge/reset/session/attendance races, restored-backup identity, nonempty financial/clinical sentinel fingerprints, HTTP permission/CSRF tests and browser lost-response/actor-switch checks. The current fingerprint assertion includes several empty financial tables and is not sufficient release evidence by itself.
+AGENTS.md, local Next guide, PG configuration/target guard and canonical reset/merge tests were read. `.agents/skills` is absent from the checkout. No secrets or real patient records were read.
 
-There is no active API, recall editor, leadership panel, numbered migration, deployment, merge, WhatsApp send or paid-service activation. Draft #434 is for review/hosted CI only. `lib/db.ts`, reset registry, permissions, financial writers, booking guards and HR locks remain unchanged.
+Prior head d5cc1bb had 60 focused unit/audit tests, lint and TypeScript passing on Node 24.15.0. That is not evidence for this schema revision. Current-head check results are recorded in the PR/review delivery, including the exact SHA; Node 22 must be established by hosted CI.
 
-## Design review details
+The new PG attempt stopped in global setup because neither TEST_DATABASE_URL nor DATABASE_URL is configured. No PG test/reset executed locally. No target/guard/security change, runtime install, fallback DB or production connection was used. Final-head hosted PG evidence is mandatory.
 
-- Merge: only the live task has a patient FK. The canonical FK-driven merge should move that FK and the appointment FK together. Events and receipts contain no patient FK and no copied patient context, so merge must not update history. Both isolated reassignment and a legitimate merge invalidate old displayed-patient witnesses: old requests return 409 before receipt access. Refreshing context is explicit, and a changed witness cannot reuse an old key.
-- Deletion: appointment deletion nulls the task's live appointment reference; patient deletion nulls its live patient reference. Original source ID, full-precision timestamp and generation remain immutable. An orphan cannot be rebound even if an appointment number is reused. Queue context/identity becomes null with `source_unavailable_review_required`, `contactBlocked: true` and `rebookingBlocked: true`; edits/replays fail closed. No active UI exists yet. The first slice never claims a proved replacement booking for any task.
-- History: typed state snapshots, actor ID, request ID, digest and revision; append-only triggers forbid UPDATE/DELETE and nonempty TRUNCATE. Receipt uniqueness is actor + request ID, linked to the exact event/digest. The writer commits state + event + receipt + canonical audit together. Database transaction/race guarantees still need real PG18 execution.
-- Reset policy remains undecided and unregistered. The added synthetic PG cases advance the actual reset-generation marker, reuse the exact original appointment ID and timestamp, and assert 409 with identical task/event/receipt/audit snapshots for both saved and unsaved attempts. This tests the generation boundary when executed; it does not exercise or approve the canonical reset workflow.
-- The previously identified creation-intent gap is addressed by the required expected-patient witness and locked comparison. Authored PG tests cover reassignment/merge before creation, reassignment/merge after creation, replay after merge, changed-witness key reuse and reset-generation ID reuse, asserting no partial writes. PG execution remains blocked.
+Remaining activation gates include execution/review of this reset design, controlled clinic-midnight tests, broader merge/reset/session/attendance races, real backup/restore identity, nonempty financial/clinical sentinels, HTTP security and browser retry/actor-switch checks. Unit success is not integration acceptance.
 
-## Computer reconnection
-
-The same clone and branch were recovered without recreation. The old final TypeScript process/session no longer existed, and its result was not recoverable; only this unconfirmed check was rerun, with persistent output in `../followup-typecheck.log` and exit status in `../followup-typecheck.exit`. No PostgreSQL executable, Docker executable or PostgreSQL Windows service was found in the scoped availability checks. No credentials, security settings or database targets were created or changed.
-
-## Review delivery gate
-
-Only Node 24.15.0 was found on PATH and in the inspected standard version-manager locations (Roaming/nvm, Local/fnm, ~/.nvm, ~/.fnm, C:/tools/nodejs). No runtime was downloaded or system settings changed. The owner subsequently authorized push and Draft #434 so the existing hosted CI can establish Node 22/PG evidence. The PR targets #429's branch and explicitly states: schema unregistered, API/UI inactive, PG unverified. Local PG18 remains unexecuted.
-
-## Combined review fixes after 3a80d8a
-
-- The followup row lock is NOWAIT. The canonical patient merge locks patients then updates FKs alphabetically, so it can hold a followup before requesting its appointment. Refusing to wait at this exact point breaks the reverse wait edge and rolls back the followup transaction as FOLLOWUP_BUSY. No merge/booking/HR writer was changed.
-- A deterministic PG test calls the real mergeDuplicatePatient and pauses it with an AFTER UPDATE trigger plus an advisory barrier after acquiring the followup row. It observes pg_locks/pg_blocking_pids rather than relying on execution-time thresholds, expects FOLLOWUP_BUSY with unchanged task/event/receipt/audit snapshots, releases the barrier and expects merge completion. This is authored evidence only until hosted PG execution; no local red/green claim is made.
-- Writer and queue share a read-only eligibility predicate: both status-log directions, direct visits, source-linked planned rows in either pointer direction, their visit pointers and clinical completion witnesses. No sibling-plan scan is used. A canonical replacement's later visit does not become attendance for the original no_show; an inconsistent retained pointer requires review rather than silently reclassifying history. No lifecycle is changed.
-- Queue entries with contradictory attendance or other lost eligibility remain visible with source_ineligible_review_required and contactBlocked=true. Missing-source behavior and immutable history are retained.
-- Status must be a JSON string. Arrays and objects with non-callable toString are rejected as INVALID_FOLLOWUP before any database connection.
-- Remaining contract/design review, true PostgreSQL execution, reset integration, controlled midnight and broader concurrency/restore/HTTP/browser evidence are still open. These fixes are not a declaration that all findings are closed.
+Schema remains unnumbered/unregistered; no API, UI, deployment, merge, WhatsApp send or paid activation. `lib/db.ts` is unchanged. Only dormant follow-up reset classifications were added in `lib/clinic-reset.ts`.
