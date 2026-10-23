@@ -3,7 +3,7 @@ import { cp, mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { classifyFullAudit, validateOfficialEvidence, validateWithdrawnAudit, validateWithdrawnOfficialEvidence } from "../lib/scoped-braces-exception.mjs";
+import { classifyFullAudit, OFFICIAL_CLOCK_TOLERANCE_MS, validateOfficialEvidence, validateWithdrawnAudit, validateWithdrawnOfficialEvidence } from "../lib/scoped-braces-exception.mjs";
 import { fetchOfficialJson, verifyBracesException } from "../scripts/verify-braces-exception.mjs";
 import { inspectInstalledBraces } from "../scripts/dependency-security/installed-braces.mjs";
 import { REVIEWED_OVERRIDES } from "../scripts/dependency-security/reviewed-overrides.mjs";
@@ -66,7 +66,8 @@ describe("full-audit lifecycle classification", () => {
 
 describe("official withdrawal evidence", () => {
   it("accepts the same advisory withdrawn, no active advisory listed, and the unchanged release", () => {
-    for (const listed of [[], [{ ghsa_id: PIN.ghsa, withdrawn_at: WITHDRAWN_AT }]]) {
+    // GitHub's affects=braces@3.0.3 query still returns the withdrawn advisory: a complete identical entry.
+    for (const listed of [[], [withdrawnAdvisory()]]) {
       expect(validateWithdrawnOfficialEvidence(withdrawnAdvisory(), listed, structuredClone(registry), NOW)).toMatchObject({ withdrawnAt: WITHDRAWN_AT, officialVersion: PIN.version });
     }
   });
@@ -75,6 +76,11 @@ describe("official withdrawal evidence", () => {
     ["malformed withdrawal time", (a) => { a.withdrawn_at = "yesterday"; }],
     ["withdrawal before the reviewed update", (a) => { a.withdrawn_at = "2026-10-01T00:00:00Z"; }],
     ["withdrawal in the future", (a) => { a.withdrawn_at = "2026-12-01T00:00:00Z"; }],
+    ["update before the withdrawal", (a) => { a.updated_at = "2026-10-23T12:53:01Z"; }],
+    ["publication after the withdrawal", (a) => { a.published_at = "2026-10-23T12:53:03Z"; }],
+    ["missing publication time", (a) => { delete a.published_at; }],
+    ["update beyond the clock tolerance", (a) => { a.withdrawn_at = new Date(NOW + OFFICIAL_CLOCK_TOLERANCE_MS).toISOString(); a.updated_at = new Date(NOW + OFFICIAL_CLOCK_TOLERANCE_MS + 1000).toISOString(); }],
+    ["a changed API url", (a) => { a.url += "x"; }],
     ["malformed update time", (a) => { a.updated_at = 5; }],
     ["different GHSA", (a) => { a.ghsa_id = "GHSA-xxxx-xxxx-xxxx"; }],
     ["different CVE", (a) => { a.cve_id = "CVE-2026-00000"; }],
@@ -93,7 +99,16 @@ describe("official withdrawal evidence", () => {
     ["another advisory", [{ ghsa_id: "GHSA-aaaa-bbbb-cccc", withdrawn_at: null }]],
     ["another withdrawn advisory", [{ ghsa_id: "GHSA-aaaa-bbbb-cccc", withdrawn_at: WITHDRAWN_AT }]],
     ["the same advisory still active", [{ ghsa_id: PIN.ghsa, withdrawn_at: null }]],
-    ["the same advisory with a different withdrawal", [{ ghsa_id: PIN.ghsa, withdrawn_at: "2026-10-23T13:00:00Z" }]],
+    ["a complete entry still active", [{ ...withdrawnAdvisory(), withdrawn_at: null }]],
+    ["the same advisory with a different withdrawal", [{ ...withdrawnAdvisory(), withdrawn_at: "2026-10-23T13:00:00Z" }]],
+    ["a partial entry (identity and withdrawal only)", [{ ghsa_id: PIN.ghsa, withdrawn_at: WITHDRAWN_AT }]],
+    ["a duplicate complete entry", [withdrawnAdvisory(), withdrawnAdvisory()]],
+    ["the withdrawn entry next to another advisory", [withdrawnAdvisory(), { ...withdrawnAdvisory(), ghsa_id: "GHSA-aaaa-bbbb-cccc" }]],
+    ["an entry with a different update time", [{ ...withdrawnAdvisory(), updated_at: "2026-10-23T12:53:04Z" }]],
+    ["an entry with different identifiers", [{ ...withdrawnAdvisory(), identifiers: [{ value: PIN.ghsa, type: "GHSA" }] }]],
+    ["an entry with a different affected range", [(() => { const a = withdrawnAdvisory(); a.vulnerabilities[0].vulnerable_version_range = "< 3.0.3"; return a; })()]],
+    ["an entry with a different severity", [{ ...withdrawnAdvisory(), severity: "low" }]],
+    ["a non-object entry", ["GHSA-vfj7-8cjw-p6xm"]],
     ["a malformed list", { ghsa_id: PIN.ghsa }],
     ["a missing list", null],
   ])("rejects a matching-advisory result with %s", (_label, listed) => {
@@ -108,6 +123,13 @@ describe("official withdrawal evidence", () => {
   ])("rejects an official release with %s", (_label, change) => {
     const release = structuredClone(registry); const changed = change(release);
     expect(() => validateWithdrawnOfficialEvidence(withdrawnAdvisory(), [], changed === null ? null : release, NOW)).toThrow(/BRACES_EXCEPTION_REJECTED/);
+  });
+  it("bounds future times with the explicit clock and tolerance, and requires that clock", () => {
+    const edge = withdrawnAdvisory();
+    edge.withdrawn_at = edge.updated_at = new Date(NOW + OFFICIAL_CLOCK_TOLERANCE_MS).toISOString();
+    expect(validateWithdrawnOfficialEvidence(edge, [], structuredClone(registry), NOW).advisoryUpdatedAt).toBe(edge.updated_at);
+    expect(() => validateWithdrawnOfficialEvidence(edge, [], structuredClone(registry), NOW - 1000)).toThrow(/in the future/);
+    for (const clock of [undefined, Number.NaN]) expect(() => validateWithdrawnOfficialEvidence(withdrawnAdvisory(), [], structuredClone(registry), clock)).toThrow(/verification clock missing/);
   });
   it("never re-allows the advisory if it reappears: the active path demands live non-withdrawn proof", () => {
     // A reported braces finding classifies as "active"; the withdrawn record must not satisfy that path,
@@ -165,7 +187,7 @@ describe("withdrawn-mode verification on a synthetic installed tree", () => {
     throw new Error(`unexpected official url ${url}`);
   });
   const LOCK_PACKAGES = 4;
-  const verify = async (full, production, options) => verifyBracesException(full, production, root, { installedBefore: await inspectInstalledBraces(root), ...options });
+  const verify = async (full, production, options) => verifyBracesException(full, production, root, { installedBefore: await inspectInstalledBraces(root), clock: () => NOW, ...options });
 
   it("passes a clean audit with live official withdrawal proof and re-verifies the patched local copy", async () => {
     const fetchJson = official();
@@ -205,7 +227,10 @@ describe("withdrawn-mode verification on a synthetic installed tree", () => {
   it.each([
     ["an unavailable official service", () => vi.fn(async () => { throw new Error("BRACES_EXCEPTION_REJECTED: official lookup failed"); }), /official lookup failed/],
     ["a still-active advisory", () => official({ advisory: structuredClone(activeAdvisory) }), /not withdrawn/],
-    ["another active advisory", () => official({ matching: [{ ghsa_id: "GHSA-aaaa-bbbb-cccc", withdrawn_at: null }] }), /still-active/],
+    ["another active advisory", () => official({ matching: [{ ghsa_id: "GHSA-aaaa-bbbb-cccc", withdrawn_at: null }] }), /differs from the withdrawn advisory: ghsa_id/],
+    ["a partial matching entry", () => official({ matching: [{ ghsa_id: PIN.ghsa, withdrawn_at: WITHDRAWN_AT }] }), /differs from the withdrawn advisory: cve_id/],
+    ["an unavailable matching-advisory service", () => vi.fn(async (url) => { if (url.startsWith("https://api.github.com/advisories?")) throw new Error("BRACES_EXCEPTION_REJECTED: official lookup failed: matching"); return url.startsWith("https://api.github.com/advisories/") ? withdrawnAdvisory() : structuredClone(registry); }), /official lookup failed: matching/],
+    ["an unavailable registry", () => vi.fn(async (url) => { if (url === "https://registry.npmjs.org/braces") throw new Error("BRACES_EXCEPTION_REJECTED: official lookup failed: registry"); return url.startsWith("https://api.github.com/advisories/") ? withdrawnAdvisory() : []; }), /official lookup failed: registry/],
   ])("rejects %s", async (_label, makeFetch, message) => {
     await expect(verify(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), { fetchJson: makeFetch() })).rejects.toThrow(message);
   });

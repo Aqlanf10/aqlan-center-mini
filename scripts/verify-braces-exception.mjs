@@ -35,7 +35,7 @@ export async function snapshotInstallation(projectRoot = root, inspect = inspect
 }
 
 export async function verifyBracesException(fullRun, productionRun, projectRoot = root,
-  { fetchJson = fetchOfficialJson, inspect = inspectInstalledBraces, installedBefore } = {}) {
+  { fetchJson = fetchOfficialJson, inspect = inspectInstalledBraces, installedBefore, clock = Date.now } = {}) {
   // "active": the reviewed advisory is still reported (scoped graph). "withdrawn": the full audit is
   // completely clean and live official proof of the withdrawal is compulsory below. Nothing else passes.
   const mode = classifyFullAudit(fullRun);
@@ -50,7 +50,7 @@ export async function verifyBracesException(fullRun, productionRun, projectRoot 
   const advisory = await fetchJson(`https://api.github.com/advisories/${PIN.ghsa}`);
   const matching = await fetchJson("https://api.github.com/advisories?ecosystem=npm&affects=braces%403.0.3&per_page=100");
   const registry = await fetchJson("https://registry.npmjs.org/braces");
-  const official = mode === "active" ? validateOfficialEvidence(advisory, matching, registry) : validateWithdrawnOfficialEvidence(advisory, matching, registry);
+  const official = mode === "active" ? validateOfficialEvidence(advisory, matching, registry) : validateWithdrawnOfficialEvidence(advisory, matching, registry, clock());
   const proof = {
     format: mode === "active" ? "aqlan-scoped-braces-exception-v1" : "aqlan-braces-advisory-withdrawn-v1", mode, ...disposition, official,
     rawFullAuditSha256: sha256(fullRun.stdout), rawProductionAuditSha256: sha256(productionRun.stdout),

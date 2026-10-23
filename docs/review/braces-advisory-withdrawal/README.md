@@ -35,12 +35,18 @@
 
   Every other failure is re-thrown.
 - `validateWithdrawnDisposition(run, installed)`: the clean audit, plus every installed braces copy is the pinned 3.0.3.
-- `validateWithdrawnOfficialEvidence(advisory, matching, registry)` requires all of the following:
-  - the **same** GHSA, CVE, page and identifiers;
-  - `withdrawn_at` is a valid instant after the reviewed `updated_at` (2026-10-02T22:36:34Z), and not in the future;
-  - `updated_at` is valid;
+- `validateWithdrawnOfficialEvidence(advisory, matching, registry, now)` requires all of the following:
+  - an explicit verification clock `now`. The verifier passes `clock()`, taken after the official lookups; it is injectable for tests;
+  - the **same** GHSA, CVE, API url, page and identifiers;
+  - `withdrawn_at`, `published_at` and `updated_at` are valid instants;
+  - **chronology:** `published_at ≤ withdrawn_at ≤ updated_at ≤ now + OFFICIAL_CLOCK_TOLERANCE_MS` (5 min), and `withdrawn_at` is after the reviewed `updated_at` (2026-10-02T22:36:34Z);
   - the affected package, range and `first_patched_version: null` are unchanged;
-  - the matching-advisory list for `braces@3.0.3` contains **nothing but this same advisory, with this same `withdrawn_at`**. The list is **not required to be empty**: GitHub's `affects=braces@3.0.3` query still returns the withdrawn advisory;
+  - **the matching-advisory list for `braces@3.0.3`:**
+    - it is a list with **at most one** entry, so duplicates and any other advisory are rejected;
+    - that entry must be **complete and identical** to the directly fetched withdrawn record on every field in `MATCHING_ENTRY_FIELDS`: `ghsa_id`, `cve_id`, `url`, `html_url`, `type`, `severity`, `identifiers`, `vulnerabilities`, `published_at`, `updated_at` and `withdrawn_at`;
+    - a mismatch names the field;
+    - the list is **not required to be empty**, because GitHub's `affects=braces@3.0.3` query still returns the withdrawn advisory;
+    - an empty list passes only together with the complete direct withdrawn record and the complete clean full and production audits;
   - the official release is unchanged.
 
 **`scripts/verify-braces-exception.mjs`, `verifyBracesException`:**
@@ -73,7 +79,7 @@
 - the workflow, `package.json`, lockfile and Dockerfile;
 - every other dependency finding, which stays fail-closed.
 
-## Regression cases (`__tests__/braces-advisory-withdrawal.test.mjs`, 61; plus `__tests__/ci-audit-runner.test.ts`: a withdrawn-proof success, 8 fail-closed proof-shape cases, and a snapshot-ordering assertion)
+## Regression cases (`__tests__/braces-advisory-withdrawal.test.mjs`, 79; plus `__tests__/ci-audit-runner.test.ts`: a withdrawn-proof success, 8 fail-closed proof-shape cases, and a snapshot-ordering assertion)
 
 The synthetic official payload uses the independently verified live values: `withdrawn_at` 2026-10-23T12:53:02Z, `updated_at` 12:53:05Z.
 
@@ -105,6 +111,22 @@ The synthetic official payload uses the independently verified live values: `wit
 
   Drift is rejected **before** any official lookup.
 
+- **Official evidence consistency:**
+  - **The direct record:**
+    - an update before the withdrawal;
+    - publication after the withdrawal;
+    - a missing publication time;
+    - an update beyond the clock tolerance (with the exact tolerance edge accepted);
+    - a missing or NaN clock;
+    - a changed API url.
+  - **The matching list:**
+    - a partial entry (identity plus withdrawal only);
+    - a duplicate complete entry;
+    - the withdrawn entry next to another advisory;
+    - an entry differing in update time, identifiers, affected range or severity;
+    - a complete entry that is still active;
+    - a non-object entry.
+  - **Unavailable services:** the matching-advisory service and the npm registry, each inside full verification.
 - **No silent re-allowance:**
   - if braces is reported again, the audit classifies as `active`;
   - that path still demands live proof that the advisory is **not** withdrawn and has the reviewed `updated_at`;

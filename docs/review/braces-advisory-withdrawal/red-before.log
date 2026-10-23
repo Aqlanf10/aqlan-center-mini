@@ -36,3 +36,24 @@ TypeError: validateWithdrawnOfficialEvidence is not a function
 # With the follow-up: all braces/audit suites green (10 files)
  Test Files  10 passed (10)
       Tests  383 passed (383)
+
+# Strict official-evidence consistency (review finding on f5500dcd): new cases against the f5500dcd implementation
+     × rejects an advisory with update before the withdrawal
+     × rejects an advisory with publication after the withdrawal
+     × rejects an advisory with missing publication time
+     × rejects an advisory with update beyond the clock tolerance
+     × rejects an advisory with a changed API url
+     × rejects a matching-advisory result with a partial entry (identity and withdrawal only)
+     × rejects a matching-advisory result with a duplicate complete entry
+     × rejects a matching-advisory result with an entry with a different update time
+     × rejects a matching-advisory result with an entry with different identifiers
+     × rejects a matching-advisory result with an entry with a different affected range
+     × rejects a matching-advisory result with an entry with a different severity
+     × bounds future times with the explicit clock and tolerance, and requires that clock
+     × rejects another active advisory          (now rejected with the exact differing field)
+     × rejects a partial matching entry         (accepted by f5500dcd)
+      Tests  14 failed | 65 passed (79)
+
+# With the change: braces/audit suites + runtime-tracing green
+ Test Files  11 passed (11)
+      Tests  406 passed (406)
