@@ -1,0 +1,47 @@
+## M1 first revision instead of latest
+     × a corrected document prints its latest saved revision, not the first revision or child agreed values 120ms
+     × a historical correction and an opening payment committed mid-print appear in neither the agreement nor the balances 89ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  2 failed | 12 passed (14)
+## M2 historical read outside the statement snapshot (pool)
+     × a historical correction and an opening payment committed mid-print appear in neither the agreement nor the balances 49ms
+     × a failing historical read fails the print instead of printing an empty history 37ms
+     × the portal statement issues no historical query and ignores a malformed historical fact; the opted-in print fails closed 42ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  3 failed | 11 passed (14)
+## M3 document children re-printed as standalone
+     × two discounted historical lines with prior payment and no current documents: details visible, billed/collected 0, opening once 231ms
+     × a current receipt 40,000 and refund 10,000 leave 270,000 once at currency level; historical facts and journal/cash are preserved 115ms
+     × several same-currency documents: each printed once; current collections/remainder shown once for the currency 98ms
+     × mixed with a current invoice: both printed; the invoice totals and canonical balance are unchanged 56ms
+     × a corrected document prints its latest saved revision, not the first revision or child agreed values 80ms
+     × fully paid historically: no opening row, remainder 0, no invented opening collections 31ms
+     × a manual opening with no stored detail says so and infers nothing; SAR and YER stay in separate buckets 53ms
+     × an SAR document uses ×100 minor units through formatMoney and never mixes with YER 45ms
+     × only this patient's agreements are printed 11ms
+     × a historical correction and an opening payment committed mid-print appear in neither the agreement nor the balances 35ms
+     × a failing historical read fails the print instead of printing an empty history 51ms
+     × the portal statement issues no historical query and ignores a malformed historical fact; the opted-in print fails closed 39ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  12 failed | 2 passed (14)
+## M4 void standalone agreements printed
+     × a standalone legacy agreement prints once with its stored site; a void one does not print 55ms
+     × the portal statement issues no historical query and ignores a malformed historical fact; the opted-in print fails closed 48ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  2 failed | 12 passed (14)
+## M5 historical read not opt-in (portal reads it too)
+     × the portal statement issues no historical query and ignores a malformed historical fact; the opted-in print fails closed 59ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 13 passed (14)
+## M6 standalone given an invented zero discount
+     × a standalone legacy agreement prints once with its stored site; a void one does not print 62ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 13 passed (14)
+## M7 empty-invoice section always printed
+     × two discounted historical lines with prior payment and no current documents: details visible, billed/collected 0, opening once 299ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 13 passed (14)
+## M8 duplicate opening line with internal note kept
+     × two discounted historical lines with prior payment and no current documents: details visible, billed/collected 0, opening once 320ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 13 passed (14)

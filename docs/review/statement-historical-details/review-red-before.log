@@ -1,0 +1,4 @@
+     × a standalone legacy agreement prints once with its stored site; a void one does not print 78ms
+     × the portal statement issues no historical query and ignores a malformed historical fact; the opted-in print fails closed 40ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  2 failed | 12 passed (14)
