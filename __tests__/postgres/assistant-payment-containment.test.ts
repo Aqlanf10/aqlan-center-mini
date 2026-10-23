@@ -74,12 +74,16 @@ const paymentParams = () => ({ patientId, invoiceId, amount: "5000", currency: "
 const issuedToken = (session: SessionPayload, tool = "record_patient_payment", params: Record<string, unknown> = paymentParams()) =>
   signToolConfirmation(buildToolConfirmationPayload({ userId: session.userId, username: session.username, tool, params, patientId }));
 const CONTAINED = /موقوف/;
+/** The refusal speaks only for this attempt: a prior attempt may already have committed. */
+const QUALIFIED = [/في هذه المحاولة/, /محاولةٌ سابقة/, /راجع سندات المريض/];
 
-function expectContained(result: { success: boolean; textSummary: string; confirmation?: unknown; requiresConfirmation?: boolean; actions?: { href?: string }[] }) {
+function expectContained(result: { success: boolean; textSummary: string; confirmation?: unknown; requiresConfirmation?: boolean; contained?: boolean; actions?: { href?: string }[] }) {
   expect(result.success).toBe(false);
   expect(result.confirmation).toBeUndefined();
   expect(result.requiresConfirmation).not.toBe(true);
+  expect(result.contained).toBe(true);
   expect(result.textSummary).toMatch(CONTAINED);
+  for (const pattern of QUALIFIED) expect(result.textSummary).toMatch(pattern);
   expect(result.actions?.some((action) => action.href === "/finance")).toBe(true);
 }
 
@@ -177,6 +181,9 @@ describe("the real assistant routes", () => {
       const data = await response.json() as Record<string, unknown>;
       expect(data.ok, JSON.stringify(data)).toBe(false);
       expect(String(data.reply)).toMatch(CONTAINED);
+      // What the chat window needs for its terminal refused state and safe navigation.
+      expect(data.contained).toBe(true);
+      expect(data.actions).toEqual([{ label: "فتح شاشة التحصيل", href: "/finance", actionType: "navigate" }]);
     }
     expect(await claims()).toBe(c0);
     expect(changedTables(s0, await databaseState())).toEqual([]);

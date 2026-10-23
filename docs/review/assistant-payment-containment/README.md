@@ -22,6 +22,8 @@ Synthetic evidence is on #440 (`docs/review/collection-idempotency-matrix/`). It
 |---|---|
 | `lib/ai-tools/contained-tools.ts` (new) | `CONTAINED_ASSISTANT_TOOLS = {record_patient_payment}`, plus one Arabic refusal that names nothing written and nothing consumed, with a link to the guarded collection screen (`/finance`) |
 | `lib/ai-tools/registry.ts` | Two checks in the central executor. **Offer path:** refuse before any signed offer is built. **Token path:** refuse after the existing signature, tool, user and expiry checks and **before** re-scoping and `claimToolConfirmation`, so a previously issued valid token is refused and never consumed |
+| `lib/ai-tools/types.ts` | Optional `contained?: boolean` on `ToolExecutionResult` (follow-up) |
+| `components/AiStaffChatModal.tsx` | Terminal refused state and safe navigation for a contained confirmation only (follow-up) |
 | `lib/ai-tools/action-tools.ts` | Defensive backstop: `recordPatientPaymentAction` returns the same refusal for any caller. This includes its former demo-mode branch, which claimed «[وضع تجريبي] تم تسجيل سند القبض». The writer call and its now-unused imports are removed |
 
 **Not changed:**
@@ -34,6 +36,32 @@ Synthetic evidence is on #440 (`docs/review/collection-idempotency-matrix/`). It
 - migrations, flags and financial arithmetic.
 
 The existing guarded collection UI is untouched and is covered by a test.
+
+## Follow-up after Dot's source review (wording and chat window)
+
+1. **Qualified refusal wording** (`contained-tools.ts`):
+   - It says that in **this attempt** no new receipt was created and no confirmation consumed.
+   - It warns that a **previous attempt may already have been recorded**, and asks to review the patient's existing receipts in their ledger before using the normal collection screen.
+   - It never claims that earlier attempts were unrecorded.
+   - The result carries `contained: true`, a typed field on `ToolExecutionResult`.
+2. **Chat window** (`components/AiStaffChatModal.tsx`): the confirmation-result handling moved into the exported `applyConfirmationResult` with identical generic behaviour: success ⇒ `done`; anything else ⇒ back to `pending`; the result has no buttons. The only new branch is `payload.contained === true && ok !== true`:
+   - The original card enters a terminal `refused` state. There is no confirm button, and a rose-coloured «رُفض التنفيذ نهائيًا…» line appears.
+   - The card's own fields, the evidence of the historical attempt, are kept unchanged.
+   - The result message shows only internal `navigate` links from the server, here `/finance`. External and protocol-relative links are dropped.
+   - A success can never be turned into a refusal by the flag.
+
+**Tests** in `__tests__/ai-chat-contained-confirmation.test.tsx`, 4 cases, with the component rendered through mocked React hooks as in `vitals-modal-confirmation`:
+- the historical-token contained response;
+- preserved card evidence;
+- the qualified wording;
+- the visible `/finance` link;
+- no retry button;
+- only internal navigation survives;
+- generic handling unchanged (failure ⇒ pending, no buttons; success ⇒ done; HTTP error ⇒ pending; `contained` on a success ⇒ done).
+
+**Red-before:** `ui-red-before.log`, 4/4 red on `a241a372`.
+
+The real-PG containment suite also asserts the qualified wording and `contained: true`, and checks that the confirmation route returns `contained` and the `/finance` action.
 
 ## Gate order after the change (unchanged gates first)
 

@@ -9,7 +9,8 @@ export interface ChatMessage {
   content: string;
   /** عرض تأكيدٍ معلّق لأداة تغيير حالة (P0.17) — لا يُنفّذ إلا بضغطة المستخدم. */
   confirmation?: ToolConfirmationOffer;
-  confirmationState?: "pending" | "executing" | "done" | "cancelled";
+  /** refused: رفضٌ نهائي لأداة محتواة — لا زر تأكيد يعود، وتبقى بيانات العرض الأصلي ظاهرة كما هي. */
+  confirmationState?: "pending" | "executing" | "done" | "cancelled" | "refused";
   model?: string;
   latencyMs?: number;
   isLocalEngine?: boolean;
@@ -19,6 +20,51 @@ export interface ChatMessage {
   actions?: ActionButton[];
   warnings?: string[];
   timestamp: string;
+}
+
+/** ما يعيده مسار التأكيد (/api/ai/confirmation) مما تحتاجه النافذة. */
+export interface ConfirmationResponsePayload {
+  ok?: boolean;
+  reply?: string;
+  textSummary?: string;
+  message?: string;
+  cards?: KpiCard[];
+  warnings?: string[];
+  actions?: ActionButton[];
+  contained?: boolean;
+}
+
+/**
+ * يطبّق نتيجة تنفيذ تأكيدٍ على المحادثة. السلوك العام لكل الأدوات كما كان: نجاحٌ ⇒ «done»، وغيره ⇒ يعود
+ * العرض «pending»، ورسالة النتيجة بلا أزرار. الاستثناء الوحيد أداةٌ محتواة (payload.contained): رفضٌ نهائي
+ * «refused» لا يعيد زر التأكيد، مع إبقاء بطاقة العرض الأصلي كما هي (دليل المحاولة)، وتُعرض روابط التنقّل
+ * الداخلية الآمنة التي أرسلها الخادم (شاشة التحصيل) — لا تنفيذ دفع ولا أي إجراء آخر.
+ */
+export function applyConfirmationResult(
+  messages: ChatMessage[],
+  messageId: string,
+  result: { responseOk: boolean; payload: ConfirmationResponsePayload | null; id: string; timestamp: string },
+): ChatMessage[] {
+  const { responseOk, payload } = result;
+  const contained = payload?.contained === true && payload?.ok !== true;
+  const resultText =
+    payload?.textSummary || payload?.reply ||
+    (responseOk ? "تم التنفيذ." : payload?.message || "تعذّر تنفيذ الإجراء المؤكد.");
+  const resultMessage: ChatMessage = {
+    id: result.id,
+    role: "assistant",
+    content: resultText,
+    cards: payload?.cards,
+    warnings: payload?.warnings,
+    ...(contained ? { actions: (payload?.actions ?? []).filter((action) => action.actionType === "navigate" && /^\/[^/\\]/.test(action.href ?? "")) } : {}),
+    sourceType: "live_database",
+    timestamp: result.timestamp,
+  };
+  const state: ChatMessage["confirmationState"] = contained ? "refused" : responseOk && payload?.ok ? "done" : "pending";
+  return [
+    ...messages.map((msg) => msg.id === messageId ? { ...msg, confirmationState: state } : msg),
+    resultMessage,
+  ];
 }
 
 interface PromptItem {
@@ -323,34 +369,11 @@ export default function AiStaffChatModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       });
-      const payload = (await response.json().catch(() => null)) as {
-        ok?: boolean;
-        reply?: string;
-        textSummary?: string;
-        message?: string;
-        cards?: KpiCard[];
-        warnings?: string[];
-      } | null;
-
-      const resultText =
-        payload?.textSummary || payload?.reply ||
-        (response.ok ? "تم التنفيذ." : payload?.message || "تعذّر تنفيذ الإجراء المؤكد.");
-
-      const resultMessage: ChatMessage = {
-        id: `a_conf_${Date.now()}`,
-        role: "assistant",
-        content: resultText,
-        cards: payload?.cards,
-        warnings: payload?.warnings,
-        sourceType: "live_database",
+      const payload = (await response.json().catch(() => null)) as ConfirmationResponsePayload | null;
+      setMessages((prev) => applyConfirmationResult(prev, messageId, {
+        responseOk: response.ok, payload, id: `a_conf_${Date.now()}`,
         timestamp: new Date().toLocaleTimeString("ar-YE", { hour: "2-digit", minute: "2-digit" }),
-      };
-      setMessages((prev) => [
-        ...prev.map((msg) => msg.id === messageId
-          ? { ...msg, confirmationState: (response.ok && payload?.ok ? "done" : "pending") as ChatMessage["confirmationState"] }
-          : msg),
-        resultMessage,
-      ]);
+      }));
     } catch {
       setMessages((prev) => prev.map((msg) =>
         msg.id === messageId ? { ...msg, confirmationState: "pending" } : msg));
@@ -572,7 +595,9 @@ export default function AiStaffChatModal({
                         className={`mt-3 rounded-xl border-2 p-3 ${
                           m.confirmationState === "done"
                             ? "border-emerald-300 bg-emerald-50"
-                            : m.confirmationState === "cancelled"
+                            : m.confirmationState === "refused"
+                              ? "border-rose-300 bg-rose-50"
+                              : m.confirmationState === "cancelled"
                               ? "border-slate-200 bg-slate-50 opacity-70"
                               : "border-amber-300 bg-amber-50"
                         }`}
@@ -628,6 +653,11 @@ export default function AiStaffChatModal({
                         {m.confirmationState === "cancelled" && (
                           <div className="mt-3 text-[11px] font-bold text-slate-500">
                             أُلغي الإجراء — لم يُلمس أي سجل.
+                          </div>
+                        )}
+                        {m.confirmationState === "refused" && (
+                          <div className="mt-3 text-[11px] font-bold text-rose-800">
+                            ⛔ رُفض التنفيذ نهائيًا — هذا الإجراء موقوف عبر المساعد. لم يُنفَّذ شيء في هذه المحاولة؛ راجع سندات المريض القائمة قبل أي تحصيل من شاشة التحصيل.
                           </div>
                         )}
                       </div>
