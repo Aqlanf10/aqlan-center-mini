@@ -1,0 +1,26 @@
+import {pathToFileURL} from 'node:url';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {performance} from 'node:perf_hooks';
+const [root,out,mode='warm',group='all']=process.argv.slice(2);
+const url=new URL(process.env.DATABASE_URL!);
+if(url.hostname!=='127.0.0.1'||url.port!=='55449'||url.pathname!=='/aqlan_populated_scale_test')throw Error('unsafe target');
+const canonical=(v:any):any=>v instanceof Date?v.toISOString():v instanceof Map?[...v.entries()].sort((a,b)=>String(a[0]).localeCompare(String(b[0]))).map(([k,x])=>[k,canonical(x)]):Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
+const importStart=performance.now();const db=await import(pathToFileURL(root+'/lib/db.ts').href);const importMs=performance.now()-importStart;
+const fixtures=JSON.parse(readFileSync('/workspace/statement-performance-evidence/populated-scale-fixtures.json','utf8'));
+const expected=JSON.parse(readFileSync('/workspace/statement-performance-evidence/populated-parity-control.json','utf8'));
+const results=[];
+if(mode==='warm')await db.ensureSchema();
+for(const f of fixtures){
+ if(group!=='all'&&f.groups!==Number(group))continue;
+ if(mode==='warm')for(let i=0;i<3;i++)await db.patientStatementSnapshot(f.patientId,'2026-10-23');
+ const times=[],errors=[],hashes=[];
+ for(let i=0;i<(mode==='cold'?1:10);i++){
+  const start=performance.now();let snapshot;
+  try{snapshot=await db.patientStatementSnapshot(f.patientId,'2026-10-23');}catch(e){errors.push({i,message:String(e)});}
+  times.push(performance.now()-start);
+  if(snapshot){const hash=createHash('sha256').update(JSON.stringify(canonical(snapshot))).digest('hex');hashes.push(hash);if(hash!==expected.find((x:any)=>x.groups===f.groups).sha256)throw Error('canonical snapshot mismatch');}
+ }
+ results.push({...f,times,errors,hashes});
+}
+writeFileSync(out,JSON.stringify({mode,importMs,node:process.version,instrumented:false,results},null,2));await db.resetPoolForTesting();

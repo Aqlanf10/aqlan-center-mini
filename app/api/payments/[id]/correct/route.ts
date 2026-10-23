@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { correctPayment, getPayment, getPaymentByIdempotencyKey, getSettings, type CorrectPaymentRefusal, type CorrectionTarget } from "@/lib/db";
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
+import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -117,7 +118,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         ...(result.acknowledgmentEvidence ? { acknowledgmentEvidence: result.acknowledgmentEvidence } : {}) },
       { status: result.replayed ? 200 : 201 },
     );
-  } catch {
+  } catch (error) {
+    // A typed domain refusal from a shared financial guard (e.g. the approved-source receipt limit)
+    // is answered exactly as /api/payments answers it: its safe Arabic message and code, nothing raw.
+    // The correction transaction has already rolled back, so nothing was written.
+    if (error instanceof DebtRepaymentError) {
+      return NextResponse.json({ message: error.message, code: error.code },
+        { status: error.code === "unauthorized" ? 403 : error.code === "invalid" ? 400 : 409 });
+    }
     return NextResponse.json({ message: "تعذّر تصحيح السند. أعد المحاولة." }, { status: 500 });
   }
 }

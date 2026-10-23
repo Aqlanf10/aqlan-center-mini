@@ -4,7 +4,7 @@ import { Client } from "pg";
 import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { formatAmount, formatMoney } from "../../lib/money";
-import { baseUrl, harness } from "./_server";
+import { authedMutation, baseUrl, confirmingSimilarCollection, harness } from "./_server";
 
 // Required built-app acceptance, using only the disposable security harness DB.
 // No route interception, live patient data, alternate browser launcher or local skip.
@@ -215,3 +215,149 @@ describe("current patient statement built-app A4 acceptance", () => {
     } finally { await context.close(); }
   });
 });
+
+/**
+ * Current statement with an active fixed-total agreement: the PDF's invoice net/discount, net
+ * collected and agreement paid/remaining agree with the fixture and with the app's own ledger
+ * balances, by currency. Receipts are recorded through the built app's real /api/payments; after
+ * one further on-account payment, the next PDF moves collected and agreement paid/remaining
+ * together. The agreement remaining is never added to the billed principal or the current due.
+ */
+describe("current patient statement PDF with an active agreement and real on-account payments", () => {
+  const agreementStamp = `${stamp}-AGR`;
+  const agreementPatientNumber = `CUR-AGR-${agreementStamp}`;
+  const agreementInvoiceNumber = `CUR-AGR-INV-${agreementStamp}`;
+  const agreementCancelledNumber = `CUR-AGR-CANCELLED-${agreementStamp}`;
+  const otherPatientInvoiceNumber = `CUR-AGR-OTHER-${agreementStamp}`;
+  const agreementTitle = `AGREEMENT-FIXED-TOTAL-${agreementStamp}`;
+  const agreementDirectory = `${directory}/agreement`;
+  let agreementPatientId = 0, agreementInvoiceId = 0, agreementPlanId = 0, serial = 0;
+
+  /** A real receipt through the built app, answering the advisory similar-receipt review only if asked. */
+  async function collect(target: { invoiceId?: number; planId?: number }, amount: string) {
+    const key = `cur-agr-${agreementStamp}-${++serial}`;
+    const response = await confirmingSimilarCollection(headers => authedMutation("/api/payments", h.sessions.admin, "POST",
+      JSON.stringify({ kind: "payment", patientId: agreementPatientId, ...target, amount, currency: "SAR", method: "cash" }),
+      { "Idempotency-Key": key, ...headers }));
+    expect(response.status, await response.clone().text()).toBe(201);
+  }
+
+  /** Prints the current statement, saves its PDF, and returns the rendered sheet lines, PDF text and app balances. */
+  async function printCurrent(name: string) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, locale: "ar-YE", timezoneId: "Asia/Aden" });
+    try {
+      const [cookieName, ...value] = h.sessions.admin.cookie.split("=");
+      await context.addCookies([{ name: cookieName, value: value.join("="), url: baseUrl }]);
+      const page = await context.newPage();
+      const errors: string[] = [], writes: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("request", request => { if (!["GET", "HEAD"].includes(request.method())) writes.push(request.method()); });
+      expect((await page.goto(`${baseUrl}/print/statement/${agreementPatientId}`))?.status()).toBe(200);
+      const sheet = page.locator(".statement-sheet"); await sheet.waitFor();
+      await page.evaluate(async () => { await document.fonts.ready; });
+      const line = async (label: string) => (await sheet.locator(".line").filter({ hasText: label }).allTextContents()).map(plain).join(" | ");
+      const lines = {
+        gross: plain(await sheet.locator(`[data-invoice-id="${agreementInvoiceId}"] tr`).filter({ hasText: "الإجمالي قبل الخصم" }).innerText()),
+        discount: plain(await sheet.locator(`[data-invoice-id="${agreementInvoiceId}"] tr`).filter({ hasText: "الخصم المسجل" }).innerText()),
+        net: plain(await sheet.locator(`[data-invoice-id="${agreementInvoiceId}"] tr`).filter({ hasText: "صافي الفاتورة بعد الخصم" }).innerText()),
+        billed: await line("إجمالي المفوتر"), collected: await line("صافي المحصّل بعد الاستردادات وعكس السندات"),
+        due: await line("الرصيد الحالي"), total: await line("إجمالي الاتفاق"), paid: await line("المسدّد من الاتفاق"), remaining: await line("المتبقي من الاتفاق"),
+      };
+      const text = plain(await sheet.innerText());
+      const ledger = await page.evaluate(async id => (await fetch(`/api/patients/${id}/ledger`, { cache: "no-store" })).json(), agreementPatientId) as
+        { balances: Record<string, { billedMinor: number; collectedMinor: number; dueMinor: number }> };
+      await page.emulateMedia({ media: "print" });
+      await mkdir(agreementDirectory, { recursive: true });
+      const path = `${agreementDirectory}/${name}.pdf`;
+      const pdf = await page.pdf({ path, format: "A4", printBackground: true, displayHeaderFooter: false, preferCSSPageSize: false });
+      expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+      const pdfText = plain(execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 5 * 1024 * 1024 }));
+      await writeFile(`${agreementDirectory}/${name}.txt`, pdfText);
+      expect(errors).toEqual([]); expect(writes).toEqual([]);
+      return { lines, text, pdfText, sar: ledger.balances.SAR };
+    } finally { await context.close(); }
+  }
+
+  /** pdftotext emits lam-alef ligatures as alef-hamza + lam and moves shadda; compare on a normalised key. */
+  const arabicKey = (text: string) => text.replace(/[\u064B-\u0652]/g, "").replace(/ا([اأإآ])ل/g, "ال$1");
+  /** The one PDF amount line holding a label (layout mode keeps a label and its amount on one line);
+   * explanatory notes that merely mention the label carry no number. */
+  function pdfLine(pdfText: string, label: string) {
+    const matches = pdfText.split("\n").map(arabicKey).filter(row => row.includes(arabicKey(label)) && /\d/.test(row));
+    expect(matches, `exactly one PDF line for ${label}`).toHaveLength(1);
+    return matches[0];
+  }
+
+  /** The same view, as fixture amounts: what every printed number must be. */
+  function expectStatement(printed: Awaited<ReturnType<typeof printCurrent>>, expected: { collected: number; paid: number }) {
+    const remaining = 300_000 - expected.paid;
+    // The app's own canonical ledger balances are the oracle for the summary lines.
+    expect(printed.sar.billedMinor).toBe(48_000);
+    expect(printed.sar.collectedMinor).toBe(expected.collected);
+    for (const [label, amount] of [["gross", 50_000], ["discount", 2_000], ["net", 48_000], ["billed", 48_000], ["collected", expected.collected],
+      ["total", 300_000], ["paid", expected.paid], ["remaining", remaining]] as const) {
+      expect(printed.lines[label], label).toContain(formatMoney(amount, "SAR"));
+    }
+    const due = printed.sar.dueMinor;
+    expect(printed.lines.due).toContain(due === 0 ? "المستحق الحالي مسدّد" : formatMoney(Math.abs(due), "SAR"));
+    // The agreement remaining is shown beside, never added to, the billed principal or the current due.
+    expect(printed.lines.billed).not.toContain(formatMoney(48_000 + 300_000, "SAR"));
+    expect(printed.lines.billed).not.toContain(formatMoney(48_000 + remaining, "SAR"));
+    expect(printed.lines.due).not.toContain(formatMoney(Math.abs(due + remaining), "SAR"));
+    // The actual PDF carries the same amounts, each on its own labelled line.
+    for (const [label, amount] of [["الإجمالي قبل الخصم", 50_000], ["الخصم المسجل", 2_000], ["صافي الفاتورة بعد الخصم", 48_000],
+      ["إجمالي المفوتر", 48_000], ["صافي المحصّل بعد الاستردادات وعكس السندات", expected.collected],
+      ["إجمالي الاتفاق", 300_000], ["المسدّد من الاتفاق", expected.paid], ["المتبقي من الاتفاق", remaining]] as const) {
+      expect(pdfLine(printed.pdfText, label), `PDF line ${label}`).toContain(formatAmount(amount, "SAR"));
+    }
+    expect(pdfLine(printed.pdfText, "الرصيد الحالي")).toContain(due === 0 ? arabicKey("المستحق الحالي مسدّد") : formatAmount(Math.abs(due), "SAR"));
+    for (const omitted of [agreementCancelledNumber, "AGREEMENT-CANCELLED-MUST-NOT-PRINT", otherPatientInvoiceNumber, "OTHER-PATIENT-MUST-NOT-PRINT"]) {
+      expect(printed.text).not.toContain(omitted); expect(printed.pdfText).not.toContain(omitted);
+    }
+    for (const shown of [agreementInvoiceNumber, agreementTitle, "AGREEMENT-CROWN-LINE", "AGREEMENT-TEMPORARY-LINE"]) {
+      expect(printed.text).toContain(shown); expect(printed.pdfText).toContain(shown);
+    }
+  }
+
+  beforeAll(async () => {
+    agreementPatientId = (await db.query<{ id: number }>(`INSERT INTO patients (patient_number, full_name)
+      VALUES ($1, 'مريض اتفاق علاج اصطناعي للطباعة') RETURNING id`, [agreementPatientNumber])).rows[0].id;
+    const otherPatientId = (await db.query<{ id: number }>(`INSERT INTO patients (patient_number, full_name)
+      VALUES ($1, 'مريض آخر اصطناعي') RETURNING id`, [`CUR-AGR-OTHER-PATIENT-${agreementStamp}`])).rows[0].id;
+    const invoice = async (number: string, patientId: number, gross: number, discount: number, status: string, lines: [string, number, number][]) => {
+      const id = (await db.query<{ id: number }>(`INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, status, created_by)
+        VALUES ($1,$2,$3,$4,'SAR',$5,'synthetic-current-agreement') RETURNING id`, [number, patientId, gross, discount, status])).rows[0].id;
+      for (const [description, quantity, unit] of lines) await db.query(`INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_minor, total_minor)
+        VALUES ($1,$2,$3,$4,$5)`, [id, description, quantity, unit, quantity * unit]);
+      return id;
+    };
+    agreementInvoiceId = await invoice(agreementInvoiceNumber, agreementPatientId, 50_000, 2_000, "open",
+      [["AGREEMENT-CROWN-LINE تاج اصطناعي", 1, 30_000], ["AGREEMENT-TEMPORARY-LINE تاج مؤقت اصطناعي", 2, 10_000]]);
+    await invoice(agreementCancelledNumber, agreementPatientId, 30_000, 0, "cancelled", [["AGREEMENT-CANCELLED-MUST-NOT-PRINT", 1, 30_000]]);
+    await invoice(otherPatientInvoiceNumber, otherPatientId, 70_000, 0, "open", [["OTHER-PATIENT-MUST-NOT-PRINT", 1, 70_000]]);
+    // An active fixed-total agreement (no installments): on-account receipts settle against it.
+    agreementPlanId = (await db.query<{ id: number }>(`INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date, consent_at)
+      VALUES ($1, $2, 300000, 'SAR', 'active', CURRENT_DATE, NOW()) RETURNING id`, [agreementPatientId, agreementTitle])).rows[0].id;
+    // Synthetic local FX settings and an open drawer for the real receipts (kept if already present).
+    await db.query("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','140') ON CONFLICT(key) DO NOTHING");
+    await db.query(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
+      SELECT 'synthetic-current-agreement', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`);
+    await collect({ invoiceId: agreementInvoiceId }, "100");
+    await collect({ planId: agreementPlanId }, "1200");
+  }, 240_000);
+
+  it("prints invoice net/discount, net collected and agreement paid/remaining by currency; the next PDF moves them together", async () => {
+    const first = await printCurrent("before-payment");
+    expectStatement(first, { collected: 130_000, paid: 120_000 });
+
+    await collect({ planId: agreementPlanId }, "70");
+    const next = await printCurrent("after-payment");
+    expectStatement(next, { collected: 137_000, paid: 127_000 });
+    // The previous collected and agreement figures are gone from the summary and agreement lines.
+    expect(next.lines.collected).not.toContain(formatMoney(130_000, "SAR"));
+    expect(next.lines.paid).not.toContain(formatMoney(120_000, "SAR"));
+    expect(next.lines.remaining).not.toContain(formatMoney(180_000, "SAR"));
+    for (const stale of [130_000, 180_000]) expect(next.pdfText).not.toContain(formatAmount(stale, "SAR"));
+  }, 240_000);
+});
+

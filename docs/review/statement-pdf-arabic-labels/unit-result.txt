@@ -1,0 +1,16 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/patient-statement-print.test.tsx __tests__/patient-statement-account-consistency.test.tsx __tests__/portal-statement-parity.test.tsx
+
+
+ RUN  v4.1.12 /workspace/statement-pdf-arabic-labels
+
+ ✓ __tests__/patient-statement-account-consistency.test.tsx (7 tests) 48ms
+ ✓ __tests__/patient-statement-print.test.tsx (30 tests) 73ms
+ ✓ __tests__/portal-statement-parity.test.tsx (9 tests) 34ms
+
+ Test Files  3 passed (3)
+      Tests  46 passed (46)
+   Start at  19:30:42
+   Duration  3.59s (transform 1.95s, setup 0ms, import 3.08s, tests 155ms, environment 0ms)
+

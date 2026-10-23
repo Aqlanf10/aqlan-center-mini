@@ -266,6 +266,17 @@ async function signOnce(patientId: number, visitId: number, expectedInvoices: nu
   const persisted = await read<Clinical>("doctorA", `/api/visits/${visitId}/clinical`);
   expect(persisted).toMatchObject({ id: visitId, patientId, status: "signed", invoiceId: null });
   expect(persisted.signedAt).not.toBeNull();
+  const sourceContext = await read<{summary:string;work:{kind:string;coverage:string;references:unknown[];reasons:string[]}[]}>("doctorA", `/api/visits/${visitId}/financial-context`);
+  expect(sourceContext.work.filter(work => work.kind === "procedure")).toEqual([
+    expect.objectContaining({coverage:"verified"}),
+  ]);
+  // The episode record has no exact RCT item edge: preserve the known gap even beside covered work.
+  if ((await q("SELECT id FROM endo_visits WHERE visit_id=$1",[visitId])).length) {
+    expect(sourceContext.summary).toBe("mixed");
+    expect(sourceContext.work).toContainEqual(expect.objectContaining({kind:"endodontic_record",coverage:"unresolved",reasons:["endo_work_item_not_explicit"]}));
+  } else expect(sourceContext.summary).toBe("verified");
+  expect(sourceContext.work.every(work => work.references.length === 0)).toBe(true);
+
   expect(await q(`SELECT ii.doctor_id FROM invoice_items ii JOIN visit_procedures vp ON vp.plan_item_id = ii.plan_item_id
     WHERE vp.visit_id = $1 AND ii.source_type = 'plan_item'`, [visitId])).toEqual([{ doctor_id: doctorId }]);
   expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toHaveLength(expectedInvoices);

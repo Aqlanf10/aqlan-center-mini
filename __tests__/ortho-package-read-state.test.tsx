@@ -135,7 +135,7 @@ describe("orthodontic agreement read states", () => {
   it.each([
     null, {}, [null], [fixture({ patientId: 20 })], [fixture({ id: 0 })], [fixture({ status: "unknown" })],
     [fixture({ title: "" })], [fixture({ installments: null })], [fixture({ installments: [null] })],
-    [fixture({ installments: [{}] })], [fixture(), fixture()],
+    [fixture({ installments: [{}] })], [fixture(), fixture()], [fixture({ agreementApproved: "yes" })],
   ])("rejects malformed, duplicate or wrong-patient plan data: %j", async (body) => {
     fetchMock.mockResolvedValue(response(body)); render(); await settle(); unknown(render());
     expect(text(render())).toContain("تعذّر تحميل اتفاق التقويم");
@@ -155,6 +155,22 @@ describe("orthodontic agreement read states", () => {
     fetchMock.mockResolvedValue(response([fixture({ installments: [] }), fixture({ id: 52 })])); render(); await settle();
     expect(text(render())).toContain("الخطة بلا أقساط"); expect(text(render())).not.toContain("✓ رابط اتفاق أقساط قديم");
     expect(writes()).toEqual([]);
+  });
+  it("FIN-INT-4: an approved principal without a schedule is the agreement, not a plan without installments", async () => {
+    fetchMock.mockResolvedValue(response([fixture({ installments: [], agreementApproved: true })])); render(); await settle();
+    expect(text(render())).toContain("✓ اتفاق معتمد بكامل الأصل"); expect(text(render())).not.toMatch(/الخطة بلا أقساط|✓ رابط اتفاق أقساط قديم/);
+    expect(writes()).toEqual([]);
+  });
+  it("FIN-INT-4: an approved plan is offered for linking; an unapproved plan without a schedule is not", async () => {
+    fetchMock.mockResolvedValue(response([fixture({ installments: [], agreementApproved: true }),
+      fixture({ id: 52, title: "Synthetic proposal", installments: [], agreementApproved: false })]));
+    render({ planId: null }); await settle();
+    const options = nodes(render({ planId: null })).filter((node) => node.type === "option").map((node) => text(node));
+    expect(options).toEqual(["اختر اتفاق الأقساط…", "Synthetic existing agreement — اتفاق معتمد"]);
+  });
+  it("FIN-INT-4: a cancelled approved plan neither funds nor is offered", async () => {
+    fetchMock.mockResolvedValue(response([fixture({ status: "cancelled", installments: [], agreementApproved: true })])); render(); await settle();
+    expect(text(render())).toContain("الخطة المربوطة ملغاة"); expect(text(render())).not.toContain("✓ اتفاق معتمد بكامل الأصل");
   });
   it.each(["active", "completed"])("preserves canonical non-cancelled %s funding and discards monetary fields", async (status) => {
     fetchMock.mockResolvedValue(response([fixture({ status, paidMinor: 987654, note: "PRIVATE_DETAIL" })])); render(); await settle();

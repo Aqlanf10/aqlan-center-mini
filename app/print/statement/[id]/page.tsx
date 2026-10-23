@@ -1,6 +1,7 @@
-import { StatementInvoiceDetails, currentStatementInvoices, statementPaymentLabel } from "./presentation";
+import labelStyles from "./labels.module.css";
+import { StatementHistoricalDetails, StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
 import { notFound } from "next/navigation";
-import { CLINIC_TIME_ZONE, listPatientPlans, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
 import {
   CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
   type Balance, type Currency,
@@ -13,6 +14,7 @@ import { PrintableReportDocument } from "@/components/reports/PrintableReportDoc
 import { buildReport, parseFilters, ReportInputError } from "@/lib/reports";
 import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { historicalOpeningBuckets } from "@/lib/statement-historical-details";
 
 export const dynamic = "force-dynamic";
 
@@ -70,8 +72,11 @@ export default async function StatementPage({ params, searchParams }: {
   }
 
   // The existing no-query print remains the current, all-history ledger and plan agreement view.
-  const [patient, ledger, settings, planCurrencies, plans] = await Promise.all([
-    getPatient(id), patientLedger(id), getSettingsSafe(), patientPlanCurrencies(id), listPatientPlans(id, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
+  // Its ledger, plan currencies and agreement progress come from one read-only snapshot, so the
+  // receipts, balances and agreement on one sheet always describe the same committed state.
+  const [patient, settings, { ledger, planCurrencies, plans, historicalAgreements }] = await Promise.all([
+    getPatient(id), getSettingsSafe(),
+    patientStatementSnapshot(id, clinicDateString(new Date(), CLINIC_TIME_ZONE), { historicalAgreements: true }),
   ]);
   if (!patient) notFound();
 
@@ -79,6 +84,12 @@ export default async function StatementPage({ params, searchParams }: {
      فاتورةٌ بعملتها، ورصيدٌ لكل عملة — لا رقمٌ واحد يمزج الريال بالسعودي بالدولار. */
   const base = CLINIC_BASE_CURRENCY;
   const balances = ledgerBalancesByCurrency(id, ledger, planCurrencies);
+  if (!historicalAgreements) throw new Error("Current statement requires its historical agreements from the same snapshot");
+  const historicalBuckets = historicalOpeningBuckets(historicalAgreements, ledger.openings, ledger.payments);
+  // Patient handout: a currency whose previous balance is explained by its historical agreements shows those
+  // agreements instead of a second opening line (the summary below still counts the opening once).
+  const explainedOpenings = new Set(historicalBuckets.filter((bucket) => bucket.agreements.length > 0).map((bucket) => bucket.currency));
+  const showInvoiceDetails = currentStatementInvoices(ledger.invoices).length > 0 || historicalAgreements.length === 0;
   const activeCurrencies = CURRENCIES.filter((currency: Currency) => {
     const bucket: Balance = balances[currency];
     return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0
@@ -117,7 +128,7 @@ export default async function StatementPage({ params, searchParams }: {
         <div className="rule" />
 
         {/* (P1-5ب) الرصيد الافتتاحي بعملته — سطرٌ لكل عملة، لا يُحوَّل. */}
-        {ledger.openings.map((opening) => (
+        {ledger.openings.filter((opening) => !explainedOpenings.has(opening.currency)).map((opening) => (
           <div className="line" key={opening.currency}>
             <span>رصيد افتتاحي — ما كان على المريض قبل بدء العمل بالبرنامج
               {opening.note ? ` (${opening.note})` : ""}
@@ -126,7 +137,9 @@ export default async function StatementPage({ params, searchParams }: {
           </div>
         ))}
 
-        <StatementInvoiceDetails invoices={ledger.invoices} />
+        <StatementHistoricalDetails buckets={historicalBuckets} />
+
+        {showInvoiceDetails ? <StatementInvoiceDetails invoices={ledger.invoices} /> : null}
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "5mm 0 2mm" }}>الدفعات</p>
         <table className="items">
@@ -176,7 +189,7 @@ export default async function StatementPage({ params, searchParams }: {
                   <span>إجمالي المفوتر</span>
                   <span className="num">{formatMoney(bucket.billedMinor, currency)}</span>
                 </div>
-                <div className="line">
+                <div className={`line ${labelStyles.labelRow}`}>
                   <span>صافي المحصّل بعد الاستردادات وعكس السندات</span>
                   <span className="num">{formatMoney(bucket.collectedMinor, currency)}</span>
                 </div>
@@ -189,10 +202,10 @@ export default async function StatementPage({ params, searchParams }: {
           })}
         </div>
 
-        {plans.filter((plan) => plan.status === "active" && !plan.totalFromItems).map((plan) => <div key={plan.id} style={{ marginTop: "4mm" }}>
+        {statementAgreements(plans).map((plan) => <div key={plan.id} style={{ marginTop: "4mm" }}>
           <p style={{ fontWeight: 700 }}>اتفاق العلاج — {plan.title}</p>
           <div className="line"><span>إجمالي الاتفاق</span><span>{formatMoney(plan.totalMinor, plan.baseCurrency)}</span></div>
-          <div className="line"><span>المسدّد من الاتفاق</span><span>{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</span></div>
+          <div className={`line ${labelStyles.labelRow}`}><span>المسدّد من الاتفاق</span><span>{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</span></div>
           <div className="line line-strong"><span>المتبقي من الاتفاق</span><span>{formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}</span></div>
           <p className="footer-note">المتبقي من الاتفاق يشمل الأقساط المستقبلية ولا يعني أن كامل المبلغ مستحق الآن.</p>
         </div>)}

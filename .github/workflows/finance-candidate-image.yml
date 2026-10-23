@@ -1,0 +1,135 @@
+name: Finance candidate Docker image
+
+# No paths filter: every new candidate head needs fresh image evidence, even
+# when the change does not touch this workflow. Never run with target privileges.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finance-candidate-image-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    if: >-
+      github.repository == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == 'Aqlanf10/aqlan-center-mini' &&
+      (github.event.pull_request.head.ref == 'integration/finance-candidate-20261022' ||
+       github.event.pull_request.head.ref == 'feat/finance-synthetic-verification-20261023' ||
+       github.event.pull_request.head.ref == 'feat/finance-reviewed-composition-20261023' ||
+       github.event.pull_request.head.ref == 'feat/finance-completed-work-20261023')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact candidate source
+        id: source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          actual_head=$(git rev-parse HEAD)
+          test "$actual_head" = "$EXPECTED_HEAD"
+          git diff --quiet HEAD --
+          untracked=$(git ls-files --others --exclude-standard)
+          test -z "$untracked"
+          tree=$(git rev-parse HEAD^{tree})
+          dockerfile=$(sha256sum Dockerfile | cut -d ' ' -f 1)
+          dockerignore=$(sha256sum .dockerignore | cut -d ' ' -f 1)
+          [[ "$tree" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$dockerfile" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$dockerignore" =~ ^[0-9a-f]{64}$ ]]
+          {
+            printf 'sha=%s\n' "$EXPECTED_HEAD"
+            printf 'tree=%s\n' "$tree"
+            printf 'dockerfile=%s\n' "$dockerfile"
+            printf 'dockerignore=%s\n' "$dockerignore"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Verified candidate head: %s\n' "$EXPECTED_HEAD"
+
+      - name: Build unchanged candidate Docker image
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --progress=plain \
+            --file Dockerfile \
+            --tag aqlan-finance-candidate:verification .
+          image_id=$(docker image inspect aqlan-finance-candidate:verification \
+            --format '{{.Id}}')
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'image_id=%s\n' "$image_id" >> "$GITHUB_OUTPUT"
+
+      - name: Verify artifacts offline without application startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          offline=(
+            --rm
+            --network none
+            --read-only
+            --user 1001:1001
+            --cap-drop ALL
+            --security-opt no-new-privileges
+            --entrypoint node
+          )
+          docker run "${offline[@]}" aqlan-finance-candidate:verification -e '
+            const fs = require("node:fs");
+            const assert = require("node:assert/strict");
+            assert.equal(process.versions.node.split(".")[0], "22");
+            assert.equal(process.getuid(), 1001);
+            for (const p of [
+              "/app/server.js",
+              "/app/.next/static",
+              "/app/preflight/runner/run.mjs",
+              "/app/preflight/manifest.json"
+            ]) assert.ok(fs.existsSync(p), p);
+            assert.ok(!fs.existsSync("/app/__tests__"));
+            const manifest = JSON.parse(
+              fs.readFileSync("/app/preflight/manifest.json", "utf8")
+            );
+            assert.equal(manifest.nodeMajor, 22);
+            console.log("Offline image artifact checks passed");
+          '
+          docker run "${offline[@]}" aqlan-finance-candidate:verification \
+            --check /app/server.js
+          docker run "${offline[@]}" aqlan-finance-candidate:verification \
+            /app/preflight/runner/run.mjs --help
+
+      - name: Record allowlisted image proof
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SOURCE_TREE: ${{ steps.source.outputs.tree }}
+          DOCKERFILE_SHA256: ${{ steps.source.outputs.dockerfile }}
+          DOCKERIGNORE_SHA256: ${{ steps.source.outputs.dockerignore }}
+          IMAGE_ID: ${{ steps.build.outputs.image_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_TREE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DOCKERFILE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DOCKERIGNORE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          {
+            printf 'Candidate head: %s\n\n' "$SOURCE_SHA"
+            printf 'Candidate tree: %s\n\n' "$SOURCE_TREE"
+            printf 'Dockerfile SHA-256: %s\n\n' "$DOCKERFILE_SHA256"
+            printf '.dockerignore SHA-256: %s\n\n' "$DOCKERIGNORE_SHA256"
+            printf 'Local image ID (not a registry digest): %s\n\n' "$IMAGE_ID"
+            printf 'PASS: unchanged Docker build and offline non-root artifact checks.\n\n'
+            printf 'No application startup, deployed database access, image publication, or Production verification.\n'
+          } >> "$GITHUB_STEP_SUMMARY"

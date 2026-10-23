@@ -7,7 +7,7 @@ import { useSession } from "./SessionProvider";
 
 /**
  * (P1-5ج) سجل النظام القديم في ملف المريض — معالجاته ودفعاته كما كانت، للقراءة.
- * لا يدخل الحساب ولا الصندوق: ما بقي منها صار رصيدًا افتتاحيًّا بعملته في «الحساب» أعلاه.
+ * لا يدخل العرض الحساب ولا الصندوق؛ الرصيد الحالي مرجعه «الحساب» أعلاه، لا بواقي الأرشيف.
  */
 
 type History = { treatments: LegacyTreatmentView[]; orphanPayments: LegacyTreatmentView["payments"] };
@@ -69,8 +69,14 @@ function ScopedLegacyHistory({ patientId }: { patientId: number }) {
         <span className="text-xs text-slate-500">{open ? "إخفاء" : "عرض"}</span>
       </button>
       <p className="mt-1 text-[11px] font-bold text-slate-500">
-        سجل مالي سابق للاطلاع. الأرقام هنا تاريخية؛ الرصيد الحالي والتحصيلات الجديدة في الحساب أعلاه.
+        سجل مالي سابق للاطلاع. المتبقي تاريخيًا ليس دينًا إضافيًا على الرصيد الحالي؛ الرصيد الحالي والتحصيلات الجديدة في الحساب أعلاه.
+        تصحيح السجل التاريخي وحده لا يصحح الرصيد الافتتاحي تلقائيًا.
       </p>
+      {data.treatments.some((treatment) => treatment.sourceKind === "legacy_import") ? (
+        <p className="mt-1 text-[11px] text-slate-500">
+          الأرصدة المستوردة تُجمّع حسب المريض والعملة؛ لا يحدد هذا العرض حصة كل معالجة من الرصيد الحالي.
+        </p>
+      ) : null}
       {open ? (
         <ul className="mt-3 space-y-2 text-xs">
           {data.treatments.map((treatment) => (
@@ -83,10 +89,10 @@ function ScopedLegacyHistory({ patientId }: { patientId: number }) {
                 <p className="mt-1 text-slate-500">البيانات التاريخية حتى {treatment.historicalAsOf}</p>
               ) : null}
               <p className="mt-1 font-bold text-slate-600">
-                السعر {formatMoney(treatment.priceMinor, treatment.currency)} ({CURRENCY_LABEL[treatment.currency]}
+                السعر التاريخي {formatMoney(treatment.priceMinor, treatment.currency)} ({CURRENCY_LABEL[treatment.currency]}
                 {treatment.rate && treatment.currency !== "YER" ? ` · سعر الصرف القديم ${treatment.rate}` : ""}) ·
-                المدفوع {formatMoney(treatment.paidMinor, treatment.currency)} ·
-                الباقي <span className={treatment.remainingMinor > 0 ? "text-rose-700" : ""}>{formatMoney(treatment.remainingMinor, treatment.currency)}</span>
+                المدفوع تاريخيًا {formatMoney(treatment.paidMinor, treatment.currency)} ·
+                المتبقي تاريخيًا <span className={treatment.remainingMinor > 0 ? "text-rose-700" : ""}>{formatMoney(treatment.remainingMinor, treatment.currency)}</span>
               </p>
               {treatment.payments.length > 0 ? (
                 <ul className="mt-2 space-y-0.5 border-t border-slate-100 pt-2 text-slate-600">

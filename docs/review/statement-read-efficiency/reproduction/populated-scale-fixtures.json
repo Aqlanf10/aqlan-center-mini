@@ -1,0 +1,17 @@
+[
+  {
+    "patientId": 1,
+    "groups": 1,
+    "plans": 2
+  },
+  {
+    "patientId": 2,
+    "groups": 5,
+    "plans": 10
+  },
+  {
+    "patientId": 3,
+    "groups": 20,
+    "plans": 40
+  }
+]

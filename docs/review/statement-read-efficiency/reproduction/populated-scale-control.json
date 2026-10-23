@@ -1,0 +1,1383 @@
+[
+  {
+    "patientId": 1,
+    "groups": 1,
+    "plans": [
+      {
+        "id": 2,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 200,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 200,
+          "remainingMinor": 800,
+          "overdueMinor": 800,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 1,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 100,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 100,
+          "remainingMinor": 800,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      }
+    ],
+    "times": [
+      60.64748000000009,
+      57.515364999999974,
+      76.51943800000004,
+      67.76626800000008,
+      54.33881799999995,
+      54.84202200000004,
+      51.97810699999991,
+      53.35745599999996,
+      57.08204499999988,
+      49.77409200000011
+    ],
+    "counts": [
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64
+    ],
+    "sha256": "ffb02a38571e79811c44e3c076c858e7fff917253acd7bbc84a096ee3a46f2e7",
+    "queryFrequencies": [
+      {
+        "calls": 1,
+        "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT i.id, i.invoice_number, i.patient_id, p.full_name, i.status, i.total_minor, i.discount_minor, i.base_currency, i.note, i.created_at FROM invoices i JOIN patients p ON p.id = i.patient_id WHERE i.patient_id = $1 ORDER BY i.created_at DESC, i.id DESC"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT ii.id, ii.invoice_id, ii.service_id, ii.doctor_id, ii.description, ii.quantity, ii.unit_price_minor, ii.total_minor, ii.plan_item_id, CASE WHEN archived.value IS NOT NULL THEN (archived.value->>'caseId')::int ELSE i.case_id END AS case_id, CASE WHEN archived.value IS NOT NULL THEN (archived.value->>'toothCode')::int ELSE i.tooth_code END AS tooth_code, CASE WHEN archived.value IS NOT NULL THEN archived.value->>'surfaces' ELSE i.surfaces END AS surfaces, i.origin_invoice_id, i.billing_status, COALESCE((i.id IS NOT NULL AND (i.billing_status IS NULL OR i.billing_status NOT IN ('unbilled', 'billed', 'included_in_package', 'waived') OR ((i.billed_invoice_id IS NOT NULL OR i.origin_invoice_id IS NOT NULL OR EXISTS ( SELECT 1 FROM invoice_items hi WHERE hi.plan_item_id = i.id OR (hi.source_type = 'plan_item' AND hi.source_id = i.id))) AND NOT (i.billing_status = 'billed' AND EXISTS (SELECT 1 FROM parties provider WHERE provider.id = i.doctor_id AND provider.kind = 'doctor') AND EXISTS ( SELECT 1 FROM invoices bv WHERE bv.id = i.billed_invoice_id AND bv.status <> 'cancelled' AND bv.patient_id = t.patient_id AND bv.base_currency = t.base_currency AND (EXISTS (SELECT 1 FROM invoice_items original_source JOIN invoices original_invoice ON original_invoice.id = original_source.invoice_id WHERE original_source.source_type = 'plan_item' AND original_source.source_id = i.id AND original_source.plan_item_id = i.id AND original_source.service_id IS NOT DISTINCT FROM i.service_id AND original_source.quantity = i.quantity AND original_source.unit_price_minor = i.unit_price_minor AND original_source.doctor_id IS NOT DISTINCT FROM i.doctor_id AND (i.origin_invoice_id IS NULL OR i.origin_invoice_id = original_source.invoice_id) AND original_invoice.patient_id = t.patient_id AND original_invoice.base_currency = t.base_currency) OR EXISTS ( SELECT 1 FROM invoice_corrections revision JOIN invoice_correction_lines approved ON approved.correction_id=revision.id JOIN invoice_items corrected_line ON corrected_line.id=approved.corrected_item_id WHERE revision.corrected_invoice_id=i.billed_invoice_id AND revision.patient_id=t.patient_id AND revision.currency=t.base_currency AND approved.plan_item_id=i.id AND corrected_line.invoice_id=revision.corrected_invoice_id AND corrected_line.plan_item_id=i.id AND approved.approved_work=jsonb_build_object( 'serviceId',i.service_id,'doctorId',i.doctor_id,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor, 'caseId',i.case_id,'toothCode',i.tooth_code,'surfaces',i.surfaces, 'caseSite',(SELECT c.site FROM clinical_cases c WHERE c.id=i.case_id)))) AND (SELECT COUNT(*) FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = i.id) = 1 AND EXISTS (SELECT 1 FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = i.id AND bi.service_id IS NOT DISTINCT FROM i.service_id AND bi.quantity = i.quantity AND bi.unit_price_minor = i.unit_price_minor AND bi.total_minor = i.quantity * i.unit_price_minor AND bi.doctor_id IS NOT DISTINCT FROM i.doctor_id AND ((bi.source_type = 'plan_item' AND bi.source_id = i.id) OR (bi.source_type IS NULL AND bi.source_id IS NULL)))))) OR (EXISTS (SELECT 1 FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = i.id) AND NOT (i.billing_status = 'included_in_package' AND EXISTS ( SELECT 1 FROM legacy_treatment_agreements la JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id AND cs.format_version = 1 AND cs.service_id = la.service_id AND cs.anchor_tooth_code IS NOT DISTINCT FROM la.tooth_code WHERE la.plan_item_id = i.id AND la.status = 'live' AND (SELECT COUNT(*) FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = i.id) = 1 AND la.patient_id = t.patient_id AND la.currency = t.base_currency AND la.service_id IS NOT DISTINCT FROM i.service_id AND la.tooth_code IS NOT DISTINCT FROM i.tooth_code AND la.case_id IS NOT DISTINCT FROM i.case_id AND i.quantity = 1 AND la.agreed_minor = i.unit_price_minor))))), false) AS financial_review FROM invoice_items ii LEFT JOIN plan_items i ON i.id = ii.plan_item_id LEFT JOIN treatment_plans t ON t.id = i.plan_id LEFT JOIN LATERAL (SELECT line.value FROM invoice_corrections correction JOIN invoice_correction_receipts receipt ON receipt.correction_id=correction.id CROSS JOIN LATERAL jsonb_array_elements(receipt.receipt#>'{original,items}') line WHERE correction.original_invoice_id=ii.invoice_id AND (line.value->>'id')::int=ii.id LIMIT 1) archived ON TRUE WHERE ii.invoice_id = ANY($1::int[]) ORDER BY ii.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT o.patient_id, p.full_name, p.phone, o.currency, o.amount_minor, o.as_of_date, o.note, o.created_by, o.updated_at FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id WHERE o.patient_id = $1 ORDER BY o.currency"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.opening_currency, y.shift_id, y.kind, y.reversal_of_id, y.amount_minor, y.currency, y.exchange_rate, y.base_amount_minor, y.base_currency, y.method, y.note, y.created_by, y.created_at FROM payments y JOIN patients p ON p.id = y.patient_id WHERE y.patient_id = $1 ORDER BY y.created_at DESC, y.id DESC"
+      },
+      {
+        "calls": 7,
+        "sql": "SELECT d.id,d.correction_id,d.source_invoice_ids, (d.patient_id=c.patient_id AND d.source_currency<>d.target_currency -- 0069: a direction other than YER -> SAR documents an unpaid lineage only. AND ((d.source_currency='YER' AND d.target_currency='SAR') OR NOT EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=ANY(d.source_invoice_ids))) AND c.original_currency=d.source_currency AND c.currency=d.target_currency AND i.patient_id=d.patient_id AND i.base_currency=d.source_currency AND i.status='cancelled' AND n.patient_id=d.patient_id AND n.base_currency=d.target_currency AND d.source_invoice_ids=(WITH RECURSIVE lineage(id) AS (SELECT c.original_invoice_id UNION SELECT old.original_invoice_id FROM invoice_corrections old JOIN lineage l ON old.corrected_invoice_id=l.id) SELECT array_agg(id ORDER BY id) FROM lineage) AND NOT EXISTS(SELECT 1 FROM unnest(d.source_invoice_ids) x(id) LEFT JOIN invoices old ON old.id=x.id WHERE old.id IS NULL OR old.patient_id<>d.patient_id OR old.base_currency<>d.source_currency OR old.status<>'cancelled') AND NOT EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=ANY(d.source_invoice_ids) AND NOT EXISTS(SELECT 1 FROM invoice_settlement_reclassification_events e WHERE e.reclassification_id=d.id AND e.payment_id=p.id)) ) AS valid FROM invoice_settlement_reclassifications d LEFT JOIN invoice_corrections c ON c.id=d.correction_id LEFT JOIN invoices i ON i.id=c.original_invoice_id LEFT JOIN invoices n ON n.id=c.corrected_invoice_id WHERE d.patient_id=ANY($1::int[]) ORDER BY d.id"
+      },
+      {
+        "calls": 7,
+        "sql": "SELECT d.id,d.correction_id,e.payment_id,p.invoice_id, (WITH RECURSIVE successors(id) AS (SELECT corrected_invoice_id FROM invoice_corrections WHERE id=d.correction_id UNION SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN successors s ON c.original_invoice_id=s.id) SELECT i.id FROM invoices i JOIN successors s ON s.id=i.id WHERE i.patient_id=d.patient_id AND i.base_currency=d.target_currency AND NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id)) AS target_invoice_id, e.source_minor::text,e.target_minor::text,e.direction, to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, (d.source_currency='YER' AND d.target_currency='SAR' AND e.payment_snapshot=to_jsonb(p) AND p.patient_id=d.patient_id AND p.invoice_id=ANY(d.source_invoice_ids) AND p.currency=d.target_currency AND p.base_currency=d.source_currency AND e.source_minor=p.base_amount_minor AND e.target_minor=p.amount_minor AND e.direction=(CASE WHEN p.kind='payment' THEN 1 WHEN p.kind='refund' THEN -1 ELSE 0 END) AND p.exchange_rate>0 AND p.base_amount_minor=FLOOR(p.amount_minor::double precision/100*p.exchange_rate::double precision+0.5) AND ((p.kind='payment' AND p.reversal_of_id IS NULL) OR (p.kind='refund' AND EXISTS( SELECT 1 FROM payments original WHERE original.id=p.reversal_of_id AND original.kind='payment' AND original.invoice_id=p.invoice_id AND original.patient_id=p.patient_id AND original.currency=p.currency AND original.exchange_rate=p.exchange_rate))) ) AS valid FROM invoice_settlement_reclassification_events e JOIN invoice_settlement_reclassifications d ON d.id=e.reclassification_id LEFT JOIN payments p ON p.id=e.payment_id WHERE d.patient_id=ANY($1::int[]) ORDER BY e.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT id, base_currency FROM treatment_plans WHERE patient_id = $1"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, t.total_minor, t.base_currency, t.status, t.start_date, t.note, t.created_at, t.total_from_items, t.consent_at, t.consent_by, t.consent_note, t.last_reminder_at, COALESCE((SELECT SUM(CASE WHEN y.kind = 'refund' THEN -1 ELSE 1 END * CASE WHEN y.currency = t.base_currency THEN y.amount_minor ELSE y.base_amount_minor END) FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor FROM treatment_plans t JOIN patients p ON p.id = t.patient_id WHERE t.patient_id=$1 ORDER BY t.created_at DESC"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT id, plan_id, number, due_date, amount_minor, last_reminder_at FROM plan_installments WHERE plan_id = ANY($1::int[]) ORDER BY plan_id, number"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT pi.id, pi.plan_id, pi.service_id, pi.service_name, pi.category, pi.tooth_code, pi.surfaces, pi.quantity, pi.unit_price_minor, pi.status, pi.visit_id, pi.done_at, pi.note, pi.sort_order, pi.planned_visit_number, pi.billing_rule, pi.billing_status, pi.session_count, pi.sessions_completed, pi.doctor_id, doc.name AS doctor_name, pi.case_id, c.site AS case_site, pi.origin, pi.origin_invoice_id, pi.billed_invoice_id, t.consent_at IS NOT NULL AS consented, (pi.id IS NOT NULL AND (pi.billing_status IS NULL OR pi.billing_status NOT IN ('unbilled', 'billed', 'included_in_package', 'waived') OR ((pi.billed_invoice_id IS NOT NULL OR pi.origin_invoice_id IS NOT NULL OR EXISTS ( SELECT 1 FROM invoice_items hi WHERE hi.plan_item_id = pi.id OR (hi.source_type = 'plan_item' AND hi.source_id = pi.id))) AND NOT (pi.billing_status = 'billed' AND EXISTS (SELECT 1 FROM parties provider WHERE provider.id = pi.doctor_id AND provider.kind = 'doctor') AND EXISTS ( SELECT 1 FROM invoices bv WHERE bv.id = pi.billed_invoice_id AND bv.status <> 'cancelled' AND bv.patient_id = t.patient_id AND bv.base_currency = t.base_currency AND (EXISTS (SELECT 1 FROM invoice_items original_source JOIN invoices original_invoice ON original_invoice.id = original_source.invoice_id WHERE original_source.source_type = 'plan_item' AND original_source.source_id = pi.id AND original_source.plan_item_id = pi.id AND original_source.service_id IS NOT DISTINCT FROM pi.service_id AND original_source.quantity = pi.quantity AND original_source.unit_price_minor = pi.unit_price_minor AND original_source.doctor_id IS NOT DISTINCT FROM pi.doctor_id AND (pi.origin_invoice_id IS NULL OR pi.origin_invoice_id = original_source.invoice_id) AND original_invoice.patient_id = t.patient_id AND original_invoice.base_currency = t.base_currency) OR EXISTS ( SELECT 1 FROM invoice_corrections revision JOIN invoice_correction_lines approved ON approved.correction_id=revision.id JOIN invoice_items corrected_line ON corrected_line.id=approved.corrected_item_id WHERE revision.corrected_invoice_id=pi.billed_invoice_id AND revision.patient_id=t.patient_id AND revision.currency=t.base_currency AND approved.plan_item_id=pi.id AND corrected_line.invoice_id=revision.corrected_invoice_id AND corrected_line.plan_item_id=pi.id AND approved.approved_work=jsonb_build_object( 'serviceId',pi.service_id,'doctorId',pi.doctor_id,'quantity',pi.quantity,'unitPriceMinor',pi.unit_price_minor, 'caseId',pi.case_id,'toothCode',pi.tooth_code,'surfaces',pi.surfaces, 'caseSite',(SELECT c.site FROM clinical_cases c WHERE c.id=pi.case_id)))) AND (SELECT COUNT(*) FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = pi.id) = 1 AND EXISTS (SELECT 1 FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = pi.id AND bi.service_id IS NOT DISTINCT FROM pi.service_id AND bi.quantity = pi.quantity AND bi.unit_price_minor = pi.unit_price_minor AND bi.total_minor = pi.quantity * pi.unit_price_minor AND bi.doctor_id IS NOT DISTINCT FROM pi.doctor_id AND ((bi.source_type = 'plan_item' AND bi.source_id = pi.id) OR (bi.source_type IS NULL AND bi.source_id IS NULL)))))) OR (EXISTS (SELECT 1 FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = pi.id) AND NOT (pi.billing_status = 'included_in_package' AND EXISTS ( SELECT 1 FROM legacy_treatment_agreements la JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id AND cs.format_version = 1 AND cs.service_id = la.service_id AND cs.anchor_tooth_code IS NOT DISTINCT FROM la.tooth_code WHERE la.plan_item_id = pi.id AND la.status = 'live' AND (SELECT COUNT(*) FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = pi.id) = 1 AND la.patient_id = t.patient_id AND la.currency = t.base_currency AND la.service_id IS NOT DISTINCT FROM pi.service_id AND la.tooth_code IS NOT DISTINCT FROM pi.tooth_code AND la.case_id IS NOT DISTINCT FROM pi.case_id AND pi.quantity = 1 AND la.agreed_minor = pi.unit_price_minor))))) AS financial_review, (SELECT la.id FROM legacy_treatment_agreements la WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1) AS legacy_agreement_id, (SELECT la.status FROM legacy_treatment_agreements la WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1) AS legacy_agreement_status, ( SELECT jsonb_build_object( 'agreementId', la.id, 'serviceId', la.service_id, 'anchorToothCode', la.tooth_code, 'agreementCount', (SELECT COUNT(*) FROM legacy_treatment_agreements all_history WHERE all_history.plan_item_id = pi.id), 'snapshot', to_jsonb(cs)) FROM legacy_treatment_agreements la LEFT JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1 ) AS legacy_context FROM plan_items pi JOIN treatment_plans t ON t.id = pi.plan_id LEFT JOIN clinical_cases c ON c.id = pi.case_id LEFT JOIN parties doc ON doc.id = pi.doctor_id WHERE pi.plan_id = ANY($1::int[]) ORDER BY pi.plan_id, pi.sort_order, pi.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT * FROM approved_agreement_principals WHERE plan_id=$1"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT i.id,i.patient_id,i.base_currency, (i.plan_id=$1 AND EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=i.id AND p.plan_id=$1 AND p.patient_id=i.patient_id) AND NOT EXISTS(SELECT 1 FROM invoice_items x WHERE x.invoice_id=i.id AND (x.plan_item_id IS NOT NULL OR x.source_type IS NOT NULL))) AS classic, ((i.plan_id IS NULL OR i.plan_id=$1) AND EXISTS(SELECT 1 FROM invoice_items x WHERE x.invoice_id=i.id) AND NOT EXISTS( SELECT 1 FROM invoice_items x LEFT JOIN plan_items pi ON pi.id=COALESCE(x.plan_item_id,CASE WHEN x.source_type='plan_item' THEN x.source_id END) WHERE x.invoice_id=i.id AND (pi.id IS NULL OR pi.plan_id<>$1 OR (x.source_type='plan_item' AND x.source_id IS DISTINCT FROM pi.id)))) AS owned FROM invoices i WHERE NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id) AND (i.plan_id=$1 OR EXISTS(SELECT 1 FROM invoice_items x JOIN plan_items pi ON pi.id=COALESCE(x.plan_item_id,CASE WHEN x.source_type='plan_item' THEN x.source_id END) WHERE x.invoice_id=i.id AND pi.plan_id=$1)) ORDER BY i.id"
+      },
+      {
+        "calls": 4,
+        "sql": "SELECT patient_id,base_currency FROM invoices WHERE id=$1"
+      },
+      {
+        "calls": 4,
+        "sql": "WITH RECURSIVE lineage(id) AS ( SELECT $1::int UNION SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id = l.id ) SELECT i.id,i.patient_id,i.base_currency, EXISTS(SELECT 1 FROM invoice_settlement_reclassifications d JOIN invoice_corrections c ON c.id=d.correction_id WHERE i.id=ANY(d.source_invoice_ids) AND d.patient_id=$2 AND d.source_currency=i.base_currency AND d.target_currency=$3 AND c.corrected_invoice_id IN(SELECT id FROM lineage)) AS reclassified FROM lineage l JOIN invoices i ON i.id=l.id ORDER BY i.id"
+      },
+      {
+        "calls": 4,
+        "sql": "SELECT id,patient_id,base_currency,total_minor::text,discount_minor::text,status,note FROM invoices WHERE id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 4,
+        "sql": "SELECT id,patient_id,currency,original_invoice_id,corrected_invoice_id,request_hash,original_currency FROM invoice_corrections WHERE corrected_invoice_id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 4,
+        "sql": "SELECT id,invoice_id,patient_id,kind,amount_minor::text,base_amount_minor::text,currency,base_currency,exchange_rate::text,reversal_of_id, to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at FROM payments WHERE invoice_id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT to_regclass('public.agreement_delta_amendments') IS NOT NULL AS present"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT invoice_id FROM payments WHERE plan_id=$1"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT delta_invoice_id,delta_minor::text,patient_id FROM agreement_delta_amendments WHERE plan_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT 1 FROM legacy_treatment_agreements a JOIN plan_items i ON i.id=a.plan_item_id WHERE i.plan_id=$1 LIMIT 1"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT * FROM debt_repayment_arrangements WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 2,
+        "sql": "SELECT * FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version DESC LIMIT 1"
+      },
+      {
+        "calls": 2,
+        "sql": "SELECT id,total_minor::text,discount_minor::text,status,base_currency FROM invoices WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 2,
+        "sql": "SELECT id,base_currency FROM treatment_plans WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 2,
+        "sql": "SELECT id,invoice_id,plan_id,opening_currency,kind,amount_minor::text,base_amount_minor::text,currency,exchange_rate::text FROM payments WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 2,
+        "sql": "SELECT currency,amount_minor::text FROM patient_opening_balances WHERE patient_id=$1"
+      },
+      {
+        "calls": 2,
+        "sql": "SELECT version,status,terms,principal_minor::text,reason,created_by,created_at::text FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version"
+      },
+      {
+        "calls": 1,
+        "sql": "COMMIT"
+      }
+    ]
+  },
+  {
+    "patientId": 2,
+    "groups": 5,
+    "plans": [
+      {
+        "id": 12,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 204,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 204,
+          "remainingMinor": 796,
+          "overdueMinor": 796,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 11,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 104,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 104,
+          "remainingMinor": 896,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 896,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 10,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 203,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 203,
+          "remainingMinor": 797,
+          "overdueMinor": 797,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 9,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 103,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 103,
+          "remainingMinor": 797,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      },
+      {
+        "id": 8,
+        "currency": "USD",
+        "source": "approved_agreement",
+        "paidMinor": 202,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 202,
+          "remainingMinor": 798,
+          "overdueMinor": 798,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 7,
+        "currency": "USD",
+        "source": "invoice",
+        "paidMinor": 102,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 102,
+          "remainingMinor": 898,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 898,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 6,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 201,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 201,
+          "remainingMinor": 799,
+          "overdueMinor": 799,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 5,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 101,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 101,
+          "remainingMinor": 899,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 899,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 4,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 200,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 200,
+          "remainingMinor": 800,
+          "overdueMinor": 800,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 3,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 100,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 100,
+          "remainingMinor": 800,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      }
+    ],
+    "times": [
+      369.31244800000013,
+      377.9751940000001,
+      416.3041280000002,
+      376.42560600000024,
+      356.1888250000002,
+      351.5058939999999,
+      358.04990799999996,
+      339.38411200000064,
+      375.19735499999933,
+      360.2484970000005
+    ],
+    "counts": [
+      643,
+      643,
+      643,
+      643,
+      643,
+      643,
+      643,
+      643,
+      643,
+      643
+    ],
+    "sha256": "85fcd6302c33d103ece8ed8235d002193d363be3f0b706e833c4b2f4c56c7c32",
+    "queryFrequencies": [
+      {
+        "calls": 1,
+        "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT i.id, i.invoice_number, i.patient_id, p.full_name, i.status, i.total_minor, i.discount_minor, i.base_currency, i.note, i.created_at FROM invoices i JOIN patients p ON p.id = i.patient_id WHERE i.patient_id = $1 ORDER BY i.created_at DESC, i.id DESC"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT ii.id, ii.invoice_id, ii.service_id, ii.doctor_id, ii.description, ii.quantity, ii.unit_price_minor, ii.total_minor, ii.plan_item_id, CASE WHEN archived.value IS NOT NULL THEN (archived.value->>'caseId')::int ELSE i.case_id END AS case_id, CASE WHEN archived.value IS NOT NULL THEN (archived.value->>'toothCode')::int ELSE i.tooth_code END AS tooth_code, CASE WHEN archived.value IS NOT NULL THEN archived.value->>'surfaces' ELSE i.surfaces END AS surfaces, i.origin_invoice_id, i.billing_status, COALESCE((i.id IS NOT NULL AND (i.billing_status IS NULL OR i.billing_status NOT IN ('unbilled', 'billed', 'included_in_package', 'waived') OR ((i.billed_invoice_id IS NOT NULL OR i.origin_invoice_id IS NOT NULL OR EXISTS ( SELECT 1 FROM invoice_items hi WHERE hi.plan_item_id = i.id OR (hi.source_type = 'plan_item' AND hi.source_id = i.id))) AND NOT (i.billing_status = 'billed' AND EXISTS (SELECT 1 FROM parties provider WHERE provider.id = i.doctor_id AND provider.kind = 'doctor') AND EXISTS ( SELECT 1 FROM invoices bv WHERE bv.id = i.billed_invoice_id AND bv.status <> 'cancelled' AND bv.patient_id = t.patient_id AND bv.base_currency = t.base_currency AND (EXISTS (SELECT 1 FROM invoice_items original_source JOIN invoices original_invoice ON original_invoice.id = original_source.invoice_id WHERE original_source.source_type = 'plan_item' AND original_source.source_id = i.id AND original_source.plan_item_id = i.id AND original_source.service_id IS NOT DISTINCT FROM i.service_id AND original_source.quantity = i.quantity AND original_source.unit_price_minor = i.unit_price_minor AND original_source.doctor_id IS NOT DISTINCT FROM i.doctor_id AND (i.origin_invoice_id IS NULL OR i.origin_invoice_id = original_source.invoice_id) AND original_invoice.patient_id = t.patient_id AND original_invoice.base_currency = t.base_currency) OR EXISTS ( SELECT 1 FROM invoice_corrections revision JOIN invoice_correction_lines approved ON approved.correction_id=revision.id JOIN invoice_items corrected_line ON corrected_line.id=approved.corrected_item_id WHERE revision.corrected_invoice_id=i.billed_invoice_id AND revision.patient_id=t.patient_id AND revision.currency=t.base_currency AND approved.plan_item_id=i.id AND corrected_line.invoice_id=revision.corrected_invoice_id AND corrected_line.plan_item_id=i.id AND approved.approved_work=jsonb_build_object( 'serviceId',i.service_id,'doctorId',i.doctor_id,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor, 'caseId',i.case_id,'toothCode',i.tooth_code,'surfaces',i.surfaces, 'caseSite',(SELECT c.site FROM clinical_cases c WHERE c.id=i.case_id)))) AND (SELECT COUNT(*) FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = i.id) = 1 AND EXISTS (SELECT 1 FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = i.id AND bi.service_id IS NOT DISTINCT FROM i.service_id AND bi.quantity = i.quantity AND bi.unit_price_minor = i.unit_price_minor AND bi.total_minor = i.quantity * i.unit_price_minor AND bi.doctor_id IS NOT DISTINCT FROM i.doctor_id AND ((bi.source_type = 'plan_item' AND bi.source_id = i.id) OR (bi.source_type IS NULL AND bi.source_id IS NULL)))))) OR (EXISTS (SELECT 1 FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = i.id) AND NOT (i.billing_status = 'included_in_package' AND EXISTS ( SELECT 1 FROM legacy_treatment_agreements la JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id AND cs.format_version = 1 AND cs.service_id = la.service_id AND cs.anchor_tooth_code IS NOT DISTINCT FROM la.tooth_code WHERE la.plan_item_id = i.id AND la.status = 'live' AND (SELECT COUNT(*) FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = i.id) = 1 AND la.patient_id = t.patient_id AND la.currency = t.base_currency AND la.service_id IS NOT DISTINCT FROM i.service_id AND la.tooth_code IS NOT DISTINCT FROM i.tooth_code AND la.case_id IS NOT DISTINCT FROM i.case_id AND i.quantity = 1 AND la.agreed_minor = i.unit_price_minor))))), false) AS financial_review FROM invoice_items ii LEFT JOIN plan_items i ON i.id = ii.plan_item_id LEFT JOIN treatment_plans t ON t.id = i.plan_id LEFT JOIN LATERAL (SELECT line.value FROM invoice_corrections correction JOIN invoice_correction_receipts receipt ON receipt.correction_id=correction.id CROSS JOIN LATERAL jsonb_array_elements(receipt.receipt#>'{original,items}') line WHERE correction.original_invoice_id=ii.invoice_id AND (line.value->>'id')::int=ii.id LIMIT 1) archived ON TRUE WHERE ii.invoice_id = ANY($1::int[]) ORDER BY ii.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT o.patient_id, p.full_name, p.phone, o.currency, o.amount_minor, o.as_of_date, o.note, o.created_by, o.updated_at FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id WHERE o.patient_id = $1 ORDER BY o.currency"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.opening_currency, y.shift_id, y.kind, y.reversal_of_id, y.amount_minor, y.currency, y.exchange_rate, y.base_amount_minor, y.base_currency, y.method, y.note, y.created_by, y.created_at FROM payments y JOIN patients p ON p.id = y.patient_id WHERE y.patient_id = $1 ORDER BY y.created_at DESC, y.id DESC"
+      },
+      {
+        "calls": 81,
+        "sql": "SELECT d.id,d.correction_id,d.source_invoice_ids, (d.patient_id=c.patient_id AND d.source_currency<>d.target_currency -- 0069: a direction other than YER -> SAR documents an unpaid lineage only. AND ((d.source_currency='YER' AND d.target_currency='SAR') OR NOT EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=ANY(d.source_invoice_ids))) AND c.original_currency=d.source_currency AND c.currency=d.target_currency AND i.patient_id=d.patient_id AND i.base_currency=d.source_currency AND i.status='cancelled' AND n.patient_id=d.patient_id AND n.base_currency=d.target_currency AND d.source_invoice_ids=(WITH RECURSIVE lineage(id) AS (SELECT c.original_invoice_id UNION SELECT old.original_invoice_id FROM invoice_corrections old JOIN lineage l ON old.corrected_invoice_id=l.id) SELECT array_agg(id ORDER BY id) FROM lineage) AND NOT EXISTS(SELECT 1 FROM unnest(d.source_invoice_ids) x(id) LEFT JOIN invoices old ON old.id=x.id WHERE old.id IS NULL OR old.patient_id<>d.patient_id OR old.base_currency<>d.source_currency OR old.status<>'cancelled') AND NOT EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=ANY(d.source_invoice_ids) AND NOT EXISTS(SELECT 1 FROM invoice_settlement_reclassification_events e WHERE e.reclassification_id=d.id AND e.payment_id=p.id)) ) AS valid FROM invoice_settlement_reclassifications d LEFT JOIN invoice_corrections c ON c.id=d.correction_id LEFT JOIN invoices i ON i.id=c.original_invoice_id LEFT JOIN invoices n ON n.id=c.corrected_invoice_id WHERE d.patient_id=ANY($1::int[]) ORDER BY d.id"
+      },
+      {
+        "calls": 81,
+        "sql": "SELECT d.id,d.correction_id,e.payment_id,p.invoice_id, (WITH RECURSIVE successors(id) AS (SELECT corrected_invoice_id FROM invoice_corrections WHERE id=d.correction_id UNION SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN successors s ON c.original_invoice_id=s.id) SELECT i.id FROM invoices i JOIN successors s ON s.id=i.id WHERE i.patient_id=d.patient_id AND i.base_currency=d.target_currency AND NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id)) AS target_invoice_id, e.source_minor::text,e.target_minor::text,e.direction, to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, (d.source_currency='YER' AND d.target_currency='SAR' AND e.payment_snapshot=to_jsonb(p) AND p.patient_id=d.patient_id AND p.invoice_id=ANY(d.source_invoice_ids) AND p.currency=d.target_currency AND p.base_currency=d.source_currency AND e.source_minor=p.base_amount_minor AND e.target_minor=p.amount_minor AND e.direction=(CASE WHEN p.kind='payment' THEN 1 WHEN p.kind='refund' THEN -1 ELSE 0 END) AND p.exchange_rate>0 AND p.base_amount_minor=FLOOR(p.amount_minor::double precision/100*p.exchange_rate::double precision+0.5) AND ((p.kind='payment' AND p.reversal_of_id IS NULL) OR (p.kind='refund' AND EXISTS( SELECT 1 FROM payments original WHERE original.id=p.reversal_of_id AND original.kind='payment' AND original.invoice_id=p.invoice_id AND original.patient_id=p.patient_id AND original.currency=p.currency AND original.exchange_rate=p.exchange_rate))) ) AS valid FROM invoice_settlement_reclassification_events e JOIN invoice_settlement_reclassifications d ON d.id=e.reclassification_id LEFT JOIN payments p ON p.id=e.payment_id WHERE d.patient_id=ANY($1::int[]) ORDER BY e.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT id, base_currency FROM treatment_plans WHERE patient_id = $1"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, t.total_minor, t.base_currency, t.status, t.start_date, t.note, t.created_at, t.total_from_items, t.consent_at, t.consent_by, t.consent_note, t.last_reminder_at, COALESCE((SELECT SUM(CASE WHEN y.kind = 'refund' THEN -1 ELSE 1 END * CASE WHEN y.currency = t.base_currency THEN y.amount_minor ELSE y.base_amount_minor END) FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor FROM treatment_plans t JOIN patients p ON p.id = t.patient_id WHERE t.patient_id=$1 ORDER BY t.created_at DESC"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT id, plan_id, number, due_date, amount_minor, last_reminder_at FROM plan_installments WHERE plan_id = ANY($1::int[]) ORDER BY plan_id, number"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT pi.id, pi.plan_id, pi.service_id, pi.service_name, pi.category, pi.tooth_code, pi.surfaces, pi.quantity, pi.unit_price_minor, pi.status, pi.visit_id, pi.done_at, pi.note, pi.sort_order, pi.planned_visit_number, pi.billing_rule, pi.billing_status, pi.session_count, pi.sessions_completed, pi.doctor_id, doc.name AS doctor_name, pi.case_id, c.site AS case_site, pi.origin, pi.origin_invoice_id, pi.billed_invoice_id, t.consent_at IS NOT NULL AS consented, (pi.id IS NOT NULL AND (pi.billing_status IS NULL OR pi.billing_status NOT IN ('unbilled', 'billed', 'included_in_package', 'waived') OR ((pi.billed_invoice_id IS NOT NULL OR pi.origin_invoice_id IS NOT NULL OR EXISTS ( SELECT 1 FROM invoice_items hi WHERE hi.plan_item_id = pi.id OR (hi.source_type = 'plan_item' AND hi.source_id = pi.id))) AND NOT (pi.billing_status = 'billed' AND EXISTS (SELECT 1 FROM parties provider WHERE provider.id = pi.doctor_id AND provider.kind = 'doctor') AND EXISTS ( SELECT 1 FROM invoices bv WHERE bv.id = pi.billed_invoice_id AND bv.status <> 'cancelled' AND bv.patient_id = t.patient_id AND bv.base_currency = t.base_currency AND (EXISTS (SELECT 1 FROM invoice_items original_source JOIN invoices original_invoice ON original_invoice.id = original_source.invoice_id WHERE original_source.source_type = 'plan_item' AND original_source.source_id = pi.id AND original_source.plan_item_id = pi.id AND original_source.service_id IS NOT DISTINCT FROM pi.service_id AND original_source.quantity = pi.quantity AND original_source.unit_price_minor = pi.unit_price_minor AND original_source.doctor_id IS NOT DISTINCT FROM pi.doctor_id AND (pi.origin_invoice_id IS NULL OR pi.origin_invoice_id = original_source.invoice_id) AND original_invoice.patient_id = t.patient_id AND original_invoice.base_currency = t.base_currency) OR EXISTS ( SELECT 1 FROM invoice_corrections revision JOIN invoice_correction_lines approved ON approved.correction_id=revision.id JOIN invoice_items corrected_line ON corrected_line.id=approved.corrected_item_id WHERE revision.corrected_invoice_id=pi.billed_invoice_id AND revision.patient_id=t.patient_id AND revision.currency=t.base_currency AND approved.plan_item_id=pi.id AND corrected_line.invoice_id=revision.corrected_invoice_id AND corrected_line.plan_item_id=pi.id AND approved.approved_work=jsonb_build_object( 'serviceId',pi.service_id,'doctorId',pi.doctor_id,'quantity',pi.quantity,'unitPriceMinor',pi.unit_price_minor, 'caseId',pi.case_id,'toothCode',pi.tooth_code,'surfaces',pi.surfaces, 'caseSite',(SELECT c.site FROM clinical_cases c WHERE c.id=pi.case_id)))) AND (SELECT COUNT(*) FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = pi.id) = 1 AND EXISTS (SELECT 1 FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = pi.id AND bi.service_id IS NOT DISTINCT FROM pi.service_id AND bi.quantity = pi.quantity AND bi.unit_price_minor = pi.unit_price_minor AND bi.total_minor = pi.quantity * pi.unit_price_minor AND bi.doctor_id IS NOT DISTINCT FROM pi.doctor_id AND ((bi.source_type = 'plan_item' AND bi.source_id = pi.id) OR (bi.source_type IS NULL AND bi.source_id IS NULL)))))) OR (EXISTS (SELECT 1 FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = pi.id) AND NOT (pi.billing_status = 'included_in_package' AND EXISTS ( SELECT 1 FROM legacy_treatment_agreements la JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id AND cs.format_version = 1 AND cs.service_id = la.service_id AND cs.anchor_tooth_code IS NOT DISTINCT FROM la.tooth_code WHERE la.plan_item_id = pi.id AND la.status = 'live' AND (SELECT COUNT(*) FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = pi.id) = 1 AND la.patient_id = t.patient_id AND la.currency = t.base_currency AND la.service_id IS NOT DISTINCT FROM pi.service_id AND la.tooth_code IS NOT DISTINCT FROM pi.tooth_code AND la.case_id IS NOT DISTINCT FROM pi.case_id AND pi.quantity = 1 AND la.agreed_minor = pi.unit_price_minor))))) AS financial_review, (SELECT la.id FROM legacy_treatment_agreements la WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1) AS legacy_agreement_id, (SELECT la.status FROM legacy_treatment_agreements la WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1) AS legacy_agreement_status, ( SELECT jsonb_build_object( 'agreementId', la.id, 'serviceId', la.service_id, 'anchorToothCode', la.tooth_code, 'agreementCount', (SELECT COUNT(*) FROM legacy_treatment_agreements all_history WHERE all_history.plan_item_id = pi.id), 'snapshot', to_jsonb(cs)) FROM legacy_treatment_agreements la LEFT JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1 ) AS legacy_context FROM plan_items pi JOIN treatment_plans t ON t.id = pi.plan_id LEFT JOIN clinical_cases c ON c.id = pi.case_id LEFT JOIN parties doc ON doc.id = pi.doctor_id WHERE pi.plan_id = ANY($1::int[]) ORDER BY pi.plan_id, pi.sort_order, pi.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])"
+      },
+      {
+        "calls": 5,
+        "sql": "SELECT * FROM approved_agreement_principals WHERE plan_id=$1"
+      },
+      {
+        "calls": 5,
+        "sql": "SELECT i.id,i.patient_id,i.base_currency, (i.plan_id=$1 AND EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=i.id AND p.plan_id=$1 AND p.patient_id=i.patient_id) AND NOT EXISTS(SELECT 1 FROM invoice_items x WHERE x.invoice_id=i.id AND (x.plan_item_id IS NOT NULL OR x.source_type IS NOT NULL))) AS classic, ((i.plan_id IS NULL OR i.plan_id=$1) AND EXISTS(SELECT 1 FROM invoice_items x WHERE x.invoice_id=i.id) AND NOT EXISTS( SELECT 1 FROM invoice_items x LEFT JOIN plan_items pi ON pi.id=COALESCE(x.plan_item_id,CASE WHEN x.source_type='plan_item' THEN x.source_id END) WHERE x.invoice_id=i.id AND (pi.id IS NULL OR pi.plan_id<>$1 OR (x.source_type='plan_item' AND x.source_id IS DISTINCT FROM pi.id)))) AS owned FROM invoices i WHERE NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id) AND (i.plan_id=$1 OR EXISTS(SELECT 1 FROM invoice_items x JOIN plan_items pi ON pi.id=COALESCE(x.plan_item_id,CASE WHEN x.source_type='plan_item' THEN x.source_id END) WHERE x.invoice_id=i.id AND pi.plan_id=$1)) ORDER BY i.id"
+      },
+      {
+        "calls": 45,
+        "sql": "SELECT patient_id,base_currency FROM invoices WHERE id=$1"
+      },
+      {
+        "calls": 45,
+        "sql": "WITH RECURSIVE lineage(id) AS ( SELECT $1::int UNION SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id = l.id ) SELECT i.id,i.patient_id,i.base_currency, EXISTS(SELECT 1 FROM invoice_settlement_reclassifications d JOIN invoice_corrections c ON c.id=d.correction_id WHERE i.id=ANY(d.source_invoice_ids) AND d.patient_id=$2 AND d.source_currency=i.base_currency AND d.target_currency=$3 AND c.corrected_invoice_id IN(SELECT id FROM lineage)) AS reclassified FROM lineage l JOIN invoices i ON i.id=l.id ORDER BY i.id"
+      },
+      {
+        "calls": 45,
+        "sql": "SELECT id,patient_id,base_currency,total_minor::text,discount_minor::text,status,note FROM invoices WHERE id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 45,
+        "sql": "SELECT id,patient_id,currency,original_invoice_id,corrected_invoice_id,request_hash,original_currency FROM invoice_corrections WHERE corrected_invoice_id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 45,
+        "sql": "SELECT id,invoice_id,patient_id,kind,amount_minor::text,base_amount_minor::text,currency,base_currency,exchange_rate::text,reversal_of_id, to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at FROM payments WHERE invoice_id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 5,
+        "sql": "SELECT to_regclass('public.agreement_delta_amendments') IS NOT NULL AS present"
+      },
+      {
+        "calls": 5,
+        "sql": "SELECT invoice_id FROM payments WHERE plan_id=$1"
+      },
+      {
+        "calls": 5,
+        "sql": "SELECT delta_invoice_id,delta_minor::text,patient_id FROM agreement_delta_amendments WHERE plan_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 5,
+        "sql": "SELECT 1 FROM legacy_treatment_agreements a JOIN plan_items i ON i.id=a.plan_item_id WHERE i.plan_id=$1 LIMIT 1"
+      },
+      {
+        "calls": 5,
+        "sql": "SELECT * FROM debt_repayment_arrangements WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 35,
+        "sql": "SELECT * FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version DESC LIMIT 1"
+      },
+      {
+        "calls": 35,
+        "sql": "SELECT id,total_minor::text,discount_minor::text,status,base_currency FROM invoices WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 35,
+        "sql": "SELECT id,base_currency FROM treatment_plans WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 35,
+        "sql": "SELECT id,invoice_id,plan_id,opening_currency,kind,amount_minor::text,base_amount_minor::text,currency,exchange_rate::text FROM payments WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 35,
+        "sql": "SELECT currency,amount_minor::text FROM patient_opening_balances WHERE patient_id=$1"
+      },
+      {
+        "calls": 35,
+        "sql": "SELECT version,status,terms,principal_minor::text,reason,created_by,created_at::text FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version"
+      },
+      {
+        "calls": 1,
+        "sql": "COMMIT"
+      }
+    ]
+  },
+  {
+    "patientId": 3,
+    "groups": 20,
+    "plans": [
+      {
+        "id": 52,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 219,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 219,
+          "remainingMinor": 781,
+          "overdueMinor": 781,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 51,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 119,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 119,
+          "remainingMinor": 881,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 881,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 50,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 218,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 218,
+          "remainingMinor": 782,
+          "overdueMinor": 782,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 49,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 118,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 118,
+          "remainingMinor": 782,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      },
+      {
+        "id": 48,
+        "currency": "USD",
+        "source": "approved_agreement",
+        "paidMinor": 217,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 217,
+          "remainingMinor": 783,
+          "overdueMinor": 783,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 47,
+        "currency": "USD",
+        "source": "invoice",
+        "paidMinor": 117,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 117,
+          "remainingMinor": 883,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 883,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 46,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 216,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 216,
+          "remainingMinor": 784,
+          "overdueMinor": 784,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 45,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 116,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 116,
+          "remainingMinor": 884,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 884,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 44,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 215,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 215,
+          "remainingMinor": 785,
+          "overdueMinor": 785,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 43,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 115,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 115,
+          "remainingMinor": 785,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      },
+      {
+        "id": 42,
+        "currency": "USD",
+        "source": "approved_agreement",
+        "paidMinor": 214,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 214,
+          "remainingMinor": 786,
+          "overdueMinor": 786,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 41,
+        "currency": "USD",
+        "source": "invoice",
+        "paidMinor": 114,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 114,
+          "remainingMinor": 886,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 886,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 40,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 213,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 213,
+          "remainingMinor": 787,
+          "overdueMinor": 787,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 39,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 113,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 113,
+          "remainingMinor": 887,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 887,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 38,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 212,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 212,
+          "remainingMinor": 788,
+          "overdueMinor": 788,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 37,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 112,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 112,
+          "remainingMinor": 788,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      },
+      {
+        "id": 36,
+        "currency": "USD",
+        "source": "approved_agreement",
+        "paidMinor": 211,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 211,
+          "remainingMinor": 789,
+          "overdueMinor": 789,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 35,
+        "currency": "USD",
+        "source": "invoice",
+        "paidMinor": 111,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 111,
+          "remainingMinor": 889,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 889,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 34,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 210,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 210,
+          "remainingMinor": 790,
+          "overdueMinor": 790,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 33,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 110,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 110,
+          "remainingMinor": 890,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 890,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 32,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 209,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 209,
+          "remainingMinor": 791,
+          "overdueMinor": 791,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 31,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 109,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 109,
+          "remainingMinor": 791,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      },
+      {
+        "id": 30,
+        "currency": "USD",
+        "source": "approved_agreement",
+        "paidMinor": 208,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 208,
+          "remainingMinor": 792,
+          "overdueMinor": 792,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 29,
+        "currency": "USD",
+        "source": "invoice",
+        "paidMinor": 108,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 108,
+          "remainingMinor": 892,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 892,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 28,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 207,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 207,
+          "remainingMinor": 793,
+          "overdueMinor": 793,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 27,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 107,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 107,
+          "remainingMinor": 893,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 893,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 26,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 206,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 206,
+          "remainingMinor": 794,
+          "overdueMinor": 794,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 25,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 106,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 106,
+          "remainingMinor": 794,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      },
+      {
+        "id": 24,
+        "currency": "USD",
+        "source": "approved_agreement",
+        "paidMinor": 205,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 205,
+          "remainingMinor": 795,
+          "overdueMinor": 795,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 23,
+        "currency": "USD",
+        "source": "invoice",
+        "paidMinor": 105,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 105,
+          "remainingMinor": 895,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 895,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 22,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 204,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 204,
+          "remainingMinor": 796,
+          "overdueMinor": 796,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 21,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 104,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 104,
+          "remainingMinor": 896,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 896,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 20,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 203,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 203,
+          "remainingMinor": 797,
+          "overdueMinor": 797,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 19,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 103,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 103,
+          "remainingMinor": 797,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      },
+      {
+        "id": 18,
+        "currency": "USD",
+        "source": "approved_agreement",
+        "paidMinor": 202,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 202,
+          "remainingMinor": 798,
+          "overdueMinor": 798,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 17,
+        "currency": "USD",
+        "source": "invoice",
+        "paidMinor": 102,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 102,
+          "remainingMinor": 898,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 898,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 16,
+        "currency": "SAR",
+        "source": "approved_agreement",
+        "paidMinor": 201,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 201,
+          "remainingMinor": 799,
+          "overdueMinor": 799,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 15,
+        "currency": "SAR",
+        "source": "invoice",
+        "paidMinor": 101,
+        "progress": {
+          "totalMinor": 1000,
+          "paidMinor": 101,
+          "remainingMinor": 899,
+          "dueToDateMinor": 1000,
+          "overdueMinor": 899,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1
+        }
+      },
+      {
+        "id": 14,
+        "currency": "YER",
+        "source": "approved_agreement",
+        "paidMinor": 200,
+        "progress": {
+          "totalMinor": 1000,
+          "dueToDateMinor": 1000,
+          "paidMinor": 200,
+          "remainingMinor": 800,
+          "overdueMinor": 800,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 1,
+          "lastReminderAt": null
+        }
+      },
+      {
+        "id": 13,
+        "currency": "YER",
+        "source": "invoice",
+        "paidMinor": 100,
+        "progress": {
+          "totalMinor": 900,
+          "paidMinor": 100,
+          "remainingMinor": 800,
+          "dueToDateMinor": 0,
+          "overdueMinor": 0,
+          "nextDueDate": null,
+          "nextDueAmountMinor": 0,
+          "paidCount": 0,
+          "count": 0
+        }
+      }
+    ],
+    "times": [
+      4670.013670999999,
+      4730.475765000001,
+      5784.381262999999,
+      4667.512366999999,
+      5060.269473,
+      5063.243723,
+      5130.900934999998,
+      4549.329595999996,
+      4550.638849000003,
+      4568.798281999996
+    ],
+    "counts": [
+      8533,
+      8533,
+      8533,
+      8533,
+      8533,
+      8533,
+      8533,
+      8533,
+      8533,
+      8533
+    ],
+    "sha256": "44f65a674c749b405d3f2dbeb7016be09d303668204a8d9bfb66e8a109ca52a5",
+    "queryFrequencies": [
+      {
+        "calls": 1,
+        "sql": "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT i.id, i.invoice_number, i.patient_id, p.full_name, i.status, i.total_minor, i.discount_minor, i.base_currency, i.note, i.created_at FROM invoices i JOIN patients p ON p.id = i.patient_id WHERE i.patient_id = $1 ORDER BY i.created_at DESC, i.id DESC"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT ii.id, ii.invoice_id, ii.service_id, ii.doctor_id, ii.description, ii.quantity, ii.unit_price_minor, ii.total_minor, ii.plan_item_id, CASE WHEN archived.value IS NOT NULL THEN (archived.value->>'caseId')::int ELSE i.case_id END AS case_id, CASE WHEN archived.value IS NOT NULL THEN (archived.value->>'toothCode')::int ELSE i.tooth_code END AS tooth_code, CASE WHEN archived.value IS NOT NULL THEN archived.value->>'surfaces' ELSE i.surfaces END AS surfaces, i.origin_invoice_id, i.billing_status, COALESCE((i.id IS NOT NULL AND (i.billing_status IS NULL OR i.billing_status NOT IN ('unbilled', 'billed', 'included_in_package', 'waived') OR ((i.billed_invoice_id IS NOT NULL OR i.origin_invoice_id IS NOT NULL OR EXISTS ( SELECT 1 FROM invoice_items hi WHERE hi.plan_item_id = i.id OR (hi.source_type = 'plan_item' AND hi.source_id = i.id))) AND NOT (i.billing_status = 'billed' AND EXISTS (SELECT 1 FROM parties provider WHERE provider.id = i.doctor_id AND provider.kind = 'doctor') AND EXISTS ( SELECT 1 FROM invoices bv WHERE bv.id = i.billed_invoice_id AND bv.status <> 'cancelled' AND bv.patient_id = t.patient_id AND bv.base_currency = t.base_currency AND (EXISTS (SELECT 1 FROM invoice_items original_source JOIN invoices original_invoice ON original_invoice.id = original_source.invoice_id WHERE original_source.source_type = 'plan_item' AND original_source.source_id = i.id AND original_source.plan_item_id = i.id AND original_source.service_id IS NOT DISTINCT FROM i.service_id AND original_source.quantity = i.quantity AND original_source.unit_price_minor = i.unit_price_minor AND original_source.doctor_id IS NOT DISTINCT FROM i.doctor_id AND (i.origin_invoice_id IS NULL OR i.origin_invoice_id = original_source.invoice_id) AND original_invoice.patient_id = t.patient_id AND original_invoice.base_currency = t.base_currency) OR EXISTS ( SELECT 1 FROM invoice_corrections revision JOIN invoice_correction_lines approved ON approved.correction_id=revision.id JOIN invoice_items corrected_line ON corrected_line.id=approved.corrected_item_id WHERE revision.corrected_invoice_id=i.billed_invoice_id AND revision.patient_id=t.patient_id AND revision.currency=t.base_currency AND approved.plan_item_id=i.id AND corrected_line.invoice_id=revision.corrected_invoice_id AND corrected_line.plan_item_id=i.id AND approved.approved_work=jsonb_build_object( 'serviceId',i.service_id,'doctorId',i.doctor_id,'quantity',i.quantity,'unitPriceMinor',i.unit_price_minor, 'caseId',i.case_id,'toothCode',i.tooth_code,'surfaces',i.surfaces, 'caseSite',(SELECT c.site FROM clinical_cases c WHERE c.id=i.case_id)))) AND (SELECT COUNT(*) FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = i.id) = 1 AND EXISTS (SELECT 1 FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = i.id AND bi.service_id IS NOT DISTINCT FROM i.service_id AND bi.quantity = i.quantity AND bi.unit_price_minor = i.unit_price_minor AND bi.total_minor = i.quantity * i.unit_price_minor AND bi.doctor_id IS NOT DISTINCT FROM i.doctor_id AND ((bi.source_type = 'plan_item' AND bi.source_id = i.id) OR (bi.source_type IS NULL AND bi.source_id IS NULL)))))) OR (EXISTS (SELECT 1 FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = i.id) AND NOT (i.billing_status = 'included_in_package' AND EXISTS ( SELECT 1 FROM legacy_treatment_agreements la JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id AND cs.format_version = 1 AND cs.service_id = la.service_id AND cs.anchor_tooth_code IS NOT DISTINCT FROM la.tooth_code WHERE la.plan_item_id = i.id AND la.status = 'live' AND (SELECT COUNT(*) FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = i.id) = 1 AND la.patient_id = t.patient_id AND la.currency = t.base_currency AND la.service_id IS NOT DISTINCT FROM i.service_id AND la.tooth_code IS NOT DISTINCT FROM i.tooth_code AND la.case_id IS NOT DISTINCT FROM i.case_id AND i.quantity = 1 AND la.agreed_minor = i.unit_price_minor))))), false) AS financial_review FROM invoice_items ii LEFT JOIN plan_items i ON i.id = ii.plan_item_id LEFT JOIN treatment_plans t ON t.id = i.plan_id LEFT JOIN LATERAL (SELECT line.value FROM invoice_corrections correction JOIN invoice_correction_receipts receipt ON receipt.correction_id=correction.id CROSS JOIN LATERAL jsonb_array_elements(receipt.receipt#>'{original,items}') line WHERE correction.original_invoice_id=ii.invoice_id AND (line.value->>'id')::int=ii.id LIMIT 1) archived ON TRUE WHERE ii.invoice_id = ANY($1::int[]) ORDER BY ii.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT o.patient_id, p.full_name, p.phone, o.currency, o.amount_minor, o.as_of_date, o.note, o.created_by, o.updated_at FROM patient_opening_balances o JOIN patients p ON p.id = o.patient_id WHERE o.patient_id = $1 ORDER BY o.currency"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT y.id, y.receipt_number, y.patient_id, p.full_name, y.invoice_id, y.plan_id, y.opening_currency, y.shift_id, y.kind, y.reversal_of_id, y.amount_minor, y.currency, y.exchange_rate, y.base_amount_minor, y.base_currency, y.method, y.note, y.created_by, y.created_at FROM payments y JOIN patients p ON p.id = y.patient_id WHERE y.patient_id = $1 ORDER BY y.created_at DESC, y.id DESC"
+      },
+      {
+        "calls": 1121,
+        "sql": "SELECT d.id,d.correction_id,d.source_invoice_ids, (d.patient_id=c.patient_id AND d.source_currency<>d.target_currency -- 0069: a direction other than YER -> SAR documents an unpaid lineage only. AND ((d.source_currency='YER' AND d.target_currency='SAR') OR NOT EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=ANY(d.source_invoice_ids))) AND c.original_currency=d.source_currency AND c.currency=d.target_currency AND i.patient_id=d.patient_id AND i.base_currency=d.source_currency AND i.status='cancelled' AND n.patient_id=d.patient_id AND n.base_currency=d.target_currency AND d.source_invoice_ids=(WITH RECURSIVE lineage(id) AS (SELECT c.original_invoice_id UNION SELECT old.original_invoice_id FROM invoice_corrections old JOIN lineage l ON old.corrected_invoice_id=l.id) SELECT array_agg(id ORDER BY id) FROM lineage) AND NOT EXISTS(SELECT 1 FROM unnest(d.source_invoice_ids) x(id) LEFT JOIN invoices old ON old.id=x.id WHERE old.id IS NULL OR old.patient_id<>d.patient_id OR old.base_currency<>d.source_currency OR old.status<>'cancelled') AND NOT EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=ANY(d.source_invoice_ids) AND NOT EXISTS(SELECT 1 FROM invoice_settlement_reclassification_events e WHERE e.reclassification_id=d.id AND e.payment_id=p.id)) ) AS valid FROM invoice_settlement_reclassifications d LEFT JOIN invoice_corrections c ON c.id=d.correction_id LEFT JOIN invoices i ON i.id=c.original_invoice_id LEFT JOIN invoices n ON n.id=c.corrected_invoice_id WHERE d.patient_id=ANY($1::int[]) ORDER BY d.id"
+      },
+      {
+        "calls": 1121,
+        "sql": "SELECT d.id,d.correction_id,e.payment_id,p.invoice_id, (WITH RECURSIVE successors(id) AS (SELECT corrected_invoice_id FROM invoice_corrections WHERE id=d.correction_id UNION SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN successors s ON c.original_invoice_id=s.id) SELECT i.id FROM invoices i JOIN successors s ON s.id=i.id WHERE i.patient_id=d.patient_id AND i.base_currency=d.target_currency AND NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id)) AS target_invoice_id, e.source_minor::text,e.target_minor::text,e.direction, to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, (d.source_currency='YER' AND d.target_currency='SAR' AND e.payment_snapshot=to_jsonb(p) AND p.patient_id=d.patient_id AND p.invoice_id=ANY(d.source_invoice_ids) AND p.currency=d.target_currency AND p.base_currency=d.source_currency AND e.source_minor=p.base_amount_minor AND e.target_minor=p.amount_minor AND e.direction=(CASE WHEN p.kind='payment' THEN 1 WHEN p.kind='refund' THEN -1 ELSE 0 END) AND p.exchange_rate>0 AND p.base_amount_minor=FLOOR(p.amount_minor::double precision/100*p.exchange_rate::double precision+0.5) AND ((p.kind='payment' AND p.reversal_of_id IS NULL) OR (p.kind='refund' AND EXISTS( SELECT 1 FROM payments original WHERE original.id=p.reversal_of_id AND original.kind='payment' AND original.invoice_id=p.invoice_id AND original.patient_id=p.patient_id AND original.currency=p.currency AND original.exchange_rate=p.exchange_rate))) ) AS valid FROM invoice_settlement_reclassification_events e JOIN invoice_settlement_reclassifications d ON d.id=e.reclassification_id LEFT JOIN payments p ON p.id=e.payment_id WHERE d.patient_id=ANY($1::int[]) ORDER BY e.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT id, base_currency FROM treatment_plans WHERE patient_id = $1"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, t.total_minor, t.base_currency, t.status, t.start_date, t.note, t.created_at, t.total_from_items, t.consent_at, t.consent_by, t.consent_note, t.last_reminder_at, COALESCE((SELECT SUM(CASE WHEN y.kind = 'refund' THEN -1 ELSE 1 END * CASE WHEN y.currency = t.base_currency THEN y.amount_minor ELSE y.base_amount_minor END) FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor FROM treatment_plans t JOIN patients p ON p.id = t.patient_id WHERE t.patient_id=$1 ORDER BY t.created_at DESC"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT id, plan_id, number, due_date, amount_minor, last_reminder_at FROM plan_installments WHERE plan_id = ANY($1::int[]) ORDER BY plan_id, number"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT pi.id, pi.plan_id, pi.service_id, pi.service_name, pi.category, pi.tooth_code, pi.surfaces, pi.quantity, pi.unit_price_minor, pi.status, pi.visit_id, pi.done_at, pi.note, pi.sort_order, pi.planned_visit_number, pi.billing_rule, pi.billing_status, pi.session_count, pi.sessions_completed, pi.doctor_id, doc.name AS doctor_name, pi.case_id, c.site AS case_site, pi.origin, pi.origin_invoice_id, pi.billed_invoice_id, t.consent_at IS NOT NULL AS consented, (pi.id IS NOT NULL AND (pi.billing_status IS NULL OR pi.billing_status NOT IN ('unbilled', 'billed', 'included_in_package', 'waived') OR ((pi.billed_invoice_id IS NOT NULL OR pi.origin_invoice_id IS NOT NULL OR EXISTS ( SELECT 1 FROM invoice_items hi WHERE hi.plan_item_id = pi.id OR (hi.source_type = 'plan_item' AND hi.source_id = pi.id))) AND NOT (pi.billing_status = 'billed' AND EXISTS (SELECT 1 FROM parties provider WHERE provider.id = pi.doctor_id AND provider.kind = 'doctor') AND EXISTS ( SELECT 1 FROM invoices bv WHERE bv.id = pi.billed_invoice_id AND bv.status <> 'cancelled' AND bv.patient_id = t.patient_id AND bv.base_currency = t.base_currency AND (EXISTS (SELECT 1 FROM invoice_items original_source JOIN invoices original_invoice ON original_invoice.id = original_source.invoice_id WHERE original_source.source_type = 'plan_item' AND original_source.source_id = pi.id AND original_source.plan_item_id = pi.id AND original_source.service_id IS NOT DISTINCT FROM pi.service_id AND original_source.quantity = pi.quantity AND original_source.unit_price_minor = pi.unit_price_minor AND original_source.doctor_id IS NOT DISTINCT FROM pi.doctor_id AND (pi.origin_invoice_id IS NULL OR pi.origin_invoice_id = original_source.invoice_id) AND original_invoice.patient_id = t.patient_id AND original_invoice.base_currency = t.base_currency) OR EXISTS ( SELECT 1 FROM invoice_corrections revision JOIN invoice_correction_lines approved ON approved.correction_id=revision.id JOIN invoice_items corrected_line ON corrected_line.id=approved.corrected_item_id WHERE revision.corrected_invoice_id=pi.billed_invoice_id AND revision.patient_id=t.patient_id AND revision.currency=t.base_currency AND approved.plan_item_id=pi.id AND corrected_line.invoice_id=revision.corrected_invoice_id AND corrected_line.plan_item_id=pi.id AND approved.approved_work=jsonb_build_object( 'serviceId',pi.service_id,'doctorId',pi.doctor_id,'quantity',pi.quantity,'unitPriceMinor',pi.unit_price_minor, 'caseId',pi.case_id,'toothCode',pi.tooth_code,'surfaces',pi.surfaces, 'caseSite',(SELECT c.site FROM clinical_cases c WHERE c.id=pi.case_id)))) AND (SELECT COUNT(*) FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = pi.id) = 1 AND EXISTS (SELECT 1 FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = pi.id AND bi.service_id IS NOT DISTINCT FROM pi.service_id AND bi.quantity = pi.quantity AND bi.unit_price_minor = pi.unit_price_minor AND bi.total_minor = pi.quantity * pi.unit_price_minor AND bi.doctor_id IS NOT DISTINCT FROM pi.doctor_id AND ((bi.source_type = 'plan_item' AND bi.source_id = pi.id) OR (bi.source_type IS NULL AND bi.source_id IS NULL)))))) OR (EXISTS (SELECT 1 FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = pi.id) AND NOT (pi.billing_status = 'included_in_package' AND EXISTS ( SELECT 1 FROM legacy_treatment_agreements la JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id AND cs.format_version = 1 AND cs.service_id = la.service_id AND cs.anchor_tooth_code IS NOT DISTINCT FROM la.tooth_code WHERE la.plan_item_id = pi.id AND la.status = 'live' AND (SELECT COUNT(*) FROM legacy_treatment_agreements lh WHERE lh.plan_item_id = pi.id) = 1 AND la.patient_id = t.patient_id AND la.currency = t.base_currency AND la.service_id IS NOT DISTINCT FROM pi.service_id AND la.tooth_code IS NOT DISTINCT FROM pi.tooth_code AND la.case_id IS NOT DISTINCT FROM pi.case_id AND pi.quantity = 1 AND la.agreed_minor = pi.unit_price_minor))))) AS financial_review, (SELECT la.id FROM legacy_treatment_agreements la WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1) AS legacy_agreement_id, (SELECT la.status FROM legacy_treatment_agreements la WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1) AS legacy_agreement_status, ( SELECT jsonb_build_object( 'agreementId', la.id, 'serviceId', la.service_id, 'anchorToothCode', la.tooth_code, 'agreementCount', (SELECT COUNT(*) FROM legacy_treatment_agreements all_history WHERE all_history.plan_item_id = pi.id), 'snapshot', to_jsonb(cs)) FROM legacy_treatment_agreements la LEFT JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id WHERE la.plan_item_id = pi.id ORDER BY la.id DESC LIMIT 1 ) AS legacy_context FROM plan_items pi JOIN treatment_plans t ON t.id = pi.plan_id LEFT JOIN clinical_cases c ON c.id = pi.case_id LEFT JOIN parties doc ON doc.id = pi.doctor_id WHERE pi.plan_id = ANY($1::int[]) ORDER BY pi.plan_id, pi.sort_order, pi.id"
+      },
+      {
+        "calls": 1,
+        "sql": "SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])"
+      },
+      {
+        "calls": 20,
+        "sql": "SELECT * FROM approved_agreement_principals WHERE plan_id=$1"
+      },
+      {
+        "calls": 20,
+        "sql": "SELECT i.id,i.patient_id,i.base_currency, (i.plan_id=$1 AND EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=i.id AND p.plan_id=$1 AND p.patient_id=i.patient_id) AND NOT EXISTS(SELECT 1 FROM invoice_items x WHERE x.invoice_id=i.id AND (x.plan_item_id IS NOT NULL OR x.source_type IS NOT NULL))) AS classic, ((i.plan_id IS NULL OR i.plan_id=$1) AND EXISTS(SELECT 1 FROM invoice_items x WHERE x.invoice_id=i.id) AND NOT EXISTS( SELECT 1 FROM invoice_items x LEFT JOIN plan_items pi ON pi.id=COALESCE(x.plan_item_id,CASE WHEN x.source_type='plan_item' THEN x.source_id END) WHERE x.invoice_id=i.id AND (pi.id IS NULL OR pi.plan_id<>$1 OR (x.source_type='plan_item' AND x.source_id IS DISTINCT FROM pi.id)))) AS owned FROM invoices i WHERE NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id) AND (i.plan_id=$1 OR EXISTS(SELECT 1 FROM invoice_items x JOIN plan_items pi ON pi.id=COALESCE(x.plan_item_id,CASE WHEN x.source_type='plan_item' THEN x.source_id END) WHERE x.invoice_id=i.id AND pi.plan_id=$1)) ORDER BY i.id"
+      },
+      {
+        "calls": 580,
+        "sql": "SELECT patient_id,base_currency FROM invoices WHERE id=$1"
+      },
+      {
+        "calls": 580,
+        "sql": "WITH RECURSIVE lineage(id) AS ( SELECT $1::int UNION SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id = l.id ) SELECT i.id,i.patient_id,i.base_currency, EXISTS(SELECT 1 FROM invoice_settlement_reclassifications d JOIN invoice_corrections c ON c.id=d.correction_id WHERE i.id=ANY(d.source_invoice_ids) AND d.patient_id=$2 AND d.source_currency=i.base_currency AND d.target_currency=$3 AND c.corrected_invoice_id IN(SELECT id FROM lineage)) AS reclassified FROM lineage l JOIN invoices i ON i.id=l.id ORDER BY i.id"
+      },
+      {
+        "calls": 580,
+        "sql": "SELECT id,patient_id,base_currency,total_minor::text,discount_minor::text,status,note FROM invoices WHERE id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 580,
+        "sql": "SELECT id,patient_id,currency,original_invoice_id,corrected_invoice_id,request_hash,original_currency FROM invoice_corrections WHERE corrected_invoice_id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 580,
+        "sql": "SELECT id,invoice_id,patient_id,kind,amount_minor::text,base_amount_minor::text,currency,base_currency,exchange_rate::text,reversal_of_id, to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at FROM payments WHERE invoice_id=ANY($1::int[]) ORDER BY id"
+      },
+      {
+        "calls": 20,
+        "sql": "SELECT to_regclass('public.agreement_delta_amendments') IS NOT NULL AS present"
+      },
+      {
+        "calls": 20,
+        "sql": "SELECT invoice_id FROM payments WHERE plan_id=$1"
+      },
+      {
+        "calls": 20,
+        "sql": "SELECT delta_invoice_id,delta_minor::text,patient_id FROM agreement_delta_amendments WHERE plan_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 20,
+        "sql": "SELECT 1 FROM legacy_treatment_agreements a JOIN plan_items i ON i.id=a.plan_item_id WHERE i.plan_id=$1 LIMIT 1"
+      },
+      {
+        "calls": 20,
+        "sql": "SELECT * FROM debt_repayment_arrangements WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 540,
+        "sql": "SELECT * FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version DESC LIMIT 1"
+      },
+      {
+        "calls": 540,
+        "sql": "SELECT id,total_minor::text,discount_minor::text,status,base_currency FROM invoices WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 540,
+        "sql": "SELECT id,base_currency FROM treatment_plans WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 540,
+        "sql": "SELECT id,invoice_id,plan_id,opening_currency,kind,amount_minor::text,base_amount_minor::text,currency,exchange_rate::text FROM payments WHERE patient_id=$1 ORDER BY id"
+      },
+      {
+        "calls": 540,
+        "sql": "SELECT currency,amount_minor::text FROM patient_opening_balances WHERE patient_id=$1"
+      },
+      {
+        "calls": 540,
+        "sql": "SELECT version,status,terms,principal_minor::text,reason,created_by,created_at::text FROM debt_repayment_revisions WHERE arrangement_id=$1 ORDER BY version"
+      },
+      {
+        "calls": 1,
+        "sql": "COMMIT"
+      }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+# Regression on the unfixed route (9881d33c correction route), test file at the fix commit: red
+     × a correction onto the settled sibling invoice is an explicit 400 invalid refusal with zero writes 510ms
+     × a correction onto the settled sibling invoice is an explicit 400 invalid refusal with zero writes 459ms
+     × a correction onto the settled sibling invoice is an explicit 400 invalid refusal with zero writes 397ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: {"message":"تعذّر تصحيح السند. أعد المحاولة."}: expected 500 to be 400 // Object.is equality
+      Tests  3 failed | 27 skipped (30)
+
+# Same regression with the fix: green
+      Tests  3 passed | 27 skipped (30)
+
+# Route mapping unit tests on the unfixed route: red (the 3 controls pass before and after)
+     × a typed unauthorized refusal answers 403 with its safe message and code 16ms
+     × a typed invalid refusal answers 400 with its safe message and code 3ms
+     × a typed stale refusal answers 409 with its safe message and code 2ms
+     × a typed conflict refusal answers 409 with its safe message and code 2ms
+     × a typed missing refusal answers 409 with its safe message and code 3ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  5 failed | 3 passed (8)

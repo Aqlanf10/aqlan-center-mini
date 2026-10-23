@@ -1,0 +1,11 @@
+surgical_extraction          self     len= 347 storedReadable=false
+surgical_extraction          guardian len= 355 storedReadable=false
+root_canal                   self     len= 354 storedReadable=false
+root_canal                   guardian len= 362 storedReadable=false
+dental_implant               self     len= 343 storedReadable=false
+dental_implant               guardian len= 351 storedReadable=false
+teeth_whitening              self     len= 329 storedReadable=false
+teeth_whitening              guardian len= 337 storedReadable=false
+orthodontics                 self     len= 338 storedReadable=false
+orthodontics                 guardian len= 346 storedReadable=false
+main upload path: 10/10 freshly signed records unreadable after the 300-character cut (limit=300)

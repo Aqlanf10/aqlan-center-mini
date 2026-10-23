@@ -1,0 +1,34 @@
+
+ RUN  v4.1.12 /tmp/claude-0/wt-union
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Ubuntu 18.6-1.pgdg24.04+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/invoice-revision.test.ts (40 tests | 1 failed | 38 skipped) 1059ms
+     × a YER invoice paid in SAR and then fully refunded reports zero net settlement, not an absent receipt, and stays out of the new directions 139ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/invoice-revision.test.ts > six-direction currency correction of an unpaid, standalone invoice > a YER invoice paid in SAR and then fully refunded reports zero net settlement, not an absent receipt, and stays out of the new directions
+AssertionError: expected 'لا يوجد سند على الفاتورة؛ تصدر فاتورة…' not to match /لا يوجد سند/
+
+- Expected:
+/لا يوجد سند/
+
++ Received:
+"لا يوجد سند على الفاتورة؛ تصدر فاتورة بديلة بالعملة المختارة بالمبالغ التي تكتبها، دون تحويل بسعر صرف."
+
+ ❯ __tests__/postgres/invoice-revision.test.ts:418:49
+    416|     expect(view.settledMinor).toBe(0);
+    417|     expect(view.currencyCorrection).toMatchObject({available:true,targ…
+    418|     expect(view.currencyCorrection.message).not.toMatch(/لا يوجد سند/);
+       |                                                 ^
+    419|     expect(view.currencyCorrection.message).toMatch(/^صافي تسوية السند…
+    420|     const {input} = await currencyCommand(invoice.id,"USD");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 38 skipped (40)
+   Start at  19:53:18
+   Duration  5.00s (transform 2.61s, setup 0ms, import 3.13s, tests 1.06s, environment 0ms)
+

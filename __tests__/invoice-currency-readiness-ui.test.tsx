@@ -62,7 +62,8 @@ function fixture(currency: Currency = "YER"): InvoiceRevisionView {
       items: [{ id: 19, serviceId: null, doctorId: null, description: "Synthetic", quantity: 1, unitPriceMinor: amount, totalMinor: amount, planItemId: null }] },
     sourceHash: "a".repeat(64), settledMinor: 0, remainingMinor: amount, accountDueMinor: amount, work: [],
     repaymentVersion: 0, repaymentTerms: { mode: "full", installments: [] },
-    ...(currency === "YER" ? { currencyCorrection: { available: true, targetCurrency: "SAR", settledMinor: 0, accountDueMinor: 0, message: "Synthetic eligible preview" } } : {}),
+    ...(currency === "YER" ? { currencyCorrection: { available: true, targetCurrency: "SAR", targets: ["SAR"], options: [{ currency: "SAR", settledMinor: 0, accountDueMinor: 0 }],
+      settledMinor: 0, accountDueMinor: 0, message: "Synthetic eligible preview" } } : {}),
   };
 }
 let recovery: InvoiceRevisionCommand | null = null;
@@ -121,6 +122,24 @@ describe("real editor currency readiness and retained write boundaries", () => {
     change("سبب التصحيح", "Synthetic correction"); click("تأكيد تصحيح الفاتورة"); await settle();
     expect(posts()).toHaveLength(1); expect(JSON.parse(posts()[0][1].body)).not.toHaveProperty("currency");
   });
+  it("an unpaid SAR→USD correction clears the amounts and sends only the amounts the owner typed in USD", async () => {
+    const view = fixture("SAR");
+    view.currencyCorrection = { available: true, targetCurrency: "YER", targets: ["YER", "USD"], message: "Synthetic unpaid preview",
+      options: [{ currency: "YER", settledMinor: 0, accountDueMinor: 0 }, { currency: "USD", settledMinor: 0, accountDueMinor: 0 }], settledMinor: 0, accountDueMinor: 0 };
+    get = async () => json(view); render(); await settle();
+    expect(states()).toContainEqual(["USD", "eligible"]);
+    change("عملة الفاتورة المصححة", "USD");
+    expect(label("عملة الفاتورة المصححة")?.props.value).toBe("USD");
+    expect(label("سعر التصحيح 1")?.props.value).toBe("");
+    expect(text(render())).toContain("لم يُحوَّل أي مبلغ تلقائيًا");
+    change("سبب التصحيح", "Synthetic wrong currency before payment"); click("تأكيد تصحيح الفاتورة"); await settle();
+    expect(posts()).toHaveLength(0);
+    change("سعر التصحيح 1", "80"); click("تأكيد تصحيح الفاتورة"); await settle();
+    expect(posts()).toHaveLength(1);
+    const body = JSON.parse(posts()[0][1].body);
+    expect(body).toMatchObject({ currency: "USD", lines: [{ itemId: 19, quantity: 1, unitPrice: "80" }], discount: "0", expectedRemainingMinor: 8000 });
+    expect(body).not.toHaveProperty("exchangeRate");
+  });
   it("retains numeric interpretation and the unchanged request format for eligible YER→SAR", async () => {
     render(); await settle(); change("عملة الفاتورة المصححة", "SAR");
     expect(label("سعر التصحيح 1")?.props.value).toBe("1000");
@@ -132,7 +151,7 @@ describe("real editor currency readiness and retained write boundaries", () => {
     expect(control.acknowledge).not.toHaveBeenCalled(); expect(done).not.toHaveBeenCalled();
   });
   it("does not unlock a refused or missing proof", async () => {
-    const view = fixture(); view.currencyCorrection = { ...view.currencyCorrection!, available: false, reasonCodes: ["INDEPENDENT_ITEM_SOURCE"] };
+    const view = fixture(); view.currencyCorrection = { ...view.currencyCorrection!, available: false, targets: [], options: [], reasonCodes: ["INDEPENDENT_ITEM_SOURCE"] };
     get = async () => json(view); render(); await settle();
     expect(states()).toContainEqual(["SAR", "review"]); expect(text(render())).toContain("مصدر مستقل");
     change("عملة الفاتورة المصححة", "SAR"); expect(label("عملة الفاتورة المصححة")?.props.value).toBe("YER");
@@ -158,7 +177,8 @@ describe("real editor currency readiness and retained write boundaries", () => {
     get = async () => json(fixture("USD")); click("إعادة قراءة الفاتورة"); await settle();
     resolve(json(fixture())); await settle();
     expect(label("عملة الفاتورة المصححة")?.props.value).toBe("USD");
-    expect(states()).toContainEqual(["SAR", "unsupported"]); expect(posts()).toHaveLength(0);
+    // The superseded YER proof is ignored; the USD read carried no proof, so SAR stays unverified.
+    expect(states()).toContainEqual(["SAR", "unverified"]); expect(posts()).toHaveLength(0);
   });
   it.each(["doctor", "reception", "cashier", "accountant"])("retains %s write denial even with a prior eligible preview", async role => {
     render(); await settle(); hooks.session = { username: "synthetic-other", role }; render();
@@ -196,5 +216,90 @@ describe("real editor currency readiness and retained write boundaries", () => {
   it("does not replay a frozen request under a different session owner", async () => {
     recovery = saved(); hooks.session = { username: "another-admin", role: "admin" }; render();
     click("إعادة نفس طلب التصحيح"); await settle(); expect(fetchMock).not.toHaveBeenCalled(); expect(control.reserve).not.toHaveBeenCalled();
+  });
+});
+
+describe("invoice correction explanations without changing recovery semantics", () => {
+  const conflict = "توجد تسويات أخرى على الحساب؛ راجع تخصيص السندات قبل جدولة تحصيل إضافي.";
+  const warning = () => nodes(render()).filter(node => node.props["data-testid"] === "invoice-unchanged-service-warning");
+
+  it("explains only the exact known settlement refusal and retains the rejected command until review", async () => {
+    post = async () => json({ code: "conflict", message: conflict }, 409);
+    render(); await settle();
+    change("سبب التصحيح", "Synthetic correction"); click("تأكيد تصحيح الفاتورة"); await settle();
+    expect(recovery?.outcome).toBe("refused");
+    expect(recovery?.message).toContain("رُفض هذا الطلب قبل حفظ التصحيح");
+    expect(recovery?.message).toContain("المتبقي المخصص لهذه الفاتورة");
+    expect(recovery?.message).toContain("حساب المريض ككل بالعملة نفسها");
+    expect(recovery?.message).toContain("ولا يحسم نتيجة أي طلب سابق");
+    expect(control.acknowledge).not.toHaveBeenCalled();
+    expect(button("تأكيد تصحيح الفاتورة")?.props.disabled).toBe(true);
+    expect(button("مراجعة التصحيح بعد الرفض")).toBeDefined();
+    const body = recovery!.body, key = recovery!.key;
+    click("إعادة نفس طلب التصحيح"); await settle();
+    expect(recovery).toMatchObject({ body, key, outcome: "refused" });
+    expect(posts().map(([, init]) => init.body)).toEqual([body, body]);
+    click("مراجعة التصحيح بعد الرفض"); await settle();
+    expect(control.acknowledge).toHaveBeenCalledTimes(1); expect(recovery).toBeNull();
+    expect(done).not.toHaveBeenCalled();
+  });
+  it.each([
+    { status: 409, code: "conflict", message: "Synthetic other conflict" },
+    { status: 400, code: "invalid", message: conflict },
+    { status: 400, code: "conflict", message: conflict },
+    { status: 404, code: "conflict", message: conflict },
+    { status: 409, code: "stale", message: conflict },
+  ])("does not mislabel another known refusal: $code / $message", async ({ status, code, message }) => {
+    post = async () => json({ code, message }, status);
+    recovery = saved(); render(); click("إعادة نفس طلب التصحيح"); await settle();
+    expect(recovery?.outcome).toBe("refused"); expect(recovery?.message).toBe(message);
+    expect(control.acknowledge).not.toHaveBeenCalled();
+  });
+  it.each(["server", "redirect", "malformed", "transport"])("never claims pre-save refusal or unlocks an unknown %s outcome", async failure => {
+    recovery = saved(); const body = recovery.body, key = recovery.key;
+    post = async () => {
+      if (failure === "transport") throw new Error("Synthetic lost response");
+      if (failure === "malformed") return json({ code: "conflict" }, 409);
+      const response = json({ code: "conflict", message: conflict }, failure === "server" ? 500 : 409);
+      if (failure === "redirect") Object.defineProperty(response, "redirected", { value: true });
+      return response;
+    };
+    render(); click("إعادة نفس طلب التصحيح"); await settle();
+    expect(recovery).toMatchObject({ body, key, outcome: "uncertain" });
+    expect(recovery?.message).not.toContain("رُفض هذا الطلب");
+    expect(button("مراجعة التصحيح بعد الرفض")).toBeUndefined();
+    click("إعادة نفس طلب التصحيح"); await settle();
+    expect(posts().map(([, init]) => init.body)).toEqual([body, body]);
+    expect(control.acknowledge).not.toHaveBeenCalled(); expect(done).not.toHaveBeenCalled();
+  });
+  it("warns when a valid price changes but the service remains, without treating the reason as a service edit", async () => {
+    render(); await settle(); expect(warning()).toHaveLength(0);
+    change("سعر التصحيح 1", "900"); change("سبب التصحيح", "تصحيح إلى زركون");
+    expect(warning()).toHaveLength(1);
+    expect(text(warning())).toContain("الخدمة ستبقى «Synthetic»");
+    expect(text(warning())).toContain("تغيير السعر أو كتابة سبب التصحيح لا يغيّر نوع الخدمة");
+    expect(text(warning())).toContain("زركون");
+    click("تأكيد تصحيح الفاتورة"); await settle();
+    expect(JSON.parse(posts()[0][1].body).lines[0]).toMatchObject({ itemId: 19, serviceId: null, unitPrice: "900" });
+  });
+  it("does not warn for unchanged, invalid, currency-only, or removed prices", async () => {
+    render(); await settle();
+    change("سبب التصحيح", "تصحيح إلى زركون"); expect(warning()).toHaveLength(0);
+    change("سعر التصحيح 1", "not-a-price"); expect(warning()).toHaveLength(0);
+    change("سعر التصحيح 1", "1000"); change("عملة الفاتورة المصححة", "SAR"); expect(warning()).toHaveLength(0);
+    change("عملة الفاتورة المصححة", "YER"); change("سعر التصحيح 1", "900"); expect(warning()).toHaveLength(1);
+    const checkbox = find(node => node.type === "input" && node.props.type === "checkbox")!;
+    (checkbox.props.onChange as (e: { target: { checked: boolean } }) => void)({ target: { checked: false } });
+    expect(warning()).toHaveLength(0);
+  });
+  it("removes the price-only warning after a real service selection changes", async () => {
+    const view = fixture();
+    view.identityAmendmentAvailable = true;
+    view.identityCatalog = { services: [{ id: 101, name: "Synthetic alternate", category: null }], doctors: [] };
+    get = async () => json(view); render(); await settle();
+    change("سعر التصحيح 1", "900"); expect(warning()).toHaveLength(1);
+    expect(label("خدمة التصحيح 1")?.props.disabled).toBe(false);
+    change("خدمة التصحيح 1", "101"); expect(warning()).toHaveLength(0);
+    change("خدمة التصحيح 1", ""); expect(warning()).toHaveLength(1);
   });
 });
