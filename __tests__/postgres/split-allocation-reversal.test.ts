@@ -15,7 +15,8 @@ import { MINOR_UNITS, type Currency } from "../../lib/money";
  *    amount, never touch the sibling allocation, any invoice, the schedule, the amendment history or
  *    the split-collection receipt, replay without writes, and refuse a changed payload without writes;
  *  - the original split-collection key, retried late, returns the same complete receipt set;
- *  - unsupported reversals are refused explicitly with zero writes (whole-database content hash).
+ *  - unsupported reversals are refused explicitly with zero writes (whole-database content hash) and no
+ *    audit row; the audit log is append-only and every replay addition is accounted for.
  */
 assertRealPostgresUrl();
 stubPostgresEnv();
@@ -69,6 +70,20 @@ async function databaseState(): Promise<Record<string, string>> {
   return Object.fromEntries((await q<{ t: string; h: string }>(stateSql)).map((row) => [row.t, row.h]));
 }
 const changedTables = (before: Record<string, string>, after: Record<string, string>) => Object.keys(after).filter((table) => before[table] !== after[table]).sort();
+/**
+ * The audit log is append-only: rows up to a mark never change, and every row after it is accounted
+ * for. The only row a replay may add is the payments route's documented best-effort trace naming the
+ * replayed receipt; a rejected request adds nothing.
+ */
+async function auditMark() {
+  const [row] = await q<{ id: string; h: string }>("SELECT coalesce(max(id),0)::text AS id, coalesce(md5(string_agg(a::text, '|' ORDER BY a.id)), '') AS h FROM audit_log a");
+  return { id: Number(row.id), hash: row.h };
+}
+async function auditSince(mark: { id: number; hash: string }) {
+  const [prefix] = await q<{ h: string }>("SELECT coalesce(md5(string_agg(a::text, '|' ORDER BY a.id)), '') AS h FROM audit_log a WHERE a.id <= $1", [mark.id]);
+  expect(prefix.h, "audit rows up to the mark are unchanged").toBe(mark.hash);
+  return q<{ action: string; entity: string; entity_id: string }>("SELECT action, entity, entity_id FROM audit_log WHERE id > $1 ORDER BY id", [mark.id]);
+}
 
 type Fixture = { patientId: number; planId: number; doctorId: number; currency: Currency; originalInvoiceId: number; deltaInvoiceId: number };
 async function invoiceRemaining(f: Fixture, invoiceId: number) {
@@ -206,6 +221,7 @@ describe.each(CURRENCIES)("%s split collection", (currency) => {
       expect(await q("SELECT id FROM payments WHERE reversal_of_id=$1", [other.id])).toEqual([]);
 
       // A lost-response retry of the reversal replays it; the same key with a changed payload writes nothing.
+      const mark = await auditMark();
       const replay = await reversal.send(f, allocation.id, allocation.amount, k);
       expect(replay.status, JSON.stringify(replay.body)).toBe(200);
       expect(changedTables(s2, await databaseState())).toEqual([]);
@@ -221,6 +237,10 @@ describe.each(CURRENCIES)("%s split collection", (currency) => {
       expect(lateChanged.status, JSON.stringify(lateChanged.body)).toBe(409);
       expect(changedTables(s2, await databaseState())).toEqual([]);
       expect((await position(f)).drawer).toBe(p2.drawer);
+      // Audit: append-only, and the only addition is the payments route's replay trace for a refund
+      // replay (naming that refund). Correction replays, the late split retry and every rejection add none.
+      const refundId = reversal.name.includes("refund") ? String(sent.body.id) : null;
+      expect(await auditSince(mark)).toEqual(refundId ? [{ action: "payment.idempotent_replay", entity: "payment", entity_id: refundId }] : []);
     }, 120_000);
   });
 
@@ -276,15 +296,16 @@ describe.each(CURRENCIES)("%s split collection", (currency) => {
         { mode: "correct", reason: "Synthetic currency", amount: major(1000, other), currency: other, method: "cash", target: "original" }, key("fx"), { id: String(original.id) })] as [string, () => Promise<Sent>]]),
     ];
     for (const [label, send] of refusals) {
-      const s0 = await databaseState();
+      const s0 = await databaseState(); const mark = await auditMark();
       const refused = await send();
       expect(refused.status, `${label}: ${JSON.stringify(refused.body)}`).toBe(409);
       expect(String(refused.body.message), label).toMatch(/[؀-ۿ]/);
       expect(changedTables(s0, await databaseState()), label).toEqual([]);
+      expect(await auditSince(mark), label).toEqual([]);
     }
     // After a full void, any further void or refund of that allocation is refused, with zero writes.
     expect((await REVERSALS[0].send(f, delta.id, delta.amount, key("void"))).status).toBe(201);
-    const s1 = await databaseState();
+    const s1 = await databaseState(); const mark1 = await auditMark();
     for (const [label, send] of [
       ["second void", () => REVERSALS[0].send(f, delta.id, delta.amount, key("void-again"))],
       ["refund after void", () => REVERSALS[2].send(f, delta.id, delta.amount, key("refund-after"))],
@@ -293,28 +314,28 @@ describe.each(CURRENCIES)("%s split collection", (currency) => {
       expect(refused.status, `${label}: ${JSON.stringify(refused.body)}`).toBe(409);
       expect(changedTables(s1, await databaseState()), label).toEqual([]);
     }
+    expect(await auditSince(mark1)).toEqual([]);
   }, 120_000);
 
   /* Correcting the delta allocation onto its sibling (the fully-settled original invoice) is refused by the
-     approved-source guard and writes nothing — but the correction route maps that guard's refusal to a
-     generic 500 «أعد المحاولة» instead of an explicit refusal. The zero-write half is asserted here; the
-     explicit-status half is the known-defect reproducer below (it.fails until the route maps the error). */
-  it("a correction onto the settled sibling invoice writes nothing", async () => {
+     approved-source guard (assertApprovedReceiptLimit, a typed DebtRepaymentError "invalid"). The correction
+     route answers it exactly as /api/payments answers that error: 400, code "invalid", the guard's Arabic
+     reason — and nothing is written (regression for the former generic 500 «أعد المحاولة»). */
+  it("a correction onto the settled sibling invoice is an explicit 400 invalid refusal with zero writes", async () => {
     const f = await fixture(currency);
     const split = await splitCollection(f);
-    const s0 = await databaseState();
-    const sent = await post(correctRoute.POST, `/api/payments/${split.byTarget.delta.id}/correct`,
-      { mode: "correct", reason: "Synthetic move to sibling", amount: major(DELTA_SHARE, currency), currency, method: "cash", invoiceId: f.originalInvoiceId }, key("sibling"), { id: String(split.byTarget.delta.id) });
-    expect(sent.status).not.toBe(201);
+    const s0 = await databaseState(); const mark = await auditMark(); const p0 = await position(f);
+    const body = { mode: "correct", reason: "Synthetic move to sibling", amount: major(DELTA_SHARE, currency), currency, method: "cash", invoiceId: f.originalInvoiceId };
+    for (const k of [key("sibling"), key("sibling-again")]) {
+      const sent = await post(correctRoute.POST, `/api/payments/${split.byTarget.delta.id}/correct`, body, k, { id: String(split.byTarget.delta.id) });
+      expect(sent.status, JSON.stringify(sent.body)).toBe(400);
+      expect(sent.body.code).toBe("invalid");
+      expect(String(sent.body.message)).toBe("المبلغ يتجاوز متبقي المصدر أو الحساب.");
+    }
     expect(changedTables(s0, await databaseState())).toEqual([]);
-  }, 120_000);
-
-  it.fails("KNOWN DEFECT (reproducer): that sibling correction should be an explicit 409 with the guard's Arabic reason, not a generic 500", async () => {
-    const f = await fixture(currency);
-    const split = await splitCollection(f);
-    const sent = await post(correctRoute.POST, `/api/payments/${split.byTarget.delta.id}/correct`,
-      { mode: "correct", reason: "Synthetic move to sibling", amount: major(DELTA_SHARE, currency), currency, method: "cash", invoiceId: f.originalInvoiceId }, key("sibling-explicit"), { id: String(split.byTarget.delta.id) });
-    expect(sent.status, JSON.stringify(sent.body)).toBe(409);
-    expect(String(sent.body.message)).toContain("يتجاوز");
+    expect(await auditSince(mark)).toEqual([]);
+    const p1 = await position(f);
+    expect([p1.drawer, p1.due, p1.originalRemaining, p1.deltaRemaining, p1.agreementRemaining, p1.earned, p1.frozen])
+      .toEqual([p0.drawer, p0.due, p0.originalRemaining, p0.deltaRemaining, p0.agreementRemaining, p0.earned, p0.frozen]);
   }, 120_000);
 });
