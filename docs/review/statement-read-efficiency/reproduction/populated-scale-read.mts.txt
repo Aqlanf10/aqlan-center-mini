@@ -1,0 +1,27 @@
+import {createRequire} from 'node:module';
+import {pathToFileURL} from 'node:url';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {performance} from 'node:perf_hooks';
+const [root,out]=process.argv.slice(2);
+const url=new URL(process.env.DATABASE_URL!);
+if(url.hostname!=='127.0.0.1'||url.port!=='55449'||url.pathname!=='/aqlan_populated_scale_test')throw Error('unsafe target');
+const pg=createRequire(root+'/package.json')('pg');let capture=false;let queries:string[]=[];
+const original=pg.Client.prototype.query;
+pg.Client.prototype.query=function(...args:any[]){if(capture)queries.push(String(typeof args[0]==='string'?args[0]:args[0]?.text).replace(/\s+/g,' ').trim());return original.apply(this,args);};
+const db=await import(pathToFileURL(root+'/lib/db.ts').href);await db.ensureSchema();
+const fixtures=JSON.parse(readFileSync('/workspace/statement-performance-evidence/populated-scale-fixtures.json','utf8'));const results=[];
+for(const f of fixtures){
+ await db.patientStatementSnapshot(f.patientId,'2026-10-23');
+ const times=[],counts=[],digests=[];let snapshot:any;
+ for(let i=0;i<10;i++){
+  queries=[];capture=true;const t=performance.now();
+  snapshot=await db.patientStatementSnapshot(f.patientId,'2026-10-23');times.push(performance.now()-t);capture=false;
+  counts.push(queries.length);digests.push(createHash('sha256').update(JSON.stringify(snapshot,(_k,v)=>v instanceof Map?[...v.entries()]:v)).digest('hex'));
+ }
+ if(new Set(digests).size!==1)throw Error('unstable snapshot');
+ const standalone=await db.listPatientPlans(f.patientId,'2026-10-23');
+ if(JSON.stringify(standalone)!==JSON.stringify(snapshot.plans))throw Error('standalone mismatch');
+ results.push({...f,times,counts,sha256:digests[0],queries,plans:snapshot.plans.map((p:any)=>({id:p.id,currency:p.baseCurrency,source:p.debtSource,paidMinor:p.paidMinor,progress:p.progress}))});
+}
+writeFileSync(out,JSON.stringify(results,null,2));await db.resetPoolForTesting();

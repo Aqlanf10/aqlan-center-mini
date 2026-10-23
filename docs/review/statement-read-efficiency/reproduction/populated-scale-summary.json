@@ -1,0 +1,86 @@
+[
+  {
+    "planCount": 2,
+    "invoiceBacked": 1,
+    "approved": 1,
+    "financialProgressEqual": true,
+    "control": {
+      "n": 10,
+      "errors": 0,
+      "sqlCalls": [
+        64
+      ],
+      "p50": 54.84202200000004,
+      "p95": 76.51943800000004,
+      "p99": 76.51943800000004
+    },
+    "opt": {
+      "n": 10,
+      "errors": 0,
+      "sqlCalls": [
+        63
+      ],
+      "p50": 56.01351899999986,
+      "p95": 108.70435600000019,
+      "p99": 108.70435600000019
+    },
+    "fullSnapshotEqual": true,
+    "canonicalSnapshotSha256": "1f8dec3086441736c2ee5d8221503da9aa0b5de14af11d8ed94ef01c2af8a03c"
+  },
+  {
+    "planCount": 10,
+    "invoiceBacked": 5,
+    "approved": 5,
+    "financialProgressEqual": true,
+    "control": {
+      "n": 10,
+      "errors": 0,
+      "sqlCalls": [
+        643
+      ],
+      "p50": 360.2484970000005,
+      "p95": 416.3041280000002,
+      "p99": 416.3041280000002
+    },
+    "opt": {
+      "n": 10,
+      "errors": 0,
+      "sqlCalls": [
+        638
+      ],
+      "p50": 470.76234899999963,
+      "p95": 594.2839010000002,
+      "p99": 594.2839010000002
+    },
+    "fullSnapshotEqual": true,
+    "canonicalSnapshotSha256": "70fb5ea67036f0346f93f6fc095b8c592a0284caa3effa253fa5d53f68885c1f"
+  },
+  {
+    "planCount": 40,
+    "invoiceBacked": 20,
+    "approved": 20,
+    "financialProgressEqual": true,
+    "control": {
+      "n": 10,
+      "errors": 0,
+      "sqlCalls": [
+        8533
+      ],
+      "p50": 4670.013670999999,
+      "p95": 5784.381262999999,
+      "p99": 5784.381262999999
+    },
+    "opt": {
+      "n": 10,
+      "errors": 0,
+      "sqlCalls": [
+        8513
+      ],
+      "p50": 5069.1407770000005,
+      "p95": 5920.991880000001,
+      "p99": 5920.991880000001
+    },
+    "fullSnapshotEqual": true,
+    "canonicalSnapshotSha256": "9e7cce0a12d7f50ba5237ebffcf7905516d9a13a4e58d2c9c639b3d2a7d10a56"
+  }
+]
