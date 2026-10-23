@@ -29342,18 +29342,9 @@ export async function visitWalkout(visitId: number, snapshotClient?: DbClient): 
   // An owning checkout reader supplies its existing read-only snapshot.
   if (snapshotClient) return visitWalkoutInSnapshot(snapshotClient, visitId);
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const walkout = await visitWalkoutInSnapshot(client, visitId);
-    await client.query("COMMIT");
-    return walkout;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  // The shared snapshot helper keeps the original error and discards a client whose ROLLBACK
+  // failed. Without the shared-local flag it always supplies a dedicated client, as before.
+  return withFinancialReadSnapshot(getPool(), (runner) => visitWalkoutInSnapshot(runner as DbClient, visitId));
 }
 
 async function visitWalkoutInSnapshot(pool: DbClient, visitId: number): Promise<VisitWalkout | null> {
