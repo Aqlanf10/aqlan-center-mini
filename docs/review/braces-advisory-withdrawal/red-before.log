@@ -1,0 +1,10 @@
+# New regression suite against the unchanged gate (9881d33c): red
+⎯⎯⎯⎯⎯⎯ Failed Tests 47 ⎯⎯⎯⎯⎯⎯⎯
+TypeError: classifyFullAudit is not a function
+AssertionError: expected [Function] to throw error matching /BRACES_EXCEPTION_REJECTED/ but got '(0 , __vite_ssr_import_5__.classifyFu…'
+AssertionError: expected [Function] to throw error matching /not completely clean|BRACES_EXCEPTION…/ but got '(0 , __vite_ssr_import_5__.classifyFu…'
+TypeError: validateWithdrawnOfficialEvidence is not a function
+
+# With the change: green
+ Test Files  5 passed (5)
+      Tests  132 passed (132)

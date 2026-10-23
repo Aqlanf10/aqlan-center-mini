@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BRACES_EXCEPTION as PIN } from "../lib/braces-exception-pins.mjs";
-import { invariant, validateOfficialEvidence, validateScopedAudit, validateAuditProcess } from "../lib/scoped-braces-exception.mjs";
+import { classifyFullAudit, invariant, validateOfficialEvidence, validateScopedAudit, validateAuditProcess, validateWithdrawnDisposition, validateWithdrawnOfficialEvidence } from "../lib/scoped-braces-exception.mjs";
 import { inspectInstalledBraces, sha256 } from "./dependency-security/installed-braces.mjs";
 
 import { runAuditJson, preserveRawAudit } from "./dependency-security/audit-process.mjs";
@@ -29,19 +29,22 @@ export async function fetchOfficialJson(url, fetchImpl = fetch) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-export async function verifyBracesException(fullRun, productionRun, projectRoot = root) {
-  validateScopedAudit(fullRun);
+export async function verifyBracesException(fullRun, productionRun, projectRoot = root,
+  { fetchJson = fetchOfficialJson, inspect = inspectInstalledBraces } = {}) {
+  // "active": the reviewed advisory is still reported (scoped graph). "withdrawn": the full audit is
+  // completely clean and live official proof of the withdrawal is compulsory below. Nothing else passes.
+  const mode = classifyFullAudit(fullRun);
   validateAuditProcess(productionRun, true);
-  const installed = await inspectInstalledBraces(projectRoot);
-  const disposition = validateScopedAudit(fullRun, installed);
+  const installed = await inspect(projectRoot);
+  const disposition = mode === "active" ? validateScopedAudit(fullRun, installed) : validateWithdrawnDisposition(fullRun, installed);
   invariant(fullRun.report.metadata.dependencies.total === installed.lockPackageCount
     && productionRun.report.metadata.dependencies.total === installed.lockPackageCount, "audit dependency total differs from complete lock graph");
-  const advisory = await fetchOfficialJson(`https://api.github.com/advisories/${PIN.ghsa}`);
-  const matching = await fetchOfficialJson("https://api.github.com/advisories?ecosystem=npm&affects=braces%403.0.3&per_page=100");
-  const registry = await fetchOfficialJson("https://registry.npmjs.org/braces");
-  const official = validateOfficialEvidence(advisory, matching, registry);
+  const advisory = await fetchJson(`https://api.github.com/advisories/${PIN.ghsa}`);
+  const matching = await fetchJson("https://api.github.com/advisories?ecosystem=npm&affects=braces%403.0.3&per_page=100");
+  const registry = await fetchJson("https://registry.npmjs.org/braces");
+  const official = mode === "active" ? validateOfficialEvidence(advisory, matching, registry) : validateWithdrawnOfficialEvidence(advisory, matching, registry);
   const proof = {
-    format: "aqlan-scoped-braces-exception-v1", ...disposition, official,
+    format: mode === "active" ? "aqlan-scoped-braces-exception-v1" : "aqlan-braces-advisory-withdrawn-v1", mode, ...disposition, official,
     rawFullAuditSha256: sha256(fullRun.stdout), rawProductionAuditSha256: sha256(productionRun.stdout),
     lockSha256: installed.lockSha256, packageSha256: installed.packageSha256,
     installedTreeSha256: installed.installedTreeSha256,
@@ -65,6 +68,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const production = runAuditJson(true);
     await preserveRawAudit(production, true, 1);
     const proof = await verifyBracesException(full, production);
-    console.log(`Verified only ${proof.advisory} on ${proof.installedCopies.length} patched installed copy/copies; raw findings remain ${JSON.stringify(proof.counts)}.`);
+    console.log(proof.mode === "active"
+      ? `Verified only ${proof.advisory} on ${proof.installedCopies.length} patched installed copy/copies; raw findings remain ${JSON.stringify(proof.counts)}.`
+      : `${proof.advisory} is officially withdrawn (${proof.official.withdrawnAt}); audits are completely clean and ${proof.installedCopies.length} patched installed copy/copies remain verified.`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
