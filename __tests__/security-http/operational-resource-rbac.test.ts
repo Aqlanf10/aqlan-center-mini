@@ -30,6 +30,17 @@ async function appointmentForB(time: string): Promise<number> {
   return body.id as number;
 }
 
+/** Read the same bounded displayed context as the manual reminder control. */
+async function reminderSnapshotFor(id: number, date: string) {
+  const response = await authedGet(`/api/appointments?date=${date}`, h.sessions.reception);
+  expect(response.status).toBe(200);
+  const rows = await response.json();
+  const item = rows.find((row: { id: number }) => row.id === id);
+  expect(item).toBeDefined();
+  return { patientId: item.patientId, patientName: item.patientName, patientPhone: item.patientPhone,
+    scheduledDate: item.scheduledDate, scheduledTime: item.scheduledTime, status: item.status };
+}
+
 describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
   const actions = [
     { action: "arrive", label: "تسجيل الوصول" },
@@ -45,7 +56,8 @@ describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
       const id = await appointmentForB(`${String(9 + index).padStart(2, "0")}:00`);
       const response = await authedMutation(
         `/api/appointments/${id}`, h.sessions.doctorA, "PATCH",
-        JSON.stringify({ action, reason: "محاولة عبر الحدود" }),
+        JSON.stringify({ action, reason: "محاولة عبر الحدود",
+          ...(action === "reminded" ? { snapshot: await reminderSnapshotFor(id, "2026-08-11") } : {}) }),
       );
       expect(response.status).toBe(404);
 
@@ -95,7 +107,7 @@ describe("مواعيد مريضٍ لا يملكه الطبيب", () => {
 
     const response = await authedMutation(
       `/api/appointments/${body.id}`, h.sessions.doctorA, "PATCH",
-      JSON.stringify({ action: "reminded" }),
+      JSON.stringify({ action: "reminded", snapshot: await reminderSnapshotFor(body.id, "2026-08-12") }),
     );
     expect(response.status).toBe(200);
   });

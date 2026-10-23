@@ -308,7 +308,7 @@ describe("مراجعة المالك ٥: الدفع على الحساب — هد�
   it("دفع YER على الحساب يبقى كما كان — مسموحًا بالأساس", async () => {
     const response = await postPayment(jsonRequest("http://localhost/api/payments", {
       patientId, amount: "5000", currency: "YER", kind: "payment", method: "cash",
-    }));
+    }, { "Idempotency-Key": "owner-review-account-yer" }));
     expect(response.status).toBe(201);
     const payment = await response.json();
     expect(payment.currency).toBe("YER");
@@ -320,7 +320,7 @@ describe("مراجعة المالك ٥: الدفع على الحساب — هد�
     const response = await postPayment(jsonRequest("http://localhost/api/payments", {
       patientId, amount: "200", currency: "USD", kind: "payment", method: "cash",
       planId,
-    }));
+    }, { "Idempotency-Key": "owner-review-plan-usd" }));
     expect(response.status).toBe(201);
     const payment = await response.json();
     expect(payment.planId).toBe(planId);

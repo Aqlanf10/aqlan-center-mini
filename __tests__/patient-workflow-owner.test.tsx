@@ -215,6 +215,14 @@ afterEach(() => {
 });
 
 describe("real patient page workflow owner", () => {
+  it("retains the verified workflow clinic calendar in the Summary props", async () => {
+    seedFetch(7, { ...workflow(), today: "2026-10-23", timeZone: "Pacific/Kiritimati" });
+    const view = mountPage(7, "?tab=summary"); await flush();
+    expect(child(view.render(), "mock-summary").props.summary).toMatchObject({
+      today: "2026-10-23", timeZone: "Pacific/Kiritimati",
+    });
+  });
+
   it.each([null, 3])("accepts the canonical server visit DTO with chair %s", async (chair) => {
     const projection = { ...workflow(), openVisit: { ...workflow().openVisit, chair,
       status: chair === null ? "waiting" : "in_chair", plannedTitle: chair === null ? null : "Planned care" } };

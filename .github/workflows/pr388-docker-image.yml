@@ -1,0 +1,90 @@
+name: PR388 final Docker image verification
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/pr388-docker-image.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr388-docker-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: >-
+      github.repository == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.number == 388 &&
+      github.event.pull_request.head.repo.full_name == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.head.ref == 'fix/require-collection-idempotency'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact reviewed source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          reviewed=28e9372ed4eb50ad1ee0e92af19d67657bed53b5
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git merge-base --is-ancestor "$reviewed" HEAD
+          git diff --exit-code "$reviewed" HEAD -- \
+            . ':!.github/workflows/pr388-docker-image.yml'
+          git rev-parse HEAD HEAD^{tree}
+
+      - name: Build unchanged final Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --progress=plain \
+            --file Dockerfile \
+            --tag aqlan-pr388:verification .
+          docker image inspect aqlan-pr388:verification \
+            --format '{{.Id}}'
+
+      - name: Verify artifacts offline without application startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          offline=(
+            --rm
+            --network none
+            --read-only
+            --user 1001:1001
+            --cap-drop ALL
+            --security-opt no-new-privileges
+            --entrypoint node
+          )
+          docker run "${offline[@]}" aqlan-pr388:verification -e '
+            const fs = require("node:fs");
+            const assert = require("node:assert/strict");
+            assert.equal(process.versions.node.split(".")[0], "22");
+            assert.equal(process.getuid(), 1001);
+            for (const p of [
+              "/app/server.js",
+              "/app/.next/static",
+              "/app/preflight/runner/run.mjs",
+              "/app/preflight/manifest.json"
+            ]) assert.ok(fs.existsSync(p), p);
+            assert.ok(!fs.existsSync("/app/__tests__"));
+            const manifest = JSON.parse(
+              fs.readFileSync("/app/preflight/manifest.json", "utf8")
+            );
+            assert.equal(manifest.nodeMajor, 22);
+            console.log("Offline image artifact checks passed");
+          '
+          docker run "${offline[@]}" aqlan-pr388:verification \
+            --check /app/server.js
+          docker run "${offline[@]}" aqlan-pr388:verification \
+            /app/preflight/runner/run.mjs --help

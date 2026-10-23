@@ -12,6 +12,7 @@
  */
 import { isAdmin } from "./roles";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./ortho-booking-intent";
+import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor } from "./appointment-doctor";
 import type { Role } from "./roles";
 import {
   getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
@@ -347,8 +348,10 @@ export async function bookAppointment(
 
   const canOverride = actorCanOverride(actor);
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
-  const state: { verdict: CapacityVerdict | null; overridden: boolean; followupServiceRejected: boolean } =
-    { verdict: null, overridden: false, followupServiceRejected: false };
+  const state: {
+    verdict: CapacityVerdict | null; overridden: boolean;
+    followupServiceRejected: boolean; doctorRejected: boolean;
+  } = { verdict: null, overridden: false, followupServiceRejected: false, doctorRejected: false };
 
   const result = await writeAppointmentInDay({
     date: input.date,
@@ -365,6 +368,10 @@ export async function bookAppointment(
         // Keep an explicit duration; otherwise use the current locked default.
         durationMinutes = Number.isFinite(requested) && requested > 0
           ? Math.round(requested) : service.defaultDurationMinutes;
+      }
+      if (!await lockBookableAppointmentDoctor(client, doctorId)) {
+        state.doctorRejected = true;
+        return { ok: false as const, conflict: null };
       }
       const judged = await judgeBookingInDay({
         sameDay, client, date: input.date, time: input.time, durationMinutes,
@@ -401,6 +408,7 @@ export async function bookAppointment(
 
   if (!result.ok) {
     if (state.followupServiceRejected) return { ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE };
+    if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
     return { ok: false, status: 409, conflict: result.conflict as BookingConflict };
   }
   const appointment = result.value;
@@ -539,13 +547,17 @@ export async function rescheduleAppointment(
 
   const canOverride = actorCanOverride(actor);
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
-  const state: { verdict: CapacityVerdict | null; overridden: boolean } =
-    { verdict: null, overridden: false };
+  const state: { verdict: CapacityVerdict | null; overridden: boolean; doctorRejected: boolean } =
+    { verdict: null, overridden: false, doctorRejected: false };
 
   const result = await writeAppointmentAcrossDays({
     fromDate: current.scheduledDate,
     toDate: input.date,
     judge: async (targetDay, client) => {
+      if (!await lockBookableAppointmentDoctor(client, doctorId)) {
+        state.doctorRejected = true;
+        return { ok: false as const, conflict: null };
+      }
       const judged = await judgeBookingInDay({
         sameDay: targetDay, client, date: input.date, time: input.time,
         durationMinutes, service, context, providerId: doctorId, chairNo,
@@ -583,6 +595,7 @@ export async function rescheduleAppointment(
   });
 
   if (!result.ok) {
+    if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
     return {
       ok: false, status: 409,
       message: (result.conflict as BookingConflict).message,

@@ -1,6 +1,7 @@
 import {CLINIC_BASE_CURRENCY,isCurrency,parseAmount,toBaseAmount,type Currency} from "./money";
 import {FinancialRecoveryError,type FinancialCommand} from "./financial-command-journal";
 import {moneyAcknowledgment,type MoneyAttempt,type MoneyAcknowledgment} from "./money-attempt";
+import {readSplitCollectionEvidence} from "./agreement-split-collection";
 import {readPaymentAcknowledgmentEvidence,calculationEvidenceMatchesReceipt,closingRefundEvidenceMatchesReceipt,replacementLineageEvidenceMatches} from "./payment-acknowledgment";
 
 export interface MoneyReceiptContext {id:number;receiptNumber:string;amountMinor:number;currency:Currency;method:string;invoiceId:number|null;planId?:number|null;openingCurrency?:Currency|null;remainingMinor:number}
@@ -65,6 +66,18 @@ export function readDurableMoneyAcknowledgment(value:unknown,command:DurableMone
   // standalone arithmetic, even if that arithmetic happens to match.
   if(hasEvidence&&(!evidence||"status" in evidence||evidence.operation!==operation||evidence.requestKey!==command.attempt.key))return null;
   if(operation==="payment"){
+    if(Object.hasOwn(value,"collection")){
+      // A plan-level upgrade is not one invoice receipt. Only the full
+      // server-proven split, with exact actor, patient and total, can acknowledge it.
+      if(expected.planId===null||expected.invoiceId!==undefined&&expected.invoiceId!==null||
+         expected.openingCurrency!==null)return null;
+      const split=readSplitCollectionEvidence(value,{
+        key:command.attempt.key,patientId:command.patientId,planId:expected.planId,
+        amountMinor:expected.amountMinor,currency:expected.currency,
+        actor:command.actor,method:expected.method,
+      });
+      return split?{paymentId:split.paymentIds[0],paymentIds:split.paymentIds,collection:split}:null;
+    }
     const calculation=evidence&&"operation" in evidence&&evidence.operation==="payment"?evidence.calculation:null;
     if(calculation&&(value.reversalOfId!==null||!calculationEvidenceMatchesReceipt(calculation,value))
       ||!calculation&&Object.hasOwn(value,"reversalOfId")&&value.reversalOfId!==null)return null;

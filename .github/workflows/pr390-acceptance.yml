@@ -1,0 +1,63 @@
+name: PR390 targeted agreement amendment acceptance
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: pr390-acceptance
+  cancel-in-progress: false
+jobs:
+  prove:
+    if: >-
+      github.repository == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.number == 390 &&
+      github.event.pull_request.head.repo.full_name == 'Aqlanf10/aqlan-center-mini' &&
+      github.event.pull_request.head.ref == 'feat/agreement-delta-amendment-20261021'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci
+      - name: Pin reviewed revision
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Quote and commission unit contracts
+        run: npm test -- __tests__/agreement-amendment-quote.test.ts __tests__/agreement-amendment-commission.test.ts __tests__/agreement-delta-schema.test.ts
+      - name: Actual PG18 amendment, multi-target collection and rollback
+        run: npm run test:postgres -- __tests__/postgres/agreement-delta-amendment.test.ts
+      - name: PG18 old invoice and all currency correction regressions
+        run: npm run test:postgres -- __tests__/postgres/invoice-revision.test.ts __tests__/postgres/invoice-currency-schema.test.ts
+      - name: Build exact production application
+        run: npm run build
+      - name: Install Chromium
+        # Ubuntu Actions image provides browser system libraries. Do not depend on
+        # an unrelated third-party Microsoft apt source; fetch pinned browser only.
+        run: npx playwright install chromium
+      - name: HTTP and browser acceptance using synthetic sessions
+        run: npm run test:security-http -- __tests__/security-http/agreement-delta-upgrade-ui.test.ts

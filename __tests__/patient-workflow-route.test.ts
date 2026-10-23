@@ -40,6 +40,19 @@ beforeEach(() => {
 });
 
 describe("workflow GET case projection authorization", () => {
+  it.each([71, 72, null])("projects referral rebooking authority without receiver identifiers for doctor %s", async partyId => {
+    boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor", partyId });
+    const visit = { id: 71, canRebook: true, rebookBlockedReason: null, rebookGeneration: "a".repeat(32), rebookHasReferral: true, rebookReferralReceiverId: 71 };
+    boundary.patientWorkflow.mockResolvedValue({ ...summary, plannedVisits: [visit] });
+    const body = await (await GET(request(), context())).json();
+    expect(body.timeZone).toBe("UTC");
+    expect(body.plannedVisits[0].canRebook).toBe(partyId === 71);
+    expect(body.plannedVisits[0].rebookGeneration).toBe(visit.rebookGeneration);
+    expect(body.plannedVisits[0]).not.toHaveProperty("rebookHasReferral");
+    expect(body.plannedVisits[0]).not.toHaveProperty("rebookReferralReceiverId");
+    expect(visit.rebookReferralReceiverId).toBe(71);
+  });
+
   it.each(["admin", "reception", "doctor"])("allows owned case projections for %s", async (role) => {
     const session = { username: `synthetic-${role}`, role };
     boundary.requireSession.mockResolvedValue(session);

@@ -86,6 +86,7 @@ function ReportTable({ title, columns, rows, base, groups }: {
                 {columns.map((column) => (
                   <td
                     key={column.key}
+                    data-report-column={column.key}
                     className={column.type === "money" || column.type === "count" || column.type === "percent" ? "num" : undefined}
                   >
                     {cellText(row, column, base)}
@@ -108,6 +109,7 @@ function ReportTable({ title, columns, rows, base, groups }: {
               {columns.map((column) => (
                 <td
                   key={column.key}
+                  data-report-column={column.key}
                   className={column.type === "money" || column.type === "count" || column.type === "percent" ? "num" : undefined}
                 >
                   {cellText(row, column, base)}

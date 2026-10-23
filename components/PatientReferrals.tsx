@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   MISSED_APPOINTMENT_LABEL, REFERRAL_SPECIALTIES, REFERRAL_SPECIALTY_LABEL, REFERRAL_STATUS_LABEL, REFERRAL_URGENCIES,
   REFERRAL_URGENCY_LABEL, WORKFLOW_STATE_LABEL,
@@ -33,11 +33,40 @@ interface Step {
   procedurePerformed: string; followupRequired: boolean; mayReturn: boolean;
 }
 
+// A committed patient context owns every read and write completion. Retiring it
+// does not claim to undo a POST that the server may already have committed.
+function createReferralOwner() {
+  let active = false;
+  let read = 0;
+  let write = 0;
+  let pending = false;
+  return {
+    activate: () => { active = true; },
+    retire: () => { active = false; read++; write++; pending = false; },
+    beginRead: () => active ? ++read : null,
+    currentRead: (token: number) => active && read === token,
+    beginWrite: () => {
+      if (!active || pending) return null;
+      pending = true;
+      return ++write;
+    },
+    currentWrite: (token: number) => active && pending && write === token,
+    finishWrite: (token: number) => {
+      if (!active || !pending || write !== token) return false;
+      pending = false;
+      return true;
+    },
+  };
+}
+
 export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
   patientId: number; canIssue: boolean;
   /** (REF-1) مواعيد المريض القادمة — «حجز الإحالة» يربط أحدها بالإحالة. */
   appointments?: Pick<Appointment, "id" | "scheduledDate" | "scheduledTime" | "status" | "doctorId" | "doctorName">[];
 }) {
+  const owner = useMemo(createReferralOwner, [patientId, canIssue]);
+  useLayoutEffect(() => { owner.activate(); return owner.retire; }, [owner]);
+  const [context, setContext] = useState(owner);
   const [items, setItems] = useState<Referral[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +92,8 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
   /** خطوةٌ داخلية واحدة — رسالة الخادم العربية كما هي عند الرفض (الصلاحية أو الحالة). */
   const runStep = async () => {
     if (!step) return;
+    const operation = owner.beginWrite();
+    if (operation === null) return;
     setBusy(true);
     try {
       const response = await fetch(`/api/referrals/${step.id}/transition`, {
@@ -75,18 +106,21 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
         }),
       });
       const payload = await response.json().catch(() => null) as { message?: string } | null;
+      if (!owner.currentWrite(operation)) return;
       if (!response.ok) { setError(payload?.message ?? "تعذّر تحديث الإحالة."); return; }
       setStep(null);
       setError(null);
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (owner.currentWrite(operation)) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      setBusy(false);
+      if (owner.finishWrite(operation)) setBusy(false);
     }
   };
 
   const submitInternal = async () => {
+    const operation = owner.beginWrite();
+    if (operation === null) return;
     setBusy(true);
     try {
       const response = await fetch(`/api/patients/${patientId}/referrals`, {
@@ -94,6 +128,7 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
         body: JSON.stringify({ ...form, kind: "internal", toPartyId }),
       });
       const payload = await response.json().catch(() => null) as { message?: string } | null;
+      if (!owner.currentWrite(operation)) return;
       if (!response.ok) { setError(payload?.message ?? "تعذّر حفظ الإحالة."); return; }
       setCreating(false);
       setToPartyId("");
@@ -101,16 +136,19 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
       setError(null);
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (owner.currentWrite(operation)) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      setBusy(false);
+      if (owner.finishWrite(operation)) setBusy(false);
     }
   };
 
   const load = useCallback(async () => {
+    const operation = owner.beginRead();
+    if (operation === null) return;
     try {
       const response = await fetch(`/api/patients/${patientId}/referrals`, { cache: "no-store" });
       const payload = await response.json().catch(() => null);
+      if (!owner.currentRead(operation)) return;
       if (!response.ok || !Array.isArray(payload)) {
         setError((payload as { message?: string } | null)?.message ?? "تعذّر تحميل الإحالات.");
         return;
@@ -118,15 +156,17 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
       setItems(payload as Referral[]);
       setError(null);
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (owner.currentRead(operation)) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      setLoading(false);
+      if (owner.currentRead(operation)) setLoading(false);
     }
-  }, [patientId]);
+  }, [patientId, owner]);
 
   useEffect(() => { void load(); }, [load]);
 
   const submit = async () => {
+    const operation = owner.beginWrite();
+    if (operation === null) return;
     /* نافذة الطباعة تُفتح هنا متزامنةً مع الضغطة — Safari يحجب النوافذ التي تُفتح بعد
        انتظار الشبكة، فتُحفظ الإحالة ولا يظهر الخطاب. تُوجَّه إلى الخطاب بعد الحفظ،
        وتُغلق إن فشل. */
@@ -138,6 +178,7 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form),
       });
       const payload = await response.json().catch(() => null) as (Referral & { message?: string }) | null;
+      if (!owner.currentWrite(operation)) return;
       if (!response.ok) { setError(payload?.message ?? "تعذّر حفظ الإحالة."); return; }
       if (payload?.id && printTab) {
         printTab.opener = null;
@@ -148,15 +189,17 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
       setForm({ toName: "", toSpecialty: "oral_surgery", reason: "", teeth: "", urgency: "routine" });
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (owner.currentWrite(operation)) setError("تعذّر الاتصال بالخادم.");
     } finally {
       if (!printed) printTab?.close();
-      setBusy(false);
+      if (owner.finishWrite(operation)) setBusy(false);
     }
   };
 
   const close = async () => {
     if (!closing) return;
+    const operation = owner.beginWrite();
+    if (operation === null) return;
     setBusy(true);
     try {
       const response = await fetch(`/api/referrals/${closing.id}`, {
@@ -164,15 +207,33 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
         body: JSON.stringify({ action: closing.action, note: closing.note }),
       });
       const payload = await response.json().catch(() => null) as { message?: string } | null;
+      if (!owner.currentWrite(operation)) return;
       if (!response.ok) { setError(payload?.message ?? "تعذّر تحديث الإحالة."); return; }
       setClosing(null);
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (owner.currentWrite(operation)) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      setBusy(false);
+      if (owner.finishWrite(operation)) setBusy(false);
     }
   };
+
+  // Reset before committing the new patient's UI, not in a later passive
+  // effect where the old referral's confirmation could still be visible.
+  if (context !== owner) {
+    setContext(owner);
+    setItems([]);
+    setLoading(true);
+    setError(null);
+    setBusy(false);
+    setCreating(false);
+    setForm({ toName: "", toSpecialty: "oral_surgery", reason: "", teeth: "", urgency: "routine" });
+    setClosing(null);
+    setInternal(false);
+    setToPartyId("");
+    setStep(null);
+    return null;
+  }
 
   const ordered = [...items].sort((a, b) => Number(b.status === "sent") - Number(a.status === "sent"));
 

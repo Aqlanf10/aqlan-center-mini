@@ -1,11 +1,9 @@
-import type { Invoice, Payment } from "@/lib/db";
+import type { Invoice } from "@/lib/db";
 import { formatMoney, invoiceNet } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
+import { currentStatementInvoices } from "@/lib/statement-lines";
 
-/** Current patient copy only. Never use this filter for historical/as-of balances. */
-export function currentStatementInvoices(invoices: readonly Invoice[]): Invoice[] {
-  return invoices.filter((invoice) => invoice.status !== "cancelled");
-}
+export { currentStatementInvoices, statementPaymentLabel } from "@/lib/statement-lines";
 
 /** Stored invoice evidence, not a repricing of treatment against today's catalogue. */
 export function StatementInvoiceDetails({ invoices }: { invoices: readonly Invoice[] }) {
@@ -42,12 +40,4 @@ export function StatementInvoiceDetails({ invoices }: { invoices: readonly Invoi
       </tbody>
     </table>)}
   </section>;
-}
-
-/** Only the persisted reversal edge identifies a reversal, never receipt-note text. */
-export function statementPaymentLabel(payment: Payment, payments: readonly Payment[]): string {
-  if (payment.kind !== "refund") return "دفعة";
-  if (!payment.reversalOfId) return "استرداد";
-  const original = payments.find((candidate) => candidate.id === payment.reversalOfId);
-  return original ? `عكس سند ${original.receiptNumber}` : "عكس سند سابق";
 }

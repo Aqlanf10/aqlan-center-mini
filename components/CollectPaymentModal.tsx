@@ -12,6 +12,7 @@ import {
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { useMoneyAttempt } from "./useMoneyAttempt";
 import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
+import { MONEY_RETIRED } from "@/lib/money-attempt";
 
 /**
  * التحصيل الموحَّد — مكونٌ واحد ومسارٌ واحد (المواصفة §٢٦ و AC-09).
@@ -141,7 +142,7 @@ export function CollectPaymentModal({
 
   const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;
 
-  const submit = async (retry = false) => {
+  const submit = async (retry = false, review?: { observedReceiptIds: number[] }) => {
     if (busy || !money.ready || (!retry && (!formReady || !amount.trim()))) return;
     if (!retry && missingForeignTarget) {
       setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة أو رصيد سابق بنفس العملة.");
@@ -161,8 +162,9 @@ export function CollectPaymentModal({
     setBusy(true);
     setError(null);
     try {
-      const result = await money.run(retry ? undefined : { url: "/api/payments", body, operation: "payment" });
-      if (!result || result.kind === "busy") return;
+      const result = await money.run(retry ? undefined : { url: "/api/payments", body, operation: "payment" }, review);
+      // "similar": nothing was written; the saved attempt shows the advisory review below.
+      if (!result || result.kind === "busy" || result.kind === "similar") return;
       if (result.kind !== "confirmed") { setError(result.message); return; }
       onSuccess(result.acknowledgment.paymentId!);
       money.consume(result.attempt);
@@ -171,6 +173,18 @@ export function CollectPaymentModal({
     } finally {
       setBusy(false);
     }
+  };
+
+  const reconcile = async () => {
+    setBusy(true); setError(null);
+    try {
+      const result = await money.reconcile();
+      if (!result || result.kind === "busy" || result.kind === "similar") return;
+      if (result.kind === "retired") { setError(MONEY_RETIRED); return; }
+      if (result.kind !== "confirmed") { setError(result.message); return; }
+      onSuccess(result.acknowledgment.paymentId!);
+      money.consume(result.attempt);
+    } finally { setBusy(false); }
   };
 
   return (
@@ -197,7 +211,9 @@ export function CollectPaymentModal({
         </header>
 
         <CurrentCollectionGuidance />
-        <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void submit(true)} />
+        <MoneyAttemptNotice attempt={money.attempt} busy={busy} onRetry={() => void submit(true)} onReconcile={() => void reconcile()}
+          onSimilar={{ confirm: (observedReceiptIds) => void submit(true, { observedReceiptIds }),
+            cancel: () => void money.dismiss() }} />
         {money.error?<p role="alert" className="mb-3 text-sm text-rose-800">{money.error}</p>:null}
         <fieldset disabled={!money.ready || !formReady || busy || money.attempt !== null} className="min-w-0">
 

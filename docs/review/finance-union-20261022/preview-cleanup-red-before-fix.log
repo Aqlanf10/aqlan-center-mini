@@ -1,0 +1,5 @@
+     × normal completion commits the read-only snapshot and returns the client normally 14ms
+     × a read failure with a successful ROLLBACK keeps the original error and returns the client normally 3ms
+     × a read failure whose ROLLBACK also fails keeps the original error and discards the client 2ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  3 failed (3)

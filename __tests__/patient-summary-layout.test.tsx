@@ -26,7 +26,8 @@ const noop = () => undefined;
 const summary: WorkflowSummary = {
   openVisit: null, lastVisit: null, nextAppointment: null, activePlans: [],
   plannedVisits: [{ id: 71, planTitle: "خطة اصطناعية", sequence: 1, title: "جلسة اصطناعية",
-    doctorName: null, durationMinutes: 30, status: "planned", appointmentDate: null, appointmentTime: null, note: null }],
+    doctorName: null, durationMinutes: 30, status: "planned", appointmentId: null, appointmentStatus: null,
+    canRebook: false, rebookBlockedReason: null, rebookGeneration: "a".repeat(32), appointmentDate: null, appointmentTime: null, note: null }],
   counts: { visits: 0, openLabOrders: 0, documents: 0, orthoCase: false },
   financial: null, alerts: [{ kind: "medical", severity: "danger", text: "تحذير يحتاج المراجعة" }], canSeeFinancial: false,
 };
@@ -42,6 +43,24 @@ function before(html: string, first: string, second: string) {
 }
 
 describe("restored patient Summary presentation", () => {
+  it.each(["no_show", "cancelled"] as const)("replaces Start with explicit rebooking for a %s appointment", (appointmentStatus) => {
+    const visit = { ...summary.plannedVisits[0], status: "scheduled" as const, appointmentStatus, appointmentId: 151,
+      appointmentDate: "2026-10-20", appointmentTime: "16:00", canRebook: true };
+    const html = render({ plannedVisits: [visit] });
+    expect(html).toContain("إعادة حجز");
+    expect(html).toContain("تحتاج إعادة حجز · 30 دقيقة");
+    expect(html).not.toContain("مجدولة");
+    expect(html).toContain("يبقى الموعد السابق وحالته محفوظين");
+    expect(html).not.toContain("ابدأ الزيارة");
+    expect(html).not.toContain(">جدولها</button>");
+    const blocked = render({ plannedVisits: [{ ...visit, canRebook: false, rebookBlockedReason: "تحتاج الإحالة مراجعة" }] });
+    expect(blocked).toContain("تحتاج الإحالة مراجعة");
+    expect(blocked).toContain("تحتاج مراجعة قبل إعادة الحجز · 30 دقيقة");
+    expect(blocked).not.toContain("مجدولة");
+    expect(blocked).not.toContain(">إعادة حجز</button>");
+    expect(blocked).not.toContain("ابدأ الزيارة");
+  });
+
   it("retains the original compact identity and actions with complete warnings and unknown-state feedback", () => {
     const props = {
       patientId: 91, patientName: "مريض اصطناعي", patientPhone: null, fallbackAlert: null,

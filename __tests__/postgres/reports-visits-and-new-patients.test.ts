@@ -112,7 +112,7 @@ describe("سجل الزيارات والفلاتر (R1)", () => {
     expect(kpi(result, "notInvoiced")).toBe(2);
     const consult = result.rows!.find((row) => row.patientId === consultOnly)!;
     expect(consult.kind).toBe("مراجع جديد");
-    expect(consult.invoiceText).toBe("بلا فاتورة");
+    expect(consult.invoiceText).toBe("لا فاتورة مباشرة مثبتة");
     const withTimes = result.rows!.find((row) => row.patientId === regular)!;
     expect(withTimes.waitMinutes).toBe(20);
     expect(withTimes.sessionMinutes).toBe(30);
@@ -158,4 +158,94 @@ describe("سجل الزيارات والفلاتر (R1)", () => {
     expect(result.title).toBe("التقرير التشغيلي للفترة");
     expect(kpi(result, "visits")).toBe(5);
   });
+});
+
+it("keeps persisted visit work visible without inventing an invoice or collection", async () => {
+  const [visit] = await q<{id:number}>(`INSERT INTO visits(patient_name,patient_id,status,arrived_at,signed_at)
+    VALUES ('Synthetic coverage witness',$1,'done',$2,$2) RETURNING id`, [regular,at("2025-05-02")]);
+  await q(`INSERT INTO visit_procedures(visit_id,service_id,quantity,unit_price_minor)
+    VALUES ($1,$2,1,0)`,[visit.id,cleaning]);
+  // Same patient and date do not authorize associating another visit's invoice.
+  const [otherInvoice] = await q<{id:number}>(`INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,created_at)
+    VALUES ('SYNTHETIC-SIBLING',$1,10000,'YER','test',$2) RETURNING id`,[regular,at("2025-05-02")]);
+  await q(`INSERT INTO visits(patient_name,patient_id,status,arrived_at,invoice_id)
+    VALUES ('Synthetic sibling visit',$1,'done',$2,$3)`,[regular,at("2025-05-02","11:00"),otherInvoice.id]);
+  const result = await buildReport("visits", filters("visits","2025-05-02","2025-05-02"));
+  expect(result.rows).toHaveLength(2);
+  expect(result.rows![0].services).toBe("تنظيف R1");
+  expect(result.rows![0].specialtyLabel).not.toBe("—");
+  expect(result.rows![0].invoiceText).toBe("لا فاتورة مباشرة مثبتة");
+  expect(result.rows![0].collection).toBe("—");
+  expect(result.rows![1].services).toBe("—");
+  expect(result.rows![1].collection).toBe("غير محصّلة");
+  expect(kpi(result,"invoiced")).toBe(1);
+  expect((await q<{invoice_id:number|null}>("SELECT invoice_id FROM visits WHERE id=$1",[visit.id]))[0].invoice_id).toBeNull();
+  const params = new URLSearchParams({preset:"custom",from:"2025-05-02",to:"2025-05-02",serviceId:String(cleaning)});
+  expect((await buildReport("visits",parseFilters(params,"2025-05-02"))).rows).toHaveLength(1);
+});
+
+
+it("does not treat cancelled or cross-patient direct pointers as active coverage", async () => {
+  for (const [number,patient,status] of [["SYNTHETIC-CANCELLED",regular,"cancelled"],["SYNTHETIC-FOREIGN",consultOnly,"issued"]] as const) {
+    const [invoice] = await q<{id:number}>(`INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,created_at,status)
+      VALUES ($1,$2,10000,'YER','test',$3,$4) RETURNING id`,[number,patient,at("2025-06-02"),status]);
+    await q(`INSERT INTO visits(patient_name,patient_id,status,arrived_at,invoice_id)
+      VALUES ('Synthetic invalid reference',$1,'done',$2,$3)`,[regular,at("2025-06-02"),invoice.id]);
+  }
+  const result = await buildReport("visits",filters("visits","2025-06-02","2025-06-02"));
+  expect(result.rows).toHaveLength(2);
+  expect(kpi(result,"invoiced")).toBe(0);
+  for (const row of result.rows!) {
+    expect(row.invoiceText).toBe("لا فاتورة مباشرة مثبتة");
+    expect(row.collection).toBe("—");
+  }
+});
+
+it("filters specialty by the displayed visit work, not the patient's financial history", async () => {
+  const [patient] = await q<{id:number}>(`INSERT INTO patients(patient_number,full_name)
+    VALUES ('SYNTHETIC-SPECIALTY','Synthetic procedure-only patient') RETURNING id`);
+  const [service] = await q<{id:number}>(`INSERT INTO services(name,price_minor,is_active,category)
+    VALUES ('Synthetic root canal',0,true,'rct') RETURNING id`);
+  // regular has general invoice history, but both July visits only record rct work.
+  for (const patientId of [patient.id,regular]) {
+    const [visit] = await q<{id:number}>(`INSERT INTO visits(patient_name,patient_id,status,arrived_at,signed_at)
+      VALUES ('Synthetic specialty visit',$1,'done',$2,$2) RETURNING id`,[patientId,at("2025-07-02")]);
+    await q(`INSERT INTO visit_procedures(visit_id,service_id,quantity,unit_price_minor)
+      VALUES ($1,$2,1,0)`,[visit.id,service.id]);
+  }
+  const all = await buildReport("visits",filters("visits","2025-07-02","2025-07-02"));
+  expect(all.rows).toHaveLength(2);
+  const selected = (specialty:string) => parseFilters(new URLSearchParams({preset:"custom",from:"2025-07-02",to:"2025-07-02",specialty}),"2025-07-02");
+  const rct = await buildReport("visits",selected("rct"));
+  expect(rct.rows).toEqual(all.rows);
+  expect(kpi(rct,"visits")).toBe(2);
+  expect((await buildReport("visits",selected("general"))).rows).toHaveLength(0);
+  for (const row of rct.rows!) {
+    expect(row.invoiceText).toBe("لا فاتورة مباشرة مثبتة");
+    expect(row.collection).toBe("—");
+  }
+  const scoped = selected("rct");
+  scoped.patientId = patient.id;
+  expect((await buildReport("visits",scoped)).rows?.map(row=>row.patientId)).toEqual([patient.id]);
+});
+
+it("keeps specialty fallback limited to the visit's validated direct invoice", async () => {
+  const selected = parseFilters(new URLSearchParams({preset:"custom",from:"2025-03-01",to:"2025-03-31",specialty:"general"}),"2025-03-31");
+  const result = await buildReport("visits",selected);
+  expect(result.rows).toHaveLength(3);
+  expect(result.rows!.every(row=>row.patientId===regular && row.specialtyLabel!=="—")).toBe(true);
+});
+
+it("validates the clinical documentary reference separately without changing persisted pointers", async () => {
+  const rows = await q<{id:number;invoice_id:number}>(`SELECT id,invoice_id FROM visits
+    WHERE (arrived_at AT TIME ZONE 'Asia/Aden')::date='2025-06-02' ORDER BY id`);
+  expect(rows).toHaveLength(2);
+  for (const [index,row] of rows.entries()) {
+    const clinical = await db.getClinicalVisit(row.id);
+    expect(clinical?.invoiceId).toBe(row.invoice_id);
+    expect(clinical).toHaveProperty("invoiceReferenceState",index===0 ? "cancelled" : "review");
+  }
+  const [valid] = await q<{id:number}>(`SELECT id FROM visits WHERE patient_id=$1 AND invoice_id IS NOT NULL
+    AND (arrived_at AT TIME ZONE 'Asia/Aden')::date='2025-03-05'`,[regular]);
+  expect(await db.getClinicalVisit(valid.id)).toHaveProperty("invoiceReferenceState","current");
 });

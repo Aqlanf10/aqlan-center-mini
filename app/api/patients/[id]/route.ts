@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { patientAppointmentsResponse } from "@/lib/patient-appointments-response";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
@@ -60,6 +61,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const blocked = await doctorBlocked(id);
   if (blocked) {
     return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403 });
+  }
+
+  // The existing patient authorization runs first. This explicit, bounded read mode
+  // never invokes the full patient/financial file and does not change ordinary GET.
+  if (new URL(_request.url).searchParams.has("projection")) {
+    return patientAppointmentsResponse(_request, session, rawId);
   }
 
   try {

@@ -368,6 +368,19 @@ describe("real clinic role handoff on one synthetic patient", () => {
     expect(bills[0].base_currency).toBe("YER");
     expect((await db.query("SELECT signed_by FROM visits WHERE id = $1", [visit.id])).rows[0].signed_by).toBe(pricedDoctorUsername);
 
+    // Real read-only source endpoint and signed reader, not an intercepted projection.
+    const sourceDoctor = await screen("pricedDoctor");
+    await sourceDoctor.page.goto(`${baseUrl}/visits/${visit.id}`);
+    const sourcePanel = sourceDoctor.page.getByRole("region", { name: "مصادر عمل الزيارة" });
+    await sourcePanel.waitFor();
+    expect(await sourcePanel.innerText()).toContain("مصادر تغطية مثبتة للعمل المسجل");
+    expect(await sourcePanel.locator('a[href^="/print/invoice/"]').count()).toBe(0);
+    const sourceResponse = await manager.context.request.get(`${baseUrl}/api/visits/${visit.id}/financial-context`);
+    expect(sourceResponse.status()).toBe(200);
+    const sourceContext = await sourceResponse.json();
+    expect(sourceContext).toMatchObject({ visitId: visit.id, patientId: patient.id, summary: "verified" });
+    expect(sourceContext.work[0].references).toContainEqual(expect.objectContaining({ kind: "invoice", id: signResult.invoiceId, state: "current" }));
+
     await cashier.page.goto(`${baseUrl}/finance`, { waitUntil: "domcontentloaded" });
     await cashier.page.getByRole("button", { name: /سند قبض سريع/ }).click();
     const picker = cashier.page.getByRole("dialog", { name: "اختيار مريض لإصدار سند قبض", exact: true });

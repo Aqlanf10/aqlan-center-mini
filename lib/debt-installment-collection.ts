@@ -6,10 +6,11 @@ import { assertDebtSession, DebtRepaymentError, debtRequestHash, readDebtPositio
 
 import { debtAccountDue } from "./debt-account-position";
 import {debtRevisionSourceMatches} from "./debt-source-proof";
+import {assertSimilarCollectionReviewed,type SimilarCollectionReview} from "./similar-collection";
 export async function collectDebtInstallment(input: {
   patientId:number;arrangementId:number;expectedVersion:number;amountMinor:number;currency:Currency;
   method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:SessionPayload;
-}) {
+},options:{similarityReview?:SimilarCollectionReview}={}) {
   if(![input.patientId,input.arrangementId,input.expectedVersion,input.amountMinor].every(value=>Number.isSafeInteger(value)&&value>0)
     ||!isCurrency(input.currency)||!["cash","transfer"].includes(input.method)||!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey))
     throw new DebtRepaymentError("invalid","بيانات التحصيل غير صالحة.");
@@ -60,6 +61,8 @@ export async function collectDebtInstallment(input: {
           throw new DebtRepaymentError("stale","تغيّرت مستندات الحساب أثناء التحصيل؛ أعد المحاولة بالمفتاح نفسه.");
         if(!Number.isSafeInteger(baseAmount)||!Number.isSafeInteger(settlement)||settlement<=0||settlement>position.remainingMinor||settlement>Math.max(0,account.due))
           throw new DebtRepaymentError("invalid","المبلغ يتجاوز المتبقي على الدين أو المستحق الفعلي على الحساب؛ راجع التسويات.");
+        // Advisory review: last check before writing (shift held, replay and all refusals done); a throw rolls back.
+        await assertSimilarCollectionReviewed(client,{patientId:input.patientId,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
         await assertDebtSession(client,input.session);
         const receipt=await writeDebtCollectionReceipt(client,{patientId:input.patientId,invoiceId:target.invoiceId,openingCurrency:target.openingCurrency,
           amountMinor:input.amountMinor,currency:input.currency,exchangeRate:rate,method:input.method,note:input.note,createdBy:input.session.username,idempotencyKey:input.idempotencyKey,requestHash:hash});

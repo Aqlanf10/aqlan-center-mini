@@ -9,6 +9,7 @@ import {
   type ExecutiveKpis,
   type PeriodPreset,
 } from "@/lib/executive";
+import { LeadershipOperationalOverview } from "@/components/leadership/LeadershipOperationalOverview";
 import { friendlyDateLong } from "@/lib/reminders";
 
 /**
@@ -68,6 +69,8 @@ export default function ExecutivePage() {
         title="غرفة القيادة"
         subtitle="الفواتير والذمم بعملة كل اتفاق، والصندوق والمصروفات من الدفاتر بالأساس"
       />
+
+      <LeadershipOperationalOverview />
 
       {/* الفترة */}
       <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
