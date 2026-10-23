@@ -38,7 +38,7 @@ async function fixture(currency:Currency, existingPatientId:number,toothCode:num
 }
 
 it('bounds total query growth for paid invoice and approved plans, corrections and mixed currencies',async()=>{
- 
+
  for(const groups of [1,5,20]){
   const [patient]=await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic scale') RETURNING id",[`SCALE-${groups}`]);
   for(let i=0;i<groups;i++){
