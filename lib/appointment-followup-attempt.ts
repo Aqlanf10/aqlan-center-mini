@@ -4,12 +4,19 @@ export const FOLLOWUP_ATTEMPT_CHANGED = 'appointment-followup-attempt-changed';
 export function followupAttemptKey(actorId: number, patientId: number, appointmentId: number): string {
   return `appointment-followup:v1:${actorId}:${patientId}:${appointmentId}`;
 }
-export function readFollowupAttempt(storage: Pick<Storage, 'getItem'>, key: string, patientId: number, appointmentId: number) {
+export function readFollowupAttempt(storage: Pick<Storage, 'getItem'>, key: string, patientId: number, appointmentId: number, actorUserId: number) {
   const raw = storage.getItem(key);
   if (raw === null) return null;
   let command: FollowupCommand | null = null;
-  try { command = parseFollowupCommand(JSON.parse(raw)); } catch { /* Fail closed; never erase malformed evidence. */ }
-  if (!command || command.expectedPatientId !== patientId || command.appointmentId !== appointmentId) {
+  try {
+    const value: unknown = JSON.parse(raw);
+    // Pre-witness v1 evidence remains byte-for-byte in storage. Bind its replay
+    // to the actor that owns this slot; never infer ownership from the new cookie.
+    const legacy = value && typeof value === 'object' && !Array.isArray(value)
+      && !Object.prototype.hasOwnProperty.call(value, 'expectedActorUserId');
+    command = parseFollowupCommand(legacy ? { ...value, expectedActorUserId: actorUserId } : value);
+  } catch { /* Fail closed; never erase malformed evidence. */ }
+  if (!command || command.expectedActorUserId !== actorUserId || command.expectedPatientId !== patientId || command.appointmentId !== appointmentId) {
     throw new Error('طلب محفوظ غير صالح. يلزم مراجعته قبل أي إجراء جديد.');
   }
   return { raw, command };

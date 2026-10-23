@@ -160,6 +160,7 @@ export async function saveAppointmentFollowup(value: unknown, admitted: SessionP
       const session = await revalidateSessionInTransaction(admitted, client);
       if (!session) reject(401, "FOLLOWUP_SESSION_CHANGED");
       if (!allowed(session.role)) reject(403, "FOLLOWUP_ROLE");
+      if (command.expectedActorUserId !== session.userId) reject(409, "FOLLOWUP_ACTOR_CHANGED");
       const { rows: patients } = await client.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE NOWAIT", [source.patient_id]);
       if (!patients.length || !await canAccessPatient(session, source.patient_id, undefined, client)) reject(403, "FOLLOWUP_PATIENT_ACCESS");
       const { rows: [receipt] } = await client.query<{ fingerprint: string; followup_id: number; revision: number }>(

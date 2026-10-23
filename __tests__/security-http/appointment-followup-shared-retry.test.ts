@@ -24,7 +24,7 @@ it.each(['two editors','two tabs'])('%s cannot replace or delete a lost-response
   const endpoint=`${baseUrl}/api/appointments/${source.id}/followup`;
   const headers={Cookie:h.sessions.reception.cookie,Origin:baseUrl,'Content-Type':'application/json'};
   const editorContext=await (await fetch(`${endpoint}?patientId=${h.seeded.patientAId}`,{headers})).json();
-  const created=await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({...editorContext.source,requestId:crypto.randomUUID(),expectedRevision:0,assigneeUserId:editorContext.actorUserId,dueAt:new Date(Date.now()+86400000).toISOString(),status:'open',outcome:'pending',nextStep:'call'})});
+  const created=await fetch(endpoint,{method:'POST',headers,body:JSON.stringify({...editorContext.source,expectedActorUserId:editorContext.actorUserId,requestId:crypto.randomUUID(),expectedRevision:0,assigneeUserId:editorContext.actorUserId,dueAt:new Date(Date.now()+86400000).toISOString(),status:'open',outcome:'pending',nextStep:'call'})});
   expect(created.status).toBe(201);
   const key=`appointment-followup:v1:${editorContext.actorUserId}:${h.seeded.patientAId}:${source.id}`;
   const context=await browser.newContext({viewport:{width:390,height:844}});
@@ -41,11 +41,9 @@ it.each(['two editors','two tabs'])('%s cannot replace or delete a lost-response
   if(mode==='two tabs')bEditor=await openHistory(b,source.id);
   else {
     const queue=a.getByRole('region',{name:'قائمة متابعة الغياب'});
-    // Sources can share a patient; find the editor by the source-specific GET.
-    const buttons=queue.getByRole('button',{name:'متابعة الغياب',exact:true});
-    const n=await buttons.count();
-    for(let i=0;i<n;i++)await buttons.nth(i).click();
-    bEditor=queue.getByRole('region',{name:'إجراء متابعة الغياب'}).last();
+    const task=queue.locator(`[data-followup-appointment="${source.id}"]`);
+    await task.getByRole('button',{name:'متابعة الغياب',exact:true}).click();
+    bEditor=task.getByRole('region',{name:'إجراء متابعة الغياب'});
     await expect.poll(()=>bEditor.getByRole('button',{name:'حفظ نتيجة المتابعة',exact:true}).isEnabled()).toBe(true);
   }
   let release!:()=>void; const held=new Promise<void>(resolve=>{release=resolve;});

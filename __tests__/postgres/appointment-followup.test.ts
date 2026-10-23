@@ -1,4 +1,5 @@
-import { beforeAll, afterAll, expect, it, vi } from "vitest";
+import { beforeAll, afterAll, expect, it } from "vitest";
+import { readFollowupAttempt } from "../../lib/appointment-followup-attempt";
 import { setTimeout as pause } from "node:timers/promises";
 import { assertRealPostgresUrl, stubPostgresEnv, dropPublicSchema } from "./_setup";
 import { validatePostgresTestTarget } from "./_safe-target";
@@ -32,7 +33,7 @@ async function fixture(): Promise<{ patientId: number; input: FollowupCommand }>
     RETURNING id,EXTRACT(EPOCH FROM created_at)::text AS created`, [patient.id, db.CLINIC_TIME_ZONE]);
   const identity = await context(source.id, reception);
   expect(identity).toMatchObject({ appointmentId: source.id, expectedPatientId: patient.id, sourceCreatedAt: source.created });
-  return { patientId: patient.id, input: { ...identity,
+  return { patientId: patient.id, input: { ...identity, expectedActorUserId: reception.userId,
     requestId: `synthetic-followup-request-${serial}`, expectedRevision: 0, assigneeUserId: reception.userId,
     dueAt: new Date(Date.now() + 86400000).toISOString(), status: "open", outcome: "pending", nextStep: "call" } };
 }
@@ -84,7 +85,7 @@ it("replays an exact lost response; same key with changed content conflicts", as
   expect(await save(f.input, reception)).toEqual({ ...first, replayed: true });
   await expect(save({ ...f.input, nextStep: "review" }, reception)).rejects.toMatchObject({ code: "FOLLOWUP_KEY_CONFLICT" });
   const other = await actor();
-  await expect(save(f.input, other)).rejects.toMatchObject({ code: "FOLLOWUP_REVISION_CHANGED" });
+  await expect(save({ ...f.input, expectedActorUserId: other.userId }, other)).rejects.toMatchObject({ code: "FOLLOWUP_REVISION_CHANGED" });
 });
 it("competing identical attempts produce a single event and receipt", async () => {
   const f = await fixture(); const results = await Promise.all([save(f.input, reception), save(f.input, reception)]);
@@ -191,7 +192,7 @@ it.each(["doctor", "assistant", "cashier", "accountant"])("does not expand acces
   const f = await fixture(); await expect(save(f.input, await actor(role))).rejects.toMatchObject({ status: 403 });
 });
 it("revalidates expired, revoked and role-changed sessions even on replay", async () => {
-  const f = await fixture(); const user = await actor(); await save(f.input, user);
+  const f = await fixture(); const user = await actor(); f.input.expectedActorUserId = user.userId; await save(f.input, user);
   await expect(save(f.input, { ...user, expiresAt: 0 })).rejects.toMatchObject({ status: 401 });
   await q("UPDATE users SET role='doctor' WHERE id=$1", [user.userId]);
   await expect(save(f.input, user)).rejects.toMatchObject({ status: 401 });
@@ -482,4 +483,28 @@ it('editor refuses a stale displayed patient and missing live link', async () =>
   expect(await editor(f.input.appointmentId,f.patientId,reception)).toMatchObject({revision:1,blocked:false});
   await q('DELETE FROM appointment_followup_links WHERE followup_id=$1',[result.followupId]);
   expect(await editor(f.input.appointmentId,f.patientId,reception)).toMatchObject({revision:1,blocked:true});
+});
+
+it('rejects an intent owned by another authenticated actor, before any mutation or receipt replay', async () => {
+  const f = await fixture(); const other = await actor('admin');
+  const before = await followupSnapshot();
+  await expect(save(f.input, other)).rejects.toMatchObject({ status: 409, code: 'FOLLOWUP_ACTOR_CHANGED' });
+  expect(await followupSnapshot()).toEqual(before);
+  await save(f.input, reception);
+  const committed = await followupSnapshot();
+  await expect(save(f.input, other)).rejects.toMatchObject({ status: 409, code: 'FOLLOWUP_ACTOR_CHANGED' });
+  expect(await followupSnapshot()).toEqual(committed);
+  expect(await save(f.input, reception)).toMatchObject({ revision: 1, replayed: true });
+});
+
+it('replays pre-witness local evidence against existing actor-scoped receipts without rewriting history', async () => {
+  const f = await fixture();
+  await save(f.input, reception);
+  const before = await followupSnapshot();
+  const { expectedActorUserId: _witness, ...legacy } = f.input;
+  const raw = JSON.stringify(legacy);
+  const restored = readFollowupAttempt({ getItem: () => raw }, 'synthetic-owner-slot', f.patientId, f.input.appointmentId, reception.userId)!;
+  expect(restored.raw).toBe(raw);
+  expect(await save(restored.command, reception)).toMatchObject({ revision: 1, replayed: true });
+  expect(await followupSnapshot()).toEqual(before);
 });

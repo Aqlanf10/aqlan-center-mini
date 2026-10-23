@@ -39,7 +39,7 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
         if (!response.ok) throw new Error(body.message ?? "تعذّر تحميل سياق المتابعة.");
         const context = body as Editor;
         if (context.source?.appointmentId !== appointmentId || context.source.expectedPatientId !== patientId || !Number.isInteger(context.actorUserId)) throw new Error("تعذّر التحقق من سياق المتابعة.");
-        const saved = readFollowupAttempt(localStorage, followupAttemptKey(context.actorUserId, patientId, appointmentId), patientId, appointmentId);
+        const saved = readFollowupAttempt(localStorage, followupAttemptKey(context.actorUserId, patientId, appointmentId), patientId, appointmentId, context.actorUserId);
         setAttempt(saved?.command ?? null); setAssignee(context.assigneeUserId); setData(context);
       } catch (error) { if (active.current && !controller.signal.aborted) setMessage(error instanceof Error ? error.message : "تعذّر تحميل المتابعة."); }
     })();
@@ -48,11 +48,11 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
   // Advisory synchronization improves both editors' UI. The lock below is still
   // required if events are delayed, missed, or delivered after a stale click.
   useEffect(() => {
-    if (!storageKey) return;
+    if (!storageKey || !data) return;
     const sync = () => {
       if (!active.current || pending.current) return;
       try {
-        const saved = readFollowupAttempt(localStorage, storageKey, patientId, appointmentId);
+        const saved = readFollowupAttempt(localStorage, storageKey, patientId, appointmentId, data.actorUserId);
         setAttempt(saved?.command ?? null);
         if (!saved) setReload(value => value + 1);
       } catch (error) { setMessage(error instanceof Error ? error.message : "تعذّر قراءة الطلب المحفوظ."); }
@@ -62,7 +62,7 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
     window.addEventListener(FOLLOWUP_ATTEMPT_CHANGED, changed);
     window.addEventListener("storage", storage);
     return () => { window.removeEventListener(FOLLOWUP_ATTEMPT_CHANGED, changed); window.removeEventListener("storage", storage); };
-  }, [storageKey, patientId, appointmentId]);
+  }, [storageKey, patientId, appointmentId, data]);
   async function save() {
     if (!data || !storageKey || pending.current || (!attempt && (data.blocked || data.closed))) return;
     pending.current = true; setBusy(true);
@@ -82,7 +82,7 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
           setAttempt(null); setData(null);
           setMessage("تغيّرت الجلسة. أعد تحميل الصفحة؛ بقي طلب المستخدم السابق محفوظاً دون إرسال أو حذف."); return;
         }
-        const saved = readFollowupAttempt(localStorage, storageKey, patientId, appointmentId);
+        const saved = readFollowupAttempt(localStorage, storageKey, patientId, appointmentId, data.actorUserId);
         if (saved && (!attempt || JSON.stringify(saved.command) !== JSON.stringify(attempt))) {
           setAttempt(saved.command);
           setMessage("هناك محاولة محفوظة لهذا الموعد. أعد المحاولة نفسها للتحقق؛ لم تُستبدل ببيانات هذا المحرر.");
@@ -104,7 +104,7 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
             setReload(value => value + 1); setMessage("تغيّر المستخدم أو سياق المتابعة. راجع البيانات المحدثة قبل إجراء جديد."); return;
           }
           const closed = outcome === "resolved" || outcome === "declined";
-          command = parseFollowupCommand({ ...data.source, requestId: crypto.randomUUID(), expectedRevision: data.revision,
+          command = parseFollowupCommand({ ...data.source, expectedActorUserId: data.actorUserId, requestId: crypto.randomUUID(), expectedRevision: data.revision,
             assigneeUserId: assignee, dueAt: new Date(Date.now() + Number(hours) * 3600000).toISOString(),
             status: data.revision === 0 ? "open" : closed ? "closed" : "open",
             outcome: data.revision === 0 ? "pending" : outcome,
@@ -117,10 +117,15 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
           localStorage.setItem(storageKey, raw); setAttempt(command);
           notifyFollowupAttemptChanged(storageKey);
         }
-        const response = await fetch(`/api/appointments/${appointmentId}/followup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: raw });
+        const response = await fetch(`/api/appointments/${appointmentId}/followup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
         const result = await response.json();
         if (!active.current) return; // Keep evidence after session/owner replacement.
-        if (!response.ok) throw new Error((result.message ?? "تعذّر تأكيد الحفظ.") + " الطلب محفوظ؛ تحديث السياق لا يمحوه.");
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403 || result.code === "FOLLOWUP_ACTOR_CHANGED") {
+            setAttempt(null); setData(null); // Hide old actor state, never erase durable evidence.
+          }
+          throw new Error((result.message ?? "تعذّر تأكيد الحفظ.") + " الطلب محفوظ؛ تحديث السياق لا يمحوه.");
+        }
         if (!Number.isInteger(result.followupId) || result.followupId <= 0 || result.followupId > 2147483647
           || result.revision !== command.expectedRevision + 1 || typeof result.replayed !== "boolean"
           || ![200, 201].includes(response.status) || (response.status === 200) !== result.replayed) throw new Error("نتيجة الحفظ غير مؤكدة. أعد الطلب نفسه.");

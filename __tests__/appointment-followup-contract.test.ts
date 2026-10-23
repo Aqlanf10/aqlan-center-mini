@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseFollowupCommand, followupFingerprintInput } from "../lib/appointment-followup-contract";
 
-const input = { appointmentId: 1, expectedPatientId: 7, sourceCreatedAt: "1700000000.123456", generation: "a".repeat(32),
+const input = { appointmentId: 1, expectedPatientId: 7, expectedActorUserId: 2, sourceCreatedAt: "1700000000.123456", generation: "a".repeat(32),
   requestId: "synthetic-followup-request", expectedRevision: 0, assigneeUserId: 2,
   dueAt: "2030-01-01T00:00:00.000Z", status: "open", outcome: "pending", nextStep: "call" };
 describe("bounded patient-free followup contract", () => {
@@ -17,7 +17,7 @@ describe("bounded patient-free followup contract", () => {
     { patientName: "Synthetic only" }, { phone: "synthetic" }, { note: "synthetic" }, { appointmentId: "1" },
     { expectedPatientId: undefined }, { expectedPatientId: "7" }, { expectedPatientId: 0 },
     { status: ["open"] }, { status: { toString: null } },
-    { sourceCreatedAt: "1700000000.123" }, { generation: "" }, { expectedRevision: -1 }, { expectedRevision: 2147483647 },
+    { sourceCreatedAt: "1700000000.123" }, { generation: "" }, { expectedActorUserId: undefined }, { expectedActorUserId: 0 }, { expectedActorUserId: "2" }, { expectedRevision: -1 }, { expectedRevision: 2147483647 },
     { assigneeUserId: 0 }, { dueAt: "2030-02-30T00:00:00.000Z" }, { dueAt: "2030-01-01T00:00:00" },
     { outcome: "whatsapp_sent" }, { outcome: "rebooked" }, { status: "closed", outcome: "pending", nextStep: "none" },
     { status: "open", outcome: "resolved" }, { status: "open", nextStep: "none" }, { outcome: "no_answer" },
@@ -45,4 +45,10 @@ describe("bounded patient-free followup contract", () => {
   it.each(["resolved", "declined"])("requires explicit %s for closure", outcome => {
     expect(parseFollowupCommand({ ...input, expectedRevision: 1, outcome, status: "closed", nextStep: "none" })).not.toBeNull();
   });
+});
+
+it("preserves legacy receipt fingerprints while actor ownership is checked separately", () => {
+  const command = parseFollowupCommand(input)!;
+  const { requestId: _key, expectedActorUserId: _actor, ...legacyIntent } = command;
+  expect(followupFingerprintInput(command)).toBe(JSON.stringify({ version: 1, ...legacyIntent }));
 });

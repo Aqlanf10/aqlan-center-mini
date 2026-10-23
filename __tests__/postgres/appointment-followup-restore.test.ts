@@ -48,7 +48,7 @@ it.each(cases)("real archive/staged restore preserves %s followup identity and g
       credentialVersion: sessionCredentialVersion("synthetic-hash"), expiresAt: Date.now() + 3600000 };
     const identity = await readAppointmentFollowupSource(902, actor);
     await q("SELECT setval(pg_get_serial_sequence('appointment_followups','id'),903,false)");
-    const command = { ...identity, requestId: "synthetic-restore-request", expectedRevision: 0,
+    const command = { ...identity, expectedActorUserId: actor.userId, requestId: "synthetic-restore-request", expectedRevision: 0,
       assigneeUserId: 900, dueAt: new Date(Date.now() + 86400000).toISOString(), status: "open", outcome: "pending", nextStep: "call" };
     const first = await saveAppointmentFollowup(command, actor);
     expect(first.followupId).toBe(903);
