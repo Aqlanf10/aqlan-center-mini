@@ -19920,8 +19920,23 @@ async function readPlans(where:string,params:unknown[],today:string):Promise<Tre
     return hydratePlans(rows,today,reader);
   },usesSharedLocalDatabaseConnection());
 }
+const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
+/**
+ * A patient statement's ledger, plan currencies and plans from one read-only snapshot, so a
+ * payment committed meanwhile is seen by all of them or by none. Standalone readers are unchanged.
+ */
+export async function patientStatementSnapshot(patientId:number,today:string){
+  await ensureSchema();
+  return withFinancialReadSnapshot(getPool(),async runner=>{
+    const client=runner as DbClient;
+    const ledger=await patientLedgerInSnapshot(patientId,client);
+    const planCurrencies=await patientPlanCurrencies(patientId,client);
+    const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
+    return {ledger,planCurrencies,plans:await hydratePlans(rows,today,client)};
+  });
+}
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
-  return readPlans("WHERE t.patient_id=$1 ORDER BY t.created_at DESC",[patientId],today);
+  return readPlans(PATIENT_PLANS_WHERE,[patientId],today);
 }
 export async function getPlan(id:number,today:string):Promise<TreatmentPlan|null> {
   return (await readPlans("WHERE t.id=$1",[id],today))[0]??null;

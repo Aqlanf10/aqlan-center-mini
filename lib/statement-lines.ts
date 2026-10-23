@@ -1,4 +1,4 @@
-import type { Invoice, Payment } from "./db";
+import type { Invoice, Payment, TreatmentPlan } from "./db";
 
 /**
  * The one patient-facing statement rule, shared by the printed statement and the
@@ -9,6 +9,15 @@ import type { Invoice, Payment } from "./db";
 /** Current patient copy only. Never use this filter for historical/as-of balances. */
 export function currentStatementInvoices<T extends Pick<Invoice, "status">>(invoices: readonly T[]): T[] {
   return invoices.filter((invoice) => invoice.status !== "cancelled");
+}
+
+/**
+ * Agreements shown on the patient copy: active plans whose total is an agreed amount rather
+ * than the sum of their items. Their totals, paid and remaining come from the canonical plan
+ * progress as-is; nothing is derived by adding agreement totals to invoices.
+ */
+export function statementAgreements<T extends Pick<TreatmentPlan, "status" | "totalFromItems">>(plans: readonly T[]): T[] {
+  return plans.filter((plan) => plan.status === "active" && !plan.totalFromItems);
 }
 
 export function statementPaymentLabel(
