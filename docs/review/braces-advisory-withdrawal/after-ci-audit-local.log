@@ -1,0 +1,50 @@
+----- RAW npm audit (attempt 1; exit 0) -----
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {},
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "dependencies": {
+      "prod": 62,
+      "dev": 305,
+      "optional": 91,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 404
+    }
+  }
+}
+
+----- RAW npm audit --omit=dev (attempt 1; exit 0) -----
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {},
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "dependencies": {
+      "prod": 62,
+      "dev": 305,
+      "optional": 91,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 404
+    }
+  }
+}
+
+بوابة التدقيق مرفوضة: BRACES_EXCEPTION_REJECTED: official lookup failed: https://api.github.com/advisories/GHSA-vfj7-8cjw-p6xm
+exit 1
