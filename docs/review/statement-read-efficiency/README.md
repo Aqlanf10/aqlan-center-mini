@@ -1,5 +1,8 @@
 # Statement read efficiency inside one financial snapshot
 
+**Current follow-up:** [populated-optimization/README.md](populated-optimization/README.md) documents the proven repeated repayment reads, the transaction-local fix, executable growth/concurrency/error tests and complete new interleaved timings.40-plan SQL falls8533→799 and warm p50~5092→457ms. Small-path tails remain mixed/worse in some retained cohorts, so blanket no-slowdown acceptance is still open. Earlier evidence below and reproduction/ remains historical and is not relabelled as the new product version.
+
+
 The coherent statement snapshot performed a separate currency read and one invoice-source discovery query per unapproved plan. On the reviewed #439 base, five draft plans required 18 SQL calls. This change reuses the complete plan rows for the currency map and batches source discovery, yielding 13 calls for the same result.
 
 Only patientStatementSnapshot opts into batching. Standalone plan readers retain the same SQL and the shared financial resolver. The repeatable-read, read-only transaction, currency validation, plan/invoice ownership checks, approved-principal authority, correction lineage, refunds, source-drift handling, permissions and error cleanup are preserved. No collection/receipt writer, migration, lockfile or workflow changes.

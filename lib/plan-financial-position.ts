@@ -38,13 +38,24 @@ export async function readPlanInvoiceFinancialPositions(client:DbClient,plans:Pl
     ORDER BY requested.plan_id,candidate.id`,[plans.map(plan=>plan.id)]);
   const grouped=new Map<number,PlanInvoiceCandidate[]>();
   for(const row of rows){const group=grouped.get(row.requested_plan_id)??[];group.push(row);grouped.set(row.requested_plan_id,group);}
-  return new Map(await Promise.all(plans.map(async plan=>[plan.id,await resolvePlanInvoiceFinancialPosition(client,plan,today,grouped.get(plan.id)??[])] as const)));
+  // Only this RR statement batch shares a patient-wide read. Cache the promise
+  // before awaiting so concurrent plan resolvers cannot fan out identical work.
+  // It is lazy (ownership/classic refusals still precede schedule reads), keyed
+  // by patient, and dies with this invocation: never shared with another client,
+  // request, date or writer. Rejections propagate through the snapshot cleanup.
+  const schedulesByPatient=new Map<number,ReturnType<typeof readDebtRepayments>>();
+  const schedulesFor=(patientId:number)=>{
+    let pending=schedulesByPatient.get(patientId);
+    if(!pending){pending=readDebtRepayments(client,patientId,today);schedulesByPatient.set(patientId,pending);}
+    return pending;
+  };
+  return new Map(await Promise.all(plans.map(async plan=>[plan.id,await resolvePlanInvoiceFinancialPosition(client,plan,today,grouped.get(plan.id)??[],()=>schedulesFor(plan.patientId))] as const)));
 }
 export async function readPlanInvoiceFinancialPosition(client:DbClient,plan:PlanFinancialIdentity,today:string):Promise<PlanInvoiceFinancialPosition|{kind:"classic_installments"}|null>{
   const {rows}=await client.query<PlanInvoiceCandidate>(PLAN_INVOICE_CANDIDATES_SQL,[plan.id]);
   return resolvePlanInvoiceFinancialPosition(client,plan,today,rows);
 }
-async function resolvePlanInvoiceFinancialPosition(client:DbClient,plan:PlanFinancialIdentity,today:string,rows:PlanInvoiceCandidate[]):Promise<PlanInvoiceFinancialPosition|{kind:"classic_installments"}|null>{
+async function resolvePlanInvoiceFinancialPosition(client:DbClient,plan:PlanFinancialIdentity,today:string,rows:PlanInvoiceCandidate[],readSchedules=()=>readDebtRepayments(client,plan.patientId,today)):Promise<PlanInvoiceFinancialPosition|{kind:"classic_installments"}|null>{
   if(!rows.length)return null;
   if(rows.every(r=>r.classic && r.patient_id===plan.patientId && r.base_currency===plan.currency))return {kind:'classic_installments'};
   const blank:PlanProgress={totalMinor:0,paidMinor:0,remainingMinor:0,dueToDateMinor:0,overdueMinor:0,nextDueDate:null,nextDueAmountMinor:0,paidCount:0,count:0};
@@ -59,7 +70,7 @@ async function resolvePlanInvoiceFinancialPosition(client:DbClient,plan:PlanFina
   // Legacy agreements can be backed by an opening bucket. Its ownership must
   // be explicitly approved (the caller handles approved agreements first).
   if((await client.query('SELECT 1 FROM legacy_treatment_agreements a JOIN plan_items i ON i.id=a.plan_item_id WHERE i.plan_id=$1 LIMIT 1',[plan.id])).rows.length)return review();
-  const allSchedules=await readDebtRepayments(client,plan.patientId,today);
+  const allSchedules=await readSchedules();
   const schedules=allSchedules.filter(s=>positions.some(p=>p.invoiceId===s.target.invoiceId)).map(({id,target,version,status,requiresReview,progress})=>({id,target,version,status,requiresReview,progress:requiresReview?null:progress}));
   const progress={...blank};
   for(const position of positions){

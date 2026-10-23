@@ -1,0 +1,130 @@
+import {Client,type PoolClient} from 'pg';
+import {afterAll,beforeAll,expect,it,vi} from 'vitest';
+import {assertRealPostgresUrl,stubPostgresEnv,createIsolatedDatabase} from './_setup';
+import {DEFAULT_SPECIALTY_TEMPLATES} from '../../lib/specialty-templates';
+import type {SessionPayload} from '../../lib/auth';
+import type {Currency} from '../../lib/money';
+assertRealPostgresUrl();stubPostgresEnv();
+process.env.DATABASE_URL=await createIsolatedDatabase('aqlan_statement_populated_test');
+const db=await import('../../lib/db'),auth=await import('../../lib/auth');
+const {createLinkedInvoice}=await import('../../lib/invoice-linkage-db');
+const {saveDebtRepayment}=await import('../../lib/debt-installments-db');
+const {collectDebtInstallment}=await import('../../lib/debt-installment-collection');
+const {approveAgreement,collectApprovedAgreement}=await import('../../lib/approved-agreements');
+const q=async(sql:string,params:unknown[]=[]) => (await db.getPool().query(sql,params)).rows;
+let session:SessionPayload;let serial=0;
+let concurrentFixture:Awaited<ReturnType<typeof fixture>>;
+beforeAll(async()=>{
+ await db.ensureSchema();const hash=await auth.hashPassword('synthetic-plan-regression');
+ const [user]=await q("INSERT INTO users(username,display_name,password_hash,role,is_active) VALUES('plan-read-test','Synthetic',$1,'admin',TRUE) RETURNING id",[hash]);
+ session={userId:user.id,username:'plan-read-test',role:'admin',credentialVersion:auth.sessionCredentialVersion(hash),expiresAt:Date.now()+3600000};
+ await db.openShift({openedBy:session.username,opening:{YER:0,SAR:0,USD:0}});
+ await q("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','140'),('finance.rate.USD','530') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
+},180000);
+afterAll(async()=>db.resetPoolForTesting());
+async function fixture(currency:Currency, existingPatientId:number,toothCode:number){
+ const n=++serial;
+ const patient={id:existingPatientId};
+ const [doctor]=await q("INSERT INTO parties(kind,name) VALUES('doctor','Synthetic provider') RETURNING id");
+ const [service]=await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES('Synthetic RCT',1000,TRUE,TRUE,'rct') RETURNING id");
+ const shell=await db.createPlanV2({patientId:patient.id,title:`Synthetic invoice plan ${n}`,specialty:null,primaryDoctorId:null,billingMode:"per_procedure",baseCurrency:currency,startDate:"2026-10-01",note:null,createdBy:session.username,items:[{serviceId:service.id,serviceName:"Synthetic RCT",category:"rct",toothCode,quantity:1,unitPriceMinor:1000,billingRule:"on_completion",sessionCount:1,surfaces:null,note:null}],installments:[]});
+ if(!shell.ok)throw Error(shell.message);
+ const created=await createLinkedInvoice({existingPlanId:shell.planId,patientId:patient.id,baseCurrency:currency,discountMinor:0,note:null,createdBy:session.username,actorRole:'admin',items:[{serviceId:service.id,category:'rct',doctorId:doctor.id,description:'Synthetic RCT',quantity:1,unitPriceMinor:1000,toothCode,caseId:null,sessions:null,surfaces:null,episodeTeeth:null,scope:null}],templates:DEFAULT_SPECIALTY_TEMPLATES,idempotencyKey:null,requestHash:null,auditDetails:{}});
+ if(!created.ok)throw Error('Fixture invoice linkage failed '+JSON.stringify(created));
+ const target={patientId:patient.id,currency,invoiceId:created.invoice.id,openingCurrency:null};
+ const schedule=await saveDebtRepayment({target,terms:{mode:'installments',installments:[{dueDate:'2026-10-01',amountMinor:1000,kind:'installment'}]},expectedVersion:0,expectedRemainingMinor:1000,reason:'Synthetic schedule',idempotencyKey:`plan-schedule-${n}`,session});
+ const collect=(amountMinor:number)=>collectDebtInstallment({patientId:patient.id,arrangementId:schedule.arrangementId,amountMinor,idempotencyKey:`plan-collect-${++serial}`,currency,expectedVersion:1,method:'cash',note:null,session});
+ return {patientId:patient.id,planId:shell.planId,invoiceId:created.invoice.id,currency,schedule,target,collect};
+}
+
+it('bounds total query growth for paid invoice and approved plans, corrections and mixed currencies',async()=>{
+ 
+ for(const groups of [1,5,20]){
+  const [patient]=await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic scale') RETURNING id",[`SCALE-${groups}`]);
+  for(let i=0;i<groups;i++){
+   const currency=(['YER','SAR','USD'] as const)[i%3];
+   const f=await fixture(currency,patient.id,[11,12,13,14,15,16,17,18,21,22,23,24,25,26,27,28,31,32,33,34][i]);await f.collect(100+i);if(groups===5&&i===1)concurrentFixture=f;
+   if(currency==='YER'){
+    const revision=await import('../../lib/invoice-revision-db');const view=await revision.readInvoiceRevision(f.invoiceId,session);
+    const result=await revision.reviseInvoice(f.invoiceId,{idempotencyKey:`scale-correction-${++serial}`,expectedSourceHash:view.sourceHash,reason:'Synthetic scale correction',lines:view.invoice.items.map(item=>({itemId:item.id,quantity:1,unitPrice:'900'})),discount:'0',repaymentTerms:{mode:'full',installments:[]},expectedRemainingMinor:800-i},session);
+    expect(result).toHaveProperty('corrected');
+   }
+   const p=await db.createPlanV2({patientId:patient.id,title:`Synthetic approved ${i}`,specialty:null,primaryDoctorId:null,billingMode:'installments',baseCurrency:currency,startDate:'2026-10-01',note:null,createdBy:session.username,items:[],installments:[{dueDate:'2026-10-01',amountMinor:1000}]});
+   if(!p.ok)throw Error(p.message);
+   await db.recordPlanConsent({planId:p.planId,actor:session.username,note:null});
+   await approveAgreement({planId:p.planId,expectedTotalMinor:1000,currency,source:{kind:'new'},reason:'Synthetic scale approval',idempotencyKey:`scale-approve-${++serial}`,session});
+   await collectApprovedAgreement({planId:p.planId,amountMinor:200+i,currency,method:'cash',note:null,idempotencyKey:`scale-approved-pay-${++serial}`,session});
+  }
+  const spy=vi.spyOn(Client.prototype,'query');
+  let snapshot:Awaited<ReturnType<typeof db.patientStatementSnapshot>>;
+  try{
+   snapshot=await db.patientStatementSnapshot(patient.id,'2026-10-23');
+   // A patient-wide schedule read per invoice plan creates quadratic fanout.
+   // Keep a generous total budget including every settlement/ownership check.
+   expect(spy.mock.calls.length).toBeLessThanOrEqual(groups*2*40);
+   expect(spy.mock.calls.filter(args=>String(args[0]).includes('SELECT * FROM debt_repayment_arrangements WHERE patient_id=$1'))).toHaveLength(1);
+  }finally{spy.mockRestore();}
+  expect(snapshot.plans).toHaveLength(groups*2);
+  expect(snapshot.plans).toEqual(await db.listPatientPlans(patient.id,'2026-10-23'));
+  for(const plan of snapshot.plans){
+   const index=Number(plan.title.match(/Synthetic approved (\d+)/)?.[1]);
+   if(plan.debtSource==='approved_agreement')expect(plan.approvedAgreement).toMatchObject({paidMinor:200+index,remainingMinor:800-index});
+  }
+ }
+
+},180000);
+
+it('keeps a payment committed during the shared read out of this snapshot and sees it in the next request',async()=>{
+ const f=concurrentFixture;expect(f).toBeDefined();
+ const before=await db.patientStatementSnapshot(f.patientId,'2026-10-23');
+ const paidBefore=before.plans.find(p=>p.id===f.planId)!.paidMinor;
+ const pool=db.getPool(),connect=pool.connect.bind(pool) as (...args:unknown[])=>unknown;
+ let injected=false;
+ const spy=vi.spyOn(pool,'connect').mockImplementation(((...args:unknown[])=>{
+  if(typeof args[0]==='function')return connect(...args);
+  return (async()=>{
+   const client=await connect() as PoolClient,query=client.query.bind(client) as (...args:unknown[])=>Promise<unknown>,release=client.release.bind(client);
+   client.query=(async(...queryArgs:unknown[])=>{
+    const result=await query(...queryArgs);
+    if(!injected&&String(queryArgs[0]).includes('SELECT * FROM debt_repayment_arrangements WHERE patient_id=$1')){
+     injected=true;const paid=await f.collect(17);expect(paid.payment).toBeTruthy();
+    }
+    return result;
+   }) as typeof client.query;
+   client.release=((destroy?:boolean|Error)=>{client.query=query as typeof client.query;client.release=release;return release(destroy);}) as typeof client.release;
+   return client;
+  })();
+ }) as unknown as typeof pool.connect);
+ try{
+  const during=await db.patientStatementSnapshot(f.patientId,'2026-10-23');
+  expect(injected).toBe(true);expect(during).toEqual(before);
+ }finally{spy.mockRestore();}
+ const after=await db.patientStatementSnapshot(f.patientId,'2026-10-23');
+ expect(after.plans.find(p=>p.id===f.planId)?.paidMinor).toBe(paidBefore+17);
+ expect(after.plans).toEqual(await db.listPatientPlans(f.patientId,'2026-10-23'));
+});
+it('rolls back a failed shared schedule read and does not cache its rejection into another request',async()=>{
+ const marker=new Error('synthetic schedule read failure');
+ const pool=db.getPool(),connect=pool.connect.bind(pool) as (...args:unknown[])=>unknown;
+ let reads=0;const calls:string[]=[];
+ const spy=vi.spyOn(pool,'connect').mockImplementation(((...args:unknown[])=>{
+  if(typeof args[0]==='function')return connect(...args);
+  return (async()=>{
+   const client=await connect() as PoolClient,query=client.query.bind(client) as (...args:unknown[])=>Promise<unknown>,release=client.release.bind(client);
+   client.query=(async(...queryArgs:unknown[])=>{
+    calls.push(String(queryArgs[0]));
+    if(String(queryArgs[0]).includes('SELECT * FROM debt_repayment_arrangements WHERE patient_id=$1')){reads++;throw marker;}
+    return query(...queryArgs);
+   }) as typeof client.query;
+   client.release=((destroy?:boolean|Error)=>{client.query=query as typeof client.query;client.release=release;return release(destroy);}) as typeof client.release;
+   return client;
+  })();
+ }) as unknown as typeof pool.connect);
+ try{
+  await expect(db.patientStatementSnapshot(concurrentFixture.patientId,'2026-10-23')).rejects.toBe(marker);
+  expect(reads).toBe(1);
+  expect(calls.filter(sql=>sql==='ROLLBACK')).toHaveLength(1);
+ }finally{spy.mockRestore();}
+ const after=await db.patientStatementSnapshot(concurrentFixture.patientId,'2026-10-23');
+ expect(after.plans).toEqual(await db.listPatientPlans(concurrentFixture.patientId,'2026-10-23'));
+});
