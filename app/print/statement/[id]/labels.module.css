@@ -1,0 +1,14 @@
+/* Only the two fixed collected/paid labels opt into this font. Preserve normal
+ * mark positioning: disabling it fixes extraction by misplacing visible shadda.
+ * No global print family, financial value or patient-entered text changes. */
+@font-face {
+  font-family: "Aqlan Statement Labels";
+  src: url("../../../fonts/statement-labels.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+.labelRow > span:first-child {
+  font-family: "Aqlan Statement Labels", sans-serif;
+}
