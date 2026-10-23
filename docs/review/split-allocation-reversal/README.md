@@ -8,11 +8,15 @@
 
 ## Fixture (per currency, real writers)
 
-1. An approved agreement of 10 × 500.00 = 5,000.00. It is approved with an idempotency key, and 1,800.00 is collected before the upgrade.
-2. A recorded upgrade to 10 × 800.00, via `saveAgreementAmendment`, adds a 3,000.00 agreement-delta invoice.
-3. One split tender of **4,000.00** goes through the real `POST /api/payments` (`planId`). The existing writer splits it into:
-   - **original allocation:** 3,200.00 on the principal invoice;
-   - **delta allocation:** 800.00 on the delta invoice.
+The fixture uses the same **minor-unit** values in every currency (`lib/money.ts` `MINOR_UNITS`: YER 1, SAR 100, USD 100). So the displayed amounts differ:
+- SAR and USD: 5,000.00 / 1,800.00 / 3,000.00 / 4,000.00 / 3,200.00 / 800.00, as written below;
+- **YER: 500,000 / 180,000 / 300,000 / 400,000 / 320,000 / 80,000.**
+
+1. An approved agreement of 10 × 500.00 = 5,000.00 (minor 500,000). It is approved with an idempotency key, and 1,800.00 (minor 180,000) is collected before the upgrade.
+2. A recorded upgrade to 10 × 800.00, via `saveAgreementAmendment`, adds a 3,000.00 (minor 300,000) agreement-delta invoice.
+3. One split tender of **4,000.00** (minor 400,000) goes through the real `POST /api/payments` (`planId`). The existing writer splits it into:
+   - **original allocation:** 3,200.00 (minor 320,000) on the principal invoice;
+   - **delta allocation:** 800.00 (minor 80,000) on the delta invoice.
 
    Both are recorded in `agreement_delta_collection_receipts`.
 4. The plan item carries a 20% collected-cash commission doctor.
@@ -93,7 +97,7 @@ Retries:
 | Unit, `__tests__/receipt-correction-route-errors.test.ts`: one case per typed code (403/400/409/409/409) | red, 5 cases | green |
 | Same unit file, controls: generic 500 without raw details; unchanged refusal-reason message; unchanged 401/403 gates before the writer | green | green |
 | Browser, `__tests__/security-http/split-allocation-correction-ui.test.ts` (built app, real routes, synthetic split created through the app's own endpoints). The ReceiptCorrection form moving the delta receipt onto the sibling invoice must show the explicit reason, not «أعد المحاولة», with nothing written | red: «expected 500 to be 400» | green |
-| Same browser file: a supported partial correction to 480.00 records exactly one 800.00 reversal and one 480.00 replacement on the delta invoice, nets −320.00 in this patient's YER cash, and leaves the sibling receipt unreversed | green | green |
+| Same browser file (YER; one minor unit per riyal): a supported partial correction of the 80,000 YER delta receipt to 48,000 YER records exactly one 80,000 reversal and one 48,000 replacement on the delta invoice, nets −32,000 YER in this patient's cash, and leaves the sibling 320,000 receipt unreversed. These are patient-scoped browser snapshots; the whole-table and audit checks are in the PostgreSQL grid. | green | green |
 
 ## Audit evidence
 
