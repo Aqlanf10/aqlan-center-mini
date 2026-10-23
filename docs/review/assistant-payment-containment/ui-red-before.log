@@ -1,0 +1,55 @@
+ RUN  v4.1.12 /tmp/claude-0/acm
+ ❯ __tests__/ai-chat-contained-confirmation.test.tsx (4 tests | 4 failed) 70ms
+     × a contained refusal of a historical token is terminal, keeps the card evidence and shows only safe navigation 5ms
+     × only internal navigation survives from a contained payload 1ms
+     × generic handling for other tools is unchanged: failure returns to pending without buttons, success is done 0ms
+     × shows a terminal refusal, the preserved card, the qualified wording and the /finance link — never a retry button 62ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  __tests__/ai-chat-contained-confirmation.test.tsx > applyConfirmationResult > a contained refusal of a historical token is terminal, keeps the card evidence and shows only safe navigation
+TypeError: applyConfirmationResult is not a function
+ ❯ __tests__/ai-chat-contained-confirmation.test.tsx:61:19
+     59|   it("a contained refusal of a historical token is terminal, keeps the…
+     60|     const before = [cardMessage()];
+     61|     const after = applyConfirmationResult(before, "a_offer", { respons…
+       |                   ^
+     62|     expect(after).toHaveLength(2);
+     63|     expect(after[0].confirmationState).toBe("refused");
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+ FAIL  __tests__/ai-chat-contained-confirmation.test.tsx > applyConfirmationResult > only internal navigation survives from a contained payload
+TypeError: applyConfirmationResult is not a function or its return value is not iterable
+ ❯ __tests__/ai-chat-contained-confirmation.test.tsx:78:24
+     76|       { label: "فتح شاشة التحصيل", href: "/finance", actionType: "navi…
+     77|     ] };
+     78|     const [, result] = applyConfirmationResult([cardMessage()], "a_off…
+       |                        ^
+     79|     expect(result.actions).toEqual([{ label: "فتح شاشة التحصيل", href:…
+     80|   });
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+ FAIL  __tests__/ai-chat-contained-confirmation.test.tsx > applyConfirmationResult > generic handling for other tools is unchanged: failure returns to pending without buttons, success is done
+TypeError: applyConfirmationResult is not a function
+ ❯ __tests__/ai-chat-contained-confirmation.test.tsx:83:20
+     81|
+     82|   it("generic handling for other tools is unchanged: failure returns t…
+     83|     const failed = applyConfirmationResult([cardMessage()], "a_offer",…
+       |                    ^
+     84|       payload: { ok: false, reply: "تعذّر", actions: [{ label: "x", hr…
+     85|     expect(failed[0].confirmationState).toBe("pending");
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+ FAIL  __tests__/ai-chat-contained-confirmation.test.tsx > the chat window, confirming a historical payment card > shows a terminal refusal, the preserved card, the qualified wording and the /finance link — never a retry button
+AssertionError: expected true to be false // Object.is equality
+- Expected
++ Received
+- false
++ true
+ ❯ __tests__/ai-chat-contained-confirmation.test.tsx:121:97
+    119|     const tree = render();
+    120|     const all = tree.map(text).join(" ");
+    121|     expect(tree.some((node) => node.type === "button" && text(node).in…
+       |                                                                                                 ^
+    122|     expect(all).toContain("رُفض التنفيذ نهائيًا");
+    123|     for (const field of historicalOffer.fields) expect(all).toContain(…
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  03:49:38
+   Duration  410ms (transform 139ms, setup 0ms, import 184ms, tests 70ms, environment 0ms)

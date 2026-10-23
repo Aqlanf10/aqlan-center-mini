@@ -104,6 +104,8 @@ export interface ToolExecutionResult {
   confirmation?: ToolConfirmationOffer;
   /** true حين يكون غيابُ النتيجة سببُه انتظار التأكيد لا فشل الإجراء. */
   requiresConfirmation?: boolean;
+  /** (CORE-SAFETY) true حين رُفضت أداةٌ محتواة: رفضٌ نهائي لا يُعاد عرض تأكيده (contained-tools.ts). */
+  contained?: boolean;
 }
 
 export interface AiToolDefinition {
