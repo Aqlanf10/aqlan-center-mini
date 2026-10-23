@@ -1,0 +1,78 @@
+{
+ "aiSettingsSeed": [
+  {
+   "enabled": true,
+   "has_key": false
+  }
+ ],
+ "previewFields": [
+  {
+   "label": "المريض",
+   "value": "Synthetic AI red (ملف #1)",
+   "sensitive": true
+  },
+  {
+   "label": "المبلغ",
+   "value": "5000 ريال يمني",
+   "sensitive": true
+  },
+  {
+   "label": "طريقة القبض",
+   "value": "نقدًا بالصندوق",
+   "sensitive": true
+  },
+  {
+   "label": "الفاتورة",
+   "value": "#1"
+  }
+ ],
+ "R1_sameTokenRetryAfterCommit": {
+  "first": true,
+  "retry": false,
+  "text": "رمز التأكيد مستهلك أو منفَّذ مسبقًا — الإجراء لا يُنفّذ مرتين. أعد الطلب من جديد إن أردت تكراره.",
+  "receiptsAfter": 1
+ },
+ "R2_secondConfirmationFromPreviewTakenBeforeFirstCommit": {
+  "second": true,
+  "receipts": [
+   {
+    "id": 1,
+    "amount": 5000,
+    "idempotency_key": null
+   },
+   {
+    "id": 2,
+    "amount": 5000,
+    "idempotency_key": null
+   }
+  ]
+ },
+ "R3_previewFieldsAfterTwoEqualReceipts": [
+  {
+   "label": "المريض",
+   "value": "Synthetic AI red (ملف #1)",
+   "sensitive": true
+  },
+  {
+   "label": "المبلغ",
+   "value": "5000 ريال يمني",
+   "sensitive": true
+  },
+  {
+   "label": "طريقة القبض",
+   "value": "نقدًا بالصندوق",
+   "sensitive": true
+  },
+  {
+   "label": "الفاتورة",
+   "value": "#1"
+  }
+ ],
+ "R4_twoTokensConfirmedConcurrently": {
+  "successes": [
+   true,
+   true
+  ],
+  "newReceipts": 2
+ }
+}
