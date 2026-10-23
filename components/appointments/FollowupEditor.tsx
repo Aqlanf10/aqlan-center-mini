@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
-import { parseFollowupCommand, type FollowupCommand, type FollowupOutcome } from "@/lib/appointment-followup-contract";
+import { parseFollowupCommand, followupFingerprintInput, type FollowupCommand, type FollowupOutcome } from "@/lib/appointment-followup-contract";
 import { FOLLOWUP_ATTEMPT_CHANGED, followupAttemptKey, readFollowupAttempt, removeOwnedFollowupAttempt, withFollowupAttemptLock, notifyFollowupAttemptChanged } from "@/lib/appointment-followup-attempt";
 import type { readAppointmentFollowupEditor } from "@/lib/appointment-followup-db";
 type Editor = Awaited<ReturnType<typeof readAppointmentFollowupEditor>>;
@@ -63,8 +63,8 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
     window.addEventListener("storage", storage);
     return () => { window.removeEventListener(FOLLOWUP_ATTEMPT_CHANGED, changed); window.removeEventListener("storage", storage); };
   }, [storageKey, patientId, appointmentId, data]);
-  async function save() {
-    if (!data || !storageKey || pending.current || (!attempt && (data.blocked || data.closed))) return;
+  async function save(retire = false) {
+    if ((retire && !attempt) || !data || !storageKey || pending.current || (!attempt && (data.blocked || data.closed))) return;
     pending.current = true; setBusy(true);
     try {
       const acquired = await withFollowupAttemptLock(storageKey, async () => {
@@ -93,6 +93,7 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
           setMessage("تغيّرت ملكية المحاولة في محرر آخر. حدّث السياق قبل إجراء جديد.");
           return;
         }
+        if (retire && !saved) throw new Error("لا توجد محاولة محفوظة للتحقق منها.");
         let command = saved?.command;
         let raw = saved?.raw;
         if (!command) {
@@ -117,7 +118,7 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
           localStorage.setItem(storageKey, raw); setAttempt(command);
           notifyFollowupAttemptChanged(storageKey);
         }
-        const response = await fetch(`/api/appointments/${appointmentId}/followup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
+        const response = await fetch(`/api/appointments/${appointmentId}/followup${retire ? "/retire" : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
         const result = await response.json();
         if (!active.current) return; // Keep evidence after session/owner replacement.
         if (!response.ok) {
@@ -125,6 +126,19 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
             setAttempt(null); setData(null); // Hide old actor state, never erase durable evidence.
           }
           throw new Error((result.message ?? "تعذّر تأكيد الحفظ.") + " الطلب محفوظ؛ تحديث السياق لا يمحوه.");
+        }
+        if (retire) {
+          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(followupFingerprintInput(command)));
+          const fingerprint = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+          if (!active.current) return;
+          if (response.status !== 200 || result.requestId !== command.requestId || result.actorUserId !== command.expectedActorUserId
+            || result.fingerprint !== fingerprint || !["retired", "committed"].includes(result.outcome)) throw new Error("إثبات نتيجة المحاولة غير مطابق؛ بقي الطلب محفوظاً.");
+          if (result.outcome === "committed") {
+            setMessage("هذه المحاولة حُفظت سابقاً. أعد المحاولة نفسها لاستلام تأكيدها؛ لم تُلغَ ولم تُحذف."); return;
+          }
+          if (!removeOwnedFollowupAttempt(localStorage, storageKey, raw!)) throw new Error("تأكد إلغاء المفتاح، لكن المحاولة المحفوظة تغيّرت؛ لم تُحذف.");
+          setAttempt(null); notifyFollowupAttemptChanged(storageKey); setReload(value => value + 1);
+          setMessage("تأكد أن المحاولة لم تُحفظ وأُغلق مفتاحها نهائياً. راجع البيانات ثم ابدأ محاولة جديدة بموعد صالح."); return;
         }
         if (!Number.isInteger(result.followupId) || result.followupId <= 0 || result.followupId > 2147483647
           || result.revision !== command.expectedRevision + 1 || typeof result.replayed !== "boolean"
@@ -153,6 +167,7 @@ function EditorForm({ appointmentId, patientId }: { appointmentId: number; patie
       </fieldset>
       <div className="flex flex-wrap gap-2">
         <button className={`${button} bg-navy-900 text-white`} disabled={busy || (!attempt && (data.blocked || data.closed))} onClick={() => void save()}>{busy ? "جارٍ التحقق…" : attempt ? "إعادة المحاولة نفسها" : data.revision === 0 ? "فتح متابعة" : "حفظ نتيجة المتابعة"}</button>
+        {attempt && !busy ? <button className={button} onClick={() => void save(true)}>إلغاء محاولة منتهية لم تُحفظ</button> : null}
         {attempt && !busy ? <button className={button} onClick={() => setReload(value => value + 1)}>تحديث السياق مع إبقاء الطلب</button> : null}
         {!data.blocked ? <a className={button} href={`/patients/${patientId}?tab=summary`}>ملف المريض وإعادة حجز الجلسة</a> : null}
       </div>

@@ -122,7 +122,21 @@ export async function readAppointmentFollowupQueue(admitted: SessionPayload, opt
  * Lock order: shared reset fence -> actor/key -> source -> task/link NOWAIT -> users NOWAIT ->
  * patient NOWAIT. Conflicting merge/session writers fail closed without lock inversion.
  * No booking, attendance, visit, payment or HR writer is invoked. */
-export async function saveAppointmentFollowup(value: unknown, admitted: SessionPayload): Promise<FollowupSaved> {
+export interface FollowupRetirementProof {
+  outcome: "committed" | "retired";
+  requestId: string;
+  actorUserId: number;
+  fingerprint: string;
+}
+export function saveAppointmentFollowup(value: unknown, admitted: SessionPayload): Promise<FollowupSaved> {
+  return mutateAppointmentFollowup(value, admitted, false);
+}
+export function retireAppointmentFollowup(value: unknown, admitted: SessionPayload): Promise<FollowupRetirementProof> {
+  return mutateAppointmentFollowup(value, admitted, true);
+}
+function mutateAppointmentFollowup(value: unknown, admitted: SessionPayload, retire: false): Promise<FollowupSaved>;
+function mutateAppointmentFollowup(value: unknown, admitted: SessionPayload, retire: true): Promise<FollowupRetirementProof>;
+async function mutateAppointmentFollowup(value: unknown, admitted: SessionPayload, retire: boolean): Promise<FollowupSaved | FollowupRetirementProof> {
   const command = parseFollowupCommand(value);
   if (!command) reject(400, "INVALID_FOLLOWUP");
   if (!allowed(admitted.role)) reject(403, "FOLLOWUP_ROLE");
@@ -170,10 +184,34 @@ export async function saveAppointmentFollowup(value: unknown, admitted: SessionP
       if (receipt) {
         if (receipt.fingerprint !== fingerprint || receipt.followup_id !== task?.id) reject(409, "FOLLOWUP_KEY_CONFLICT");
         if (session.expiresAt < Date.now()) reject(401, "FOLLOWUP_SESSION_CHANGED");
+        if (retire) return { outcome: "committed", requestId: command.requestId, actorUserId: session.userId, fingerprint };
         return { followupId: receipt.followup_id, revision: receipt.revision, replayed: true };
+      }
+      const { rows: [retired] } = await client.query<{ fingerprint: string }>(
+        "SELECT fingerprint FROM appointment_followup_retirements WHERE actor_user_id=$1 AND request_id=$2",
+        [session.userId, command.requestId]);
+      if (retired) {
+        if (retired.fingerprint !== fingerprint) reject(409, "FOLLOWUP_KEY_CONFLICT");
+        if (!retire) reject(409, "FOLLOWUP_ATTEMPT_RETIRED");
+        if (session.expiresAt < Date.now()) reject(401, "FOLLOWUP_SESSION_CHANGED");
+        return { outcome: "retired", requestId: command.requestId, actorUserId: session.userId, fingerprint };
       }
       if (!source.eligible) reject(409, "FOLLOWUP_SOURCE_NOT_NO_SHOW");
       if ((task?.revision ?? 0) !== command.expectedRevision || task?.status === "closed") reject(409, "FOLLOWUP_REVISION_CHANGED");
+      if (retire) {
+        const { rows: [expiry] } = await client.query<{ expired: boolean }>(
+          "SELECT $1::timestamptz <= clock_timestamp() AS expired", [command.dueAt]);
+        if (command.status !== "open" || !expiry.expired) reject(409, "FOLLOWUP_ATTEMPT_NOT_EXPIRED");
+        await client.query(`INSERT INTO appointment_followup_retirements
+          (actor_user_id,request_id,fingerprint,source_appointment_id,source_created_at,patient_id,generation,expected_revision,original_due_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [session.userId,command.requestId,fingerprint,source.id,command.sourceCreatedAt,source.patient_id,command.generation,command.expectedRevision,command.dueAt]);
+        await insertAuditRow(client, { action: "appointment_followup.attempt_retire", entity: "appointment_followup_attempt", entityId: null,
+          actor: session.username, actorRole: session.role,
+          details: { actorUserId: session.userId, requestId: command.requestId, fingerprint, reason: "expired_uncommitted" } });
+        if (!await revalidateSessionInTransaction(admitted, client)) reject(401, "FOLLOWUP_SESSION_CHANGED");
+        return { outcome: "retired", requestId: command.requestId, actorUserId: session.userId, fingerprint };
+      }
       const assignee = users.find(user => user.id === command.assigneeUserId);
       if (!assignee?.is_active || !allowed(assignee.role)) reject(400, "FOLLOWUP_ASSIGNEE_UNAVAILABLE");
       const { rows: [due] } = await client.query<{ future: boolean }>("SELECT $1::timestamptz > clock_timestamp() AS future", [command.dueAt]);
@@ -206,6 +244,7 @@ export async function saveAppointmentFollowup(value: unknown, admitted: SessionP
       return { followupId: followupId!, revision, replayed: false };
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "followup attempt retired") reject(409, "FOLLOWUP_ATTEMPT_RETIRED");
     if ((error as { code?: string }).code === "55P03") reject(409, "FOLLOWUP_BUSY");
     throw error;
   }

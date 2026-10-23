@@ -22,6 +22,7 @@ it('enforces roles, no-store, patient witness, method and CSRF over real HTTP',a
       const response=await fetch(baseUrl+path,{headers:{Cookie:h.sessions[role].cookie}});
       expect(response.status).toBe(403);
     }
+    expect((await fetch(baseUrl+api()+'/retire',{method:'POST',headers:{Cookie:h.sessions[role].cookie,Origin:baseUrl,'Content-Type':'application/json'},body:'{}'})).status).toBe(403);
     expect((await fetch(baseUrl+api(),{method:'POST',headers:{Cookie:h.sessions[role].cookie,Origin:baseUrl,'Content-Type':'application/json'},body:'{}'})).status).toBe(403);
   }
   const headers={Cookie:h.sessions.reception.cookie};
@@ -50,6 +51,11 @@ it('mobile RTL: explicit create, lost-response retry survives reload, no-answer 
   });
   await editor.getByRole('button',{name:'فتح متابعة',exact:true}).click();
   await expect.poll(async()=>Number((await db.query('SELECT count(*) FROM appointment_followup_events e JOIN appointment_followups f ON f.id=e.followup_id WHERE f.source_appointment_id=$1',[appointmentId])).rows[0].count)).toBe(1);
+  await expect.poll(()=>editor.getByRole('button',{name:'إلغاء محاولة منتهية لم تُحفظ',exact:true}).isEnabled()).toBe(true);
+  const savedBefore=await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('appointment-followup:v1:')));
+  await editor.getByRole('button',{name:'إلغاء محاولة منتهية لم تُحفظ',exact:true}).click();
+  await expect.poll(()=>editor.getByText(/حُفظت سابقاً/).count()).toBe(1);
+  expect(await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.startsWith('appointment-followup:v1:')))).toEqual(savedBefore);
   await page.reload();
   await appointments.getByRole('button',{name:'السابقة والمغلقة'}).click();
   await row.getByRole('button',{name:'متابعة الغياب',exact:true}).click();

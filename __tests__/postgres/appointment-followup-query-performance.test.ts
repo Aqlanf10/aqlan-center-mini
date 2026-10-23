@@ -53,7 +53,7 @@ it('populated 0070 upgrades without changing facts; bounded page probes skip 50k
     };
     const before=await facts();
     const started=performance.now();
-    expect((await migrate(pool,{apply:true,files})).appliedVersions).toEqual(['0071']);
+    expect((await migrate(pool,{apply:true,files})).appliedVersions).toEqual(['0071','0072']);
     const ddlMs=performance.now()-started;
     expect(await facts()).toEqual(before);
     expect(await applyRuntimeMigrationFiles(pool,[indexMigration])).toEqual([]);

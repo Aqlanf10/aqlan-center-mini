@@ -1,0 +1,17 @@
+
+ RUN  v4.1.12 /workspace/aqlan-center-mini
+
+رحلة مصطنعة ناجحة — للاختبار
+رحلة مصطنعة ساقطة — للاختبار
+رحلة مصطنعة ناجحة — للاختبار
+
+ Test Files  668 passed (668)
+      Tests  11644 passed (11644)
+   Start at  20:01:17
+   Duration  458.43s (transform 19.23s, setup 0ms, import 79.76s, tests 299.37s, environment 58ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

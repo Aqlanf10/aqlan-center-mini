@@ -5,7 +5,7 @@ import { APPOINTMENT_FOLLOWUP_RESET_KEEP_TABLES, APPOINTMENT_FOLLOWUP_RESET_WIPE
 it("candidate reset classification wipes only links and retains the three history tables", () => {
   expect(APPOINTMENT_FOLLOWUP_RESET_WIPE_TABLES).toEqual(["appointment_followup_links"]);
   expect(APPOINTMENT_FOLLOWUP_RESET_KEEP_TABLES).toEqual([
-    "appointment_followups", "appointment_followup_events", "appointment_followup_receipts",
+    "appointment_followups", "appointment_followup_events", "appointment_followup_receipts", "appointment_followup_retirements",
   ]);
   const wipe = new Set<string>([...RESET_WIPE_TABLES, ...APPOINTMENT_FOLLOWUP_RESET_WIPE_TABLES]);
   const keep = new Set<string>([...RESET_KEEP_TABLES, ...APPOINTMENT_FOLLOWUP_RESET_KEEP_TABLES]);

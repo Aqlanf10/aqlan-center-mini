@@ -22,3 +22,8 @@ it('0071 has byte-identical runtime SQL, preserving 0070 as a separate predecess
   expect(APPOINTMENT_FOLLOWUP_QUERY_SQL).toContain('DROP INDEX appointment_followups_queue_idx');
   expect(APPOINTMENT_FOLLOWUP_QUERY_SQL).not.toMatch(/\b(?:UPDATE|DELETE|INSERT|TRUNCATE)\b/);
 });
+
+it('0072 runtime registration exactly matches the additive retirement migration',async()=>{
+ const { APPOINTMENT_FOLLOWUP_RETIREMENT_SQL }=await import('../lib/appointment-followup-retirement-schema');
+ expect(readFileSync('migrations/0072_appointment_followup_retirements.sql','utf8')).toBe(APPOINTMENT_FOLLOWUP_RETIREMENT_SQL);
+});

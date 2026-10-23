@@ -11,7 +11,7 @@ import type { FollowupCommand } from "../../lib/appointment-followup-contract";
 validatePostgresTestTarget(process.env);
 assertRealPostgresUrl(); stubPostgresEnv();
 const db = await import("../../lib/db");
-const { saveAppointmentFollowup: save, readAppointmentFollowupQueue: queue, readAppointmentFollowupSource: context } = await import("../../lib/appointment-followup-db");
+const { saveAppointmentFollowup: save, retireAppointmentFollowup: retire, readAppointmentFollowupQueue: queue, readAppointmentFollowupSource: context } = await import("../../lib/appointment-followup-db");
 const q = async (sql: string, values: unknown[] = []) => (await db.getPool().query(sql, values)).rows;
 let serial = 0;
 let reception: SessionPayload;
@@ -45,9 +45,9 @@ async function fingerprint() {
 }
 async function followupSnapshot() {
   const result: Record<string, unknown> = {};
-  for (const table of ["appointment_followups", "appointment_followup_links", "appointment_followup_events", "appointment_followup_receipts"])
+  for (const table of ["appointment_followups", "appointment_followup_links", "appointment_followup_events", "appointment_followup_receipts", "appointment_followup_retirements"])
     result[table] = await q(`SELECT to_jsonb(t) AS value FROM ${table} t ORDER BY to_jsonb(t)::text`);
-  result.audit = await q("SELECT to_jsonb(a) AS value FROM audit_log a WHERE entity='appointment_followup' ORDER BY id");
+  result.audit = await q("SELECT to_jsonb(a) AS value FROM audit_log a WHERE entity IN ('appointment_followup','appointment_followup_attempt') ORDER BY id");
   return result;
 }
 it.each(["reassignment", "merge"])("rejects stale displayed patient before first save after %s without partial writes", async change => {
@@ -386,10 +386,12 @@ it("missing live link never reconstructs context or recreates a link on save/rep
 it("canonical reset retains nonempty generation history, wipes links and rejects reused-ID intent", async () => {
   const f = await fixture(); const first = await save(f.input, reception);
   const unsaved = await fixture();
+  unsaved.input.dueAt="2000-01-01T00:00:00.000Z";
+  await retire(unsaved.input,reception);
   const before = await followupSnapshot();
   const { RESET_WIPE_TABLES, RESET_KEEP_TABLES } = await import("../../lib/clinic-reset");
   expect(RESET_WIPE_TABLES).toContain("appointment_followup_links");
-  for (const table of ["appointment_followups", "appointment_followup_events", "appointment_followup_receipts"]) {
+  for (const table of ["appointment_followups", "appointment_followup_events", "appointment_followup_receipts", "appointment_followup_retirements"]) {
     expect(RESET_KEEP_TABLES).toContain(table);
     expect(RESET_WIPE_TABLES).not.toContain(table);
   }
@@ -506,5 +508,62 @@ it('replays pre-witness local evidence against existing actor-scoped receipts wi
   const restored = readFollowupAttempt({ getItem: () => raw }, 'synthetic-owner-slot', f.patientId, f.input.appointmentId, reception.userId)!;
   expect(restored.raw).toBe(raw);
   expect(await save(restored.command, reception)).toMatchObject({ revision: 1, replayed: true });
+  expect(await followupSnapshot()).toEqual(before);
+});
+
+it('retires only an expired never-committed intent; lost retirement acknowledgement is idempotent and a fresh key can proceed', async () => {
+  const f=await fixture(); f.input.dueAt='2000-01-01T00:00:00.000Z';
+  await expect(save(f.input,reception)).rejects.toMatchObject({code:'FOLLOWUP_DUE_MUST_BE_FUTURE'});
+  const proof=await retire(f.input,reception);
+  expect(proof).toMatchObject({outcome:'retired',requestId:f.input.requestId,actorUserId:reception.userId});
+  const before=await followupSnapshot();
+  expect(await retire(f.input,reception)).toEqual(proof);
+  await expect(save(f.input,reception)).rejects.toMatchObject({code:'FOLLOWUP_ATTEMPT_RETIRED'});
+  await expect(retire({...f.input,dueAt:'2001-01-01T00:00:00.000Z'},reception)).rejects.toMatchObject({code:'FOLLOWUP_KEY_CONFLICT'});
+  expect(await followupSnapshot()).toEqual(before);
+  const created=await save({...f.input,requestId:f.input.requestId+'-fresh',dueAt:new Date(Date.now()+86400000).toISOString()},reception);
+  expect(created).toMatchObject({revision:1,replayed:false});
+  for(const sql of ['UPDATE appointment_followup_retirements SET fingerprint=fingerprint','DELETE FROM appointment_followup_retirements','TRUNCATE appointment_followup_retirements'])
+    await expect(q(sql)).rejects.toThrow('append-only');
+  // Simulate a pre-retirement application writer: its task UPDATE rolls back
+  // when the database event fence rejects the retired key.
+  const snapshot=await followupSnapshot();const client=await db.getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE appointment_followups SET revision=2 WHERE id=$1',[created.followupId]);
+    await expect(client.query(`INSERT INTO appointment_followup_events(followup_id,revision,actor_user_id,request_id,fingerprint,assignee_user_id,due_at,status,outcome,next_step)
+      VALUES($1,2,$2,$3,$4,$2,clock_timestamp(),'open','no_answer','call')`,[created.followupId,reception.userId,f.input.requestId,'c'.repeat(64)])).rejects.toThrow('followup attempt retired');
+    await client.query('ROLLBACK');
+  } finally {client.release();}
+  expect(await followupSnapshot()).toEqual(snapshot);
+});
+it('a committed response lost in transit is reported committed and remains exactly replayable, never retired',async()=>{
+  const f=await fixture();const saved=await save(f.input,reception);const before=await followupSnapshot();
+  expect(await retire(f.input,reception)).toMatchObject({outcome:'committed',requestId:f.input.requestId});
+  expect(await save(f.input,reception)).toEqual({...saved,replayed:true});
+  expect(await followupSnapshot()).toEqual(before);
+});
+it('waits for an in-flight writer on the same actor/key before declaring its outcome',async()=>{
+  const f=await fixture(); const blocker=await db.getPool().connect();
+  let saving:ReturnType<typeof save>|undefined;let retiring:ReturnType<typeof retire>|undefined;
+  try {
+    await blocker.query('BEGIN');
+    await blocker.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`appointment-followup:${reception.userId}:${f.input.requestId}`]);
+    const waiting=async(n:number)=>{for(let i=0;i<100;i++){await blocker.query('SELECT pg_stat_clear_snapshot()');const rows=await blocker.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory'");if(rows.rows[0].n>=n)return;await pause(20);}throw new Error('Synthetic writer did not reach key fence');};
+    saving=save(f.input,reception); await waiting(1);
+    retiring=retire(f.input,reception); await waiting(2);
+    await blocker.query('COMMIT');
+    expect(await saving).toMatchObject({revision:1});
+    expect(await retiring).toMatchObject({outcome:'committed'});
+    expect(await q('SELECT request_id FROM appointment_followup_retirements WHERE actor_user_id=$1 AND request_id=$2',[reception.userId,f.input.requestId])).toHaveLength(0);
+  } finally {await blocker.query('ROLLBACK');blocker.release();await Promise.allSettled([saving,retiring].filter(Boolean));}
+});
+it('retirement rejects non-expired, foreign actor, stale patient and stale generation without writes',async()=>{
+  const f=await fixture();const before=await followupSnapshot();const other=await actor('admin');
+  await expect(retire(f.input,reception)).rejects.toMatchObject({code:'FOLLOWUP_ATTEMPT_NOT_EXPIRED'});
+  const expired={...f.input,dueAt:'2000-01-01T00:00:00.000Z'};
+  await expect(retire(expired,other)).rejects.toMatchObject({code:'FOLLOWUP_ACTOR_CHANGED'});
+  await expect(retire({...expired,expectedPatientId:f.patientId+100000},reception)).rejects.toMatchObject({code:'FOLLOWUP_SOURCE_CHANGED'});
+  await expect(retire({...expired,generation:'0'.repeat(32)},reception)).rejects.toMatchObject({code:'FOLLOWUP_GENERATION_CHANGED'});
   expect(await followupSnapshot()).toEqual(before);
 });

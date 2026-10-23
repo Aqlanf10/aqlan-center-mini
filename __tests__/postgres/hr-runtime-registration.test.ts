@@ -1,3 +1,4 @@
+import { APPOINTMENT_FOLLOWUP_RETIREMENT_SQL } from "../../lib/appointment-followup-retirement-schema";
 import { APPOINTMENT_FOLLOWUP_QUERY_SQL } from "../../lib/appointment-followup-query-schema";
 import { APPOINTMENT_FOLLOWUP_SQL } from "../../lib/appointment-followup-schema";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../../lib/patient-appointment-history-schema";
@@ -43,8 +44,9 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0068", name: "collection_attempt_retirements", checksum: createHash("sha256").update(COLLECTION_ATTEMPT_RETIREMENT_SQL).digest("hex") },
     { version: "0069", name: "unpaid_currency_transitions", checksum: createHash("sha256").update(UNPAID_CURRENCY_TRANSITION_SQL).digest("hex") },
     { version: "0070", name: "appointment_followups", checksum: createHash("sha256").update(APPOINTMENT_FOLLOWUP_SQL).digest("hex") },
+    { version: "0072", name: "appointment_followup_retirements", checksum: createHash("sha256").update(APPOINTMENT_FOLLOWUP_RETIREMENT_SQL).digest("hex") },
     { version: "0071", name: "appointment_followup_query_indexes", checksum: createHash("sha256").update(APPOINTMENT_FOLLOWUP_QUERY_SQL).digest("hex") },
-  ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
+  ].sort((a,b)=>a.version.localeCompare(b.version)).map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);
   }

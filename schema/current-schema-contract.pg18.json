@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 134,
-    "columns": 1696,
-    "constraints": 1960,
-    "indexes": 419,
-    "triggers": 88
+    "tables": 135,
+    "columns": 1706,
+    "constraints": 1980,
+    "indexes": 420,
+    "triggers": 92
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -876,6 +876,12 @@
         }
       },
       "triggers": {
+        "appointment_followup_event_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
         "appointment_followup_events_immutable": {
           "timing": "BEFORE",
           "events": [
@@ -1024,6 +1030,12 @@
         }
       },
       "triggers": {
+        "appointment_followup_receipt_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
         "appointment_followup_receipts_immutable": {
           "timing": "BEFORE",
           "events": [
@@ -1032,6 +1044,101 @@
           ]
         },
         "appointment_followup_receipts_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "appointment_followup_retirements": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "expected_revision": {
+          "type": "int4",
+          "nullable": false
+        },
+        "fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "generation": {
+          "type": "text",
+          "nullable": false
+        },
+        "original_due_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "retired_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "source_appointment_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "source_created_at": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "actor_user_id",
+        "request_id"
+      ],
+      "unique": [],
+      "checks": [
+        "appointment_followup_retirements_check",
+        "appointment_followup_retirements_expected_revision_check",
+        "appointment_followup_retirements_fingerprint_check",
+        "appointment_followup_retirements_generation_check",
+        "appointment_followup_retirements_patient_id_check",
+        "appointment_followup_retirements_request_id_check",
+        "appointment_followup_retirements_source_appointment_id_check",
+        "appointment_followup_retirements_source_created_at_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "appointment_followup_retirements_pkey": {
+          "columns": [
+            "actor_user_id",
+            "request_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "appointment_followup_retirement_fence": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "appointment_followup_retirement_no_truncate": {
           "timing": "BEFORE",
           "events": [
             "TRUNCATE"
