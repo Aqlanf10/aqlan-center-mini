@@ -1,0 +1,20 @@
+{
+ "first": true,
+ "retrySameToken": {
+  "success": false,
+  "text": "رمز التأكيد مستهلك أو منفَّذ مسبقًا — الإجراء لا يُنفّذ مرتين. أعد الطلب من جديد إن أردت تكراره."
+ },
+ "second": true,
+ "receipts": [
+  {
+   "id": 1,
+   "amount": 5000,
+   "idempotency_key": null
+  },
+  {
+   "id": 2,
+   "amount": 5000,
+   "idempotency_key": null
+  }
+ ]
+}
