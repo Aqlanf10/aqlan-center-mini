@@ -1,0 +1,6 @@
+# Temporary mutation (reverted): a void reverses one minor unit less than the receipt's remainder
+ lib/db.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  7 failed | 3 passed | 1 expected fail | 22 skipped (33)
+# reverted:
