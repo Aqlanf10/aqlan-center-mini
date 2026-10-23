@@ -1,5 +1,7 @@
 "use client";
 
+import { FollowupQueue } from "@/components/appointments/FollowupQueue";
+import { FollowupEditor } from "@/components/appointments/FollowupEditor";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   calledVisits,
@@ -91,6 +93,7 @@ const LEVEL_BADGE: Record<WaitLevel, string> = {
 
 export default function FlowBoard() {
   const session = useSession();
+  const [followupSource, setFollowupSource] = useState<{ appointmentId: number; patientId: number } | null>(null);
   const admin = isAdmin(session?.role);
   const CHAIR_COUNT = useChairCount();
   const CLINIC_NAME = useClinicName();
@@ -330,7 +333,7 @@ export default function FlowBoard() {
 
   /* (LIVE-2) «لم يحضر» و«إلغاء» من الصالة مباشرةً — عبر مسار المواعيد نفسه وحارسه (موعدٌ
      محجوز فقط؛ جهازان يضغطان معًا يرفض الخادم الثاني برسالة). النقل يبقى في شاشة المواعيد. */
-  const closeAppointment = useCallback(async (appointmentId: number, patientName: string, kind: "no_show" | "cancel") => {
+  const closeAppointment = useCallback(async (appointmentId: number, patientName: string, kind: "no_show" | "cancel", patientId?: number | null) => {
     let reason: string | null = null;
     if (kind === "cancel") {
       const typed = window.prompt(`سبب إلغاء موعد ${patientName} (اختياري):`, "");
@@ -339,11 +342,12 @@ export default function FlowBoard() {
     } else if (!window.confirm(`تسجيل «لم يحضر» لموعد ${patientName}؟`)) {
       return;
     }
-    await act(() => fetch(`/api/appointments/${appointmentId}`, {
+    const saved = await act(() => fetch(`/api/appointments/${appointmentId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: kind, reason }),
     }));
+    if (saved && kind === "no_show" && patientId) setFollowupSource({ appointmentId, patientId });
     await loadExpected();
   }, [act, loadExpected]);
 
@@ -519,6 +523,7 @@ export default function FlowBoard() {
 
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
+      {followupSource ? <FollowupEditor {...followupSource} /> : null}
       {/*
         العنوان سطرًا والروابط سطرًا تحته.
         كانت الروابط بجانب العنوان، فلمّا صارت أربعة انكسر اسم المركز إلى أربعة أسطر
@@ -572,6 +577,7 @@ export default function FlowBoard() {
           </button>
         </div>
       </header>
+      <FollowupQueue />
 
       <ReceptionHandoffs>
 
@@ -725,7 +731,7 @@ export default function FlowBoard() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { void closeAppointment(row.id, row.patientName, "no_show"); }}
+                    onClick={() => { void closeAppointment(row.id, row.patientName, "no_show", row.patientId); }}
                     disabled={busy}
                     className="rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 disabled:opacity-50"
                   >

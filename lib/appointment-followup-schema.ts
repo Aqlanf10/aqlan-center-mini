@@ -1,5 +1,4 @@
-/** Candidate only: deliberately unnumbered and NOT installed by ensureSchema.
- * Runtime/reset/backup registration must be coordinated before activation. */
+/** Additive migration 0070. Keep runtime DDL byte-identical to the numbered file. */
 export const APPOINTMENT_FOLLOWUP_SQL = `
 CREATE TABLE appointment_followups (
   id SERIAL PRIMARY KEY,

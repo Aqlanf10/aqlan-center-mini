@@ -15,6 +15,7 @@
 
 /** ما يُمسح — مرتّبًا من الأطراف إلى الأصول (للقراءة؛ المسح في أمر TRUNCATE واحد). */
 export const RESET_WIPE_TABLES = [
+  "appointment_followup_links",
   "approved_agreement_principals",
   // التشغيل اليومي
   "ai_confirmation_claims",
@@ -149,6 +150,7 @@ export class ProtectedCollectionAttemptHistoryError extends Error {
 }
 
 export const RESET_KEEP_TABLES = [
+  "appointment_followups", "appointment_followup_events", "appointment_followup_receipts", "appointment_followup_retirements",
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,
@@ -228,9 +230,9 @@ export function isResetPhrase(value: unknown): boolean {
   return typeof value === "string" && value.trim().replace(/\s+/g, " ") === RESET_CONFIRM_PHRASE;
 }
 
-/** Dormant follow-up schema: apply these classifications together with bootstrap.
- * Do not add the absent links table to active reset/preview queries before then. */
+/** Follow-up classifications registered together with additive migration 0070.
+ * Kept named for downstream compatibility and explicit invariant tests. */
 export const APPOINTMENT_FOLLOWUP_RESET_WIPE_TABLES = ["appointment_followup_links"] as const;
 export const APPOINTMENT_FOLLOWUP_RESET_KEEP_TABLES = [
-  "appointment_followups", "appointment_followup_events", "appointment_followup_receipts",
+  "appointment_followups", "appointment_followup_events", "appointment_followup_receipts", "appointment_followup_retirements",
 ] as const;

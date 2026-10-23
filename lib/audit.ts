@@ -15,7 +15,7 @@
 
 /** الأفعال المسجَّلة. قائمة مغلقة عمدًا: نصٌّ حرّ يجعل السجل غير قابل للتصفية. */
 export type AuditAction =
-  | "appointment_followup.create" | "appointment_followup.update"
+  | "appointment_followup.create" | "appointment_followup.update" | "appointment_followup.attempt_retire"
   | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status"
   | "payment.create" | "payment.refund" | "payment.idempotent_replay"
   | "payment.recover_installment" | "payment.attempt_retire"
@@ -146,6 +146,7 @@ export type AuditAction =
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "appointment_followup.create": "إنشاء متابعة موعد متغيب",
   "appointment_followup.update": "تحديث متابعة موعد متغيب",
+  "appointment_followup.attempt_retire": "تقاعد محاولة متابعة منتهية لم تُحفظ",
   "hr.staff.create": "إنشاء ملف موظف",
   "hr.staff.update": "تعديل ملف موظف",
   "hr.staff.link_user": "ربط ملف موظف بحساب دخول",

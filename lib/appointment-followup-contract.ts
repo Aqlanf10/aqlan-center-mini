@@ -7,6 +7,7 @@ export type FollowupNextStep = typeof FOLLOWUP_NEXT_STEPS[number];
 export interface FollowupCommand {
   appointmentId: number;
   expectedPatientId: number;
+  expectedActorUserId: number; // Witness only; authenticated transaction actor remains authority.
   sourceCreatedAt: string;
   generation: string;
   requestId: string;
@@ -17,7 +18,7 @@ export interface FollowupCommand {
   outcome: FollowupOutcome;
   nextStep: FollowupNextStep;
 }
-const keys = ["appointmentId", "expectedPatientId", "sourceCreatedAt", "generation", "requestId", "expectedRevision", "assigneeUserId", "dueAt", "status", "outcome", "nextStep"];
+const keys = ["appointmentId", "expectedPatientId", "expectedActorUserId", "sourceCreatedAt", "generation", "requestId", "expectedRevision", "assigneeUserId", "dueAt", "status", "outcome", "nextStep"];
 function id(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 2147483647;
 }
@@ -25,7 +26,7 @@ export function parseFollowupCommand(value: unknown): FollowupCommand | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const v = value as Record<string, unknown>;
   if (Object.keys(v).length !== keys.length || Object.keys(v).some(key => !keys.includes(key))) return null;
-  if (!id(v.appointmentId) || !id(v.expectedPatientId) || !id(v.assigneeUserId)
+  if (!id(v.appointmentId) || !id(v.expectedPatientId) || !id(v.expectedActorUserId) || !id(v.assigneeUserId)
     || typeof v.expectedRevision !== "number" || !Number.isInteger(v.expectedRevision) || v.expectedRevision < 0 || v.expectedRevision >= 2147483647
     || typeof v.sourceCreatedAt !== "string" || !/^\d{1,12}\.\d{6}$/.test(v.sourceCreatedAt)
     || typeof v.generation !== "string" || !/^[a-f0-9]{32}$/.test(v.generation)
@@ -40,12 +41,14 @@ export function parseFollowupCommand(value: unknown): FollowupCommand | null {
   if (v.outcome === "rebooking_review" && v.nextStep !== "review") return null;
   if (v.expectedRevision === 0 && (v.status !== "open" || v.outcome !== "pending")) return null;
   // Explicit construction fixes fingerprint order and strips prototypes.
-  return { appointmentId: v.appointmentId, expectedPatientId: v.expectedPatientId, sourceCreatedAt: v.sourceCreatedAt, generation: v.generation,
+  return { appointmentId: v.appointmentId, expectedPatientId: v.expectedPatientId, expectedActorUserId: v.expectedActorUserId, sourceCreatedAt: v.sourceCreatedAt, generation: v.generation,
     requestId: v.requestId, expectedRevision: v.expectedRevision, assigneeUserId: v.assigneeUserId,
     dueAt: v.dueAt, status: v.status as FollowupCommand["status"],
     outcome: v.outcome as FollowupOutcome, nextStep: v.nextStep as FollowupNextStep };
 }
 export function followupFingerprintInput(command: FollowupCommand): string {
-  const { requestId: _requestId, ...intent } = command;
+  // Actor is already the receipt namespace. Excluding the new witness preserves
+  // historical fingerprints for identical legacy intents; it never grants access.
+  const { requestId: _requestId, expectedActorUserId: _actorWitness, ...intent } = command;
   return JSON.stringify({ version: 1, ...intent });
 }

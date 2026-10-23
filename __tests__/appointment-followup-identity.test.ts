@@ -6,7 +6,7 @@ import { getPool, insertAuditRow, type DbClient, type DbPool } from "../lib/db";
 import { saveAppointmentFollowup } from "../lib/appointment-followup-db";
 import type { SessionPayload } from "../lib/auth";
 
-const command = { appointmentId: 10, expectedPatientId: 20, sourceCreatedAt: "1700000000.123456",
+const command = { appointmentId: 10, expectedPatientId: 20, expectedActorUserId: 30, sourceCreatedAt: "1700000000.123456",
   generation: "a".repeat(32), requestId: "synthetic-identity-request", expectedRevision: 0,
   assigneeUserId: 30, dueAt: "2030-01-01T00:00:00.000Z", status: "open", outcome: "pending", nextStep: "call" };
 const actor = { userId: 30, username: "synthetic", role: "reception", expiresAt: Date.now() + 3600000 } as SessionPayload;

@@ -1,0 +1,62 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.12 /workspace/aqlan-center-mini
+
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+رحلة مصطنعة ساقطة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+ ❯ __tests__/docs-drift-guard.test.ts (2 tests | 1 failed) 11ms
+     × كل ملف في migrations/ مذكور باسمه في docs/DATABASE_MIGRATIONS.md 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/docs-drift-guard.test.ts > حارس انحراف الوثائق > كل ملف في migrations/ مذكور باسمه في docs/DATABASE_MIGRATIONS.md
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "0071_appointment_followup_query_indexes.sql",
++ ]
+
+ ❯ __tests__/docs-drift-guard.test.ts:21:21
+     19|     expect(files.length).toBeGreaterThan(0);
+     20|     const missing = files.filter((name) => !doc.includes(name));
+     21|     expect(missing).toEqual([]);
+       |                     ^
+     22|   });
+     23|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 667 passed (668)
+      Tests  1 failed | 11637 passed (11638)
+   Start at  18:28:38
+   Duration  408.39s (transform 18.91s, setup 0ms, import 78.65s, tests 249.91s, environment 63ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

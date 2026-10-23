@@ -12,8 +12,11 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
     "0067": "0067_patient_appointment_history_index.sql",
     "0068": "0068_collection_attempt_retirements.sql",
     "0069": "0069_unpaid_currency_transitions.sql",
+    "0070": "0070_appointment_followups.sql",
+    "0072": "0072_appointment_followup_retirements.sql",
+    "0071": "0071_appointment_followup_query_indexes.sql",
   };
-  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069"];
+  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0067,0068,0069,0070", "0066,0067,0068,0069,0070,0071", "0066,0067,0068,0069,0070,0071,0072"];
   if (files.length > 59 && reviewedTails.includes(files.slice(59).map(file => file.version).join(",")) &&
       files.slice(59).every(file => reviewedAdditions[file.version] === file.filename)) {
     return periodontalCandidateMigrationVersion(files.slice(0, 59));

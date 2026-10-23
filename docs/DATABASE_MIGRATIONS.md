@@ -567,3 +567,21 @@ Durable proof for a collection attempt key. `POST /api/payments/attempts/retire`
 ### 0069_unpaid_currency_transitions.sql
 
 Currency correction of an **unpaid** invoice lineage in any of the six YER/SAR/USD directions, through the existing correction path and the existing 0063 transition document. A direction other than YER → SAR is accepted only while no receipt has ever referenced the lineage (row lock on the lineage invoices, then a receipt check), and never carries receipt events; a second currency change on a lineage stays refused. Target amounts are the replacement's explicit lines — never an exchange rate. Validation only, so a backup replay passes (proved by a SAR → USD restore round trip). This replaces the #392 candidate design, whose claim trigger issued the target invoice on INSERT and made any database holding one such correction unrestorable. Neither this listing nor CI authorizes a production deploy.
+
+### 0070_appointment_followups.sql — متابعة الغياب
+
+إضافة جداول مهام المتابعة وروابطها الحية وسجل الأحداث وإيصالات إعادة المحاولة. لا تغيّر الحضور أو الحجز أو المال. سُجّلت نسخة SQL المطابقة في bootstrap مع تصنيف إعادة الضبط في نفس التغيير: الروابط فقط تُمسح، والجداول التاريخية الثلاثة تبقى. الحفظ يرفض جيل إعادة الضبط أو المريض أو وقت إنشاء الموعد القديم، ولا يعيد بناء رابط مفقود. ترقية غير منشورة، ضمن Draft مستقل مبني على #434؛ لم تُطبّق على الإنتاج.
+
+تخصيص الرقم: فُحصت طلبات الدمج النشطة حتى #441 بتاريخ 2026-10-23، وملفات السلسلة حتى 0069. أساس #434 لم يحجز رقماً. يجب إعادة فحص التعارض قبل الدمج، ولا يجوز إعادة استعمال رقم يخص تغييراً آخر.
+
+### 0071_appointment_followup_query_indexes.sql — فهارس قائمة المتابعة
+
+ترحيل إضافي بعد 0070 دون تغيير نصه المنشور. يبني فهرس المهام المفتوحة بحسب جيل إعادة الضبط والموعد والمعرّف، ثم يحذف فهرس القائمة السابق غير المقيّد بالجيل. يضيف فهارس الروابط السريرية للزيارة والموعد المخطط بعد قياس كلفة الاستعلام؛ لا يغيّر بيانات المرضى أو المهام أو الأحداث أو الإيصالات. التسجيل التشغيلي مطابق لملف الترحيل، والتعارض يتراجع ذريًا دون تبنّي فهرس مجهول.
+
+فُحصت الطلبات حتى #445 قبل نشره؛ لا تحجز #442 أو #444 أو #445 ترحيلًا مرقمًا. يجب إعادة تنسيق الرقم عند تركيب الفروع. إنشاء الفهارس عادي داخل معاملة وقد يحجب الكتابات أثناء البناء؛ حذف الفهرس العادي قد يأخذ ACCESS EXCLUSIVE ويحجب القراءة والكتابة، ولا توجد lock_timeout خاصة بالترحيل. تجربة إعادة إنشاء الفهرس بعد الترحيل ليست دليل ترقية احتفاظ حقيقية؛ الأخيرة مسحت 50,000 صف قديم. مرشح منفصل يحصر مفاتيح الصفحة أولًا ثم يحتفظ بالفهرس اجتاز التشخيص الاصطناعي، لكنه غير منشور وتطبيقه يحتاج معرفة سجل نشر 0071؛ نصه المنشور لم يُعدّل؛ القياس الاصطناعي واختبارات الترقية لا يمنحان تصريح نشر أو ضمان أداء للإنتاج. الأدلة في [مراجعة المتابعة](review/appointment-followup-queue/review-fixes/README.md).
+
+### 0072_appointment_followup_retirements.sql — إثبات تقاعد المحاولة المنتهية
+
+سجل دائم غير قابل للتعديل أو الحذف، للمستخدم ومفتاح الطلب وبصمته وهوية المصدر والجيل. حارس قاعدة البيانات يسلسل إدخال إثبات التقاعد مع إدخال الأحداث والإيصالات بالقفل نفسه، ويمنع اجتماعهما أو الكتابة اللاحقة بمفتاح متقاعد. التطبيق يجيز تقاعد المحاولة المفتوحة المنتهية فقط بعد التحقق من الجلسة والمصدر والجيل، ويعيد «محفوظ» عند وجود إيصال مطابق. إعادة الضبط تحفظ الإثبات، ولا يوجد ربط حي بالمريض يعاد بناؤه. الترحيل مستقل ولا يغير 0070 أو0071 المنشورين. فُحصت الطلبات حتى #447 قبل تخصيص الرقم؛ لا تنفيذ إنتاجي ولا تصريح نشر.
+
+قيد نشر 0072: المفتاح الخارجي يأخذ SHARE ROW EXCLUSIVE على users، وإنشاء المشغّلات يأخذه على جدولي الأحداث والإيصالات. يتعارض مع ROW EXCLUSIVE للكتّاب، لكنه متوافق مع ACCESS SHARE للقراءة العادية؛ هذا يختلف عن ACCESS EXCLUSIVE لحذف فهرس 0071. أثبتت تجربة اصطناعية بأربعة اختبارات انتظار الكتّاب الثلاثة والتراجع الذري برمز 55P03 عند مهلة اتصال اختبارية 1500ms، ونجاح القراءات أثناء الانتظار وإعادة التطبيق بعد تحرير الكاتب. المهلة ليست جزءًا من الترحيل المنشور أو سياسة التشغيل. القياسات ليست توقعًا للإنتاج ولا تصريح نشر؛ راجع [أدلة أقفال التقاعد](review/appointment-followup-queue/retirement-review/README.md#0072-lock-contention-diagnostic).

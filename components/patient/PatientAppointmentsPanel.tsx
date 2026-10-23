@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FollowupAction } from "@/components/appointments/FollowupQueue";
 import { AppointmentReminder } from "@/components/AppointmentReminder";
 import { useSession } from "@/components/SessionProvider";
 import { formatClinicTimestamp } from "@/lib/clinic-clock";
@@ -138,6 +139,7 @@ export function PatientAppointmentsPanel({ patientId }: { patientId: number }) {
                   <span className={`rounded-full border px-3 py-1 text-xs font-bold ${STATUS[item.status].style}`}>{item.status === "booked" && item.scheduledDate < page.today ? "محجوز سابق لم يُغلق" : STATUS[item.status].label}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-600"><span>الطبيب: {item.doctorName || "غير مسند"}</span><span>المدة: {item.durationMinutes} دقيقة</span></div>
+                {item.status === "no_show" ? <div className="mt-3"><FollowupAction appointmentId={item.id} patientId={patientId} /></div> : null}
                 {item.status === "cancelled" ? <p className="mt-2 break-words text-xs text-rose-800">سبب الإلغاء: {item.cancelReason || "لم يُسجّل سبب"}</p> : null}
                 {page.canRemind && canRemindPatientRole(session?.role) ? <div className="mt-3"><AppointmentReminder item={item} clinicTimeZone={page.timeZone} busy={!!ready?.busy} isCurrent={currentPage} onConfirmed={snapshot => confirmReminder(item, snapshot)} /></div> : null}
               </li>)}

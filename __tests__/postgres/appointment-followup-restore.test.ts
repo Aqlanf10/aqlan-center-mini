@@ -6,10 +6,9 @@ import type { Pool } from "pg";
 import { expect, it, vi } from "vitest";
 import * as db from "../../lib/db";
 import { sessionCredentialVersion } from "../../lib/auth";
-import { saveAppointmentFollowup, readAppointmentFollowupQueue, readAppointmentFollowupSource } from "../../lib/appointment-followup-db";
+import { saveAppointmentFollowup, retireAppointmentFollowup, readAppointmentFollowupQueue, readAppointmentFollowupSource } from "../../lib/appointment-followup-db";
 import { fullBackupBlocks } from "../../lib/fullBackup";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
-import { APPOINTMENT_FOLLOWUP_SQL } from "../../lib/appointment-followup-schema";
 import { readTarGzEntries } from "../../lib/restore/archive";
 import { stagedRestore } from "../../lib/restore/staging";
 import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
@@ -19,7 +18,7 @@ import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
 // Only domain pool routing is injected. Export/replay, authorization SQL, target
 // guards, triggers and migration execution remain real.
 const cases = ["live", "appointment-null", "both-null", "missing-link", "stale-patient", "stale-timestamp", "old-generation"] as const;
-const tables = ["appointment_followups", "appointment_followup_links", "appointment_followup_events", "appointment_followup_receipts"] as const;
+const tables = ["appointment_followups", "appointment_followup_links", "appointment_followup_events", "appointment_followup_receipts", "appointment_followup_retirements"] as const;
 async function snapshot(pool: Pool) {
   const result: Record<string, unknown> = {};
   for (const table of [...tables, "patients", "appointments", "audit_log"]) {
@@ -37,11 +36,8 @@ it.each(cases)("real archive/staged restore preserves %s followup identity and g
     directory = await mkdtemp(join(tmpdir(), "followup-restore-"));
     const files = await loadMigrationFiles();
     await migrate(fixture.source, { apply: true, files });
-    await fixture.source.query(APPOINTMENT_FOLLOWUP_SQL);
-    // Candidate schema is unregistered. Prepare ONLY the owned, empty target
-    // with real shipped migrations + candidate DDL; no invented migration number.
+    // Prepare ONLY the owned, empty target through shipped numbered migrations.
     await migrate(fixture.archiveTarget, { apply: true, files });
-    await fixture.archiveTarget.query(APPOINTMENT_FOLLOWUP_SQL);
     for (const table of tables) expect((await fixture.archiveTarget.query(`SELECT * FROM ${table}`)).rows).toEqual([]);
     const q = async (sql: string, values: unknown[] = []) => (await fixture.source.query(sql, values)).rows;
     await q("INSERT INTO users(id,username,display_name,password_hash,role) VALUES (900,'synthetic-restore','Synthetic','synthetic-hash','reception')");
@@ -52,10 +48,12 @@ it.each(cases)("real archive/staged restore preserves %s followup identity and g
       credentialVersion: sessionCredentialVersion("synthetic-hash"), expiresAt: Date.now() + 3600000 };
     const identity = await readAppointmentFollowupSource(902, actor);
     await q("SELECT setval(pg_get_serial_sequence('appointment_followups','id'),903,false)");
-    const command = { ...identity, requestId: "synthetic-restore-request", expectedRevision: 0,
+    const command = { ...identity, expectedActorUserId: actor.userId, requestId: "synthetic-restore-request", expectedRevision: 0,
       assigneeUserId: 900, dueAt: new Date(Date.now() + 86400000).toISOString(), status: "open", outcome: "pending", nextStep: "call" };
     const first = await saveAppointmentFollowup(command, actor);
     expect(first.followupId).toBe(903);
+    const expired={...command,requestId:command.requestId+'-retire',expectedRevision:1,dueAt:'2000-01-01T00:00:00.000Z'};
+    expect(await retireAppointmentFollowup(expired,actor)).toMatchObject({outcome:'retired'});
     if (kind === "stale-patient") {
       await q("INSERT INTO patients(id,patient_number,full_name) VALUES (904,'SYN-MOVED','Synthetic moved source')");
       await q("UPDATE appointments SET patient_id=904 WHERE id=902");
@@ -98,7 +96,7 @@ it.each(cases)("real archive/staged restore preserves %s followup identity and g
     expect(restored.ok).toBe(true);
     expect((await fixture.archiveTarget.query(`SELECT tgname FROM pg_trigger
       WHERE tgrelid IN ('appointment_followups'::regclass,'appointment_followup_links'::regclass,
-        'appointment_followup_events'::regclass,'appointment_followup_receipts'::regclass)
+        'appointment_followup_events'::regclass,'appointment_followup_receipts'::regclass,'appointment_followup_retirements'::regclass)
       AND tgenabled <> 'O'`)).rows).toEqual([]);
     expect(await snapshot(fixture.archiveTarget)).toEqual(before);
     poolSpy.mockReturnValue(fixture.archiveTarget as unknown as db.DbPool);
@@ -106,6 +104,8 @@ it.each(cases)("real archive/staged restore preserves %s followup identity and g
     if (kind === "live") {
       expect(queue.items.find(row => row.id === 903)).toMatchObject({ contactBlocked: false, patient_id: 901 });
       expect(await saveAppointmentFollowup(command, actor)).toEqual({ ...first, replayed: true });
+      expect(await retireAppointmentFollowup(expired,actor)).toMatchObject({outcome:'retired'});
+      await expect(saveAppointmentFollowup(expired,actor)).rejects.toMatchObject({code:'FOLLOWUP_ATTEMPT_RETIRED'});
       expect(await snapshot(fixture.archiveTarget)).toEqual(before);
     } else {
       if (kind === "old-generation") expect(queue.items).toEqual([]);
@@ -126,6 +126,7 @@ it.each(cases)("real archive/staged restore preserves %s followup identity and g
     }
     await expect(fixture.archiveTarget.query("UPDATE appointment_followup_events SET outcome='pending' WHERE followup_id=903")).rejects.toThrow("append-only");
     await expect(fixture.archiveTarget.query("DELETE FROM appointment_followup_receipts")).rejects.toThrow("append-only");
+    await expect(fixture.archiveTarget.query("DELETE FROM appointment_followup_retirements")).rejects.toThrow("append-only");
   } finally {
     poolSpy.mockRestore();
     try { await fixture.close(); }

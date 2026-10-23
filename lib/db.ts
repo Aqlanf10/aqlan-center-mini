@@ -1,3 +1,6 @@
+import { APPOINTMENT_FOLLOWUP_RETIREMENT_SQL } from "./appointment-followup-retirement-schema";
+import { APPOINTMENT_FOLLOWUP_QUERY_SQL } from "./appointment-followup-query-schema";
+import { APPOINTMENT_FOLLOWUP_SQL } from "./appointment-followup-schema";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
@@ -2098,6 +2101,9 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0066", name: "agreement_delta_amendments", filename: "0066_agreement_delta_amendments.sql", sql: AGREEMENT_DELTA_SQL, checksum: checksumOf(AGREEMENT_DELTA_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0068", name: "collection_attempt_retirements", filename: "0068_collection_attempt_retirements.sql", sql: COLLECTION_ATTEMPT_RETIREMENT_SQL, checksum: checksumOf(COLLECTION_ATTEMPT_RETIREMENT_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0069", name: "unpaid_currency_transitions", filename: "0069_unpaid_currency_transitions.sql", sql: UNPAID_CURRENCY_TRANSITION_SQL, checksum: checksumOf(UNPAID_CURRENCY_TRANSITION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0070", name: "appointment_followups", filename: "0070_appointment_followups.sql", sql: APPOINTMENT_FOLLOWUP_SQL, checksum: checksumOf(APPOINTMENT_FOLLOWUP_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0071", name: "appointment_followup_query_indexes", filename: "0071_appointment_followup_query_indexes.sql", sql: APPOINTMENT_FOLLOWUP_QUERY_SQL, checksum: checksumOf(APPOINTMENT_FOLLOWUP_QUERY_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0072", name: "appointment_followup_retirements", filename: "0072_appointment_followup_retirements.sql", sql: APPOINTMENT_FOLLOWUP_RETIREMENT_SQL, checksum: checksumOf(APPOINTMENT_FOLLOWUP_RETIREMENT_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);

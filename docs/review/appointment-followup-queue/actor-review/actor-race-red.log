@@ -1,0 +1,44 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/appointment-followup-actor-race.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/appointment-followup-actor-race.test.ts (1 test | 1 failed) 5050ms
+   × held successful context GET cannot let another cookie actor commit or erase the original actor intent 2425ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/appointment-followup-actor-race.test.ts > held successful context GET cannot let another cookie actor commit or erase the original actor intent
+AssertionError: expected 201 to be 409 // Object.is equality
+
+- Expected
++ Received
+
+- 409
++ 201
+
+ ❯ __tests__/security-http/appointment-followup-actor-race.test.ts:56:29
+     54|     release();
+     55|     const result = await post;
+     56|     expect(result.status()).toBe(409);
+       |                             ^
+     57|     expect(await page.evaluate(key => localStorage.getItem(key), saved…
+     58|     expect(Number((await db.query('SELECT count(*) FROM appointment_fo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  18:43:04
+   Duration  10.19s (transform 27ms, setup 0ms, import 709ms, tests 5.05s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

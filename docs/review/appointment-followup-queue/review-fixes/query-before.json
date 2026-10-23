@@ -1,0 +1,706 @@
+{
+  "head": "090dae60c8a9d308f939a8296baff85b2aa5c3a3",
+  "synthetic": true,
+  "plans": [
+    {
+      "label": "all",
+      "elapsedMs": 8003.4098220000005,
+      "error": "canceling statement due to statement timeout",
+      "code": "57014",
+      "estimatedPlan": [
+        {
+          "Plan": {
+            "Node Type": "Limit",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.9,
+            "Total Cost": 27234.5,
+            "Plan Rows": 26,
+            "Plan Width": 137,
+            "Disabled": false,
+            "Plans": [
+              {
+                "Node Type": "Result",
+                "Parent Relationship": "InitPlan",
+                "Subplan Name": "InitPlan 10",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 0.03,
+                "Total Cost": 0.05,
+                "Plan Rows": 1,
+                "Plan Width": 32,
+                "Disabled": false,
+                "Plans": [
+                  {
+                    "Node Type": "Limit",
+                    "Parent Relationship": "InitPlan",
+                    "Subplan Name": "InitPlan 9",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 0.03,
+                    "Total Cost": 0.03,
+                    "Plan Rows": 1,
+                    "Plan Width": 40,
+                    "Disabled": false,
+                    "Plans": [
+                      {
+                        "Node Type": "Sort",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Startup Cost": 0.03,
+                        "Total Cost": 0.03,
+                        "Plan Rows": 1,
+                        "Plan Width": 40,
+                        "Disabled": false,
+                        "Sort Key": [
+                          "audit_log.id DESC"
+                        ],
+                        "Plans": [
+                          {
+                            "Node Type": "Seq Scan",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Relation Name": "audit_log",
+                            "Alias": "audit_log",
+                            "Startup Cost": 0,
+                            "Total Cost": 0.02,
+                            "Plan Rows": 1,
+                            "Plan Width": 40,
+                            "Disabled": false,
+                            "Filter": "(action = 'system.reset'::text)"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Node Type": "Nested Loop",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Left",
+                "Startup Cost": 0.86,
+                "Total Cost": 10474461.01,
+                "Plan Rows": 10000,
+                "Plan Width": 137,
+                "Disabled": false,
+                "Inner Unique": true,
+                "Join Filter": "(p.id = a.patient_id)",
+                "Plans": [
+                  {
+                    "Node Type": "Nested Loop",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Join Type": "Left",
+                    "Startup Cost": 0.86,
+                    "Total Cost": 7996.98,
+                    "Plan Rows": 10000,
+                    "Plan Width": 135,
+                    "Disabled": false,
+                    "Inner Unique": true,
+                    "Join Filter": "((a.id = f.source_appointment_id) AND ((EXTRACT(epoch FROM a.created_at))::text = f.source_created_at))",
+                    "Plans": [
+                      {
+                        "Node Type": "Nested Loop",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Join Type": "Left",
+                        "Startup Cost": 0.57,
+                        "Total Cost": 4105.98,
+                        "Plan Rows": 10000,
+                        "Plan Width": 95,
+                        "Disabled": false,
+                        "Inner Unique": true,
+                        "Plans": [
+                          {
+                            "Node Type": "Index Scan",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Scan Direction": "Forward",
+                            "Index Name": "appointment_followups_queue_idx",
+                            "Relation Name": "appointment_followups",
+                            "Alias": "f",
+                            "Startup Cost": 0.29,
+                            "Total Cost": 741.03,
+                            "Plan Rows": 10000,
+                            "Plan Width": 87,
+                            "Disabled": false,
+                            "Filter": "(generation = (InitPlan 10).col1)"
+                          },
+                          {
+                            "Node Type": "Index Scan",
+                            "Parent Relationship": "Inner",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Scan Direction": "Forward",
+                            "Index Name": "appointment_followup_links_pkey",
+                            "Relation Name": "appointment_followup_links",
+                            "Alias": "l",
+                            "Startup Cost": 0.29,
+                            "Total Cost": 0.34,
+                            "Plan Rows": 1,
+                            "Plan Width": 12,
+                            "Disabled": false,
+                            "Index Cond": "(followup_id = f.id)"
+                          }
+                        ]
+                      },
+                      {
+                        "Node Type": "Index Scan",
+                        "Parent Relationship": "Inner",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Scan Direction": "Forward",
+                        "Index Name": "appointments_pkey",
+                        "Relation Name": "appointments",
+                        "Alias": "a",
+                        "Startup Cost": 0.29,
+                        "Total Cost": 0.37,
+                        "Plan Rows": 1,
+                        "Plan Width": 56,
+                        "Disabled": false,
+                        "Index Cond": "(id = l.appointment_id)",
+                        "Filter": "(patient_id = l.patient_id)"
+                      }
+                    ]
+                  },
+                  {
+                    "Node Type": "Materialize",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 0,
+                    "Total Cost": 1.03,
+                    "Plan Rows": 2,
+                    "Plan Width": 16,
+                    "Disabled": false,
+                    "Plans": [
+                      {
+                        "Node Type": "Seq Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Relation Name": "patients",
+                        "Alias": "p",
+                        "Startup Cost": 0,
+                        "Total Cost": 1.02,
+                        "Plan Rows": 2,
+                        "Plan Width": 16,
+                        "Disabled": false
+                      }
+                    ]
+                  },
+                  {
+                    "Node Type": "Index Scan",
+                    "Parent Relationship": "SubPlan",
+                    "Subplan Name": "SubPlan 1",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Scan Direction": "Forward",
+                    "Index Name": "planned_visits_pkey",
+                    "Relation Name": "planned_visits",
+                    "Alias": "moved",
+                    "Startup Cost": 0.29,
+                    "Total Cost": 8.3,
+                    "Plan Rows": 1,
+                    "Plan Width": 0,
+                    "Disabled": false,
+                    "Index Cond": "(id = a.planned_visit_id)",
+                    "Filter": "((appointment_id IS NOT NULL) AND (appointment_id <> a.id))"
+                  },
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "SubPlan",
+                    "Subplan Name": "SubPlan 2",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "appointment_status_log",
+                    "Alias": "attendance",
+                    "Startup Cost": 0,
+                    "Total Cost": 0,
+                    "Plan Rows": 1,
+                    "Plan Width": 0,
+                    "Disabled": false,
+                    "Filter": "((appointment_id = a.id) AND ((from_status = ANY ('{arrived,in_progress,done}'::text[])) OR (to_status = ANY ('{arrived,in_progress,done}'::text[]))))"
+                  },
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "SubPlan",
+                    "Subplan Name": "SubPlan 5",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "visits",
+                    "Alias": "attendance_1",
+                    "Startup Cost": 0,
+                    "Total Cost": 3040219,
+                    "Plan Rows": 5000,
+                    "Plan Width": 0,
+                    "Disabled": false,
+                    "Filter": "((appointment_id = a.id) OR EXISTS(SubPlan 4))",
+                    "Plans": [
+                      {
+                        "Node Type": "Seq Scan",
+                        "Parent Relationship": "SubPlan",
+                        "Subplan Name": "SubPlan 4",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Relation Name": "planned_visits",
+                        "Alias": "linked",
+                        "Startup Cost": 0,
+                        "Total Cost": 304,
+                        "Plan Rows": 1,
+                        "Plan Width": 0,
+                        "Disabled": false,
+                        "Filter": "(((appointment_id = a.id) OR ((id = a.planned_visit_id) AND (appointment_id IS NULL))) AND ((attendance_1.planned_visit_id = id) OR (attendance_1.id = visit_id)))"
+                      }
+                    ]
+                  },
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "SubPlan",
+                    "Subplan Name": "SubPlan 8",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "planned_visits",
+                    "Alias": "linked_1",
+                    "Startup Cost": 0,
+                    "Total Cost": 430.25,
+                    "Plan Rows": 1,
+                    "Plan Width": 0,
+                    "Disabled": false,
+                    "Filter": "(((appointment_id = a.id) OR ((id = a.planned_visit_id) AND (appointment_id IS NULL))) AND ((visit_id IS NOT NULL) OR (status = ANY ('{in_progress,completed}'::text[])) OR (ANY (id = (hashed SubPlan 7).col1))))",
+                    "Plans": [
+                      {
+                        "Node Type": "Hash Join",
+                        "Parent Relationship": "SubPlan",
+                        "Subplan Name": "SubPlan 7",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Join Type": "Left",
+                        "Startup Cost": 0.01,
+                        "Total Cost": 0.02,
+                        "Plan Rows": 1,
+                        "Plan Width": 4,
+                        "Disabled": false,
+                        "Inner Unique": true,
+                        "Hash Cond": "(session.plan_item_id = item.id)",
+                        "Filter": "((session.status <> 'planned'::text) OR (session.completed_at IS NOT NULL) OR (session.visit_id IS NOT NULL) OR (item.status = ANY ('{done,cancelled}'::text[])) OR (item.done_at IS NOT NULL) OR (item.visit_id IS NOT NULL))",
+                        "Plans": [
+                          {
+                            "Node Type": "Seq Scan",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Relation Name": "treatment_sessions",
+                            "Alias": "session",
+                            "Startup Cost": 0,
+                            "Total Cost": 0,
+                            "Plan Rows": 1,
+                            "Plan Width": 52,
+                            "Disabled": false
+                          },
+                          {
+                            "Node Type": "Hash",
+                            "Parent Relationship": "Inner",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Startup Cost": 0,
+                            "Total Cost": 0,
+                            "Plan Rows": 1,
+                            "Plan Width": 48,
+                            "Disabled": false,
+                            "Plans": [
+                              {
+                                "Node Type": "Seq Scan",
+                                "Parent Relationship": "Outer",
+                                "Parallel Aware": false,
+                                "Async Capable": false,
+                                "Relation Name": "plan_items",
+                                "Alias": "item",
+                                "Startup Cost": 0,
+                                "Total Cost": 0,
+                                "Plan Rows": 1,
+                                "Plan Width": 48,
+                                "Disabled": false
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "label": "sparse-patient",
+      "elapsedMs": 15001.221607000001,
+      "error": "canceling statement due to statement timeout",
+      "code": "57014",
+      "estimatedPlan": [
+        {
+          "Plan": {
+            "Node Type": "Limit",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 199.94,
+            "Total Cost": 1246.57,
+            "Plan Rows": 1,
+            "Plan Width": 137,
+            "Disabled": false,
+            "Plans": [
+              {
+                "Node Type": "Result",
+                "Parent Relationship": "InitPlan",
+                "Subplan Name": "InitPlan 10",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 0.03,
+                "Total Cost": 0.05,
+                "Plan Rows": 1,
+                "Plan Width": 32,
+                "Disabled": false,
+                "Plans": [
+                  {
+                    "Node Type": "Limit",
+                    "Parent Relationship": "InitPlan",
+                    "Subplan Name": "InitPlan 9",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 0.03,
+                    "Total Cost": 0.03,
+                    "Plan Rows": 1,
+                    "Plan Width": 40,
+                    "Disabled": false,
+                    "Plans": [
+                      {
+                        "Node Type": "Sort",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Startup Cost": 0.03,
+                        "Total Cost": 0.03,
+                        "Plan Rows": 1,
+                        "Plan Width": 40,
+                        "Disabled": false,
+                        "Sort Key": [
+                          "audit_log.id DESC"
+                        ],
+                        "Plans": [
+                          {
+                            "Node Type": "Seq Scan",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Relation Name": "audit_log",
+                            "Alias": "audit_log",
+                            "Startup Cost": 0,
+                            "Total Cost": 0.02,
+                            "Plan Rows": 1,
+                            "Plan Width": 40,
+                            "Disabled": false,
+                            "Filter": "(action = 'system.reset'::text)"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Node Type": "Result",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 199.89,
+                "Total Cost": 1246.53,
+                "Plan Rows": 1,
+                "Plan Width": 137,
+                "Disabled": false,
+                "Plans": [
+                  {
+                    "Node Type": "Sort",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 199.89,
+                    "Total Cost": 199.9,
+                    "Plan Rows": 1,
+                    "Plan Width": 179,
+                    "Disabled": false,
+                    "Sort Key": [
+                      "f.due_at",
+                      "f.id"
+                    ],
+                    "Plans": [
+                      {
+                        "Node Type": "Nested Loop",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Join Type": "Inner",
+                        "Startup Cost": 0.86,
+                        "Total Cost": 199.88,
+                        "Plan Rows": 1,
+                        "Plan Width": 179,
+                        "Disabled": false,
+                        "Inner Unique": false,
+                        "Plans": [
+                          {
+                            "Node Type": "Nested Loop",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Join Type": "Inner",
+                            "Startup Cost": 0.86,
+                            "Total Cost": 198.84,
+                            "Plan Rows": 1,
+                            "Plan Width": 135,
+                            "Disabled": false,
+                            "Inner Unique": true,
+                            "Join Filter": "(l.appointment_id = a.id)",
+                            "Plans": [
+                              {
+                                "Node Type": "Nested Loop",
+                                "Parent Relationship": "Outer",
+                                "Parallel Aware": false,
+                                "Async Capable": false,
+                                "Join Type": "Inner",
+                                "Startup Cost": 0.58,
+                                "Total Cost": 198.49,
+                                "Plan Rows": 1,
+                                "Plan Width": 135,
+                                "Disabled": false,
+                                "Inner Unique": true,
+                                "Plans": [
+                                  {
+                                    "Node Type": "Index Scan",
+                                    "Parent Relationship": "Outer",
+                                    "Parallel Aware": false,
+                                    "Async Capable": false,
+                                    "Scan Direction": "Forward",
+                                    "Index Name": "appointments_patient_history_idx",
+                                    "Relation Name": "appointments",
+                                    "Alias": "a",
+                                    "Startup Cost": 0.29,
+                                    "Total Cost": 40.13,
+                                    "Plan Rows": 20,
+                                    "Plan Width": 56,
+                                    "Disabled": false,
+                                    "Index Cond": "(patient_id = 902)"
+                                  },
+                                  {
+                                    "Node Type": "Index Scan",
+                                    "Parent Relationship": "Inner",
+                                    "Parallel Aware": false,
+                                    "Async Capable": false,
+                                    "Scan Direction": "Forward",
+                                    "Index Name": "appointment_followups_source_appointment_id_source_created__key",
+                                    "Relation Name": "appointment_followups",
+                                    "Alias": "f",
+                                    "Startup Cost": 0.29,
+                                    "Total Cost": 7.92,
+                                    "Plan Rows": 1,
+                                    "Plan Width": 87,
+                                    "Disabled": false,
+                                    "Index Cond": "((source_appointment_id = a.id) AND (source_created_at = (EXTRACT(epoch FROM a.created_at))::text) AND (generation = (InitPlan 10).col1))",
+                                    "Filter": "(status = 'open'::text)"
+                                  }
+                                ]
+                              },
+                              {
+                                "Node Type": "Index Scan",
+                                "Parent Relationship": "Inner",
+                                "Parallel Aware": false,
+                                "Async Capable": false,
+                                "Scan Direction": "Forward",
+                                "Index Name": "appointment_followup_links_pkey",
+                                "Relation Name": "appointment_followup_links",
+                                "Alias": "l",
+                                "Startup Cost": 0.29,
+                                "Total Cost": 0.34,
+                                "Plan Rows": 1,
+                                "Plan Width": 12,
+                                "Disabled": false,
+                                "Index Cond": "(followup_id = f.id)",
+                                "Filter": "((patient_id = 902) AND (appointment_id = f.source_appointment_id))"
+                              }
+                            ]
+                          },
+                          {
+                            "Node Type": "Seq Scan",
+                            "Parent Relationship": "Inner",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Relation Name": "patients",
+                            "Alias": "p",
+                            "Startup Cost": 0,
+                            "Total Cost": 1.02,
+                            "Plan Rows": 1,
+                            "Plan Width": 16,
+                            "Disabled": false,
+                            "Filter": "(id = 902)"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "Node Type": "Index Scan",
+                    "Parent Relationship": "SubPlan",
+                    "Subplan Name": "SubPlan 1",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Scan Direction": "Forward",
+                    "Index Name": "planned_visits_pkey",
+                    "Relation Name": "planned_visits",
+                    "Alias": "moved",
+                    "Startup Cost": 0.29,
+                    "Total Cost": 8.3,
+                    "Plan Rows": 1,
+                    "Plan Width": 0,
+                    "Disabled": false,
+                    "Index Cond": "(id = a.planned_visit_id)",
+                    "Filter": "((appointment_id IS NOT NULL) AND (appointment_id <> a.id))"
+                  },
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "SubPlan",
+                    "Subplan Name": "SubPlan 2",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "appointment_status_log",
+                    "Alias": "attendance",
+                    "Startup Cost": 0,
+                    "Total Cost": 0,
+                    "Plan Rows": 1,
+                    "Plan Width": 0,
+                    "Disabled": false,
+                    "Filter": "((appointment_id = a.id) AND ((from_status = ANY ('{arrived,in_progress,done}'::text[])) OR (to_status = ANY ('{arrived,in_progress,done}'::text[]))))"
+                  },
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "SubPlan",
+                    "Subplan Name": "SubPlan 5",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "visits",
+                    "Alias": "attendance_1",
+                    "Startup Cost": 0,
+                    "Total Cost": 3040219,
+                    "Plan Rows": 5000,
+                    "Plan Width": 0,
+                    "Disabled": false,
+                    "Filter": "((appointment_id = a.id) OR EXISTS(SubPlan 4))",
+                    "Plans": [
+                      {
+                        "Node Type": "Seq Scan",
+                        "Parent Relationship": "SubPlan",
+                        "Subplan Name": "SubPlan 4",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Relation Name": "planned_visits",
+                        "Alias": "linked",
+                        "Startup Cost": 0,
+                        "Total Cost": 304,
+                        "Plan Rows": 1,
+                        "Plan Width": 0,
+                        "Disabled": false,
+                        "Filter": "(((appointment_id = a.id) OR ((id = a.planned_visit_id) AND (appointment_id IS NULL))) AND ((attendance_1.planned_visit_id = id) OR (attendance_1.id = visit_id)))"
+                      }
+                    ]
+                  },
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "SubPlan",
+                    "Subplan Name": "SubPlan 8",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "planned_visits",
+                    "Alias": "linked_1",
+                    "Startup Cost": 0,
+                    "Total Cost": 430.25,
+                    "Plan Rows": 1,
+                    "Plan Width": 0,
+                    "Disabled": false,
+                    "Filter": "(((appointment_id = a.id) OR ((id = a.planned_visit_id) AND (appointment_id IS NULL))) AND ((visit_id IS NOT NULL) OR (status = ANY ('{in_progress,completed}'::text[])) OR (ANY (id = (hashed SubPlan 7).col1))))",
+                    "Plans": [
+                      {
+                        "Node Type": "Hash Join",
+                        "Parent Relationship": "SubPlan",
+                        "Subplan Name": "SubPlan 7",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Join Type": "Left",
+                        "Startup Cost": 0.01,
+                        "Total Cost": 0.02,
+                        "Plan Rows": 1,
+                        "Plan Width": 4,
+                        "Disabled": false,
+                        "Inner Unique": true,
+                        "Hash Cond": "(session.plan_item_id = item.id)",
+                        "Filter": "((session.status <> 'planned'::text) OR (session.completed_at IS NOT NULL) OR (session.visit_id IS NOT NULL) OR (item.status = ANY ('{done,cancelled}'::text[])) OR (item.done_at IS NOT NULL) OR (item.visit_id IS NOT NULL))",
+                        "Plans": [
+                          {
+                            "Node Type": "Seq Scan",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Relation Name": "treatment_sessions",
+                            "Alias": "session",
+                            "Startup Cost": 0,
+                            "Total Cost": 0,
+                            "Plan Rows": 1,
+                            "Plan Width": 52,
+                            "Disabled": false
+                          },
+                          {
+                            "Node Type": "Hash",
+                            "Parent Relationship": "Inner",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Startup Cost": 0,
+                            "Total Cost": 0,
+                            "Plan Rows": 1,
+                            "Plan Width": 48,
+                            "Disabled": false,
+                            "Plans": [
+                              {
+                                "Node Type": "Seq Scan",
+                                "Parent Relationship": "Outer",
+                                "Parallel Aware": false,
+                                "Async Capable": false,
+                                "Relation Name": "plan_items",
+                                "Alias": "item",
+                                "Startup Cost": 0,
+                                "Total Cost": 0,
+                                "Plan Rows": 1,
+                                "Plan Width": 48,
+                                "Disabled": false
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
