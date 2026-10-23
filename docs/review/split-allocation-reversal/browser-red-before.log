@@ -1,0 +1,8 @@
+# Browser test on the UNFIXED correction route (built app): red
+     × moving the delta allocation onto its settled sibling invoice shows the explicit refusal and writes nothing 2780ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected 500 to be 400 // Object.is equality
+      Tests  1 failed | 1 passed (2)
+
+# Rebuilt with the fix: green
+      Tests  2 passed (2)
