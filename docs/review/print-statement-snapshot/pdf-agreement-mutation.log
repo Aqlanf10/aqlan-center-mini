@@ -1,0 +1,10 @@
+# Temporary mutation (reverted): the agreement 'paid' line prints the remaining amount
+ app/print/statement/[id]/page.tsx | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  __tests__/security-http/patient-statement-current-print-ui.test.ts > current patient statement PDF with an active agreement and real on-account payments > prints invoice net/discount, net collected and agreement paid/remaining by currency; the next PDF moves them together
+AssertionError: paid: expected 'المسدّد من الاتفاق1,800.00 ر.س' to contain '1,200.00 ر.س'
+      Tests  1 failed | 1 passed (2)
+# reverted; rebuilding
+build 0
+      Tests  2 passed (2)

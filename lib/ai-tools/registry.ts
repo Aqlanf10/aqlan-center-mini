@@ -9,6 +9,7 @@ import { AI_TOOL_ALIAS_TO_CANONICAL, authorizeToolPolicy, resolveToolPolicy } fr
 import { applyPatientScoping } from "./authorization";
 import { buildToolConfirmationOffer, buildToolConfirmationPayload, verifyToolConfirmation, TOOL_CONFIRMATION_MAX_PARAMS_JSON } from "../ai-confirmation";
 import { buildConfirmationPreview, toolActionLabel } from "./confirmation-preview";
+import { containedToolRefusal, isContainedAssistantTool } from "./contained-tools";
 import { claimToolConfirmation } from "../db";
 import { generateInternalReport, getTodayCollections, getPatientReceivables, getDebtAging, getDoctorCommissionReport } from "./finance-tools";
 import { searchPatient, getPatientSummary } from "./patient-tools";
@@ -361,6 +362,9 @@ export async function executeAiTool(
     if (payload.exp <= Date.now()) {
       return deniedResult("انتهت صلاحية عرض التأكيد — أعد الطلب من جديد.", ["انتهاء عمر رمز التأكيد"]);
     }
+    /* (CORE-SAFETY) أداة محتواة: رمزٌ صادر سابقًا سليمُ التوقيع يُرفض هنا — قبل إعادة العزل
+       وقبل الاستهلاك — فلا يُستهلك تأكيد ولا يُستدعى الكاتب المالي. */
+    if (isContainedAssistantTool(policy.canonicalName)) return containedToolRefusal();
     /* إعادة التفويض والتفويض على بيانات اللحظة: الصلاحيات والملكية تُفحص الآن. */
     const tokenParams =
       typeof payload.params === "object" && payload.params ? { ...payload.params } : {};
@@ -397,6 +401,8 @@ export async function executeAiTool(
 
   /* ٤-ب) مسار العرض: أداة تغيير حالة بلا رمز — معاينة موقّعة وانتظار التأكيد. */
   if (policy.requiresConfirmation) {
+    /* (CORE-SAFETY) أداة محتواة: لا عرض تأكيد موقّعًا أصلًا — رفضٌ مع رابط شاشة التحصيل المحمية. */
+    if (isContainedAssistantTool(policy.canonicalName)) return containedToolRefusal();
     const offerParams: Record<string, any> =
       params && typeof params === "object" ? { ...params } : {};
     let previewParams = offerParams;

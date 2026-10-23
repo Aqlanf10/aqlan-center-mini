@@ -83,7 +83,8 @@ describe("DOT-PF-01 installment acknowledgments", () => {
     });
     try {
       const before = await planReceipts();
-      await page.getByLabel("مبلغ القسط").fill("11");
+      // Each case is an independent installment; distinct amounts keep the same-day similar-receipt advisory out of its subject.
+      await page.getByLabel("مبلغ القسط").fill(body === "{" ? "11" : "12");
       await page.getByRole("button", { name: "سجّل القسط واطبع السند" }).click();
       const retry = page.getByRole("button", { name: "إعادة التحقق من العملية السابقة" });
       await retry.waitFor();

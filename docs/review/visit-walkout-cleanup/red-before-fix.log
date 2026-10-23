@@ -1,0 +1,9 @@
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Ubuntu 18.6-1.pgdg24.04+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/visit-walkout-snapshot-cleanup.test.ts (4 tests | 1 failed) 840ms
+     × a read failure whose ROLLBACK also fails keeps the original error and discards the client 10ms
+AssertionError: expected [ undefined ] to deeply equal [ true ]
+- Expected
++ Received
+ ❯ __tests__/postgres/visit-walkout-snapshot-cleanup.test.ts:85:27
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)

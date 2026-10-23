@@ -23,6 +23,7 @@ let admin: Client;
 let db: typeof import("../../lib/db");
 let files: MigrationFile[];
 let purchase: MigrationFile;
+let throughPurchase: MigrationFile[];
 let numbered: Pool;
 let runtime: Pool;
 const originalEnv = { DATABASE_URL: process.env.DATABASE_URL, SKIP_SEED: process.env.SKIP_SEED };
@@ -61,6 +62,8 @@ beforeAll(async () => {
   assertPostgresMajorOrThrow(postgresMajorFromVersionNum(version.server_version_num));
   files = await loadMigrationFiles();
   purchase = files.find(file => file.version === "0065")!;
+  // These are 0065 tests: later numbered migrations (0066+) are outside their subject.
+  throughPurchase = files.filter(file => file.version <= "0065");
   expect(purchase).toBeDefined();
   expect(purchase.sql).toBe(INVENTORY_PURCHASE_RECEIPTS_SQL);
   numbered = (await fresh()).pool;
@@ -149,13 +152,13 @@ describe("purchase receipt installation and upgrade", () => {
     const before = await state(fixture.pool);
     expect((await fixture.pool.query("SELECT to_regclass('public.inventory_purchase_receipts') AS name")).rows[0].name).toBeNull();
     if (path === "numbered") {
-      expect((await migrate(fixture.pool, { apply: true, files })).appliedVersions).toEqual(["0065"]);
+      expect((await migrate(fixture.pool, { apply: true, files: throughPurchase })).appliedVersions).toEqual(["0065"]);
     } else await runtimeAt(fixture.url);
     expect(await state(fixture.pool)).toEqual(before);
     expect(await registry(fixture.pool)).toEqual(expectedRegistry());
     expect((await fixture.pool.query("SELECT count(*)::int AS n FROM inventory_purchase_receipts")).rows[0].n).toBe(0);
     if (path === "runtime") await runtimeAt(fixture.url);
-    expect(await migrate(fixture.pool, { apply: true, files })).toMatchObject({ appliedVersions: [], alreadyUpToDate: true });
+    expect(await migrate(fixture.pool, { apply: true, files: throughPurchase })).toMatchObject({ appliedVersions: [], alreadyUpToDate: true });
     expect(await state(fixture.pool)).toEqual(before);
   });
 
@@ -164,7 +167,7 @@ describe("purchase receipt installation and upgrade", () => {
     await migrate(fixture.pool, { apply: true, files: files.filter(file => file.version < "0065") });
     const competitor = new Pool({ connectionString: fixture.url, ssl: false });
     try {
-      const [startup, cli] = await Promise.all([applyRuntimeMigrationFiles(fixture.pool, [purchase]), migrate(competitor, { apply: true, files })]);
+      const [startup, cli] = await Promise.all([applyRuntimeMigrationFiles(fixture.pool, [purchase]), migrate(competitor, { apply: true, files: throughPurchase })]);
       expect([...startup, ...cli.appliedVersions]).toEqual(["0065"]);
       expect(await registry(fixture.pool)).toEqual(expectedRegistry());
     } finally { await competitor.end(); }

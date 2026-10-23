@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, OpeningBalanceChanged, OpeningBalanceExists, clearPatientOpeningBalance, getPatientOpeningBalance, getSettings, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
+import { CLINIC_TIME_ZONE, OpeningBalanceChanged, OpeningBalanceExists, OpeningCorrectionRefused, clearPatientOpeningBalance, previewOpeningCorrection, getPatientOpeningBalance, getSettings, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
 import { parseAmount, CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
@@ -31,8 +31,27 @@ export async function GET(request: Request) {
   if (!session) return denied();
   if (!canViewFinancialReports(session.role)) return forbidden();
 
+  const search = new URL(request.url).searchParams;
+  // (FIN-INT legacy) Dry run of a correction or deletion: the exact rule the write applies. Nothing is written.
+  if (search.get("preview") === "1") {
+    const patientId = Number(search.get("patientId"));
+    const currency = search.get("currency") || CLINIC_BASE_CURRENCY;
+    const clear = search.get("clear") === "1";
+    const amountMinor = clear ? null : parseAmount(search.get("amount") ?? "", isCurrency(currency) ? currency : CLINIC_BASE_CURRENCY);
+    if (!Number.isInteger(patientId) || patientId <= 0) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+    if (!isCurrency(currency)) return NextResponse.json({ message: "عملة الرصيد غير صالحة." }, { status: 400 });
+    if (!clear && (amountMinor === null || amountMinor <= 0)) {
+      return NextResponse.json({ message: "اكتب المبلغ المصحّح لمعاينة أثره." }, { status: 400 });
+    }
+    try {
+      return NextResponse.json({ preview: await previewOpeningCorrection(patientId, currency, clear ? null : amountMinor) });
+    } catch {
+      return NextResponse.json({ message: "تعذّرت معاينة تصحيح الرصيد الافتتاحي." }, { status: 500 });
+    }
+  }
+
   // (P2-5) سجلّ مريضٍ واحد: كل قيمةٍ كانت ومن غيّرها ولماذا.
-  const historyFor = Number(new URL(request.url).searchParams.get("history"));
+  const historyFor = Number(search.get("history"));
   if (Number.isInteger(historyFor) && historyFor > 0) {
     try {
       return NextResponse.json({ history: await listOpeningBalanceHistory(historyFor) });
@@ -138,6 +157,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof OpeningBalanceExists) return NextResponse.json({ message: error.message }, { status: 403 });
     if (error instanceof OpeningBalanceChanged) return NextResponse.json({ message: error.message }, { status: 409 });
+    if (error instanceof OpeningCorrectionRefused) return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
     return NextResponse.json({ message: "تعذّر حفظ الرصيد الافتتاحي." }, { status: 500 });
   }
 }
@@ -180,6 +200,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof OpeningBalanceChanged) return NextResponse.json({ message: error.message }, { status: 409 });
+    if (error instanceof OpeningCorrectionRefused) return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
     return NextResponse.json({ message: "تعذّر حذف الرصيد الافتتاحي." }, { status: 500 });
   }
 }

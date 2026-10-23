@@ -9,6 +9,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { authedGet, baseUrl, harness } from "./_server";
 import { emitAcceptedEvidence, type EvidenceFile } from "./_synthetic-evidence-log";
 import { CONSENT_TEMPLATES } from "../../lib/consent-templates";
+import { CONSENT_RECORD_NOTE_LIMIT, DOCUMENT_NOTE_LIMIT, buildConsentNotePayload } from "../../lib/consent-record";
 
 /**
  * إعادة طباعة الإقرار الموقّع تعتمد على الدليل المحفوظ وحده — على التطبيق المبني وبيانات اصطناعية.
@@ -28,7 +29,7 @@ const ARTIFACTS = join(process.cwd(), ".settings-ui-artifacts");
 /*
  * Dot review 5461832436: this run's own consent screens and A4 PDFs are retained in the CI log (bounded, checksummed
  * `SYNTHETIC_PRINT_EVIDENCE_V1`, with run/checkout identity). A scene is accepted only after all of its assertions passed;
- * the set is emitted only when complete. The >300-character capture defect is NOT repaired by this; it stays open.
+ * the set is emitted only when complete. The >300-character capture defect (Codex P1) is covered by «سجل شاشة التوقيع الحقيقي» below.
  */
 const EVIDENCE = new Map<string, EvidenceFile["mime"]>(["signed", "blank", "refused"].flatMap((name) => [
   [`consent-${name}-1280.png`, "image/png"], [`consent-${name}-390.png`, "image/png"], [`consent-${name}.pdf`, "application/pdf"],
@@ -67,7 +68,14 @@ async function signaturePng(): Promise<Buffer> {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-async function upload(patientId: number, input: { kind: string; note: string | null; title: string; bytes: Buffer; takenOn?: string | null }): Promise<number> {
+type UploadInput = { kind: string; note: string | null; title: string; bytes: Buffer; takenOn?: string | null };
+async function upload(patientId: number, input: UploadInput): Promise<number> {
+  const response = await uploadResponse(patientId, input);
+  expect(response.status, await response.clone().text()).toBeLessThan(300);
+  return ((await response.json()) as { id: number }).id;
+}
+
+async function uploadResponse(patientId: number, input: UploadInput): Promise<Response> {
   const form = new FormData();
   form.set("file", new Blob([new Uint8Array(input.bytes)], { type: "image/png" }), "signature.png");
   form.set("kind", input.kind);
@@ -75,14 +83,12 @@ async function upload(patientId: number, input: { kind: string; note: string | n
   // A historical upload may legitimately carry no signing date; the API keeps it null.
   if (input.takenOn !== null) form.set("takenOn", input.takenOn ?? "2026-03-15");
   if (input.note !== null) form.set("note", input.note);
-  const response = await fetch(`${baseUrl}/api/patients/${patientId}/documents`, {
+  return fetch(`${baseUrl}/api/patients/${patientId}/documents`, {
     method: "POST",
     headers: { Cookie: h.sessions.admin.cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
     body: form,
     redirect: "manual",
   });
-  expect(response.status, await response.clone().text()).toBeLessThan(300);
-  return ((await response.json()) as { id: number }).id;
 }
 
 const consentNote = (extra: Record<string, unknown> = {}) => JSON.stringify({
@@ -140,7 +146,6 @@ beforeAll(async () => {
   signedDoc = await upload(patient1, { kind: "consent", note: consentNote(), title: `إقرار موافقة: ${RECORDED_PROCEDURE}`, bytes: signatureBytes });
   snapshotDoc = await upload(patient1, {
     kind: "consent", title: "إقرار بنص محفوظ", bytes: signatureBytes,
-    // مسار الرفع يقصّ الملاحظة عند 300 حرف، فالنسخة الاصطناعية مضغوطة كي يبقى JSON سليمًا.
     note: JSON.stringify({ templateId: TEMPLATE_A.id, signatoryName: SIGNER, signatoryRelation: "self", terms: [SNAPSHOT_TERM], risks: ["خ"], postOpInstructions: ["ت"] }),
   });
   foreignDoc = await upload(patient2, { kind: "consent", note: consentNote(), title: "إقرار مريض آخر", bytes: signatureBytes });
@@ -260,6 +265,65 @@ describe("إعادة طباعة إقرارٍ موقّع — الدليل الم�
       expect(body, label).not.toContain("نموذج غير موقّع");
     }
     expect(modeOf((await html("admin", printPath(patient1, "docId=abc"))).body)).toBe("refused");
+  });
+});
+
+/*
+ * Codex P1 on #291: the upload route cut every note at 300 characters. The consent form's own record is longer than that for
+ * almost every template, so a freshly signed consent was stored as invalid JSON and its reprint was refused. The fixtures above
+ * are hand-made and short; this uses the exact record the signature screen sends (`buildConsentNotePayload`).
+ */
+describe("سجل شاشة التوقيع الحقيقي يُحفظ كاملًا ويُعاد طبعه", () => {
+  const notesOf = async (patientId: number) => (await db.query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM patient_documents WHERE patient_id = $1`, [patientId])).rows[0].n;
+
+  it("كل قالب، للمريض نفسه ولولي الأمر: الملاحظة المحفوظة هي المرسلة حرفيًّا، والطباعة موقّعة", async () => {
+    const signer = `موقّع حقيقي طويل الاسم ${stamp}`;
+    let longest = 0;
+    for (const template of CONSENT_TEMPLATES) {
+      for (const [relation, guardian] of [["self", null], ["guardian", "الأب"]] as const) {
+        const label = `${template.id}/${relation}`;
+        const note = JSON.stringify(buildConsentNotePayload({ template, signatoryName: signer, signatoryRelation: relation, guardianRelation: guardian }));
+        longest = Math.max(longest, note.length);
+        const id = await upload(patient1, { kind: "consent", note, title: `إقرار موافقة: ${template.procedureName}`, bytes: signatureBytes });
+        const { rows: [row] } = await db.query<{ note: string }>(`SELECT note FROM patient_documents WHERE id = $1`, [id]);
+        expect(row.note, label).toBe(note);
+        const { status, body } = await html("admin", printPath(patient1, `docId=${id}`));
+        expect(status, label).toBe(200);
+        expect(modeOf(body), label).toBe("signed");
+        expect(showsSignatureOf(body, id), label).toBe(true);
+        expect(body, label).toContain(signer);
+      }
+    }
+    /* The scenario is only meaningful if the real records cross the old cut. */
+    expect(longest).toBeGreaterThan(DOCUMENT_NOTE_LIMIT);
+  });
+
+  it("سجلٌّ منظَّم مقصوص أو غير مكتمل أو أطول من الحد: 400 برسالة عربية ولا يُكتب شيء", async () => {
+    const real = JSON.stringify(buildConsentNotePayload({ template: TEMPLATE_A, signatoryName: SIGNER, signatoryRelation: "self", guardianRelation: null }));
+    const cases: Array<[string, string]> = [
+      ["مقصوص عند 300", real.slice(0, DOCUMENT_NOTE_LIMIT)],
+      ["بلا اسم موقّع", JSON.stringify({ templateId: TEMPLATE_A.id, signatoryRelation: "self" })],
+      ["أطول من الحد", JSON.stringify({ ...JSON.parse(real), textNote: "ن".repeat(CONSENT_RECORD_NOTE_LIMIT) })],
+    ];
+    const before = await notesOf(patient1);
+    for (const [label, note] of cases) {
+      const response = await uploadResponse(patient1, { kind: "consent", note, title: "إقرار مرفوض", bytes: signatureBytes });
+      expect(response.status, label).toBe(400);
+      const payload = (await response.json()) as { message?: string };
+      expect(payload.message, label).toMatch(/[\u0600-\u06FF]/);
+      expect(JSON.stringify(payload), label).not.toMatch(/SyntaxError|stack|Error:/);
+    }
+    expect(await notesOf(patient1)).toBe(before);
+  });
+
+  it("الملاحظة الحرّة — إقرار ورقي ممسوح أو أي مستند آخر — تبقى مقبولة ومقصوصة عند 300 كما كانت", async () => {
+    const free = `إقرار ورقي ممسوح ${"س".repeat(400)}`;
+    for (const kind of ["consent", "photo"]) {
+      const id = await upload(patient2, { kind, note: free, title: `ملاحظة حرّة ${kind}`, bytes: signatureBytes });
+      const { rows: [row] } = await db.query<{ note: string }>(`SELECT note FROM patient_documents WHERE id = $1`, [id]);
+      expect(row.note, kind).toBe(free.slice(0, DOCUMENT_NOTE_LIMIT));
+    }
   });
 });
 

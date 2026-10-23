@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// Core authority remains pinned to 055c399a. The load boundary differs only by
+// Core authority remains pinned to 055c399a, except the reviewed presentation-only
+// sign delta in #380: clear invoiceReferenceState after an owner-bound successful
+// sign response, before the canonical reread. It must not carry old invoice
+// verification onto the response invoice ID. Request/guards/response validation,
+// unknown-outcome handling, callback and dependencies are unchanged. Navigation
+// is outside this slice. The extra equivalence assertion below pins that claim.
+// The original sign SHA is retained there; the full current slice stays pinned too.
+// The load boundary differs only by
 // removing the retired catalogue modal reset after the inline ServiceSelect switch.
 // CI1768 caught that obsolete setter; all owner/read/draft guards remain unchanged.
 const baseline = [
@@ -22,7 +29,7 @@ const baseline = [
     "label": "sign",
     "start": "  const sign = useCallback(",
     "end": "  /** (VISIT-2) فتح ملف",
-    "sha": "ef28cfac2060d5b9e80e2e17a947a49287c3daf8c0c6efe5a6798504c45a698e"
+    "sha": "4e1cd839b93397762e4e96d0fa92467a877c6ea3864637a1d2e93ae353ca89f6"
   },
   {
     "label": "payload",
@@ -43,6 +50,15 @@ describe("actual visit workspace retains its authoritative contracts", () => {
     const from = source.indexOf(start); expect(from).toBeGreaterThan(-1);
     const to = source.indexOf(end, from); expect(to).toBeGreaterThan(from);
     expect(createHash("sha256").update(source.slice(from, to)).digest("hex")).toBe(sha);
+  });
+  it("changes only optimistic documentary verification within the original sign authority", () => {
+    const from = source.indexOf("  const sign = useCallback(");
+    const to = source.indexOf("  /** (VISIT-2) فتح ملف", from);
+    const sign = source.slice(from, to);
+    const reviewedInsertion = ", invoiceReferenceState: undefined";
+    expect(sign.split(reviewedInsertion)).toHaveLength(2);
+    expect(createHash("sha256").update(sign.replace(reviewedInsertion, "")).digest("hex"))
+      .toBe("ef28cfac2060d5b9e80e2e17a947a49287c3daf8c0c6efe5a6798504c45a698e");
   });
   it("uses one catalog action and one worklist, preserving tooth and plan callbacks", () => {
     expect(source.match(/<ServiceSelect/g)).toHaveLength(1);

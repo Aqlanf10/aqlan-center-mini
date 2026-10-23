@@ -192,11 +192,14 @@ describe("opening balance mutation transaction fence", () => {
       void changing.catch(() => {});
       await waitForLock("%FROM patient_opening_balances%FOR UPDATE%");
       await gate.query("COMMIT");
-      const paid = await paying; await changing;
+      const paid = await paying;
+      // The correction rechecks receipts after its lock: the committed receipt keeps its balance.
+      if (action === "set") await changing;
+      else await expect(changing).rejects.toMatchObject({ code: "receipts_reference_opening" });
       expect(paid.reason).toBeNull();
       expect(paid.payment).toMatchObject({ amountMinor: 1000, currency: "SAR", openingCurrency: "SAR" });
       expect(await financialRows(id)).toEqual({ payments: 1, invoices: 0, arrangements: 0 });
-      expect(await history(id)).toHaveLength(2);
+      expect(await history(id)).toHaveLength(action === "set" ? 2 : 1);
     } finally { await gate.query("ROLLBACK").catch(() => {}); await Promise.allSettled([paying, changing].filter((p) => p !== undefined)); }
   });
 

@@ -535,3 +535,35 @@ writes. Demo reset refuses before backup when any committed or rejected outcome
 exists. Only a genuinely empty table may join the existing reset truncation under
 the reviewed serialization/table locks and an empty-table trigger recheck; receipts
 are not an unconditional wipe target. See [protocol and release limits](INVENTORY_PURCHASE_RETRY.md).
+
+### 0066_agreement_delta_amendments.sql
+
+Append-only agreement price-increase event and difference-only invoice lineage. A logical collection can allocate across the original source and difference invoices with an immutable group receipt. Existing invoices, receipts and historical records are not revised. Production rollout is blocked until the precise PG18, HTTP, chronology, statement, checkout and migration parity checks pass; neither this migration listing nor CI alone authorizes a production deploy.
+
+
+### 0067_patient_appointment_history_index.sql
+
+Adds only the nonunique B-tree `appointments_patient_history_idx` on
+`appointments (patient_id, scheduled_date, scheduled_time, id)` for patient-scoped
+keyset reads. Numbered and checksum-checked runtime registration use identical
+SQL. There are no table, row, financial-write, reader or reset-ownership changes.
+0066 and 0068 remain owned by the independent finance work in PR #408;
+this integration composes their unchanged SQL with 0067. Both application orders
+must preserve catalog, registry and rows; re-run that proof if migration bytes change.
+
+This is ordinary transactional `CREATE INDEX`, not `CONCURRENTLY`: writes can
+wait during the build, existing writers can delay it, and application readiness
+waits for migration completion. Review actual database size, traffic, storage,
+lock/statement limits and a maintenance window before deployment. Keep the
+Production/unknown-remote CLI apply prohibition and all existing safeguards.
+The synthetic benchmark demonstrates reduced read work, not a reader correctness
+fix, a universal scan bound or a Production latency/zero-downtime promise. See
+[measurement, migration-order proof and deployment limits](../PATIENT_APPOINTMENT_HISTORY_INDEX.md).
+
+### 0068_collection_attempt_retirements.sql
+
+Durable proof for a collection attempt key. `POST /api/payments/attempts/retire` records a key only when no receipt (`payments.idempotency_key`) and no split collection group carries it; afterwards no receipt or group may use that key. The retirement insert and every keyed receipt/group insert take the same per-key transaction advisory lock, so a send still in flight is waited for and reported as `committed`. Each row binds the proof to the attempt's patient, operation (`payment`/`installment`), SHA-256 of the exact saved request body and the user who sent it; only that user's live money session may retire it, and a repeat must present the identical attempt. Rows are permanent history: no update or delete, no patient cascade (patient delete and merge treat them as financial footprint), and TRUNCATE only of an empty table. A factory reset refuses before backup or deletion while any row exists (`protected-collection-attempt-history`), because a reset restarts identities while sessions survive. Validation only: no rows are generated, so a backup replay passes. Reserved on #408 before use; `0067` belongs to the nonfinancial appointment index (#417). Neither this listing nor CI authorizes a production deploy.
+
+### 0069_unpaid_currency_transitions.sql
+
+Currency correction of an **unpaid** invoice lineage in any of the six YER/SAR/USD directions, through the existing correction path and the existing 0063 transition document. A direction other than YER → SAR is accepted only while no receipt has ever referenced the lineage (row lock on the lineage invoices, then a receipt check), and never carries receipt events; a second currency change on a lineage stays refused. Target amounts are the replacement's explicit lines — never an exchange rate. Validation only, so a backup replay passes (proved by a SAR → USD restore round trip). This replaces the #392 candidate design, whose claim trigger issued the target invoice on INSERT and made any database holding one such correction unrestorable. Neither this listing nor CI authorizes a production deploy.

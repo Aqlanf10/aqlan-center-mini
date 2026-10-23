@@ -80,6 +80,7 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/finance" },
     { path: "/api/shifts", methods: ["GET", "POST", "PATCH"] },
     { path: "/api/payments", methods: ["GET", "POST"] },
+    { path: "/api/payments/attempts/retire", methods: ["POST"] },
     { path: "/api/invoices" },
     { path: "/api/invoices/[id]" },
     { path: "/api/expenses", methods: ["GET", "POST"] },
@@ -153,6 +154,7 @@ const ASSISTANT_RULES: Rule[] = [
   { path: "/api/visits" },
   { path: "/api/visits/readiness" },
   { path: "/api/visits/[id]" },
+  { path: "/api/visits/[id]/financial-context", methods: ["GET", "HEAD"] },
   { path: "/api/visits/[id]/clinical", methods: ["GET", "HEAD", "POST"] },
   { path: "/api/patients/[id]" },
   { path: "/api/patients/[id]/workflow" },
@@ -183,7 +185,7 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
   if (!access.viewPatientLedger && matches("/api/patients/[id]/treatment-financial-context", pathname)) return false;
   if (role === "cashier") {
     if (pathname === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
-    if (pathname === "/api/payments" && verb === "POST" && !access.collectPayments) return false;
+    if ((pathname === "/api/payments" || pathname === "/api/payments/attempts/retire") && verb === "POST" && !access.collectPayments) return false;
     if ((pathname === "/api/expenses" || pathname === "/api/expenses/quote"
       || /^\/api\/expenses\/\d+\/attachments$/.test(pathname)) && verb === "POST" && !access.createExpenses) return false;
     if ((!access.viewPatientLedger) && (/^\/api\/patients\/\d+\/ledger$/.test(pathname)

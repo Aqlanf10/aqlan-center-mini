@@ -1,3 +1,6 @@
+import { readVisitFinancialContexts } from "./visit-financial-context-db";
+import { VISIT_SOURCE_SUMMARY, type VisitFinancialContext } from "./visit-financial-context";
+import { UNVERIFIED_VISIT_INVOICE_LABEL } from "./visit-financial-presentation";
 import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
@@ -232,6 +235,8 @@ export interface ReportVisit {
   chair: number | null;
   /** أول زيارة مسجّلة لهذا المريض (مراجعٌ جديد). */
   firstVisit: boolean;
+  /** Recorded clinical work, independent of invoicing or payment. */
+  procedures?: { serviceId: number; description: string; category: string | null }[];
 }
 
 /**
@@ -261,7 +266,7 @@ interface MovementPlan {
 }
 
 interface PatientMovement {
-  currencyCorrections?:{invoiceId:number;invoiceNumber:string;issuedDate:string;date:string;minor:number}[];
+  currencyCorrections?:{invoiceId:number;invoiceNumber:string;issuedDate:string;date:string;minor:number;currency:Currency}[];
   patientId: number; patientNumber: string; name: string; phone: string | null;
   createdDate: string | null; lastVisitDate: string | null;
   status: keyof typeof PATIENT_STATUS_LABEL;
@@ -585,12 +590,12 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
     }
   }
 
-  const {rows:currencyCorrections}=await pool.query<{patient_id:number;invoice_id:number;invoice_number:string;issued_date:string;date:string;minor:string}>(`
-    SELECT d.patient_id,i.id AS invoice_id,i.invoice_number,(i.created_at AT TIME ZONE $1)::date::text AS issued_date,
+  const {rows:currencyCorrections}=await pool.query<{patient_id:number;invoice_id:number;invoice_number:string;issued_date:string;date:string;minor:string;currency:Currency}>(`
+    SELECT d.patient_id,i.id AS invoice_id,i.invoice_number,(i.created_at AT TIME ZONE $1)::date::text AS issued_date,d.source_currency AS currency,
       (d.created_at AT TIME ZONE $1)::date::text AS date,(i.total_minor-i.discount_minor)::text AS minor
     FROM invoice_settlement_reclassifications d JOIN invoice_corrections c ON c.id=d.correction_id JOIN invoices i ON i.id=c.original_invoice_id
     WHERE d.patient_id=ANY($2::int[]) AND (d.created_at AT TIME ZONE $1)::date<=$3::date`,[CLINIC_TIME_ZONE,ids,opts.asOf??clinicTodayISO()]);
-  for(const row of currencyCorrections){const patient=byId.get(row.patient_id);if(patient)(patient.currencyCorrections??=[]).push({invoiceId:row.invoice_id,invoiceNumber:row.invoice_number,issuedDate:row.issued_date,date:row.date,minor:num(row.minor)});}
+  for(const row of currencyCorrections){const patient=byId.get(row.patient_id);if(patient)(patient.currencyCorrections??=[]).push({invoiceId:row.invoice_id,invoiceNumber:row.invoice_number,issuedDate:row.issued_date,date:row.date,minor:num(row.minor),currency:row.currency});}
 
   // Explicit approved sources affect current reference progress only, never add
   // a second ledger principal. Opening history is already net of prior cash.
@@ -643,7 +648,7 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
  * العملة الأساسية وحده. لا يجمع الرصيد بين الدلاء أبدًا.
  */
 export interface CurrencyAwareMovement {
-  currencyCorrections?:{invoiceId:number;issuedDate:string;date:string;minor:number}[];
+  currencyCorrections?:{invoiceId:number;issuedDate:string;date:string;minor:number;currency:Currency}[];
   /** (P1-5ب) الرصيد الافتتاحي بدلو عملته. */
   openings: OpeningsByCurrency;
   invoices: { date: string; netMinor: number; currency: Currency }[];
@@ -842,7 +847,8 @@ export function balancesByCurrencyAt(m: CurrencyAwareMovement, date: string): Re
       balances[prior?payment.allocation!.sourceCurrency:payment.settlementCurrency]-=(payment.kind==="refund"?-1:1)*(prior?payment.allocation!.sourceMinor:payment.settlementMinor);
     }
   }
-  for(const correction of m.currencyCorrections??[])if(correction.issuedDate<=date&&date<correction.date)balances.YER+=correction.minor;
+  // The original invoice stays owed in its own currency until the dated correction (0063/0069).
+  for(const correction of m.currencyCorrections??[])if(correction.issuedDate<=date&&date<correction.date)balances[correction.currency]+=correction.minor;
   return balances;
 }
 
@@ -871,8 +877,8 @@ export function oldestUnpaidByCurrency(
         debts.push({ date: invoice.date, amount: invoice.netMinor });
       }
     }
-    if(currency==="YER")for(const correction of m.currencyCorrections??[]){
-      if(correction.issuedDate<=asOf&&asOf<correction.date&&correction.minor>0)debts.push({date:correction.issuedDate,amount:correction.minor});
+    for(const correction of m.currencyCorrections??[]){
+      if(correction.currency===currency&&correction.issuedDate<=asOf&&asOf<correction.date&&correction.minor>0)debts.push({date:correction.issuedDate,amount:correction.minor});
     }
     debts.sort((a, b) => (a.date < b.date ? -1 : 1));
 
@@ -1035,6 +1041,7 @@ interface ReportContext {
   movements: PatientMovement[];
   /** (تقارير R1) سجل الزيارات حتى نهاية المدى — مصدر أعداد الزيارات وتقريرها. */
   visits: ReportVisit[];
+  visitSources?: Map<number, VisitFinancialContext>;
   /** (P0-1) مخرجات محرّك العمولات نفسه للمدى — لتقرير الطبيب وحده. */
   commissionRows?: CommissionRow[];
   /** (RPT-SPEC) الإجراءات وتكاليف المختبر ونسب المواد — للتقرير حسب التخصص وحده. */
@@ -1140,12 +1147,17 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
     phone: string | null; date: string; arrived_at: Date; called_at: Date | null; seated_at: Date | null;
     finished_at: Date | null; status: string; doctor_id: number | null; invoice_id: number | null;
     appointment_id: number | null; chair: number | null; first_visit: boolean;
+    procedures: NonNullable<ReportVisit["procedures"]>;
   }>(
     `SELECT v.id, v.patient_id, COALESCE(p.full_name, v.patient_name) AS patient_name,
             p.patient_number, COALESCE(p.phone, v.patient_phone) AS phone,
             (v.arrived_at AT TIME ZONE $1)::date::text AS date,
             v.arrived_at, v.called_at, v.seated_at, v.finished_at, v.status, v.doctor_id,
-            v.invoice_id, v.appointment_id, v.chair,
+            direct_invoice.id AS invoice_id, v.appointment_id, v.chair,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object(
+              'serviceId', vp.service_id, 'description', s.name, 'category', s.category) ORDER BY vp.id)
+              FROM visit_procedures vp JOIN services s ON s.id = vp.service_id
+              WHERE vp.visit_id = v.id), '[]'::jsonb) AS procedures,
             (v.patient_id IS NOT NULL AND NOT EXISTS (
                SELECT 1 FROM visits earlier
                 WHERE earlier.patient_id = v.patient_id
@@ -1153,6 +1165,8 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
             )) AS first_visit
        FROM visits v
        LEFT JOIN patients p ON p.id = v.patient_id
+       LEFT JOIN invoices direct_invoice ON direct_invoice.id = v.invoice_id
+         AND direct_invoice.patient_id = v.patient_id AND direct_invoice.status <> 'cancelled'
       WHERE (v.arrived_at AT TIME ZONE $1)::date <= $2::date
         AND ($3::int IS NULL OR v.patient_id = $3::int)
       ORDER BY v.arrived_at, v.id`,
@@ -1175,6 +1189,7 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
     appointmentId: row.appointment_id,
     chair: row.chair,
     firstVisit: row.first_visit,
+    procedures: row.procedures,
   }));
 }
 
@@ -1207,6 +1222,12 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   }
   if (report === "specialty") ctx.specialty = await loadSpecialtyExtras(filters);
 
+  if (report === "visits") {
+    // Only source evidence shares this snapshot; existing report context was loaded above.
+    ctx.visitSources = await withFinancialReadSnapshot(getPool(), runner =>
+      readVisitFinancialContexts(runner,visitsInRange(ctx,filters.from,filters.to).map(visit=>({visitId:visit.id,expectedPatientId:visit.patientId}))),
+      usesSharedLocalDatabaseConnection());
+  }
   switch (report) {
     case "daily": return dailyReport(ctx);
     case "monthly": return monthlyReport(ctx);
@@ -1319,11 +1340,15 @@ function patientHasDoctor(m: PatientMovement, doctorId: number): boolean {
     || m.visitDoctorIds.includes(doctorId);
 }
 
-/** (P-01/D-1) حالة المديونية داخل دلوٍ بعينه — لا يطفئ رصيدُ عملةٍ حالةَ أخرى. */
+/** One source precedence for visit display and filters; no patient-history inference. */
+function visitReportWork(visit: ReportVisit, invoice: MovementInvoice | undefined) {
+  return visit.procedures?.length ? visit.procedures : invoice?.lines ?? [];
+}
+
 /**
  * (تقارير R1) زيارات السجل داخل مدى وفلاتر التقرير. الطبيب بطبيب الزيارة نفسها لا
- * بعلاقة المريض التاريخية؛ والتخصص وحالة المريض بفلاتر المريض كما في بقية التقارير؛
- * والخدمة ببنود فاتورة الزيارة.
+ * بعلاقة المريض التاريخية؛ وحالة المريض بفلتر المريض كما في بقية التقارير؛
+ * والتخصص والخدمة بإجراءات الزيارة المسجلة، أو بنود فاتورتها عند غيابها.
  */
 function visitsInRange(ctx: ReportContext, from: string, to: string): ReportVisit[] {
   const { filters } = ctx;
@@ -1334,12 +1359,11 @@ function visitsInRange(ctx: ReportContext, from: string, to: string): ReportVisi
     if (visit.date < from || visit.date > to) return false;
     if (filters.doctorId && visit.doctorId !== filters.doctorId) return false;
     const patient = visit.patientId !== null ? byPatient.get(visit.patientId) : undefined;
-    if ((filters.specialty || statusFiltered) && !patient) return false;
-    if (filters.specialty && patient && !patientHasSpecialty(patient, filters.specialty)) return false;
-    if (filters.serviceId) {
-      const invoice = visit.invoiceId !== null ? invoiceById.get(visit.invoiceId) : undefined;
-      if (!invoice || !invoice.lines.some((line) => line.serviceId === filters.serviceId)) return false;
-    }
+    if (statusFiltered && !patient) return false;
+    const invoice = visit.invoiceId !== null ? invoiceById.get(visit.invoiceId) : undefined;
+    const work = visitReportWork(visit, invoice);
+    if (filters.specialty && !work.some((line) => line.category === filters.specialty)) return false;
+    if (filters.serviceId && !work.some((line) => line.serviceId === filters.serviceId)) return false;
     return true;
   });
 }
@@ -3186,7 +3210,8 @@ function visitsReport(ctx: ReportContext): ReportResult {
         : paid >= invoice.netMinor ? "مسدَّدة"
           : paid > 0 ? `جزئي (${formatMoney(paid, invoice.currency)})` : "غير محصّلة";
     }
-    const categories = invoice ? [...new Set(invoice.lines.map((line) => line.category).filter(Boolean))] as string[] : [];
+    const work = visitReportWork(visit, invoice);
+    const categories = [...new Set(work.map((line) => line.category).filter(Boolean))] as string[];
 
     rows.push({
       patientId: visit.patientId,
@@ -3205,8 +3230,9 @@ function visitsReport(ctx: ReportContext): ReportResult {
       waitMinutes: waitMinutes ?? "—",
       sessionMinutes: sessionMinutes ?? "—",
       statusLabel: VISIT_STATUS_LABEL[visit.status] ?? visit.status,
-      services: invoice && invoice.lines.length ? invoice.lines.map((line) => line.description).join("، ") : "—",
-      invoiceText: invoice ? formatMoney(invoice.netMinor, invoice.currency) : "بلا فاتورة",
+      services: work.length ? work.map((line) => line.description).join("، ") : "—",
+      invoiceText: invoice ? formatMoney(invoice.netMinor, invoice.currency) : UNVERIFIED_VISIT_INVOICE_LABEL,
+      workSource: VISIT_SOURCE_SUMMARY[ctx.visitSources?.get(visit.id)?.summary ?? "unresolved"],
       collection,
     });
   }
@@ -3224,8 +3250,8 @@ function visitsReport(ctx: ReportContext): ReportResult {
       countKpi("visitedPatients", "المرضى المراجعون", new Set(visits.map((visit) => visit.patientId ?? -visit.id)).size),
       countKpi("firstVisits", "مراجعون جدد", firstVisits, "good"),
       countKpi("completed", "زيارات منتهية", completed),
-      countKpi("invoiced", "زيارات مفوترة", invoiced),
-      countKpi("notInvoiced", "زيارات بلا فاتورة", visits.length - invoiced, visits.length - invoiced > 0 ? "warn" : "calm"),
+      countKpi("invoiced", "زيارات بفاتورة مباشرة", invoiced),
+      countKpi("notInvoiced", "زيارات دون فاتورة مباشرة مثبتة", visits.length - invoiced, visits.length - invoiced > 0 ? "warn" : "calm"),
       { key: "avgWait", label: "متوسط الانتظار (دقيقة)", text: waitCount ? String(Math.round(waitTotal / waitCount)) : "—" },
       { key: "avgSession", label: "متوسط الجلسة (دقيقة)", text: sessionCount ? String(Math.round(sessionTotal / sessionCount)) : "—" },
     ],
@@ -3246,6 +3272,7 @@ function visitsReport(ctx: ReportContext): ReportResult {
       { key: "sessionMinutes", label: "الجلسة (د)" },
       { key: "statusLabel", label: "الحالة" },
       { key: "services", label: "الخدمات" },
+      { key: "workSource", label: "مصادر العمل — تحقق حالي" },
       { key: "invoiceText", label: "الفاتورة" },
       { key: "collection", label: "التحصيل" },
     ],
@@ -3253,7 +3280,10 @@ function visitsReport(ctx: ReportContext): ReportResult {
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
       "الطبيب طبيب الزيارة نفسها؛ و«مراجع جديد» أول زيارةٍ مسجّلة للمريض في السجل كله.",
-      "التحصيل: ما سُدّد من فاتورة الزيارة بعملتها.",
+      "الخدمات من إجراءات الزيارة المسجلة؛ عند غيابها تُعرض بنود الفاتورة المباشرة إن وجدت.",
+      "مصادر العمل تحقق حالي للروابط المسجلة، لا حالة السداد ولا رصيدًا موزعًا على الزيارة. التفاصيل في صفحة الزيارة؛ المصادر غير المحسومة تبقى للمراجعة.",
+      "غياب فاتورة مباشرة لا يثبت دينًا أو مجانية أو تغطية باتفاق سابق؛ يلزم التحقق من المصدر المالي للعمل.",
+      "التحصيل: ما سُدّد من فاتورة الزيارة المباشرة بعملتها، وليس حالة سداد تغطية سابقة.",
     ],
   };
 }
@@ -4212,8 +4242,8 @@ export function patientStatementReport(ctx: ReportContext): ReportResult {
     });
   }
   for(const correction of patient.currencyCorrections??[]){
-    events.push({date:correction.issuedDate,description:`الفاتورة الأصلية ${correction.invoiceNumber}`,currency:"YER",debit:correction.minor,credit:0});
-    events.push({date:correction.date,description:`إبطال عملة الفاتورة ${correction.invoiceNumber}`,currency:"YER",debit:0,credit:correction.minor});
+    events.push({date:correction.issuedDate,description:`الفاتورة الأصلية ${correction.invoiceNumber}`,currency:correction.currency,debit:correction.minor,credit:0});
+    events.push({date:correction.date,description:`إبطال عملة الفاتورة ${correction.invoiceNumber}`,currency:correction.currency,debit:0,credit:correction.minor});
   }
   for (const payment of payments) {
     if(payment.allocation){

@@ -1,0 +1,7 @@
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Ubuntu 18.6-1.pgdg24.04+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/print-statement-snapshot.test.ts (3 tests | 1 failed) 1143ms
+     × a payment committed between the reads never splits receipts and balances from agreement progress 94ms
+AssertionError: expected '<div class="sheet sheet-a4 statement-…' not to contain '1,270.00 ر.س'
+ ❯ __tests__/postgres/print-statement-snapshot.test.ts:114:24
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
