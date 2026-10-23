@@ -206,3 +206,17 @@ export function authedMutation(
     redirect: "manual",
   });
 }
+
+/**
+ * The operator's answer to the advisory similar-receipt review, for tests whose subject is NOT that
+ * review (built-app suites share seeded patients, so an earlier file's equal receipt can trigger it).
+ * Resends the SAME request and key with exactly the receipts the server reported; it never skips the
+ * review, and returns any other response unchanged. The review itself is tested in similar-collection-*.
+ */
+export async function confirmingSimilarCollection(send: (headers: Record<string, string>) => Promise<Response>): Promise<Response> {
+  const first = await send({});
+  if (first.status !== 409) return first;
+  const body = await first.clone().json().catch(() => null) as { reason?: string; receipts?: { id: number }[] } | null;
+  if (body?.reason !== "similar_collection_review_required" || !Array.isArray(body.receipts)) return first;
+  return send({ "x-collection-similarity-review": body.receipts.length ? `ids:${body.receipts.map((receipt) => receipt.id).join(",")}` : "none" });
+}

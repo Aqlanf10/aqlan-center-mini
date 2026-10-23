@@ -13,6 +13,14 @@ it("accepts existing responses and exact reason codes without enabling currency 
     expect(readInvoiceRevisionView(value,17,12)?.currencyCorrection).toMatchObject({available:false,reasonCodes:[code]});
   }
 });
+it("a pre-0069 response offers only its single target, with the top-level amounts",()=>{
+  const value=fixture();Object.assign(value.currencyCorrection,{available:true,settledMinor:300,accountDueMinor:2200});
+  expect(readInvoiceRevisionView(value,17,12)?.currencyCorrection).toMatchObject({available:true,targets:["SAR"],
+    options:[{currency:"SAR",settledMinor:300,accountDueMinor:2200}]});
+  expect(readInvoiceRevisionView(fixture(),17,12)?.currencyCorrection).toMatchObject({available:false,targets:[],options:[]});
+  const half=fixture();Object.assign(half.currencyCorrection,{targets:["SAR"]});
+  expect(readInvoiceRevisionView(half,17,12)).toBeNull();
+});
 it.each(["UNKNOWN",null,17,{},["UNKNOWN"],[17],["__proto__"]])("rejects malformed scope diagnostics %j",reasonCodes=>{
   const value=fixture();Object.assign(value.currencyCorrection,{reasonCodes});
   expect(readInvoiceRevisionView(value,17,12)).toBeNull();

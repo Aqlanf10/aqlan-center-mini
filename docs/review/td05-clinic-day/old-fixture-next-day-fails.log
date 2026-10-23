@@ -1,0 +1,11 @@
+ ❯ __tests__/security-http/td05-currency-safety-2.test.ts (8 tests | 1 failed) 37946ms
+     × التوقيع ⇒ السابق باليمني سطره، واليوم بالدولار سطره، ولا إجمالي عبر العملتين 31105ms
+ FAIL  __tests__/security-http/td05-currency-safety-2.test.ts > المراجعة الثانية ٦: سابق يمني + اليوم دولاري — عملتان منفصلتان لا مجموع واحد > التوقيع ⇒ السابق باليمني سطره، واليوم بالدولار سطره، ولا إجمالي عبر العملتين
+AssertionError: expected +0 to be 1 // Object.is equality
+ ❯ exactMoney __tests__/security-http/td05-currency-safety-2.test.ts:165:61
+ ❯ __tests__/security-http/td05-currency-safety-2.test.ts:302:11
+ ❯ exactMoney __tests__/security-http/td05-currency-safety-2.test.ts:165:3
+ ❯ __tests__/security-http/td05-currency-safety-2.test.ts:302:5
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 passed (8)
+   Duration  44.17s (transform 29ms, setup 0ms, import 585ms, tests 37.95s, environment 0ms)

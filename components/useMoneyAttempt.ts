@@ -2,6 +2,7 @@
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { moneyAttempts, type MoneyRequest } from "@/lib/money-attempt";
+import type { SimilarCollectionReview } from "@/lib/similar-collection";
 import { useSession } from "./SessionProvider";
 import {useDurableMoneyAttempt,type MoneyDurableContext} from "./useDurableMoneyAttempt";
 
@@ -16,11 +17,14 @@ export function useMoneyAttempt(owner: string, visible = true, viewKey = owner, 
     lifetime.current = token.visible ? token : null;
     return () => { lifetime.current = null; };
   }, [token]);
-  const run = async (request?: MoneyRequest) => {
+  const run = async (request?: MoneyRequest, review?: SimilarCollectionReview) => {
     if (!session || lifetime.current !== token) return null;
-    const result = await moneyAttempts.run(scope, request);
+    const result = await moneyAttempts.run(scope, request, review, session.username, () => lifetime.current === token);
     return token === lifetime.current ? result : null;
   };
   const durable=useDurableMoneyAttempt(owner,durableContext??null,visible,viewKey);
-  return durableContext?durable:{ attempt, run, consume: (confirmed: NonNullable<typeof attempt>) => moneyAttempts.consume(scope, confirmed),ready:true,error:null };
+  return durableContext?durable:{ attempt, run, consume: (confirmed: NonNullable<typeof attempt>) => moneyAttempts.consume(scope, confirmed),
+    dismiss: async () => moneyAttempts.dismiss(scope),
+    reconcile: async () => { if (!session || lifetime.current !== token) return null; const result = await moneyAttempts.reconcile(scope, () => lifetime.current === token); return token === lifetime.current ? result : null; },
+    ready:true,error:null };
 }

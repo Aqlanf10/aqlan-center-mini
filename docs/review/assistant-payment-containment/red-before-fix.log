@@ -1,0 +1,303 @@
+ RUN  v4.1.12 /tmp/claude-0/acm
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Ubuntu 18.6-1.pgdg24.04+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts (12 tests | 9 failed) 1163ms
+     × the action itself refuses (real DB and demo mode) and writes nothing 74ms
+     × normal dispatch through the local action engine issues no confirmation and writes nothing 45ms
+     × a fresh request for record_patient_payment gets no signed offer 34ms
+     × a fresh request for record_payment gets no signed offer 37ms
+     × a fresh request for receive_payment gets no signed offer 33ms
+     × a fresh request for record_receipt gets no signed offer 32ms
+     × a previously issued valid token refuses, is not consumed, and its replay refuses the same way 43ms
+     × POST /api/ai/chat answers the payment command without an offer (this environment's demo-mode short-circuit included) 42ms
+     × POST /api/ai/confirmation with a previously issued token refuses without consuming it or touching money 33ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > record_patient_payment execution is contained > the action itself refuses (real DB and demo mode) and writes nothing
+AssertionError: expected true to be false // Object.is equality
+- Expected
++ Received
+- false
++ true
+ ❯ expectContained __tests__/postgres/assistant-payment-containment.test.ts:79:26
+     77|
+     78| function expectContained(result: { success: boolean; textSummary: stri…
+     79|   expect(result.success).toBe(false);
+       |                          ^
+     80|   expect(result.confirmation).toBeUndefined();
+     81|   expect(result.requiresConfirmation).not.toBe(true);
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:91:7
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > record_patient_payment execution is contained > normal dispatch through the local action engine issues no confirmation and writes nothing
+AssertionError: expected { …(7) } to be undefined
+- Expected:
+undefined
++ Received:
+{
+  "description": "لن يُنفَّذ هذا الإجراء إلا بعد تأكيدك الصريح. تأكد من صحة البيانات أعلاه — المريض والقيم الحساسة — ثم اضغط «تأكيد التنفيذ».",
+  "expiresAt": 1792724889474,
+  "fields": [
+    {
+      "label": "المريض",
+      "sensitive": true,
+      "value": "سالم الاصطناعي للاحتواء (ملف #1)",
+    },
+    {
+      "label": "المبلغ",
+      "sensitive": true,
+      "value": "5000 ريال يمني",
+    },
+    {
+      "label": "طريقة القبض",
+      "sensitive": true,
+      "value": "نقدًا بالصندوق",
+    },
+  ],
+  "patientLabel": "سالم الاصطناعي للاحتواء",
+  "title": "تأكيد: تسجيل سند قبض",
+  "token": "eyJ2IjoxLCJqdGkiOiIxMzQ1NDAxMC0yMGUxLTQ0Y2MtYWJhOC1hOTFhMzk2MzkxM2EiLCJ1c2VySWQiOjEsInVzZXJuYW1lIjoiY29udGFpbm1lbnQtYWRtaW4iLCJ0b29sIjoicmVjb3JkX3BhdGllbnRfcGF5bWVudCIsInBhcmFtcyI6eyJwYXRpZW50TmFtZSI6Itiz2KfZhNmFINin2YTYp9i12LfZhtin2LnZiiDZhNmE2KfYrdiq2YjYp9ihIiwiYW1vdW50Ijo1MDAwLCJjdXJyZW5jeSI6IllFUiIsIm1ldGhvZCI6ImNhc2giLCJwYXRpZW50SWQiOjF9LCJwYXRpZW50SWQiOjEsImlhdCI6MTc5MjcyNDI4OTQ3NCwiZXhwIjoxNzkyNzI0ODg5NDc0fQ.vxdKnGStrVFtinmR_hF0Wc4zZeXh9DHNhpD9wDUU-KM",
+  "tool": "record_patient_payment",
+}
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:102:35
+    100|     const response = await processAssistantQuery(`سجل دفعة 5000 ريال ل…
+    101|     expect(response.intent).toBe("action_record_payment");
+    102|     expect(response.confirmation).toBeUndefined();
+       |                                   ^
+    103|     expect(ctx.pendingConfirmation).toBeUndefined();
+    104|     expect(response.answer).toMatch(CONTAINED);
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > record_patient_payment execution is contained > a fresh request for record_patient_payment gets no signed offer
+AssertionError: expected { …(7) } to be undefined
+- Expected:
+undefined
++ Received:
+{
+  "description": "لن يُنفَّذ هذا الإجراء إلا بعد تأكيدك الصريح. تأكد من صحة البيانات أعلاه — المريض والقيم الحساسة — ثم اضغط «تأكيد التنفيذ».",
+  "expiresAt": 1792724889510,
+  "fields": [
+    {
+      "label": "المريض",
+      "sensitive": true,
+      "value": "سالم الاصطناعي للاحتواء (ملف #1)",
+    },
+    {
+      "label": "المبلغ",
+      "sensitive": true,
+      "value": "5000 ريال يمني",
+    },
+    {
+      "label": "طريقة القبض",
+      "sensitive": true,
+      "value": "نقدًا بالصندوق",
+    },
+    {
+      "label": "الفاتورة",
+      "value": "#1",
+    },
+  ],
+  "patientLabel": "سالم الاصطناعي للاحتواء",
+  "title": "تأكيد: تسجيل سند قبض",
+  "token": "eyJ2IjoxLCJqdGkiOiI3Y2EzY2VhYy02NzNjLTRkYTQtYTJiNy1mOTg4ZTAxMDkxZGEiLCJ1c2VySWQiOjEsInVzZXJuYW1lIjoiY29udGFpbm1lbnQtYWRtaW4iLCJ0b29sIjoicmVjb3JkX3BhdGllbnRfcGF5bWVudCIsInBhcmFtcyI6eyJwYXRpZW50SWQiOjEsImludm9pY2VJZCI6MSwiYW1vdW50IjoiNTAwMCIsImN1cnJlbmN5IjoiWUVSIiwibWV0aG9kIjoiY2FzaCIsInBhdGllbnROYW1lIjoi2LPYp9mE2YUg2KfZhNin2LXYt9mG2KfYudmKINmE2YTYp9it2KrZiNin2KEifSwicGF0aWVudElkIjoxLCJpYXQiOjE3OTI3MjQyODk1MTAsImV4cCI6MTc5MjcyNDg4OTUxMH0.YPHYXNuRvFL1H1WZcsIBcWdn3vKCCJbXS6pJX8U2Lrw",
+  "tool": "record_patient_payment",
+}
+ ❯ expectContained __tests__/postgres/assistant-payment-containment.test.ts:80:31
+     78| function expectContained(result: { success: boolean; textSummary: stri…
+     79|   expect(result.success).toBe(false);
+     80|   expect(result.confirmation).toBeUndefined();
+       |                               ^
+     81|   expect(result.requiresConfirmation).not.toBe(true);
+     82|   expect(result.textSummary).toMatch(CONTAINED);
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:114:7
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > record_patient_payment execution is contained > a fresh request for record_payment gets no signed offer
+AssertionError: expected { …(7) } to be undefined
+- Expected:
+undefined
++ Received:
+{
+  "description": "لن يُنفَّذ هذا الإجراء إلا بعد تأكيدك الصريح. تأكد من صحة البيانات أعلاه — المريض والقيم الحساسة — ثم اضغط «تأكيد التنفيذ».",
+  "expiresAt": 1792724889547,
+  "fields": [
+    {
+      "label": "المريض",
+      "sensitive": true,
+      "value": "سالم الاصطناعي للاحتواء (ملف #1)",
+    },
+    {
+      "label": "المبلغ",
+      "sensitive": true,
+      "value": "5000 ريال يمني",
+    },
+    {
+      "label": "طريقة القبض",
+      "sensitive": true,
+      "value": "نقدًا بالصندوق",
+    },
+    {
+      "label": "الفاتورة",
+      "value": "#1",
+    },
+  ],
+  "patientLabel": "سالم الاصطناعي للاحتواء",
+  "title": "تأكيد: تسجيل سند قبض",
+  "token": "eyJ2IjoxLCJqdGkiOiJhODdiZDNjNS0xODNjLTQ2NzMtYWYxOS1lZDI1ZWNjZGMzYWIiLCJ1c2VySWQiOjEsInVzZXJuYW1lIjoiY29udGFpbm1lbnQtYWRtaW4iLCJ0b29sIjoicmVjb3JkX3BhdGllbnRfcGF5bWVudCIsInBhcmFtcyI6eyJwYXRpZW50SWQiOjEsImludm9pY2VJZCI6MSwiYW1vdW50IjoiNTAwMCIsImN1cnJlbmN5IjoiWUVSIiwibWV0aG9kIjoiY2FzaCIsInBhdGllbnROYW1lIjoi2LPYp9mE2YUg2KfZhNin2LXYt9mG2KfYudmKINmE2YTYp9it2KrZiNin2KEifSwicGF0aWVudElkIjoxLCJpYXQiOjE3OTI3MjQyODk1NDcsImV4cCI6MTc5MjcyNDg4OTU0N30.2slOCGczUhSBHnSecVZVNKDWSPrJj6xEcykl2PdgpLE",
+  "tool": "record_patient_payment",
+}
+ ❯ expectContained __tests__/postgres/assistant-payment-containment.test.ts:80:31
+     78| function expectContained(result: { success: boolean; textSummary: stri…
+     79|   expect(result.success).toBe(false);
+     80|   expect(result.confirmation).toBeUndefined();
+       |                               ^
+     81|   expect(result.requiresConfirmation).not.toBe(true);
+     82|   expect(result.textSummary).toMatch(CONTAINED);
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:114:7
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > record_patient_payment execution is contained > a fresh request for receive_payment gets no signed offer
+AssertionError: expected { …(7) } to be undefined
+- Expected:
+undefined
++ Received:
+{
+  "description": "لن يُنفَّذ هذا الإجراء إلا بعد تأكيدك الصريح. تأكد من صحة البيانات أعلاه — المريض والقيم الحساسة — ثم اضغط «تأكيد التنفيذ».",
+  "expiresAt": 1792724889580,
+  "fields": [
+    {
+      "label": "المريض",
+      "sensitive": true,
+      "value": "سالم الاصطناعي للاحتواء (ملف #1)",
+    },
+    {
+      "label": "المبلغ",
+      "sensitive": true,
+      "value": "5000 ريال يمني",
+    },
+    {
+      "label": "طريقة القبض",
+      "sensitive": true,
+      "value": "نقدًا بالصندوق",
+    },
+    {
+      "label": "الفاتورة",
+      "value": "#1",
+    },
+  ],
+  "patientLabel": "سالم الاصطناعي للاحتواء",
+  "title": "تأكيد: تسجيل سند قبض",
+  "token": "eyJ2IjoxLCJqdGkiOiJlODM1NDkzZC04MzlmLTRiNjQtYTk0OC1iODY5MWI2ZWVkNTgiLCJ1c2VySWQiOjEsInVzZXJuYW1lIjoiY29udGFpbm1lbnQtYWRtaW4iLCJ0b29sIjoicmVjb3JkX3BhdGllbnRfcGF5bWVudCIsInBhcmFtcyI6eyJwYXRpZW50SWQiOjEsImludm9pY2VJZCI6MSwiYW1vdW50IjoiNTAwMCIsImN1cnJlbmN5IjoiWUVSIiwibWV0aG9kIjoiY2FzaCIsInBhdGllbnROYW1lIjoi2LPYp9mE2YUg2KfZhNin2LXYt9mG2KfYudmKINmE2YTYp9it2KrZiNin2KEifSwicGF0aWVudElkIjoxLCJpYXQiOjE3OTI3MjQyODk1ODAsImV4cCI6MTc5MjcyNDg4OTU4MH0.jiT2cQN3T0DZjckoDjXI4bJaomAZ_caP0kgLRIUQ3hE",
+  "tool": "record_patient_payment",
+}
+ ❯ expectContained __tests__/postgres/assistant-payment-containment.test.ts:80:31
+     78| function expectContained(result: { success: boolean; textSummary: stri…
+     79|   expect(result.success).toBe(false);
+     80|   expect(result.confirmation).toBeUndefined();
+       |                               ^
+     81|   expect(result.requiresConfirmation).not.toBe(true);
+     82|   expect(result.textSummary).toMatch(CONTAINED);
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:114:7
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > record_patient_payment execution is contained > a fresh request for record_receipt gets no signed offer
+AssertionError: expected { …(7) } to be undefined
+- Expected:
+undefined
++ Received:
+{
+  "description": "لن يُنفَّذ هذا الإجراء إلا بعد تأكيدك الصريح. تأكد من صحة البيانات أعلاه — المريض والقيم الحساسة — ثم اضغط «تأكيد التنفيذ».",
+  "expiresAt": 1792724889612,
+  "fields": [
+    {
+      "label": "المريض",
+      "sensitive": true,
+      "value": "سالم الاصطناعي للاحتواء (ملف #1)",
+    },
+    {
+      "label": "المبلغ",
+      "sensitive": true,
+      "value": "5000 ريال يمني",
+    },
+    {
+      "label": "طريقة القبض",
+      "sensitive": true,
+      "value": "نقدًا بالصندوق",
+    },
+    {
+      "label": "الفاتورة",
+      "value": "#1",
+    },
+  ],
+  "patientLabel": "سالم الاصطناعي للاحتواء",
+  "title": "تأكيد: تسجيل سند قبض",
+  "token": "eyJ2IjoxLCJqdGkiOiI3MjkwMDNjOC05MDRhLTRiMTAtYjk2ZS1mYzE2MjcxZTM4MTciLCJ1c2VySWQiOjEsInVzZXJuYW1lIjoiY29udGFpbm1lbnQtYWRtaW4iLCJ0b29sIjoicmVjb3JkX3BhdGllbnRfcGF5bWVudCIsInBhcmFtcyI6eyJwYXRpZW50SWQiOjEsImludm9pY2VJZCI6MSwiYW1vdW50IjoiNTAwMCIsImN1cnJlbmN5IjoiWUVSIiwibWV0aG9kIjoiY2FzaCIsInBhdGllbnROYW1lIjoi2LPYp9mE2YUg2KfZhNin2LXYt9mG2KfYudmKINmE2YTYp9it2KrZiNin2KEifSwicGF0aWVudElkIjoxLCJpYXQiOjE3OTI3MjQyODk2MTIsImV4cCI6MTc5MjcyNDg4OTYxMn0.wiHxOhqY3kP-NsqWzunl5rynCM_7GUFfZjT3kB25m3Y",
+  "tool": "record_patient_payment",
+}
+ ❯ expectContained __tests__/postgres/assistant-payment-containment.test.ts:80:31
+     78| function expectContained(result: { success: boolean; textSummary: stri…
+     79|   expect(result.success).toBe(false);
+     80|   expect(result.confirmation).toBeUndefined();
+       |                               ^
+     81|   expect(result.requiresConfirmation).not.toBe(true);
+     82|   expect(result.textSummary).toMatch(CONTAINED);
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:114:7
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > record_patient_payment execution is contained > a previously issued valid token refuses, is not consumed, and its replay refuses the same way
+AssertionError: expected true to be false // Object.is equality
+- Expected
++ Received
+- false
++ true
+ ❯ expectContained __tests__/postgres/assistant-payment-containment.test.ts:79:26
+     77|
+     78| function expectContained(result: { success: boolean; textSummary: stri…
+     79|   expect(result.success).toBe(false);
+       |                          ^
+     80|   expect(result.confirmation).toBeUndefined();
+     81|   expect(result.requiresConfirmation).not.toBe(true);
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:125:53
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > the real assistant routes > POST /api/ai/chat answers the payment command without an offer (this environment's demo-mode short-circuit included)
+AssertionError: expected { …(7) } to be undefined
+- Expected:
+undefined
++ Received:
+{
+  "description": "لن يُنفَّذ هذا الإجراء إلا بعد تأكيدك الصريح. تأكد من صحة البيانات أعلاه — المريض والقيم الحساسة — ثم اضغط «تأكيد التنفيذ».",
+  "expiresAt": 1792724889754,
+  "fields": [
+    {
+      "label": "المريض",
+      "sensitive": true,
+      "value": "سالم الاصطناعي للاحتواء",
+    },
+    {
+      "label": "المبلغ",
+      "sensitive": true,
+      "value": "5000 ريال يمني",
+    },
+    {
+      "label": "طريقة القبض",
+      "sensitive": true,
+      "value": "نقدًا بالصندوق",
+    },
+  ],
+  "patientLabel": "سالم الاصطناعي للاحتواء",
+  "title": "تأكيد: تسجيل سند قبض",
+  "token": "eyJ2IjoxLCJqdGkiOiIwYThkNmUwOS03NjI0LTQxOTctOGU1My0zMmE2NDI3YzA4NGIiLCJ1c2VySWQiOjEsInVzZXJuYW1lIjoiY29udGFpbm1lbnQtYWRtaW4iLCJ0b29sIjoicmVjb3JkX3BhdGllbnRfcGF5bWVudCIsInBhcmFtcyI6eyJwYXRpZW50TmFtZSI6Itiz2KfZhNmFINin2YTYp9i12LfZhtin2LnZiiDZhNmE2KfYrdiq2YjYp9ihIiwiYW1vdW50Ijo1MDAwLCJjdXJyZW5jeSI6IllFUiIsIm1ldGhvZCI6ImNhc2gifSwicGF0aWVudElkIjpudWxsLCJpYXQiOjE3OTI3MjQyODk3NTQsImV4cCI6MTc5MjcyNDg4OTc1NH0.yoGV5YTdGwV_eg7qiReVA_0Id5nxNmbCSEiF4rp-X48",
+  "tool": "record_patient_payment",
+}
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:164:31
+    162|     const data = await response.json() as Record<string, unknown>;
+    163|     expect(response.status, JSON.stringify(data)).toBe(200);
+    164|     expect(data.confirmation).toBeUndefined();
+       |                               ^
+    165|     expect(String(data.answer ?? data.reply ?? "")).toMatch(CONTAINED);
+    166|     expect(await claims()).toBe(c0);
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+ FAIL  __tests__/postgres/assistant-payment-containment.test.ts > the real assistant routes > POST /api/ai/confirmation with a previously issued token refuses without consuming it or touching money
+AssertionError: {"ok":true,"reply":"💵 **[وضع تجريبي] تم تسجيل سند القبض بنجاح:**\n• **المريض:** مريض تجريبي\n• **المبلغ:** 5,000 ر.ي\n• **طريقة الدفع:** نقداً بالصندوق\n• **رقم السند:** R-DEMO-001","success":true,"textSummary":"💵 **[وضع تجريبي] تم تسجيل سند القبض بنجاح:**\n• **المريض:** مريض تجريبي\n• **المبلغ:** 5,000 ر.ي\n• **طريقة الدفع:** نقداً بالصندوق\n• **رقم السند:** R-DEMO-001","cards":[{"title":"سند القبض","value":"5,000 ر.ي","tone":"good"},{"title":"طريقة القبض","value":"نقد","tone":"info"}],"message":"💵 **[وضع تجريبي] تم تسجيل سند القبض بنجاح:**\n• **المريض:** مريض تجريبي\n• **المبلغ:** 5,000 ر.ي\n• **طريقة الدفع:** نقداً بالصندوق\n• **رقم السند:** R-DEMO-001"}: expected true to be false // Object.is equality
+- Expected
++ Received
+- false
++ true
+ ❯ __tests__/postgres/assistant-payment-containment.test.ts:177:45
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+ Test Files  1 failed (1)
+      Tests  9 failed | 3 passed (12)
+   Start at  02:58:04
+   Duration  5.26s (transform 2.72s, setup 0ms, import 3.40s, tests 1.16s, environment 0ms)

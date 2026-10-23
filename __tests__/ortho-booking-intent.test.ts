@@ -5,6 +5,9 @@ vi.mock("../lib/db", () => ({
   writeAppointmentAcrossDays: vi.fn(), writeAppointmentInDay: vi.fn(),
 }));
 vi.mock("../lib/capacity-context", () => ({ evaluateCapacity: vi.fn(), loadCapacityContext: vi.fn(), resolveService: vi.fn() }));
+// This suite isolates service admission; real doctor identity/row locking is
+// covered by the PostgreSQL appointment-doctor-bookability suite.
+vi.mock("../lib/appointment-doctor", () => ({ lockBookableAppointmentDoctor: vi.fn(), APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE: "الطبيب غير متاح للحجز." }));
 vi.mock("../lib/session", () => ({ requireSession: vi.fn() }));
 import { bookAppointment, type BookAppointmentInput } from "../lib/book-appointment";
 import { findUserByUsername, insertAppointmentOnClient, lockAppointmentServiceForBooking, writeAppointmentInDay } from "../lib/db";
@@ -12,6 +15,7 @@ import { evaluateCapacity, loadCapacityContext, resolveService } from "../lib/ca
 import { requireSession } from "../lib/session";
 import { POST } from "../app/api/appointments/route";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE } from "../lib/ortho-booking-intent";
+import { lockBookableAppointmentDoctor } from "../lib/appointment-doctor";
 import type { AppointmentService } from "../lib/appointment-services";
 const service = (): AppointmentService => ({ id: 81, code: "ORTHO_FOLLOW_UP", nameAr: "Periodic synthetic", nameEn: null,
   specialty: "orthodontics", legacyType: "follow_up", isActive: true, defaultDurationMinutes: 10,
@@ -23,6 +27,7 @@ const request = (): BookAppointmentInput => ({ patientId: 19, date: "2030-01-15"
 const actor = { username: "synthetic", role: "reception", channel: "ui" as const };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(lockBookableAppointmentDoctor).mockResolvedValue(true);
   vi.mocked(loadCapacityContext).mockResolvedValue({ chairs: 3, shifts: [{ start: "09:00", end: "20:00" }], nearCapacityPercent: 80, emergencyReserveMinutes: 0, newPatientDailyLimit: 0 });
   vi.mocked(resolveService).mockResolvedValue(service());
   vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(service());

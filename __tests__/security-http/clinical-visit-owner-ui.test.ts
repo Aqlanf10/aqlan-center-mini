@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Dialog, type Page, type Route } from "playwright";
 import { mkdir } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
+import { emptyPatientAppointmentsFixtureRead, isPatientFileFixtureRead } from "../helpers/patient-file-fixture-route";
 
 // Remote CI acceptance only. The real built patient/Today composition is used;
 // no fixture component, React hook replacement, Production URL or real patient.
@@ -142,6 +143,7 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean; holdR
       await json(route, { message: "Unexpected write blocked by synthetic owner fixture" }, 409);
       return;
     }
+    const appointmentsPage = emptyPatientAppointmentsFixtureRead(url, patientId);
     if (clinicalOwner !== undefined) {
       const read = { route, visitId: clinicalOwner };
       reads.push(read);
@@ -149,7 +151,8 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean; holdR
         || (clinicalOwner === visitB && options.holdB && reads.filter((item) => item.visitId === visitB).length === 1)
         || (clinicalOwner === visitA && options.holdRefreshA && reads.filter((item) => item.visitId === visitA).length > 1)) heldReads.push(read);
       else await json(route, snapshots.get(clinicalOwner));
-    } else if (path === patientPath) await json(route, { patient, visits: [], appointments: [] });
+    } else if (isPatientFileFixtureRead(url, patientId)) await json(route, { patient, visits: [], appointments: [] });
+    else if (appointmentsPage) await json(route, appointmentsPage);
     else if (path === `${patientPath}/workflow`) { workflowReads += 1; await json(route, workflow(activeVisit)); }
     else if (path === "/api/visits/readiness") await json(route, { visit: {
       visitId: activeVisit, status: "in_chair", chair: 1, signedAt: null, cleared: true,

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import {Calculator, FileText, Link2, Plus, Save, Trash2} from "lucide-react";
 import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, invoiceNet, isCurrency, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
+import { OpeningCorrectionPreview } from "./OpeningCorrectionPreview";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
@@ -819,7 +820,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
 
       {mode === "opening" && canAddOpening ? (
         <OpeningForm
-          base={base} busy={busy} canEdit={canEditOpening}
+          patientId={patientId} base={base} busy={busy} canEdit={canEditOpening}
           openings={ledger?.openings ?? (ledger?.opening ? [{ ...ledger.opening, currency: base }] : [])}
           onSubmit={async (body) => {
             const saved = await send(() => fetch("/api/opening-balances", {
@@ -1880,7 +1881,8 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
  * تُفتح. والتاريخ حقلٌ لأنه هو ما يُؤرّخ به القيد وعمر الدَّين: «الأول من الشهر»
  * ليس كـ«قبل سنتين» في قائمة المتأخرين.
  */
-function OpeningForm({ base, busy, canEdit, openings, onSubmit, onClear }: {
+function OpeningForm({ patientId, base, busy, canEdit, openings, onSubmit, onClear }: {
+  patientId: number;
   base: Currency;
   busy: boolean;
   /** (DAY1) المدير يعدّل ويحذف؛ غيره يضيف لعملةٍ بلا رصيد فقط. */
@@ -1951,6 +1953,7 @@ function OpeningForm({ base, busy, canEdit, openings, onSubmit, onClear }: {
           aria-label="سبب التعديل"
           className="mb-3 w-full rounded-xl border border-warning-300 bg-warning-50 px-3 py-2 text-sm outline-none focus:border-brand-blue" />
       ) : null}
+      {existing && canEdit ? <OpeningCorrectionPreview key={`${currency}:${amount}`} patientId={patientId} currency={currency} amount={amount} /> : null}
 
       <div className="flex flex-wrap gap-2">
         <button

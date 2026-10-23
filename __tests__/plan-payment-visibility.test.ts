@@ -63,6 +63,20 @@ function expectHidden(body: Record<string, unknown>, route: "generic" | "patient
   expect(raw).not.toMatch(/nextDueDate|nextDueAmountMinor|remainingMinor":14000|paidCount|2026-10-03T15/);
 }
 
+it.each([71, 72, null])("patient plans strip referral authority and project rebooking for doctor %s", async partyId => {
+  mocks.session.mockResolvedValue({ userId: 7, username: "synthetic_doctor", role: "doctor", partyId });
+  const visit = { id: 501, canRebook: true, rebookBlockedReason: null, rebookGeneration: "a".repeat(32), rebookHasReferral: true, rebookReferralReceiverId: 71 };
+  mocks.visits.mockResolvedValue([visit]);
+  const response = await get("patient");
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.plannedVisits[0].canRebook).toBe(partyId === 71);
+  expect(body.plannedVisits[0].rebookGeneration).toBe(visit.rebookGeneration);
+  expect(body.plannedVisits[0]).not.toHaveProperty("rebookHasReferral");
+  expect(body.plannedVisits[0]).not.toHaveProperty("rebookReferralReceiverId");
+  expect(visit.rebookReferralReceiverId).toBe(71);
+});
+
 for (const route of ["generic", "patient"] as const) {
   describe(`${route} raw plan response`, () => {
     it.each(["false", "true"])("per-doctor deny survives global switch %s", async (global) => {
@@ -185,4 +199,11 @@ it("revoking stored plan permission denies the next patient-file read with the s
 it("masked schedule existence is a real boolean, including a verified empty schedule", () => {
   expect(withoutPlanPayments(plan).hasInstallments).toBe(true);
   expect(withoutPlanPayments({ ...plan, installments: [] }).hasInstallments).toBe(false);
+});
+
+it("FIN-INT-4: masked approval existence is a real boolean, never the approved amounts", () => {
+  expect(withoutPlanPayments(plan).agreementApproved).toBe(false);
+  const approved = withoutPlanPayments({ ...plan, agreementApproved: true, approvedAgreement: { remainingMinor: 765432 } as never });
+  expect(approved.agreementApproved).toBe(true);
+  expect(JSON.stringify(approved)).not.toMatch(/765432|approvedAgreement/);
 });

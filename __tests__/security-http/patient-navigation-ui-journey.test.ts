@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { mkdir } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+import { isPatientFileFixtureRead } from "../helpers/patient-file-fixture-route";
 
 // Runs only against the existing built-app security harness and its isolated test database.
 // No Production URL, credentials, or patient data are accepted by this test.
@@ -79,7 +80,7 @@ describe("patient context navigation on the built application", () => {
         if (url.origin !== baseUrl || !["GET", "HEAD", "OPTIONS"].includes(request.method())) {
           unexpected.push(`${request.method()} ${url.pathname}`); await route.abort(); return;
         }
-        if (url.pathname === `/api/patients/${patientId}`) {
+        if (isPatientFileFixtureRead(url, patientId)) {
           const response = await route.fetch(); const payload = await response.json();
           expect(response.ok()).toBe(true); expect(payload.patient.id).toBe(patientId);
           payload.patient.medicalAlert = warning;
@@ -199,7 +200,7 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
         } else { unexpected.push(`${method} ${url.pathname}`); await route.abort(); }
         return;
       }
-      const patientGet = url.pathname === `/api/patients/${patientId}`;
+      const patientGet = isPatientFileFixtureRead(url, patientId);
       const readinessGet = url.pathname === "/api/visits/readiness" && url.searchParams.get("patientId") === String(patientId);
       if ((patientGet || readinessGet) && failRefresh) {
         failedGets += 1;
@@ -390,7 +391,7 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
           } else { unexpected.push(`${method} ${url.pathname}`); await route.abort(); }
           return;
         }
-        if (url.pathname === `/api/patients/${patientId}`) {
+        if (isPatientFileFixtureRead(url, patientId)) {
           const response = await route.fetch(); const payload = await response.json();
           expect(response.ok()).toBe(true);
           payload.patient.medicalAlert = long ? `[VITALS: BP=165/100] تنبيه ملف اصطناعي ${warnings[2]}` : null;

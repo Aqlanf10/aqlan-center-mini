@@ -378,3 +378,112 @@ describe.each(actions)("recall mutation refusal: $name", (action) => {
     expect(contents(render())).toContain("✓ تم التواصل مع جميع المرضى");
   });
 });
+
+// Execute the actual private RecallCard component as well as the page. Card hook
+// slots are separate from page slots; this remains a synthetic handler harness,
+// not a DOM/browser assertion. No WhatsApp URL is ever navigated to.
+function renderCard(kind: "missed" | "lapsed", overrides: Record<string, unknown> = {}) {
+  const card = find((node) => (node.props.row as { kind?: string } | undefined)?.kind === kind
+    && typeof node.props.onDone === "function");
+  const cursor = hooks.cursor;
+  hooks.cursor = kind === "missed" ? 1000 : 1100;
+  try {
+    return (card.type as (props: Record<string, unknown>) => ReactNode)({ ...card.props, ...overrides });
+  } finally {
+    hooks.cursor = cursor;
+  }
+}
+function doneButton(kind: "missed" | "lapsed") {
+  const button = elements(renderCard(kind)).find((node) => node.type === "button"
+    && contents(node).trim() === "تمت المتابعة ✓");
+  expect(button).toBeDefined();
+  return button!;
+}
+function click(node: Element) {
+  (node.props.onClick as (() => void) | undefined)?.();
+}
+
+// Unlike the broader refusal tests above, these enter through RecallCard's
+// rendered action controls, so reconnecting WhatsApp to onDone is a regression.
+describe.each(["missed", "lapsed"] as const)("explicit recall contact confirmation: %s", (kind) => {
+  it("opening a WhatsApp draft never marks done, posts, refreshes, or hides the patient", async () => {
+    const row = initialFeed[kind][0];
+    const card = find((node) => (node.props.row as { kind?: string } | undefined)?.kind === kind
+      && typeof node.props.onDone === "function");
+    const onDone = vi.fn(card.props.onDone as (row: unknown) => Promise<void>);
+    const tree = renderCard(kind, { row: { ...row, patientPhone: "770123456" }, onDone });
+    const link = elements(tree).find((node) => node.type === "a"
+      && String(node.props.href).startsWith("https://wa.me/"));
+    expect(link).toBeDefined();
+    expect(contents(link)).toBe("💬 فتح مسودة واتساب");
+    const url = new URL(String(link!.props.href));
+    expect(url.pathname).toBe("/967770123456");
+    expect(url.searchParams.get("text")).toContain(row.patientName);
+    expect(link!.props.target).toBe("_blank");
+    expect(link!.props.rel).toContain("noopener");
+    click(link!);
+    click(link!);
+    await flush();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(writes()).toHaveLength(0);
+    expect(reads()).toHaveLength(1);
+    assertOriginalRows();
+    expect(contents(tree)).toContain("فتح مسودة واتساب لا يعني إرسال الرسالة");
+    expect(contents(tree)).toContain("بعد إتمام التواصل، اضغط «تمت المتابعة» لتسجيلها");
+  });
+
+  it("only explicit completion writes once through pending command and canonical refresh", async () => {
+    const command = deferred<Response>();
+    const refresh = deferred<Response>();
+    write = () => command.promise;
+    read = () => refresh.promise;
+    const button = doneButton(kind);
+    expect(button.props.type).toBe("button");
+    click(button);
+    click(button); // Same retained handler before a render must also be locked.
+    expect(writes()).toHaveLength(1);
+    assertWrite(actions.find((action) => action.name === kind)!);
+    expect(doneButton(kind).props.disabled).toBe(true);
+    assertOriginalRows();
+    command.resolve(response(200, { ok: true }));
+    await flush();
+    expect(reads()).toHaveLength(2);
+    click(button);
+    expect(writes()).toHaveLength(1);
+    expect(doneButton(kind).props.disabled).toBe(true);
+    refresh.resolve(response(200, emptyFeed));
+    await flush();
+    expect(elements(render()).filter((node) => typeof node.props.onDone === "function")).toHaveLength(0);
+    expect(alerts()).toEqual([]);
+  });
+
+  it.each([401, 403, 409, 500])("explicit completion refused with %s keeps the patient and permits retry", async (status) => {
+    write = async () => response(status, { message: `Synthetic refusal ${status}` });
+    click(doneButton(kind));
+    await flush();
+    expect(writes()).toHaveLength(1);
+    expect(reads()).toHaveLength(1);
+    expect(alerts()).toEqual([`Synthetic refusal ${status}`]);
+    assertOriginalRows();
+    expect(doneButton(kind).props.disabled).toBe(false);
+  });
+
+  it("network failure after explicit completion retains the patient", async () => {
+    write = async () => { throw new Error("Synthetic network failure"); };
+    click(doneButton(kind));
+    await flush();
+    expect(writes()).toHaveLength(1);
+    expect(reads()).toHaveLength(1);
+    expect(alerts()).toEqual(["تعذّر الاتصال بالخادم."]);
+    assertOriginalRows();
+    expect(doneButton(kind).props.disabled).toBe(false);
+  });
+
+  it.each([null, "", "not-a-number"])("does not offer a WhatsApp launch without a usable phone (%s)", (patientPhone) => {
+    const tree = renderCard(kind, { row: { ...initialFeed[kind][0], patientPhone } });
+    expect(elements(tree).filter((node) => node.type === "a"
+      && String(node.props.href).startsWith("https://wa.me/"))).toHaveLength(0);
+    expect(contents(tree)).toContain("بلا رقم");
+    expect(writes()).toHaveLength(0);
+  });
+});

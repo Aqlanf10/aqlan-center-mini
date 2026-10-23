@@ -49,6 +49,35 @@ describe("actual lab document render privacy", () => {
     expect(source).toEqual(before);
   });
 
+  it.each([
+    ["51(Crown), 65(Pontic), 71(Abutment), 85(Crown)", [51, 65, 71, 85]],
+    ["14(Abutment), 51(Crown), 75(Pontic)", [51, 75]],
+  ])("draws selected primary teeth in both labeled arches: %s", async (toothNumbers, selected) => {
+    const source = dispatchOrder({ toothNumbers });
+    const before = structuredClone(source);
+    mocks.getLabOrderById.mockResolvedValue(source);
+    const html = await renderPage();
+    assertPrivateAbsent(html);
+    expect(html).toContain('aria-label="الأسنان اللبنية — الفك العلوي"');
+    expect(html).toContain('aria-label="الأسنان اللبنية — الفك السفلي"');
+    const cells = [...html.matchAll(/data-primary-tooth="(\d+)" data-selected="(true|false)"/g)];
+    expect(cells.map((cell) => Number(cell[1]))).toEqual([55, 54, 53, 52, 51, 61, 62, 63, 64, 65, 85, 84, 83, 82, 81, 71, 72, 73, 74, 75]);
+    expect(cells.filter((cell) => cell[2] === "true").map((cell) => Number(cell[1])).sort((a, b) => a - b)).toEqual(selected);
+    for (const code of selected) expect(html).toContain(`<strong>#${code}</strong>`);
+    expect(html).toContain("تاج");
+    expect(html).toContain("دمية جسر");
+    expect(source).toEqual(before);
+  });
+
+  it("keeps the permanent-only diagram unchanged without extra primary rows", async () => {
+    const html = await renderPage();
+    expect(html).not.toContain("data-primary-tooth");
+    for (const code of [14, 15, 16]) expect(html).toContain(`<strong>#${code}</strong>`);
+    expect(html).toContain("دعامة جسر");
+    expect(html).toContain("دمية جسر");
+    assertPrivateAbsent(html);
+  });
+
   it("renders modal preview without private fields and offers only the dedicated print page", () => {
     const html = renderToStaticMarkup(<LabPrescriptionModal order={dispatchOrder()} onClose={() => {}} />);
     assertPrivateAbsent(html);
