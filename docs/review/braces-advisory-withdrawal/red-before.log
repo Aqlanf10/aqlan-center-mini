@@ -8,3 +8,31 @@ TypeError: validateWithdrawnOfficialEvidence is not a function
 # With the change: green
  Test Files  5 passed (5)
       Tests  132 passed (132)
+
+# Follow-up (installation binding, matching withdrawal instant, runner mode/snapshot): new cases against 229a39f6 implementation: red
+     × rejects a matching-advisory result with the same advisory with a different withdrawal
+     × rejects no pre-audit installation snapshot before any official lookup
+     × requires both complete audits and independent verification before success   (snapshot taken before the first audit and handed to the verifier)
+      Tests  3 failed | 90 passed (93)
+# 229a39f6 also failed 2 existing ci-audit-runner cases (mocked proof without `mode` reached the withdrawn message); fixed by an explicit mode check.
+
+# Unchanged old tests against 229a39f6 (reproduced locally, matches hosted run 40003309562 "Unit tests"):
+     × requires both complete audits and independent verification before success
+     × can recover from two unavailable attempts once complete scoped and production evidence arrives
+      Tests  2 failed | 29 passed (31)
+
+# Explicit CLI proof contract (only active|withdrawn with required fields): new cases against the 229a39f6 CLI
+     × requires both complete audits and independent verification before success
+     × fails closed for a missing mode
+     × fails closed for an unknown mode
+     × fails closed for a non-object proof
+     × fails closed for a withdrawn proof without official evidence
+     × fails closed for a withdrawn proof without a withdrawal instant
+     × fails closed for a withdrawn proof with findings
+     × fails closed for an active proof without counts
+     × fails closed for an active proof without the advisory
+      Tests  9 failed | 31 passed (40)
+
+# With the follow-up: all braces/audit suites green (10 files)
+ Test Files  10 passed (10)
+      Tests  383 passed (383)

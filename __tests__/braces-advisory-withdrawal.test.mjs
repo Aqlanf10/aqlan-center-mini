@@ -3,8 +3,9 @@ import { cp, mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { classifyFullAudit, validateWithdrawnAudit, validateWithdrawnOfficialEvidence } from "../lib/scoped-braces-exception.mjs";
+import { classifyFullAudit, validateOfficialEvidence, validateWithdrawnAudit, validateWithdrawnOfficialEvidence } from "../lib/scoped-braces-exception.mjs";
 import { fetchOfficialJson, verifyBracesException } from "../scripts/verify-braces-exception.mjs";
+import { inspectInstalledBraces } from "../scripts/dependency-security/installed-braces.mjs";
 import { REVIEWED_OVERRIDES } from "../scripts/dependency-security/reviewed-overrides.mjs";
 import { BRACES_EXCEPTION as PIN } from "../lib/braces-exception-pins.mjs";
 
@@ -22,9 +23,10 @@ const activeFull = await load("full-audit");
 const cleanProduction = await load("production-audit");
 const activeAdvisory = await load("advisory");
 const registry = await load("registry");
-const WITHDRAWN_AT = "2026-10-23T12:00:00Z";
+const WITHDRAWN_AT = "2026-10-23T12:53:02Z";
+const UPDATED_AT = "2026-10-23T12:53:05Z";
 const NOW = Date.parse("2026-10-23T18:00:00Z");
-const withdrawnAdvisory = () => ({ ...structuredClone(activeAdvisory), withdrawn_at: WITHDRAWN_AT, updated_at: WITHDRAWN_AT });
+const withdrawnAdvisory = () => ({ ...structuredClone(activeAdvisory), withdrawn_at: WITHDRAWN_AT, updated_at: UPDATED_AT });
 /** The complete clean report npm audit now returns (same shape as the clean production fixture). */
 const cleanReport = (dependencyTotal) => {
   const report = structuredClone(cleanProduction);
@@ -45,10 +47,15 @@ describe("full-audit lifecycle classification", () => {
     ["missing counters", (() => { const r = cleanReport(); delete r.metadata.vulnerabilities.total; return run(r); })()],
     ["counters contradicting the empty graph", (() => { const r = cleanReport(); r.metadata.vulnerabilities.high = 1; r.metadata.vulnerabilities.total = 1; return run(r, 1); })()],
     ["clean report with failing status", run(cleanReport(), 1)],
+    ["a claimed zero summary over a non-empty graph", (() => { const r = cleanReport(); r.vulnerabilities.other = { ...structuredClone(activeFull.vulnerabilities.braces), name: "other", severity: "info", effects: [] }; return run(r); })()],
+    ["a moderate finding with a passing status", (() => { const r = cleanReport(); r.vulnerabilities.other = { ...structuredClone(activeFull.vulnerabilities.braces), name: "other", severity: "moderate", effects: [] }; r.metadata.vulnerabilities.moderate = 1; r.metadata.vulnerabilities.total = 1; return run(r, 0); })()],
+    ["a partial graph node", (() => { const r = cleanReport(); r.vulnerabilities.other = { name: "other", severity: "low" }; r.metadata.vulnerabilities.low = 1; r.metadata.vulnerabilities.total = 1; return run(r); })()],
+    ["missing graph with zero counters", (() => { const r = cleanReport(); delete r.vulnerabilities; return run(r); })()],
+    ["missing dependency counters", (() => { const r = cleanReport(); delete r.metadata.dependencies; return run(r); })()],
     ["spawn error", { ...run(cleanReport()), error: new Error("ECONNRESET") }],
     ["signal", { ...run(cleanReport()), signal: "SIGTERM" }],
   ])("rejects %s", (_label, input) => { expect(() => classifyFullAudit(input)).toThrow(/BRACES_EXCEPTION_REJECTED/); });
-  it.each([["low", 0], ["moderate", 1], ["high", 1], ["critical", 1]])("rejects an unexpected %s finding on any package", (severity, code) => {
+  it.each([["info", 0], ["low", 0], ["moderate", 1], ["high", 1], ["critical", 1]])("rejects an unexpected %s finding on any package", (severity, code) => {
     const report = cleanReport();
     report.vulnerabilities.other = { ...structuredClone(activeFull.vulnerabilities.braces), name: "other", severity, effects: [] };
     report.metadata.vulnerabilities[severity] = 1; report.metadata.vulnerabilities.total = 1;
@@ -86,6 +93,7 @@ describe("official withdrawal evidence", () => {
     ["another advisory", [{ ghsa_id: "GHSA-aaaa-bbbb-cccc", withdrawn_at: null }]],
     ["another withdrawn advisory", [{ ghsa_id: "GHSA-aaaa-bbbb-cccc", withdrawn_at: WITHDRAWN_AT }]],
     ["the same advisory still active", [{ ghsa_id: PIN.ghsa, withdrawn_at: null }]],
+    ["the same advisory with a different withdrawal", [{ ghsa_id: PIN.ghsa, withdrawn_at: "2026-10-23T13:00:00Z" }]],
     ["a malformed list", { ghsa_id: PIN.ghsa }],
     ["a missing list", null],
   ])("rejects a matching-advisory result with %s", (_label, listed) => {
@@ -100,6 +108,15 @@ describe("official withdrawal evidence", () => {
   ])("rejects an official release with %s", (_label, change) => {
     const release = structuredClone(registry); const changed = change(release);
     expect(() => validateWithdrawnOfficialEvidence(withdrawnAdvisory(), [], changed === null ? null : release, NOW)).toThrow(/BRACES_EXCEPTION_REJECTED/);
+  });
+  it("never re-allows the advisory if it reappears: the active path demands live non-withdrawn proof", () => {
+    // A reported braces finding classifies as "active"; the withdrawn record must not satisfy that path,
+    expect(classifyFullAudit(run(structuredClone(activeFull), 1))).toBe("active");
+    expect(() => validateOfficialEvidence(withdrawnAdvisory(), [{ ...withdrawnAdvisory() }], structuredClone(registry))).toThrow(/official advisory changed/);
+    // and a republished (un-withdrawn) advisory carries a new update time, so it needs a fresh review too.
+    const republished = { ...structuredClone(activeAdvisory), updated_at: "2026-10-24T00:00:00Z" };
+    expect(() => validateOfficialEvidence(republished, [structuredClone(republished)], structuredClone(registry))).toThrow(/official advisory changed/);
+    expect(() => validateWithdrawnOfficialEvidence(republished, [], structuredClone(registry), NOW)).toThrow(/not withdrawn/);
   });
   it("rejects missing or non-object advisory payloads", () => {
     for (const payload of [null, [], "withdrawn", {}]) expect(() => validateWithdrawnOfficialEvidence(payload, [], structuredClone(registry), NOW)).toThrow(/BRACES_EXCEPTION_REJECTED/);
@@ -148,10 +165,11 @@ describe("withdrawn-mode verification on a synthetic installed tree", () => {
     throw new Error(`unexpected official url ${url}`);
   });
   const LOCK_PACKAGES = 4;
+  const verify = async (full, production, options) => verifyBracesException(full, production, root, { installedBefore: await inspectInstalledBraces(root), ...options });
 
   it("passes a clean audit with live official withdrawal proof and re-verifies the patched local copy", async () => {
     const fetchJson = official();
-    const proof = await verifyBracesException(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), root, { fetchJson });
+    const proof = await verify(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), { fetchJson });
     expect(proof).toMatchObject({ format: "aqlan-braces-advisory-withdrawn-v1", mode: "withdrawn", advisory: PIN.ghsa, package: PIN.package, version: PIN.version, auditedPackages: [] });
     expect(proof.official.withdrawnAt).toBe(WITHDRAWN_AT);
     expect(proof.installedCopies).toEqual([{ path: "node_modules/braces", name: PIN.package, version: PIN.version, files: PIN.files }]);
@@ -165,10 +183,22 @@ describe("withdrawn-mode verification on a synthetic installed tree", () => {
     ["local archive integrity drift", async () => writeFile(path.join(root, "vendor/braces-3.0.3-local.tgz"), "tampered"), /local package archive changed/],
     ["installed source drift", async () => writeFile(path.join(root, "node_modules/braces/index.js"), "module.exports = {};\n"), /file set\/hash differs/],
     ["an unexpected installed copy", async () => { const p = path.join(root, "node_modules/consumer/lib/node_modules/braces"); await mkdir(p, { recursive: true }); await writeFile(path.join(p, "index.js"), "module.exports = {};\n"); }, /shadow braces directory/],
+    ["a missing installed copy", async () => rm(path.join(root, "node_modules/braces"), { recursive: true }), /required installed package missing: node_modules\/braces/],
   ])("rejects %s before any official lookup", async (_label, drift, message) => {
+    const installedBefore = await inspectInstalledBraces(root);
     await drift();
     const fetchJson = official();
-    await expect(verifyBracesException(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), root, { fetchJson })).rejects.toThrow(message);
+    await expect(verifyBracesException(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), root, { fetchJson, installedBefore })).rejects.toThrow(message);
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no pre-audit installation snapshot", () => undefined],
+    ["an installation changed after the audits ran", async () => { const before = await inspectInstalledBraces(root); await writeFile(path.join(root, "node_modules/runtime/package.json"), JSON.stringify({ name: "runtime", version: "1.0.1" })); return before; }],
+  ])("rejects %s before any official lookup", async (_label, snapshot) => {
+    const installedBefore = await snapshot();
+    const fetchJson = official();
+    await expect(verifyBracesException(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), root, { fetchJson, installedBefore })).rejects.toThrow(/BRACES_EXCEPTION_REJECTED/);
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
@@ -177,14 +207,14 @@ describe("withdrawn-mode verification on a synthetic installed tree", () => {
     ["a still-active advisory", () => official({ advisory: structuredClone(activeAdvisory) }), /not withdrawn/],
     ["another active advisory", () => official({ matching: [{ ghsa_id: "GHSA-aaaa-bbbb-cccc", withdrawn_at: null }] }), /still-active/],
   ])("rejects %s", async (_label, makeFetch, message) => {
-    await expect(verifyBracesException(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), root, { fetchJson: makeFetch() })).rejects.toThrow(message);
+    await expect(verify(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), { fetchJson: makeFetch() })).rejects.toThrow(message);
   });
 
   it("rejects audit totals that differ from the complete lock graph, and a production finding", async () => {
-    await expect(verifyBracesException(run(cleanReport(LOCK_PACKAGES + 1)), run(cleanReport(LOCK_PACKAGES)), root, { fetchJson: official() })).rejects.toThrow(/dependency total differs/);
+    await expect(verify(run(cleanReport(LOCK_PACKAGES + 1)), run(cleanReport(LOCK_PACKAGES)), { fetchJson: official() })).rejects.toThrow(/dependency total differs/);
     const production = cleanReport(LOCK_PACKAGES);
     production.vulnerabilities.other = { ...structuredClone(activeFull.vulnerabilities.braces), name: "other", severity: "low", effects: [] };
     production.metadata.vulnerabilities.low = 1; production.metadata.vulnerabilities.total = 1;
-    await expect(verifyBracesException(run(cleanReport(LOCK_PACKAGES)), run(production), root, { fetchJson: official() })).rejects.toThrow(/BRACES_EXCEPTION_REJECTED/);
+    await expect(verify(run(cleanReport(LOCK_PACKAGES)), run(production), { fetchJson: official() })).rejects.toThrow(/BRACES_EXCEPTION_REJECTED/);
   });
 });

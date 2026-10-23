@@ -40,7 +40,7 @@
   - `withdrawn_at` is a valid instant after the reviewed `updated_at` (2026-10-02T22:36:34Z), and not in the future;
   - `updated_at` is valid;
   - the affected package, range and `first_patched_version: null` are unchanged;
-  - the matching-advisory list for `braces@3.0.3` contains **nothing but this same advisory withdrawn**;
+  - the matching-advisory list for `braces@3.0.3` contains **nothing but this same advisory, with this same `withdrawn_at`**. The list is **not required to be empty**: GitHub's `affects=braces@3.0.3` query still returns the withdrawn advisory;
   - the official release is unchanged.
 
 **`scripts/verify-braces-exception.mjs`, `verifyBracesException`:**
@@ -53,6 +53,7 @@
   - consumer resolution;
   - runtime and dev-only placement.
 - It always checks lock-graph totals.
+- **Same unchanged installation:** `ci-audit.mjs` (and the standalone verifier) take `snapshotInstallation()` **before** either audit runs. `verifyBracesException` requires `installedTreeSha256`, `lockSha256` and `packageSha256` of its own inspection to equal that snapshot. Otherwise it rejects with `installation changed between the audits and their verification`, before any official lookup. A missing snapshot is also rejected. The audit evidence therefore describes the exact installation that the following build and runtime verification use. `npm ci` runs once, before the audit, in the same job.
 - It **always fetches** the three official documents and validates them for the mode.
 - The proof format is `aqlan-braces-advisory-withdrawn-v1` (mode `withdrawn`) or the unchanged `aqlan-scoped-braces-exception-v1`.
 - Test-only dependency injection is added for the fetcher and the inspector; the defaults are the real ones.
@@ -60,6 +61,8 @@
 **`scripts/ci-audit.mjs`:**
 - The full audit is accepted through `classifyFullAudit`, where it used `validateScopedAudit`.
 - The success messages state which lifecycle state passed.
+- The CLI explicitly accepts **only** a proof with `mode` `active` or `withdrawn`. It must also carry the advisory, CVE, package, version and counts. A withdrawn proof additionally needs `official.withdrawnAt` and `counts.total` 0. A missing or unknown mode, or a malformed required field, is rejected (`BRACES_EXCEPTION_REJECTED`, exit 1). A non-active value is never treated as withdrawn. Verifier errors still propagate to exit 1.
+- **Defect in 229a39f6, fixed:** the CLI treated every non-active proof as withdrawn. The unchanged `ci-audit-runner` mock proof (no `mode`) therefore crashed into exit 1, which caused hosted run 40003309562 to fail at "Unit tests". The audit, build and runtime proof were skipped there, so that run is neither an audit rejection nor a live verification. The active fixture now states `mode: "active"` explicitly; no assertion was weakened.
 - The retry, threshold and failure behaviour is unchanged.
 
 **Unchanged:**
@@ -70,7 +73,9 @@
 - the workflow, `package.json`, lockfile and Dockerfile;
 - every other dependency finding, which stays fail-closed.
 
-## Regression cases (`__tests__/braces-advisory-withdrawal.test.mjs`, 50)
+## Regression cases (`__tests__/braces-advisory-withdrawal.test.mjs`, 61; plus `__tests__/ci-audit-runner.test.ts`: a withdrawn-proof success, 8 fail-closed proof-shape cases, and a snapshot-ordering assertion)
+
+The synthetic official payload uses the independently verified live values: `withdrawn_at` 2026-10-23T12:53:02Z, `updated_at` 12:53:05Z.
 
 - **Verified withdrawal plus a complete clean audit** on a synthetic installed tree passes. The patched copy is re-verified, all 3 official lookups are made, and the proof is written.
 - **Unavailable registry or advisory service:**
@@ -83,16 +88,35 @@
   - changed identity, identifiers, package, range or patched version;
   - non-list, missing or malformed matching results;
   - a missing release document.
-- **Unexpected findings or severity:** a low, moderate, high or critical finding on any package; a finding in the production audit; another advisory, active or withdrawn; this same advisory still active.
+- **Contradictory counts, status or partial graphs:**
+  - a claimed zero summary over a non-empty graph;
+  - a moderate finding with a passing status;
+  - a partial graph node;
+  - a missing graph with zero counters;
+  - missing dependency counters.
+- **Unexpected findings or severity:** an info, low, moderate, high or critical finding on any package; a finding in the production audit; another advisory, active or withdrawn; this same advisory still active.
 - **Patch, integrity and provenance drift:**
   - the patch file, the local archive integrity and the installed source files;
   - an unexpected installed braces copy;
+  - a **missing installed copy** (`required installed package missing: node_modules/braces`);
+  - an installation changed after the audits ran, or no pre-audit snapshot;
   - official registry versions, latest tag, integrity and tarball;
   - lock-graph total mismatch.
 
   Drift is rejected **before** any official lookup.
 
+- **No silent re-allowance:**
+  - if braces is reported again, the audit classifies as `active`;
+  - that path still demands live proof that the advisory is **not** withdrawn and has the reviewed `updated_at`;
+  - so neither a withdrawn record nor a republished, re-updated advisory passes without a fresh review.
+- **Runner CLI:**
+  - the installation snapshot is taken before the first audit subprocess and handed to the verifier;
+  - a withdrawn-mode proof is reported as such;
+  - a proof without a known mode exits 1.
+
 ## Remaining notes
 
-- **Unknown until hosted CI runs:** the exact live official values, `withdrawn_at` and `updated_at`, could not be fetched from this sandbox; the HTML page confirms the withdrawal. If GitHub's live payload differs from the reviewed shape in any checked field, the gate stays closed and reports exactly which field. It never passes silently.
+- **Independently verified:** the official API values (`withdrawn_at` 2026-10-23T12:53:02Z, `updated_at` 12:53:05Z, npm `latest` still 3.0.3 with the unchanged tarball and integrity) were independently verified on #442. They could not be fetched from this sandbox. Hosted CI performs the live lookup on every run. If GitHub's live payload differs from the reviewed shape in any checked field, the gate stays closed and reports exactly which field. It never passes silently.
+- **Not changed:** the local patched vendor source and its nesting, cycle and compatibility regression tests (`braces-security-patch`, `braces-packaging`, `braces-provenance`) are unchanged and still pass.
+- **Not bound:** `verify-braces-runtime.mjs` (also run in the Dockerfile without an audit) is unchanged. It records its own `lockSha256` and `packageSha256`, which can be compared with `exception-proof.json`; the two are not cross-checked automatically.
 - **Kept, not retired:** the pinned patched local braces copy and its runtime and dev-only protections are kept unchanged. Retiring them would be a separate, reviewed change.

@@ -7,8 +7,8 @@
  * (including low) blocks while this narrowly scoped exception exists.
  */
 import { decideAuditOutcome, describeBlockingVulnerabilities } from "../lib/ci-audit.ts";
-import { classifyFullAudit, validateAuditProcess } from "../lib/scoped-braces-exception.mjs";
-import { verifyBracesException } from "./verify-braces-exception.mjs";
+import { classifyFullAudit, invariant, isRecord, validateAuditProcess } from "../lib/scoped-braces-exception.mjs";
+import { snapshotInstallation, verifyBracesException } from "./verify-braces-exception.mjs";
 import { runAuditJson, preserveRawAudit } from "./dependency-security/audit-process.mjs";
 
 const ATTEMPTS = 3;
@@ -42,13 +42,27 @@ async function auditedRun(production) {
   return null;
 }
 
+/** Only the two supported lifecycle states, with their required fields, are reported as success. */
+function validateProofShape(proof) {
+  invariant(isRecord(proof) && (proof.mode === "active" || proof.mode === "withdrawn"), `unknown verification mode ${String(proof?.mode)}`);
+  invariant(["advisory", "cve", "package", "version"].every((key) => typeof proof[key] === "string" && proof[key].length > 0) && isRecord(proof.counts),
+    "verification proof is missing required fields");
+  if (proof.mode === "withdrawn") {
+    invariant(isRecord(proof.official) && typeof proof.official.withdrawnAt === "string" && proof.official.withdrawnAt.length > 0
+      && proof.counts.total === 0, "withdrawn verification proof is malformed");
+  }
+  return proof;
+}
+
 async function main() {
   try {
+    // Bind the audit evidence to this unchanged installation (re-compared inside the verifier).
+    const installedBefore = await snapshotInstallation();
     const full = await auditedRun(false);
     if (!full) return 1;
     const production = await auditedRun(true);
     if (!production) return 1;
-    const proof = await verifyBracesException(full, production);
+    const proof = validateProofShape(await verifyBracesException(full, production, undefined, { installedBefore }));
     if (proof.mode === "active") {
       console.log(`Scoped exception verified ONLY for ${proof.advisory} / ${proof.cve}, ${proof.package}@${proof.version}.`);
       console.log(`RAW full npm audit remains unchanged: ${JSON.stringify(proof.counts)}. Production-only audit has zero moderate+ findings. Post-build runtime proof remains mandatory.`);

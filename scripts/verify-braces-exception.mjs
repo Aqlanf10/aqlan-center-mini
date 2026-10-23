@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BRACES_EXCEPTION as PIN } from "../lib/braces-exception-pins.mjs";
-import { classifyFullAudit, invariant, validateOfficialEvidence, validateScopedAudit, validateAuditProcess, validateWithdrawnDisposition, validateWithdrawnOfficialEvidence } from "../lib/scoped-braces-exception.mjs";
+import { classifyFullAudit, invariant, isRecord, validateOfficialEvidence, validateScopedAudit, validateAuditProcess, validateWithdrawnDisposition, validateWithdrawnOfficialEvidence } from "../lib/scoped-braces-exception.mjs";
 import { inspectInstalledBraces, sha256 } from "./dependency-security/installed-braces.mjs";
 
 import { runAuditJson, preserveRawAudit } from "./dependency-security/audit-process.mjs";
@@ -29,13 +29,21 @@ export async function fetchOfficialJson(url, fetchImpl = fetch) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+/** Taken BEFORE both audits run; verification requires the installation to be byte-identical afterwards. */
+export async function snapshotInstallation(projectRoot = root, inspect = inspectInstalledBraces) {
+  return inspect(projectRoot);
+}
+
 export async function verifyBracesException(fullRun, productionRun, projectRoot = root,
-  { fetchJson = fetchOfficialJson, inspect = inspectInstalledBraces } = {}) {
+  { fetchJson = fetchOfficialJson, inspect = inspectInstalledBraces, installedBefore } = {}) {
   // "active": the reviewed advisory is still reported (scoped graph). "withdrawn": the full audit is
   // completely clean and live official proof of the withdrawal is compulsory below. Nothing else passes.
   const mode = classifyFullAudit(fullRun);
   validateAuditProcess(productionRun, true);
   const installed = await inspect(projectRoot);
+  // Both audits must describe this exact installation: the caller inspects it BEFORE running them.
+  invariant(isRecord(installedBefore) && ["installedTreeSha256", "lockSha256", "packageSha256"].every((key) => typeof installed[key] === "string" && installed[key] === installedBefore[key]),
+    "installation changed between the audits and their verification");
   const disposition = mode === "active" ? validateScopedAudit(fullRun, installed) : validateWithdrawnDisposition(fullRun, installed);
   invariant(fullRun.report.metadata.dependencies.total === installed.lockPackageCount
     && productionRun.report.metadata.dependencies.total === installed.lockPackageCount, "audit dependency total differs from complete lock graph");
@@ -63,11 +71,12 @@ export async function verifyBracesException(fullRun, productionRun, projectRoot 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     invariant(process.argv.length === 2, "standalone verifier accepts no flags");
+    const installedBefore = await snapshotInstallation();
     const full = runAuditJson();
     await preserveRawAudit(full, false, 1);
     const production = runAuditJson(true);
     await preserveRawAudit(production, true, 1);
-    const proof = await verifyBracesException(full, production);
+    const proof = await verifyBracesException(full, production, root, { installedBefore });
     console.log(proof.mode === "active"
       ? `Verified only ${proof.advisory} on ${proof.installedCopies.length} patched installed copy/copies; raw findings remain ${JSON.stringify(proof.counts)}.`
       : `${proof.advisory} is officially withdrawn (${proof.official.withdrawnAt}); audits are completely clean and ${proof.installedCopies.length} patched installed copy/copies remain verified.`);
