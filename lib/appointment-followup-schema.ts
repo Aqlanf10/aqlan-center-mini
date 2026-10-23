@@ -70,9 +70,8 @@ CREATE FUNCTION aqlan_followup_link_immutable() RETURNS TRIGGER AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF EXISTS (SELECT 1 FROM appointment_followup_events WHERE followup_id=NEW.followup_id)
-      OR NOT EXISTS (SELECT 1 FROM appointment_followups f JOIN appointments a
-        ON a.id=f.source_appointment_id AND EXTRACT(EPOCH FROM a.created_at)::text=f.source_created_at
-        WHERE f.id=NEW.followup_id AND a.id=NEW.appointment_id AND a.patient_id=NEW.patient_id) THEN
+      OR NOT EXISTS (SELECT 1 FROM appointment_followups f WHERE f.id=NEW.followup_id
+        AND (NEW.appointment_id IS NULL OR NEW.appointment_id=f.source_appointment_id)) THEN
       RAISE EXCEPTION 'followup live source is immutable';
     END IF;
   ELSIF NEW.followup_id IS DISTINCT FROM OLD.followup_id

@@ -16118,6 +16118,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     dependsOn.get("debt_repayment_arrangements")!.add("patient_opening_balance_history");
   for (const dependency of ["plan_items", "plan_installments", "invoice_items", "patient_opening_balances"])
     dependsOn.get("approved_agreement_principals")?.add(dependency);
+  // Follow-up links must precede events: once history exists the link insert
+  // guard forbids recreation. This is restore ordering, never a history-to-link FK.
+  if (dependsOn.has("appointment_followup_events") && dependsOn.has("appointment_followup_links"))
+    dependsOn.get("appointment_followup_events")!.add("appointment_followup_links");
   const ordered = insertionOrder(
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );

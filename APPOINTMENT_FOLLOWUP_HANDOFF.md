@@ -47,4 +47,14 @@ The new PG attempt stopped in global setup because neither TEST_DATABASE_URL nor
 
 Remaining activation gates include execution/review of this reset design, controlled clinic-midnight tests, broader merge/reset/session/attendance races, real backup/restore identity, nonempty financial/clinical sentinels, HTTP security and browser retry/actor-switch checks. Unit success is not integration acceptance.
 
-Schema remains unnumbered/unregistered; no API, UI, deployment, merge, WhatsApp send or paid activation. `lib/db.ts` is unchanged. Only dormant follow-up reset classifications were added in `lib/clinic-reset.ts`.
+Schema remains unnumbered/unregistered; no API, UI, deployment, merge, WhatsApp send or paid activation. `lib/db.ts` has only the separately approved four-line follow-up export ordering dependency. Only dormant follow-up reset classifications were added in `lib/clinic-reset.ts`.
+
+## Approved restore correction (after 03346d0d)
+
+The prior insert trigger could not replay NULL/stale links, and FK-only ordering could insert events before links. The approved shared change is limited to `backupSnapshotSqlLines`: when both tables exist, events depend on links for export insertion order. No database FK is added and existing financial ordering is unchanged.
+
+Link INSERT still refuses if any event exists. It requires the task and, for a non-NULL appointment ID, equality to the immutable source ID. Independent FKs validate reference existence. It no longer compares live patient or creation timestamp: a valid stored snapshot can be stale and must restore unchanged. UPDATE still forbids changing/reviving appointment IDs. Writer and queue retain mandatory current patient/timestamp/generation checks; stale links remain blocked/review-required. Missing links with events cannot be recreated.
+
+`appointment-followup-restore.test.ts` uses the existing guarded owned PG18 fixture, real shipped migrations plus unnumbered candidate DDL in source and empty target, real fullBackupBlocks and stagedRestore, and real domain writes/session checks via injected pool routing. The target's explicit allowNonEmptyTarget applies only to its owned empty candidate schema; no production target or trigger bypass is used. Seven cases cover live, appointment-null, both-null, missing link, changed patient, changed microsecond timestamp, and old generation with reused IDs. Assertions compare exact PG JSON snapshots, check blocked contact, unchanged history, append-only guards, rejected recreation, and active triggers. Live coherent restore retries must return the same receipt without a second event. Restore does not automatically change incarnation/generation; old reset generations reject, while a coherent snapshot preserves its generation and receipts.
+
+These are acceptance tests, not skipped or expected-failure tests. Local PG remains unavailable; neither the authored roundtrip nor previous reset tests are proof until final-head CI executes them. No shared staging/restore code or other lib/db.ts logic was changed.
