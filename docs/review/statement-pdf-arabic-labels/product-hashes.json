@@ -1,0 +1,8 @@
+{
+  "app/print/statement/[id]/page.tsx": "f9c2817ac90ebfd33b816f6677ef366ce5fb52f3f3839ceb0efed75bdfe9b43e",
+  "app/print/statement/[id]/labels.module.css": "c682d530796cf4cfd8163435a83818400d9944d783574930ec5298b78b3da22b",
+  "app/fonts/statement-labels.woff": "63e6983e3049f3d9a5d51cd27df9c64aeb38799b85aa3ed852c3fad78d46575b",
+  "app/print/print.css": "ebeb201a449effab485577bf79a112ecb165376c92a1b4e0397c07e50da08fc9",
+  "app/print/statement/[id]/presentation.tsx": "d13f4c9f678bca757570dad7f6142a4b7a215b9b966ceeaac8117abfd4a97976",
+  "__tests__/security-http/patient-statement-current-print-ui.test.ts": "9d3c9055abb23a10000a9b430495615d54075a189de33067d6b7583e7b1701f0"
+}

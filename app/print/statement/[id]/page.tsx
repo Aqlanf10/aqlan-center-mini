@@ -1,3 +1,4 @@
+import labelStyles from "./labels.module.css";
 import { StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
@@ -178,7 +179,7 @@ export default async function StatementPage({ params, searchParams }: {
                   <span>إجمالي المفوتر</span>
                   <span className="num">{formatMoney(bucket.billedMinor, currency)}</span>
                 </div>
-                <div className="line">
+                <div className={`line ${labelStyles.labelRow}`}>
                   <span>صافي المحصّل بعد الاستردادات وعكس السندات</span>
                   <span className="num">{formatMoney(bucket.collectedMinor, currency)}</span>
                 </div>
@@ -194,7 +195,7 @@ export default async function StatementPage({ params, searchParams }: {
         {statementAgreements(plans).map((plan) => <div key={plan.id} style={{ marginTop: "4mm" }}>
           <p style={{ fontWeight: 700 }}>اتفاق العلاج — {plan.title}</p>
           <div className="line"><span>إجمالي الاتفاق</span><span>{formatMoney(plan.totalMinor, plan.baseCurrency)}</span></div>
-          <div className="line"><span>المسدّد من الاتفاق</span><span>{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</span></div>
+          <div className={`line ${labelStyles.labelRow}`}><span>المسدّد من الاتفاق</span><span>{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</span></div>
           <div className="line line-strong"><span>المتبقي من الاتفاق</span><span>{formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}</span></div>
           <p className="footer-note">المتبقي من الاتفاق يشمل الأقساط المستقبلية ولا يعني أن كامل المبلغ مستحق الآن.</p>
         </div>)}
