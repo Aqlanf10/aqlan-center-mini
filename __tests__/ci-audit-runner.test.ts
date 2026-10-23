@@ -110,6 +110,15 @@ describe("dependency audit CLI fail-closed boundary", () => {
     ["a withdrawn proof without a withdrawal instant", { ...structuredClone(withdrawnProof), official: {} }],
     ["a withdrawn proof with findings", { ...structuredClone(withdrawnProof), counts: { ...cleanCounts, low: 1, total: 1 } }],
     ["an active proof without counts", (() => { const { counts: _counts, ...proof } = structuredClone(withdrawnProof); return { ...proof, mode: "active" }; })()],
+    ["counts with a missing level", { ...structuredClone(withdrawnProof), counts: { low: 0, moderate: 0, high: 0, critical: 0, total: 0 } }],
+    ["counts with an unknown level", { ...structuredClone(withdrawnProof), counts: { ...cleanCounts, total: 0, extra: 0 } }],
+    ["a negative count", { ...structuredClone(withdrawnProof), counts: { ...cleanCounts, low: -1, total: -1 } }],
+    ["a non-integer count", { ...structuredClone(withdrawnProof), counts: { ...cleanCounts, low: "0", total: 0 } }],
+    ["a total contradicting its levels", { mode: "active", advisory: "GHSA-vfj7-8cjw-p6xm", cve: "CVE-2026-93687", package: "braces", version: "3.0.3", counts: { ...cleanCounts, high: 2, total: 1 } }],
+    ["array counts", { ...structuredClone(withdrawnProof), counts: [] }],
+    ["a non-instant withdrawal time", { ...structuredClone(withdrawnProof), official: { withdrawnAt: "yesterday" } }],
+    ["a non-string withdrawal time", { ...structuredClone(withdrawnProof), official: { withdrawnAt: 1 } }],
+    ["an impossible withdrawal date", { ...structuredClone(withdrawnProof), official: { withdrawnAt: "2026-13-45T99:00:00Z" } }],
     ["an active proof without the advisory", { mode: "active", cve: "CVE-2026-93687", package: "braces", version: "3.0.3", counts: fullAudit.metadata.vulnerabilities }],
   ])("fails closed for %s", async (_label, proof) => {
     boundary.spawnSync.mockReturnValueOnce(auditResult(productionAudit)).mockReturnValueOnce(auditResult(productionAudit));

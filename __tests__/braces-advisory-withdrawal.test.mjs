@@ -124,6 +124,24 @@ describe("official withdrawal evidence", () => {
     const release = structuredClone(registry); const changed = change(release);
     expect(() => validateWithdrawnOfficialEvidence(withdrawnAdvisory(), [], changed === null ? null : release, NOW)).toThrow(/BRACES_EXCEPTION_REJECTED/);
   });
+  // The direct record must satisfy the reviewed official schema on its own: an empty list, or matching entries
+  // that merely agree with an equally malformed record, never stand in for a missing/null/changed field.
+  it.each([
+    ["missing type", (a) => { delete a.type; }],
+    ["null type", (a) => { a.type = null; }],
+    ["unreviewed type", (a) => { a.type = "unreviewed"; }],
+    ["missing severity", (a) => { delete a.severity; }],
+    ["null severity", (a) => { a.severity = null; }],
+    ["changed severity", (a) => { a.severity = "low"; }],
+    ["changed publication time", (a) => { a.published_at = "2026-09-19T00:00:00Z"; }],
+    ["changed vulnerable functions", (a) => { a.vulnerabilities[0].vulnerable_functions = ["expand"]; }],
+    ["missing affected-package field", (a) => { delete a.vulnerabilities[0].vulnerable_functions; }],
+  ])("rejects a direct record with %s, with an empty list and with agreeing entries", (_label, change) => {
+    const advisory = withdrawnAdvisory(); change(advisory);
+    for (const listed of [[], [structuredClone(advisory)]]) {
+      expect(() => validateWithdrawnOfficialEvidence(structuredClone(advisory), listed, structuredClone(registry), NOW)).toThrow(/BRACES_EXCEPTION_REJECTED/);
+    }
+  });
   it("bounds future times with the explicit clock and tolerance, and requires that clock", () => {
     const edge = withdrawnAdvisory();
     edge.withdrawn_at = edge.updated_at = new Date(NOW + OFFICIAL_CLOCK_TOLERANCE_MS).toISOString();
@@ -211,6 +229,21 @@ describe("withdrawn-mode verification on a synthetic installed tree", () => {
     await drift();
     const fetchJson = official();
     await expect(verifyBracesException(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), root, { fetchJson, installedBefore })).rejects.toThrow(message);
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("binds the installed-file hash: a non-manifest file change with unchanged package/lock identity is rejected", async () => {
+    const before = await inspectInstalledBraces(root);
+    await writeFile(path.join(root, "node_modules/runtime/index.js"), "module.exports = { changed: true };\n");
+    const after = await inspectInstalledBraces(root);
+    // Existing package/lock validation alone cannot see this change; only the before/after tree hash does.
+    expect(after.lockSha256).toBe(before.lockSha256);
+    expect(after.packageSha256).toBe(before.packageSha256);
+    expect(after.packages).toEqual(before.packages);
+    expect(after.installedTreeSha256).not.toBe(before.installedTreeSha256);
+    const fetchJson = official();
+    await expect(verifyBracesException(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)), root, { fetchJson, installedBefore: before, clock: () => NOW }))
+      .rejects.toThrow(/installation changed between the audits and their verification/);
     expect(fetchJson).not.toHaveBeenCalled();
   });
 

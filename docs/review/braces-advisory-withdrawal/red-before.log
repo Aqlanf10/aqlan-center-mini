@@ -57,3 +57,16 @@ TypeError: validateWithdrawnOfficialEvidence is not a function
 # With the change: braces/audit suites + runtime-tracing green
  Test Files  11 passed (11)
       Tests  406 passed (406)
+
+# Direct-record schema + CLI proof boundary (review of 969defaf): new cases against the 969defaf implementation
+     × rejects a direct record with {missing type, null type, unreviewed type, missing severity, null severity, changed severity,
+       changed publication time, changed vulnerable functions, missing affected-package field}, with an empty list and with agreeing entries   (9)
+     × fails closed for counts with a missing level / an unknown level / a non-integer count / a total contradicting its levels
+     × fails closed for a non-instant withdrawal time / an impossible withdrawal date
+      Tests  15 failed | 123 passed (138)
+# The file-level installation-binding case (non-manifest file changed, package/lock identity unchanged) is green on 969defaf too:
+# it demonstrates that the existing before/after tree-hash binding, not package validation, rejects the change.
+
+# With the change: braces/audit suites green
+ Test Files  10 passed (10)
+      Tests  420 passed (420)
