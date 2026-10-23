@@ -58,17 +58,22 @@ It creates no invoices or receipts, so a patient with genuine historical treatme
 ### `lib/db.ts` `patientStatementSnapshot` (the one coordinated integration)
 
 ```diff
+-export async function patientStatementSnapshot(patientId:number,today:string){
++export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean}={}){
+ ...
      const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
 -    return {ledger,planCurrencies,plans:await hydratePlans(rows,today,client)};
 +    const plans=await hydratePlans(rows,today,client);
-+    // Historical agreements are saved facts read on this same snapshot client (no separate transaction).
-+    const historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
++    // Opt-in (current print only): historical agreements are saved facts read on this same snapshot client.
++    // Other consumers (the portal) issue no historical query and keep their existing failure surface.
++    const historicalAgreements=options.historicalAgreements?await readStatementHistoricalAgreements(client,patientId):undefined;
 +    return {ledger,planCurrencies,plans,historicalAgreements};
 ```
 
+The read is **opt-in**: only the current print passes `{ historicalAgreements: true }`. The default (the portal) reads no history.
 Plus one import. `listHistoricalDocuments` is **not** called: it opens its own transaction and performs per-document position and correction reads.
 
-**Composition with #444 (`45067c53`):** keep #444's derived `planCurrencies`, `hydratePlans(rows,today,client,true)` and its repayment cache. Add only the `historicalAgreements` read on the same `client` and the extra return field. `lib/plan-financial-position.ts` is not touched.
+**Composition with #444 (`45067c53`):** keep #444's derived `planCurrencies`, `hydratePlans(rows,today,client,true)` and its repayment cache. Add only the opt-in `historicalAgreements` read on the same `client`, the `options` parameter and the extra return field. `lib/plan-financial-position.ts` is not touched.
 
 ### Test composition
 
