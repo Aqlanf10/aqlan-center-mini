@@ -1,6 +1,6 @@
 import { StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
 import { notFound } from "next/navigation";
-import { CLINIC_TIME_ZONE, listPatientPlans, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
 import {
   CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
   type Balance, type Currency,
@@ -70,8 +70,10 @@ export default async function StatementPage({ params, searchParams }: {
   }
 
   // The existing no-query print remains the current, all-history ledger and plan agreement view.
-  const [patient, ledger, settings, planCurrencies, plans] = await Promise.all([
-    getPatient(id), patientLedger(id), getSettingsSafe(), patientPlanCurrencies(id), listPatientPlans(id, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
+  // Its ledger, plan currencies and agreement progress come from one read-only snapshot, so the
+  // receipts, balances and agreement on one sheet always describe the same committed state.
+  const [patient, settings, { ledger, planCurrencies, plans }] = await Promise.all([
+    getPatient(id), getSettingsSafe(), patientStatementSnapshot(id, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
   ]);
   if (!patient) notFound();
 

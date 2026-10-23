@@ -8,7 +8,10 @@ vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
 vi.mock("@/lib/reports", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/reports")>(), buildReport: mocks.buildReport }));
 vi.mock("@/lib/db", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/db")>(),
   getPatient: mocks.getPatient, patientLedger: mocks.patientLedger, getSettingsSafe: mocks.getSettingsSafe,
-  patientPlanCurrencies: mocks.patientPlanCurrencies, listPatientPlans: mocks.listPatientPlans }));
+  patientPlanCurrencies: mocks.patientPlanCurrencies, listPatientPlans: mocks.listPatientPlans,
+  // The current print reads the same sources in one snapshot; here it composes the same mocks.
+  patientStatementSnapshot: async (id: number, today: string) => ({ ledger: await mocks.patientLedger(id),
+    planCurrencies: await mocks.patientPlanCurrencies(id), plans: await mocks.listPatientPlans(id, today) }) }));
 vi.mock("@/components/PrintHeader", () => ({ PrintHeader: ({ title }: { title: string }) => createElement("h1", null, title), PrintFooter: () => null }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
 import StatementPage from "../app/print/statement/[id]/page";
