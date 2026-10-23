@@ -1,0 +1,27 @@
+# Mutation 1 (temporary, reverted): /api/plans/[id] drops the Idempotency-Key before the installment writer
+ app/api/plans/[id]/route.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > 'installment via POST /api/plans/[id]' > YER
+AssertionError: {"reason":"similar_collection_review_required","message":"يوجد سند قبض مشابه لهذا المريض بالمبلغ والعملة نفسيهما خلال آخر 24 ساعة. راجع السند السابق، ثم ألغِ أو سجّل دفعة مستقلة.","windowHours":24,"receipts":[{"id":1,"receiptNumber":"R-00002","amountMinor":5000,"currency":"YER","createdAt":"2026-10-23T02:25:40.345Z","method":"cash","invoiceId":1,"planId":2,"openingCurrency":null,"createdBy":"matrix-admin"}]}: expected 409 to be 200 // Object.is equality
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > 'installment via POST /api/plans/[id]' > SAR
+AssertionError: {"reason":"similar_collection_review_required","message":"يوجد سند قبض مشابه لهذا المريض بالمبلغ والعملة نفسيهما خلال آخر 24 ساعة. راجع السند السابق، ثم ألغِ أو سجّل دفعة مستقلة.","windowHours":24,"receipts":[{"id":2,"receiptNumber":"R-00003","amountMinor":10000,"currency":"SAR","createdAt":"2026-10-23T02:25:40.536Z","method":"cash","invoiceId":2,"planId":3,"openingCurrency":null,"createdBy":"matrix-admin"}]}: expected 409 to be 200 // Object.is equality
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > 'installment via POST /api/plans/[id]' > USD
+AssertionError: {"reason":"similar_collection_review_required","message":"يوجد سند قبض مشابه لهذا المريض بالمبلغ والعملة نفسيهما خلال آخر 24 ساعة. راجع السند السابق، ثم ألغِ أو سجّل دفعة مستقلة.","windowHours":24,"receipts":[{"id":3,"receiptNumber":"R-00004","amountMinor":10000,"currency":"USD","createdAt":"2026-10-23T02:25:40.687Z","method":"cash","invoiceId":3,"planId":4,"openingCurrency":null,"createdBy":"matrix-admin"}]}: expected 409 to be 200 // Object.is equality
+      Tests  3 failed | 1 passed | 83 skipped (87)
+
+# Mutation 2 (temporary, reverted): a void reverses one minor unit less than the receipt's remainder
+ lib/db.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > reversal of a 'invoice receipt' > 'full void (POST /api/payments/[id]/co…' > YER
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > reversal of a 'invoice receipt' > 'full void (POST /api/payments/[id]/co…' > SAR
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > reversal of a 'invoice receipt' > 'full void (POST /api/payments/[id]/co…' > USD
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > reversal of a 'invoice receipt' > 'partial reversal by correction to a s…' > YER
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > reversal of a 'invoice receipt' > 'partial reversal by correction to a s…' > SAR
+ FAIL  __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts > reversal of a 'invoice receipt' > 'partial reversal by correction to a s…' > USD
+AssertionError: {"message":"تعذّر تصحيح السند. أعد المحاولة."}: expected 500 to be 201 // Object.is equality
+
+# Both mutations reverted:
+?? __tests__/postgres/collection-entrypoint-idempotency-matrix.test.ts
+?? docs/review/collection-idempotency-matrix/
