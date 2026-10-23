@@ -5,14 +5,15 @@ import productionAudit from "./fixtures/dependency-security/production-audit.jso
 // Evaluate the real CLI and strict graph policy. Replace npm subprocesses,
 // artifact writes and the independent verifier I/O boundary; graph/mutation suites
 // exercise that verifier separately. No network or database is opened here.
-const boundary = vi.hoisted(() => ({ spawnSync: vi.fn(), verify: vi.fn(), mkdir: vi.fn(), writeFile: vi.fn() }));
-vi.mock("../scripts/verify-braces-exception.mjs", () => ({ verifyBracesException: boundary.verify }));
+const boundary = vi.hoisted(() => ({ spawnSync: vi.fn(), verify: vi.fn(), snapshot: vi.fn(), mkdir: vi.fn(), writeFile: vi.fn() }));
+vi.mock("../scripts/verify-braces-exception.mjs", () => ({ verifyBracesException: boundary.verify, snapshotInstallation: boundary.snapshot }));
 vi.mock("node:fs/promises", () => ({ mkdir: boundary.mkdir, writeFile: boundary.writeFile }));
 vi.mock("node:child_process", () => ({ spawnSync: boundary.spawnSync }));
 
 const cleanCounts = { info: 0, low: 0, moderate: 0, high: 0, critical: 0 };
 const reportWith = (vulnerabilities: unknown) => ({ metadata: { vulnerabilities } });
 const cleanReport = reportWith(cleanCounts);
+const installedBefore = { installedTreeSha256: "tree", lockSha256: "lock", packageSha256: "package" };
 const registryError = { error: { code: "E503", summary: "Service Unavailable" } };
 
 function auditResult(report: unknown, status: number | null = 0) {
@@ -26,7 +27,8 @@ class CliExit extends Error {
 beforeEach(() => {
   vi.resetModules();
   boundary.spawnSync.mockReset();
-  boundary.verify.mockReset().mockResolvedValue({ advisory: "GHSA-vfj7-8cjw-p6xm", cve: "CVE-2026-93687", package: "braces", version: "3.0.3", counts: fullAudit.metadata.vulnerabilities });
+  boundary.verify.mockReset().mockResolvedValue({ mode: "active", advisory: "GHSA-vfj7-8cjw-p6xm", cve: "CVE-2026-93687", package: "braces", version: "3.0.3", counts: fullAudit.metadata.vulnerabilities });
+  boundary.snapshot.mockReset().mockResolvedValue(installedBefore);
   boundary.mkdir.mockResolvedValue(undefined);
   boundary.writeFile.mockResolvedValue(undefined);
   boundary.spawnSync.mockImplementation(() => {
@@ -83,8 +85,47 @@ describe("dependency audit CLI fail-closed boundary", () => {
     expect(boundary.spawnSync.mock.calls[0][1]).not.toContain("--omit=dev");
     expect(boundary.spawnSync.mock.calls[1][1]).toContain("--omit=dev");
     expect(boundary.verify).toHaveBeenCalledTimes(1);
+    // The installation is snapshotted BEFORE either audit runs and handed to the verifier for re-comparison.
+    expect(boundary.snapshot).toHaveBeenCalledTimes(1);
+    expect(boundary.snapshot.mock.invocationCallOrder[0]).toBeLessThan(boundary.spawnSync.mock.invocationCallOrder[0]);
+    expect(boundary.verify.mock.calls[0][3]).toEqual({ installedBefore });
     expect(boundary.writeFile.mock.calls.filter(([file]) => /attempt-\d+\.json$/.test(String(file))).map(([, bytes]) => bytes)).toEqual([JSON.stringify(fullAudit), JSON.stringify(productionAudit)]);
     expect(vi.mocked(console.log).mock.calls.flat()).toContain(JSON.stringify(fullAudit));
+  });
+
+  const withdrawnProof = { mode: "withdrawn", advisory: "GHSA-vfj7-8cjw-p6xm", cve: "CVE-2026-93687", package: "braces", version: "3.0.3", counts: productionAudit.metadata.vulnerabilities, official: { withdrawnAt: "2026-10-23T12:53:02Z" } };
+  it("reports a complete withdrawn-mode proof as the withdrawn lifecycle state", async () => {
+    boundary.spawnSync.mockReturnValueOnce(auditResult(productionAudit)).mockReturnValueOnce(auditResult(productionAudit));
+    boundary.verify.mockResolvedValueOnce(structuredClone(withdrawnProof));
+    expect(await invokeAudit()).toBe(0);
+    expect(boundary.verify).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(console.log).mock.calls.flat().join(" ")).toContain("officially withdrawn (2026-10-23T12:53:02Z)");
+  });
+
+  it.each([
+    ["a missing mode", (() => { const { mode: _mode, ...proof } = structuredClone(withdrawnProof); return proof; })()],
+    ["an unknown mode", { ...structuredClone(withdrawnProof), mode: "retired" }],
+    ["a non-object proof", null],
+    ["a withdrawn proof without official evidence", (() => { const { official: _official, ...proof } = structuredClone(withdrawnProof); return proof; })()],
+    ["a withdrawn proof without a withdrawal instant", { ...structuredClone(withdrawnProof), official: {} }],
+    ["a withdrawn proof with findings", { ...structuredClone(withdrawnProof), counts: { ...cleanCounts, low: 1, total: 1 } }],
+    ["an active proof without counts", (() => { const { counts: _counts, ...proof } = structuredClone(withdrawnProof); return { ...proof, mode: "active" }; })()],
+    ["counts with a missing level", { ...structuredClone(withdrawnProof), counts: { low: 0, moderate: 0, high: 0, critical: 0, total: 0 } }],
+    ["counts with an unknown level", { ...structuredClone(withdrawnProof), counts: { ...cleanCounts, total: 0, extra: 0 } }],
+    ["a negative count", { ...structuredClone(withdrawnProof), counts: { ...cleanCounts, low: -1, total: -1 } }],
+    ["a non-integer count", { ...structuredClone(withdrawnProof), counts: { ...cleanCounts, low: "0", total: 0 } }],
+    ["a total contradicting its levels", { mode: "active", advisory: "GHSA-vfj7-8cjw-p6xm", cve: "CVE-2026-93687", package: "braces", version: "3.0.3", counts: { ...cleanCounts, high: 2, total: 1 } }],
+    ["array counts", { ...structuredClone(withdrawnProof), counts: [] }],
+    ["a non-instant withdrawal time", { ...structuredClone(withdrawnProof), official: { withdrawnAt: "yesterday" } }],
+    ["a non-string withdrawal time", { ...structuredClone(withdrawnProof), official: { withdrawnAt: 1 } }],
+    ["an impossible withdrawal date", { ...structuredClone(withdrawnProof), official: { withdrawnAt: "2026-13-45T99:00:00Z" } }],
+    ["an active proof without the advisory", { mode: "active", cve: "CVE-2026-93687", package: "braces", version: "3.0.3", counts: fullAudit.metadata.vulnerabilities }],
+  ])("fails closed for %s", async (_label, proof) => {
+    boundary.spawnSync.mockReturnValueOnce(auditResult(productionAudit)).mockReturnValueOnce(auditResult(productionAudit));
+    boundary.verify.mockResolvedValueOnce(proof);
+    expect(await invokeAudit()).toBe(1);
+    expect(vi.mocked(console.error).mock.calls.flat().join(" ")).toMatch(/BRACES_EXCEPTION_REJECTED/);
+    expect(vi.mocked(console.log).mock.calls.flat().join(" ")).not.toMatch(/officially withdrawn|Scoped exception verified/);
   });
 
   // The approved scoped contract deliberately supersedes legacy metadata-only
