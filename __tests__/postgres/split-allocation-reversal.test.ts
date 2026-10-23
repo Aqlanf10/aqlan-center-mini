@@ -11,8 +11,8 @@ import { MINOR_UNITS, type Currency } from "../../lib/money";
  * reversed independently — full void and partial correction (ReceiptCorrection) and partial refund
  * (API) — separately in YER, SAR and USD. Existing policy is the oracle:
  *  - supported reversals move native cash, patient debt, the cash journal account, the reversed
- *    allocation's invoice, agreement paid/remaining and earned commission by exactly the reversed
- *    amount, never touch the sibling allocation, any invoice, the schedule, the amendment history or
+ *    allocation's invoice and agreement paid/remaining by exactly the reversed amount, and earned
+ *    commission by exactly the doctor's configured percent of it, never touch the sibling allocation, any invoice, the schedule, the amendment history or
  *    the split-collection receipt, replay without writes, and refuse a changed payload without writes;
  *  - the original split-collection key, retried late, returns the same complete receipt set;
  *  - unsupported reversals are refused explicitly with zero writes (whole-database content hash) and no
@@ -105,7 +105,7 @@ async function position(f: Fixture) {
     due: (await db.computeDebtRows([f.patientId], true)).filter((row) => row.currency === f.currency).reduce((sum, row) => sum + row.dueMinor, 0),
     originalRemaining: await invoiceRemaining(f, f.originalInvoiceId),
     deltaRemaining: await invoiceRemaining(f, f.deltaInvoiceId),
-    agreementPaid: agreement.paidMinor, agreementRemaining: agreement.remainingMinor,
+    agreementTotal: agreement.totalMinor, agreementPaid: agreement.paidMinor, agreementRemaining: agreement.remainingMinor,
     accrued: commission.reduce((sum, row) => sum + row.accruedMinor, 0),
     earned: commission.reduce((sum, row) => sum + row.earnedMinor, 0),
     journal,
@@ -159,6 +159,21 @@ async function splitCollection(f: Fixture) {
   return { splitKey, body, ids, byTarget: { original: rows[0], delta: rows[1] } };
 }
 
+/**
+ * The doctor's configured commission policy, read from its history row, not restated here: earned
+ * commission is `percent` of the cash collected on that doctor's invoice lines (basis collected_cash,
+ * lab/material deductions off), and accrual is `percent` of the doctor's billed work. Precondition:
+ * every line of both agreement invoices is this doctor's, so the whole tender and agreement count.
+ */
+async function commissionPolicy(f: Fixture) {
+  const [policy] = await q<{ percent: string; config: { basis: string; deductLabCost: boolean; deductMaterialCost: boolean } }>(
+    "SELECT percent::text, config FROM doctor_commission_history WHERE party_id=$1 ORDER BY effective_from DESC, id DESC LIMIT 1", [f.doctorId]);
+  expect(policy.config).toMatchObject({ basis: "collected_cash", deductLabCost: false, deductMaterialCost: false });
+  expect(await q("SELECT DISTINCT doctor_id FROM invoice_items WHERE invoice_id = ANY($1::int[])", [[f.originalInvoiceId, f.deltaInvoiceId]])).toEqual([{ doctor_id: f.doctorId }]);
+  const percent = Number(policy.percent);
+  return { share: (minor: number) => Math.round((minor * percent) / 100) };
+}
+
 type Target = "original" | "delta";
 type Reversal = { name: string; ui: string; reversed: (allocation: number) => number;
   send: (f: Fixture, paymentId: number, allocation: number, k: string | null, changed?: boolean) => Promise<Sent> };
@@ -187,7 +202,9 @@ describe.each(CURRENCIES)("%s split collection", (currency) => {
       const allocationRows = await q("SELECT * FROM payments WHERE id = ANY($1::int[]) ORDER BY id", [split.ids]);
       // The split itself is meaningful for every projection asserted below.
       expect(p1.drawer - p0.drawer).toBe(SPLIT_TENDER);
-      expect(p1.earned).toBeGreaterThan(p0.earned);
+      const policy = await commissionPolicy(f);
+      expect(p1.earned - p0.earned).toBe(policy.share(SPLIT_TENDER));
+      expect(p1.accrued).toBe(policy.share(p1.agreementTotal));
 
       const k = key("reverse");
       const sent = await reversal.send(f, allocation.id, allocation.amount, k);
@@ -210,10 +227,9 @@ describe.each(CURRENCIES)("%s split collection", (currency) => {
       expect(cashAccount, JSON.stringify({ splitBooks, reversalBooks })).toBeDefined();
       expect(reversalBooks[cashAccount!]).toBe(-X);
       expect(Object.values(reversalBooks).reduce((sum, value) => sum + value, 0)).toBe(0);
-      // Commission: accrual untouched; earned falls, but never below what was earned before the split.
+      // Commission under the configured policy: accrual untouched; earned falls by exactly percent × X.
       expect(p2.accrued).toBe(p1.accrued);
-      expect(p2.earned).toBeLessThanOrEqual(p1.earned);
-      expect(p2.earned).toBeGreaterThanOrEqual(p0.earned);
+      expect(p1.earned - p2.earned).toBe(policy.share(X));
       // Invoices, schedule, amendment history and the split-collection receipt are never rewritten;
       // both original allocation receipts are byte-identical and the sibling has no reversal.
       expect(p2.frozen).toBe(p1.frozen);
