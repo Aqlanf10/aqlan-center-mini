@@ -17,12 +17,13 @@ let browser: Browser;
 const stamp = Date.now();
 const directory = ".settings-ui-artifacts/patient-statement-historical";
 const plain = (text: string) => text.normalize("NFKC").replace(/[‎‏‪-‮⁦-⁩]/g, "");
-/** pdftotext emits each lam-alef ligature in visual order (alef before lam) and moves shadda. The same key is
- * applied to BOTH sides, so only that glyph order and diacritics are neutralised — never letters. */
-const arabicKey = (text: string) => text.replace(/[\u064B-\u0652]/g, "").replace(/\u0644([\u0627\u0623\u0625\u0622])/g, "$1\u0644");
 const TEETH = [11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38];
+let savedDocument: { id: number; lines: { discountMinor: number; netMinor: number }[] };
+let receipt: { id: number; receiptNumber: string };
 let rct = 0, patientId = 0, otherPatientId = 0, documentId = 0, otherDocumentId = 0, serial = 0;
-const serviceName = `HISTORICAL-RCT-${stamp}`;
+const serviceMarker = `HISTORICAL-RCT-${stamp}`;
+/** A long Arabic treatment description (the saved line description), led by a Latin marker for row counting. */
+const serviceName = `${serviceMarker} علاج عصب وحشو قنوات الجذر مع ترميم نهائي ومتابعة مراحل العلاج والتأكد من راحة المريض`;
 const otherServiceName = `OTHER-PATIENT-HISTORY-${stamp}`;
 
 async function createDocument(patient: number, serviceId: number, teeth: number[], amounts: { discount: string; paid: string; remaining: number }) {
@@ -64,12 +65,12 @@ beforeAll(async () => {
   patientId = (await db.query<{ id: number }>("INSERT INTO patients(patient_number,full_name) VALUES($1,'مريض اتفاقات تاريخية اصطناعي') RETURNING id", [`HIST-PRINT-${stamp}`])).rows[0].id;
   otherPatientId = (await db.query<{ id: number }>("INSERT INTO patients(patient_number,full_name) VALUES($1,'مريض آخر اصطناعي') RETURNING id", [`HIST-OTHER-${stamp}`])).rows[0].id;
   // 24 lines × 50,000 = 1,200,000; discount 20,000; agreed 1,180,000; paid before 180,000; carried 1,000,000.
-  const document = await createDocument(patientId, rct, TEETH, { discount: "20000", paid: "180000", remaining: 1_000_000 });
-  documentId = document.id;
+  savedDocument = await createDocument(patientId, rct, TEETH, { discount: "20000", paid: "180000", remaining: 1_000_000 });
+  documentId = savedDocument.id;
   otherDocumentId = (await createDocument(otherPatientId, otherService, [46], { discount: "0", paid: "0", remaining: 50_000 })).id;
   await db.query(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
     SELECT 'synthetic-historical-statement', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`);
-  const receipt = await collect({ kind: "payment", amount: "40000", openingCurrency: "YER" });
+  receipt = await collect({ kind: "payment", amount: "40000", openingCurrency: "YER" });
   await collect({ kind: "refund", amount: "10000", reversalOfId: receipt.id });
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
@@ -87,82 +88,107 @@ async function openPrint(role: "admin" | "doctorA" | "accountant", target = pati
   return { context, page, errors, writes, status: response?.status() };
 }
 
-describe("current statement prints historical agreements in the invoice detail layout", () => {
-  it("renders the saved lines, distinct labels, history-only prior payment and one currency-level opening collection in an RTL A4 PDF", async () => {
+/** Raw pdftotext output: no NFKC, no ligature or mark normalisation. */
+const rawPdfText = (path: string) => execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 5 * 1024 * 1024 });
+/** The single raw PDF line carrying exactly this label, with its exact amount on the same line. The amount is a
+ * whole token: bounded by whitespace or the bidi embedding controls pdftotext writes around numbers. The labels
+ * asserted this way contain no lam-alef ligature or combining mark, so their raw extraction is their logical text. */
+function rawLabelled(raw: string, label: string, amountMinor: number) {
+  const lines = raw.split("\n").filter((line) => line.includes(label));
+  expect(lines, `exactly one raw PDF line with ${label}`).toHaveLength(1);
+  expect(lines[0], `raw PDF amount for ${label}`).toMatch(new RegExp(`(^|[\\s\\u202a-\\u202e])${formatAmount(amountMinor, "YER").replace(/[.,]/g, "\\$&")}([\\s\\u202a-\\u202e]|ر)`));
+  return lines[0];
+}
+/** Internal provenance / implementation prose that must never reach the patient handout. */
+const INTERNAL = ["تسجيل اتفاق تاريخي", "أُضيف إلى الرصيد السابق", "سجل تاريخي", "ليس سند قبض", "قبل بدء العمل بالبرنامج", "النسخة", "لا فواتير حالية"];
+
+async function printPdf(name: string) {
+  const opened = await openPrint("admin");
+  const { context, page } = opened;
+  expect(opened.status).toBe(200);
+  const sheet = page.locator(".statement-sheet"); await sheet.waitFor();
+  await page.evaluate(async () => { await document.fonts.ready; });
+  const ledger = await page.evaluate(async (id) => (await fetch(`/api/patients/${id}/ledger`, { cache: "no-store" })).json(), patientId) as
+    { balances: Record<string, { billedMinor: number; collectedMinor: number; dueMinor: number }> };
+  const text = plain(await sheet.innerText());
+  const receipts = (await sheet.locator("table.items:not(.statement-invoice) tbody tr").allInnerTexts()).map(plain);
+  await mkdir(directory, { recursive: true });
+  await page.emulateMedia({ media: "print" });
+  await page.setViewportSize({ width: Math.floor(194 * 96 / 25.4), height: Math.floor(281 * 96 / 25.4) });
+  await page.screenshot({ path: `${directory}/${name}.png`, fullPage: true });
+  const pdfPath = `${directory}/${name}.pdf`;
+  const pdf = await page.pdf({ path: pdfPath, format: "A4", printBackground: true, displayHeaderFooter: false, preferCSSPageSize: false });
+  expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+  const raw = rawPdfText(pdfPath);
+  await writeFile(`${directory}/${name}.txt`, raw);
+  return { ...opened, sheet, ledger, text, receipts, pdfPath, raw };
+}
+
+describe("patient-facing current statement with historical treatment (synthetic full Arabic example)", () => {
+  it("prints the agreement lines, recorded discount, prior payment, current payment/refund and one reconciled final balance on RTL A4", async () => {
     const before = await historyState();
-    const { context, page, errors, writes, status } = await openPrint("admin");
+    const printed = await printPdf("statement-historical-a4");
+    const { context, page, sheet, errors, writes } = printed;
     try {
-      expect(status).toBe(200);
-      const sheet = page.locator(".statement-sheet"); await sheet.waitFor();
-      await page.evaluate(async () => { await document.fonts.ready; });
       expect(await sheet.getAttribute("dir")).toBe("rtl");
       const table = sheet.locator(`[data-historical-kind="document"][data-historical-id="${documentId}"]`);
       expect(await table.count()).toBe(1);
       expect(await sheet.locator("[data-historical-kind]").count()).toBe(1);
-      const rows = await table.locator("tbody tr:not(.statement-total)").allInnerTexts();
-      expect(rows).toHaveLength(TEETH.length);
+      const rows = table.locator("tbody tr:not(.statement-total)");
+      expect(await rows.count()).toBe(TEETH.length);
       for (const [index, tooth] of TEETH.entries()) {
-        const cells = (await table.locator("tbody tr:not(.statement-total)").nth(index).locator("td").allInnerTexts()).map(plain);
+        const cells = (await rows.nth(index).locator("td").allInnerTexts()).map(plain);
         expect(cells.slice(0, 4)).toEqual([serviceName, String(tooth), "1", formatMoney(50000, "YER")]);
+        expect(cells[5]).toBe(formatMoney(50000 - savedDocument.lines[index].discountMinor, "YER"));
       }
       const total = async (label: string) => plain(await table.locator("tr.statement-total").filter({ hasText: label }).innerText());
       expect(await total("الإجمالي قبل الخصم")).toContain(formatMoney(1_200_000, "YER"));
       expect(await total("الخصم المسجل")).toContain(formatMoney(20_000, "YER"));
-      expect(await total("المتفق عليه بعد الخصم")).toContain(formatMoney(1_180_000, "YER"));
-      expect(await total("مدفوع قبل البرنامج")).toContain(formatMoney(180_000, "YER"));
-      expect(await total("المتبقي عند التسجيل")).toContain(formatMoney(1_000_000, "YER"));
-      const line = async (label: string) => (await sheet.locator(".line").filter({ hasText: label }).allTextContents()).map(plain);
-      expect(await line("المحصّل منه في البرنامج بعد الاستردادات")).toEqual([expect.stringContaining(formatMoney(30_000, "YER"))]);
-      expect(await line("المتبقي من الرصيد السابق")).toEqual([expect.stringContaining(formatMoney(970_000, "YER"))]);
-      expect(await line("إجمالي المفوتر")).toEqual([expect.stringContaining(formatMoney(0, "YER"))]);
-      // The app's canonical ledger remains the oracle for the current balance.
-      const ledger = await page.evaluate(async (id) => (await fetch(`/api/patients/${id}/ledger`, { cache: "no-store" })).json(), patientId) as
-        { balances: Record<string, { billedMinor: number; collectedMinor: number; dueMinor: number }> };
-      expect(ledger.balances.YER).toMatchObject({ billedMinor: 0, collectedMinor: 30_000, dueMinor: 970_000 });
-      expect((await line("الرصيد الحالي")).join(" ")).toContain(formatAmount(970_000, "YER"));
-      const text = plain(await sheet.innerText());
-      expect(text).not.toContain(otherServiceName);
-      expect(text).toContain("لا فواتير حالية");
-
-      await mkdir(directory, { recursive: true });
-      await page.emulateMedia({ media: "print" });
-      await page.setViewportSize({ width: Math.floor(194 * 96 / 25.4), height: Math.floor(281 * 96 / 25.4) });
+      expect(await total("المبلغ المتفق عليه")).toContain(formatMoney(1_180_000, "YER"));
+      expect(await total("المدفوع من قبل")).toContain(formatMoney(180_000, "YER"));
+      expect(await total("المبلغ المتبقي")).toContain(formatMoney(1_000_000, "YER"));
+      // Current movements: one payment and its genuine reversal, each once, with receipt numbers.
+      expect(printed.receipts).toHaveLength(2);
+      expect(printed.receipts.join(" | ")).toContain(`عكس سند ${receipt.receiptNumber}`);
+      expect(printed.receipts.filter((row) => row.includes(receipt.receiptNumber))).toHaveLength(2);
+      // One reconciled final balance: 1,000,000 carried − 40,000 + 10,000 = 970,000, equal to the canonical ledger.
+      expect(printed.ledger.balances.YER).toMatchObject({ billedMinor: 0, collectedMinor: 30_000, dueMinor: 970_000 });
+      const finals = (await sheet.locator(".line-strong").filter({ hasText: "الرصيد الحالي" }).allTextContents()).map(plain);
+      expect(finals).toEqual([expect.stringContaining(formatMoney(970_000, "YER"))]);
+      for (const internal of INTERNAL) expect(printed.text, internal).not.toContain(internal);
+      expect(printed.text).not.toContain(`#${documentId}`);
+      expect(printed.text).not.toContain("الفواتير وتفاصيل العلاج");
+      expect(printed.text).not.toContain(otherServiceName);
       expect(await table.locator("thead").evaluate((node) => getComputedStyle(node).display)).toBe("table-header-group");
       const layout = await table.locator("td.num").evaluateAll((cells) => cells.map((cell) => ({ scrollWidth: cell.scrollWidth, clientWidth: cell.clientWidth })));
       for (const cell of layout) expect(cell.scrollWidth).toBeLessThanOrEqual(cell.clientWidth + 1);
-      await page.screenshot({ path: `${directory}/print.png`, fullPage: true });
-      const pdfPath = `${directory}/statement-historical-a4.pdf`;
-      const pdf = await page.pdf({ path: pdfPath, format: "A4", printBackground: true, displayHeaderFooter: false, preferCSSPageSize: false });
-      expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
-      const pdfText = plain(execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", pdfPath, "-"], { encoding: "utf8", maxBuffer: 5 * 1024 * 1024 }));
-      await writeFile(`${directory}/statement-historical-a4.txt`, pdfText);
-      const pages = pdfText.split("\f").filter((pageText) => pageText.trim());
-      expect(pages.length).toBeGreaterThanOrEqual(2);
-      // Every page carrying historical lines repeats the agreement heading and column headings.
-      const withLines = pages.filter((pageText) => pageText.includes(serviceName));
+
+      // Raw PDF: exact labelled amounts, no normalisation.
+      const raw = printed.raw;
+      rawLabelled(raw, "الخصم المسجل", 20_000);
+      rawLabelled(raw, "المبلغ المتفق عليه", 1_180_000);
+      rawLabelled(raw, "المدفوع من قبل", 180_000);
+      rawLabelled(raw, "المبلغ المتبقي", 1_000_000);
+      rawLabelled(raw, "الرصيد الحالي", 970_000);
+      const rawPages = raw.split("\f").filter((pageText) => pageText.trim());
+      expect(rawPages.length).toBeGreaterThanOrEqual(2);
+      // Every page carrying historical lines repeats the agreement heading and the column headings.
+      const withLines = rawPages.filter((pageText) => pageText.includes(serviceMarker));
       expect(withLines.length).toBeGreaterThanOrEqual(2);
-      for (const pageText of withLines) {
-        const key = arabicKey(pageText);
-        expect(key).toContain(arabicKey("اتفاق علاج سابق"));
-        expect(key).toContain(arabicKey("سعر الوحدة"));
-        expect(pageText).toContain(`#${documentId}`);
-      }
-      expect(pdfText.match(new RegExp(serviceName, "g")) ?? []).toHaveLength(TEETH.length);
-      for (const amount of [1_200_000, 20_000, 1_180_000, 180_000, 1_000_000, 30_000, 970_000]) expect(pdfText).toContain(formatAmount(amount, "YER"));
-      const key = arabicKey(pdfText);
-      for (const label of ["مدفوع قبل البرنامج", "المتبقي من الرصيد السابق", "اتفاقات علاج سابقة"]) expect(key).toContain(arabicKey(label));
-      expect(pdfText).not.toContain(otherServiceName);
-      // Actual PDF geometry: every word stays on its A4 page; the visual is RTL (labels right of amounts).
-      const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", pdfPath, "-"], { encoding: "utf8", maxBuffer: 5 * 1024 * 1024 });
-      const geometry = await page.evaluate((raw) => {
-        const doc = new DOMParser().parseFromString(raw, "application/xml");
+      for (const pageText of withLines) for (const heading of ["اتفاق", "بتاريخ", "سعر الوحدة", "الموضع", "الكمية", "الصافي"]) expect(pageText).toContain(heading);
+      expect(raw.match(new RegExp(serviceMarker, "g")) ?? []).toHaveLength(TEETH.length);
+      expect(raw).not.toContain(otherServiceName);
+      // Actual PDF geometry: A4 pages, every word inside its page; RTL: each description sits right of its amounts.
+      const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", printed.pdfPath, "-"], { encoding: "utf8", maxBuffer: 5 * 1024 * 1024 });
+      const geometry = await page.evaluate((source) => {
+        const doc = new DOMParser().parseFromString(source, "application/xml");
         if (doc.querySelector("parsererror")) throw new Error("Invalid PDF geometry XML");
         return Array.from(doc.getElementsByTagName("page")).map((p) => ({ width: Number(p.getAttribute("width")), height: Number(p.getAttribute("height")),
           words: Array.from(p.getElementsByTagName("word")).map((w) => ({ text: w.textContent ?? "", xMin: Number(w.getAttribute("xMin")), xMax: Number(w.getAttribute("xMax")),
             yMin: Number(w.getAttribute("yMin")), yMax: Number(w.getAttribute("yMax")) })) }));
       }, xml);
       await writeFile(`${directory}/pdf-layout.json`, JSON.stringify(geometry, null, 2));
-      expect(geometry).toHaveLength(pages.length);
+      expect(geometry).toHaveLength(rawPages.length);
       for (const paper of geometry) {
         // A4 = 595.28 × 841.89 pt; Chromium rounds the media box to whole points.
         expect(Math.abs(paper.width - 595.28)).toBeLessThan(1.5); expect(Math.abs(paper.height - 841.89)).toBeLessThan(1.5);
@@ -170,15 +196,34 @@ describe("current statement prints historical agreements in the invoice detail l
           expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.xMax).toBeLessThanOrEqual(paper.width);
           expect(word.yMin).toBeGreaterThanOrEqual(0); expect(word.yMax).toBeLessThanOrEqual(paper.height);
         }
-        // In each historical line row, the description (service marker) sits right of the unit-price amount.
-        for (const marker of paper.words.filter((word) => word.text === serviceName)) {
-          const amounts = paper.words.filter((word) => /^50,000$/.test(word.text) && Math.abs((word.yMin + word.yMax) / 2 - (marker.yMin + marker.yMax) / 2) < 6);
+        for (const marker of paper.words.filter((word) => word.text === serviceMarker)) {
+          // The long Arabic description wraps; the row's amounts are vertically centred within its first ~45 pt.
+          const amounts = paper.words.filter((word) => /^50,000$/.test(word.text) && word.yMin >= marker.yMin - 6 && word.yMin < marker.yMin + 45);
           expect(amounts.length).toBeGreaterThanOrEqual(1);
           for (const amount of amounts) expect(amount.xMax).toBeLessThan(marker.xMin);
         }
       }
       expect(errors).toEqual([]); expect(writes).toEqual([]);
     } finally { await context.close(); }
+    expect(await historyState()).toEqual(before);
+  });
+
+  it("a further current payment updates the movements and the single final balance once, in DOM, ledger and raw PDF", async () => {
+    const third = await collect({ kind: "payment", amount: "5000", openingCurrency: "YER" });
+    const before = await historyState();
+    const printed = await printPdf("statement-historical-second-payment");
+    try {
+      expect(printed.receipts).toHaveLength(3);
+      expect(printed.receipts.filter((row) => row.includes(third.receiptNumber))).toHaveLength(1);
+      expect(printed.ledger.balances.YER).toMatchObject({ billedMinor: 0, collectedMinor: 35_000, dueMinor: 965_000 });
+      const finals = (await printed.sheet.locator(".line-strong").filter({ hasText: "الرصيد الحالي" }).allTextContents()).map(plain);
+      expect(finals).toEqual([expect.stringContaining(formatMoney(965_000, "YER"))]);
+      expect(rawLabelled(printed.raw, "الرصيد الحالي", 965_000)).not.toContain(formatAmount(970_000, "YER"));
+      // The agreement's own facts do not move with current payments.
+      rawLabelled(printed.raw, "المبلغ المتبقي", 1_000_000);
+      rawLabelled(printed.raw, "المدفوع من قبل", 180_000);
+      expect(printed.errors).toEqual([]); expect(printed.writes).toEqual([]);
+    } finally { await printed.context.close(); }
     expect(await historyState()).toEqual(before);
   });
 

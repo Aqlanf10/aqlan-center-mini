@@ -19926,7 +19926,7 @@ const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
  * A patient statement's ledger, plan currencies and plans from one read-only snapshot, so a
  * payment committed meanwhile is seen by all of them or by none. Standalone readers are unchanged.
  */
-export async function patientStatementSnapshot(patientId:number,today:string){
+export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean}={}){
   await ensureSchema();
   return withFinancialReadSnapshot(getPool(),async runner=>{
     const client=runner as DbClient;
@@ -19934,8 +19934,9 @@ export async function patientStatementSnapshot(patientId:number,today:string){
     const planCurrencies=await patientPlanCurrencies(patientId,client);
     const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
     const plans=await hydratePlans(rows,today,client);
-    // Historical agreements are saved facts read on this same snapshot client (no separate transaction).
-    const historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
+    // Opt-in (current print only): historical agreements are saved facts read on this same snapshot client.
+    // Other consumers (the portal) issue no historical query and keep their existing failure surface.
+    const historicalAgreements=options.historicalAgreements?await readStatementHistoricalAgreements(client,patientId):undefined;
     return {ledger,planCurrencies,plans,historicalAgreements};
   });
 }

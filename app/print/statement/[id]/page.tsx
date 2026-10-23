@@ -74,7 +74,8 @@ export default async function StatementPage({ params, searchParams }: {
   // Its ledger, plan currencies and agreement progress come from one read-only snapshot, so the
   // receipts, balances and agreement on one sheet always describe the same committed state.
   const [patient, settings, { ledger, planCurrencies, plans, historicalAgreements }] = await Promise.all([
-    getPatient(id), getSettingsSafe(), patientStatementSnapshot(id, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
+    getPatient(id), getSettingsSafe(),
+    patientStatementSnapshot(id, clinicDateString(new Date(), CLINIC_TIME_ZONE), { historicalAgreements: true }),
   ]);
   if (!patient) notFound();
 
@@ -82,7 +83,12 @@ export default async function StatementPage({ params, searchParams }: {
      فاتورةٌ بعملتها، ورصيدٌ لكل عملة — لا رقمٌ واحد يمزج الريال بالسعودي بالدولار. */
   const base = CLINIC_BASE_CURRENCY;
   const balances = ledgerBalancesByCurrency(id, ledger, planCurrencies);
+  if (!historicalAgreements) throw new Error("Current statement requires its historical agreements from the same snapshot");
   const historicalBuckets = historicalOpeningBuckets(historicalAgreements, ledger.openings, ledger.payments);
+  // Patient handout: a currency whose previous balance is explained by its historical agreements shows those
+  // agreements instead of a second opening line (the summary below still counts the opening once).
+  const explainedOpenings = new Set(historicalBuckets.filter((bucket) => bucket.agreements.length > 0).map((bucket) => bucket.currency));
+  const showInvoiceDetails = currentStatementInvoices(ledger.invoices).length > 0 || historicalAgreements.length === 0;
   const activeCurrencies = CURRENCIES.filter((currency: Currency) => {
     const bucket: Balance = balances[currency];
     return bucket.billedMinor !== 0 || bucket.collectedMinor !== 0
@@ -121,7 +127,7 @@ export default async function StatementPage({ params, searchParams }: {
         <div className="rule" />
 
         {/* (P1-5ب) الرصيد الافتتاحي بعملته — سطرٌ لكل عملة، لا يُحوَّل. */}
-        {ledger.openings.map((opening) => (
+        {ledger.openings.filter((opening) => !explainedOpenings.has(opening.currency)).map((opening) => (
           <div className="line" key={opening.currency}>
             <span>رصيد افتتاحي — ما كان على المريض قبل بدء العمل بالبرنامج
               {opening.note ? ` (${opening.note})` : ""}
@@ -132,7 +138,7 @@ export default async function StatementPage({ params, searchParams }: {
 
         <StatementHistoricalDetails buckets={historicalBuckets} />
 
-        <StatementInvoiceDetails invoices={ledger.invoices} />
+        {showInvoiceDetails ? <StatementInvoiceDetails invoices={ledger.invoices} /> : null}
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "5mm 0 2mm" }}>الدفعات</p>
         <table className="items">

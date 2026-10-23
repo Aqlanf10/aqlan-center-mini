@@ -24,8 +24,9 @@ export interface HistoricalStatementLine {
   site: string | null;
   /** Exactly one per clinical line in this contract; tooth counts are never turned into quantities. */
   quantity: 1;
-  unitPriceMinor: number;
-  /** Allocated discount; null where the stored agreement carries no discount (standalone agreements). */
+  /** Saved unit price; null where none was recorded (standalone agreements store only the agreed amount). */
+  unitPriceMinor: number | null;
+  /** Allocated discount; null where none was recorded (standalone agreements). Never an invented zero. */
   discountMinor: number | null;
   netMinor: number;
 }
@@ -39,8 +40,9 @@ export interface HistoricalStatementAgreement {
   currency: Currency;
   historicalAsOf: string;
   lines: HistoricalStatementLine[];
-  grossMinor: number;
-  discountMinor: number;
+  /** Recorded gross and discount; null for standalone agreements, whose persisted contract has neither. */
+  grossMinor: number | null;
+  discountMinor: number | null;
   agreedMinor: number;
   previouslyPaidMinor: number;
   remainingMinor: number;
@@ -133,7 +135,7 @@ export async function readStatementHistoricalAgreements(client: Pick<DbClient, "
     const previouslyPaidMinor = safeMinor(row.previously_paid_minor, `المدفوع سابقًا للاتفاق #${row.id}`);
     const remainingMinor = safeMinor(row.remaining_minor, `متبقي الاتفاق #${row.id}`);
     const agreedMinor = grossMinor - discountMinor;
-    if (lines.reduce((sum, line) => sum + line.unitPriceMinor, 0) !== grossMinor
+    if (lines.reduce((sum, line) => sum + (line.unitPriceMinor ?? 0), 0) !== grossMinor
       || lines.reduce((sum, line) => sum + (line.discountMinor ?? 0), 0) !== discountMinor
       || agreedMinor < 0 || remainingMinor !== agreedMinor - previouslyPaidMinor) {
       throw new StatementHistoricalDetailsError(`مجاميع الاتفاق #${row.id} لا تطابق بنوده`);
@@ -150,8 +152,8 @@ export async function readStatementHistoricalAgreements(client: Pick<DbClient, "
     const coverage = legacyCoverageStateFromSnapshot(row.coverage_snapshot, { agreementId: row.id, serviceId: row.service_id, anchorToothCode: row.tooth_code });
     const site = coverage.kind === "verified" ? siteLabel(coverage.coverage.site) : row.tooth_code === null ? null : String(row.tooth_code);
     result.push({ kind: "standalone", id: row.id, version: 1, currency: row.currency, historicalAsOf: isoDate(row.historical_as_of, `الاتفاق السابق #${row.id}`),
-      lines: [{ description: row.service_name, site, quantity: 1, unitPriceMinor: agreedMinor, discountMinor: null, netMinor: agreedMinor }],
-      grossMinor: agreedMinor, discountMinor: 0, agreedMinor, previouslyPaidMinor, remainingMinor });
+      lines: [{ description: row.service_name, site, quantity: 1, unitPriceMinor: null, discountMinor: null, netMinor: agreedMinor }],
+      grossMinor: null, discountMinor: null, agreedMinor, previouslyPaidMinor, remainingMinor });
   }
   return result;
 }

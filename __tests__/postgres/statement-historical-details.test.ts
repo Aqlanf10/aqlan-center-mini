@@ -21,6 +21,8 @@ vi.mock("@/lib/session", async (importOriginal) => ({ ...(await importOriginal<o
   requireSession: async () => ({ role: "admin", username: "synthetic-print", userId: 1 }) }));
 vi.mock("@/components/PrintHeader", () => ({ PrintHeader: ({ title }: { title: string }) => createElement("h1", null, title), PrintFooter: () => null }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
+const gates = vi.hoisted(() => ({ portalPatientId: 0 }));
+vi.mock("@/lib/portal-server", () => ({ requirePortalSession: async () => (gates.portalPatientId ? { patientId: gates.portalPatientId } : null) }));
 
 const db = await import("../../lib/db");
 const auth = await import("../../lib/auth");
@@ -30,6 +32,7 @@ const { parseLegacyTreatmentRequest } = await import("../../lib/legacy-treatment
 const { DEFAULT_SPECIALTY_TEMPLATES } = await import("../../lib/specialty-templates");
 const { readStatementHistoricalAgreements, StatementHistoricalDetailsError } = await import("../../lib/statement-historical-details");
 const { default: StatementPage } = await import("../../app/print/statement/[id]/page");
+const { GET: portalStatement } = await import("../../app/api/portal/statement/route");
 const { formatMoney } = await import("../../lib/money");
 
 const q = async <T = Record<string, unknown>>(sql: string, values: unknown[] = []) => (await db.getPool().query(sql, values)).rows as T[];
@@ -110,12 +113,6 @@ const lineRows = (table: string) => [...table.matchAll(/<tr><td class="statement
   .map((match) => match.slice(1, 7));
 /** The current-balance block line for a label (the existing canonical summary). */
 const summary = (html: string, label: string) => [...html.matchAll(new RegExp(`<span>${label}</span><span class="num">([^<]*)</span>`, "g"))].map((match) => match[1]);
-const bucket = (html: string, currency: Currency) => {
-  const start = html.indexOf(`data-historical-currency="${currency}"`);
-  expect(start).toBeGreaterThan(0);
-  const next = html.indexOf("data-historical-currency=", start + 10);
-  return html.slice(start, next > 0 ? next : html.indexOf("</section>", start));
-};
 
 /** Whole-database content hash: printing must write nothing (payments, cash shifts, journals, history, audit). */
 async function financialState(_patientId: number) {
@@ -151,18 +148,22 @@ describe("historical agreement details in the current printed statement", () => 
     expect(document.lines[0].discountMinor + document.lines[1].discountMinor).toBe(50000);
     expect(totalRow(table, "الإجمالي قبل الخصم")).toBe(formatMoney(500000, "YER"));
     expect(totalRow(table, "الخصم المسجل")).toBe(formatMoney(50000, "YER"));
-    expect(totalRow(table, "المتفق عليه بعد الخصم")).toBe(formatMoney(450000, "YER"));
-    expect(totalRow(table, "مدفوع قبل البرنامج (سجل تاريخي — ليس سند قبض حاليًا)")).toBe(formatMoney(150000, "YER"));
-    expect(totalRow(table, "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(300000, "YER"));
+    expect(totalRow(table, "المبلغ المتفق عليه")).toBe(formatMoney(450000, "YER"));
+    expect(totalRow(table, "المدفوع من قبل")).toBe(formatMoney(150000, "YER"));
+    expect(totalRow(table, "المبلغ المتبقي")).toBe(formatMoney(300000, "YER"));
     // Canonical balances unchanged: nothing billed or collected now; the opening counted once.
     expect(summary(html, "إجمالي المفوتر")).toEqual([formatMoney(0, "YER")]);
     expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(0, "YER")]);
     expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(300000, "YER")]);
-    expect(html).toContain("لا فواتير حالية");
+    expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(300000, "YER"))]);
     expect(html).toContain("لا دفعات");
-    expect(summary(bucket(html, "YER"), "المحصّل منه في البرنامج بعد الاستردادات")).toEqual([formatMoney(0, "YER")]);
-    expect(summary(bucket(html, "YER"), "المتبقي من الرصيد السابق")).toEqual([formatMoney(300000, "YER")]);
-    expect(html).not.toContain("لا تقابله تفاصيل علاج مسجلة");
+    // Patient handout: no contradictory empty-invoice section, no second opening line, no internal prose.
+    expect(html).not.toContain("لا فواتير حالية");
+    expect(html).not.toContain("الفواتير وتفاصيل العلاج");
+    expect(html).not.toContain("ما كان على المريض قبل بدء العمل بالبرنامج");
+    for (const internal of ["تسجيل اتفاق تاريخي", "أُضيف إلى الرصيد السابق", "سجل تاريخي", "ليس سند قبض", "النسخة", `#${document.id}`, "بلا تفاصيل علاج مسجلة"]) {
+      expect(html, internal).not.toContain(internal);
+    }
   });
 
   it("a current receipt 40,000 and refund 10,000 leave 270,000 once at currency level; historical facts and journal/cash are preserved", async () => {
@@ -172,13 +173,13 @@ describe("historical agreement details in the current printed statement", () => 
     const html = await print(examplePatient);
     expect(await financialState(examplePatient)).toEqual(before);
     const table = agreementTable(html, "document", exampleDocument);
-    expect(totalRow(table, "مدفوع قبل البرنامج (سجل تاريخي — ليس سند قبض حاليًا)")).toBe(formatMoney(150000, "YER"));
-    expect(totalRow(table, "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(300000, "YER"));
+    expect(totalRow(table, "المدفوع من قبل")).toBe(formatMoney(150000, "YER"));
+    expect(totalRow(table, "المبلغ المتبقي")).toBe(formatMoney(300000, "YER"));
     // The historical table is byte-identical after current collections: they are never allocated to it.
     expect(table).toBe(exampleTable);
-    expect(summary(bucket(html, "YER"), "المحصّل منه في البرنامج بعد الاستردادات")).toEqual([formatMoney(30000, "YER")]);
-    expect(summary(bucket(html, "YER"), "المتبقي من الرصيد السابق")).toEqual([formatMoney(270000, "YER")]);
-    expect(summary(html, "الرصيد الحالي").join(" ")).toContain(formatMoney(270000, "YER"));
+    // Each movement contributes once: one final amount due for the currency.
+    expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(270000, "YER"))]);
+    expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(300000, "YER")]);
     expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(30000, "YER")]);
     expect(html).toContain(receipt.receiptNumber);
     // The history is never a receipt: exactly two current receipts, both real.
@@ -193,11 +194,13 @@ describe("historical agreement details in the current printed statement", () => 
     await pay(patientId, { amountMinor: 25000 });
     const html = await print(patientId);
     expect(agreementTable(html, "document", first.id)).toContain(formatMoney(150000, "YER"));
-    expect(totalRow(agreementTable(html, "document", second.id), "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(300000, "YER"));
-    const yer = bucket(html, "YER");
-    expect(summary(yer, "المحصّل منه في البرنامج بعد الاستردادات")).toEqual([formatMoney(25000, "YER")]);
-    expect(summary(yer, "المتبقي من الرصيد السابق")).toEqual([formatMoney(425000, "YER")]);
-    expect(html.match(/المحصّل منه في البرنامج بعد الاستردادات/g)).toHaveLength(1);
+    expect(totalRow(agreementTable(html, "document", second.id), "المبلغ المتبقي")).toBe(formatMoney(300000, "YER"));
+    expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(450000, "YER")]);
+    expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(25000, "YER")]);
+    expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(425000, "YER"))]);
+    // Current collections are never repeated or allocated under each agreement.
+    expect(html.match(/<td colSpan="5">المبلغ المتبقي<\/td>/g)).toHaveLength(2);
+    expect(html).not.toContain(formatMoney(275000, "YER"));
     // Document children are never printed again as standalone agreements.
     expect(html).not.toContain('data-historical-kind="standalone"');
     expect(html.match(/data-historical-kind="document"/g)).toHaveLength(2);
@@ -211,12 +214,11 @@ describe("historical agreement details in the current printed statement", () => 
     if (!invoice) throw new Error("Synthetic invoice failed");
     await pay(patientId, { amountMinor: 15000, invoiceId: invoice.id });
     const html = await print(patientId);
-    expect(totalRow(agreementTable(html, "document", document.id), "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(100000, "YER"));
+    expect(totalRow(agreementTable(html, "document", document.id), "المبلغ المتبقي")).toBe(formatMoney(100000, "YER"));
     expect(html).toContain("CURRENT-INVOICE-LINE");
     expect(summary(html, "إجمالي المفوتر")).toEqual([formatMoney(55000, "YER")]);
     expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(15000, "YER")]);
-    // Invoice receipts never count as opening collections.
-    expect(summary(bucket(html, "YER"), "المحصّل منه في البرنامج بعد الاستردادات")).toEqual([formatMoney(0, "YER")]);
+    expect(html).toContain("الفواتير وتفاصيل العلاج");
     expect(summary(html, "الرصيد الحالي").join(" ")).toContain(formatMoney(100000 + 55000 - 15000, "YER"));
   });
 
@@ -233,11 +235,11 @@ describe("historical agreement details in the current printed statement", () => 
       .toEqual(["200000", "300000"]);
     const html = await print(patientId);
     const table = agreementTable(html, "document", document.id);
-    expect(table).toContain("النسخة المصححة 2");
+    expect(table).not.toContain("النسخة");
     expect(lineRows(table).map((row) => row[3])).toEqual([formatMoney(220000, "YER"), formatMoney(300000, "YER")]);
     expect(totalRow(table, "الإجمالي قبل الخصم")).toBe(formatMoney(520000, "YER"));
-    expect(totalRow(table, "مدفوع قبل البرنامج (سجل تاريخي — ليس سند قبض حاليًا)")).toBe(formatMoney(130000, "YER"));
-    expect(totalRow(table, "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(370000, "YER"));
+    expect(totalRow(table, "المدفوع من قبل")).toBe(formatMoney(130000, "YER"));
+    expect(totalRow(table, "المبلغ المتبقي")).toBe(formatMoney(370000, "YER"));
     expect(table).not.toContain(formatMoney(200000, "YER"));
     expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(370000, "YER")]);
   });
@@ -248,9 +250,8 @@ describe("historical agreement details in the current printed statement", () => 
     expect(await q("SELECT count(*)::int AS n FROM patient_opening_balances WHERE patient_id=$1", [patientId])).toEqual([{ n: 0 }]);
     const html = await print(patientId);
     const table = agreementTable(html, "document", document.id);
-    expect(totalRow(table, "مدفوع قبل البرنامج (سجل تاريخي — ليس سند قبض حاليًا)")).toBe(formatMoney(50000, "YER"));
-    expect(totalRow(table, "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(0, "YER"));
-    expect(bucket(html, "YER")).toContain("لا رصيد سابق قائم بهذه العملة.");
+    expect(totalRow(table, "المدفوع من قبل")).toBe(formatMoney(50000, "YER"));
+    expect(totalRow(table, "المبلغ المتبقي")).toBe(formatMoney(0, "YER"));
     expect(summary(html, "رصيد افتتاحي")).toEqual([]);
   });
 
@@ -261,11 +262,15 @@ describe("historical agreement details in the current printed statement", () => 
     expect((await legacy.voidLegacyTreatment({ patientId, agreementId: voided.id, reason: "Synthetic entered in error", actor: session.username, actorRole: "admin" })).ok).toBe(true);
     const html = await print(patientId);
     const table = agreementTable(html, "standalone", live.id);
-    expect(lineRows(table)).toEqual([[esc(live.serviceName), "الفكّان", "1", formatMoney(400000, "YER"), "—", formatMoney(400000, "YER")]]);
-    expect(totalRow(table, "مدفوع قبل البرنامج (سجل تاريخي — ليس سند قبض حاليًا)")).toBe(formatMoney(100000, "YER"));
-    expect(totalRow(table, "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(300000, "YER"));
+    // Standalone agreements persist agreed/paid/remaining only: no recorded unit price, gross or discount is claimed.
+    expect(lineRows(table)).toEqual([[esc(live.serviceName), "الفكّان", "1", "غير مسجل", "غير مسجل", formatMoney(400000, "YER")]]);
+    expect(totalRow(table, "المبلغ المتفق عليه")).toBe(formatMoney(400000, "YER"));
+    for (const claimed of ["الإجمالي قبل الخصم", "الخصم المسجل", "المتفق عليه بعد الخصم"]) expect(table).not.toContain(claimed);
+    expect(table).not.toContain(`>${formatMoney(0, "YER")}<`);
+    expect(totalRow(table, "المدفوع من قبل")).toBe(formatMoney(100000, "YER"));
+    expect(totalRow(table, "المبلغ المتبقي")).toBe(formatMoney(300000, "YER"));
     expect(html).not.toContain(`data-historical-id="${voided.id}"`);
-    expect(summary(bucket(html, "YER"), "المتبقي من الرصيد السابق")).toEqual([formatMoney(300000, "YER")]);
+    expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(300000, "YER"))]);
   });
 
   it("a manual opening with no stored detail says so and infers nothing; SAR and YER stay in separate buckets", async () => {
@@ -274,14 +279,15 @@ describe("historical agreement details in the current printed statement", () => 
     const document = await historical(patientId, { currency: "YER", items: [{ serviceId: services.rct, price: "80000", toothCode: 44 }], discount: "0", paid: "30000" });
     await pay(patientId, { amountMinor: 2345, currency: "SAR" });
     const html = await print(patientId);
-    const sar = bucket(html, "SAR");
-    expect(sar).toContain("تفاصيل العلاج غير مسجلة للرصيد السابق بهذه العملة.");
-    expect(sar).not.toContain("data-historical-kind");
-    expect(summary(sar, "المحصّل منه في البرنامج بعد الاستردادات")).toEqual([formatMoney(2345, "SAR")]);
-    expect(summary(sar, "المتبقي من الرصيد السابق")).toEqual([formatMoney(10000, "SAR")]);
-    const yer = bucket(html, "YER");
-    expect(totalRow(agreementTable(yer, "document", document.id), "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(50000, "YER"));
-    expect(summary(yer, "المتبقي من الرصيد السابق")).toEqual([formatMoney(50000, "YER")]);
+    // The SAR balance has no stored treatment detail: said once, nothing inferred; its own opening line stays.
+    expect(html).toContain('data-undetailed-currency="SAR"');
+    expect(html).toContain("الرصيد السابق (ريال سعودي) بلا تفاصيل علاج مسجلة.");
+    expect(html).toContain("Synthetic imported balance");
+    expect(totalRow(agreementTable(html, "document", document.id), "المبلغ المتبقي")).toBe(formatMoney(50000, "YER"));
+    // Separate currency buckets in the canonical summary: YER then SAR, never mixed.
+    expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(50000, "YER"), formatMoney(12345, "SAR")]);
+    expect(summary(html, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(0, "YER"), formatMoney(2345, "SAR")]);
+    expect(summary(html, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(50000, "YER")), expect.stringContaining(formatMoney(10000, "SAR"))]);
   });
 
   it("an SAR document uses ×100 minor units through formatMoney and never mixes with YER", async () => {
@@ -292,8 +298,9 @@ describe("historical agreement details in the current printed statement", () => 
     const html = await print(patientId);
     const table = agreementTable(html, "document", document.id);
     expect(totalRow(table, "الإجمالي قبل الخصم")).toBe(formatMoney(180050, "SAR"));
-    expect(totalRow(table, "المتبقي عند التسجيل — أُضيف إلى الرصيد السابق")).toBe(formatMoney(120000, "SAR"));
-    expect(html).not.toContain('data-historical-currency="YER"');
+    expect(totalRow(table, "المبلغ المتبقي")).toBe(formatMoney(120000, "SAR"));
+    expect(summary(html, "رصيد افتتاحي")).toEqual([formatMoney(120000, "SAR")]);
+    expect(html).not.toContain(" ر.ي");
   });
 
   it("only this patient's agreements are printed", async () => {
@@ -345,10 +352,10 @@ describe("one coherent snapshot and fail-closed reads", () => {
     expect(html).toBe(before);
     const after = await print(patientId);
     const table = agreementTable(after, "document", document.id);
-    expect(totalRow(table, "مدفوع قبل البرنامج (سجل تاريخي — ليس سند قبض حاليًا)")).toBe(formatMoney(50000, "YER"));
+    expect(totalRow(table, "المدفوع من قبل")).toBe(formatMoney(50000, "YER"));
     expect(summary(after, "رصيد افتتاحي")).toEqual([formatMoney(50000, "YER")]);
-    expect(summary(bucket(after, "YER"), "المحصّل منه في البرنامج بعد الاستردادات")).toEqual([formatMoney(7000, "YER")]);
-    expect(summary(bucket(after, "YER"), "المتبقي من الرصيد السابق")).toEqual([formatMoney(43000, "YER")]);
+    expect(summary(after, "صافي المحصّل بعد الاستردادات وعكس السندات")).toEqual([formatMoney(7000, "YER")]);
+    expect(summary(after, "الرصيد الحالي")).toEqual([expect.stringContaining(formatMoney(43000, "YER"))]);
   });
 
   it("a failing historical read fails the print instead of printing an empty history", async () => {
@@ -389,5 +396,52 @@ describe("one coherent snapshot and fail-closed reads", () => {
     for (const broken of [{ ...agreement, remaining_minor: "700" }, { ...agreement, previously_paid_minor: null }, { ...agreement, agreed_minor: "0" }]) {
       await expect(readStatementHistoricalAgreements(fake([], [broken]), 1)).rejects.toBeInstanceOf(StatementHistoricalDetailsError);
     }
+  });
+});
+
+/** Every SQL text the snapshot's connections issue while `run` executes. */
+async function capturedSql(run: () => Promise<unknown>) {
+  const pool = db.getPool();
+  const original = pool.connect.bind(pool) as (...args: unknown[]) => unknown;
+  const issued: string[] = [];
+  const spy = vi.spyOn(pool, "connect").mockImplementation(((...args: unknown[]) => {
+    if (typeof args[0] === "function") return original(...args);
+    return (async () => {
+      const client = await (original() as Promise<PoolClient>);
+      const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+      const release = client.release.bind(client);
+      client.query = (async (...args: unknown[]) => { issued.push(sqlOf(args)); return query(...args); }) as typeof client.query;
+      client.release = ((destroy?: boolean | Error) => { client.query = query as typeof client.query; client.release = release; return release(destroy); }) as typeof client.release;
+      return client;
+    })();
+  }) as unknown as typeof pool.connect);
+  try { await run(); } finally { spy.mockRestore(); }
+  return issued;
+}
+/** The two statement-historical reader queries (plan hydration's existing legacy join is not one of them). */
+const historicalSql = (sql: string) => /FROM legacy_treatment_documents d\b/.test(sql) || /a\.document_id IS NULL AND a\.status = 'live'/.test(sql);
+
+describe("the historical read is a current-print opt-in only", () => {
+  it("the portal statement issues no historical query and ignores a malformed historical fact; the opted-in print fails closed", async () => {
+    const patientId = await newPatient("portal isolation");
+    const document = await historical(patientId, { items: [{ serviceId: services.rct, price: "200000", toothCode: 45 }], discount: "0", paid: "50000" });
+    gates.portalPatientId = patientId;
+    const portalSql = await capturedSql(async () => { const response = await portalStatement(); expect(response.status).toBe(200); });
+    expect(portalSql.length).toBeGreaterThan(0);
+    expect(portalSql.filter(historicalSql)).toEqual([]);
+    const printSql = await capturedSql(() => print(patientId));
+    expect(printSql.filter(historicalSql).length).toBe(2);
+    const healthy = await (await portalStatement()).json();
+    // Corrupt the saved revision line in this disposable database only (bypassing its append-only trigger).
+    const client = await db.getPool().connect();
+    try {
+      await client.query("SET session_replication_role = replica");
+      await client.query(`UPDATE legacy_treatment_document_revisions SET lines = jsonb_set(lines, '{0,unitPriceMinor}', '"200000"') WHERE document_id = $1`, [document.id]);
+    } finally { await client.query("RESET session_replication_role"); client.release(); }
+    const response = await portalStatement();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(healthy);
+    await expect(print(patientId)).rejects.toBeInstanceOf(StatementHistoricalDetailsError);
+    gates.portalPatientId = 0;
   });
 });
