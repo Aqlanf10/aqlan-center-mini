@@ -15,7 +15,7 @@ Control: immutable #439 head `9881d33c21c4812ae3e18219a8112438d6192a78`. Product
 
 Absolute / relative changes: p50 −5.533ms (−27.3%); p95 −6.677ms (−27.2%); p99 −8.967ms (−31.8%). All three paired blocks improved. This is service-layer evidence on an isolated synthetic fixture, not a Production latency SLA, HTTP timing, or a promise of no slowdown in every workload. The weaker historical baseline is not used as this acceptance comparator.
 
-Method: identical seed clones, 1,000 synthetic patients / 100,000 appointments / 100 statement invoices and receipts / five draft agreements; same PG18.6 container (2 CPUs, 1GiB), Node22.23.3, pool max5, one request at a time. Three paired blocks in control→optimized / optimized→control / control→optimized order; 10 excluded warm-ups and 200 measured calls per side/block. Same 600-sample method as the prior investigation; this repeat isolates statement calls. Database/OS caches warm; no cold-start or saturation claim. Raw timings and EXPLAIN trees retained in cloud workspace /workspace/statement-performance-evidence.
+Method: identical seed clones, 1,000 synthetic patients / 100,000 appointments / 100 statement invoices and receipts / five draft agreements; same PG18.6 container (2 CPUs, 1GiB), Node22.23.3, pool max5, one request at a time. Three paired blocks in control→optimized / optimized→control / control→optimized order; 10 excluded warm-ups and 200 measured calls per side/block. Same 600-sample method as the prior investigation; this repeat isolates statement calls. Database/OS caches warm; no cold-start or saturation claim. Complete warm and cold raw samples, recalculation script and fixture/harness recipe are committed in reproduction/. EXPLAIN trees remain in cloud workspace /workspace/statement-performance-evidence.
 
 ## Attribution
 
@@ -27,14 +27,22 @@ Collection remains separate and unchanged: prior profiling found one extra simil
 
 ## Regression evidence
 
-- New bounded-query-growth regression: 1→40 draft plans returns every plan without one extra SQL submission per plan. Red on immutable #439: 50 calls exceeded the 12-call bound; green on this change.
+- New bounded-query-growth regression: 1→40 empty draft plans returns every plan without one extra SQL submission per plan. Red on immutable #439: 50 calls exceeded the 12-call bound; green on this change.
 - Concurrent new-plan commit between snapshot reads cannot split plan details from the currency map; both appear together on the next request.
 - Existing payment-between-reads print and portal concurrency tests pass, including rollback-failure cleanup.
 - Complete statement plan DTOs/currency maps equal standalone readers across the populated existing source matrix: approved/draft agreements, invoice-backed schedules, all three currencies, classic installments, refunds, invoice/receipt corrections, ambiguous ownership, reclassification and source drift.
 - Local typecheck and 28 focused PostgreSQL cases passed. Full hosted CI is required on the final head; no old green run is reused.
 
-Local Chromium is absent and no browser download was performed. Full hosted HTTP/browser verification will cover portal/current-print and PDF functional paths; no local browser latency claim is made.
+Installed system Chromium was reused without download: portal4/4 and basic print pass, but active-agreement PDF label extraction fails identically on base and candidate before the later payment/second-PDF assertions. This remains an acceptance blocker, not an accepted inherited failure. See pdf-diagnosis/ for exact text, runtime, minimal reproduction and separate repair proposal. No local browser latency claim. Run40000981477 on8445d830 completed: PostgreSQL success, audit failure, HTTP/browser skipped, aggregate failure; audit remediation is separately owned. No skipped check counts as success.
 
 ## Deployment boundary
 
 This is an independent code-review candidate, not a release. #439/main/source PRs remain frozen. The separate DDL contention proposal concerns bounded lock waits, controlled traffic windows and partial-migration recovery; no DDL or live configuration change is included here.
+
+## Cold probe and scope limitation
+
+All52 fresh-process samples/version are retained. Control→optimized p50 271.888→266.186ms, p95 306.122→342.542ms, p99 326.792→434.562ms, zero errors. Aggregate cold tails are worse; non-regression is inconclusive. First call after module import, DB/OS caches warm; not full app or disk-cold latency. Do not omit the initial slow samples.
+
+Only candidate-discovery submissions are batched. Invoice-backed plans still read invoice settlement and debt repayments; approved agreements resolve individually. The empty-draft query-count test does not prove globally constant total statement SQL.
+
+Additional populated2/10/40-plan probe: total SQL64→63 /643→638 /8533→8513; candidate timing observations were slower in this small single-order run. Full canonical snapshots match. This exposes substantial inherited repeated financial reads and does not establish populated-plan speedup or non-regression. See reproduction/POPULATED-RESULTS.md for full numbers, limitations and proposed separate investigation.

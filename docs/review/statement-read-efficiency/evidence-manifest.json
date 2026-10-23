@@ -1,0 +1,29 @@
+{
+  "measuredProductHead": "8445d830af40fab112761085e8e8b2dd14c5d378",
+  "files": {
+    "README.md": "53b77db9c0783c6a0dd3baf508a00e44fed8ef7c45a258b402aafcb23c28cc56",
+    "measurement-summary.json": "576c3f182ee0d974e576e580e3e72da3baf3e9511ba36c25d8946c44b4cf6eab",
+    "pdf-diagnosis/source-and-extractor.json": "b910c8937dab7347c104153abe63b052ad0b4008cf5716f3634a8591eca94b52",
+    "pdf-diagnosis/README.md": "3f3f6fb7d086aa23f147680a9714ced2eba4fae751a9d02c5c76358a113ad6b9",
+    "pdf-diagnosis/reproduce.cjs.txt": "35143511738c4be1e64ffbd00730861840ca3ac01424d18899b8aa41ad2dff82",
+    "pdf-diagnosis/minimal-results.json": "d931c9602be11cdde65407e89d267630a090987533e59c8f01147f5a587259c2",
+    "pdf-diagnosis/text-comparison.json": "54b9ca38ab4bdf59c67c097bf87e717cd978c42c01718e16166e3b765c56e705",
+    "reproduction/populated-scale-fixtures.json": "93f371c2f842ad402092a8b19e683b20607d3a4a799c2fa78a3ead3bdd9cfef2",
+    "reproduction/populated-scale-opt.json": "1d1759ee2033ab476750d0a549966b2cec962a825df0dd9fb881486a2cadbe79",
+    "reproduction/cold-expanded-summary.json": "ea48dc80925a927b9b3431719e574216da354b74ea8cd235caebddb8cbf4b46b",
+    "reproduction/populated-scale-summary.json": "f680fe7efd5057c203ae5ed0b65c5f0acaa974087fd147b5f1dcbf781abe3458",
+    "reproduction/README.md": "f44c7d337a819dcc782f6af3b766586aa075e145274729f1c7f7b29b785a37ad",
+    "reproduction/populated-canonical-snapshots.json": "395db33763308a1403bd1cf56f84e337bb725e225db2c2e18cc75bbbf8663fc8",
+    "reproduction/populated-scale-parity.mts.txt": "40c7fdeaec1ab2a5cc172c94884fb9b9efb639f672d08813b8c8d8add86642f2",
+    "reproduction/populated-scale-seed.test.ts.txt": "9646741ee761927a481b8825615e748f98d236d4d2e0a8d330be32fe5279f020",
+    "reproduction/measure.py": "96f98e4f7d37f2d016996c521a14d8e220c87176586ac86b52f0f525c05e9163",
+    "reproduction/POPULATED-RESULTS.md": "3ae0ad1376d5cc5d9e705e2f3f9b7c7d02fee99d10a4158b6c8c93cdbf5d36f3",
+    "reproduction/recalculate.py": "e64433376dc3a2fe4f6f94ca1e59647413e9302fd92c4ff53544296bee142435",
+    "reproduction/cold.py": "8fd49579dbdd7278e622025e84309bdeb031d34ebf36be825e81a16e667bf875",
+    "reproduction/populated-scale-read.mts.txt": "5670cac88bec2d755d1f8b9580152f2c1f3bc3f9b1b3b7b366bd17edf8a3bf03",
+    "reproduction/populated-scale-control.json": "2599800541e50fd16fbf9aaa24b069d7ef1f66d5684079a69bf714f757e89ea8",
+    "reproduction/raw-samples.json": "e7a8a33e60401a23857ef4e07e54c07a93a3c4f4a0f1d966b64bf5929c6ada1d",
+    "reproduction/bench.mts.txt": "c4f4d6d755ed77e0b98ee7363c2f6f7148495bb0c684af6e6970e4e5364fee5b",
+    "reproduction/cold-extend.py": "2e239f2469d7777e1f475c6c994d87bf470b5a9c764ff2dd3c9dd9902d0a75e1"
+  }
+}

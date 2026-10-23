@@ -1,0 +1,27 @@
+const { chromium } = require('/workspace/statement-read-efficiency/node_modules/playwright');
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const out = __dirname;
+const expected = 'صافي المحصّل بعد الاستردادات وعكس السندات';
+const plain = s => s.normalize('NFKC').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '');
+const arabicKey = s => s.replace(/[\u064B-\u0652]/g, '').replace(/ا([اأإآ])ل/g, 'ال$1');
+(async () => {
+ const browser = await chromium.launch({headless:true, executablePath:'/usr/bin/chromium'});
+ const results=[];
+ try {
+  for (const [name,font,features] of [['naskh','Noto Naskh Arabic',''],['sans','Noto Sans Arabic',''],['dejavu','DejaVu Sans',''],['dejavu-no-ligatures','DejaVu Sans','font-variant-ligatures:none;font-feature-settings:"liga" 0,"rlig" 0;'],['naskh-no-ligatures','Noto Naskh Arabic','font-variant-ligatures:none;font-feature-settings:"liga" 0,"rlig" 0;']]) {
+   const page=await browser.newPage();
+   const html=`<!doctype html><html dir="rtl"><meta charset="utf-8"><style>body{${features}font-family:"${font}",sans-serif;padding:8mm}.line{display:flex;justify-content:space-between;gap:4mm;font-size:9pt;margin:1mm 0}</style><div class="line"><span>${expected}</span><span>1,300.00 ر.س</span></div></html>`;
+   fs.writeFileSync(`${out}/${name}.html`,html);
+   await page.setContent(html); await page.evaluate(()=>document.fonts.ready);
+   const dom=await page.locator('.line span').first().textContent();
+   const pdf=`${out}/${name}.pdf`; await page.pdf({path:pdf,format:'A4',printBackground:true});
+   const extracted=plain(execFileSync('pdftotext',['-layout','-enc','UTF-8',pdf,'-'],{encoding:'utf8'}));
+   fs.writeFileSync(`${out}/${name}.txt`,extracted);
+   const matches=extracted.split('\n').map(arabicKey).filter(row=>row.includes(arabicKey(expected)) && /\d/.test(row));
+   results.push({name,font,dom,domExact:dom===expected,extracted,matches:matches.length,unchangedPredicatePass:matches.length===1});
+   await page.close();
+  }
+ } finally {await browser.close();}
+ fs.writeFileSync(`${out}/minimal-results.json`,JSON.stringify(results,null,2)); console.log(JSON.stringify(results,null,2));
+})().catch(e=>{console.error(e);process.exitCode=1});
