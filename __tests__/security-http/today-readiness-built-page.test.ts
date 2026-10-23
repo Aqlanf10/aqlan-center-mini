@@ -3,6 +3,7 @@ import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+import { emptyFollowupsFixtureRead } from "../helpers/followups-fixture-route";
 import type { Visit } from "../../lib/flow";
 import type { VisitReadiness } from "../../components/today/useChairReadiness";
 import { clearanceGate, normalizeEmergencyReason, CLEARANCE_WARNING, CLEARANCE_REQUIRED_MESSAGE } from "../../lib/chair-readiness";
@@ -117,6 +118,8 @@ describe("Today readiness on the built RTL board", () => {
         await route.fulfill({ json: { ...visits[index], warning: decision.warning } });
         return;
       }
+      const followups = emptyFollowupsFixtureRead(url, method, baseUrl, null);
+      if (followups) { await route.fulfill({ json: followups }); return; }
       if (url.pathname === "/api/visits" && !url.search) { await route.fulfill({ json: visits }); return; }
       if (url.pathname === "/api/visits" && url.search === "?view=reception-handoff") {
         await route.fulfill({ json: { owner: { username: "secadmin", role: "admin" }, fromDate: "2026-10-08", toDate: "2026-10-09", clinicTimeZone: "Asia/Aden", items: [] } }); return;

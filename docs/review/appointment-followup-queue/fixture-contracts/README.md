@@ -16,6 +16,17 @@ logs or artifacts) identified these first failures:
 | `clinical-visit-owner-ui.test.ts`, `fixture()`'s `context.route`, `expectSafe` at original line 263 | Expected `[]`, received `['GET /api/appointment-followups']`; four cases |
 | `hr-temporal-history-ui.test.ts`, original line 25 | Exact migration list expected through `0071`, actual list additionally contains `0072`; `beforeAll` fails |
 
+The first repair head `8814acc9fa63124d0306aaaa3b657f0c984c0ae7` then passed
+quality and PostgreSQL in run
+[40038423529](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/40038423529),
+but exposed one further fixture gap: `today-readiness-built-page.test.ts` at
+original lines 278/281 reported the same unexpected follow-up GET at 390/1280px.
+Both cases reproduced locally on that unchanged head in **12.30 seconds**. Its
+route handler now uses the same explicit board scope after its existing origin
+and exact-write-permit guards. Readiness freshness, movement/override policy,
+geometry and unexpected-request assertions are unchanged. This failed run is
+old-head evidence, not final-head acceptance.
+
 Local red-before reproduction used the unchanged #450 built app, Node 22, system
 Chromium, and disposable PostgreSQL at loopback. `CI=true GITHUB_ACTIONS=true`
 enabled the clinical fixture's existing CI-only selection locally; this is a local
@@ -52,9 +63,12 @@ No product, database migration, security policy, workflow or dependency changes.
 ## Verification
 
 - Fixture boundary and existing guarded-route/patient-fixture units: **47/47**.
-- Focused rebuilt-app acceptance: **28/28 cases in all four files passed**, with
+- Initial focused rebuilt-app acceptance: **28/28 cases in the first four files passed**, with
   CI-only clinical selection enabled locally, including all seven HR cases and
   the withheld-table 503 check. No cases were skipped.
+- Follow-up focused acceptance includes Today readiness: **30/30 cases in five
+  files passed**, zero skipped, on the same unchanged product build. Typecheck
+  and lint also passed after the additional three-line fixture wiring.
 - Build, typecheck and lint passed; the final fixture-only refinement was checked
   again with typecheck and lint. Product build inputs are unchanged.
 - Final hosted CI is recorded in the Draft PR with its exact final head; do not
@@ -67,7 +81,8 @@ npm run test:security-http -- \
   __tests__/security-http/reception-signature-handoff-ui.test.ts \
   __tests__/security-http/clinical-visit-owner-ui.test.ts \
   __tests__/security-http/hr-temporal-history-ui.test.ts \
-  __tests__/security-http/reception-exact-checkout-ui.test.ts
+  __tests__/security-http/reception-exact-checkout-ui.test.ts \
+  __tests__/security-http/today-readiness-built-page.test.ts
 ```
 
 Existing 0071/0072 rollout holds remain. This test repair is not deployment or
