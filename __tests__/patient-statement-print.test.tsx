@@ -11,7 +11,7 @@ vi.mock("@/lib/db", async (importOriginal) => ({ ...await importOriginal<typeof 
   patientPlanCurrencies: mocks.patientPlanCurrencies, listPatientPlans: mocks.listPatientPlans,
   // The current print reads the same sources in one snapshot; here it composes the same mocks.
   patientStatementSnapshot: async (id: number, today: string) => ({ ledger: await mocks.patientLedger(id),
-    planCurrencies: await mocks.patientPlanCurrencies(id), plans: await mocks.listPatientPlans(id, today) }) }));
+    planCurrencies: await mocks.patientPlanCurrencies(id), plans: await mocks.listPatientPlans(id, today), historicalAgreements: [] }) }));
 vi.mock("@/components/PrintHeader", () => ({ PrintHeader: ({ title }: { title: string }) => createElement("h1", null, title), PrintFooter: () => null }));
 vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null }));
 import StatementPage from "../app/print/statement/[id]/page";

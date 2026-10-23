@@ -9,7 +9,7 @@ vi.mock("@/lib/db", async (original) => ({ ...await original<typeof import("../l
   patientLedger: mocks.ledger, getSettingsSafe: async () => ({}),
   patientPlanCurrencies: async () => new Map(), listPatientPlans: async () => [],
   // The current print reads the same sources in one snapshot; here it composes the same mocks.
-  patientStatementSnapshot: async (id: number) => ({ ledger: await mocks.ledger(id), planCurrencies: new Map(), plans: [] }),
+  patientStatementSnapshot: async (id: number) => ({ ledger: await mocks.ledger(id), planCurrencies: new Map(), plans: [], historicalAgreements: [] }),
 }));
 vi.mock("@/components/PrintHeader", () => ({
   PrintHeader: () => createElement("h1", null, "Synthetic statement"), PrintFooter: () => null,

@@ -10859,6 +10859,7 @@ export { MINOR_UNITS };
 
 import type { ExpenseCategory, PartyKind } from "./expenses";
 import { partyStatementTotals, type PartyCurrencyTotals } from "./party-statement";
+import { readStatementHistoricalAgreements } from "./statement-historical-details";
 
 export interface Party {
   id: number;
@@ -19928,7 +19929,7 @@ const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
  * A patient statement's ledger, plan currencies and plans from one read-only snapshot, so a
  * payment committed meanwhile is seen by all of them or by none. Standalone readers are unchanged.
  */
-export async function patientStatementSnapshot(patientId:number,today:string){
+export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean}={}){
   await ensureSchema();
   return withFinancialReadSnapshot(getPool(),async runner=>{
     const client=runner as DbClient;
@@ -19937,7 +19938,11 @@ export async function patientStatementSnapshot(patientId:number,today:string){
     // The same complete patient plan set and fail-closed currency validation as
     // patientPlanCurrencies; reuse rows already required for statement details.
     const planCurrencies=new Map(rows.map(row=>[row.id,{patientId,currency:requireCurrency(row.base_currency,"خطة علاج",row.id)}]));
-    return {ledger,planCurrencies,plans:await hydratePlans(rows,today,client,true)};
+    const plans=await hydratePlans(rows,today,client,true);
+    // Opt-in (current print only): historical agreements are saved facts read on this same snapshot client.
+    // Other consumers (the portal) issue no historical query and keep their existing failure surface.
+    const historicalAgreements=options.historicalAgreements?await readStatementHistoricalAgreements(client,patientId):undefined;
+    return {ledger,planCurrencies,plans,historicalAgreements};
   });
 }
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
