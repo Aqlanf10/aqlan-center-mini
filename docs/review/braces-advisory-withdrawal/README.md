@@ -38,6 +38,12 @@
 - `validateWithdrawnOfficialEvidence(advisory, matching, registry, now)` requires all of the following:
   - an explicit verification clock `now`. The verifier passes `clock()`, taken after the official lookups; it is injectable for tests;
   - the **same** GHSA, CVE, API url, page and identifiers;
+  - **the direct record checked on its own against the reviewed official schema**, also when the matching list is empty:
+    - `type` is `reviewed` and `severity` is `high`;
+    - `published_at` is the reviewed 2026-09-18T18:31:41Z;
+    - `vulnerabilities` equals the reviewed affected-package record exactly.
+
+    A missing, null or changed field is rejected even when matching entries agree with it. The live page confirms «GitHub Reviewed», «High», published Sep 18, 2026, patched versions «None».
   - `withdrawn_at`, `published_at` and `updated_at` are valid instants;
   - **chronology:** `published_at ≤ withdrawn_at ≤ updated_at ≤ now + OFFICIAL_CLOCK_TOLERANCE_MS` (5 min), and `withdrawn_at` is after the reviewed `updated_at` (2026-10-02T22:36:34Z);
   - the affected package, range and `first_patched_version: null` are unchanged;
@@ -67,7 +73,7 @@
 **`scripts/ci-audit.mjs`:**
 - The full audit is accepted through `classifyFullAudit`, where it used `validateScopedAudit`.
 - The success messages state which lifecycle state passed.
-- The CLI explicitly accepts **only** a proof with `mode` `active` or `withdrawn`. It must also carry the advisory, CVE, package, version and counts. A withdrawn proof additionally needs `official.withdrawnAt` and `counts.total` 0. A missing or unknown mode, or a malformed required field, is rejected (`BRACES_EXCEPTION_REJECTED`, exit 1). A non-active value is never treated as withdrawn. Verifier errors still propagate to exit 1.
+- The CLI explicitly accepts **only** a proof with `mode` `active` or `withdrawn`. It must also carry the advisory, CVE, package and version, plus a counts object with exactly `info`, `low`, `moderate`, `high`, `critical` and `total`: non-negative safe integers, where `total` is the sum of the levels. A withdrawn proof additionally needs `official.withdrawnAt` as a valid ISO instant, and `counts.total` 0. A missing or unknown mode, or a malformed required field, is rejected (`BRACES_EXCEPTION_REJECTED`, exit 1). A non-active value is never treated as withdrawn. Verifier errors still propagate to exit 1.
 - **Defect in 229a39f6, fixed:** the CLI treated every non-active proof as withdrawn. The unchanged `ci-audit-runner` mock proof (no `mode`) therefore crashed into exit 1, which caused hosted run 40003309562 to fail at "Unit tests". The audit, build and runtime proof were skipped there, so that run is neither an audit rejection nor a live verification. The active fixture now states `mode: "active"` explicitly; no assertion was weakened.
 - The retry, threshold and failure behaviour is unchanged.
 
@@ -111,6 +117,18 @@ The synthetic official payload uses the independently verified live values: `wit
 
   Drift is rejected **before** any official lookup.
 
+- **Direct-record schema**, each rejected both with an empty list and with entries that agree:
+  - a missing, null or unreviewed `type`;
+  - a missing, null or changed `severity`;
+  - a changed publication time;
+  - changed `vulnerable_functions`;
+  - a missing affected-package field.
+- **CLI proof boundary:**
+  - counts with a missing or unknown level;
+  - negative, non-integer or array counts;
+  - a total contradicting its levels;
+  - a non-instant, non-string or impossible `withdrawnAt`.
+- **File-level installation binding:** a non-manifest installed file (`node_modules/runtime/index.js`) changes after the snapshot. Package and lock identity and the package map stay identical; only `installedTreeSha256` differs, and verification rejects before any lookup.
 - **Official evidence consistency:**
   - **The direct record:**
     - an update before the withdrawal;

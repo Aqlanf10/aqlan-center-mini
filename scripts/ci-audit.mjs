@@ -7,7 +7,7 @@
  * (including low) blocks while this narrowly scoped exception exists.
  */
 import { decideAuditOutcome, describeBlockingVulnerabilities } from "../lib/ci-audit.ts";
-import { classifyFullAudit, invariant, isRecord, validateAuditProcess } from "../lib/scoped-braces-exception.mjs";
+import { classifyFullAudit, invariant, isInstant, isRecord, validateAuditProcess } from "../lib/scoped-braces-exception.mjs";
 import { snapshotInstallation, verifyBracesException } from "./verify-braces-exception.mjs";
 import { runAuditJson, preserveRawAudit } from "./dependency-security/audit-process.mjs";
 
@@ -45,11 +45,15 @@ async function auditedRun(production) {
 /** Only the two supported lifecycle states, with their required fields, are reported as success. */
 function validateProofShape(proof) {
   invariant(isRecord(proof) && (proof.mode === "active" || proof.mode === "withdrawn"), `unknown verification mode ${String(proof?.mode)}`);
-  invariant(["advisory", "cve", "package", "version"].every((key) => typeof proof[key] === "string" && proof[key].length > 0) && isRecord(proof.counts),
+  invariant(["advisory", "cve", "package", "version"].every((key) => typeof proof[key] === "string" && proof[key].length > 0),
     "verification proof is missing required fields");
+  const levels = ["info", "low", "moderate", "high", "critical"];
+  const counts = proof.counts;
+  invariant(isRecord(counts) && Object.keys(counts).sort().join() === [...levels, "total"].sort().join()
+    && [...levels, "total"].every((key) => Number.isSafeInteger(counts[key]) && counts[key] >= 0)
+    && counts.total === levels.reduce((sum, key) => sum + counts[key], 0), "verification proof counts are malformed");
   if (proof.mode === "withdrawn") {
-    invariant(isRecord(proof.official) && typeof proof.official.withdrawnAt === "string" && proof.official.withdrawnAt.length > 0
-      && proof.counts.total === 0, "withdrawn verification proof is malformed");
+    invariant(isRecord(proof.official) && isInstant(proof.official.withdrawnAt) && counts.total === 0, "withdrawn verification proof is malformed");
   }
   return proof;
 }
