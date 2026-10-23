@@ -567,3 +567,9 @@ Durable proof for a collection attempt key. `POST /api/payments/attempts/retire`
 ### 0069_unpaid_currency_transitions.sql
 
 Currency correction of an **unpaid** invoice lineage in any of the six YER/SAR/USD directions, through the existing correction path and the existing 0063 transition document. A direction other than YER → SAR is accepted only while no receipt has ever referenced the lineage (row lock on the lineage invoices, then a receipt check), and never carries receipt events; a second currency change on a lineage stays refused. Target amounts are the replacement's explicit lines — never an exchange rate. Validation only, so a backup replay passes (proved by a SAR → USD restore round trip). This replaces the #392 candidate design, whose claim trigger issued the target invoice on INSERT and made any database holding one such correction unrestorable. Neither this listing nor CI authorizes a production deploy.
+
+### 0070_appointment_followups.sql — متابعة الغياب
+
+إضافة جداول مهام المتابعة وروابطها الحية وسجل الأحداث وإيصالات إعادة المحاولة. لا تغيّر الحضور أو الحجز أو المال. سُجّلت نسخة SQL المطابقة في bootstrap مع تصنيف إعادة الضبط في نفس التغيير: الروابط فقط تُمسح، والجداول التاريخية الثلاثة تبقى. الحفظ يرفض جيل إعادة الضبط أو المريض أو وقت إنشاء الموعد القديم، ولا يعيد بناء رابط مفقود. ترقية غير منشورة، ضمن Draft مستقل مبني على #434؛ لم تُطبّق على الإنتاج.
+
+تخصيص الرقم: فُحصت طلبات الدمج النشطة حتى #441 بتاريخ 2026-10-23، وملفات السلسلة حتى 0069. أساس #434 لم يحجز رقماً. يجب إعادة فحص التعارض قبل الدمج، ولا يجوز إعادة استعمال رقم يخص تغييراً آخر.

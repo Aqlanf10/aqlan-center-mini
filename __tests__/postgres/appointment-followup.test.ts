@@ -3,19 +3,8 @@ import { setTimeout as pause } from "node:timers/promises";
 import { assertRealPostgresUrl, stubPostgresEnv, dropPublicSchema } from "./_setup";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
-import { APPOINTMENT_FOLLOWUP_SQL } from "../../lib/appointment-followup-schema";
 import { PLANNED_REBOOK_GENERATION_SQL } from "../../lib/planned-visit-rebooking-contract";
 import type { FollowupCommand } from "../../lib/appointment-followup-contract";
-
-// Candidate registration only in this isolated guarded PG suite. Production
-// arrays remain unchanged until schema bootstrap/manifest are approved together.
-vi.mock("../../lib/clinic-reset", async importOriginal => {
-  const actual = await importOriginal<typeof import("../../lib/clinic-reset")>();
-  return { ...actual,
-    RESET_WIPE_TABLES: [...actual.RESET_WIPE_TABLES, ...actual.APPOINTMENT_FOLLOWUP_RESET_WIPE_TABLES],
-    RESET_KEEP_TABLES: [...actual.RESET_KEEP_TABLES, ...actual.APPOINTMENT_FOLLOWUP_RESET_KEEP_TABLES],
-  };
-});
 
 // Validate the original environment BEFORE helpers replace it. No fallback target.
 validatePostgresTestTarget(process.env);
@@ -33,7 +22,6 @@ async function actor(role = "reception"): Promise<SessionPayload> {
 beforeAll(async () => {
   await dropPublicSchema(assertRealPostgresUrl());
   await db.ensureSchema();
-  await q(APPOINTMENT_FOLLOWUP_SQL); // Candidate schema deliberately installed ONLY here.
   reception = await actor();
 });
 afterAll(async () => { await db.resetPoolForTesting(); });
@@ -449,4 +437,49 @@ it("canonical reset failure after truncate rolls back links, history, sources an
   expect(await q("SELECT to_jsonb(p) AS value FROM patients p ORDER BY id")).toEqual(patientsBefore);
   expect(await q(`SELECT ${PLANNED_REBOOK_GENERATION_SQL} AS value`)).toEqual(generationBefore);
   expect(await save(f.input, reception)).toMatchObject({ replayed: true });
+});
+
+it("paginates more than 100 same-patient tasks without losing tied or microsecond deadlines and never writes on read", async () => {
+  const { parseFollowupPage } = await import('../../lib/appointment-followup-page');
+  const f = await fixture();
+  const identities: number[] = [];
+  // Each source is a different absence. The patient queue must not leak other patients.
+  for (let i = 0; i < 103; i++) {
+    const [source] = await q(`INSERT INTO appointments(patient_id,scheduled_date,scheduled_time,status,created_at)
+      VALUES ($1,'2000-01-01','10:00','no_show','2020-01-01T00:00:00.123456Z') RETURNING id`, [f.patientId]);
+    const identity = await context(source.id, reception);
+    const saved = await save({ ...f.input, ...identity, requestId: `synthetic-page-${source.id}` }, reception);
+    identities.push(saved.followupId);
+    await q(`UPDATE appointment_followups SET due_at='2090-01-01T00:00:00Z'::timestamptz + ($2::int % 3) * interval '1 microsecond' WHERE id=$1`, [saved.followupId,i]);
+  }
+  const other = await fixture(); await save(other.input, reception);
+  const before = await followupSnapshot();
+  let token: string | null = null;
+  const found: number[] = [];
+  do {
+    const params = new URLSearchParams({ patientId: String(f.patientId), limit: '17' });
+    if (token) params.set('cursor', token);
+    const page = await queue(reception, parseFollowupPage(params)!);
+    for (const item of page.items) { expect(item.patient_id).toBe(f.patientId); found.push(item.id); }
+    token = page.nextCursor;
+  } while (token);
+  expect(new Set(found).size).toBe(103);
+  expect([...found].sort((a,b) => a-b)).toEqual(identities);
+  expect(await followupSnapshot()).toEqual(before);
+  const page = await queue(reception, {limit:1, patientId:f.patientId, cursor:null});
+  const options = parseFollowupPage(new URLSearchParams({patientId:String(f.patientId),cursor:page.nextCursor!}))!;
+  options.cursor!.generation = '0'.repeat(32);
+  await expect(queue(reception, options)).rejects.toMatchObject({code:'FOLLOWUP_GENERATION_CHANGED'});
+  for (const role of ['doctor','assistant','accountant','cashier']) await expect(queue(await actor(role))).rejects.toMatchObject({status:403});
+});
+
+it('editor refuses a stale displayed patient and missing live link', async () => {
+  const { readAppointmentFollowupEditor: editor } = await import('../../lib/appointment-followup-db');
+  const f = await fixture();
+  expect(await editor(f.input.appointmentId, f.patientId, reception)).toMatchObject({revision:0,blocked:false,actorUserId:reception.userId});
+  await expect(editor(f.input.appointmentId, f.patientId+999, reception)).rejects.toMatchObject({code:'FOLLOWUP_SOURCE_CHANGED'});
+  const result = await save(f.input,reception);
+  expect(await editor(f.input.appointmentId,f.patientId,reception)).toMatchObject({revision:1,blocked:false});
+  await q('DELETE FROM appointment_followup_links WHERE followup_id=$1',[result.followupId]);
+  expect(await editor(f.input.appointmentId,f.patientId,reception)).toMatchObject({revision:1,blocked:true});
 });

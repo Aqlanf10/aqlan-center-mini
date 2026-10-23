@@ -1,0 +1,20 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/appointment-followup-http-ui.test.ts __tests__/security-http/planned-visit-rebooking-http.test.ts __tests__/security-http/planned-visit-rebooking-browser.test.ts
+
+
+ RUN  v4.1.12 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  3 passed (3)
+      Tests  19 passed (19)
+   Start at  17:52:19
+   Duration  33.78s (transform 142ms, setup 0ms, import 777ms, tests 27.62s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

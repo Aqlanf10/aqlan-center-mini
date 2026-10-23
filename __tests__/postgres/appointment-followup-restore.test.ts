@@ -9,7 +9,6 @@ import { sessionCredentialVersion } from "../../lib/auth";
 import { saveAppointmentFollowup, readAppointmentFollowupQueue, readAppointmentFollowupSource } from "../../lib/appointment-followup-db";
 import { fullBackupBlocks } from "../../lib/fullBackup";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
-import { APPOINTMENT_FOLLOWUP_SQL } from "../../lib/appointment-followup-schema";
 import { readTarGzEntries } from "../../lib/restore/archive";
 import { stagedRestore } from "../../lib/restore/staging";
 import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
@@ -37,11 +36,8 @@ it.each(cases)("real archive/staged restore preserves %s followup identity and g
     directory = await mkdtemp(join(tmpdir(), "followup-restore-"));
     const files = await loadMigrationFiles();
     await migrate(fixture.source, { apply: true, files });
-    await fixture.source.query(APPOINTMENT_FOLLOWUP_SQL);
-    // Candidate schema is unregistered. Prepare ONLY the owned, empty target
-    // with real shipped migrations + candidate DDL; no invented migration number.
+    // Prepare ONLY the owned, empty target through shipped numbered migrations.
     await migrate(fixture.archiveTarget, { apply: true, files });
-    await fixture.archiveTarget.query(APPOINTMENT_FOLLOWUP_SQL);
     for (const table of tables) expect((await fixture.archiveTarget.query(`SELECT * FROM ${table}`)).rows).toEqual([]);
     const q = async (sql: string, values: unknown[] = []) => (await fixture.source.query(sql, values)).rows;
     await q("INSERT INTO users(id,username,display_name,password_hash,role) VALUES (900,'synthetic-restore','Synthetic','synthetic-hash','reception')");

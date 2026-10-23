@@ -17,6 +17,7 @@ describe("patient appointment history index provenance", () => {
       "0067_patient_appointment_history_index.sql",
       "0068_collection_attempt_retirements.sql",
       "0069_unpaid_currency_transitions.sql",
+      "0070_appointment_followups.sql",
     ]);
   });
 

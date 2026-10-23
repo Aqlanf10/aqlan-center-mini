@@ -50,6 +50,7 @@ import { PatientContactPanel, PatientFlagChips } from "@/components/PatientConta
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
+import { FollowupQueue } from "@/components/appointments/FollowupQueue";
 import { PatientAppointmentsPanel } from "@/components/patient/PatientAppointmentsPanel";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
@@ -1114,7 +1115,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           <button type="button" onClick={refreshWorkflow} className="mr-2 underline">إعادة التحقق من الملخص</button>
         </p>
       ) : null}
-      {tab === "summary" ? <PatientAppointmentsPanel patientId={patient.id} /> : null}
+      {tab === "summary" ? <><PatientAppointmentsPanel patientId={patient.id} /><FollowupQueue key={patient.id} patientId={patient.id} /></> : null}
       {/* محتوى التبويب — كل وحدة تحمّل بياناتها عند فتحها (§٤٨) */}
       {contextNavigationError ? <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">{contextNavigationError}</p> : null}
       {!clinicalContext.ready && (tab === "treatment" || tab === "today") ? (

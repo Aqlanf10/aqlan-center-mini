@@ -1,3 +1,4 @@
+import { encodeFollowupCursor, type FollowupPageOptions } from "./appointment-followup-page";
 import { createHash } from "node:crypto";
 import { getPool, insertAuditRow, CLINIC_TIME_ZONE, type DbClient, type DbPool } from "./db";
 import type { SessionPayload } from "./auth";
@@ -67,31 +68,39 @@ export async function readAppointmentFollowupSource(appointmentId: number, admit
 /** Current open backlog, independent of the leadership selected-day counters.
  * Patient context is live, behind current authority, and never persisted here.
  * Missing/reassigned/reused sources expose no patient context. No bootstrap/write. */
-export async function readAppointmentFollowupQueue(admitted: SessionPayload) {
+export async function readAppointmentFollowupQueue(admitted: SessionPayload, options: FollowupPageOptions = { limit: 100, patientId: null, cursor: null }) {
   if (!allowed(admitted.role)) reject(403, "FOLLOWUP_ROLE");
   return followupTransaction(getPool(), async client => {
     await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))", [PURCHASE_RESET_FENCE]);
     const session = await revalidateSessionInTransaction(admitted, client);
     if (!session) reject(401, "FOLLOWUP_SESSION_CHANGED");
     if (!allowed(session.role)) reject(403, "FOLLOWUP_ROLE");
+    if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100) reject(400, "INVALID_FOLLOWUP_PAGE");
+    if (options.patientId !== null && !await canAccessPatient(session, options.patientId, undefined, client)) reject(403, "FOLLOWUP_PATIENT_ACCESS");
+    const { rows: [generation] } = await client.query<{ value: string }>(`SELECT ${PLANNED_REBOOK_GENERATION_SQL} AS value`);
+    if (options.cursor && (options.cursor.generation !== generation.value || options.cursor.patientId !== options.patientId)) reject(409, "FOLLOWUP_GENERATION_CHANGED");
     // Only these two roles have unrestricted patient-read authority. Keep this
     // hard boundary if roles are ever expanded; do not reuse the query for HR.
     const { rows } = await client.query<{
       id: number; revision: number; source_appointment_id: number; source_created_at: string; generation: string;
       assignee_user_id: number; due_at: Date; outcome: string; next_step: string; overdue: boolean;
-      patient_id: number | null; full_name: string | null; eligible: boolean;
+      patient_id: number | null; full_name: string | null; eligible: boolean; cursor_due: string;
     }>(`SELECT f.id,f.revision,f.source_appointment_id,f.source_created_at,f.generation,
       f.assignee_user_id,f.due_at,f.outcome,f.next_step,f.due_at < clock_timestamp() AS overdue,
-      p.id AS patient_id,p.full_name,${followupEligibilitySql("$1")} AS eligible
+      p.id AS patient_id,p.full_name,to_char(f.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_due,${followupEligibilitySql("$1")} AS eligible
       FROM appointment_followups f
       LEFT JOIN appointment_followup_links l ON l.followup_id=f.id
       LEFT JOIN appointments a ON a.id=l.appointment_id AND a.id=f.source_appointment_id
         AND EXTRACT(EPOCH FROM a.created_at)::text=f.source_created_at AND a.patient_id=l.patient_id
       LEFT JOIN patients p ON p.id=a.patient_id
       WHERE f.generation=${PLANNED_REBOOK_GENERATION_SQL} AND f.status='open'
-      ORDER BY f.due_at,f.id LIMIT 101`, [CLINIC_TIME_ZONE]);
+      AND ($2::int IS NULL OR p.id=$2)
+      AND ($3::timestamptz IS NULL OR (f.due_at,f.id)>($3::timestamptz,$4::int))
+      ORDER BY f.due_at,f.id LIMIT $5`, [CLINIC_TIME_ZONE, options.patientId, options.cursor?.due ?? null, options.cursor?.id ?? null, options.limit + 1]);
     if (session.expiresAt < Date.now()) reject(401, "FOLLOWUP_SESSION_CHANGED");
-    return { items: rows.slice(0, 100).map(row => ({ ...row,
+    const selected = rows.slice(0, options.limit);
+    const last = selected.at(-1);
+    return { timeZone: CLINIC_TIME_ZONE, items: selected.map(({ cursor_due: _cursorDue, ...row }) => ({ ...row,
       sourceState: row.patient_id === null ? "source_unavailable_review_required" as const
         : !row.eligible ? "source_ineligible_review_required" as const : "available" as const,
       contactBlocked: row.patient_id === null || !row.eligible,
@@ -101,11 +110,12 @@ export async function readAppointmentFollowupQueue(admitted: SessionPayload) {
         appointmentId: row.source_appointment_id, expectedPatientId: row.patient_id,
         sourceCreatedAt: row.source_created_at, generation: row.generation,
       },
-    })), hasMore: rows.length > 100 };
+    })), hasMore: rows.length > options.limit,
+      nextCursor: rows.length > options.limit && last ? encodeFollowupCursor({ due: last.cursor_due, id: last.id, generation: generation.value, patientId: options.patientId }) : null };
   });
 }
 
-/** No runtime schema bootstrap here. This foundation is dormant until registration.
+/** Schema bootstrap is owned by ensureSchema / numbered migration 0070.
  * Lock order: shared reset fence -> actor/key -> source -> task/link NOWAIT -> users NOWAIT ->
  * patient NOWAIT. Conflicting merge/session writers fail closed without lock inversion.
  * No booking, attendance, visit, payment or HR writer is invoked. */
@@ -195,4 +205,29 @@ export async function saveAppointmentFollowup(value: unknown, admitted: SessionP
     if ((error as { code?: string }).code === "55P03") reject(409, "FOLLOWUP_BUSY");
     throw error;
   }
+}
+
+/** Fresh editor context; the save writer rechecks all witnesses under locks. */
+export async function readAppointmentFollowupEditor(appointmentId: number, expectedPatientId: number, admitted: SessionPayload) {
+  const source = await readAppointmentFollowupSource(appointmentId, admitted);
+  if (source.expectedPatientId !== expectedPatientId) reject(409, "FOLLOWUP_SOURCE_CHANGED");
+  return followupTransaction(getPool(), async client => {
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))", [PURCHASE_RESET_FENCE]);
+    const session = await revalidateSessionInTransaction(admitted, client);
+    if (!session) reject(401, "FOLLOWUP_SESSION_CHANGED");
+    if (!allowed(session.role)) reject(403, "FOLLOWUP_ROLE");
+    const { rows: [row] } = await client.query<{ eligible: boolean; revision: number; status: string | null; assignee_user_id: number | null; due_at: Date | null; linked: boolean }>(`
+      SELECT ${followupEligibilitySql("$5")} AS eligible, COALESCE(f.revision,0) AS revision,
+        f.status,f.assignee_user_id,f.due_at,(f.id IS NULL OR (l.appointment_id=a.id AND l.patient_id=a.patient_id)) AS linked
+      FROM appointments a LEFT JOIN appointment_followups f ON f.source_appointment_id=a.id AND f.source_created_at=$3 AND f.generation=$4
+      LEFT JOIN appointment_followup_links l ON l.followup_id=f.id
+      WHERE a.id=$1 AND a.patient_id=$2 AND EXTRACT(EPOCH FROM a.created_at)::text=$3
+        AND ${PLANNED_REBOOK_GENERATION_SQL}=$4`, [appointmentId, expectedPatientId, source.sourceCreatedAt, source.generation, CLINIC_TIME_ZONE]);
+    if (!row) reject(409, "FOLLOWUP_SOURCE_CHANGED");
+    if (!await canAccessPatient(session, expectedPatientId, undefined, client)) reject(403, "FOLLOWUP_PATIENT_ACCESS");
+    const { rows: assignees } = await client.query<{ id: number; display_name: string }>("SELECT id,display_name FROM users WHERE is_active=true AND role IN ('admin','reception') ORDER BY id");
+    if (session.expiresAt < Date.now()) reject(401, "FOLLOWUP_SESSION_CHANGED");
+    return { source, revision: row.revision, closed: row.status === "closed", blocked: !row.eligible || !row.linked,
+      assigneeUserId: row.assignee_user_id ?? session.userId, assignees, actorUserId: session.userId };
+  });
 }

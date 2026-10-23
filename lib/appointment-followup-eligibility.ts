@@ -3,7 +3,7 @@
  * A moved planned pointer is ambiguous, not proof of original attendance.
  * ended_at alone is not attendance: no_show legitimately stamps it.
  * Only internal parameter positions are accepted; the clinic zone stays bound. */
-export function followupEligibilitySql(zoneParameter: "$1" | "$2"): string {
+export function followupEligibilitySql(zoneParameter: "$1" | "$2" | "$5"): string {
   return `COALESCE((a.id IS NOT NULL AND a.status='no_show'
     AND a.arrived_at IS NULL AND a.started_at IS NULL
     AND a.scheduled_date + a.scheduled_time <= clock_timestamp() AT TIME ZONE ${zoneParameter}

@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
+  "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 130,
-    "columns": 1664,
-    "constraints": 1894,
-    "indexes": 406,
-    "triggers": 82
+    "tables": 134,
+    "columns": 1696,
+    "constraints": 1960,
+    "indexes": 416,
+    "triggers": 88
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -733,6 +733,427 @@
         }
       },
       "triggers": {}
+    },
+    "appointment_followup_events": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "assignee_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "due_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "followup_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "next_step": {
+          "type": "text",
+          "nullable": false
+        },
+        "outcome": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_id": {
+          "type": "text",
+          "nullable": false
+        },
+        "revision": {
+          "type": "int4",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "actor_user_id",
+          "request_id"
+        ],
+        [
+          "followup_id",
+          "revision"
+        ],
+        [
+          "id",
+          "actor_user_id",
+          "request_id",
+          "fingerprint"
+        ]
+      ],
+      "checks": [
+        "appointment_followup_events_check",
+        "appointment_followup_events_check1",
+        "appointment_followup_events_check2",
+        "appointment_followup_events_fingerprint_check",
+        "appointment_followup_events_next_step_check",
+        "appointment_followup_events_outcome_check",
+        "appointment_followup_events_request_id_check",
+        "appointment_followup_events_revision_check",
+        "appointment_followup_events_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "followup_id"
+          ],
+          "refTable": "appointment_followups",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "assignee_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "appointment_followup_events_actor_user_id_request_id_key": {
+          "columns": [
+            "actor_user_id",
+            "request_id"
+          ],
+          "unique": true
+        },
+        "appointment_followup_events_followup_id_revision_key": {
+          "columns": [
+            "followup_id",
+            "revision"
+          ],
+          "unique": true
+        },
+        "appointment_followup_events_id_actor_user_id_request_id_fin_key": {
+          "columns": [
+            "id",
+            "actor_user_id",
+            "request_id",
+            "fingerprint"
+          ],
+          "unique": true
+        },
+        "appointment_followup_events_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "appointment_followup_events_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "appointment_followup_events_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "appointment_followup_links": {
+      "columns": {
+        "appointment_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "followup_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "followup_id"
+      ],
+      "unique": [],
+      "checks": [],
+      "foreignKeys": [
+        {
+          "columns": [
+            "followup_id"
+          ],
+          "refTable": "appointment_followups",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "appointment_id"
+          ],
+          "refTable": "appointments",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "appointment_followup_links_pkey": {
+          "columns": [
+            "followup_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "appointment_followup_link_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "appointment_followup_receipts": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "event_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_id": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "actor_user_id",
+        "request_id"
+      ],
+      "unique": [
+        [
+          "event_id"
+        ]
+      ],
+      "checks": [],
+      "foreignKeys": [
+        {
+          "columns": [
+            "event_id",
+            "actor_user_id",
+            "request_id",
+            "fingerprint"
+          ],
+          "refTable": "appointment_followup_events",
+          "refColumns": [
+            "id",
+            "actor_user_id",
+            "request_id",
+            "fingerprint"
+          ]
+        }
+      ],
+      "indexes": {
+        "appointment_followup_receipts_event_id_key": {
+          "columns": [
+            "event_id"
+          ],
+          "unique": true
+        },
+        "appointment_followup_receipts_pkey": {
+          "columns": [
+            "actor_user_id",
+            "request_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "appointment_followup_receipts_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "appointment_followup_receipts_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "appointment_followups": {
+      "columns": {
+        "assignee_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "due_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "generation": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "next_step": {
+          "type": "text",
+          "nullable": false
+        },
+        "outcome": {
+          "type": "text",
+          "nullable": false
+        },
+        "revision": {
+          "type": "int4",
+          "nullable": false
+        },
+        "source_appointment_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "source_created_at": {
+          "type": "text",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "source_appointment_id",
+          "source_created_at",
+          "generation"
+        ]
+      ],
+      "checks": [
+        "appointment_followups_check",
+        "appointment_followups_check1",
+        "appointment_followups_check2",
+        "appointment_followups_generation_check",
+        "appointment_followups_next_step_check",
+        "appointment_followups_outcome_check",
+        "appointment_followups_revision_check",
+        "appointment_followups_source_appointment_id_check",
+        "appointment_followups_source_created_at_check",
+        "appointment_followups_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "assignee_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "appointment_followups_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "appointment_followups_queue_idx": {
+          "columns": [
+            "due_at",
+            "id"
+          ],
+          "unique": false
+        },
+        "appointment_followups_source_appointment_id_source_created__key": {
+          "columns": [
+            "source_appointment_id",
+            "source_created_at",
+            "generation"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "appointment_followup_source_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
     },
     "appointment_services": {
       "columns": {
