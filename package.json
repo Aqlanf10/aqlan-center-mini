@@ -17,6 +17,8 @@
     "scan:money": "node --import tsx scripts/scan-money-aggregation.mjs",
     "db:baseline:manifest": "tsx scripts/generate-baseline-manifest.ts",
     "db:baseline:manifest:verify": "tsx scripts/verify-baseline-manifest.ts",
+    "db:ortho:reconcile": "tsx scripts/db-ortho-reconcile.ts",
+    "db:ortho:reference": "tsx scripts/generate-ortho-reconciliation-reference.ts",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:provision:mini": "tsx scripts/provision-mini-database.ts",
     "db:status": "tsx scripts/db-status.ts",
