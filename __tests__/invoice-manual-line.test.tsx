@@ -97,8 +97,8 @@ describe("controlled loop wired like the ledger row", () => {
     const props = (): Props => ({
       services, value: rows[0].serviceId ? Number(rows[0].serviceId) : null,
       // The ledger's catalogue handler: a catalogue choice (or the empty choice) is never manual.
-      onChange: (id, srv) => { rows = replaceRowService(rows, 0, { serviceId: id ? String(id) : "", doctorId: "", manual: false,
-        price: srv ? String(srv.priceMinor) : "", description: srv ? srv.name : rows[0].description }, srv ? "per_tooth_episode" : "none"); },
+      onChange: (id, srv) => { rows = replaceRowService(rows, 0, { serviceId: id ? String(id) : "", doctorId: "", manual: false, priceReason: "",
+        price: srv ? String(srv.priceMinor) : "", description: srv ? srv.name : rows[0].serviceId ? "" : rows[0].description }, srv ? "per_tooth_episode" : "none"); },
       allowManual: true, manualSelected: rows[0].manual === true, onManualSelect: () => { rows = selectManualLine(rows, 0); },
     });
     render(props()).choose(MANUAL_LINE_VALUE);
