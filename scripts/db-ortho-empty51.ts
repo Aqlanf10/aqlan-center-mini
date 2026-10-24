@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { empty51Tls } from "../lib/ortho-empty51-tls";
 import { Client } from "pg";
 import { runEmpty51Session, validateEmpty51Approval, type Empty51Approval, type Empty51Reference } from "../lib/ortho-empty51-reconciliation";
 import { ReconciliationRefused } from "../lib/ortho-reconciliation";
@@ -21,7 +22,7 @@ async function main() {
       || decodeURIComponent(url.pathname.slice(1)) !== endpoint.database || decodeURIComponent(url.username) !== endpoint.user) throw new ReconciliationRefused("target");
   const ca = process.env.ORTHO_EMPTY51_CA_FILE ? await readFile(process.env.ORTHO_EMPTY51_CA_FILE, "utf8") : undefined;
   const client = new Client({ host: endpoint.host, port: endpoint.port, database: endpoint.database, user: endpoint.user,
-    password: decodeURIComponent(url.password), ssl: { rejectUnauthorized: true, ...(ca ? { ca } : {}) },
+    password: decodeURIComponent(url.password), ssl: empty51Tls(endpoint.host, ca),
     connectionTimeoutMillis: OPERATOR_LIMITS.connectionTimeoutMillis, query_timeout: OPERATOR_LIMITS.query_timeout,
     options: OPERATOR_SESSION_OPTIONS + (apply ? "" : " -c default_transaction_read_only=on") });
   return runEmpty51Session(client, approval, reference, apply);
