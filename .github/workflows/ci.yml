@@ -168,6 +168,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # Private reference tests verify unchanged source against its frozen commit.
+          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
