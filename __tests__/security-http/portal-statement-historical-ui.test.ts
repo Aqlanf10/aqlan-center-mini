@@ -259,11 +259,13 @@ describe("actual Arabic SAR statement PDF, not a DOM-only scaling proof", () => 
         const lines = raw.split("\n").filter((line) => line.includes(label));
         expect(lines, `one raw PDF line for ${label}`).toHaveLength(1);
         expect(lines[0]).toMatch(new RegExp(`(^|[\\s\\u202a-\\u202e])${amount.replace(/[.,]/g, "\\$&")}([\\s\\u202a-\\u202e]|ر)`));
-        expect(lines[0]).toContain("ر.س");
+        // pdftotext may insert directional controls inside ر.س. Remove only those controls;
+        // keep the raw labelled numeric-token check above and every Arabic letter/digit unchanged.
+        expect(lines[0].replace(/[\u202a-\u202e\u2066-\u2069]/g, "")).toContain("ر.س");
         labelled[label] = lines[0];
       }
       expect(raw).not.toContain(patients.YER.marker);
-      expect(raw).not.toMatch(/150,050|100,050|50,000|ر\.ي/);
+      expect(raw.replace(/[\u202a-\u202e\u2066-\u2069]/g, "")).not.toMatch(/150,050|100,050|50,000|ر\.ي/);
       expect(raw.split("\f").filter((text) => text.trim())).toHaveLength(1);
       // Render the actual PDF bytes for human visual review, not a screenshot of a separate DOM.
       execFileSync("pdftoppm", ["-singlefile", "-r", "120", "-png", pdfPath, `${directory}/statement-historical-sar-a4-rendered`]);

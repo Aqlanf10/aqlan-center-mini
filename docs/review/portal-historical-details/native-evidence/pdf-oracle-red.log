@@ -1,0 +1,41 @@
+Running PR 458 (unit), Node v22.23.3, synthetic PG port 55458, HTTP port 3458
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/_temporary-portal-pdf-oracle.test.ts
+
+
+ RUN  v4.1.12 <isolated-worktree>
+
+ ❯ __tests__/_temporary-portal-pdf-oracle.test.ts (6 tests | 1 failed) 10ms
+   × replays the exact labelled amount/currency assertions on CI artifact 12573080972 6ms
+   ✓ still rejects wrong YER currency 1ms
+   ✓ still rejects wrong Arabic currency order 0ms
+   ✓ still rejects x100 wrong amount 0ms
+   ✓ still rejects one-cent wrong prior payment 0ms
+   ✓ still rejects wrong Arabic label 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/_temporary-portal-pdf-oracle.test.ts > replays the exact labelled amount/currency assertions on CI artifact 12573080972
+AssertionError: expected '\u202b\u202a 0.00\u202cر\u202a.\u202c…' to contain 'ر.س'
+
+Expected: "ر.س"
+Received: "\\u202b\\u202a 0.00\\u202cر\\u202a.\\u202cس\\u202c                                                                                                                         \\u202bالخصم المسجل\\u202c"
+
+ ❯ assertActualPdfText __tests__/_temporary-portal-pdf-oracle.test.ts:14:26
+     12|         expect(lines, `one raw PDF line for ${label}`).toHaveLength(1);
+     13|         expect(lines[0]).toMatch(new RegExp(`(^|[\\s\\u202a-\\u202e])$…
+     14|         expect(lines[0]).toContain("ر.س");
+       |                          ^
+     15|         labelled[label] = lines[0];
+     16|       }
+ ❯ __tests__/_temporary-portal-pdf-oracle.test.ts:18:94
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  19:37:16
+   Duration  162ms (transform 19ms, setup 0ms, import 30ms, tests 10ms, environment 0ms)
+

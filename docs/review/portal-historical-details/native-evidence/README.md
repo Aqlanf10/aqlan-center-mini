@@ -13,7 +13,7 @@ Base: `1edac8b9a1d74a0752ecc5e5d9f550a8e50ab2bf`. This follow-up changes tests, 
 
 The literal SAR expectations were checked against the current source, not invented: `lib/money.ts` uses 100 minor units per SAR, fixed two-decimal rendering (including `0.00`), and `ر.س`; `app/print/statement/[id]/presentation.tsx` renders the recorded zero discount because it tests `!== null`, not `> 0`, and supplies the asserted Arabic labels. The current statement summary uses the agreement currency's canonical due. Source inspection does not substitute for PDF extraction or visual review.
 
-The existing CI upload steps did not collect the new output directory. A narrowly scoped `portal-historical-details-evidence` upload now allowlists the seven synthetic PNG/PDF/TXT/JSON outputs, including hidden paths, with seven-day retention. It uploads no browser/session state, cookies, traces, broad directories, or database dumps. This is artifact collection configuration, not evidence that an artifact has already been generated or published.
+The existing CI upload steps did not collect the new output directory. A narrowly scoped `portal-historical-details-evidence` upload now allowlists the seven synthetic PNG/PDF/TXT/JSON outputs, including hidden paths, with seven-day retention. It uploads no browser/session state, cookies, traces, broad directories, or database dumps. At initial publication this was collection configuration only. The follow-up below records the later, partially populated CI artifact and the remaining final-head CI gate.
 
 ## Local verification
 
@@ -40,4 +40,16 @@ Executed application commands:
 - `npm run test:postgres -- __tests__/postgres/statement-historical-details.test.ts`
 - `npm run test:security-http -- __tests__/security-http/portal-statement-historical-ui.test.ts -t 'a real database error'`
 
-In a supported browser-capable environment, run the complete `portal-statement-historical-ui.test.ts` suite and inspect the actual PDF-rendered PNG, not only its DOM or extracted text. The seven-file CI artifact is configured for that run but is not yet published. The owner must separately decide the corrupt-history fallback policy; passing tests do not make that decision.
+In a supported browser-capable environment, run the complete `portal-statement-historical-ui.test.ts` suite and inspect the actual PDF-rendered PNG, not only its DOM or extracted text. The later CI run published five of the seven files. Replaying its exact raw PDF text reproduces the currency-text assertion failure; the follow-up below records the diagnosis. The corrected final head still requires a complete hosted run and seven-file artifact. The owner must separately decide the corrupt-history fallback policy; passing tests do not make that decision.
+
+## CI follow-up: bidi-only PDF test-oracle correction
+
+Run [40122100420](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/40122100420) on published head `8282a58842315bdf0479023ebc721e3a3842754d` finished with quality and PostgreSQL jobs successful, HTTP integration failed, and required gates failed closed. Artifact `12573080972` contained both corruption screenshots, generic-500 JSON, the actual SAR PDF, and raw text, but not the later rendered PNG/summary. Its downloaded ZIP SHA-256 matched GitHub's recorded `7653cb909d7e0235e542b2f66064f6ffcd1ca3c99c4b9eae74f0eaaf8874f23b`.
+
+Replaying the exact original assertion loop against those bytes fails on `toContain("ر.س")`: `pdftotext` emitted `ر\u202a.\u202cس`. All five raw labelled numeric-token assertions pass. The correction removes only U+202A–U+202E and U+2066–U+2069 for currency matching and negative wrong-currency checking. Raw numeric and Arabic-label assertions and raw output are unchanged. No Arabic letters, punctuation, digits, ligatures, or words are rewritten.
+
+The original oracle replay failed; the corrected replay passed 6/6, including rejection of wrong YER currency, reversed Arabic currency letters, x100 amounts, a one-cent prior-payment error, and a changed Arabic label. Sanitized `pdf-oracle-red.log` and `pdf-oracle-green.log` preserve those runs; `pdf-oracle-ci-lines.json` preserves the five original raw lines as escaped codepoints. Reproduce the durable counterexample checks with `node docs/review/portal-historical-details/native-evidence/replay-pdf-oracle.mjs`.
+
+The actual CI PDF was rendered directly and visually inspected: readable RTL A4, `1,500.50`, `500.00`, `1,000.50` SAR and `0.00` discount, without visible content clipping. Both CI corruption screenshots show the Arabic notice, no history table, and the unchanged `60,000` YER balance with the `40,000` receipt. This visual observation does not establish a passing final test run. Complete HTTP logs could not be retrieved because the connector transport closed, so the absence of unrelated HTTP failures remains unconfirmed. The corrected head must pass full hosted CI before that claim is made. The owner fallback-policy decision is still outstanding.
+
+After the bidi-only change, focused lint, the 4 GB typecheck, and the 12 portal unit cases passed again. The durable counterexample replay also passed. A new complete hosted CI run is still required.
