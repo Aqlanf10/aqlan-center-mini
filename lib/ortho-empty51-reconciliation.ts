@@ -1,4 +1,5 @@
 import type { Client } from "pg";
+import { languageSourceStructure } from "./ortho-language-contract";
 import { catalogHash, readOrthoCatalog, readRegistryCatalog, readReconciliationAuditCatalog, ORTHO_REFERENCE_SOURCE } from "./ortho-reconciliation-catalog";
 import pinned from "../schema/ortho-empty51-reference.pg18.json";
 import runtime from "../schema/ortho-reconciliation-reference.pg18.json";
@@ -36,6 +37,9 @@ function structure(catalog: Catalog) {
     if (["relation", "function", "type"].includes(row.section)) {
       delete properties.owner;
       for (const key of ["relacl", "proacl", "typacl"]) delete properties[key];
+    }
+    if (row.section === "function" && properties.prolang && typeof properties.prolang === "object") {
+      properties.prolang = languageSourceStructure(properties.prolang as Record<string, unknown>);
     }
     // Collation is not normalized: incompatible isolated references fail closed.
     return { ...row, properties };

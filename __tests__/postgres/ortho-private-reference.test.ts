@@ -32,10 +32,11 @@ describe("isolated private reference generation", () => {
     const reference = await readFile(join(first.directory, "reference.json"), "utf8");
     expect(reference).toContain(owner);
     const raw = JSON.parse(reference);
-    const language = (await admin.query("SELECT oid::text AS oid FROM pg_language WHERE lanname='plpgsql'")).rows[0].oid;
+    const language = (await admin.query("SELECT lanname FROM pg_language WHERE lanname='plpgsql'")).rows[0].lanname;
     for (const row of raw.catalog.filter((row: { section: string }) => row.section === "function")) {
       expect(row.properties.owner).toBe(owner);
-      expect(row.properties.prolang).toBe(language);
+      expect(row.properties.prolang.name).toBe(language);
+      expect(row.properties.prolang.languages.find((entry: { lanname: string }) => entry.lanname === language).owner).toBe(config.cluster.bootstrapRole);
     }
     const witness = JSON.parse(await readFile(join(first.directory, "witness.json"), "utf8"));
     expect(witness.locale).toEqual(config.locale);

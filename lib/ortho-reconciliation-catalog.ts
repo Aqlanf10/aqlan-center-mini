@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Client } from "pg";
+import { readLanguageContract } from "./ortho-language-contract";
 import contracts from "./ortho-assessment-runtime.generated.json";
 
 export const ORTHO_REFERENCE_SOURCE = "c998b435306f8295a217e49f20080293c479c359";
@@ -105,6 +106,14 @@ async function readCatalog(client: Client, table: string, names: string[]) {
         FROM pg_catalog.pg_namespace n WHERE n.nspname='public' AND EXISTS(SELECT 1 FROM nodes)
     ) SELECT * FROM observations ORDER BY section COLLATE "C", identity COLLATE "C", properties::text COLLATE "C"
   `, [names, table]);
+  // Resolve only prolang. Never drop arbitrary OIDs or normalize security.
+  const languages = new Map<string, Record<string, unknown>>();
+  for (const row of rows) if (row.section === "function") {
+    const properties = row.properties as Record<string, unknown>;
+    const oid = String(properties.prolang);
+    if (!languages.has(oid)) languages.set(oid, await readLanguageContract(client, oid));
+    properties.prolang = languages.get(oid)!;
+  }
   return rows.map(row => {
     const properties = row.properties as Record<string, unknown>;
     return row.section === "dependency" && properties.type === "toast table"

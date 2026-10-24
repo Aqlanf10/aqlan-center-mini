@@ -92,3 +92,13 @@ Keep configuration, platform evidence, references, witnesses and journals privat
 Do not commit them, add real environment identities to tests, or attach them to a
 public pull request. Empty sandbox `.git` marker directories are allowed; any
 populated `.git` directory, file or symlink in the output's ancestry is refused.
+
+The catalog collector resolves `pg_proc.prolang` through its language and handler
+contracts, including builtin validators. Language and handler allocation OIDs are
+replaced only after all edges resolve to unique identities. Other routine OIDs
+are not discarded. The contract retains trust, ownership, ACLs/grantors,
+implementation symbols/libraries, definitions, configuration, security flags,
+schema identity/security, dependencies and security labels. Names alone are not
+an equivalence witness. Source-shape validation permits separately reviewed
+security identities; action-time catalog equality compares those identities
+verbatim. Library paths and symbols do not authenticate installed binaries.
