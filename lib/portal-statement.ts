@@ -1,6 +1,7 @@
 import type { Invoice, OpeningBalance, Payment, TreatmentPlan } from "./db";
 import { invoiceNet, type Balance, type Currency } from "./money";
 import { currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./statement-lines";
+import type { HistoricalOpeningBucket } from "./statement-historical-details";
 
 /**
  * (FIN-INT-8) What the patient portal may show of the ledger: the same current
@@ -36,6 +37,38 @@ export interface PortalStatementAgreement {
   remainingMinor: number;
 }
 
+/** A previous-treatment line as printed: no document, revision, service or tooth-code ids. */
+export interface PortalHistoricalLine {
+  description: string;
+  site: string | null;
+  quantity: 1;
+  /** null where none was recorded (never an invented zero). */
+  unitPriceMinor: number | null;
+  discountMinor: number | null;
+  netMinor: number;
+}
+
+/** A historical treatment agreement exactly as the current printed statement shows it. */
+export interface PortalHistoricalAgreement {
+  historicalAsOf: string;
+  currency: Currency;
+  lines: PortalHistoricalLine[];
+  grossMinor: number | null;
+  discountMinor: number | null;
+  agreedMinor: number;
+  previouslyPaidMinor: number;
+  remainingMinor: number;
+}
+
+/**
+ * «العلاج السابق»: saved historical facts, not invoices or receipts. `available: false` means a stored
+ * historical fact failed validation; the section is withheld (nothing guessed) while balances, invoices
+ * and receipts, which never depend on it, are still shown.
+ */
+export type PortalHistoricalTreatment =
+  | { available: true; agreements: PortalHistoricalAgreement[]; undetailed: { currency: Currency; partial: boolean }[] }
+  | { available: false };
+
 export interface PortalStatementPayment {
   receiptNumber: string;
   createdAt: string;
@@ -50,8 +83,32 @@ export interface PortalStatement {
   payments: PortalStatementPayment[];
   openings: { currency: Currency; amountMinor: number; asOfDate: string }[];
   agreements: PortalStatementAgreement[];
+  historical: PortalHistoricalTreatment;
   balances: Record<Currency, Balance>;
   baseCurrency: Currency;
+}
+
+/** Same buckets the print renders (historicalOpeningBuckets), reduced to the allowed fields. */
+export function portalHistoricalTreatment(buckets: readonly HistoricalOpeningBucket[] | null): PortalHistoricalTreatment {
+  if (buckets === null) return { available: false };
+  return {
+    available: true,
+    agreements: buckets.flatMap((bucket) => bucket.agreements).map((agreement) => ({
+      historicalAsOf: agreement.historicalAsOf,
+      currency: agreement.currency,
+      lines: agreement.lines.map((line) => ({
+        description: line.description, site: line.site, quantity: line.quantity,
+        unitPriceMinor: line.unitPriceMinor, discountMinor: line.discountMinor, netMinor: line.netMinor,
+      })),
+      grossMinor: agreement.grossMinor,
+      discountMinor: agreement.discountMinor,
+      agreedMinor: agreement.agreedMinor,
+      previouslyPaidMinor: agreement.previouslyPaidMinor,
+      remainingMinor: agreement.remainingMinor,
+    })),
+    undetailed: buckets.filter((bucket) => bucket.openingWithoutStoredDetail)
+      .map((bucket) => ({ currency: bucket.currency, partial: bucket.agreements.length > 0 })),
+  };
 }
 
 export function portalStatementView(
@@ -59,6 +116,7 @@ export function portalStatementView(
   balances: Record<Currency, Balance>,
   baseCurrency: Currency,
   plans: readonly Pick<TreatmentPlan, "title" | "status" | "totalFromItems" | "totalMinor" | "baseCurrency" | "progress">[],
+  historicalBuckets: readonly HistoricalOpeningBucket[] | null,
 ): PortalStatement {
   return {
     invoices: currentStatementInvoices(ledger.invoices).map((invoice) => ({
@@ -88,6 +146,7 @@ export function portalStatementView(
       title: plan.title, currency: plan.baseCurrency, totalMinor: plan.totalMinor,
       paidMinor: plan.progress.paidMinor, remainingMinor: plan.progress.remainingMinor,
     })),
+    historical: portalHistoricalTreatment(historicalBuckets),
     balances,
     baseCurrency,
   };
