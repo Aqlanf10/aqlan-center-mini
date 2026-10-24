@@ -13,7 +13,8 @@ import type { HistoricalDocumentReceipt } from "../../lib/legacy-treatment-docum
  * amendment answers; it does not fix anything.
  *
  * New treatment: crowns are a multi-tooth episode. Choosing one crown service and 19 teeth in «علاج جديد»
- * creates 19 invoice lines and 19 plan items (one per tooth, quantity 1), all carrying the same episode.
+ * shows one entry group with quantity 19, then saves 19 invoice lines and 19 plan items (one per tooth,
+ * quantity 1), all carrying the same episode. One doctor selection applies to every canonical line.
  * After consent, approval against that invoice and a prior payment, «ترقية خدمة الاتفاق بفرق مؤرخ» refuses
  * atomically because the dated amendment supports exactly one plan item. In the combined candidate, the
  * reviewed preview-message correction shows that exact controlled reason. A directly seeded single item with
@@ -193,11 +194,20 @@ describe("19 crowns: new treatment from the UI, then a dated upgrade attempt", (
       for (const tooth of TEETH) await dialog.getByTestId(`odontogram-tooth-${tooth}`).click();
       await page.getByTestId("tooth-dialog-confirm").click();
       await dialog.waitFor({ state: "detached" });
-      await expect.poll(() => page.locator('[data-testid^="invoice-row-"]').count(), { timeout: 20_000 }).toBe(19);
-      // Explicitly attribute each line, so the unchanged-commission assertion is non-vacuous.
-      for (let index = 0; index < TEETH.length; index++) {
-        await page.getByTestId(`invoice-provider-${index}`).selectOption(String(doctorPartyId));
-      }
+      await expect.poll(() => page.locator('[data-testid^="invoice-row-"]').count(), { timeout: 20_000 }).toBe(1);
+      const group = page.getByTestId("invoice-row-0");
+      expect(await group.getAttribute("data-display-group")).toBeTruthy();
+      expect(await group.getAttribute("data-tooth-count")).toBe("19");
+      expect(await group.getByLabel("الكمية", { exact: true }).inputValue()).toBe("19");
+      expect(await group.getByLabel("الكمية", { exact: true }).isDisabled()).toBe(true);
+      expect(await group.getByLabel("السعر", { exact: true }).count()).toBe(1);
+      expect(await group.getByLabel("السعر", { exact: true }).inputValue()).toBe("50,000");
+      expect(await page.getByTestId("invoice-line-total-0").innerText()).toContain("950,000");
+      expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain(`الأسنان: ${TEETH.join("، ")}`);
+      expect(await page.locator('[data-testid^="invoice-provider-"]').count()).toBe(1);
+      expect(await page.getByTestId("invoice-group-details-0").locator('[data-testid^="invoice-clinical-preview-"]').count()).toBe(19);
+      // One visible doctor selector must attribute every saved line, keeping commission checks non-vacuous.
+      await page.getByTestId("invoice-provider-0").selectOption(String(doctorPartyId));
       const save = page.getByRole("button", { name: "احفظ الفاتورة", exact: true });
       await expect.poll(() => save.isEnabled(), { timeout: 60_000 }).toBe(true);
       await save.click();
@@ -209,6 +219,7 @@ describe("19 crowns: new treatment from the UI, then a dated upgrade attempt", (
         JOIN invoices i ON i.id=ii.invoice_id WHERE i.patient_id=$1 ORDER BY ii.id`, [patientId]);
       const plans = await q("SELECT id, total_minor::text, status, consent_at FROM treatment_plans WHERE patient_id=$1", [patientId]);
       evidence.newTreatment = { creation: "browser UI; synthetic catalog, doctor and patient seeded only",
+        visibleEntryGroups: 1, displayedQuantity: 19, displayedGroupTotalMinor: 950000, doctorSelections: 1,
         invoiceCount: created.invoices.length, invoiceTotalMinor: created.invoices[0]?.total_minor,
         invoiceLines: items.length, plans: plans.length,
         planItems: created.planItems.map(({ quantity, unit_price_minor, tooth_code }) => ({ quantity, unit_price_minor, tooth_code })) };
@@ -217,7 +228,8 @@ describe("19 crowns: new treatment from the UI, then a dated upgrade attempt", (
       expect(items).toHaveLength(19);
       expect(plans).toHaveLength(1);
       expect(created.planItems).toHaveLength(19);
-      expect(created.planItems.every((row) => row.quantity === 1 && row.unit_price_minor === "50000" && row.service_id === services.original)).toBe(true);
+      expect(created.planItems.every((row) => row.quantity === 1 && row.unit_price_minor === "50000"
+        && row.service_id === services.original && row.doctor_id === doctorPartyId)).toBe(true);
       expect(created.planItems.map((row) => row.tooth_code).sort((a, b) => Number(a) - Number(b))).toEqual(TEETH);
       expect(items.every((row) => row.quantity === 1 && row.unit_price_minor === "50000"
         && row.service_id === services.original && row.doctor_id === doctorPartyId)).toBe(true);

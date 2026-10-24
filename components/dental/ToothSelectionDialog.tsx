@@ -29,9 +29,11 @@ function isChartRecord(value: unknown): value is ToothRecord {
  * نافذةٌ عربية (RTL) وصفوف الأسنان بوضع المواجهة (`dir="ltr"`)؛ على الجوال لوحةٌ سفلية بعرض الشاشة والمخطط
  * يُمرَّر أفقيًا داخلها فقط. Escape أو «إلغاء» يغلق بلا تغيير.
  */
-export function ToothSelectionDialog({ patientId, mode, serviceName, initial, onConfirm, onCancel, purpose = "invoice" }: {
+export function ToothSelectionDialog({ patientId, mode, serviceName, initial, onConfirm, onCancel, purpose = "invoice", groupedInvoice = false }: {
   patientId: number;
   purpose?: "invoice" | "legacy_agreement";
+  /** Entry presentation only; canonical tooth/case identities remain separate. */
+  groupedInvoice?: boolean;
   mode: ToothScopeMode;
   serviceName: string;
   initial: ToothSelection;
@@ -131,7 +133,7 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
           <div className="min-w-0">
             <h3 id={titleId} className="text-sm font-extrabold text-navy-900">تحديد الأسنان — {serviceName}</h3>
             <p id={hintId} className="mt-0.5 text-[11px] font-semibold text-slate-500">{purpose === "legacy_agreement" && mode === "multi_tooth_episode" ? "اختر كل أسنان الحلقة التي يغطيها اتفاق تاريخي واحد."
-              : purpose === "legacy_agreement" && mode === "per_tooth_episode" ? "اختر سنًّا واحدًا لكل اتفاق تاريخي مستقل." : MODE_HINT[mode]}</p>
+              : purpose === "legacy_agreement" && mode === "per_tooth_episode" ? "اختر سنًّا واحدًا لكل اتفاق تاريخي مستقل." : groupedInvoice && multi ? "اختر الأسنان؛ تظهر الخدمة في بند واحد والكمية بعدد الأسنان، مع ربط العلاج لكل سن." : MODE_HINT[mode]}</p>
           </div>
           <button type="button" onClick={onCancel} aria-label="إغلاق"
             className="min-h-[44px] min-w-[44px] shrink-0 rounded-xl bg-slate-100 text-xs font-black text-slate-600 hover:bg-slate-200">✕</button>
@@ -182,12 +184,12 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
           {mode === "per_tooth_episode" && teeth.length > 1 ? (
             <p role="status" data-testid="tooth-dialog-split-notice"
               className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
-              {purpose === "legacy_agreement" ? "الاتفاق التاريخي لهذا العلاج مستقل لكل سن؛ لا يمكن حفظ الاختيار المتعدد" : PER_TOOTH_SPLIT_NOTICE}: {teeth.join("، ")} — لا تُجمع عدة أسنان في حالة واحدة.
+              {purpose === "legacy_agreement" ? "الاتفاق التاريخي لهذا العلاج مستقل لكل سن؛ لا يمكن حفظ الاختيار المتعدد" : groupedInvoice ? "بند واحد في شاشة الإدخال، وحالة علاج مستقلة لكل سن" : PER_TOOTH_SPLIT_NOTICE}: {teeth.join("، ")} — لا تُجمع عدة أسنان في حالة واحدة.
             </p>
           ) : null}
           {mode === "multi_tooth_episode" && teeth.length > 1 ? (
             <p role="status" className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-900">
-              حلقةٌ واحدة: {teeth.join("، ")} — {purpose === "legacy_agreement" ? "اتفاق واحد وبند واحد بالمبلغ الكامل للحلقة، دون ضربه بعدد الأسنان." : "سطرٌ لكل سن في الفاتورة."}
+              حلقةٌ واحدة: {teeth.join("، ")} — {purpose === "legacy_agreement" ? "اتفاق واحد وبند واحد بالمبلغ الكامل للحلقة، دون ضربه بعدد الأسنان." : groupedInvoice ? "بند واحد في شاشة الإدخال، والكمية بعدد الأسنان." : "سطرٌ لكل سن في الفاتورة."}
             </p>
           ) : null}
         </div>
