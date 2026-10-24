@@ -2,6 +2,7 @@
 import {useEffect,useMemo,useRef,useState} from "react";
 import {formatMoney,parseAmount,toInputAmount,type Currency} from "@/lib/money";
 import {quoteAgreementAmendment} from "@/lib/agreement-amendment-quote";
+import {AGREEMENT_PREVIEW_UNAVAILABLE,agreementAmendmentPreviewMessage} from "@/lib/agreement-amendment-preview-message";
 type View={
  planId:number;patientId:number;currency:Currency;itemId:number;caseId:number|null;quantity:number;
  oldServiceId:number;oldUnitMinor:number;previousAgreementMinor:number;
@@ -27,11 +28,16 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
     const response=await fetch(`/api/plans/${planId}/agreement-amendment`,{cache:"no-store"});
     const value:unknown=await response.json();
     if(cancelled)return;
-    if(!response.ok||!value||typeof value!=="object"||!("planId" in value)
+    if(response.redirected)throw Error("تعذّرت معاينة مصدر الاتفاق الآمن.");
+    if(!response.ok){
+      // A preview refusal describes this GET only, not any pending POST's outcome.
+      setMessage(agreementAmendmentPreviewMessage(response.status,value));return;
+    }
+    if(!value||typeof value!=="object"||!("planId" in value)
       ||value.planId!==planId||!("sourceHash" in value)||typeof value.sourceHash!=="string")
       throw Error("تعذّرت معاينة مصدر الاتفاق الآمن.");
     setView(value as View);setMessage(null);
-   }catch{if(!cancelled)setMessage("البيانات أو الهجرة المالية غير جاهزة؛ لا يمكن حفظ التعديل.");}})();
+   }catch{if(!cancelled)setMessage(AGREEMENT_PREVIEW_UNAVAILABLE);}})();
    return()=>{cancelled=true;};
  },[planId,opened,previewVersion]);
  const proposal=useMemo(()=>{
