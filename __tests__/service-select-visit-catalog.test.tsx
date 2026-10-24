@@ -92,7 +92,7 @@ function serviceFixtures(): ServiceItem[] {
 
 function mount(overrides: Partial<Props> = {}) {
   const onChange = vi.fn<Props["onChange"]>();
-  let props: Props = { services: serviceFixtures(), value: null, onChange, ...overrides };
+  let props = { services: serviceFixtures(), value: null, onChange, ...overrides } as Props;
   const render = () => {
     hooks.cursor = 0;
     return ServiceSelect(props);
@@ -120,7 +120,7 @@ function mount(overrides: Partial<Props> = {}) {
   return {
     onChange, render, nodes, find, select, search, options, option, editSearch, choose,
     optionIds: () => options().map((node) => String(node.props.value)),
-    update: (next: Partial<Props>) => { props = { ...props, ...next }; },
+    update: (next: Partial<Props>) => { props = { ...props, ...next } as Props; },
   };
 }
 
