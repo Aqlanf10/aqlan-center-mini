@@ -1,0 +1,598 @@
+{
+  "note": "Synthetic databases only. prerequisites.sql is read-only and ends in ROLLBACK.",
+  "scenarios": [
+    {
+      "scenario": "deployed_with_fixtures",
+      "expectedFailing": [],
+      "failing": [],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "server.version",
+          "ok": true,
+          "detail": "server_version=18.6 (Ubuntu 18.6-1.pgdg24.04+2) (EXECUTE FUNCTION and hashtextextended need >= 11)"
+        },
+        {
+          "check_id": "server.not_in_recovery",
+          "ok": true,
+          "detail": "primary"
+        },
+        {
+          "check_id": "registry.exactly_eight",
+          "ok": true,
+          "detail": "registered=0051,0052,0056,0057,0058,0063,0064,0065"
+        },
+        {
+          "check_id": "registry.names_and_checksums_match_published",
+          "ok": true,
+          "detail": "all 8 match"
+        },
+        {
+          "check_id": "registry.none_adopted",
+          "ok": true,
+          "detail": "adopted=0"
+        },
+        {
+          "check_id": "registry.candidate_versions_absent",
+          "ok": true,
+          "detail": "none present"
+        },
+        {
+          "check_id": "conflict.relation_names",
+          "ok": true,
+          "detail": "none of 16 names exist"
+        },
+        {
+          "check_id": "conflict.type_names",
+          "ok": true,
+          "detail": "none exist"
+        },
+        {
+          "check_id": "conflict.functions",
+          "ok": true,
+          "detail": "none of 4 exist"
+        },
+        {
+          "check_id": "conflict.triggers_on_existing_tables",
+          "ok": true,
+          "detail": "none of 5 exist"
+        },
+        {
+          "check_id": "conflict.direction_check_name",
+          "ok": true,
+          "detail": "absent"
+        },
+        {
+          "check_id": "keys.clinical_cases.id",
+          "ok": true,
+          "detail": "type=integer, key=clinical_cases_pkey(p)"
+        },
+        {
+          "check_id": "keys.invoices.id",
+          "ok": true,
+          "detail": "type=integer, key=invoices_pkey(p)"
+        },
+        {
+          "check_id": "keys.parties.id",
+          "ok": true,
+          "detail": "type=integer, key=parties_pkey(p)"
+        },
+        {
+          "check_id": "keys.patients.id",
+          "ok": true,
+          "detail": "type=integer, key=patients_pkey(p)"
+        },
+        {
+          "check_id": "keys.plan_items.id",
+          "ok": true,
+          "detail": "type=integer, key=plan_items_pkey(p)"
+        },
+        {
+          "check_id": "keys.services.id",
+          "ok": true,
+          "detail": "type=integer, key=services_pkey(p)"
+        },
+        {
+          "check_id": "keys.treatment_plans.id",
+          "ok": true,
+          "detail": "type=integer, key=treatment_plans_pkey(p)"
+        },
+        {
+          "check_id": "keys.users.id",
+          "ok": true,
+          "detail": "type=integer, key=users_pkey(p)"
+        },
+        {
+          "check_id": "columns.appointments.id",
+          "ok": true,
+          "detail": "integer (0067 index)"
+        },
+        {
+          "check_id": "columns.appointments.patient_id",
+          "ok": true,
+          "detail": "integer (0067 index)"
+        },
+        {
+          "check_id": "columns.appointments.scheduled_date",
+          "ok": true,
+          "detail": "date (0067 index)"
+        },
+        {
+          "check_id": "columns.appointments.scheduled_time",
+          "ok": true,
+          "detail": "time without time zone (0067 index)"
+        },
+        {
+          "check_id": "columns.invoice_items.invoice_id",
+          "ok": true,
+          "detail": "integer (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoice_items.plan_item_id",
+          "ok": true,
+          "detail": "integer (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoice_items.source_id",
+          "ok": true,
+          "detail": "bigint (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoice_items.source_type",
+          "ok": true,
+          "detail": "text (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoice_settlement_reclassification_events.reclassification_id",
+          "ok": true,
+          "detail": "integer (0069 guard)"
+        },
+        {
+          "check_id": "columns.invoice_settlement_reclassifications.id",
+          "ok": true,
+          "detail": "integer (0069 guard)"
+        },
+        {
+          "check_id": "columns.invoice_settlement_reclassifications.source_currency",
+          "ok": true,
+          "detail": "text (0069 constraint / guard)"
+        },
+        {
+          "check_id": "columns.invoice_settlement_reclassifications.source_invoice_ids",
+          "ok": true,
+          "detail": "integer[] (0069 guard (= ANY(array)))"
+        },
+        {
+          "check_id": "columns.invoice_settlement_reclassifications.target_currency",
+          "ok": true,
+          "detail": "text (0069 constraint / guard)"
+        },
+        {
+          "check_id": "columns.invoices.base_currency",
+          "ok": true,
+          "detail": "text (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoices.created_at",
+          "ok": true,
+          "detail": "timestamp with time zone (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoices.discount_minor",
+          "ok": true,
+          "detail": "bigint (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoices.id",
+          "ok": true,
+          "detail": "integer (0066 invoice fence / 0069 guard)"
+        },
+        {
+          "check_id": "columns.invoices.invoice_number",
+          "ok": true,
+          "detail": "text (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoices.patient_id",
+          "ok": true,
+          "detail": "integer (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoices.plan_id",
+          "ok": true,
+          "detail": "integer (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoices.status",
+          "ok": true,
+          "detail": "text (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.invoices.total_minor",
+          "ok": true,
+          "detail": "bigint (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.payments.idempotency_key",
+          "ok": true,
+          "detail": "text (0068 key fence)"
+        },
+        {
+          "check_id": "columns.payments.invoice_id",
+          "ok": true,
+          "detail": "integer (0069 guard)"
+        },
+        {
+          "check_id": "columns.plan_items.id",
+          "ok": true,
+          "detail": "integer (0066 invoice fence)"
+        },
+        {
+          "check_id": "columns.plan_items.plan_id",
+          "ok": true,
+          "detail": "integer (0066 invoice fence)"
+        },
+        {
+          "check_id": "appointments.index_name_absent",
+          "ok": true,
+          "detail": "absent"
+        },
+        {
+          "check_id": "appointments.no_equivalent_index",
+          "ok": true,
+          "detail": "none"
+        },
+        {
+          "check_id": "appointments.no_invalid_index",
+          "ok": true,
+          "detail": "none"
+        },
+        {
+          "check_id": "currency.invoice_settlement_reclassifications_source_currency_check",
+          "ok": true,
+          "detail": "CHECK ((source_currency = 'YER'::text)), validated=true"
+        },
+        {
+          "check_id": "currency.invoice_settlement_reclassifications_target_currency_check",
+          "ok": true,
+          "detail": "CHECK ((target_currency = 'SAR'::text)), validated=true"
+        },
+        {
+          "check_id": "currency.no_other_checks_on_currency_columns",
+          "ok": true,
+          "detail": "none"
+        },
+        {
+          "check_id": "estimate.appointments",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=128 kB"
+        },
+        {
+          "check_id": "estimate.clinical_cases",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=40 kB"
+        },
+        {
+          "check_id": "estimate.invoice_items",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=80 kB"
+        },
+        {
+          "check_id": "estimate.invoice_settlement_reclassification_events",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=64 kB"
+        },
+        {
+          "check_id": "estimate.invoice_settlement_reclassifications",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=64 kB"
+        },
+        {
+          "check_id": "estimate.invoices",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=88 kB"
+        },
+        {
+          "check_id": "estimate.parties",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=48 kB"
+        },
+        {
+          "check_id": "estimate.patients",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=128 kB"
+        },
+        {
+          "check_id": "estimate.payments",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=128 kB"
+        },
+        {
+          "check_id": "estimate.plan_items",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=48 kB"
+        },
+        {
+          "check_id": "estimate.services",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=48 kB"
+        },
+        {
+          "check_id": "estimate.treatment_plans",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=64 kB"
+        },
+        {
+          "check_id": "estimate.users",
+          "ok": true,
+          "detail": "reltuples=never analyzed, size=32 kB"
+        }
+      ]
+    },
+    {
+      "scenario": "target_check_missing",
+      "expectedFailing": [
+        "currency.invoice_settlement_reclassifications_target_currency_check"
+      ],
+      "failing": [
+        "currency.invoice_settlement_reclassifications_target_currency_check"
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "currency.invoice_settlement_reclassifications_target_currency_check",
+          "ok": false,
+          "detail": "missing: 0069 would fail after 0066 and 0068 committed"
+        }
+      ]
+    },
+    {
+      "scenario": "source_check_not_validated",
+      "expectedFailing": [
+        "currency.invoice_settlement_reclassifications_source_currency_check"
+      ],
+      "failing": [
+        "currency.invoice_settlement_reclassifications_source_currency_check"
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "currency.invoice_settlement_reclassifications_source_currency_check",
+          "ok": false,
+          "detail": "CHECK ((source_currency = 'YER'::text)) NOT VALID, validated=false"
+        }
+      ]
+    },
+    {
+      "scenario": "extra_currency_check",
+      "expectedFailing": [
+        "currency.no_other_checks_on_currency_columns"
+      ],
+      "failing": [
+        "currency.no_other_checks_on_currency_columns"
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "currency.no_other_checks_on_currency_columns",
+          "ok": false,
+          "detail": "other=synthetic_extra_check CHECK ((target_currency <> 'USD'::text))"
+        }
+      ]
+    },
+    {
+      "scenario": "new_object_conflicts",
+      "expectedFailing": [
+        "conflict.direction_check_name",
+        "conflict.functions",
+        "conflict.relation_names",
+        "conflict.triggers_on_existing_tables",
+        "conflict.type_names"
+      ],
+      "failing": [
+        "conflict.direction_check_name",
+        "conflict.functions",
+        "conflict.relation_names",
+        "conflict.triggers_on_existing_tables",
+        "conflict.type_names"
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "conflict.relation_names",
+          "ok": false,
+          "detail": "existing=collection_attempt_retirements[r, 0068 table]"
+        },
+        {
+          "check_id": "conflict.type_names",
+          "ok": false,
+          "detail": "existing=_collection_attempt_retirements,collection_attempt_retirements"
+        },
+        {
+          "check_id": "conflict.functions",
+          "ok": false,
+          "detail": "existing=aqlan_agreement_delta_immutable() [0066 CREATE FUNCTION]; aqlan_unpaid_currency_transition_guard() [0069 CREATE OR REPLACE FUNCTION]"
+        },
+        {
+          "check_id": "conflict.triggers_on_existing_tables",
+          "ok": false,
+          "detail": "existing=invoice_settlement_reclassifications.invoice_reclassification_direction_guard"
+        },
+        {
+          "check_id": "conflict.direction_check_name",
+          "ok": false,
+          "detail": "existing on payments"
+        }
+      ]
+    },
+    {
+      "scenario": "appointments_index_name_taken_and_equivalent",
+      "expectedFailing": [
+        "appointments.index_name_absent",
+        "appointments.no_equivalent_index",
+        "conflict.relation_names"
+      ],
+      "failing": [
+        "appointments.index_name_absent",
+        "appointments.no_equivalent_index",
+        "conflict.relation_names"
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "conflict.relation_names",
+          "ok": false,
+          "detail": "existing=appointments_patient_history_idx[i, 0067 index]"
+        },
+        {
+          "check_id": "appointments.index_name_absent",
+          "ok": false,
+          "detail": "appointments_patient_history_idx"
+        },
+        {
+          "check_id": "appointments.no_equivalent_index",
+          "ok": false,
+          "detail": "equivalent=synthetic_equivalent_idx"
+        }
+      ]
+    },
+    {
+      "scenario": "referenced_column_missing",
+      "expectedFailing": [
+        "columns.payments.idempotency_key"
+      ],
+      "failing": [
+        "columns.payments.idempotency_key"
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "columns.payments.idempotency_key",
+          "ok": false,
+          "detail": "missing (0068 key fence)"
+        }
+      ]
+    },
+    {
+      "scenario": "referenced_key_not_unique",
+      "expectedFailing": [
+        "keys.parties.id"
+      ],
+      "failing": [
+        "keys.parties.id"
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "keys.parties.id",
+          "ok": false,
+          "detail": "type=integer, key=NONE"
+        }
+      ]
+    },
+    {
+      "scenario": "registry_drift",
+      "expectedFailing": [
+        "registry.names_and_checksums_match_published",
+        "registry.none_adopted"
+      ],
+      "failing": [
+        "registry.names_and_checksums_match_published",
+        "registry.none_adopted"
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "registry.names_and_checksums_match_published",
+          "ok": false,
+          "detail": "mismatch=0052"
+        },
+        {
+          "check_id": "registry.none_adopted",
+          "ok": false,
+          "detail": "adopted=1"
+        }
+      ]
+    },
+    {
+      "scenario": "existing:aqlan_upgrade_proof",
+      "failing": [
+        "appointments.index_name_absent",
+        "appointments.no_equivalent_index",
+        "conflict.direction_check_name",
+        "conflict.functions",
+        "conflict.relation_names",
+        "conflict.triggers_on_existing_tables",
+        "conflict.type_names",
+        "currency.invoice_settlement_reclassifications_source_currency_check",
+        "currency.invoice_settlement_reclassifications_target_currency_check",
+        "currency.no_other_checks_on_currency_columns",
+        "registry.candidate_versions_absent",
+        "registry.exactly_eight"
+      ],
+      "rows": [
+        {
+          "check_id": "registry.exactly_eight",
+          "ok": false,
+          "detail": "registered=0051,0052,0056,0057,0058,0063,0064,0065,0066,0067,0068,0069"
+        },
+        {
+          "check_id": "registry.candidate_versions_absent",
+          "ok": false,
+          "detail": "present=0066,0067,0068,0069"
+        },
+        {
+          "check_id": "conflict.relation_names",
+          "ok": false,
+          "detail": "existing=agreement_delta_amendments[r, 0066 table]; agreement_delta_amendments_delta_invoice_id_key[i, 0066 implicit index]; agreement_delta_amendments_id_seq[S, 0066 implicit sequence]; agreement_delta_amendments_idempotency_key_key[i, 0066 implicit index]; agreement_delta_amendments_next_unique[i, 0066 index]; agreement_delta_amendments_patient_time_idx[i, 0066 index]; agreement_delta_amendments_pkey[i, 0066 implicit index]; agreement_delta_amendments_plan_time_idx[i, 0066 index]; agreement_delta_attempt_rejections[r, 0066 table]; agreement_delta_attempt_rejections_pkey[i, 0066 implicit index]; agreement_delta_collection_receipts[r, 0066 table]; agreement_delta_collection_receipts_pkey[i, 0066 implicit index]; appointments_patient_history_idx[i, 0067 index]; collection_attempt_retirements[r, 0068 table]; collection_attempt_retirements_patient_idx[i, 0068 index]; collection_attempt_retirements_pkey[i, 0068 implicit index]"
+        },
+        {
+          "check_id": "conflict.type_names",
+          "ok": false,
+          "detail": "existing=_agreement_delta_amendments,_agreement_delta_attempt_rejections,_agreement_delta_collection_receipts,_collection_attempt_retirements,agreement_delta_amendments,agreement_delta_attempt_rejections,agreement_delta_collection_receipts,collection_attempt_retirements"
+        },
+        {
+          "check_id": "conflict.functions",
+          "ok": false,
+          "detail": "existing=aqlan_agreement_delta_immutable() [0066 CREATE FUNCTION]; aqlan_agreement_delta_invoice_fence() [0066 CREATE FUNCTION]; aqlan_collection_key_fence() [0068 CREATE OR REPLACE FUNCTION]; aqlan_unpaid_currency_transition_guard() [0069 CREATE OR REPLACE FUNCTION]"
+        },
+        {
+          "check_id": "conflict.triggers_on_existing_tables",
+          "ok": false,
+          "detail": "existing=invoice_items.agreement_delta_item_fence,invoice_settlement_reclassification_events.invoice_reclassification_event_direction_guard,invoice_settlement_reclassifications.invoice_reclassification_direction_guard,invoices.agreement_delta_invoice_fence,payments.collection_key_retirement_fence"
+        },
+        {
+          "check_id": "conflict.direction_check_name",
+          "ok": false,
+          "detail": "existing on invoice_settlement_reclassifications"
+        },
+        {
+          "check_id": "appointments.index_name_absent",
+          "ok": false,
+          "detail": "appointments_patient_history_idx"
+        },
+        {
+          "check_id": "appointments.no_equivalent_index",
+          "ok": false,
+          "detail": "equivalent=appointments_patient_history_idx"
+        },
+        {
+          "check_id": "currency.invoice_settlement_reclassifications_source_currency_check",
+          "ok": false,
+          "detail": "missing: 0069 would fail after 0066 and 0068 committed"
+        },
+        {
+          "check_id": "currency.invoice_settlement_reclassifications_target_currency_check",
+          "ok": false,
+          "detail": "missing: 0069 would fail after 0066 and 0068 committed"
+        },
+        {
+          "check_id": "currency.no_other_checks_on_currency_columns",
+          "ok": false,
+          "detail": "other=invoice_settlement_reclassifications_direction_check CHECK (((source_currency = ANY (ARRAY['YER'::text, 'SAR'::text, 'USD'::text])) AND (target_currency = ANY (ARRAY['YER'::text, 'SAR'::text, 'USD'::text])) AND (source_currency <> target_currency)))"
+        }
+      ]
+    }
+  ],
+  "result": "PASS"
+}

@@ -1,0 +1,599 @@
+{
+  "deployedRuntimeCommit": "f2b5eef97047994438729fe8a2da72e214cdf881",
+  "candidateCheckoutCommit": "c998b435306f8295a217e49f20080293c479c359",
+  "steps": [
+    {
+      "check": "deployed runtime registers exactly 0051/0052/0056/0057/0058/0063/0064/0065",
+      "ok": true,
+      "detail": [
+        "0051",
+        "0052",
+        "0056",
+        "0057",
+        "0058",
+        "0063",
+        "0064",
+        "0065"
+      ]
+    },
+    {
+      "check": "deployed registrations are applied, never adopted",
+      "ok": true
+    },
+    {
+      "check": "exactly twelve registrations after the candidate",
+      "ok": true,
+      "detail": [
+        "0051",
+        "0052",
+        "0056",
+        "0057",
+        "0058",
+        "0063",
+        "0064",
+        "0065",
+        "0066",
+        "0067",
+        "0068",
+        "0069"
+      ]
+    },
+    {
+      "check": "the eight deployed registrations are byte-identical (name, checksum, adopted, applied_at)",
+      "ok": true
+    },
+    {
+      "check": "0066/0067/0068/0069 are applied, never adopted",
+      "ok": true
+    },
+    {
+      "check": "candidate startup applies 0066, 0068, 0069, then 0067",
+      "ok": true,
+      "detail": [
+        "0066",
+        "0068",
+        "0069",
+        "0067"
+      ]
+    },
+    {
+      "check": "second candidate initialisation registers and re-applies nothing",
+      "ok": true
+    },
+    {
+      "check": "added registrations carry the published file checksums",
+      "ok": true,
+      "detail": {
+        "0066": "28bd13b5ca9f34d9a9010aade759d91fb398b47f30a78433e5e663ce90464dac",
+        "0067": "4717e0a68ee8ba9aee745000c8561d4b9d6481f48f41c094518fac76c1bdacc6",
+        "0068": "07864df6fb6fb98742fd35efebcd2f33f23a1b26c90fb7df16f54605cf62aa42",
+        "0069": "c11d02aecc5d8644dbec1edea664ecb5ba63f3c21a53c77f06c5bb4007fbc714"
+      }
+    },
+    {
+      "check": "every other historical migration stays unregistered (no retroactive registration or baseline adoption)",
+      "ok": true,
+      "detail": 51
+    },
+    {
+      "check": "every pre-existing table's rows are unchanged on their pre-upgrade columns",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "only 0069's two currency CHECKs are removed",
+      "ok": true,
+      "detail": [
+        "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_source_currency_check",
+        "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_target_currency_check"
+      ]
+    },
+    {
+      "check": "no pre-existing table, column, constraint, index or trigger definition changes (only CREATE OR REPLACE functions may differ)",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "0067's index and 0069's validated direction CHECK exist",
+      "ok": true
+    },
+    {
+      "check": "every patient's canonical per-currency balances are identical before (deployed reader) and after (candidate reader)",
+      "ok": true
+    },
+    {
+      "check": "deployed runtime re-initialises on the upgraded schema without registering, replaying or refusing anything",
+      "ok": true
+    },
+    {
+      "check": "deployed runtime writers (invoices, receipts, reversal, plan, opening, appointments, YER→SAR reclassification) still succeed on the upgraded schema",
+      "ok": true,
+      "detail": {
+        "patients": 8,
+        "invoices": 10,
+        "invoice_items": 6,
+        "payments": 18,
+        "plans": 2,
+        "openings": 2,
+        "appointments": 12,
+        "reclassifications": 2,
+        "audit": 18
+      }
+    }
+  ],
+  "deployedInit": {
+    "ms": 476,
+    "wallMs": 1452
+  },
+  "fixtures": {
+    "patients": 4,
+    "invoices": 5,
+    "invoice_items": 3,
+    "payments": 9,
+    "plans": 1,
+    "openings": 1,
+    "appointments": 6,
+    "reclassifications": 1,
+    "audit": 9
+  },
+  "balancesBefore": {
+    "1": {
+      "YER": {
+        "billedMinor": 39000,
+        "collectedMinor": 13000,
+        "openingMinor": 0,
+        "dueMinor": 26000
+      },
+      "SAR": {
+        "billedMinor": 39000,
+        "collectedMinor": 13000,
+        "openingMinor": 0,
+        "dueMinor": 26000
+      },
+      "USD": {
+        "billedMinor": 39000,
+        "collectedMinor": 13000,
+        "openingMinor": 0,
+        "dueMinor": 26000
+      }
+    },
+    "2": {
+      "YER": {
+        "billedMinor": 0,
+        "collectedMinor": 50000,
+        "openingMinor": 0,
+        "dueMinor": -50000
+      },
+      "SAR": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      },
+      "USD": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      }
+    },
+    "3": {
+      "YER": {
+        "billedMinor": 0,
+        "collectedMinor": 20000,
+        "openingMinor": 120000,
+        "dueMinor": 100000
+      },
+      "SAR": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      },
+      "USD": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      }
+    },
+    "4": {
+      "YER": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      },
+      "SAR": {
+        "billedMinor": 1000,
+        "collectedMinor": 1000,
+        "openingMinor": 0,
+        "dueMinor": 0
+      },
+      "USD": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      }
+    }
+  },
+  "nonEmptyTablesBefore": 28,
+  "candidateRuns": [
+    {
+      "attempt": 1,
+      "ms": 143,
+      "wallMs": 1187,
+      "registered": [
+        "0051",
+        "0052",
+        "0056",
+        "0057",
+        "0058",
+        "0063",
+        "0064",
+        "0065",
+        "0066",
+        "0067",
+        "0068",
+        "0069"
+      ]
+    },
+    {
+      "attempt": 2,
+      "ms": 100,
+      "wallMs": 1150,
+      "registered": [
+        "0051",
+        "0052",
+        "0056",
+        "0057",
+        "0058",
+        "0063",
+        "0064",
+        "0065",
+        "0066",
+        "0067",
+        "0068",
+        "0069"
+      ]
+    }
+  ],
+  "unregisteredHistoricalVersions": [
+    "0001",
+    "0002",
+    "0003",
+    "0004",
+    "0005",
+    "0006",
+    "0007",
+    "0008",
+    "0009",
+    "0010",
+    "0011",
+    "0012",
+    "0013",
+    "0014",
+    "0015",
+    "0016",
+    "0017",
+    "0018",
+    "0019",
+    "0020",
+    "0021",
+    "0022",
+    "0023",
+    "0024",
+    "0025",
+    "0026",
+    "0027",
+    "0028",
+    "0029",
+    "0030",
+    "0031",
+    "0032",
+    "0033",
+    "0034",
+    "0035",
+    "0036",
+    "0037",
+    "0038",
+    "0039",
+    "0040",
+    "0041",
+    "0042",
+    "0043",
+    "0045",
+    "0046",
+    "0048",
+    "0049",
+    "0050",
+    "0059",
+    "0060",
+    "0061"
+  ],
+  "catalogDiff": {
+    "added": [
+      "column:agreement_delta_amendments.actor_id",
+      "column:agreement_delta_amendments.actor_username",
+      "column:agreement_delta_amendments.case_id",
+      "column:agreement_delta_amendments.delta_invoice_id",
+      "column:agreement_delta_amendments.delta_minor",
+      "column:agreement_delta_amendments.doctor_id",
+      "column:agreement_delta_amendments.id",
+      "column:agreement_delta_amendments.idempotency_key",
+      "column:agreement_delta_amendments.new_service_id",
+      "column:agreement_delta_amendments.new_unit_minor",
+      "column:agreement_delta_amendments.occurred_at",
+      "column:agreement_delta_amendments.old_service_id",
+      "column:agreement_delta_amendments.old_unit_minor",
+      "column:agreement_delta_amendments.original_invoice_id",
+      "column:agreement_delta_amendments.patient_id",
+      "column:agreement_delta_amendments.plan_id",
+      "column:agreement_delta_amendments.plan_item_id",
+      "column:agreement_delta_amendments.previous_agreement_minor",
+      "column:agreement_delta_amendments.previous_amendment_id",
+      "column:agreement_delta_amendments.quantity",
+      "column:agreement_delta_amendments.reason",
+      "column:agreement_delta_amendments.receipt",
+      "column:agreement_delta_amendments.request_hash",
+      "column:agreement_delta_amendments.revised_agreement_minor",
+      "column:agreement_delta_amendments.settled_snapshot_minor",
+      "column:agreement_delta_amendments.source_hash",
+      "column:agreement_delta_attempt_rejections.actor_id",
+      "column:agreement_delta_attempt_rejections.expected_source_hash",
+      "column:agreement_delta_attempt_rejections.idempotency_key",
+      "column:agreement_delta_attempt_rejections.observed_source_hash",
+      "column:agreement_delta_attempt_rejections.patient_id",
+      "column:agreement_delta_attempt_rejections.plan_id",
+      "column:agreement_delta_attempt_rejections.rejected_at",
+      "column:agreement_delta_attempt_rejections.request_hash",
+      "column:agreement_delta_collection_receipts.actor_id",
+      "column:agreement_delta_collection_receipts.created_at",
+      "column:agreement_delta_collection_receipts.idempotency_key",
+      "column:agreement_delta_collection_receipts.patient_id",
+      "column:agreement_delta_collection_receipts.payment_ids",
+      "column:agreement_delta_collection_receipts.plan_id",
+      "column:agreement_delta_collection_receipts.request_hash",
+      "column:agreement_delta_collection_receipts.result_snapshot",
+      "column:collection_attempt_retirements.idempotency_key",
+      "column:collection_attempt_retirements.operation",
+      "column:collection_attempt_retirements.patient_id",
+      "column:collection_attempt_retirements.request_hash",
+      "column:collection_attempt_retirements.retired_at",
+      "column:collection_attempt_retirements.retired_by",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_actor_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_actor_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_actor_username_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_case_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_delta_invoice_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_delta_invoice_id_key",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_delta_invoice_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_delta_minor_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_delta_minor_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_doctor_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_idempotency_key_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_idempotency_key_key",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_idempotency_key_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_new_service_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_new_service_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_new_unit_minor_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_new_unit_minor_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_occurred_at_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_old_service_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_old_service_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_old_unit_minor_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_old_unit_minor_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_original_invoice_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_original_invoice_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_patient_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_patient_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_pkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_plan_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_plan_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_plan_item_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_plan_item_id_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_previous_agreement_minor_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_previous_agreement_minor_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_previous_amendment_id_fkey",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_quantity_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_quantity_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_reason_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_reason_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_receipt_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_receipt_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_request_hash_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_request_hash_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_revised_agreement_minor_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_settled_snapshot_minor_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_settled_snapshot_minor_not_null",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_source_hash_check",
+      "constraint:agreement_delta_amendments.agreement_delta_amendments_source_hash_not_null",
+      "constraint:agreement_delta_amendments.amendment_positive_delta",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejection_expected_source_hash_not_null",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejection_observed_source_hash_not_null",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_actor_id_fkey",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_actor_id_not_null",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_expected_source_hash_check",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_idempotency_key_check",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_idempotency_key_not_null",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_observed_source_hash_check",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_patient_id_fkey",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_patient_id_not_null",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_pkey",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_plan_id_fkey",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_plan_id_not_null",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_rejected_at_not_null",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_request_hash_check",
+      "constraint:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_request_hash_not_null",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_actor_id_fkey",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_actor_id_not_null",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_created_at_not_null",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_idempotency_key_check",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_idempotency_key_not_null",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_patient_id_fkey",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_patient_id_not_null",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_payment_ids_check",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_payment_ids_not_null",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_pkey",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_plan_id_fkey",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_plan_id_not_null",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_request_hash_check",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_request_hash_not_null",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_result_snapshot_check",
+      "constraint:agreement_delta_collection_receipts.agreement_delta_collection_receipts_result_snapshot_not_null",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_idempotency_key_check",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_idempotency_key_not_null",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_operation_check",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_operation_not_null",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_patient_id_fkey",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_patient_id_not_null",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_pkey",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_request_hash_check",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_request_hash_not_null",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_retired_at_not_null",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_retired_by_check",
+      "constraint:collection_attempt_retirements.collection_attempt_retirements_retired_by_not_null",
+      "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_direction_check",
+      "function:aqlan_agreement_delta_immutable",
+      "function:aqlan_agreement_delta_invoice_fence",
+      "function:aqlan_collection_key_fence",
+      "function:aqlan_unpaid_currency_transition_guard",
+      "index:agreement_delta_amendments_delta_invoice_id_key",
+      "index:agreement_delta_amendments_idempotency_key_key",
+      "index:agreement_delta_amendments_next_unique",
+      "index:agreement_delta_amendments_patient_time_idx",
+      "index:agreement_delta_amendments_pkey",
+      "index:agreement_delta_amendments_plan_time_idx",
+      "index:agreement_delta_attempt_rejections_pkey",
+      "index:agreement_delta_collection_receipts_pkey",
+      "index:appointments_patient_history_idx",
+      "index:collection_attempt_retirements_patient_idx",
+      "index:collection_attempt_retirements_pkey",
+      "table:agreement_delta_amendments",
+      "table:agreement_delta_attempt_rejections",
+      "table:agreement_delta_collection_receipts",
+      "table:collection_attempt_retirements",
+      "trigger:agreement_delta_amendments.agreement_delta_immutable",
+      "trigger:agreement_delta_amendments.agreement_delta_no_truncate",
+      "trigger:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_immutable",
+      "trigger:agreement_delta_attempt_rejections.agreement_delta_attempt_rejections_no_truncate",
+      "trigger:agreement_delta_collection_receipts.agreement_delta_collection_immutable",
+      "trigger:agreement_delta_collection_receipts.agreement_delta_collection_no_truncate",
+      "trigger:agreement_delta_collection_receipts.collection_key_retirement_fence",
+      "trigger:collection_attempt_retirements.collection_attempt_retirement_fence",
+      "trigger:collection_attempt_retirements.collection_attempt_retirement_truncate",
+      "trigger:invoice_items.agreement_delta_item_fence",
+      "trigger:invoice_settlement_reclassification_events.invoice_reclassification_event_direction_guard",
+      "trigger:invoice_settlement_reclassifications.invoice_reclassification_direction_guard",
+      "trigger:invoices.agreement_delta_invoice_fence",
+      "trigger:payments.collection_key_retirement_fence"
+    ],
+    "removed": [
+      "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_source_currency_check",
+      "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_target_currency_check"
+    ],
+    "changed": []
+  },
+  "balancesAfter": {
+    "1": {
+      "YER": {
+        "billedMinor": 39000,
+        "collectedMinor": 13000,
+        "openingMinor": 0,
+        "dueMinor": 26000
+      },
+      "SAR": {
+        "billedMinor": 39000,
+        "collectedMinor": 13000,
+        "openingMinor": 0,
+        "dueMinor": 26000
+      },
+      "USD": {
+        "billedMinor": 39000,
+        "collectedMinor": 13000,
+        "openingMinor": 0,
+        "dueMinor": 26000
+      }
+    },
+    "2": {
+      "YER": {
+        "billedMinor": 0,
+        "collectedMinor": 50000,
+        "openingMinor": 0,
+        "dueMinor": -50000
+      },
+      "SAR": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      },
+      "USD": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      }
+    },
+    "3": {
+      "YER": {
+        "billedMinor": 0,
+        "collectedMinor": 20000,
+        "openingMinor": 120000,
+        "dueMinor": 100000
+      },
+      "SAR": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      },
+      "USD": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      }
+    },
+    "4": {
+      "YER": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      },
+      "SAR": {
+        "billedMinor": 1000,
+        "collectedMinor": 1000,
+        "openingMinor": 0,
+        "dueMinor": 0
+      },
+      "USD": {
+        "billedMinor": 0,
+        "collectedMinor": 0,
+        "openingMinor": 0,
+        "dueMinor": 0
+      }
+    }
+  },
+  "deployedReinit": {
+    "ms": 122,
+    "wallMs": 1155
+  },
+  "deployedWritesAfterUpgrade": {
+    "patients": 8,
+    "invoices": 10,
+    "invoice_items": 6,
+    "payments": 18,
+    "plans": 2,
+    "openings": 2,
+    "appointments": 12,
+    "reclassifications": 2,
+    "audit": 18
+  },
+  "result": "PASS",
+  "digest": "01258174784092fc0eff82177c286b06f8acce28778663ecbf23ecbb2539b40b"
+}

@@ -1,0 +1,107 @@
+{
+  "scenario": "0069 precondition violated: invoice_settlement_reclassifications_target_currency_check absent",
+  "deployedInit": {
+    "status": 0,
+    "error": null
+  },
+  "fixtures": {
+    "status": 0,
+    "error": null
+  },
+  "candidateFirstStart": {
+    "status": 1,
+    "error": [
+      "Error.captureStackTrace(err)",
+      "error: constraint \"invoice_settlement_reclassifications_target_currency_check\" of relation \"invoice_settlement_reclassifications\" does not exist"
+    ]
+  },
+  "registeredAfterFailure": [
+    "0051",
+    "0052",
+    "0056",
+    "0057",
+    "0058",
+    "0063",
+    "0064",
+    "0065",
+    "0066",
+    "0068"
+  ],
+  "objectsAfterFailure": {
+    "has_0066": true,
+    "has_0068": true,
+    "has_0069": false,
+    "has_0067": false
+  },
+  "prerequisitesAfterFailure": [
+    "conflict.functions",
+    "conflict.relation_names",
+    "conflict.triggers_on_existing_tables",
+    "conflict.type_names",
+    "currency.invoice_settlement_reclassifications_target_currency_check",
+    "registry.candidate_versions_absent",
+    "registry.exactly_eight"
+  ],
+  "candidateSecondStart": {
+    "status": 1,
+    "error": [
+      "Error.captureStackTrace(err)",
+      "error: constraint \"invoice_settlement_reclassifications_target_currency_check\" of relation \"invoice_settlement_reclassifications\" does not exist"
+    ]
+  },
+  "registeredAfterRetry": [
+    "0051",
+    "0052",
+    "0056",
+    "0057",
+    "0058",
+    "0063",
+    "0064",
+    "0065",
+    "0066",
+    "0068"
+  ],
+  "deployedReinit": {
+    "status": 0,
+    "error": null
+  },
+  "deployedWrites": {
+    "status": 0,
+    "error": null
+  },
+  "registeredAfterDeployedFallback": [
+    "0051",
+    "0052",
+    "0056",
+    "0057",
+    "0058",
+    "0063",
+    "0064",
+    "0065",
+    "0066",
+    "0068"
+  ],
+  "candidateAfterRollForward": {
+    "status": 0,
+    "error": null
+  },
+  "registeredAfterRollForward": [
+    "0051",
+    "0052",
+    "0056",
+    "0057",
+    "0058",
+    "0063",
+    "0064",
+    "0065",
+    "0066",
+    "0067",
+    "0068",
+    "0069"
+  ],
+  "objectsAfterRollForward": {
+    "has_0069": true,
+    "old_checks_dropped": true,
+    "has_0067": true
+  }
+}

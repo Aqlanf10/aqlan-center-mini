@@ -1,0 +1,133 @@
+{
+  "note": "Synthetic-size timings; lock modes are exact. Not a Production performance claim.",
+  "files": [
+    {
+      "file": "0066_agreement_delta_amendments",
+      "syntheticMs": 14.1,
+      "locksOnPreExistingTables": [
+        {
+          "target": "clinical_cases",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "invoice_items",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "invoices",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "parties",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "patients",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "plan_items",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "services",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "treatment_plans",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "users",
+          "mode": "ShareRowExclusiveLock"
+        }
+      ],
+      "probes": {
+        "invoice_items": {
+          "read": "proceeds",
+          "write": "BLOCKED"
+        },
+        "invoices": {
+          "read": "proceeds",
+          "write": "BLOCKED"
+        },
+        "patients": {
+          "read": "proceeds",
+          "write": "BLOCKED"
+        },
+        "treatment_plans": {
+          "read": "proceeds",
+          "write": "BLOCKED"
+        }
+      }
+    },
+    {
+      "file": "0068_collection_attempt_retirements",
+      "syntheticMs": 2.6,
+      "locksOnPreExistingTables": [
+        {
+          "target": "agreement_delta_collection_receipts",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "patients",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "payments",
+          "mode": "ShareRowExclusiveLock"
+        }
+      ],
+      "probes": {
+        "patients": {
+          "read": "proceeds",
+          "write": "BLOCKED"
+        },
+        "payments": {
+          "read": "proceeds",
+          "write": "BLOCKED"
+        }
+      }
+    },
+    {
+      "file": "0069_unpaid_currency_transitions",
+      "syntheticMs": 1.2,
+      "locksOnPreExistingTables": [
+        {
+          "target": "invoice_settlement_reclassification_events",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "target": "invoice_settlement_reclassifications",
+          "mode": "AccessExclusiveLock"
+        },
+        {
+          "target": "invoice_settlement_reclassifications",
+          "mode": "ShareRowExclusiveLock"
+        }
+      ],
+      "probes": {
+        "invoice_settlement_reclassifications": {
+          "read": "BLOCKED",
+          "write": "n/a"
+        }
+      }
+    },
+    {
+      "file": "0067_patient_appointment_history_index",
+      "syntheticMs": 1.3,
+      "locksOnPreExistingTables": [
+        {
+          "target": "appointments",
+          "mode": "ShareLock"
+        }
+      ],
+      "probes": {
+        "appointments": {
+          "read": "proceeds",
+          "write": "BLOCKED"
+        }
+      }
+    }
+  ]
+}
