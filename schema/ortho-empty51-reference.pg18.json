@@ -3356,7 +3356,380 @@
         "prosrc": "\nDECLARE\n  current_revision ortho_strategy_revisions%ROWTYPE;\n  predecessor ortho_strategy_revisions%ROWTYPE;\nBEGIN\n  -- Read final row ownership: canonical merge may update several FKs in a\n  -- different order, and backup may insert the successor before its predecessor.\n  SELECT * INTO current_revision FROM ortho_strategy_revisions WHERE id = NEW.id;\n  IF NOT FOUND THEN\n    RAISE EXCEPTION 'Strategy revision missing at final validation' USING ERRCODE = '23514';\n  END IF;\n  IF NOT EXISTS (\n    SELECT 1 FROM ortho_cases o JOIN clinical_cases c ON c.ortho_case_id = o.id\n    WHERE o.id = current_revision.ortho_case_id AND c.id = current_revision.clinical_case_id\n      AND o.patient_id = current_revision.patient_id AND c.patient_id = current_revision.patient_id\n  ) THEN\n    RAISE EXCEPTION 'Strategy revision current owner does not match both cases' USING ERRCODE = '23514';\n  END IF;\n  IF current_revision.supersedes_revision_id IS NOT NULL THEN\n    SELECT * INTO predecessor FROM ortho_strategy_revisions\n      WHERE id = current_revision.supersedes_revision_id;\n    IF NOT FOUND OR predecessor.ortho_case_id <> current_revision.ortho_case_id\n       OR predecessor.clinical_case_id <> current_revision.clinical_case_id\n       OR predecessor.version <> current_revision.version - 1 THEN\n      RAISE EXCEPTION 'Strategy revision predecessor must be the exact prior version of this case'\n        USING ERRCODE = '23514';\n    END IF;\n  END IF;\n  RETURN NULL;\nEND;\n",
         "procost": 100,
         "prokind": "f",
-        "prolang": "13681",
+        "prolang": {
+          "name": "plpgsql",
+          "routines": [
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": null,
+              "prosrc": "fmgr_c_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "fmgr_c_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.fmgr_c_validator(pg_catalog.oid)",
+              "language": "internal",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.fmgr_c_validator(oid)\n RETURNS void\n LANGUAGE internal\n STABLE PARALLEL SAFE STRICT\nAS $function$fmgr_c_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "s",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "s",
+              "dependencies": [],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": null,
+              "prosrc": "fmgr_internal_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "fmgr_internal_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.fmgr_internal_validator(pg_catalog.oid)",
+              "language": "internal",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.fmgr_internal_validator(oid)\n RETURNS void\n LANGUAGE internal\n STABLE PARALLEL SAFE STRICT\nAS $function$fmgr_internal_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "s",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "s",
+              "dependencies": [],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_call_handler",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_call_handler",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_call_handler()",
+              "language": "c",
+              "pronargs": 0,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_call_handler()\n RETURNS language_handler\n LANGUAGE c\nAS '$libdir/plpgsql', $function$plpgsql_call_handler$function$\n",
+              "prorettype": "2280",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [],
+              "proisstrict": false,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_inline_handler",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_inline_handler",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)",
+              "language": "c",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_inline_handler(internal)\n RETURNS void\n LANGUAGE c\n STRICT\nAS '$libdir/plpgsql', $function$plpgsql_inline_handler$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "2281"
+              ],
+              "proisstrict": true,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)",
+              "language": "c",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_validator(oid)\n RETURNS void\n LANGUAGE c\n STRICT\nAS '$libdir/plpgsql', $function$plpgsql_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            }
+          ],
+          "languages": [
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": false,
+              "lanname": "c",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "inline",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.fmgr_c_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [],
+              "lanpltrusted": false,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            },
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": false,
+              "lanname": "internal",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "inline",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.fmgr_internal_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [],
+              "lanpltrusted": false,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            },
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": true,
+              "lanname": "plpgsql",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_call_handler()"
+                },
+                {
+                  "slot": "inline",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)"
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_call_handler()"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)"
+                }
+              ],
+              "lanpltrusted": true,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            }
+          ]
+        },
         "proname": "check_ortho_strategy_revision_final_state",
         "prorows": 0,
         "pronargs": 0,
@@ -3391,7 +3764,380 @@
         "prosrc": "\nBEGIN\n  -- Same ownership-only exception as medical history; never edit clinical facts,\n  -- recorded provenance, command identity, revision lineage or fixed case IDs.\n  IF TG_OP = 'UPDATE'\n     AND (to_jsonb(NEW) - 'patient_id') = (to_jsonb(OLD) - 'patient_id') THEN\n    RETURN NEW;\n  END IF;\n  RAISE EXCEPTION 'Orthodontic strategy revisions are append-only'\n    USING ERRCODE = '55000';\nEND;\n",
         "procost": 100,
         "prokind": "f",
-        "prolang": "13681",
+        "prolang": {
+          "name": "plpgsql",
+          "routines": [
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": null,
+              "prosrc": "fmgr_c_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "fmgr_c_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.fmgr_c_validator(pg_catalog.oid)",
+              "language": "internal",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.fmgr_c_validator(oid)\n RETURNS void\n LANGUAGE internal\n STABLE PARALLEL SAFE STRICT\nAS $function$fmgr_c_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "s",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "s",
+              "dependencies": [],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": null,
+              "prosrc": "fmgr_internal_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "fmgr_internal_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.fmgr_internal_validator(pg_catalog.oid)",
+              "language": "internal",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.fmgr_internal_validator(oid)\n RETURNS void\n LANGUAGE internal\n STABLE PARALLEL SAFE STRICT\nAS $function$fmgr_internal_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "s",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "s",
+              "dependencies": [],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_call_handler",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_call_handler",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_call_handler()",
+              "language": "c",
+              "pronargs": 0,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_call_handler()\n RETURNS language_handler\n LANGUAGE c\nAS '$libdir/plpgsql', $function$plpgsql_call_handler$function$\n",
+              "prorettype": "2280",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [],
+              "proisstrict": false,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_inline_handler",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_inline_handler",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)",
+              "language": "c",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_inline_handler(internal)\n RETURNS void\n LANGUAGE c\n STRICT\nAS '$libdir/plpgsql', $function$plpgsql_inline_handler$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "2281"
+              ],
+              "proisstrict": true,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)",
+              "language": "c",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_validator(oid)\n RETURNS void\n LANGUAGE c\n STRICT\nAS '$libdir/plpgsql', $function$plpgsql_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            }
+          ],
+          "languages": [
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": false,
+              "lanname": "c",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "inline",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.fmgr_c_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [],
+              "lanpltrusted": false,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            },
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": false,
+              "lanname": "internal",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "inline",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.fmgr_internal_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [],
+              "lanpltrusted": false,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            },
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": true,
+              "lanname": "plpgsql",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_call_handler()"
+                },
+                {
+                  "slot": "inline",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)"
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_call_handler()"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)"
+                }
+              ],
+              "lanpltrusted": true,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            }
+          ]
+        },
         "proname": "reject_ortho_strategy_revision_mutation",
         "prorows": 0,
         "pronargs": 0,
@@ -6292,7 +7038,380 @@
         "prosrc": "\n      BEGIN\n        RAISE EXCEPTION 'سجل التدقيق لا يُعدَّل ولا يُحذف منه.';\n      END;\n      ",
         "procost": 100,
         "prokind": "f",
-        "prolang": "13681",
+        "prolang": {
+          "name": "plpgsql",
+          "routines": [
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": null,
+              "prosrc": "fmgr_c_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "fmgr_c_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.fmgr_c_validator(pg_catalog.oid)",
+              "language": "internal",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.fmgr_c_validator(oid)\n RETURNS void\n LANGUAGE internal\n STABLE PARALLEL SAFE STRICT\nAS $function$fmgr_c_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "s",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "s",
+              "dependencies": [],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": null,
+              "prosrc": "fmgr_internal_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "fmgr_internal_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.fmgr_internal_validator(pg_catalog.oid)",
+              "language": "internal",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.fmgr_internal_validator(oid)\n RETURNS void\n LANGUAGE internal\n STABLE PARALLEL SAFE STRICT\nAS $function$fmgr_internal_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "s",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "s",
+              "dependencies": [],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_call_handler",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_call_handler",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_call_handler()",
+              "language": "c",
+              "pronargs": 0,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_call_handler()\n RETURNS language_handler\n LANGUAGE c\nAS '$libdir/plpgsql', $function$plpgsql_call_handler$function$\n",
+              "prorettype": "2280",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [],
+              "proisstrict": false,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_inline_handler",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_inline_handler",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)",
+              "language": "c",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_inline_handler(internal)\n RETURNS void\n LANGUAGE c\n STRICT\nAS '$libdir/plpgsql', $function$plpgsql_inline_handler$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "2281"
+              ],
+              "proisstrict": true,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            },
+            {
+              "owner": "ci",
+              "proacl": null,
+              "probin": "$libdir/plpgsql",
+              "prosrc": "plpgsql_validator",
+              "procost": 1,
+              "prokind": "f",
+              "proname": "plpgsql_validator",
+              "prorows": 0,
+              "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)",
+              "language": "c",
+              "pronargs": 1,
+              "namespace": "pg_catalog",
+              "proconfig": null,
+              "proretset": false,
+              "prosecdef": false,
+              "definition": "CREATE OR REPLACE FUNCTION pg_catalog.plpgsql_validator(oid)\n RETURNS void\n LANGUAGE c\n STRICT\nAS '$libdir/plpgsql', $function$plpgsql_validator$function$\n",
+              "prorettype": "2278",
+              "prosqlbody": null,
+              "prosupport": "-",
+              "proargmodes": null,
+              "proargnames": null,
+              "proargtypes": [
+                "26"
+              ],
+              "proisstrict": true,
+              "proparallel": "u",
+              "protrftypes": null,
+              "provariadic": "0",
+              "provolatile": "v",
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                }
+              ],
+              "proleakproof": false,
+              "effective_acl": [
+                "=X/ci",
+                "ci=X/ci"
+              ],
+              "proallargtypes": null,
+              "proargdefaults": null,
+              "pronargdefaults": 0,
+              "security_labels": [],
+              "namespace_security": {
+                "acl": [
+                  "ci=UC/ci",
+                  "=U/ci"
+                ],
+                "owner": "ci"
+              }
+            }
+          ],
+          "languages": [
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": false,
+              "lanname": "c",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "inline",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.fmgr_c_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [],
+              "lanpltrusted": false,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            },
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": false,
+              "lanname": "internal",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "inline",
+                  "present": false,
+                  "identity": null
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.fmgr_internal_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [],
+              "lanpltrusted": false,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            },
+            {
+              "owner": "ci",
+              "lanacl": null,
+              "lanispl": true,
+              "lanname": "plpgsql",
+              "handlers": [
+                {
+                  "slot": "call",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_call_handler()"
+                },
+                {
+                  "slot": "inline",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)"
+                },
+                {
+                  "slot": "validator",
+                  "present": true,
+                  "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)"
+                }
+              ],
+              "dependencies": [
+                {
+                  "kind": "e",
+                  "type": "extension",
+                  "identity": "plpgsql"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_call_handler()"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_inline_handler(pg_catalog.internal)"
+                },
+                {
+                  "kind": "n",
+                  "type": "function",
+                  "identity": "pg_catalog.plpgsql_validator(pg_catalog.oid)"
+                }
+              ],
+              "lanpltrusted": true,
+              "effective_acl": [
+                "=U/ci",
+                "ci=U/ci"
+              ],
+              "security_labels": []
+            }
+          ]
+        },
         "proname": "audit_log_is_append_only",
         "prorows": 0,
         "pronargs": 0,
