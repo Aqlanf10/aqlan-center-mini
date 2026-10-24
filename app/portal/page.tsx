@@ -340,6 +340,7 @@ function StatementTab() {
         )}
       </div>
 
+      {feed.agreementsRequireReview ? <p role="status" className="rounded-xl border border-amber-200 p-3 text-sm">بعض أرصدة اتفاقات العلاج غير متاحة وتحتاج مراجعة مصدرها. الفواتير وكشف الحساب المعروضان مستقلان عن هذا الملخص.</p> : null}
       {feed.agreements.map((agreement, index) => (
         <div key={index} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
           <h2 className="mb-2 text-sm font-black text-navy-900">اتفاق العلاج — {agreement.title}</h2>

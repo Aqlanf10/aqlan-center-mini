@@ -310,10 +310,10 @@ export default function FinancePage() {
       // ٤. خطط الأقساط العلاجية
       if (plansRes.status === "fulfilled" && plansRes.value.ok) {
         const plansPayload = await plansRes.value.json();
-        const plans: { status: string; progress?: { overdueMinor: number } }[] =
+        const plans: { status: string; approvedAgreement?: { available: boolean }; progress?: { overdueMinor: number } }[] =
           plansPayload.plans || [];
         const active = plans.filter((p) => p.status === "active");
-        const overdue = active.filter((p) => (p.progress?.overdueMinor || 0) > 0);
+        const overdue = active.filter((p) => p.approvedAgreement?.available !== false && (p.progress?.overdueMinor || 0) > 0);
         setPlansStats({ activePlansCount: active.length, overdueCount: overdue.length });
       }
 

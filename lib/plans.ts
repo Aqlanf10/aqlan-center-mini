@@ -380,6 +380,8 @@ export function canEditItems(plan: {
  * (أُنجز/بقيت من العلاج) — لأن مالها يأتي من فواتير زياراتها لا منها.
  */
 export interface PlanLedgerSummary {
+  currentAgreement?: { totalMinor: number; paidMinor: number; remainingMinor: number };
+  agreementReviewRequired?: boolean;
   id: number;
   title: string;
   status: PlanStatus;
@@ -413,6 +415,7 @@ export interface PlanLedgerSummary {
 }
 
 export function planLedgerSummary(plan: {
+  approvedAgreement?: Awaited<ReturnType<typeof import("./approved-agreements").approvedAgreementPosition>>;
   id: number;
   title: string;
   status: PlanStatus;
@@ -437,6 +440,10 @@ export function planLedgerSummary(plan: {
     && Number.isSafeInteger(item.unitPriceMinor) && Number(item.unitPriceMinor) >= 0);
   const ordinaryProgress = legacy && completeOrdinaryItems ? planItemsProgress(ordinaryItems as PlanItemLike[]) : null;
   return {
+    ...(plan.approvedAgreement ? (plan.approvedAgreement.available ? { currentAgreement: {
+      totalMinor: plan.approvedAgreement.totalMinor, paidMinor: plan.approvedAgreement.paidMinor,
+      remainingMinor: plan.approvedAgreement.remainingMinor,
+    } } : { agreementReviewRequired: true }) : {}),
     ...(legacy ? { legacy: true, legacyItemCount,
       ordinaryItemsProgress: ordinaryProgress ? {
         count: ordinaryProgress.count, doneCount: ordinaryProgress.doneCount,
@@ -451,7 +458,7 @@ export function planLedgerSummary(plan: {
     consented: plan.consentAt !== null && (plan.items?.filter(historical).every((item) =>
       item.legacyAgreementStatus === "live" && item.billingStatus === "included_in_package"
       && item.legacyCoverageState === "verified" && item.legacyCurrentConsentRequired === false) ?? true),
-    installments: hasInstallments ? {
+    installments: hasInstallments && plan.approvedAgreement?.available !== false ? {
       paidMinor: plan.progress.paidMinor,
       remainingMinor: plan.progress.remainingMinor,
       overdueMinor: plan.progress.overdueMinor,

@@ -19806,6 +19806,8 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient, ba
     rows.filter(row=>!approvedIds.has(row.id)).map(row=>({id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)})),today) : null;
   return Promise.all(rows.map(async (row) => {
     const approvedAgreement = approvedIds.has(row.id) ? await (await import("./approved-agreements")).approvedAgreementPosition(row.id,today,reader) : null;
+    // A known approval without its reader result is unknown, never a classic fallback.
+    if (approvedIds.has(row.id) && !approvedAgreement) throw new Error("Approved plan financial source unavailable");
     const invoiceSource = approvedAgreement ? null : invoiceSources?.has(row.id) ? invoiceSources.get(row.id)! : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
     const invoiceFinancial = invoiceSource?.kind === "classic_installments" ? null : invoiceSource;
     const debtSource = approvedAgreement ? (approvedAgreement.available ? "approved_agreement" as const : null)
@@ -19815,6 +19817,16 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient, ba
     const items = itemsByPlan.get(row.id) ?? [];
     const paidMinor = approvedAgreement?.paidMinor ?? (invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.paidMinor : toMinor(row.paid_minor));
     const lastReminderAt = row.last_reminder_at ? row.last_reminder_at.toISOString() : null;
+    // Keep schedule attribution on the original source. Delta receipts must not
+    // mark original installments paid. Current debt comes from the approved reader.
+    const originalProgress = planProgress(
+      { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments, lastReminderAt },
+      approvedAgreement?.originalPaidMinor ?? paidMinor, today,
+    );
+    const progress = approvedAgreement ? { ...originalProgress,
+      totalMinor: approvedAgreement.totalMinor, paidMinor: approvedAgreement.paidMinor,
+      remainingMinor: approvedAgreement.remainingMinor,
+    } : invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.progress : originalProgress;
     return {
       approvedAgreement, invoiceFinancial, debtSource, agreementApproved: approvedIds.has(row.id),
       id: row.id,
@@ -19833,11 +19845,7 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient, ba
       lastReminderAt,
       installments,
       paidMinor,
-      progress: invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.progress : planProgress(
-        { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments, lastReminderAt },
-        paidMinor,
-        today,
-      ),
+      progress,
       items,
       itemsProgress: planItemsProgress(items),
       totalFromItems: row.total_from_items,
@@ -21487,7 +21495,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     totalMinor: number; doneMinor: number; remainingMinor: number;
     baseCurrency: Currency;
     clinicalProgress?: ClinicalProgressView;
-    nextDueDate: string | null; overdueMinor: number;
+    nextDueDate: string | null; overdueMinor: number | null;
   }[];
   plannedVisits: PlannedVisitView[];
   counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
@@ -21616,7 +21624,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     consentAt: plan.consentAt, itemsCount: plan.itemsProgress.count,
     doneItems: plan.itemsProgress.doneCount, totalMinor: plan.totalMinor,
     doneMinor: plan.itemsProgress.doneMinor, remainingMinor: plan.itemsProgress.remainingMinor,
-    nextDueDate: plan.progress.nextDueDate, overdueMinor: plan.progress.overdueMinor,
+    nextDueDate: plan.approvedAgreement?.available === false ? null : plan.progress.nextDueDate,
+    overdueMinor: plan.approvedAgreement?.available === false ? null : plan.progress.overdueMinor,
     // (TD-05) عملة الاتفاق مع الخطة — تعرض بها أرقامها ولا تُحوَّل.
     baseCurrency: plan.baseCurrency,
     clinicalProgress: historicalClinicalProgress(plan.items),
@@ -21700,7 +21709,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   // التنبيهات: ما يجب أن يُقال لا ما يمكن أن يُعرض.
   const alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[] = [];
   for (const plan of activePlanViews) {
-    if (plan.overdueMinor > 0) {
+    if (plan.overdueMinor !== null && plan.overdueMinor > 0) {
       alerts.push({
         kind: "overdue_installment", severity: "danger",
         text: `قسط متأخر في «${plan.title}»: ${formatMoney(plan.overdueMinor, plan.baseCurrency)}`,
