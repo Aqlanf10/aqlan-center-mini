@@ -1,0 +1,5 @@
+Running PR 458 (unit), Node v22.23.3, synthetic PG port 55458, HTTP port 3458
+
+> aqlan-center@0.1.0 typecheck
+> tsc --noEmit
+
