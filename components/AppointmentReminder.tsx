@@ -36,7 +36,10 @@ export function AppointmentReminder({ item, busy, isCurrent, onConfirmed, clinic
   const canUse = () => active && !!session?.username && !busy && owner.current === context
     && pending.current === null && isCurrent();
   const link = whatsAppLink(item, item.status === "no_show" ? "missed" : "upcoming");
+  const reminded = Boolean(item.reminderSentAt);
   const needsOverride = reminderNeedsOverride(item.reminderSentAt);
+  const reminderLabel = needsOverride ? "إعادة تذكير؟" : reminded ? "ذُكِّر ✓" : "💬 تذكير واتساب";
+  const helpId = `appointment-reminder-help-${item.id}`;
 
   const confirm = async () => {
     if (!canUse()) return;
@@ -61,40 +64,48 @@ export function AppointmentReminder({ item, busy, isCurrent, onConfirmed, clinic
 
   if (!active) return null;
   return (
-    <div role="group" aria-label={`تذكير موعد ${item.patientName}`} className="flex flex-wrap items-center gap-1.5" data-manual-reminder={item.id}>
+    <div role="group" aria-label={`تذكير موعد ${item.patientName}`} className="inline-flex max-w-full flex-wrap items-center gap-1.5" data-manual-reminder={item.id}>
       {link ? (
         <a
           href={busy || !session?.username ? undefined : link}
           target="_blank"
           rel="noopener noreferrer"
           aria-disabled={busy || !session?.username}
+          aria-label={`${reminderLabel}، فتح مسودة واتساب لـ${item.patientName}`}
+          aria-describedby={helpId}
           onClick={(event) => {
             if (!canUse() || (needsOverride && !window.confirm("سُجّل تذكير لهذا المريض قبل أقل من ١٢ ساعة. هل تريد فتح مسودة جديدة؟")) || !canUse()) {
               event.preventDefault();
             }
           }}
-          className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 aria-disabled:opacity-40"
+          title={item.reminderSentAt ? `آخر تذكير مسجّل: ${formatClinicTimestamp(item.reminderSentAt, clinicTimeZone)}` : "فتح مسودة واتساب فقط؛ لا يُسجّل التذكير حتى يؤكده الموظف."}
+          className={`whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-bold transition-opacity hover:opacity-90 aria-disabled:opacity-40 ${
+            needsOverride || reminded
+              ? "border border-emerald-300 bg-emerald-50 text-emerald-700"
+              : "bg-[#25D366] text-white shadow-2xs"
+          }`}
         >
-          💬 فتح مسودة واتساب
+          {reminderLabel}
         </a>
       ) : (
-        <span className="rounded-xl bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-500">بلا رقم واتساب صالح</span>
+        <span title="بلا رقم واتساب صالح" className="rounded-xl bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-400">بلا رقم</span>
       )}
       <button
         type="button"
         data-action="confirm-manual-reminder"
         disabled={busy || !session?.username}
         onClick={confirm}
-        className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+        aria-label={`تأكيد الموظف أنه ذكّر ${item.patientName} بالموعد`}
+        aria-describedby={helpId}
+        title="تسجيل أنني ذكّرت المريض برسالة أرسلتها أو بتواصل فعلي"
+        className="whitespace-nowrap rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
       >
-        أؤكد أنني ذكّرت المريض
+        تأكيد الموظف
       </button>
-      {item.reminderSentAt ? (
-        <span className="text-[11px] font-bold text-emerald-700" title={`آخر تذكير مسجّل: ${formatClinicTimestamp(item.reminderSentAt, clinicTimeZone)}`}>
-          تذكير مسجّل ✓
-        </span>
-      ) : null}
-      <span className="w-full text-[10px] text-slate-500">فتح المسودة لا يسجّل تذكيرًا. التأكيد اليدوي إفادة الموظف، وليس إثبات تسليم.</span>
+      <span id={helpId} className="sr-only">
+        فتح المسودة لا يسجّل تذكيرًا. التأكيد اليدوي إفادة الموظف، وليس إثبات تسليم.
+        {item.reminderSentAt ? ` آخر تذكير مسجّل: ${formatClinicTimestamp(item.reminderSentAt, clinicTimeZone)}` : ""}
+      </span>
     </div>
   );
 }

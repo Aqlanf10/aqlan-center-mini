@@ -96,6 +96,36 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("manual appointment reminder confirmation", () => {
+  it("restores the compact green draft and adds only the short staff confirmation control", () => {
+    const tree = render();
+    const all = elements(tree);
+    expect(tree!.props.className).toBe("inline-flex max-w-full flex-wrap items-center gap-1.5");
+    expect(text(draft())).toBe("💬 تذكير واتساب");
+    expect(draft().props.className).toContain("bg-[#25D366] text-white");
+    expect(draft().props["aria-label"]).toContain("فتح مسودة");
+    const buttons = all.filter(node => node.type === "button");
+    expect(buttons).toHaveLength(1);
+    expect(text(buttons[0])).toBe("تأكيد الموظف");
+    expect(buttons[0].props["aria-label"]).toContain(item.patientName);
+    const help = all.find(node => node.props.id === draft().props["aria-describedby"]);
+    expect(help!.props.className).toBe("sr-only");
+    expect(buttons[0].props["aria-describedby"]).toBe(help!.props.id);
+    expect(text(help)).toContain("ليس إثبات تسليم");
+    expect(all.some(node => String(node.props.className).split(" ").includes("w-full"))).toBe(false);
+  });
+
+  it.each([
+    ["2026-10-21T06:00:00Z", "ذُكِّر ✓"],
+    ["2026-10-22T05:00:00Z", "إعادة تذكير؟"],
+  ])("keeps the original recorded-state label and clinic timestamp for %s", (timestamp, label) => {
+    item = { ...item, reminderSentAt: timestamp };
+    expect(text(draft())).toBe(label);
+    expect(draft().props.className).toContain("border-emerald-300 bg-emerald-50 text-emerald-700");
+    expect(draft().props.title).toContain("آخر تذكير مسجّل:");
+    expect(draft().props["aria-label"]).toContain("فتح مسودة");
+    expect(draft().props["aria-label"]).toContain(label);
+    expect(onConfirmed).not.toHaveBeenCalled();
+  });
   it("only prepares a WhatsApp draft, with no confirmation, mutation, or success claim", () => {
     const url = new URL(draft().props.href as string);
     expect(url.hostname).toBe("wa.me"); expect(url.pathname).toBe("/967770123456");
@@ -103,7 +133,7 @@ describe("manual appointment reminder confirmation", () => {
     expect(openDraft().preventDefault).not.toHaveBeenCalled();
     expect(confirmMock).not.toHaveBeenCalled(); expect(onConfirmed).not.toHaveBeenCalled();
     expect(text(render())).toContain("فتح المسودة لا يسجّل تذكيرًا");
-    expect(text(render())).not.toContain("تذكير مسجّل ✓");
+    expect(draft().props.title).not.toContain("آخر تذكير مسجّل");
     // Opening, canceling in WhatsApp, or a blocked popup leaves the same retry link.
     expect(draft().props.href).toBe(url.toString());
     openDraft(); expect(onConfirmed).not.toHaveBeenCalled();
@@ -112,7 +142,7 @@ describe("manual appointment reminder confirmation", () => {
   it("does not stamp when staff cancels the explicit confirmation", async () => {
     openDraft(); confirmMock.mockReturnValue(false);
     await confirmHandler()(); expect(onConfirmed).not.toHaveBeenCalled();
-    expect(text(render())).not.toContain("تذكير مسجّل ✓");
+    expect(draft().props.title).not.toContain("آخر تذكير مسجّل");
     expect(draft()).toBeDefined();
   });
 
@@ -126,23 +156,24 @@ describe("manual appointment reminder confirmation", () => {
       scheduledDate: item.scheduledDate, scheduledTime: item.scheduledTime, status: item.status,
     });
     // No optimistic stamp: only a refreshed server value can show it.
-    expect(text(render())).not.toContain("تذكير مسجّل ✓");
+    expect(draft().props.title).not.toContain("آخر تذكير مسجّل");
     item = { ...item, reminderSentAt: "2026-10-22T06:00:00Z" };
-    expect(text(render())).toContain("تذكير مسجّل ✓");
+    expect(draft().props.title).toContain("آخر تذكير مسجّل");
     expect(text(render())).not.toContain("تم التسليم");
   });
 
   it("permits an explicit actual-contact attestation without a valid WhatsApp number", async () => {
     item = { ...item, patientPhone: null };
     expect(draft()).toBeUndefined();
-    expect(text(render())).toContain("بلا رقم واتساب صالح");
+    expect(text(render())).toContain("بلا رقم");
+    expect(elements(render()).some(node => node.props.title === "بلا رقم واتساب صالح")).toBe(true);
     await confirmHandler()(); expect(onConfirmed).toHaveBeenCalledOnce();
   });
 
   it("does not invent success on failed recording and permits an explicit retry", async () => {
     onConfirmed.mockRejectedValueOnce(new Error("Synthetic failure"));
     await expect(confirmHandler()()).rejects.toThrow("Synthetic failure");
-    expect(text(render())).not.toContain("تذكير مسجّل ✓");
+    expect(draft().props.title).not.toContain("آخر تذكير مسجّل");
     await confirmHandler()(); expect(onConfirmed).toHaveBeenCalledTimes(2);
   });
 
