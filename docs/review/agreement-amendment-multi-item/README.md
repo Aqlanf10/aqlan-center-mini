@@ -1,11 +1,11 @@
 # 19-crown upgrade after payment: UI characterisation and a multi-item amendment strategy
 
 Per #451 comment 6386297467.
-- Test and documentation only, built on the frozen `c998b435`; #451's branch is not written to.
+- Test and documentation only. The original characterization was based on `c998b435`; the strengthened checks start from PR #460 head `4b21d71d2422888f01185bb39f07358cbdd1aa0e`. No application code, guard, migration or financial policy is changed here; #451's branch is not written to.
 - Synthetic data only.
 - **Nothing is fixed here, and the requested case is not declared fixed.**
 
-## What the real UI creates (built app, `__tests__/security-http/agreement-amendment-19-crowns-journey.test.ts`)
+## Characterized workflows and required assertions (built app, `__tests__/security-http/agreement-amendment-19-crowns-journey.test.ts`)
 
 ### New treatment (admin, «علاج جديد»)
 
@@ -17,17 +17,18 @@ Per #451 comment 6386297467.
 | Consent | Through the plan screen («سجّل موافقة المريض»). |
 | Approval | Through «اعتماد أصل الاتفاق المالي», source: the existing invoice. |
 | Prior payment | 180,000 through the plan collection endpoint. |
-| «ترقية خدمة الاتفاق بفرق مؤرخ» | **API:** `GET` and `POST` both return **409** «تعدد بنود العلاج يحتاج تخصيصًا ماليًا مستقلًا؛ لا يُخمّن فرق السعر.». Nothing is written: invoices, plan items, payments and amendments are unchanged. **UI:** the panel shows «البيانات أو الهجرة المالية غير جاهزة؛ لا يمكن حفظ التعديل.» instead (**defect 1**, below). |
+| «ترقية خدمة الاتفاق بفرق مؤرخ» | **API:** `GET` and schema-valid guard-probe `POST`s must return **409**, code `conflict`, «تعدد بنود العلاج يحتاج تخصيصًا ماليًا مستقلًا؛ لا يُخمّن فرق السعر.». The test compares complete stored financial/history rows and cash/commission reader results before and after refusal, rather than just counts and totals. **UI:** the panel shows «البيانات أو الهجرة المالية غير جاهزة؛ لا يمكن حفظ التعديل.» instead (**defect 1**, below). |
 
-### Historical treatment (separate path)
+### Historical treatment (separate direct HTTP API path, not a browser journey)
 
 | Step | What was observed |
 |---|---|
-| Historical document: one crown episode for the same 19 teeth, agreed 950,000, paid before 180,000 | **1 grouped line** of 950,000 (`episodeTeeth` = all 19), represented by **1 plan item** (quantity 1, 950,000), with **no invoice**. |
-| Dated amendment | **409** «مطلوب اتفاق فعال معتمد ومغطى بفاتورة واحدة مثبتة؛ لم يُنشأ تعديل.» It does not apply to historical agreements. Correction remains the historical workflow. |
+| Direct POST to the historical-document endpoint: one crown episode for the same 19 teeth, agreed 950,000, paid before 180,000 | **1 grouped line** of 950,000 (`episodeTeeth` = all 19), represented by **1 plan item** (quantity 1, 950,000), with **no invoice**. |
+| Dated amendment GET and schema-valid guard-probe POSTs | **409**, code `conflict`, «مطلوب اتفاق فعال معتمد ومغطى بفاتورة واحدة مثبتة؛ لم يُنشأ تعديل.» It does not apply to historical agreements. Correction remains the historical workflow. |
 
 **Consequences:**
 - The earlier passing amendment tests seed **one** plan item with `quantity = 10` directly. They prove the arithmetic, **not** this journey.
+- A separate explicitly named new-treatment API test uses the real invoice, consent, financial-approval and payment endpoints. It does not seed a plan or item directly, and is not a replacement for the browser UI journey.
 - The requested case cannot be inferred from the words "19 crowns": a new treatment produces 19 per-tooth items, while a historical one produces one grouped episode.
 - Moving a quantity of 19 onto one tooth to get past the guard would misrepresent the teeth, and is not a solution.
 
@@ -77,7 +78,20 @@ Per #451 comment 6386297467.
 | D5 | Doctor and commission on the difference | always the original item's doctor / an explicit, confirmed doctor |
 | D6 | Show the real refusal reason in the panel (defect 1) | yes (recommended) / keep as is |
 
+## Exact refusal proof, not a generic failure
+
+- Both unsupported-source cases must return exactly HTTP `409` and `{code: "conflict", message: <the exact Arabic refusal above>}` for GET and POST. An authentication error, stale-source result, malformed request or HTTP 500 cannot satisfy these assertions.
+- A supported preview hash **cannot be obtained** for either refused source: `snapshot()` rejects the source shape before producing its hash. The POST checks are therefore explicitly labeled schema-valid guard probes, not valid preview-backed upgrade commands. Two distinct well-formed nonzero SHA-256 probe values must produce the same exact source-shape refusal. A malformed-hash control must instead return HTTP `400` / `invalid`. No stale-rejection row may be added.
+- Historical creation must return one document line linked to one actual plan and one actual plan item, with exactly the 19 selected teeth, a 950,000 YER grouped value, historical paid 180,000 and remaining 770,000. These facts are re-read after creation. A missing plan fails the test instead of silently skipping the amendment check. No current payment receipt or cash movement is fabricated for the historical paid fact.
+- Refusal immutability compares full rows for invoices and invoice items; payments; plans, items and installments; financial approvals; amendment events, stale rejections and collection receipts; historical documents, revisions, agreements and tooth coverage; opening balances and their history; repayment arrangements/revisions; and the fixture doctor's commission history. It also compares the complete cash-drawer endpoint result and that patient's commission-detail lines and totals. New-treatment commission assertions require nonempty positive accrual and earned amounts. This is scoped evidence, not a claim that every unrelated table in the database was inspected.
+
 ## Evidence and limits
 
-- `agreement-amendment-19-crowns-journey.test.ts` passes on `c998b435`. It **characterises** current behaviour, both journeys and defect 1. It is not a red-to-green fix proof.
-- Its JSON evidence is written to `.settings-ui-artifacts/agreement-amendment-19-crowns.json` when run. The figures above come from that file.
+- The runtime record is written to `.settings-ui-artifacts/agreement-amendment-19-crowns.json`. It marks a scenario `passed` only after all its assertions complete; file existence alone is not proof. It contains synthetic aggregates, refusal bodies and source/test provenance, not raw patient rows, database URLs, sessions or credentials.
+- The observed local run at **2026-10-24 18:39 UTC** is retained in [2026-10-24-api-evidence.json](2026-10-24-api-evidence.json), copied unchanged from the test output after checking both API scenarios passed and the recorded test-source SHA-256 matches the tested file. The original ignored artifact was not durable hosted evidence and does not prove these strengthened assertions.
+- Exact focused command: `npm run test:security-http -- __tests__/security-http/agreement-amendment-19-crowns-journey.test.ts -t 'direct HTTP API'`. Result: **2 passed, 1 not selected**, exit 0. Both selected cases ran against the real built standalone app and a disposable loopback PostgreSQL cluster, which was stopped afterward. The unselected case is the browser journey, not another API case.
+- Browser limitation: the local runtime's Chromium launch was verified unavailable (`EPERM` creating a Unix socket, including the supported escalation attempt). No browser workaround was used. The browser assertions remain enabled in the default, unfiltered suite and require CI validation; this local record does **not** prove the UI journey or the generic-message rendering.
+- Local `npm run build`, final `npm run typecheck` and focused ESLint passed with Node 22.23.3. The build retained the existing dynamic-filesystem tracing warning in `lib/migration-files.ts`. An initial standalone typecheck hit the default 2 GB heap limit; the serialized 4 GB check passed. No full security-HTTP suite or Production test is claimed.
+- Observed synthetic new-treatment values: one 950,000 YER invoice, 19 linked per-tooth items, one 180,000 YER cash receipt attributed to the approved invoice (`payments.plan_id` is null on this path), and unchanged commission accrual 190,000 / earned 36,000. Historical paid 180,000 remains a document fact with zero current payment receipts.
+- The browser case preserves the frozen UI's generic-error assertion. A separate UI fix must update that assertion when composed; this test-only branch does not change the panel.
+- D1–D5 remain an unimplemented proposal awaiting the owner's decisions. No claim here means the multi-item upgrade is fixed, and no Staging or Production validation was performed.
