@@ -1,0 +1,11 @@
+// Prints the runtime's published migration versions and checksums. Usage: tsx checksums.mjs <runtime root>
+import { guardHelperProcess } from "./guard.mjs";
+
+// Refuses a non-loopback DATABASE_URL and strips rerouting variables BEFORE any runtime module is imported.
+guardHelperProcess();
+const root = process.argv[2];
+const mod = await import(`${root}/lib/migration-files.ts`);
+const load = mod.loadMigrationFiles ?? mod.default?.loadMigrationFiles;
+const files = await load(`${root}/migrations`);
+console.log(JSON.stringify({ checksums: Object.fromEntries(files.map((f) => [f.version, f.checksum])) }));
+process.exit(0);

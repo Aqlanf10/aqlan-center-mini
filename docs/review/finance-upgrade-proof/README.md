@@ -1,0 +1,161 @@
+# Synthetic upgrade proof: deployed f2b5eef9 → completed-work candidate c998b435
+
+This is release verification only. The candidate under review is **#451 at c998b435306f8295a217e49f20080293c479c359**, and it stays frozen: this branch adds only this directory on top of it. The deployed runtime is **f2b5eef97047994438729fe8a2da72e214cdf881**.
+
+There was no Production connection, Production SQL, backup or restore operation, merge or deployment. No bulk `migrate` and no baseline adoption were run. All data is synthetic, and no Production schema dump or data appears here. **Do not run these scripts against Railway or any non-local database.**
+
+**Targets and runtimes are guarded** (`proof/guard.mjs`, self-tested in `evidence/guard-selftest.json`, 4/4):
+- Every orchestrator and every directly runnable helper refuses a non-loopback target before it imports any runtime code. This covers: remote hosts, platform host names, a loopback URL rerouted with `?host=`, a socket-only URL, and a missing `DATABASE_URL`.
+- Every orchestrator and helper strips inherited rerouting variables (libpq `PG*`, the runtime's other database URL names, `RAILWAY_*`, `VERCEL_*`).
+- Every orchestrator asserts the runtimes and records them in its evidence:
+  - `OLD_ROOT` is exactly f2b5eef9 with a clean tree;
+  - `NEW_ROOT` contains c998b435 and equals it everywhere outside this directory.
+- Each orchestrator drops and recreates its own disposable PostgreSQL 18.6 database on every run.
+
+## Contents
+
+| Path | What it is |
+|---|---|
+| `proof/run-proof.mjs` | The upgrade proof (21 assertions). Database `aqlan_upgrade_proof` |
+| `proof/lock-inventory.mjs` | Expected lock modes and blocked readers and writers, asserted, plus rollback and a clean rerun (6 assertions). Database `aqlan_upgrade_locks` |
+| `proof/partial-failure.mjs` | A deliberately violated 0069 precondition: registry 8 → 10 → 10 → 12, exit statuses, fail-closed retry state, the deployed-runtime fallback and forward repair (11 assertions). Database `aqlan_upgrade_partial` |
+| `proof/validate-prerequisites.mjs` | Validates `prerequisites.sql`: the clean deployed schema passes, and 12 injected violations each fail exactly their checks while locking only the registry |
+| `proof/guard.mjs`, `guard-selftest.mjs` | Target and runtime guard, and its self-test |
+| `proof/static-checks.sh`, `static-checks.eslint.config.mjs` | Syntax and static checks for every harness file, with the repository's pinned tooling |
+| `proof/init.mjs`, `fixtures.mjs`, `balances.mjs`, `checksums.mjs`, `prereq.mjs` | Helpers, each guarded:<br>• one runtime's `ensureSchema()` in its own process;<br>• synthetic fixtures on the **deployed** runtime;<br>• per-patient balances computed by one runtime's own readers;<br>• published checksums;<br>• a `prerequisites.sql` runner |
+| `prerequisites.sql`, `prerequisite-spec.md` | Catalog-only, read-only prerequisite check and its specification |
+| `rollout-plan.md` | Bounded rollout plan. It separates application rollback, forward repair and a last-resort restore |
+| `evidence/*.json`, `evidence/static-checks.log` | Output of the scripts |
+
+## Upgrade proof: `evidence/upgrade-proof.json` = PASS (21/21)
+
+**The starting point is never normalised.**
+- The schema is exactly what the deployed runtime creates. The original validated `CHECK (source_currency = 'YER')` and `CHECK (target_currency = 'SAR')` stay in place while the legacy fixtures are written.
+- The harness itself runs no DDL on this database.
+- 0069's constraint change happens only inside the candidate's own initialisation.
+- Assertions 3–6 and 11 prove these preconditions explicitly.
+
+**Method:**
+
+1. The deployed runtime initialises an empty database.
+2. Fixtures of two kinds, kept distinct:
+   - **Application-writer fixtures**, created by the deployed runtime's own functions:
+     - YER, SAR and USD invoices (`createInvoice`);
+     - receipts and a reversal (`recordPayment`);
+     - a consented plan with a plan payment (`createPlan`, `recordPlanConsent`);
+     - an opening balance with an opening collection (`setPatientOpeningBalance`);
+     - rates and a shift (`saveSettings`, `openShift`).
+   - **Direct SQL fixtures**, validated by the deployed schema's own constraints and triggers:
+     - the service, doctor party, patient and 6 appointment rows;
+     - the legacy 0063 YER→SAR reclassification document with its event, built as the deployed runtime's currency tests build it.
+
+   Result: 4 patients, 5 invoices, 9 payments, 28 non-empty tables.
+3. Per-patient balances are read with the deployed reader. Every pre-existing table is digested on its pre-upgrade columns, and the catalog is snapshotted.
+4. The candidate initialises **twice**, each run in a fresh process.
+
+**Assertions:**
+
+1. The deployed runtime registers exactly 0051, 0052, 0056, 0057, 0058, 0063, 0064 and 0065.
+2. Those rows are applied, never adopted.
+3. The unmodified deployed schema keeps its original validated YER/SAR CHECKs, with exact definitions, and has no direction CHECK.
+4. `prerequisites.sql` passes on the deployed schema (64/64) before the fixtures exist.
+5. The fixtures write data only: the catalog is identical before and after them.
+6. The legacy YER→SAR reclassification fixtures exist under the original CHECKs, and the prerequisites still pass.
+7. After the candidate there are exactly 12 registrations.
+8. The eight deployed rows are byte-identical (name, checksum, adopted, `applied_at`).
+9. The four new rows are applied, never adopted.
+10. The new rows were applied in the order 0066, 0068, 0069, 0067.
+11. All four, including 0069's constraint change, were applied after the candidate started, by its own initialisation.
+12. The second candidate initialisation re-applies no migration file and adds no registration. Its idempotent runtime schema SQL still runs; it is not "no SQL".
+13. The new rows carry the published checksums:
+
+    | Migration | Checksum |
+    |---|---|
+    | 0066 | 28bd13b5ca9f34d9a9010aade759d91fb398b47f30a78433e5e663ce90464dac |
+    | 0067 | 4717e0a68ee8ba9aee745000c8561d4b9d6481f48f41c094518fac76c1bdacc6 |
+    | 0068 | 07864df6fb6fb98742fd35efebcd2f33f23a1b26c90fb7df16f54605cf62aa42 |
+    | 0069 | c11d02aecc5d8644dbec1edea664ecb5ba63f3c21a53c77f06c5bb4007fbc714 |
+
+14. The 51 other historical versions stay unregistered (no retroactive registration and no baseline adoption).
+15. Every pre-existing row is unchanged.
+16. The only removals are 0069's two currency CHECKs.
+17. No pre-existing definition changed.
+18. 0067's index and 0069's validated direction CHECK exist.
+19. Per-patient balances are identical: the deployed reader before the upgrade, the candidate reader after it.
+20. The deployed runtime re-initialises on the upgraded schema without registering, replaying or refusing anything.
+21. The deployed runtime's writers all still succeed on the upgraded schema.
+
+**Boundary of 20–21:** they were tested before any candidate-only feature record existed: no agreement-delta or retirement rows, and no non-YER→SAR reclassification. They do not show that the old runtime handles data created by the candidate's new features.
+
+**Catalog difference:** added 4 tables, 4 functions, 11 indexes and 14 triggers. Removed only the two old CHECKs. Changed: none.
+
+**Synthetic time:** deployed initialisation about 0.5–0.7 s; candidate about 0.1–0.15 s per run. This is not a size, duration or outage estimate for Production.
+
+## Locks: `evidence/lock-inventory.json` = PASS (6/6)
+
+**Method:**
+- Each file runs alone in a transaction, as the runtime runs it.
+- While that transaction is open, an ordinary reader and an ordinary writer are run, from separate sessions, against every pre-existing table the file locks, each with a bounded `lock_timeout` of 200 ms. Writers are no-op `UPDATE`s where the table has a harmless column; otherwise the `ROW EXCLUSIVE` request that every write takes first.
+- A blocked probe is proven by the server itself: `pg_locks` shows its request ungranted, and `pg_blocking_pids()` names the migration backend.
+- Then `ROLLBACK`: the catalog must be unchanged, and every probe must now proceed.
+- The whole inventory runs twice, on freshly recreated databases, and both passes must match.
+- The expected lock modes and blocked/proceeding probes below are **asserted**: a blocked probe must fail with SQLSTATE 55P03. Any disagreement fails the run with a nonzero exit.
+
+**Results:**
+
+| File | Locks held on pre-existing tables | Readers | Writers |
+|---|---|---|---|
+| 0066 | SHARE ROW EXCLUSIVE on `clinical_cases`, `invoice_items`, `invoices`, `parties`, `patients`, `plan_items`, `services`, `treatment_plans`, `users` | proceed | **blocked** (ungranted ROW EXCLUSIVE, blocked by the migration) |
+| 0068 | SHARE ROW EXCLUSIVE on `patients`, `payments`, `agreement_delta_collection_receipts` | proceed | **blocked** |
+| 0069 | ACCESS EXCLUSIVE + SHARE ROW EXCLUSIVE on `invoice_settlement_reclassifications`; SHARE ROW EXCLUSIVE on `…_events` | **blocked** on the reclassification table (ungranted ACCESS SHARE); proceed on events | **blocked** |
+| 0067 | SHARE on `appointments` | proceed | **blocked** |
+
+## Partial failure: `evidence/partial-failure.json` = PASS (11/11)
+
+The violation is injected deliberately and only here: `…_target_currency_check` is dropped before the candidate starts.
+
+| Stage | Observed |
+|---|---|
+| Before injection | deployed initialisation and fixtures exit 0; registry 8 |
+| Candidate, first start | exits 1 in 0069, on the missing CHECK |
+| Committed and registered afterwards | 0066 and 0068 (10 registrations). Their objects exist; 0069's and 0067's do not |
+| `prerequisites.sql` on that state | refuses it, naming the missing CHECK |
+| Candidate, retry | exits 1 the same way (fail closed); registry stays at 10. Registry and catalog are **byte-identical** to before the retry, and no lock is left held |
+| Deployed runtime | re-initialises, and its writers succeed; registrations stay at 10 |
+| Forward repair | re-adding the exact validated CHECK, then starting the candidate again, gives exactly the 12 expected registrations with 0069 and 0067 applied |
+
+## Static checks: `evidence/static-checks.log` = PASS
+
+`proof/static-checks.sh` runs with the repository's pinned tooling: Node 22 (`.nvmrc` and engines), and ESLint 9.39.5, @eslint/js 9.39.5 and TypeScript 5.9.3 (package-lock). It checks every harness file:
+
+- **Syntax:** `node --check`.
+- **ESLint:** a dedicated config, `static-checks.eslint.config.mjs`. The repository config ignores every `*.mjs`, so it cannot check these files. The config uses `recommended`, `no-undef`, `no-unused-vars`, `eqeqeq` and `prefer-const`, and a negative control proves that it rejects a bad file.
+- **TypeScript:** `tsc --checkJs` against the pg and node declarations, with `--noUnusedLocals`, `--noUnusedParameters` and `--noImplicitReturns`.
+
+`prerequisites.sql` is checked by executing it in every validation scenario.
+
+## Reproduce (local disposable cluster only)
+
+```sh
+export OLD_ROOT=<checkout of f2b5eef9 with npm ci>
+export NEW_ROOT=<checkout of this branch with npm ci>
+export ADMIN_DATABASE_URL=postgresql://<user>:<password>@127.0.0.1:<port>/postgres
+D=docs/review/finance-upgrade-proof
+sh $D/proof/static-checks.sh
+EVIDENCE=$D/evidence/guard-selftest.json node $D/proof/guard-selftest.mjs
+EVIDENCE=$D/evidence/upgrade-proof.json node $D/proof/run-proof.mjs
+EVIDENCE=$D/evidence/lock-inventory.json node $D/proof/lock-inventory.mjs
+EVIDENCE=$D/evidence/partial-failure.json node $D/proof/partial-failure.mjs
+EVIDENCE=$D/evidence/prerequisites-validation.json node $D/proof/validate-prerequisites.mjs
+```
+
+## What remains open
+
+The proof does not close any release gate:
+
+- Production schema compatibility (`prerequisites.sql` has not been run on Production);
+- recovery readiness, which deferring the backup feature does not waive;
+- the migration-locking decision;
+- the open decision in `rollout-plan.md` on how initialisation is triggered deliberately.
+
+No restore is approved.
