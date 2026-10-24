@@ -10859,7 +10859,7 @@ export { MINOR_UNITS };
 
 import type { ExpenseCategory, PartyKind } from "./expenses";
 import { partyStatementTotals, type PartyCurrencyTotals } from "./party-statement";
-import { readStatementHistoricalAgreements } from "./statement-historical-details";
+import { readStatementHistoricalAgreements, StatementHistoricalDetailsError, type HistoricalStatementAgreement } from "./statement-historical-details";
 
 export interface Party {
   id: number;
@@ -19929,7 +19929,11 @@ const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
  * A patient statement's ledger, plan currencies and plans from one read-only snapshot, so a
  * payment committed meanwhile is seen by all of them or by none. Standalone readers are unchanged.
  */
-export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean}={}){
+/** historicalAgreements: `true` (current print) fails closed on a malformed historical fact; `"tolerant"`
+ * (patient portal) reports such a fact as `null` (section unavailable) while every other figure still comes
+ * from this same snapshot. Only the reader's own typed validation error is tolerated, never a database
+ * error, so the snapshot transaction is never used after a failed statement. */
+export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant"}={}){
   await ensureSchema();
   return withFinancialReadSnapshot(getPool(),async runner=>{
     const client=runner as DbClient;
@@ -19939,9 +19943,14 @@ export async function patientStatementSnapshot(patientId:number,today:string,opt
     // patientPlanCurrencies; reuse rows already required for statement details.
     const planCurrencies=new Map(rows.map(row=>[row.id,{patientId,currency:requireCurrency(row.base_currency,"خطة علاج",row.id)}]));
     const plans=await hydratePlans(rows,today,client,true);
-    // Opt-in (current print only): historical agreements are saved facts read on this same snapshot client.
-    // Other consumers (the portal) issue no historical query and keep their existing failure surface.
-    const historicalAgreements=options.historicalAgreements?await readStatementHistoricalAgreements(client,patientId):undefined;
+    // Opt-in: historical agreements are saved facts read on this same snapshot client.
+    let historicalAgreements:HistoricalStatementAgreement[]|null|undefined;
+    if(options.historicalAgreements==="tolerant"){
+      try{historicalAgreements=await readStatementHistoricalAgreements(client,patientId);}
+      catch(error){if(!(error instanceof StatementHistoricalDetailsError))throw error;historicalAgreements=null;}
+    }else if(options.historicalAgreements){
+      historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
+    }
     return {ledger,planCurrencies,plans,historicalAgreements};
   });
 }

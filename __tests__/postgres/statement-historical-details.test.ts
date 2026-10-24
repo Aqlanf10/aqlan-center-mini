@@ -30,10 +30,11 @@ const documents = await import("../../lib/legacy-treatment-document-db");
 const legacy = await import("../../lib/legacy-treatment-db");
 const { parseLegacyTreatmentRequest } = await import("../../lib/legacy-treatment");
 const { DEFAULT_SPECIALTY_TEMPLATES } = await import("../../lib/specialty-templates");
-const { readStatementHistoricalAgreements, StatementHistoricalDetailsError } = await import("../../lib/statement-historical-details");
+const { readStatementHistoricalAgreements, StatementHistoricalDetailsError, historicalOpeningBuckets } = await import("../../lib/statement-historical-details");
 const { default: StatementPage } = await import("../../app/print/statement/[id]/page");
 const { GET: portalStatement } = await import("../../app/api/portal/statement/route");
 const { formatMoney } = await import("../../lib/money");
+const { portalHistoricalTreatment } = await import("../../lib/portal-statement");
 
 const q = async <T = Record<string, unknown>>(sql: string, values: unknown[] = []) => (await db.getPool().query(sql, values)).rows as T[];
 let session: SessionPayload;
@@ -421,27 +422,63 @@ async function capturedSql(run: () => Promise<unknown>) {
 /** The two statement-historical reader queries (plan hydration's existing legacy join is not one of them). */
 const historicalSql = (sql: string) => /FROM legacy_treatment_documents d\b/.test(sql) || /a\.document_id IS NULL AND a\.status = 'live'/.test(sql);
 
-describe("the historical read is a current-print opt-in only", () => {
-  it("the portal statement issues no historical query and ignores a malformed historical fact; the opted-in print fails closed", async () => {
-    const patientId = await newPatient("portal isolation");
+describe("the patient portal shows the print's previous-treatment details (slice 1a)", () => {
+  it.each([
+    ["YER", [{ serviceId: "rct", price: "200000", toothCode: 45 }, { serviceId: "crown", price: "300000", toothCode: 46 }], "50000", "150000", 40_000, [450_000, 150_000, 300_000]],
+    ["SAR", [{ serviceId: "crown", price: "1500.50", toothCode: 11 }], "0", "500", 2_000, [150_050, 50_000, 100_050]],
+  ] as const)("in %s: from the same snapshot and readers as the print, allowlisted, canonical balances unchanged", async (currency, items, discount, paid, collected, [agreed, before, remaining]) => {
+    const patientId = await newPatient(`portal history ${currency}`);
+    await historical(patientId, { currency, items: items.map((item) => ({ ...item, serviceId: services[item.serviceId] })), discount, paid });
+    await pay(patientId, { amountMinor: collected, currency });
+    gates.portalPatientId = patientId;
+    try {
+      let body: string | undefined;
+      const portalSql = await capturedSql(async () => { const response = await portalStatement(); expect(response.status).toBe(200); body = await response.text(); });
+      expect(portalSql.filter(historicalSql).length).toBe(2);
+      const feed = JSON.parse(body!);
+      expect(feed.historical.available).toBe(true);
+      expect(feed.historical.agreements.map((agreement: { currency: string; agreedMinor: number; previouslyPaidMinor: number; remainingMinor: number }) =>
+        [agreement.currency, agreement.agreedMinor, agreement.previouslyPaidMinor, agreement.remainingMinor])).toEqual([[currency, agreed, before, remaining]]);
+      expect(feed.historical.agreements[0].lines.reduce((sum: number, line: { netMinor: number }) => sum + line.netMinor, 0)).toBe(agreed);
+      expect(feed.historical.undetailed).toEqual([]);
+      // The oracle is the print's own reader and bucket projection on an independent snapshot.
+      const snapshot = await db.patientStatementSnapshot(patientId, "2026-10-24", { historicalAgreements: true });
+      expect(feed.historical).toEqual(portalHistoricalTreatment(historicalOpeningBuckets(snapshot.historicalAgreements!, snapshot.ledger.openings, snapshot.ledger.payments)));
+      // Allowlist: no document/revision/standalone ids or kinds reach the patient's browser.
+      for (const agreement of feed.historical.agreements) {
+        expect(Object.keys(agreement).sort()).toEqual(["agreedMinor", "currency", "discountMinor", "grossMinor", "historicalAsOf", "lines", "previouslyPaidMinor", "remainingMinor"]);
+        for (const line of agreement.lines) expect(Object.keys(line).sort()).toEqual(["description", "discountMinor", "netMinor", "quantity", "site", "unitPriceMinor"]);
+      }
+      // Balances remain the canonical ledger's (the opening collected once, in its own currency).
+      expect(feed.balances).toEqual(JSON.parse(JSON.stringify(db.ledgerBalancesByCurrency(patientId, snapshot.ledger, snapshot.planCurrencies))));
+      expect(feed.balances[currency].dueMinor).toBe(remaining - collected);
+      const printed = await print(patientId);
+      expect(printed).toContain(formatMoney(remaining, currency));
+    } finally { gates.portalPatientId = 0; }
+  });
+
+  it("a malformed saved historical fact withholds only that section in the portal; the opted-in print fails closed", async () => {
+    const patientId = await newPatient("portal malformed history");
     const document = await historical(patientId, { items: [{ serviceId: services.rct, price: "200000", toothCode: 45 }], discount: "0", paid: "50000" });
     gates.portalPatientId = patientId;
-    const portalSql = await capturedSql(async () => { const response = await portalStatement(); expect(response.status).toBe(200); });
-    expect(portalSql.length).toBeGreaterThan(0);
-    expect(portalSql.filter(historicalSql)).toEqual([]);
-    const printSql = await capturedSql(() => print(patientId));
-    expect(printSql.filter(historicalSql).length).toBe(2);
-    const healthy = await (await portalStatement()).json();
-    // Corrupt the saved revision line in this disposable database only (bypassing its append-only trigger).
-    const client = await db.getPool().connect();
     try {
-      await client.query("SET session_replication_role = replica");
-      await client.query(`UPDATE legacy_treatment_document_revisions SET lines = jsonb_set(lines, '{0,unitPriceMinor}', '"200000"') WHERE document_id = $1`, [document.id]);
-    } finally { await client.query("RESET session_replication_role"); client.release(); }
-    const response = await portalStatement();
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(healthy);
-    await expect(print(patientId)).rejects.toBeInstanceOf(StatementHistoricalDetailsError);
-    gates.portalPatientId = 0;
+      const healthy = await (await portalStatement()).json();
+      expect(healthy.historical.available).toBe(true);
+      // Corrupt the saved revision line in this disposable database only (bypassing its append-only trigger).
+      const client = await db.getPool().connect();
+      try {
+        await client.query("SET session_replication_role = replica");
+        await client.query(`UPDATE legacy_treatment_document_revisions SET lines = jsonb_set(lines, '{0,unitPriceMinor}', '"200000"') WHERE document_id = $1`, [document.id]);
+      } finally { await client.query("RESET session_replication_role"); client.release(); }
+      const response = await portalStatement();
+      expect(response.status).toBe(200);
+      const degraded = await response.json();
+      expect(degraded.historical).toEqual({ available: false });
+      const { historical: _healthyHistory, ...healthyRest } = healthy;
+      const { historical: _degradedHistory, ...degradedRest } = degraded;
+      expect(degradedRest).toEqual(healthyRest);
+      await expect(print(patientId)).rejects.toBeInstanceOf(StatementHistoricalDetailsError);
+    } finally { gates.portalPatientId = 0; }
   });
 });
+

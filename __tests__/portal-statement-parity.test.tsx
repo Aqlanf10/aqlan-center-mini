@@ -123,7 +123,7 @@ describe("portal statement is the printed statement, without internal data", () 
     const body = await (await GET()).text();
     for (const secret of INTERNAL) expect(body).not.toContain(secret);
     const feed = JSON.parse(body);
-    expect(Object.keys(feed).sort()).toEqual(["agreements", "balances", "baseCurrency", "invoices", "openings", "payments"]);
+    expect(Object.keys(feed).sort()).toEqual(["agreements", "balances", "baseCurrency", "historical", "invoices", "openings", "payments"]);
     for (const row of feed.invoices) expect(Object.keys(row).sort()).toEqual(
       ["baseCurrency", "createdAt", "discountMinor", "invoiceNumber", "items", "netMinor", "status", "totalMinor"]);
     // Treatment lines carry only what the print shows: no line, service, doctor or lineage ids.
@@ -208,7 +208,7 @@ describe("portal statement is the printed statement, without internal data", () 
     const balances = ledgerBalancesByCurrency(17, source, new Map());
     const agreements = plans();
     const plansBefore = structuredClone(agreements);
-    portalStatementView(source, balances, "YER", agreements);
+    portalStatementView(source, balances, "YER", agreements, []);
     expect(agreements).toEqual(plansBefore);
     expect(source).toEqual(before);
   });
