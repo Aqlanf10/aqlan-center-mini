@@ -47,6 +47,10 @@ const STORAGE_KEY = `aqlan:agreement-amendment:pending:${PLAN_ID}`;
 const MULTI_ITEM_REASON = "تعدد بنود العلاج يحتاج تخصيصًا ماليًا مستقلًا؛ لا يُخمّن فرق السعر.";
 const GENERIC = "البيانات أو الهجرة المالية غير جاهزة؛ لا يمكن حفظ التعديل.";
 const ADMIN_ONLY = "يتطلب تعديل اتفاق العلاج جلسة مدير سارية.";
+const validPreview = () => ({ planId: PLAN_ID, patientId: 1, currency: "YER", itemId: 1,
+  caseId: null, quantity: 19, oldServiceId: 1, oldUnitMinor: 10000, previousAgreementMinor: 190000,
+  recordedPaymentsMinor: 0, recordedRefundsMinor: 0, sourceHash: "synthetic-source-hash",
+  services: [{ id: 1, name: "Synthetic crown", category: null }, { id: 2, name: "Synthetic upgrade", category: "crown" }] });
 const fetchMock = vi.fn();
 const onChanged = vi.fn(async () => {});
 let storage: Map<string, string>;
@@ -99,6 +103,12 @@ function expectNoNewAttempt() {
   expect(onChanged).not.toHaveBeenCalled();
   expect(fetchMock.mock.calls.every(([, init]) => !init?.method)).toBe(true);
 }
+function fillProposal() {
+  for (const [type, value] of [["select", "2"], ["input", "20000"], ["textarea", "Synthetic documented reason"]]) {
+    const field = render().nodes.find((node) => node.type === type)!;
+    (field.props.onChange as (event: unknown) => void)({ target: { value } });
+  }
+}
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false;
   hooks.effects.clear(); hooks.pending = [];
@@ -117,14 +127,86 @@ afterEach(() => {
 describe("agreement amendment preview refusal display", () => {
   it.each([false, true])("keeps a valid preview and its pending-request input guard (pending: %s)", async (pending) => {
     if (pending) storage.set(STORAGE_KEY, JSON.stringify({ key: "synthetic-pending-key", body: "{}" }));
-    fetchMock.mockResolvedValueOnce(response({ planId: PLAN_ID, patientId: 1, currency: "YER", itemId: 1,
-      caseId: null, quantity: 19, oldServiceId: 1, oldUnitMinor: 10000, previousAgreementMinor: 190000,
-      recordedPaymentsMinor: 0, recordedRefundsMinor: 0, sourceHash: "synthetic-source-hash",
-      services: [{ id: 1, name: "Synthetic crown", category: null }] }));
+    fetchMock.mockResolvedValueOnce(response(validPreview()));
     const page = await open();
     expect(page.nodes.some((node) => node.type === "select")).toBe(true);
     expect(page.nodes.find((node) => node.type === "fieldset")?.props.disabled).toBe(pending);
     expect(page.nodes.some((node) => node.props.role === "alert")).toBe(false);
+    expectNoNewAttempt();
+  });
+
+  it("disables an old filled proposal while the reopened preview is still loading", async () => {
+    fetchMock.mockResolvedValueOnce(response(validPreview()));
+    await open(); fillProposal();
+    expect(render().nodes.find((node) => node.props.children === "حفظ فرق التعديل المؤرخ")?.props.disabled).toBe(false);
+    click("ترقية خدمة الاتفاق بفرق مؤرخ");
+    fetchMock.mockReturnValueOnce(deferred<Response>().promise);
+    const page = await open();
+    expect(page.nodes.some((node) => node.type === "select")).toBe(false);
+    expect(page.nodes.find((node) => node.props.children === "حفظ فرق التعديل المؤرخ")?.props.disabled).toBe(true);
+    expectNoNewAttempt();
+  });
+
+  it.each([409, 401, 403, 500, "network", "malformed"] as const)("discards only the rendered preview after a loaded proposal is reopened and receives %s", async (failure) => {
+    fetchMock.mockResolvedValueOnce(response(validPreview()));
+    await open(); fillProposal();
+    expect(render().nodes.find((node) => node.props.children === "حفظ فرق التعديل المؤرخ")?.props.disabled).toBe(false);
+    click("ترقية خدمة الاتفاق بفرق مؤرخ");
+    if (failure === "network") fetchMock.mockRejectedValueOnce(new Error("Synthetic network failure"));
+    else if (failure === "malformed") fetchMock.mockResolvedValueOnce(response({ planId: PLAN_ID, sourceHash: "synthetic" }));
+    else fetchMock.mockResolvedValueOnce(response({ code: "conflict", message: MULTI_ITEM_REASON }, failure as number));
+    const page = await open();
+    expect(page.nodes.some((node) => node.type === "select")).toBe(false);
+    expect(page.nodes.find((node) => node.props.children === "حفظ فرق التعديل المؤرخ")?.props.disabled).toBe(true);
+    expectNoNewAttempt();
+  });
+
+  it.each([409, 401, 403, 500, "network", "malformed"] as const)("retains pending evidence and retry after a valid preview is reopened and receives %s", async (failure) => {
+    const command = { key: "synthetic-pending-key", body: JSON.stringify({ idempotencyKey: "synthetic-pending-key",
+      expectedSourceHash: "synthetic-hash", newServiceId: 2, newUnitMinor: 15000, reason: "Synthetic reason" }) };
+    const stored = JSON.stringify(command);
+    storage.set(STORAGE_KEY, stored);
+    fetchMock.mockResolvedValueOnce(response(validPreview()));
+    await open();
+    click("ترقية خدمة الاتفاق بفرق مؤرخ");
+    if (failure === "network") fetchMock.mockRejectedValueOnce(new Error("Synthetic network failure"));
+    else if (failure === "malformed") fetchMock.mockResolvedValueOnce(response({ planId: PLAN_ID, sourceHash: "synthetic" }));
+    else fetchMock.mockResolvedValueOnce(response({ code: "conflict", message: MULTI_ITEM_REASON }, failure as number));
+    const page = await open();
+    expect(page.nodes.some((node) => node.type === "select")).toBe(false);
+    expect(page.nodes.find((node) => node.props.children === "إعادة الطلب المحفوظ نفسه")?.props.disabled).toBe(false);
+    expect(page.html).toContain("تحقق من حالة طلب التعديل المحفوظ");
+    expect(page.html).not.toContain("تحديث المعاينة وتصحيح الطلب المرفوض");
+    expectNoNewAttempt();
+    fetchMock.mockResolvedValueOnce(response({}, 500));
+    click("إعادة الطلب المحفوظ نفسه"); await settle();
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "POST", body: command.body });
+    expect(storage.get(STORAGE_KEY)).toBe(stored);
+    expect(removeItem).not.toHaveBeenCalled(); expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {}, { planId: PLAN_ID, sourceHash: "synthetic" },
+    { ...validPreview(), currency: "INVALID" },
+    { ...validPreview(), patientId: 0 }, { ...validPreview(), itemId: -1 },
+    { ...validPreview(), caseId: "1" }, { ...validPreview(), oldServiceId: 0 },
+    { ...validPreview(), quantity: 1.5 }, { ...validPreview(), quantity: "19" },
+    { ...validPreview(), oldUnitMinor: -1 },
+    { ...validPreview(), previousAgreementMinor: Number.MAX_SAFE_INTEGER + 1 },
+    { ...validPreview(), recordedPaymentsMinor: null },
+    { ...validPreview(), recordedRefundsMinor: 1 },
+    { ...validPreview(), sourceHash: "" }, { ...validPreview(), sourceHash: "  " },
+    { ...validPreview(), services: null }, { ...validPreview(), services: {} },
+    { ...validPreview(), services: [null] },
+    { ...validPreview(), services: [{ id: 0, name: "Synthetic", category: null }] },
+    { ...validPreview(), services: [{ id: 1, name: {}, category: null }] },
+    { ...validPreview(), services: [{ id: 1, name: "Synthetic", category: {} }] },
+  ])("safely rejects malformed successful preview %# without rendering or enabling save", async (payload) => {
+    fetchMock.mockResolvedValueOnce(response(payload));
+    const page = await open();
+    expect(page.html).toContain(GENERIC);
+    expect(page.nodes.some((node) => node.type === "select")).toBe(false);
+    expect(page.nodes.find((node) => node.props.children === "حفظ فرق التعديل المؤرخ")?.props.disabled).toBe(true);
     expectNoNewAttempt();
   });
 
