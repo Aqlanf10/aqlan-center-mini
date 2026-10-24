@@ -1,4 +1,5 @@
 import type { Client } from "pg";
+import { configureOperatorTimeouts } from "./ortho-reconciliation-limits";
 import { catalogHash, readOrthoCatalog, readRegistryCatalog, ORTHO_VERSIONS, type OrthoVersion } from "./ortho-reconciliation-catalog";
 import reference from "../schema/ortho-reconciliation-reference.pg18.json";
 import contracts from "./ortho-assessment-runtime.generated.json";
@@ -12,6 +13,7 @@ export class ReconciliationRefused extends Error {
 }
 
 export async function reportOrthoReconciliation(client: Client) {
+  await configureOperatorTimeouts(client);
   const { rows: [server] } = await client.query("SELECT current_setting('server_version_num')::int AS version");
   if (Math.floor(server.version / 10000) !== 18 || catalogHash({ catalogs: reference.catalogs, registryCatalog: reference.registryCatalog, runtimeRegistry: reference.runtimeRegistry }) !== reference.digest) throw new ReconciliationRefused("catalog");
   const registry = (await client.query("SELECT version,name,checksum,adopted FROM public.schema_migrations ORDER BY version")).rows;
@@ -100,6 +102,7 @@ async function assertDataInvariants(client: Client, version: OrthoVersion) {
 export async function applySyntheticOrthoReconciliation(client: Client, expected: { database: string; oid: string; capability: string }) {
   if (!NAME.test(expected.database) || !/^\d+$/.test(expected.oid) || !/^[a-f0-9]{64}$/.test(expected.capability)) throw new ReconciliationRefused("target");
   let committing = false;
+  await configureOperatorTimeouts(client);
   await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
   try {
     await client.query("SET LOCAL search_path = pg_catalog, public");

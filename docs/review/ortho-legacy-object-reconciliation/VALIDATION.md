@@ -4,10 +4,11 @@ Environment: disposable Docker `postgres:18-alpine`, server **18.6**; no live da
 
 - Original reviewed PR454 test: **5/5 passed**, before changes.
 - Existing `ortho-revision-registration.test.ts`: **16/16 passed**, independently before expansion.
-- Focused unit/route/guard/operator-boundary tests: **22/22 passed**.
-- Expanded PostgreSQL tests: **43/43 passed** (27 new/extended cases plus 16 existing registration cases). After the final sequence-lock hardening, the two affected preservation/locking tests were rerun: **2/2 passed**; 25 unrelated cases were filtered out in that focused rerun.
+- Full post-sequence-hardening focused run on `81d8a3d700247255c2dc9a001317467dc63440ce`: **43/43 passed in one run**, not an aggregate of old/new cases.
+- After the independent-review fixes, expanded PostgreSQL suite: **46/46 passed in one run** (30 new/extended cases plus 16 existing registration cases).
+- Focused unit/route/guard/operator cleanup and collision-scope tests: **30/30 passed**.
 - Typecheck: **passed**.
-- Full repository lint: **0 errors, 210 existing warnings**. The initial generator `no-unsafe-finally` issue was fixed without changing rules. Changed files also receive a final focused lint check.
+- Full repository lint before the review follow-up: **0 errors, 210 existing warnings**. Follow-up changed-file lint passed without changing rules.
 - Full GitHub CI: dispatched separately after push; the Draft PR/run links are the source of truth for exact-head status. Local focused results do not imply full CI completion.
 - Local build/image and HTTP-security suite: not run.
 - Staging/Production acceptance: not run; no deployment or merge.
@@ -15,7 +16,7 @@ Environment: disposable Docker `postgres:18-alpine`, server **18.6**; no live da
 Commands:
 
 ```sh
-npm test -- __tests__/login-diagnostics.test.ts __tests__/login-diagnostics-route.test.ts __tests__/ortho-revision-migration-guard.test.ts __tests__/ortho-reconciliation-cli.test.ts
+npm test -- __tests__/login-diagnostics.test.ts __tests__/login-diagnostics-route.test.ts __tests__/ortho-revision-migration-guard.test.ts __tests__/ortho-reconciliation-cli.test.ts __tests__/ortho-reconciliation-session.test.ts __tests__/ortho-reconciliation-collision-scope.test.ts
 npm run test:postgres -- __tests__/postgres/ortho-legacy-object-login.test.ts __tests__/postgres/ortho-revision-registration.test.ts
 npm run typecheck
 npm run lint

@@ -1,6 +1,9 @@
 import { Client } from "pg";
 import { validateLocalVerificationTarget } from "../lib/verification-target-policy.mjs";
-import { applySyntheticOrthoReconciliation, reportOrthoReconciliation, ReconciliationRefused } from "../lib/ortho-reconciliation";
+import { ReconciliationRefused } from "../lib/ortho-reconciliation";
+
+import { OPERATOR_LIMITS, OPERATOR_SESSION_OPTIONS } from "../lib/ortho-reconciliation-limits";
+import { OperatorCleanupFailure, runOrthoOperatorSession } from "../lib/ortho-reconciliation-session";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -17,22 +20,24 @@ async function main() {
     oid: args.find(arg => arg.startsWith("--expected-oid="))?.slice(15) ?? "",
     capability: args.find(arg => arg.startsWith("--capability="))?.slice(13) ?? "" };
   if (apply && (!/^\d+$/.test(expected.oid) || !/^[a-f0-9]{64}$/.test(expected.capability))) throw new ReconciliationRefused("target");
+  if (!apply && args.length) throw new ReconciliationRefused("target");
   const client = new Client({ connectionString: url.toString(), ssl: false,
-    options: apply ? "-c search_path=pg_catalog,public" : "-c default_transaction_read_only=on -c search_path=pg_catalog,public" });
-  client.on("error", () => { /* pending queries reject; never print raw connection errors */ });
-  await client.connect();
-  try {
-    if (apply) {
-      console.log(JSON.stringify(await applySyntheticOrthoReconciliation(client, expected)));
-    } else {
-      if (args.length) throw new ReconciliationRefused("target");
-      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      console.log(JSON.stringify(await reportOrthoReconciliation(client)));
-      await client.query("ROLLBACK");
-    }
-  } finally { await client.end(); }
+    connectionTimeoutMillis: OPERATOR_LIMITS.connectionTimeoutMillis, query_timeout: OPERATOR_LIMITS.query_timeout,
+    options: `${OPERATOR_SESSION_OPTIONS}${apply ? "" : " -c default_transaction_read_only=on"}` });
+  return runOrthoOperatorSession(client, { apply, expected });
 }
-main().catch(error => {
-  console.error(JSON.stringify({ event: "ortho_reconciliation_refused", category: error instanceof ReconciliationRefused ? error.category : "unclassified" }));
+// Process-level deadline also bounds a stalled socket or cleanup operation.
+// Termination closes the connection, but never proves a COMMIT did not occur.
+const deadline = setTimeout(() => {
+  console.error(JSON.stringify({ event: "ortho_reconciliation_refused", category: "deadline", outcome: "unknown" }));
+  process.exit(124);
+}, OPERATOR_LIMITS.processMs);
+main().then(result => {
+  console.log(JSON.stringify(result));
+}, error => {
+  console.error(JSON.stringify({ event: "ortho_reconciliation_refused",
+    category: error instanceof OperatorCleanupFailure ? "cleanup" : error instanceof ReconciliationRefused ? error.category : "unclassified",
+    ...(error instanceof OperatorCleanupFailure ? { outcome: error.outcome } : {}) }));
   process.exitCode = 1;
-});
+  if (error instanceof OperatorCleanupFailure) process.exit(1);
+}).finally(() => clearTimeout(deadline));

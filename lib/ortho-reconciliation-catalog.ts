@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Client } from "pg";
+import contracts from "./ortho-assessment-runtime.generated.json";
 
 export const ORTHO_REFERENCE_SOURCE = "c998b435306f8295a217e49f20080293c479c359";
 export const ORTHO_VERSIONS = ["0051", "0052"] as const;
@@ -15,7 +16,10 @@ export async function readOrthoCatalog(client: Client, version: OrthoVersion) {
   const table = `ortho_${stem}_revisions`;
   const names = [table, `${table}_id_seq`, `${table}_pkey`, `_${table}`,
     `ortho_${stem}_patient_case_version_idx`, `reject_ortho_${stem}_revision_mutation`,
-    `check_ortho_${stem}_revision_final_state`];
+    `check_ortho_${stem}_revision_final_state`,
+    // Keep the complete guard scope: these names can be occupied by standalone
+    // relations, types or routines even when the revision table is absent.
+    ...[...contracts.find(file => file.version === version)!.sql.matchAll(/\bCONSTRAINT\s+([a-z_][a-z0-9_]*)/g)].map(match => match[1])];
   return readCatalog(client, table, names);
 }
 

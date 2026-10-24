@@ -49,6 +49,14 @@ The write transaction:
 
 The prototype deliberately refuses an existing reconciliation ledger instead of silently repeating or extending a previous operation. Concurrent requests serialize; only one records the pair. A failure before COMMIT attempts rollback. A failed COMMIT acknowledgement reports `uncertain_commit`, never success or an asserted rollback, and never retries automatically. Check registry **and** ledger on the same guarded synthetic target before deciding what happened.
 
+## Bounded execution and completed output
+
+The operator connection has a 5-second connect deadline and a 65-second client query deadline. Server limits are 60 seconds per statement, 30 seconds for locks, 10 seconds idle in a transaction, and 120 seconds per transaction. A referenced 180-second process watchdog bounds stalled networking or cleanup as well. Expiry reports a fixed deadline/unknown-outcome event and terminates; it never asserts that a COMMIT was rolled back.
+
+A report is returned to stdout only after its read-only transaction rolls back and the dedicated connection closes successfully. Apply output likewise waits for connection cleanup after COMMIT. Cleanup failure after confirmed commit explicitly reports `outcome=committed`; a failed report cleanup reports `read_only`; ambiguous apply cleanup reports `unknown`. No exception content is emitted.
+
+The catalog collector covers the guard's full constraint/index collision-name list, including names occupied by standalone objects when the revision table is absent. Unit parity and real PostgreSQL negative tests enforce this without editing the startup guard.
+
 ## Design blockers before any live proposal
 
 The catalog lock strategy requires a superuser and affects shared server catalogs, so it is intentionally unsuitable for an unattended live repair. A separately reviewed live plan must resolve locking/maintenance scope, role/ACL/locale equivalence, data validation against the actual legacy contract, and operator evidence retention. PostgreSQL catalog dependencies cannot prove the absence of external application references or dynamic SQL. Neither reference equality nor the private observation that captured 0051 definitions matched establishes provenance.
@@ -58,3 +66,5 @@ Root handles any future live application separately. Staging must be tested and 
 ## Validation
 
 The original #454 reproduction independently passed 5/5 on PostgreSQL 18.6 before modification; the existing registration suite independently passed 16/16. Current focused results and exact-head CI status are recorded in `VALIDATION.md`. These are distinct from full CI, build/image, HTTP-security, and live acceptance stages.
+
+The separate [Staging design](STAGING-DESIGN.md) narrows any future proposal to empty, exact 0051 only and requires supported audit retention, compatible identity/ACL/locale evidence, and a verified maintenance window. [Advanced PR454 source review](PR454-ADVANCED-REVIEW.md) records why those newer changes were not merged.

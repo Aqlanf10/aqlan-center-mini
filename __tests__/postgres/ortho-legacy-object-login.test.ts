@@ -400,3 +400,20 @@ describe("transaction-time safety", () => {
     expect(await withClient(name, snapshot)).toEqual(before);
   });
 });
+
+describe("standalone collisions in the complete guard scope", () => {
+  it.each([
+    ["0051", "sctable", "CREATE TABLE ortho_strategy_case_version_unique(id integer)"],
+    ["0051", "scindex", "CREATE INDEX ortho_strategy_command_unique ON users(id)"],
+    ["0052", "actype", "CREATE TYPE ortho_assessment_first_revision AS ENUM ('synthetic')"],
+  ])("does not report a standalone %s collision as absent (%s)", async (version, suffix, sql) => {
+    const { name, before } = await scenario(suffix, async client => { await client.query(sql); });
+    await withClient(name, async client => {
+      await client.query("BEGIN READ ONLY");
+      expect((await reportOrthoReconciliation(client)).results.find(row => row.version === version)?.shape).toBe("unknown_or_partial");
+      await client.query("ROLLBACK");
+    });
+    await expect(ensureSchema()).rejects.toThrow(`ORTHO_UNREGISTERED_OBJECT_COLLISION: ${version}:`);
+    expect(await withClient(name, snapshot)).toEqual(before);
+  });
+});
