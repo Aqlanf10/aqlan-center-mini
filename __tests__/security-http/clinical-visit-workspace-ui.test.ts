@@ -130,7 +130,7 @@ async function fixture(width: number, planned = true) {
     id: visitId, patientId, patientName: "مريض مساحة زيارة اصطناعي", chiefComplaint: "نص الشكوى الأصلي",
     examination: "", diagnosis: "", treatmentDone: "ملاحظة الطبيب الأصلية", nextPlan: "",
     doctorId, status: "open", signedAt: null, signedBy: null, invoiceId: null, addendum: null,
-    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: null, plannedVisit: null, previousVisit: null, latestDiagnosis: null, activeCases: [],
     outstanding: planned ? outstanding : [], billingCurrency: "YER", sessionPricing: [], labOrders: [],
   };

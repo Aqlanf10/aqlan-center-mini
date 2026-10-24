@@ -150,7 +150,7 @@ beforeEach(() => {
   stored = {
     id: 91001, patientId: 92001, patientName: "Synthetic orthodontic patient", ...emptyNotes,
     addendum: null, doctorId: 94001, status: "open", signedAt: null, signedBy: null, invoiceId: null,
-    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: { ...orthodontics }, outstanding: [], sessionPricing: [], labOrders: [], billingCurrency: "YER",
     plannedVisit: { id: 96001, title: "Planned adjustment", sequence: 3, planTitle: "Baseline plan", doctorId: 94001, durationMinutes: 30 },
     previousVisit: { id: 91000, date: "2026-09-01", treatmentDone: "Previous visit work", nextPlan: "Previous next plan", proceduresSummary: null },

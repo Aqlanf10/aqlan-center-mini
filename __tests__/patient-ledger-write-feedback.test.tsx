@@ -102,15 +102,15 @@ beforeEach(() => {
 });
 afterEach(() => { for (const h of [hooks.outer, hooks.inner, hooks.form]) h.effects.forEach(effect => effect.cleanup?.()); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-function renderLegacy(): ReactNode {
-  const form = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm" && node.props.historical === true); expect(form).toBeDefined();
+function renderInvoiceForm(historical = true): ReactNode {
+  const form = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm" && !!node.props.historical === historical); expect(form).toBeDefined();
   for (let round = 0; round < 30; round++) {
     hooks.current = hooks.form; hooks.form.cursor = 0; hooks.form.changed = false;
     const tree = (form!.type as (props: Record<string, unknown>) => ReactNode)(form!.props);
     hooks.form.pending.splice(0).forEach(run => run());
     if (!hooks.form.changed) return tree;
   }
-  throw new Error("Legacy preview fixture did not settle");
+  throw new Error("Invoice form fixture did not settle");
 }
 
 describe("PatientLedger operation-scoped success feedback", () => {
@@ -128,18 +128,18 @@ describe("PatientLedger operation-scoped success feedback", () => {
     const realRead = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => url === "/api/patients/901/historical-documents/preview"
       ? Promise.resolve(json({ message: "Synthetic preview refusal" }, 409)) : realRead(url, init));
-    const pickService = elements(renderLegacy()).find(node => node.type === ServiceSelect)!;
-    (pickService.props.onChange as (id: number, service: unknown) => void)(31, { id: 31, name: "Synthetic root canal", category: "rct", priceMinor: 180000, priceConfigured: true, isActive: true }); renderLegacy();
-    const toothButton = elements(renderLegacy()).find(node => node.props["data-testid"] === "invoice-tooth-button-0")!;
+    const pickService = elements(renderInvoiceForm()).find(node => node.type === ServiceSelect)!;
+    (pickService.props.onChange as (id: number, service: unknown) => void)(31, { id: 31, name: "Synthetic root canal", category: "rct", priceMinor: 180000, priceConfigured: true, isActive: true }); renderInvoiceForm();
+    const toothButton = elements(renderInvoiceForm()).find(node => node.props["data-testid"] === "invoice-tooth-button-0")!;
     (toothButton.props.onClick as () => void)();
-    const dialog = elements(renderLegacy()).find(node => node.type === ToothSelectionDialog)!;
+    const dialog = elements(renderInvoiceForm()).find(node => node.type === ToothSelectionDialog)!;
     (dialog.props.onConfirm as (selection: { teeth: number[]; surfaces: string; scope: null }) => void)({ teeth: [36], surfaces: "", scope: null });
     for (const [label, value] of [["السعر", "300000"], ["سبب تغيير السعر", "Synthetic historical agreed price"], ["المدفوع قبل النظام", "120000"], ["تاريخ المعلومات التاريخية", "2026-01-01"]]) {
-      const input = elements(renderLegacy()).find(node => node.type === "input" && node.props["aria-label"] === label)!;
+      const input = elements(renderInvoiceForm()).find(node => node.type === "input" && node.props["aria-label"] === label)!;
       (input.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
     }
-    renderLegacy(); await vi.advanceTimersByTimeAsync(351);
-    const refused = renderLegacy(); expect(text(refused)).toContain("Synthetic preview refusal");
+    renderInvoiceForm(); await vi.advanceTimersByTimeAsync(351);
+    const refused = renderInvoiceForm(); expect(text(refused)).toContain("Synthetic preview refusal");
     const save = elements(refused).find(node => node.type === "button" && text(node).trim() === "احفظ الاتفاق التاريخي")!;
     expect(save.props.disabled).toBe(true); await (save.props.onClick as () => Promise<void>)();
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/patients/901/historical-documents/preview")).toHaveLength(1);
@@ -177,5 +177,59 @@ describe("PatientLedger operation-scoped success feedback", () => {
     expect(text(find(node => node.props["data-testid"] === "invoice-clinical-notice"))).toContain("حُفظ الاتفاق التاريخي");
     const legacyWrites = fetchMock.mock.calls.filter(([url]) => url === "/api/patients/901/historical-documents");
     expect(legacyWrites).toHaveLength(2); expect(legacyWrites[0][1].body).toBe(legacyWrites[1][1].body);
+  });
+});
+
+describe("PatientLedger manual row provenance", () => {
+  const picker = () => elements(renderInvoiceForm(false)).find(node => node.type === ServiceSelect)!;
+  const input = (label: string) => elements(renderInvoiceForm(false)).find(node => node.type === "input" && node.props["aria-label"] === label)!;
+  const type = (label: string, value: string) => (input(label).props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
+  const select = (id: number, service: unknown) => (picker().props.onChange as (id: number, service: unknown) => void)(id, service);
+  const manual = () => (picker().props.onManualSelect as () => void)();
+  const catalogue = { id: 31, name: "Synthetic root canal", category: "rct", priceMinor: 180000, priceConfigured: true, isActive: true };
+
+  it("catalogue → placeholder → manual drops catalogue identity in the real form handler", async () => {
+    render(); await settle(); open("invoice"); vi.useFakeTimers();
+    select(31, catalogue);
+    type("السعر", "180001");
+    type("سبب تغيير السعر", "Synthetic catalogue override");
+    select(0, null);
+    manual();
+    expect(picker().props).toMatchObject({ value: null, manualSelected: true });
+    expect(input("وصف البند").props.value).toBe("");
+    expect(input("السعر").props.value).toBe("");
+    expect(elements(renderInvoiceForm(false)).some(node => node.props["data-testid"] === "invoice-tooth-control-0")).toBe(false);
+    type("وصف البند", "Synthetic manual work");
+    type("السعر", "900");
+    renderInvoiceForm(false); await vi.advanceTimersByTimeAsync(351);
+    const preview = fetchMock.mock.calls.find(([url]) => url === "/api/invoices/clinical-preview");
+    expect(preview).toBeDefined();
+    const item = JSON.parse(preview![1].body).items[0];
+    expect(item).toMatchObject({ description: "Synthetic manual work", price: "900", priceReason: "" });
+    expect(item).not.toHaveProperty("serviceId");
+    expect(item).not.toHaveProperty("doctorId");
+    expect(item).not.toHaveProperty("caseId");
+  });
+
+  it("keeps text typed after clearing a catalogue choice, but clears amounts on a real currency change", async () => {
+    render(); await settle(); open("invoice");
+    select(31, catalogue);
+    select(0, null);
+    // Even text equal to a catalogue name is manual when the user typed it after clearing the choice.
+    type("وصف البند", catalogue.name);
+    type("السعر", "12345");
+    manual(); manual();
+    expect(picker().props).toMatchObject({ value: null, manualSelected: true });
+    expect(input("وصف البند").props.value).toBe(catalogue.name);
+    expect(input("السعر").props.value).toBe("12345");
+    for (const currency of ["SAR", "USD", "YER"]) {
+      const choice = elements(renderInvoiceForm(false)).find(node => node.type === "select" && node.props["aria-label"] === "عملة الفاتورة")!;
+      expect(choice.props.value).not.toBe(currency);
+      (choice.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: currency } });
+      expect(picker().props).toMatchObject({ value: null, manualSelected: true });
+      expect(input("وصف البند").props.value).toBe(catalogue.name);
+      expect(input("السعر").props.value).toBe("");
+      type("السعر", "99");
+    }
   });
 });

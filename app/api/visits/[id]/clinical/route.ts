@@ -1,3 +1,4 @@
+import { InventoryBusy, InventoryTrackingRequired } from "@/lib/inventory-domain/legacy-write-guard";
 import { ClinicalDoctorIdentityConflict } from "@/lib/clinical-doctor-identity";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -147,13 +148,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         invalid_override_reason: "سبب المتابعة طويل جدًا — الحد الأقصى ٣٠٠ حرف.",
         ortho_case_invalid: "حالة التقويم المرسلة مغلقة أو لا تخص مريض هذه الزيارة — حدّث الشاشة وأعد التوقيع.",
         plan_session_unlinked: "إجراءٌ حرّ يطابق بندًا له تمويل قائم أو جلسات في خطة المريض — اربطه ببنده الأصلي، أو ببند جديد صريح للعمل الإضافي، قبل التوقيع.",
+        amended_plan_session_unlinked: "للخدمة تعديل مالي موثق؛ استقلال هذا العمل عن تغطيته غير متحقق. ربط الخدمة المعدلة سريريًا غير مدعوم حاليًا. تبقى الزيارة مسودة للمراجعة؛ لن تُنشأ فاتورة ثانية لهذا العمل.",
         invalid_decision_reason: "اكتب سبب «بلا رسوم» للشدّة (من ٣ أحرف إلى ٣٠٠).",
       };
       if (result.reason) {
         return NextResponse.json(
           result.reason === "unmet_dependency"
             ? { message: messages[result.reason], unmetRequirements: result.unmetRequirements ?? [] }
-            : result.reason === "plan_session_unlinked"
+            : result.reason === "plan_session_unlinked" || result.reason === "amended_plan_session_unlinked"
               ? { message: messages[result.reason], sessionConflicts: result.sessionConflicts ?? [] }
               : { message: messages[result.reason] },
           { status: result.reason === "invalid_override_reason" || result.reason === "invalid_decision_reason" ? 400 : 409 },
@@ -297,6 +299,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (error instanceof ProcedurePriceRejected) {
       return NextResponse.json({ message: error.message, code: "price_authority" }, { status: 409 });
+    }
+    if (error instanceof InventoryBusy || error instanceof InventoryTrackingRequired) {
+      return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
     }
     if (error instanceof InventoryShortage) {
       return NextResponse.json({ message: error.message, code: "inventory_shortage" }, { status: 409 });

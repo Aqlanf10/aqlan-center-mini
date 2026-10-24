@@ -159,6 +159,41 @@ function assertPassiveLabUi() {
   }
   expect(labWrites()).toHaveLength(0);
 }
+
+describe("amended-service signature containment in the existing review UI", () => {
+  it.each([true, undefined, null, "false"])("does not present a verified charge or enable sign with amendment evidence %s", async (value) => {
+    stored.procedures = [line()];
+    stored.amendedServiceConflict = value;
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, options?: RequestInit) => url.endsWith("/billing-preview")
+      ? response(200, { duesByCurrency: { YER: 800000 }, mixedCurrencies: false, zeroReason: null })
+      : original(url, options));
+    await mount();
+    expect(hasTest("visit-signature-blocked")).toBe(true);
+    expect(button("احفظ بلا توقيع").props.disabled).toBe(false);
+    await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+    expect(hasTest("visit-financial-review-required")).toBe(true);
+    expect(contents(byTest("visit-financial-review-required"))).toContain(value === true ? "غير مدعوم حاليًا" : "تعذّر التحقق");
+    expect(button("التوقيع متوقف لحين استكمال المراجعة").props.disabled).toBe(true);
+    expect(contents(render().tree)).not.toContain("الاستحقاق المالي الناتج");
+    expect(hasTest("no-additional-due")).toBe(false);
+    expect(writes().filter(([, request]) => JSON.parse(String(request.body)).action === "sign")).toHaveLength(0);
+  });
+
+  it("retains ordinary charge review for independently allowed work", async () => {
+    stored.procedures = [line()];
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, options?: RequestInit) => url.endsWith("/billing-preview")
+      ? response(200, { duesByCurrency: { YER: 800000 }, mixedCurrencies: false, zeroReason: null })
+      : original(url, options));
+    await mount();
+    await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
+    expect(hasTest("visit-financial-review-required")).toBe(false);
+    expect(hasTest("visit-signature-blocked")).toBe(false);
+    expect(signButton().props.disabled).toBe(false);
+    expect(contents(signButton())).toContain("أنشئ استحقاق");
+  });
+});
 function unmount() {
   hooks.effects.forEach((effect) => effect.cleanup?.());
   hooks.effects.clear();
@@ -175,7 +210,7 @@ beforeEach(() => {
   props = { visitId: 91001 };
   stored = { id: 91001, patientId: 92001, patientName: "Synthetic patient", ...savedNotes,
     addendum: null, doctorId: 94001, status: "open", signedAt: null, signedBy: null,
-    invoiceId: null, procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+    invoiceId: null, procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: null, plannedVisit: null, previousVisit: null, outstanding: [], sessionPricing: [], labOrders: [],
     billingCurrency: "YER" };
   fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {

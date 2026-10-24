@@ -34,7 +34,7 @@ function clinicalVisit(diagnosis: string, contextPatientId = patientId) {
     id: visitId, patientId: contextPatientId, patientName: "مريض وصفة تجريبي",
     chiefComplaint: "", examination: "", diagnosis, treatmentDone: "", nextPlan: "", addendum: null,
     doctorId: 98104, status: "open", signedAt: null, signedBy: null, invoiceId: null,
-    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: null, plannedVisit: null, previousVisit: null, latestDiagnosis: null,
     activeCases: [], outstanding: [], billingCurrency: "YER", sessionPricing: [], labOrders: [],
   };

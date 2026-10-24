@@ -149,6 +149,8 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
 export async function approvedAgreementPosition(planId:number,today:string, reader?:DbClient):Promise<{
   planId:number;currency:Currency;totalMinor:number;paidMinor:number;remainingMinor:number;dueNowMinor:number;
   invoiceId:number|null;openingCurrency:Currency|null;sourceKind:string;available:boolean;deltaInvoiceIds?:number[];
+  /** Settlement of the original source only, for the immutable installment schedule. */
+  originalPaidMinor?:number;originalTotalMinor?:number;
 }|null> {
   if(!reader)return transaction(client=>approvedAgreementPosition(planId,today,client),true);
   const a=await readApprovedAgreement(reader,planId);if(!a)return null;
@@ -168,15 +170,16 @@ export async function approvedAgreementPosition(planId:number,today:string, read
     deltaSettled+=doc.settledMinor;
   }
   const currentTotal=Number(a.total_minor)+deltaTotal;
-  const paid=Number(a.historical_paid_minor)+position.settledMinor+deltaSettled;
+  const originalPaid=Number(a.historical_paid_minor)+position.settledMinor;
+  const paid=originalPaid+deltaSettled;
   const remaining=Math.max(0,currentTotal-paid);
-  if(![deltaTotal,deltaSettled,currentTotal,paid,remaining].every(Number.isSafeInteger))
+  if(![deltaTotal,deltaSettled,currentTotal,originalPaid,paid,remaining].every(Number.isSafeInteger))
     throw new Error("Agreement amendment totals exceed safe monetary units");
   const originalDue=a.terms.installments.length?a.terms.installments.filter(i=>i.dueDate<=today).reduce((s,i)=>s+i.amountMinor,0):Number(a.total_minor);
   const dueNow=Math.min(remaining,Math.max(0,originalDue+deltaTotal-paid));
   return {planId,currency:a.currency,totalMinor:currentTotal,paidMinor:paid,remainingMinor:remaining,
     dueNowMinor:dueNow,invoiceId:a.invoice_id,openingCurrency:a.opening_currency,sourceKind:a.source_kind,
-    deltaInvoiceIds:deltas.map(event=>event.delta_invoice_id),
+    deltaInvoiceIds:deltas.map(event=>event.delta_invoice_id),originalPaidMinor:originalPaid,originalTotalMinor:Number(a.total_minor),
     available:position.available&&deltaAvailable&&approvedSourceMatches(position.sourceSnapshot,a.source_snapshot)};
 }
 

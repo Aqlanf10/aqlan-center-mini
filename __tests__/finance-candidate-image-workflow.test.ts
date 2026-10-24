@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 describe("candidate workflow scope and source binding", () => {
-  it("checks every eligible PR head without privileged or publishing triggers", () => {
+  it("checks the original PR allowlist and one exact push branch without privileged or publishing triggers", () => {
     expect(workflow).toContain("  pull_request:\n    branches: [main]\n    types: [opened, synchronize, reopened, ready_for_review, edited]");
     for (const guard of [
       "github.repository == 'Aqlanf10/aqlan-center-mini'",
@@ -96,12 +96,52 @@ describe("candidate workflow scope and source binding", () => {
       "github.event.pull_request.head.repo.full_name == 'Aqlanf10/aqlan-center-mini'",
       "github.event.pull_request.head.ref == 'integration/finance-candidate-20261022'",
     ]) expect(workflow).toContain(guard);
+    expect(workflow.match(/^on:\n([\s\S]*?)\npermissions:/m)?.[1]).toBe(
+      "  pull_request:\n    branches: [main]\n    types: [opened, synchronize, reopened, ready_for_review, edited]\n"
+      + "  push:\n    branches: [feat/dot-combined-staging-20261024]\n");
+    expect(workflow).toContain("EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}");
     expect(workflow).toContain("permissions:\n  contents: read\n");
-    expect(workflow).toContain("group: finance-candidate-image-${{ github.event.pull_request.number }}\n  cancel-in-progress: true");
+    expect(workflow).toContain("group: finance-candidate-image-${{ github.event.pull_request.number || github.ref }}\n  cancel-in-progress: true");
     expect(workflow).toContain("runs-on: ubuntu-latest\n    timeout-minutes: 45");
-    expect(workflow).toContain("ref: ${{ github.event.pull_request.head.sha }}\n          fetch-depth: 1\n          persist-credentials: false");
+    expect(workflow).toContain("ref: ${{ github.event.pull_request.head.sha || github.sha }}\n          fetch-depth: 1\n          persist-credentials: false");
     expect(workflow.match(/uses: .+/g)).toEqual(["uses: actions/checkout@v7"]);
     expect(workflow).not.toMatch(/pull_request_target|workflow_dispatch|workflow_run|paths:|paths-ignore:|secrets\.|vars\.|environment:|services:|continue-on-error|always\(\)|upload-artifact|docker (?:push|login)|--(?:secret|env|env-file|volume|mount|privileged|publish)\b/);
+  });
+
+  const candidateRef = "refs/heads/feat/dot-combined-staging-20261024";
+  const repository = "Aqlanf10/aqlan-center-mini";
+  const originalHeads = ["integration/finance-candidate-20261022", "feat/finance-synthetic-verification-20261023",
+    "feat/finance-reviewed-composition-20261023", "feat/finance-completed-work-20261023"];
+  function eventContext(eventName: string, ref = candidateRef, head = originalHeads[0], base = "main", headRepository = repository, ownerRepository = repository) {
+    return { repository: ownerRepository, event_name: eventName, ref, sha: "a".repeat(40), event: { pull_request: {
+      number: eventName === "pull_request" ? 451 : null, base: { ref: base },
+      // GitHub missing expression values are empty; preserve that behavior in the synthetic context.
+      head: { ref: head, repo: { full_name: headRepository }, sha: eventName === "pull_request" ? "b".repeat(40) : "" },
+    } } };
+  }
+  const cases = [
+    { name: "exact candidate push", github: eventContext("push"), allowed: true },
+    ...["refs/heads/main", "refs/heads/feat/other", `${candidateRef}-extra`, "refs/tags/feat/dot-combined-staging-20261024"]
+      .map(ref => ({ name: `reject push ${ref}`, github: eventContext("push", ref), allowed: false })),
+    { name: "reject foreign repository push", github: eventContext("push", candidateRef, originalHeads[0], "main", repository, "other/fork"), allowed: false },
+    ...originalHeads.map(head => ({ name: `retain original PR ${head}`, github: eventContext("pull_request", "refs/pull/451/merge", head), allowed: true })),
+    { name: "reject new candidate PR to main", github: eventContext("pull_request", "refs/pull/999/merge", "feat/dot-combined-staging-20261024"), allowed: false },
+    { name: "reject feature-base PR", github: eventContext("pull_request", "refs/pull/999/merge", originalHeads[0], "feat/finance-completed-work-20261023"), allowed: false },
+    { name: "reject foreign PR head", github: eventContext("pull_request", "refs/pull/999/merge", originalHeads[0], "main", "other/fork"), allowed: false },
+    { name: "reject workflow dispatch", github: eventContext("workflow_dispatch"), allowed: false },
+  ];
+  it.each(cases)("evaluates the actual job gate: $name", ({ github, allowed }) => {
+    const expression = workflow.match(/^ {4}if: >-\n([\s\S]*?)^ {4}runs-on:/m)?.[1];
+    expect(expression).toBeTruthy();
+    expect(runInNewContext(expression!, { github }, { timeout: 1_000 })).toBe(allowed);
+  });
+  it.each(["push", "pull_request"])("binds checkout and verification to the exact %s source SHA", eventName => {
+    const github = eventContext(eventName);
+    const checkout = workflow.match(/^ {10}ref: \$\{\{ (.+) \}\}/m)?.[1];
+    const expected = workflow.match(/^ {10}EXPECTED_HEAD: \$\{\{ (.+) \}\}/m)?.[1];
+    expect(checkout).toBe("github.event.pull_request.head.sha || github.sha");
+    expect(expected).toBe(checkout);
+    expect(runInNewContext(checkout!, { github }, { timeout: 1_000 })).toBe((eventName === "push" ? "a" : "b").repeat(40));
   });
 
   it.each([sourceName, buildName, smokeName, proofName])("has valid fail-closed Bash: %s", (name) => {

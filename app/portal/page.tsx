@@ -12,8 +12,8 @@ import {
 import { messagePreview } from "@/lib/messages";
 import { CURRENCY_LABEL, activeBalanceCurrencies, formatMoney } from "@/lib/money";
 import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
-import type { PortalStatement } from "@/lib/portal-statement";
-import { friendlyDate } from "@/lib/reminders";
+import type { PortalHistoricalTreatment, PortalStatement } from "@/lib/portal-statement";
+import { friendlyDate, friendlyDateLong } from "@/lib/reminders";
 
 /**
  * بوابة المريض.
@@ -294,6 +294,8 @@ function StatementTab() {
         </div>
       ))}
 
+      <HistoricalTreatment historical={feed.historical} />
+
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-black text-navy-900">الفواتير</h2>
         {feed.invoices.length === 0 ? (
@@ -340,6 +342,7 @@ function StatementTab() {
         )}
       </div>
 
+      {feed.agreementsRequireReview ? <p role="status" className="rounded-xl border border-amber-200 p-3 text-sm">بعض أرصدة اتفاقات العلاج غير متاحة وتحتاج مراجعة مصدرها. الفواتير وكشف الحساب المعروضان مستقلان عن هذا الملخص.</p> : null}
       {feed.agreements.map((agreement, index) => (
         <div key={index} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
           <h2 className="mb-2 text-sm font-black text-navy-900">اتفاق العلاج — {agreement.title}</h2>
@@ -369,6 +372,66 @@ function StatementTab() {
           </ul>
         )}
       </div>
+    </section>
+  );
+}
+
+/** «العلاج السابق»: the same saved historical agreements and labels as the current printed statement. */
+function HistoricalTreatment({ historical }: { historical: PortalHistoricalTreatment }) {
+  if (!historical.available) {
+    return <p role="status" className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+      تفاصيل العلاج السابق غير متاحة حاليًا، والأرصدة المعروضة لا تعتمد عليها. راجع المركز للاطلاع على التفاصيل.
+    </p>;
+  }
+  // As on the print: only genuine historical treatment opens this section.
+  if (historical.agreements.length === 0) return null;
+  return (
+    <section aria-label="العلاج السابق" className="rounded-2xl border border-slate-200 bg-white p-4">
+      <h2 className="mb-3 text-sm font-black text-navy-900">العلاج السابق</h2>
+      <div className="space-y-4">
+        {historical.agreements.map((agreement, index) => {
+          const money = (minor: number | null) => minor === null ? "غير مسجل" : formatMoney(minor, agreement.currency);
+          const heading = `اتفاق علاج بتاريخ ${friendlyDateLong(agreement.historicalAsOf)}`;
+          return (
+            <div key={index} className="text-xs">
+              <h3 className="mb-1 text-sm font-bold text-slate-700">{heading}</h3>
+              <table className="w-full table-fixed" aria-label={heading}>
+                <thead className="text-slate-500">
+                  <tr><th className="w-1/3 text-start font-bold">العلاج / البيان</th><th className="text-start font-bold">الموضع</th>
+                    <th className="text-end font-bold">الكمية</th><th className="text-end font-bold">سعر الوحدة</th>
+                    <th className="text-end font-bold">الخصم</th><th className="text-end font-bold">الصافي</th></tr>
+                </thead>
+                <tbody>
+                  {agreement.lines.map((line, lineIndex) => (
+                    <tr key={lineIndex}>
+                      <td className="break-words">{line.description}</td>
+                      <td>{line.site ?? "—"}</td>
+                      <td className="text-end tabular-nums">{line.quantity}</td>
+                      <td className="text-end tabular-nums">{money(line.unitPriceMinor)}</td>
+                      <td className="text-end tabular-nums">{money(line.discountMinor)}</td>
+                      <td className="text-end tabular-nums">{money(line.netMinor)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <dl className="mt-2 space-y-1 text-sm">
+                {agreement.grossMinor !== null && agreement.discountMinor !== null && <>
+                  <div className="flex justify-between"><dt>الإجمالي قبل الخصم</dt><dd className="tabular-nums">{money(agreement.grossMinor)}</dd></div>
+                  <div className="flex justify-between"><dt>الخصم المسجل</dt><dd className="tabular-nums">{money(agreement.discountMinor)}</dd></div>
+                </>}
+                <div className="flex justify-between"><dt>المبلغ المتفق عليه</dt><dd className="tabular-nums">{money(agreement.agreedMinor)}</dd></div>
+                <div className="flex justify-between"><dt>المدفوع من قبل</dt><dd className="tabular-nums">{money(agreement.previouslyPaidMinor)}</dd></div>
+                <div className="flex justify-between font-bold"><dt>المبلغ المتبقي</dt><dd className="tabular-nums">{money(agreement.remainingMinor)}</dd></div>
+              </dl>
+            </div>
+          );
+        })}
+      </div>
+      {historical.undetailed.map((entry) => (
+        <p key={entry.currency} className="mt-2 text-xs text-slate-500">
+          {entry.partial ? "جزء من الرصيد السابق" : "الرصيد السابق"} ({CURRENCY_LABEL[entry.currency]}) بلا تفاصيل علاج مسجلة.
+        </p>
+      ))}
     </section>
   );
 }

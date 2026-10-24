@@ -380,6 +380,8 @@ export function canEditItems(plan: {
  * (أُنجز/بقيت من العلاج) — لأن مالها يأتي من فواتير زياراتها لا منها.
  */
 export interface PlanLedgerSummary {
+  currentAgreement?: { totalMinor: number; paidMinor: number; remainingMinor: number };
+  agreementReviewRequired?: boolean;
   id: number;
   title: string;
   status: PlanStatus;
@@ -413,6 +415,7 @@ export interface PlanLedgerSummary {
 }
 
 export function planLedgerSummary(plan: {
+  approvedAgreement?: Awaited<ReturnType<typeof import("./approved-agreements").approvedAgreementPosition>>;
   id: number;
   title: string;
   status: PlanStatus;
@@ -437,6 +440,10 @@ export function planLedgerSummary(plan: {
     && Number.isSafeInteger(item.unitPriceMinor) && Number(item.unitPriceMinor) >= 0);
   const ordinaryProgress = legacy && completeOrdinaryItems ? planItemsProgress(ordinaryItems as PlanItemLike[]) : null;
   return {
+    ...(plan.approvedAgreement ? (plan.approvedAgreement.available ? { currentAgreement: {
+      totalMinor: plan.approvedAgreement.totalMinor, paidMinor: plan.approvedAgreement.paidMinor,
+      remainingMinor: plan.approvedAgreement.remainingMinor,
+    } } : { agreementReviewRequired: true }) : {}),
     ...(legacy ? { legacy: true, legacyItemCount,
       ordinaryItemsProgress: ordinaryProgress ? {
         count: ordinaryProgress.count, doneCount: ordinaryProgress.doneCount,
@@ -451,7 +458,7 @@ export function planLedgerSummary(plan: {
     consented: plan.consentAt !== null && (plan.items?.filter(historical).every((item) =>
       item.legacyAgreementStatus === "live" && item.billingStatus === "included_in_package"
       && item.legacyCoverageState === "verified" && item.legacyCurrentConsentRequired === false) ?? true),
-    installments: hasInstallments ? {
+    installments: hasInstallments && plan.approvedAgreement?.available !== false ? {
       paidMinor: plan.progress.paidMinor,
       remainingMinor: plan.progress.remainingMinor,
       overdueMinor: plan.progress.overdueMinor,
@@ -525,6 +532,8 @@ export interface SessionPlanItem {
   hasLegacyLineage?: boolean;
   legacyCoverage?: LegacyCoverageState;
   caseSite?: string | null;
+  /** Financial amendment identity only; this does not grant clinical substitution. */
+  amendedService?: boolean;
 }
 
 export function unlinkedSessionConflicts(
@@ -547,7 +556,9 @@ export function unlinkedSessionConflicts(
     const protectedItem = items.find((one) => sameKey(one, procedure)
       && (one.fundedByAgreement || one.hasInvoiceLineage || one.hasLegacyLineage || one.billingStatus === "billed" || one.billingStatus === "needs_financial_review"));
     if (protectedItem) {
-      conflicts.push(`«${protectedItem.serviceName}» له سجل مالي قائم — اربط العمل ببنده الأصلي وراجع حالته المالية؛ لا يُفوتر كإجراء جديد.`);
+      conflicts.push(protectedItem.amendedService
+        ? `«${protectedItem.serviceName}» له تعديل مالي موثق؛ استقلال هذا العمل عن تغطيته غير متحقق. ربط الخدمة المعدلة سريريًا غير مدعوم حاليًا؛ تبقى الزيارة مسودة للمراجعة ولا يُفوتر العمل مرة ثانية.`
+        : `«${protectedItem.serviceName}» له سجل مالي قائم — اربط العمل ببنده الأصلي وراجع حالته المالية؛ لا يُفوتر كإجراء جديد.`);
       continue;
     }
     /* بندٌ مخطَّط أحادي الجلسة بنفس الخدمة والسن يأخذ الإجراء أولًا (المطابقة القديمة) — فلا تعارض. */

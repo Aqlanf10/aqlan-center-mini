@@ -31,10 +31,12 @@ export function ApprovedAgreementPanel({planId,totalMinor,currency,position,canA
     finally{setBusy(false);}
   }
   if(position)return <section data-testid="approved-agreement" className="mb-3 rounded-xl border border-emerald-200 p-3 text-sm">
+    {!position.available || position.currency !== currency ? <p role="alert">الرصيد الحالي غير متاح؛ تغيّر المصدر ويلزم مراجعة مالية قبل التحصيل.</p> : <>
     <p className="font-bold">التزام مالي معتمد · {formatMoney(position.totalMinor,currency)}</p>
     <dl className="my-2 grid grid-cols-2 gap-2"><div><dt>كامل المتبقي</dt><dd className="font-bold">{formatMoney(position.remainingMinor,currency)}</dd></div><div><dt>المستحق حتى اليوم</dt><dd className="font-bold">{formatMoney(position.dueNowMinor,currency)}</dd></div></dl>
     <p className="text-xs">المصدر: {position.invoiceId?`فاتورة #${position.invoiceId}`:`رصيد افتتاحي ${currency}`} · التحصيل يخفض هذا المصدر.</p>
-    {!position.available?<p role="alert">تغيّر المصدر؛ يلزم مراجعة مالية قبل التحصيل.</p>:null}
+    {position.deltaInvoiceIds?.length ? <p className="text-xs">فواتير فروق التعديل: {position.deltaInvoiceIds.map(id => `#${id}`).join("، ")}. الإجمالي الحالي يشمل الأصل والفروق؛ البنود الأصلية محفوظة كتاريخ.</p> : null}
+    </>}
     <a className="mt-2 inline-block underline" href={`/print/plan/${planId}`} target="_blank" rel="noreferrer">طباعة الاتفاق ورصيده</a>
     {isAdmin?<AgreementAmendmentPanel planId={planId} onChanged={onChanged}/>:null}
   </section>;

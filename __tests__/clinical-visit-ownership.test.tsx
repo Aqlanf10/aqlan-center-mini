@@ -108,7 +108,7 @@ let pendingWrite: ((visitId: number, body: Record<string, unknown>) => Promise<R
 function visit(id: number, diagnosis: string): Record<string, unknown> {
   return { id, patientId: 92001, patientName: "Same synthetic patient", chiefComplaint: "", examination: "", diagnosis,
     treatmentDone: "", nextPlan: "", addendum: null, doctorId: 94001, status: "open", signedAt: null, signedBy: null,
-    invoiceId: null, procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+    invoiceId: null, procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: null, outstanding: [], sessionPricing: [], labOrders: [], billingCurrency: "YER", plannedVisit: null,
     previousVisit: null, latestDiagnosis: null, activeCases: [], suggestions: { chiefComplaint: null, nextPlan: null, doctorId: 94001 } };
 }

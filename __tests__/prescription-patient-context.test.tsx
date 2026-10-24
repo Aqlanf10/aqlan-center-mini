@@ -121,7 +121,7 @@ const patientFile = (id = patientId, medicalAlert: string | null = "Penicillin a
 function visit(id: number) {
   return { id, patientId: patientId as number | null, patientName: "Synthetic patient", chiefComplaint: "", examination: "", diagnosis: "Existing diagnosis",
     treatmentDone: "", nextPlan: "", addendum: null, doctorId: 94001, status: "open", signedAt: null, signedBy: null,
-    invoiceId: null, procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+    invoiceId: null, procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: null as Record<string, unknown> | null, outstanding: [], sessionPricing: [], labOrders: [], billingCurrency: "YER", plannedVisit: null,
     previousVisit: null, latestDiagnosis: null, activeCases: [] };
 }
