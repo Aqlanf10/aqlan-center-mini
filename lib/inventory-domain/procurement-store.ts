@@ -400,6 +400,10 @@ export async function resolveQuarantineReceipt(
     );
     const row = receiptLineRows.rows[0];
     invariant(row, "not_found", "Quarantine receipt line was not found");
+    // Every quarantine transition shares the custody item lock. Acquire it
+    // before the lot row: custody allocations take the lot FK's KEY SHARE lock
+    // after locking the item, so lot -> item would create a deadlock cycle.
+    await client.query("SELECT id FROM inventory_items WHERE id=$1 FOR UPDATE", [row.document.itemId]);
     await client.query(
       "SELECT id FROM goods_receipt_lines WHERE order_id=$1 AND order_line_id=$2 ORDER BY id FOR UPDATE",
       [order.id, row.document.orderLineId],
@@ -452,7 +456,6 @@ export async function resolveQuarantineReceipt(
       );
       const lot = lotRows.rows[0];
       invariant(lot, "not_found", "Quarantined stock lot was not found");
-      await client.query("SELECT id FROM inventory_items WHERE id=$1 FOR UPDATE", [plan.stockCompensation.itemId]);
       const movement = await client.query<{ id: number }>(
         "INSERT INTO inventory_movements(item_id,kind,qty,expiry_date,reason,created_by,unit_cost_minor,is_return) VALUES($1,'out',$2::numeric,NULL,$3,$4,NULL,$5) RETURNING id",
         [plan.stockCompensation.itemId, plan.stockCompensation.baseQuantity, plan.stockCompensation.reason, actor.username, plan.stockCompensation.isReturn],
