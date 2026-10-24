@@ -457,6 +457,57 @@ describe("the patient portal shows the print's previous-treatment details (slice
     } finally { gates.portalPatientId = 0; }
   });
 
+  it("a PostgreSQL statement error rolls back the read-only snapshot and returns only a generic portal 500", async () => {
+    const patientId = await newPatient("portal database failure");
+    await historical(patientId, { items: [{ serviceId: services.rct, price: "200000", toothCode: 45 }], discount: "0", paid: "50000" });
+    gates.portalPatientId = patientId;
+    const healthy = await (await portalStatement()).json();
+    const pool = db.getPool();
+    const original = pool.connect.bind(pool) as (...args: unknown[]) => unknown;
+    const issued: string[] = [];
+    let databaseError: unknown;
+    let injected = false;
+    const spy = vi.spyOn(pool, "connect").mockImplementation(((...args: unknown[]) => {
+      if (typeof args[0] === "function") return original(...args);
+      return (async () => {
+        const client = await (original() as Promise<PoolClient>);
+        const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+        const release = client.release.bind(client);
+        client.query = (async (...args: unknown[]) => {
+          const sql = sqlOf(args); issued.push(sql);
+          if (!injected && historicalSql(sql)) {
+            injected = true;
+            // Real PostgreSQL 42703 aborts this transaction; this is not a mocked validation error.
+            try { await query(`SELECT "synthetic_private_patient_${patientId}"`); }
+            catch (error) { databaseError = error; throw error; }
+          }
+          return query(...args);
+        }) as typeof client.query;
+        client.release = ((destroy?: boolean | Error) => { client.query = query as typeof client.query; client.release = release; return release(destroy); }) as typeof client.release;
+        return client;
+      })();
+    }) as unknown as typeof pool.connect);
+    try {
+      const response = await portalStatement();
+      const raw = await response.text();
+      expect(injected).toBe(true);
+      expect(databaseError).toMatchObject({ code: "42703", message: expect.stringContaining(`synthetic_private_patient_${patientId}`) });
+      expect(databaseError).not.toBeInstanceOf(StatementHistoricalDetailsError);
+      expect(response.status).toBe(500);
+      expect(JSON.parse(raw)).toEqual({ message: "تعذّر تحميل كشف الحساب." });
+      expect(raw).not.toMatch(/synthetic_private|SELECT|patientId|historical|available|42703|column|stack/);
+      expect(issued[0]).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      expect(issued.at(-1)).toBe("ROLLBACK");
+      expect(issued).not.toContain("COMMIT");
+    } finally { spy.mockRestore(); gates.portalPatientId = 0; }
+    gates.portalPatientId = patientId;
+    try {
+      const recovered = await portalStatement();
+      expect(recovered.status).toBe(200);
+      expect(await recovered.json()).toEqual(healthy);
+    } finally { gates.portalPatientId = 0; }
+  });
+
   it("a malformed saved historical fact withholds only that section in the portal; the opted-in print fails closed", async () => {
     const patientId = await newPatient("portal malformed history");
     const document = await historical(patientId, { items: [{ serviceId: services.rct, price: "200000", toothCode: 45 }], discount: "0", paid: "50000" });

@@ -561,6 +561,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic portal fallback and SAR PDF evidence only. No session state,
+      # cookies, traces, database dump, or broad directory upload.
+      - name: Upload portal historical statement evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-historical-details-evidence
+          path: |
+            .settings-ui-artifacts/portal-historical-evidence/corrupt-history-390.png
+            .settings-ui-artifacts/portal-historical-evidence/corrupt-history-1280.png
+            .settings-ui-artifacts/portal-historical-evidence/database-error-response.json
+            .settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4.pdf
+            .settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4.txt
+            .settings-ui-artifacts/portal-historical-evidence/statement-historical-sar-a4-rendered.png
+            .settings-ui-artifacts/portal-historical-evidence/sar-pdf-evidence.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic clinical-note containment fixture is allowlisted.
       - name: Upload pending clinical notes UI screenshot
         if: always()
