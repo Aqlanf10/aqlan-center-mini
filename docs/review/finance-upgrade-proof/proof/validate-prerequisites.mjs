@@ -3,10 +3,11 @@
 // Also reports it on the already-upgraded synthetic database (partial-failure.mjs reports its own state).
 // Env: OLD_ROOT, ADMIN_DATABASE_URL, EVIDENCE.
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { runPrerequisites } from "./prereq.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { OLD_ROOT, ADMIN_DATABASE_URL, EVIDENCE } = process.env;
@@ -14,7 +15,6 @@ for (const [name, value] of Object.entries({ OLD_ROOT, ADMIN_DATABASE_URL, EVIDE
 const admin = new URL(ADMIN_DATABASE_URL);
 if (!["127.0.0.1", "localhost"].includes(admin.hostname)) throw new Error("refusing a non-local database: synthetic proof only");
 const urlFor = (db) => { const url = new URL(ADMIN_DATABASE_URL); url.pathname = `/${db}`; return url.toString(); };
-const SQL = readFileSync(path.join(here, "..", "prerequisites.sql"), "utf8");
 const BASE = "aqlan_prereq_base";
 
 const maintenance = new pg.Client({ connectionString: ADMIN_DATABASE_URL });
@@ -34,10 +34,10 @@ async function run(db, setup = []) {
   await client.connect();
   try {
     for (const statement of setup) await client.query(statement);
-    const results = await client.query(SQL);
-    const rows = [results].flat().find((r) => r.rows?.[0]?.check_id)?.rows ?? [];
-    const stillReadOnly = (await client.query("SHOW transaction_read_only")).rows[0].transaction_read_only;
-    return { rows, failing: rows.filter((r) => !r.ok).map((r) => r.check_id).sort(), afterwardsReadOnly: stillReadOnly };
+    const { rows, failing } = await runPrerequisites(client);
+    // The script ends in ROLLBACK: the session is back outside any transaction afterwards.
+    const [{ inTransaction }] = (await client.query("SELECT now() <> statement_timestamp() AS \"inTransaction\"")).rows;
+    return { rows, failing, inTransactionAfterwards: inTransaction };
   } finally { await client.end(); }
 }
 

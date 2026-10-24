@@ -31,6 +31,7 @@
     "has_0066": true,
     "has_0068": true,
     "has_0069": false,
+    "old_checks_dropped": false,
     "has_0067": false
   },
   "prerequisitesAfterFailure": [
@@ -61,6 +62,7 @@
     "0066",
     "0068"
   ],
+  "strayLocksAfterRetry": 0,
   "deployedReinit": {
     "status": 0,
     "error": null
@@ -100,8 +102,49 @@
     "0069"
   ],
   "objectsAfterRollForward": {
+    "has_0066": true,
+    "has_0068": true,
     "has_0069": true,
     "old_checks_dropped": true,
     "has_0067": true
-  }
+  },
+  "checks": [
+    {
+      "check": "candidate initialisation fails in 0069",
+      "ok": true
+    },
+    {
+      "check": "0066 and 0068 stay committed and registered after the 0069 failure (10 registrations)",
+      "ok": true
+    },
+    {
+      "check": "0066 and 0068 objects exist; 0069 and 0067 objects do not",
+      "ok": true
+    },
+    {
+      "check": "prerequisites.sql refuses the partial state and names the missing CHECK",
+      "ok": true
+    },
+    {
+      "check": "a retry fails the same way (fail closed)",
+      "ok": true
+    },
+    {
+      "check": "the retry leaves the partial registry and catalog byte-identical",
+      "ok": true
+    },
+    {
+      "check": "no lock is left held after the failed retry",
+      "ok": true
+    },
+    {
+      "check": "the deployed runtime re-initialises and its writers succeed on the partial state, registering nothing",
+      "ok": true
+    },
+    {
+      "check": "after the forward repair the candidate reaches exactly 12 registrations with 0069 and 0067 applied",
+      "ok": true
+    }
+  ],
+  "result": "PASS"
 }

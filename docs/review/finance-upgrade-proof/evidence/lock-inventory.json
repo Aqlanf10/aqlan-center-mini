@@ -1,9 +1,33 @@
 {
-  "note": "Synthetic-size timings; lock modes are exact. Not a Production performance claim.",
+  "note": "Synthetic-size timings; lock modes and blocking are exact. Not a Production performance claim.",
+  "lockTimeoutMs": 200,
+  "result": "PASS",
+  "checks": [
+    {
+      "check": "every blocked probe is recorded by the server as an ungranted request blocked by the migration backend",
+      "ok": true
+    },
+    {
+      "check": "every probe is bounded (lock_timeout 200 ms) and ends as proceeds or BLOCKED",
+      "ok": true
+    },
+    {
+      "check": "ROLLBACK of every file leaves the catalog exactly as before",
+      "ok": true
+    },
+    {
+      "check": "after ROLLBACK every reader and writer probe proceeds",
+      "ok": true
+    },
+    {
+      "check": "a clean rerun on a recreated database gives identical lock modes, probe outcomes and blocking records",
+      "ok": true
+    }
+  ],
   "files": [
     {
       "file": "0066_agreement_delta_amendments",
-      "syntheticMs": 14.1,
+      "syntheticMs": 15.4,
       "locksOnPreExistingTables": [
         {
           "target": "clinical_cases",
@@ -42,28 +66,159 @@
           "mode": "ShareRowExclusiveLock"
         }
       ],
-      "probes": {
+      "probesWhileOpen": {
+        "clinical_cases": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "invoice_items": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 203,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "invoices": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 2
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "parties": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "patients": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "plan_items": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 8
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "services": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "treatment_plans": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 4
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "users": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        }
+      },
+      "rollbackClean": true,
+      "probesAfterRollback": {
+        "clinical_cases": {
+          "read": "proceeds",
+          "write": "proceeds"
+        },
         "invoice_items": {
           "read": "proceeds",
-          "write": "BLOCKED"
+          "write": "proceeds"
         },
         "invoices": {
           "read": "proceeds",
-          "write": "BLOCKED"
+          "write": "proceeds"
+        },
+        "parties": {
+          "read": "proceeds",
+          "write": "proceeds"
         },
         "patients": {
           "read": "proceeds",
-          "write": "BLOCKED"
+          "write": "proceeds"
+        },
+        "plan_items": {
+          "read": "proceeds",
+          "write": "proceeds"
+        },
+        "services": {
+          "read": "proceeds",
+          "write": "proceeds"
         },
         "treatment_plans": {
           "read": "proceeds",
-          "write": "BLOCKED"
+          "write": "proceeds"
+        },
+        "users": {
+          "read": "proceeds",
+          "write": "proceeds"
         }
       }
     },
     {
       "file": "0068_collection_attempt_retirements",
-      "syntheticMs": 2.6,
+      "syntheticMs": 2.8,
       "locksOnPreExistingTables": [
         {
           "target": "agreement_delta_collection_receipts",
@@ -78,20 +233,63 @@
           "mode": "ShareRowExclusiveLock"
         }
       ],
-      "probes": {
+      "probesWhileOpen": {
+        "agreement_delta_collection_receipts": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "patients": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
+        "payments": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        }
+      },
+      "rollbackClean": true,
+      "probesAfterRollback": {
+        "agreement_delta_collection_receipts": {
+          "read": "proceeds",
+          "write": "proceeds"
+        },
         "patients": {
           "read": "proceeds",
-          "write": "BLOCKED"
+          "write": "proceeds"
         },
         "payments": {
           "read": "proceeds",
-          "write": "BLOCKED"
+          "write": "proceeds"
         }
       }
     },
     {
       "file": "0069_unpaid_currency_transitions",
-      "syntheticMs": 1.2,
+      "syntheticMs": 1.5,
       "locksOnPreExistingTables": [
         {
           "target": "invoice_settlement_reclassification_events",
@@ -106,28 +304,94 @@
           "mode": "ShareRowExclusiveLock"
         }
       ],
-      "probes": {
+      "probesWhileOpen": {
+        "invoice_settlement_reclassification_events": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        },
         "invoice_settlement_reclassifications": {
-          "read": "BLOCKED",
-          "write": "n/a"
+          "read": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "AccessShareLock",
+            "blockedByMigrationBackend": true
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        }
+      },
+      "rollbackClean": true,
+      "probesAfterRollback": {
+        "invoice_settlement_reclassification_events": {
+          "read": "proceeds",
+          "write": "proceeds"
+        },
+        "invoice_settlement_reclassifications": {
+          "read": "proceeds",
+          "write": "proceeds"
         }
       }
     },
     {
       "file": "0067_patient_appointment_history_index",
-      "syntheticMs": 1.3,
+      "syntheticMs": 3.7,
       "locksOnPreExistingTables": [
         {
           "target": "appointments",
           "mode": "ShareLock"
         }
       ],
-      "probes": {
+      "probesWhileOpen": {
+        "appointments": {
+          "read": {
+            "outcome": "proceeds",
+            "waitedMs": 1
+          },
+          "write": {
+            "outcome": "BLOCKED",
+            "waitedMs": 201,
+            "ungrantedRequest": "RowExclusiveLock",
+            "blockedByMigrationBackend": true
+          }
+        }
+      },
+      "rollbackClean": true,
+      "probesAfterRollback": {
         "appointments": {
           "read": "proceeds",
-          "write": "BLOCKED"
+          "write": "proceeds"
         }
       }
+    }
+  ],
+  "rerunSyntheticMs": [
+    {
+      "file": "0066_agreement_delta_amendments",
+      "syntheticMs": 14.8
+    },
+    {
+      "file": "0068_collection_attempt_retirements",
+      "syntheticMs": 3.2
+    },
+    {
+      "file": "0069_unpaid_currency_transitions",
+      "syntheticMs": 1.1
+    },
+    {
+      "file": "0067_patient_appointment_history_index",
+      "syntheticMs": 1.7
     }
   ]
 }

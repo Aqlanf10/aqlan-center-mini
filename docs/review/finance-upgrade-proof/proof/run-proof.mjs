@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { runPrerequisites } from "./prereq.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { OLD_ROOT, NEW_ROOT, ADMIN_DATABASE_URL, EVIDENCE } = process.env;
@@ -43,6 +44,7 @@ await maintenance.query(`CREATE DATABASE ${PROOF_DB}`);
 await maintenance.end();
 const db = new pg.Client({ connectionString: proofUrl.toString() });
 await db.connect();
+/** @param {string} sql @param {unknown[]} [values] @returns {Promise<any[]>} */
 const q = async (sql, values = []) => (await db.query(sql, values)).rows;
 const registrations = () => q("SELECT version, name, checksum, adopted, applied_at::text FROM schema_migrations ORDER BY version");
 
@@ -77,6 +79,19 @@ evidence.deployedInit = run("init.mjs", OLD_ROOT, "upgrade-proof-deployed");
 const deployedRegs = await registrations();
 check(JSON.stringify(deployedRegs.map((r) => r.version)) === JSON.stringify(EXPECTED_DEPLOYED), "deployed runtime registers exactly 0051/0052/0056/0057/0058/0063/0064/0065", deployedRegs.map((r) => r.version));
 check(deployedRegs.every((r) => r.adopted === false), "deployed registrations are applied, never adopted");
+// The starting point is the deployed schema exactly as the deployed runtime left it: nothing is normalised.
+const OLD_CHECKS = {
+  "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_source_currency_check": "CHECK ((source_currency = 'YER'::text))|validated=true",
+  "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_target_currency_check": "CHECK ((target_currency = 'SAR'::text))|validated=true",
+};
+const catalogDeployed = await catalog();
+check(Object.entries(OLD_CHECKS).every(([key, def]) => catalogDeployed[key] === def)
+    && !Object.keys(catalogDeployed).some((k) => k.endsWith(".invoice_settlement_reclassifications_direction_check")),
+  "unmodified deployed schema keeps its original validated YER/SAR CHECKs and has no direction CHECK",
+  Object.fromEntries(Object.keys(OLD_CHECKS).map((k) => [k, catalogDeployed[k] ?? null])));
+const prerequisitesDeployed = await runPrerequisites(db);
+check(prerequisitesDeployed.failing.length === 0, "prerequisites.sql passes on the deployed schema before fixtures (no candidate object exists)",
+  { rows: prerequisitesDeployed.rows.length, failing: prerequisitesDeployed.failing });
 
 // 2. Synthetic clinical/financial fixtures through the deployed runtime's writers; baseline readings.
 evidence.fixtures = run("fixtures.mjs", OLD_ROOT, "upgrade-proof-fixtures").fixtures;
@@ -86,12 +101,20 @@ for (const r of await q("SELECT table_name, column_name FROM information_schema.
   (columnsByTable[r.table_name] ??= []).push(r.column_name);
 }
 const catalogBefore = await catalog();
+const fixtureCatalogDiff = diff(catalogDeployed, catalogBefore);
+check(!fixtureCatalogDiff.added.length && !fixtureCatalogDiff.removed.length && !fixtureCatalogDiff.changed.length,
+  "fixtures write data only: the catalog is identical before and after them", fixtureCatalogDiff);
+const [legacy] = await q(`SELECT (SELECT count(*)::int FROM invoice_settlement_reclassifications WHERE source_currency='YER' AND target_currency='SAR') AS documents,
+  (SELECT count(*)::int FROM invoice_settlement_reclassification_events) AS events`);
+check(legacy.documents >= 1 && legacy.events >= 1 && (await runPrerequisites(db)).failing.length === 0,
+  "legacy YER→SAR reclassification fixtures exist under the original CHECKs, and prerequisites still pass", legacy);
 const digestsBefore = await tableDigests(columnsByTable);
 const nonEmpty = Object.entries(digestsBefore).filter(([, d]) => !d.startsWith("0:")).map(([t]) => t);
 evidence.nonEmptyTablesBefore = nonEmpty.length;
 
 // 3. Candidate initialisation, twice. (Lock modes are inventoried deterministically by lock-inventory.mjs.)
 const runs = [];
+const [{ now: candidateStartedAt }] = await q("SELECT clock_timestamp()::text AS now");
 for (const attempt of [1, 2]) {
   const init = run("init.mjs", NEW_ROOT, `upgrade-proof-candidate-${attempt}`);
   runs.push({ attempt, ...init, registrations: await registrations() });
@@ -107,6 +130,8 @@ const added = first.registrations.filter((r) => EXPECTED_ADDED.includes(r.versio
 check(added.every((r) => r.adopted === false), "0066/0067/0068/0069 are applied, never adopted");
 const order = [...added].sort((a, b) => a.applied_at.localeCompare(b.applied_at) || a.version.localeCompare(b.version)).map((r) => r.version);
 check(JSON.stringify(order) === JSON.stringify(["0066", "0068", "0069", "0067"]), "candidate startup applies 0066, 0068, 0069, then 0067", order);
+const [{ ok: appliedByCandidate }] = await q("SELECT bool_and(applied_at > $1::timestamptz) AS ok FROM schema_migrations WHERE version = ANY($2)", [candidateStartedAt, EXPECTED_ADDED]);
+check(appliedByCandidate === true, "0066/0067/0068/0069 (including 0069's constraint change) were applied only by the candidate's own initialisation", { candidateStartedAt });
 check(JSON.stringify(second.registrations) === JSON.stringify(first.registrations), "second candidate initialisation registers and re-applies nothing");
 const fileChecksums = run("checksums.mjs", NEW_ROOT, "upgrade-proof-checksums").checksums;
 check(added.every((r) => r.checksum === fileChecksums[r.version]), "added registrations carry the published file checksums", Object.fromEntries(added.map((r) => [r.version, r.checksum])));

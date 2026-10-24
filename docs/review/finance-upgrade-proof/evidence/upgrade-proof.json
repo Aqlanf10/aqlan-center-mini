@@ -1,6 +1,6 @@
 {
   "deployedRuntimeCommit": "f2b5eef97047994438729fe8a2da72e214cdf881",
-  "candidateCheckoutCommit": "c998b435306f8295a217e49f20080293c479c359",
+  "candidateCheckoutCommit": "b2a6d0f94da324afabf425d5f5e4050829ecbe22",
   "steps": [
     {
       "check": "deployed runtime registers exactly 0051/0052/0056/0057/0058/0063/0064/0065",
@@ -19,6 +19,39 @@
     {
       "check": "deployed registrations are applied, never adopted",
       "ok": true
+    },
+    {
+      "check": "unmodified deployed schema keeps its original validated YER/SAR CHECKs and has no direction CHECK",
+      "ok": true,
+      "detail": {
+        "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_source_currency_check": "CHECK ((source_currency = 'YER'::text))|validated=true",
+        "constraint:invoice_settlement_reclassifications.invoice_settlement_reclassifications_target_currency_check": "CHECK ((target_currency = 'SAR'::text))|validated=true"
+      }
+    },
+    {
+      "check": "prerequisites.sql passes on the deployed schema before fixtures (no candidate object exists)",
+      "ok": true,
+      "detail": {
+        "rows": 64,
+        "failing": []
+      }
+    },
+    {
+      "check": "fixtures write data only: the catalog is identical before and after them",
+      "ok": true,
+      "detail": {
+        "added": [],
+        "removed": [],
+        "changed": []
+      }
+    },
+    {
+      "check": "legacy YER→SAR reclassification fixtures exist under the original CHECKs, and prerequisites still pass",
+      "ok": true,
+      "detail": {
+        "documents": 1,
+        "events": 1
+      }
     },
     {
       "check": "exactly twelve registrations after the candidate",
@@ -55,6 +88,13 @@
         "0069",
         "0067"
       ]
+    },
+    {
+      "check": "0066/0067/0068/0069 (including 0069's constraint change) were applied only by the candidate's own initialisation",
+      "ok": true,
+      "detail": {
+        "candidateStartedAt": "2026-10-24 00:33:26.108897+00"
+      }
     },
     {
       "check": "second candidate initialisation registers and re-applies nothing",
@@ -122,8 +162,8 @@
     }
   ],
   "deployedInit": {
-    "ms": 476,
-    "wallMs": 1452
+    "ms": 469,
+    "wallMs": 1495
   },
   "fixtures": {
     "patients": 4,
@@ -222,8 +262,8 @@
   "candidateRuns": [
     {
       "attempt": 1,
-      "ms": 143,
-      "wallMs": 1187,
+      "ms": 164,
+      "wallMs": 1258,
       "registered": [
         "0051",
         "0052",
@@ -241,8 +281,8 @@
     },
     {
       "attempt": 2,
-      "ms": 100,
-      "wallMs": 1150,
+      "ms": 127,
+      "wallMs": 1126,
       "registered": [
         "0051",
         "0052",
@@ -580,8 +620,8 @@
     }
   },
   "deployedReinit": {
-    "ms": 122,
-    "wallMs": 1155
+    "ms": 99,
+    "wallMs": 1150
   },
   "deployedWritesAfterUpgrade": {
     "patients": 8,
@@ -595,5 +635,5 @@
     "audit": 18
   },
   "result": "PASS",
-  "digest": "01258174784092fc0eff82177c286b06f8acce28778663ecbf23ecbb2539b40b"
+  "digest": "a979072a48714092f46775ba0dd9ccabfb5ddd6cd59736322c42ecea4cf75c07"
 }

@@ -6,7 +6,9 @@
 
 None of these is closed by this document.
 
-1. **Recovery proof:** a verified backup of the target database, restored and checked somewhere other than Production, plus a measured restore time.
+1. **Recovery readiness:**
+   - the existing backup arrangement is verified, and a restore has been rehearsed somewhere other than Production, with a measured restore time;
+   - the owner deferred development of a backup *feature*. That does not disable existing backups, and it does not waive this gate.
 2. **Production schema compatibility:** `prerequisites.sql` returns every `ok = true` on the target, run by an authorized operator in the rollout window after writes stop (`prerequisite-spec.md`).
 3. **Migration-locking decision:** the release owner accepts the lock and duration profile below, or rejects it.
 
@@ -21,7 +23,9 @@ The schema initialises **lazily**. `/api/health` runs `SELECT 1` and deliberatel
 | 3 | 0069 | **ACCESS EXCLUSIVE** + SHARE ROW EXCLUSIVE on `invoice_settlement_reclassifications`; SHARE ROW EXCLUSIVE on `…_events` | **reads and writes block** on the reclassification table | the new CHECK's validation scan of `invoice_settlement_reclassifications` |
 | 4 | 0067 | SHARE on `appointments` (plain `CREATE INDEX`, inside the file's transaction) | reads proceed; **appointment writes block** | the index build over all of `appointments` |
 
-Synthetic durations were 18 ms, 3 ms, 1 ms and 1 ms. These are **not** Production estimates. The two data-dependent steps are 0069's scan, which is small for a table holding only currency-correction documents, and 0067's build. Both are sized from `estimate.*` in the prerequisite output.
+Every write and read marked as blocking was proven blocked by the server itself: the request shows as ungranted in `pg_locks`, and `pg_blocking_pids()` names the migration backend, within a bounded 200 ms `lock_timeout`. After `ROLLBACK` the catalog is unchanged and the same probes proceed. A clean rerun on a recreated database gives identical results (`lock-inventory.json`).
+
+Synthetic durations were about 15 ms, 3 ms, 2 ms and 4 ms. These are **not** Production estimates. The two data-dependent steps are 0069's scan, which is small for a table holding only currency-correction documents, and 0067's build. Both are sized from `estimate.*` in the prerequisite output.
 
 `CREATE INDEX CONCURRENTLY` is not available. It cannot run inside a transaction, and published migration files are not changed.
 
@@ -30,7 +34,7 @@ Synthetic durations were 18 ms, 3 ms, 1 ms and 1 ms. These are **not** Productio
 ## Window procedure
 
 1. **Announce a write-free window.** Reception, cashier and doctors stop entering data. The deployed service is scaled to **zero** instances, so nothing competes for locks.
-2. **[authorized operator] Take the backup** that the recovery gate requires, at this point. Restoring it loses only what happens after this moment, which in a write-free window should be nothing.
+2. **[authorized operator] Record the recovery point** for this moment from the verified backup arrangement (gate 1). This plan performs and authorizes no backup operation. The recovery point only bounds the data-loss window of the last-resort path below.
 3. **[authorized operator] Check for other sessions** with a count-only query that returns no query text. Example: `SELECT state, count(*) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() GROUP BY 1`. Proceed only with **0** other active or idle-in-transaction sessions.
 4. **[authorized operator] Run `prerequisites.sql`.** Proceed only if every row is `ok = true`. A false row stops the rollout before any change, and the deployed version is started again.
 5. **Start exactly one candidate instance.** Use a single replica. The advisory lock would serialize a second one, but that instance would sit waiting inside a request. Do not open public traffic yet.
@@ -59,21 +63,28 @@ So a partial failure must be detected at step 7. The process must not be left se
 | 0069 | 0066, 0068 | **proven**: re-initialises and writes succeed with registry 10 (`partial-failure.json`) |
 | 0067 | 0066, 0068, 0069 | **proven** as a superset: the deployed runtime re-initialises and writes succeed after all 12 (`upgrade-proof.json`). 0067 is only an index |
 
-**Response:**
+**Three distinct responses, in this order.** They are not interchangeable, and a database restore is not the default rollback.
 
+**A. Application rollback (first response; the database is untouched and nothing is lost).**
 1. Scale the candidate to zero.
-2. Start the deployed version again (one instance). It ignores the extra registrations, as proven.
-3. Keep the window write-free until a decision is made.
-4. Choose:
-   - **Roll forward** when the failure names a catalog precondition (one of the `prerequisite-spec.md` check IDs), and the committed files are in the proven-compatible table above.
-     - Fix that one precondition with a separately reviewed and authorized catalog statement.
-     - Then repeat steps 5 to 7.
-     - Proven synthetically for the missing target CHECK: re-adding it, then starting the candidate again, reached exactly 12 registrations with 0069 and 0067 applied (`partial-failure.json` → `registeredAfterRollForward`, `objectsAfterRollForward`).
-     - Re-adding a validated CHECK scans its table under ACCESS EXCLUSIVE, so it belongs in the same window.
-   - **Restore the step 2 backup** when any of these holds:
-     - the failure is not a named precondition;
-     - data integrity is in doubt;
-     - the committed state is outside the proven table.
+2. Start the deployed version again, as one instance. It ignores the extra registrations, as proven (table above).
+3. Keep the window write-free until the next decision.
+
+**B. Forward repair of the partially committed DDL** applies when the failure names a catalog precondition (one of the `prerequisite-spec.md` check IDs) and the committed files are in the proven-compatible table above.
+- Fix that one precondition with a separately reviewed and authorized catalog statement.
+- Then repeat steps 5 to 7.
+- Proven synthetically for the missing target CHECK:
+  - the failed retry leaves the partial registry and catalog byte-identical, and holds no lock afterwards;
+  - re-adding the CHECK, then starting the candidate again, reached exactly 12 registrations with 0069 and 0067 applied (`partial-failure.json`).
+- Re-adding a validated CHECK scans its table under ACCESS EXCLUSIVE, so it belongs in the same window.
+- If B is not possible, the system stays on A: the deployed version, against the partial schema.
+
+**C. Database restore (last resort, separately authorized; no restore is approved).**
+- It is considered only if A cannot run safely on the committed state, or if data integrity is in doubt.
+- It needs its own explicit authorization at the time.
+- **Before that authorization, the data-loss window must be disclosed:** restoring the recovery point from step 2 discards **every clinic transaction committed after it.** These include payments, invoices, appointments and clinical records entered after traffic reopened, if the failure was found late.
+- In a strictly write-free window that set should be empty, and it must be verified rather than assumed.
+
 5. **Never:**
    - drop the committed 0066 or 0068 objects by hand;
    - delete or edit `schema_migrations` rows;
