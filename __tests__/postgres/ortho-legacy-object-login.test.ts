@@ -417,3 +417,177 @@ describe("standalone collisions in the complete guard scope", () => {
     expect(await withClient(name, snapshot)).toEqual(before);
   });
 });
+
+// Separate supported-audit path: no global catalog locks or synthetic ledger.
+import emptyReference from "../../schema/ortho-empty51-reference.pg18.json";
+import { catalogHash, readRegistryCatalog, readReconciliationAuditCatalog } from "../../lib/ortho-reconciliation-catalog";
+import { EMPTY51_EVENT, EMPTY51_IDENTITY_SQL, reconcileEmpty51, type Empty51Approval } from "../../lib/ortho-empty51-reconciliation";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { gzipSync } from "node:zlib";
+import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
+import { fullBackupBlocks } from "../../lib/fullBackup";
+import { stagedRestore } from "../../lib/restore/staging";
+import { loadMigrationFiles } from "../../lib/migration-files";
+import { resetClinicData, backupSqlLines } from "../../lib/db";
+
+let emptyBase: string;
+async function emptyScenario(suffix: string) {
+  await resetPoolForTesting();
+  const name = `${base}_${suffix}`;
+  await createOwned(name, emptyBase);
+  const approval = await withClient(name, async client => ({
+    environment: "staging", endpoint: { host: "127.0.0.1", port: Number(new URL(target.testUrl).port), database: name, user: "ci" },
+    identity: (await client.query(EMPTY51_IDENTITY_SQL)).rows[0], reviewedReferenceDigest: catalogHash(emptyReference),
+    approvalId: "synthetic-review-001", actionId: randomUUID(),
+    window: { from: new Date(Date.now() - 1000).toISOString(), until: new Date(Date.now() + 15 * 60_000).toISOString(),
+      noApplicationOrDDLOrSequenceCallers: true, preserveAuditAndRegistry: true },
+  } as Empty51Approval));
+  return { name, approval };
+}
+describe("separate empty 0051 operator path", () => {
+  beforeAll(async () => {
+    emptyBase = `${base}_emptybase`;
+    await resetPoolForTesting(); await createOwned(emptyBase, "template0"); await selectDatabase(emptyBase);
+    auth.stopBeforeOrtho = true;
+    try { await expect(ensureSchema()).rejects.toThrow("SYNTHETIC_PRE_ORTHO_BOUNDARY"); }
+    finally { auth.stopBeforeOrtho = false; await resetPoolForTesting(); }
+    await withClient(emptyBase, async client => {
+      await client.query(STRATEGY.sql);
+      await client.query("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic operator login',$2,'admin')", [USERNAME, await hashPassword(PASSWORD)]);
+    });
+  });
+  it("defaults read-only, atomically records truthful equivalence and preserves sequence; normal init/login follows", async () => {
+    const { name, approval } = await emptyScenario("e51ok");
+    await withClient(name, async client => {
+      const before = await snapshot(client);
+      const sequence = (await client.query("SELECT last_value::text,is_called FROM ortho_strategy_revisions_id_seq")).rows;
+      expect(await reconcileEmpty51(client, approval, emptyReference)).toMatchObject({ event: "ortho_empty51_report", eligible: true });
+      expect(await snapshot(client)).toEqual(before);
+      expect(await reconcileEmpty51(client, approval, emptyReference, true)).toMatchObject({ event: "ortho_empty51_recorded", historicalExecutionVerified: false });
+      expect((await client.query("SELECT last_value::text,is_called FROM ortho_strategy_revisions_id_seq")).rows).toEqual(sequence);
+      const rows = (await client.query("SELECT details FROM audit_log WHERE action=$1", [EMPTY51_EVENT])).rows;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].details).toMatchObject({ format: 1, evidence_kind: "catalog_equivalence", historical_execution_verified: false, empty_row_count: 0, action_id: approval.actionId, source_target: approval.identity });
+      expect((await client.query("SELECT to_regclass('public.ortho_reconciliation_records') AS ledger")).rows[0].ledger).toBeNull();
+    });
+    await selectDatabase(name);
+    const response = await login(); expect(response.status).toBe(200); expect(auth.verifyCalls).toBe(1);
+    expect((await withClient(name, snapshot)).registry.map(row => row.version)).toEqual(reference.runtimeRegistry.map(row => row.version));
+  });
+  it.each(["target", "registry", "nonempty", "drift", "assessment", "history", "window", "sequence"])("refuses %s without registering or auditing", async defect => {
+    const { name, approval } = await emptyScenario(`e${defect}`);
+    await withClient(name, async client => {
+      if (defect === "target") approval.identity.oid = "0";
+      if (defect === "registry") await client.query("UPDATE schema_migrations SET checksum='wrong' WHERE version='0069'");
+      if (defect === "nonempty") {
+        await client.query("ALTER TABLE ortho_strategy_revisions DISABLE TRIGGER ALL");
+        await client.query("INSERT INTO ortho_strategy_revisions(patient_id,recorded_patient_id,ortho_case_id,clinical_case_id,version,actor_user_id,created_by,reason,recording_context,command_id,request_fingerprint,rows) VALUES(1,1,1,1,1,1,'synthetic','synthetic','current','synthetic_command_1234',repeat('a',64),'[{}]')");
+        await client.query("ALTER TABLE ortho_strategy_revisions ENABLE TRIGGER ALL");
+      }
+      if (defect === "drift") await client.query("ALTER TABLE ortho_strategy_revisions ADD COLUMN unexpected text");
+      if (defect === "assessment") await client.query("CREATE TABLE ortho_assessment_case_version_unique(id int)");
+      if (defect === "history") await client.query("CREATE TABLE appointments_patient_history_idx(id int)");
+      if (defect === "window") approval.window.until = new Date(0).toISOString();
+      if (defect === "sequence") await client.query("SELECT setval('ortho_strategy_revisions_id_seq',2147483647,true)");
+      await expect(reconcileEmpty51(client, approval, emptyReference, true)).rejects.toThrow(/ORTHO_RECONCILIATION_/);
+      expect((await client.query("SELECT count(*)::int n FROM schema_migrations WHERE version='0051'")).rows[0].n).toBe(0);
+      expect((await client.query("SELECT count(*)::int n FROM audit_log WHERE action=$1", [EMPTY51_EVENT])).rows[0].n).toBe(0);
+    });
+  });
+  it.each([false, true])("atomic rollback and uncertain commit (committed=%s)", async commit => {
+    const { name, approval } = await emptyScenario(commit ? "eack" : "erollback");
+    await withClient(name, async client => {
+      const wrapped = { query: async (sql: string, values?: unknown[]) => {
+        if (!commit && sql.startsWith("INSERT INTO public.schema_migrations")) throw new Error("synthetic write failure");
+        const result = await client.query(sql, values);
+        if (commit && sql === "COMMIT") throw new Error("synthetic acknowledgement lost");
+        return result;
+      } } as unknown as Client;
+      await expect(reconcileEmpty51(wrapped, approval, emptyReference, true)).rejects.toThrow(commit ? "ORTHO_RECONCILIATION_UNCERTAIN_COMMIT" : "synthetic write failure");
+      expect((await client.query("SELECT count(*)::int n FROM schema_migrations WHERE version='0051'")).rows[0].n).toBe(commit ? 1 : 0);
+      expect((await client.query("SELECT count(*)::int n FROM audit_log WHERE action=$1", [EMPTY51_EVENT])).rows[0].n).toBe(commit ? 1 : 0);
+    });
+  });
+  it("rejects action-time catalog drift and concurrent duplicate requests", async () => {
+    const { name, approval } = await emptyScenario("elate");
+    await withClient(name, async client => {
+      let changed = false;
+      const wrapped = { query: async (sql: string, values?: unknown[]) => {
+        const result = await client.query(sql, values);
+        if (!changed && sql.startsWith("LOCK TABLE public.ortho_strategy")) {
+          changed = true; await client.query("ALTER TABLE ortho_strategy_revisions ADD COLUMN unexpected text");
+        }
+        return result;
+      } } as unknown as Client;
+      await expect(reconcileEmpty51(wrapped, approval, emptyReference, true)).rejects.toThrow("ORTHO_RECONCILIATION_CATALOG");
+    });
+    const outcomes = await Promise.allSettled([withClient(name, client => reconcileEmpty51(client, approval, emptyReference, true)), withClient(name, client => reconcileEmpty51(client, approval, emptyReference, true))]);
+    expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter(result => result.status === "rejected")).toHaveLength(1);
+  });
+  it("uses ordinary locks with a non-superuser operator and explicitly reviewed ACLs", async () => {
+    const { name: referenceName } = await emptyScenario("eprivref");
+    const role = `ortho_operator_${randomUUID().replaceAll("-", "")}`;
+    const name = `${base}_eprivtarget`;
+    await admin.query(`CREATE ROLE "${role}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
+    const granted: string[] = [referenceName];
+    try {
+      const approvedReference = await withClient(referenceName, async client => {
+        await client.query(`GRANT SELECT,MAINTAIN ON public.schema_migrations,public.audit_log,public.ortho_strategy_revisions TO "${role}"`);
+        await client.query(`GRANT INSERT ON public.schema_migrations,public.audit_log TO "${role}"`);
+        await client.query(`GRANT SELECT ON SEQUENCE public.ortho_strategy_revisions_id_seq TO "${role}"`);
+        await client.query(`GRANT USAGE ON SEQUENCE public.audit_log_id_seq TO "${role}"`);
+        return { source: emptyReference.source, catalog: await readOrthoCatalog(client, "0051"),
+          registryCatalog: await readRegistryCatalog(client), auditCatalog: await readReconciliationAuditCatalog(client) };
+      });
+      // Reference and target are physically separate disposable databases.
+      await createOwned(name, referenceName); granted.push(name);
+      await withClient(name, async client => {
+        await client.query(`SET ROLE "${role}"`);
+        expect((await client.query("SELECT rolsuper FROM pg_roles WHERE rolname=current_user")).rows[0].rolsuper).toBe(false);
+        const approval: Empty51Approval = { environment: "staging", endpoint: { host: "127.0.0.1", port: Number(new URL(target.testUrl).port), database: name, user: role },
+          identity: (await client.query(EMPTY51_IDENTITY_SQL)).rows[0], reviewedReferenceDigest: catalogHash(approvedReference), approvalId: "synthetic-review-001", actionId: randomUUID(),
+          window: { from: new Date(Date.now()-1000).toISOString(), until: new Date(Date.now()+15*60_000).toISOString(), noApplicationOrDDLOrSequenceCallers: true, preserveAuditAndRegistry: true } };
+        expect(await reconcileEmpty51(client, approval, approvedReference, true)).toMatchObject({ event: "ortho_empty51_recorded" });
+        expect((await client.query("SELECT actor FROM audit_log WHERE action=$1", [EMPTY51_EVENT])).rows[0].actor).toBe(role);
+      });
+    } finally {
+      for (const database of granted) await withClient(database, async client => {
+        await client.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${role}"`);
+        await client.query(`REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM "${role}"`);
+      });
+      await admin.query(`DROP ROLE "${role}"`);
+    }
+  });
+  it("supported backup/restore/reset preserves the actual fixed event, but restores destination registry semantics", async () => {
+    const { name, approval } = await emptyScenario("eretention");
+    await withClient(name, client => reconcileEmpty51(client, approval, emptyReference, true));
+    await selectDatabase(name); await ensureSchema();
+    const fixture = await openBackupTimestampFixture(process.env);
+    const directory = await mkdtemp(join(tmpdir(), "ortho-empty51-retention-"));
+    const read = async (pool: { query(sql: string, values?: unknown[]): Promise<{ rows: Record<string, any>[] }> }) => (await pool.query("SELECT action,entity,entity_id,summary,details,actor,actor_role,extract(epoch from created_at)::text AS created_at FROM audit_log WHERE action=$1 ORDER BY id", [EMPTY51_EVENT])).rows;
+    try {
+      const original = await read(getPool());
+      const originalRegistry = (await getPool().query("SELECT * FROM schema_migrations ORDER BY version")).rows;
+      const source = await getPool().connect(); const blocks: Uint8Array[] = [];
+      try { for await (const block of fullBackupBlocks({ source, readDocument: async () => { throw new Error("Synthetic fixture has no documents"); } })) blocks.push(block); }
+      finally { source.release(); }
+      const archive = join(directory, "synthetic-proof.tar.gz"); await writeFile(archive, gzipSync(Buffer.concat(blocks)));
+      const restored = await stagedRestore({ archivePath: archive, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, "documents") });
+      expect(restored.ok).toBe(true);
+      expect(await read(fixture.archiveTarget)).toEqual(original);
+      const destinationRegistry = (await fixture.archiveTarget.query("SELECT * FROM schema_migrations ORDER BY version")).rows;
+      expect(destinationRegistry.map(({ version, name, checksum, adopted }) => ({ version, name, checksum, adopted }))).toEqual((await loadMigrationFiles()).map(({ version, name, checksum }) => ({ version, name, checksum, adopted: false })));
+      expect(destinationRegistry.find(row => row.version === "0051")).not.toEqual(originalRegistry.find(row => row.version === "0051"));
+      expect(original[0].details.source_target.database).toBe(name); // historical source evidence, not destination attestation
+      const reset = await resetClinicData({ actor: "synthetic-operator", actorRole: "admin" }, async client => {
+        let bytes = 0; for await (const line of backupSqlLines(client)) bytes += line.length;
+        expect(bytes).toBeGreaterThan(0); return { ok: true, backupId: "synthetic-empty51" };
+      });
+      expect(reset.ok).toBe(true); expect(await read(getPool())).toEqual(original);
+      expect((await getPool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(originalRegistry);
+    } finally { await fixture.close(); await rm(directory, { recursive: true, force: true }); }
+  });
+});

@@ -27,6 +27,10 @@ export async function readRegistryCatalog(client: Client) {
   return readCatalog(client, "schema_migrations", ["schema_migrations", "schema_migrations_pkey", "_schema_migrations"]);
 }
 
+export async function readReconciliationAuditCatalog(client: Client) {
+  return readCatalog(client, "audit_log", ["audit_log", "_audit_log", "audit_log_id_seq", "audit_log_is_append_only"]);
+}
+
 async function readCatalog(client: Client, table: string, names: string[]) {
   const { rows } = await client.query<{ section: string; identity: string; properties: unknown }>(`
     WITH rels AS (

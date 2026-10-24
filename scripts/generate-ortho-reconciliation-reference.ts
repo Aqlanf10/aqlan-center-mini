@@ -4,7 +4,7 @@ import { writeFile, readFile } from "node:fs/promises";
 import { Client } from "pg";
 import { ensureSchema, resetPoolForTesting } from "../lib/db";
 import { validateOwnershipHarnessEnvironment, assertPostgres18VersionNum } from "./verify-schema-ownership";
-import { catalogHash, readOrthoCatalog, readRegistryCatalog, ORTHO_REFERENCE_SOURCE, ORTHO_VERSIONS } from "../lib/ortho-reconciliation-catalog";
+import { catalogHash, readOrthoCatalog, readRegistryCatalog, readReconciliationAuditCatalog, ORTHO_REFERENCE_SOURCE, ORTHO_VERSIONS } from "../lib/ortho-reconciliation-catalog";
 import contracts from "../lib/ortho-assessment-runtime.generated.json";
 
 // This generator never connects to an operator target: only the guarded test
@@ -38,11 +38,13 @@ async function main() {
       await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
       const catalogs = Object.fromEntries(await Promise.all(ORTHO_VERSIONS.map(async version => [version, await readOrthoCatalog(client, version)])));
       const registryCatalog = await readRegistryCatalog(client);
+      const auditCatalog = await readReconciliationAuditCatalog(client);
       const runtimeRegistry = (await client.query("SELECT version,name,checksum,adopted FROM public.schema_migrations ORDER BY version")).rows;
       await client.query("ROLLBACK");
       const manifest = { format: 1, source: ORTHO_REFERENCE_SOURCE, postgresMajor: 18,
         contracts: contracts.map(({ version, checksum }) => ({ version, checksum })), catalogs, registryCatalog, runtimeRegistry, digest: catalogHash({ catalogs, registryCatalog, runtimeRegistry }) };
       await writeFile(new URL("../schema/ortho-reconciliation-reference.pg18.json", import.meta.url), JSON.stringify(manifest, null, 2) + "\n");
+      await writeFile(new URL("../schema/ortho-empty51-reference.pg18.json", import.meta.url), JSON.stringify({ source: ORTHO_REFERENCE_SOURCE, catalog: catalogs["0051"], registryCatalog, auditCatalog }, null, 2) + "\n");
       console.log(JSON.stringify({ event: "ortho_reference_generated", digest: manifest.digest }));
     } finally { await client.end(); }
   } finally {

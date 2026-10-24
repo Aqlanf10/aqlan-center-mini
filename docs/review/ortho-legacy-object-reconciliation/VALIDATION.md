@@ -23,3 +23,11 @@ npm run lint
 ```
 
 PostgreSQL commands use an explicit local `TEST_DATABASE_URL` accepted by the existing safe-target harness. Fixtures include the original post-initialization reproduction and a genuinely fresh pre-Ortho initialization boundary, empty and nonempty objects, partial/conflicting objects, catalog/ACL/owner/collation/dependency drift, invariant violations, concurrent reconciliation/runtime requests, rollback and lost-COMMIT-acknowledgement simulation, and real route login/initialization after reconciliation. No synthetic test is evidence that existing live objects are equivalent.
+
+## Separate empty-0051 path
+
+Development verification: 12 restricted-path PostgreSQL cases passed in one run, including the actual format-1 reconciliation event through supported full backup, staged restore and reset. Reset preserved the event and exact registry rows; restore preserved exact event fields/timestamp but created its own full migration registry (source registry inserts are filtered). A restored event remains source-bound evidence. No future retention or live policy is proved.
+
+38 focused units passed under Node 22.23.4. Typecheck and changed-file lint passed. Final expanded focused PostgreSQL verification additionally includes non-superuser ordinary-lock operation and absent-0067-object refusal; exact-head outcomes will be reported in Draft PR455. Earlier development runs used the environment's Node24 executable; final focused verification uses the repository's Node22 contract. No CI gate was weakened.
+
+The parent-supplied metadata supplement also passed offline: see [METADATA-QUERY-VALIDATION.md](METADATA-QUERY-VALIDATION.md). No cause for the generic live refusal was established, and no live retry was made.

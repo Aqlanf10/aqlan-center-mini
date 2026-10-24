@@ -66,3 +66,42 @@ Before approval, demonstrate with disposable synthetic data that the chosen even
 ## Evidence still required from root's separately authorized process
 
 Actual empty-state proof; full 0051 catalog/security/locale/dependency witness; absence of all 0052 collision objects; exact predecessor registry; precise Staging identity; usable existing permissions; maintenance/no-DDL/no-sequence-caller control; supported audit retention/round-trip proof; a current backup/recovery plan; independent approval of the final action and digests. None is inferred from health readiness, a matching captured table definition, or passing synthetic tests.
+
+## Separate empty-0051 implementation (review required)
+
+`lib/ortho-empty51-reconciliation.ts` and `scripts/db-ortho-empty51.ts` now implement the restricted path. They do not change the synthetic prototype or startup guards. The default transaction is READ ONLY and only reports eligibility. `--apply-empty-0051` explicitly enables the one transaction. It requires exactly the nine predecessor registrations, absent 0052 collision scope and absent 0067 registration, an exact empty 0051 contract, and a valid unexhausted sequence. It never calls nextval/setval/ALTER on that sequence. Full metadata, registry, emptiness, sequence and window checks run after ordinary relation locks and again after the audit/registry inserts, before COMMIT.
+
+The supported event is `schema.ortho_0051_catalog_reconciled`, format 1, entity `schema_migrations`, entity ID `0051`. Details say `evidence_kind=catalog_equivalence` and `historical_execution_verified=false`, and bind the source target identity, frozen source/checksum, approved reference digest, action/approval IDs, original sequence and maintenance window. Both the parameterized audit INSERT and exact registry INSERT (`adopted=false`) use the same connection and transaction. Applied time means reconciliation time. A COMMIT acknowledgement failure remains uncertain; there is no automatic retry. Review the pair by action ID and target identity before deciding any next operation.
+
+Required local files are selected explicitly by `ORTHO_EMPTY51_APPROVAL_FILE` and `ORTHO_EMPTY51_REFERENCE_FILE`. `ORTHO_EMPTY51_ENVIRONMENT=staging` is mandatory. `ORTHO_EMPTY51_URL` is a dedicated credential input, with no application URL fallback; do not put it in source or reports. The CLI binds exact hostname, port, database and role from the approval, rejects URL query options, and requires verified TLS (optional trusted CA file via `ORTHO_EMPTY51_CA_FILE`). It never disables certificate verification. The library is tested directly on disposable loopback PostgreSQL without involving a live endpoint.
+
+An approval file must satisfy exported `Empty51Approval`: environment `staging`; explicit endpoint; the full identity query result below; independently reviewed SHA256 of the reference JSON object (`catalogHash`, JSON serialization); opaque approval and unique action IDs (8–100 ASCII letters/digits/underscore/hyphen); and a currently valid window of at most 30 minutes with both `noApplicationOrDDLOrSequenceCallers:true` and `preserveAuditAndRegistry:true`. These are operational attestations requiring root review, not facts inferred by code. All app instances, workers, migrators, restores, resets, DDL actors and independent sequence callers must remain stopped for the complete operation. Keep audit/registry records and the reviewed files with the operator evidence. Expiry, missing metadata, changed identity, incompatible locale or unknown shape refuses the operation.
+
+The new reference generator output is `schema/ortho-empty51-reference.pg18.json`, containing 0051, registry and existing audit catalog contracts from a wholly separate fresh synthetic database. The checked-in output remains owner `ci` / `en_US.utf8`, and is not a live witness. A compatible isolated reference must be independently built and reviewed for the intended role, ACLs and locale. The module verifies pinned source structure separately, but its actual equivalence check compares **every** approved catalog property verbatim, including owners, ACLs, shared dependencies, schema security and locale. It does not replace live security with the synthetic defaults. Collation definitions are not normalized; incompatibility is a blocker requiring review, not a reason to loosen comparison. The approved digest must come from independent review of that isolated reference; never generate it by accepting target observations as expected output.
+
+Minimal identity query for root's separately authorized metadata collection (SELECT only):
+
+```sql
+SELECT current_database() AS database, d.oid::text,
+       pg_get_userbyid(d.datdba) AS owner, current_user AS role,
+       inet_server_addr()::text AS "serverAddress", inet_server_port() AS "serverPort",
+       current_setting('server_version_num') AS version
+FROM pg_catalog.pg_database d WHERE d.datname=current_database();
+SELECT encoding, datlocprovider, datcollate, datctype, datlocale, daticurules, datcollversion
+FROM pg_catalog.pg_database WHERE datname=current_database();
+SELECT nspname, pg_get_userbyid(nspowner) AS owner, nspacl
+FROM pg_catalog.pg_namespace WHERE nspname='public';
+SELECT c.relname, pg_get_userbyid(c.relowner) AS owner, c.relacl,
+       c.relrowsecurity, c.relforcerowsecurity
+FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+WHERE n.nspname='public' AND c.relname IN
+ ('ortho_strategy_revisions','ortho_strategy_revisions_id_seq','schema_migrations','audit_log','audit_log_id_seq');
+SELECT p.proname, pg_get_userbyid(p.proowner) AS owner, p.proacl
+FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+WHERE n.nspname='public' AND p.proname IN
+ ('reject_ortho_strategy_revision_mutation','check_ortho_strategy_revision_final_state','audit_log_is_append_only');
+```
+
+This supplement is not the full equivalence proof: the operator's read-only report compares all catalog sections. No target metadata or credentials are committed here. The endpoint allowlist and TLS identity supplement database OID/address evidence; neither database OID nor server IP alone is a globally unique identity.
+
+Retention limitation: `audit_log` UPDATE/DELETE guards do not block TRUNCATE. Catalog inspection cannot establish future retention. The required maintenance/retention operation must prohibit audit truncation and preserve the event and registry evidence. Supported reset keeps audit and registry; supported restore preserves the historical audit event but deliberately strips source registry INSERTs and initializes destination registry independently. A restored source event is never authority to reconcile the destination. No new audit framework or table is introduced.

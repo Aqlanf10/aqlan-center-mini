@@ -1,4 +1,4 @@
-# Explicit synthetic Ortho reconciliation and login diagnostics
+# Explicit Ortho reconciliation and login diagnostics
 
 This continuation starts at frozen candidate `c998b435306f8295a217e49f20080293c479c359`. The reproduction and design were imported from reviewed PR #454 head `1014a268afd0b477554c97f974b8961846cf69b8`; later changes to that PR are not incorporated. No changes to #451, published migrations, runtime/CLI guards, or health initialization.
 
@@ -9,6 +9,12 @@ An unregistered 0051/0052 object still blocks startup and login. Login now emits
 The separate operator tool defaults to a read-only transaction and read-only connection. It reports catalog observations without registering anything. `--apply-synthetic` enables an explicitly guarded, **synthetic-only prototype**. This is not authorization or a runbook for Staging/Production. No live connections, writes, release, deployment, or merge were performed.
 
 A successful synthetic reconciliation records **catalog equivalence**, not historical execution of the migration SQL. Existing rows and sequence values are not updated. Normal startup can then register an absent companion migration and 0067 through its unchanged code path.
+
+## Separate empty-0051 path
+
+`npm run db:ortho:empty51` is a distinct report-default entrypoint for the reviewed empty-0051 remedy. It requires an explicit Staging endpoint/identity allowlist, verified TLS, independently reviewed source-compatible owner/ACL/locale reference, and a bounded maintenance/retention attestation. Only `--apply-empty-0051` enables writes. Ordinary relation locks, exact nine-version predecessors, full 0052 absence, absent 0067 registry/index, global emptiness and unchanged sequence checks protect its narrow scope. It atomically inserts a truthful format-1 event in the **existing** `audit_log` and the exact 0051 registry row. It creates no ledger and changes no immutable migration or startup guard.
+
+See [STAGING-DESIGN.md](STAGING-DESIGN.md) for configuration, least-privilege requirements and maintenance limitations. The checked-in reference is synthetic, not a live witness. Implementation/testing does not establish live eligibility or authorize execution. Logging alone does not repair login; normal 0052/0067 initialization and root/owner Staging acceptance remain required after any separately approved reconciliation.
 
 ## Diagnostics
 
