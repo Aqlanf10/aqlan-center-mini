@@ -203,3 +203,12 @@ export function inventoryMovementForRead(movement: InventoryMovement, pricesAllo
     createdBy: movement.createdBy, createdAt: movement.createdAt, isReturn: movement.isReturn,
   };
 }
+
+/** Physical balance is not necessarily usable stock. Waste may retire released
+ * expired stock, but no usage kind can spend the held inspection reserve. */
+export function custodyUsageQuantity(
+  lot: { availableQuantity: string; wasteQuantity: string },
+  kind: "consumed" | "returned_to_store" | "approved_waste",
+): string {
+  return kind === "approved_waste" ? lot.wasteQuantity : lot.availableQuantity;
+}

@@ -45,7 +45,7 @@ function clinicalVisit(automaticTreatment: boolean) {
     id: visitId, patientId, patientName: "مريض ملاحظات تجريبي",
     ...makeNotes("Synthetic saved"), ...(automaticTreatment ? { treatmentDone: "" } : {}),
     doctorId, status: "open", signedAt: null, signedBy: null, invoiceId: null, addendum: null,
-    procedures: [procedure], totalMinor: 100, planItemsMatched: 0, planTitle: null, planWarning: null,
+    procedures: [procedure], totalMinor: 100, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: null, plannedVisit: null, previousVisit: null, latestDiagnosis: null, activeCases: [],
     outstanding: [{
       planItemId: 98206, serviceId: services[1].id, planTitle: "Synthetic plan", serviceName: services[1].name,

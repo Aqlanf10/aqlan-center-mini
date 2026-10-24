@@ -17,6 +17,7 @@ import { useSession } from "@/components/SessionProvider";
  */
 
 interface Plan {
+  approvedAgreement?: { available: boolean; deltaInvoiceIds?: number[] };
   debtSource?: "approved_agreement" | "invoice" | "classic_installments" | null;
   baseCurrency: Currency;
   invoiceFinancial?: {kind: string; message: string | null};
@@ -50,7 +51,7 @@ interface Plan {
 }
 
 function hasProvenDebt(plan: Plan): boolean {
-  return (plan.debtSource === "approved_agreement" || plan.debtSource === "invoice" || plan.debtSource === "classic_installments") && plan.invoiceFinancial?.kind !== "review_required";
+  return (plan.debtSource === "approved_agreement" || plan.debtSource === "invoice" || plan.debtSource === "classic_installments") && plan.invoiceFinancial?.kind !== "review_required" && plan.approvedAgreement?.available !== false;
 }
 function canRemind(plan: Plan): boolean {
   return hasProvenDebt(plan) && !plan.invoiceFinancial?.message && plan.status === "active" && (plan.progress.overdueMinor > 0 || plan.progress.nextDueAmountMinor > 0);
@@ -482,16 +483,16 @@ export default function PlansPage() {
                       <td className="py-3 px-3">
                         <div className="font-semibold text-slate-800">{plan.title}</div>
                         <div className="text-[11px] text-slate-500">
-                          {plan.progress.paidCount} من {plan.progress.count} أقساط مسددة
+                          {plan.approvedAgreement?.available === false ? "الرصيد الحالي غير متاح؛ راجع المصدر" : <>{plan.progress.paidCount} من {plan.progress.count} {plan.approvedAgreement?.deltaInvoiceIds?.length ? "أقساط الجدول الأصلي مسددة" : "أقساط مسددة"}</>}
                         </div>
                       </td>
 
                       {/* Due date */}
                       <td className="py-3 px-3">
                         <span className={`font-semibold ${overdue ? "text-red-700" : "text-slate-700"}`}>
-                          {friendlyDateLong(dueDate)}
+                          {plan.approvedAgreement?.available === false ? "غير متاح" : friendlyDateLong(dueDate)}
                         </span>
-                        {overdue && (
+                        {overdue && hasProvenDebt(plan) && (
                           <span className="block text-[10px] font-bold text-red-600">
                             مستحق الدفع
                           </span>
@@ -505,10 +506,10 @@ export default function PlansPage() {
                             overdue ? "text-red-700 text-sm" : "text-slate-800"
                           }`}
                         >
-                          {!hasProvenDebt(plan) ? "لا يوجد دين مثبت" : formatMoney(amount, plan.baseCurrency)}
+                          {plan.approvedAgreement?.available === false ? "الرصيد الحالي غير متاح" : !hasProvenDebt(plan) ? "لا يوجد دين مثبت" : formatMoney(amount, plan.baseCurrency)}
                         </div>
                         <div className="text-[10px] text-slate-400">
-                          {!hasProvenDebt(plan) ? "قيمة العرض ليست رصيدًا مستحقًا" : `باقٍ ${formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}`}
+                          {plan.approvedAgreement?.available === false ? "يلزم مراجعة مصدر الاتفاق" : !hasProvenDebt(plan) ? "قيمة العرض ليست رصيدًا مستحقًا" : `باقٍ ${formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}`}
                         </div>
                       </td>
 

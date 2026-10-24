@@ -1,13 +1,9 @@
 "use client";
 import {useEffect,useMemo,useRef,useState} from "react";
-import {formatMoney,parseAmount,toInputAmount,type Currency} from "@/lib/money";
+import {formatMoney,parseAmount,toInputAmount} from "@/lib/money";
 import {quoteAgreementAmendment} from "@/lib/agreement-amendment-quote";
-type View={
- planId:number;patientId:number;currency:Currency;itemId:number;caseId:number|null;quantity:number;
- oldServiceId:number;oldUnitMinor:number;previousAgreementMinor:number;
- recordedPaymentsMinor:number;recordedRefundsMinor:number;sourceHash:string;
- services:{id:number;name:string;category:string|null}[];
-};
+import {AGREEMENT_PREVIEW_UNAVAILABLE,agreementAmendmentPreviewMessage} from "@/lib/agreement-amendment-preview-message";
+import {isAgreementAmendmentPreview,type AgreementAmendmentPreview as View} from "@/lib/agreement-amendment-preview";
 const storageKey=(planId:number)=>`aqlan:agreement-amendment:pending:${planId}`;
 type Pending={key:string;body:string};
 const isPending=(value:unknown):value is Pending=>!!value&&typeof value==="object"
@@ -23,15 +19,21 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
   return()=>{active.current=false;};
  },[planId]);
  useEffect(()=>{if(!opened)return;let cancelled=false;
+   // Expire only the rendered preview, never an uncertain persisted command.
+   setView(null);setMessage(null);
    void (async()=>{try{
     const response=await fetch(`/api/plans/${planId}/agreement-amendment`,{cache:"no-store"});
     const value:unknown=await response.json();
     if(cancelled)return;
-    if(!response.ok||!value||typeof value!=="object"||!("planId" in value)
-      ||value.planId!==planId||!("sourceHash" in value)||typeof value.sourceHash!=="string")
+    if(response.redirected)throw Error("تعذّرت معاينة مصدر الاتفاق الآمن.");
+    if(!response.ok){
+      // A preview refusal describes this GET only, not any pending POST's outcome.
+      setMessage(agreementAmendmentPreviewMessage(response.status,value));return;
+    }
+    if(!isAgreementAmendmentPreview(value,planId))
       throw Error("تعذّرت معاينة مصدر الاتفاق الآمن.");
-    setView(value as View);setMessage(null);
-   }catch{if(!cancelled)setMessage("البيانات أو الهجرة المالية غير جاهزة؛ لا يمكن حفظ التعديل.");}})();
+    setView(value);setMessage(null);
+   }catch{if(!cancelled)setMessage(AGREEMENT_PREVIEW_UNAVAILABLE);}})();
    return()=>{cancelled=true;};
  },[planId,opened,previewVersion]);
  const proposal=useMemo(()=>{
@@ -133,7 +135,7 @@ export function AgreementAmendmentPanel({planId,onChanged}:{planId:number;onChan
   setPreviewVersion(v=>v+1);
  };
  return <section dir="rtl" className="mt-3 space-y-3 rounded-xl border border-amber-300 p-3" data-testid="agreement-amendment">
-  <button type="button" className="font-bold underline" onClick={()=>setOpened(!opened)}>ترقية خدمة الاتفاق بفرق مؤرخ</button>
+  <button type="button" className="font-bold underline" onClick={()=>{setView(null);setOpened(!opened);}}>ترقية خدمة الاتفاق بفرق مؤرخ</button>
   {opened?<div className="space-y-3">
    <p className="text-xs">التعديل للترقية الموجبة فقط. لن تُحرّر الفاتورة الأصلية أو السندات أو العمولة القديمة.</p>
    {view?<><dl className="grid grid-cols-2 gap-2">

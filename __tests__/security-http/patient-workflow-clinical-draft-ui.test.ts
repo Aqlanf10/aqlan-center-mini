@@ -38,7 +38,7 @@ const workflow = () => ({ patient,
 });
 const clinical = () => ({ id: visitId, patientId, patientName: patient.fullName, ...notes("Synthetic saved"), doctorId,
   status: "open", signedAt: null, signedBy: null, invoiceId: null, addendum: null,
-  procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+  procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
   ortho: null, plannedVisit: null, previousVisit, latestDiagnosis: null, activeCases: [],
   outstanding: [], billingCurrency: "YER", sessionPricing: [], labOrders: [],
 });

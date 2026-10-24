@@ -6,37 +6,41 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [feat/dot-combined-staging-20261024]
 
 permissions:
   contents: read
 
 concurrency:
-  group: finance-candidate-image-${{ github.event.pull_request.number }}
+  group: finance-candidate-image-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   image:
     if: >-
       github.repository == 'Aqlanf10/aqlan-center-mini' &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.repo.full_name == 'Aqlanf10/aqlan-center-mini' &&
-      (github.event.pull_request.head.ref == 'integration/finance-candidate-20261022' ||
-       github.event.pull_request.head.ref == 'feat/finance-synthetic-verification-20261023' ||
-       github.event.pull_request.head.ref == 'feat/finance-reviewed-composition-20261023' ||
-       github.event.pull_request.head.ref == 'feat/finance-completed-work-20261023')
+      ((github.event_name == 'push' && github.ref == 'refs/heads/feat/dot-combined-staging-20261024') ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.head.repo.full_name == 'Aqlanf10/aqlan-center-mini' &&
+        (github.event.pull_request.head.ref == 'integration/finance-candidate-20261022' ||
+         github.event.pull_request.head.ref == 'feat/finance-synthetic-verification-20261023' ||
+         github.event.pull_request.head.ref == 'feat/finance-reviewed-composition-20261023' ||
+         github.event.pull_request.head.ref == 'feat/finance-completed-work-20261023')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Verify exact candidate source
         id: source
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         shell: bash
         run: |
           set -euo pipefail

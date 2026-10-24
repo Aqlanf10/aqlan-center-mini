@@ -23,7 +23,7 @@ function clinicalVisit(ortho = true) {
   return {
     id: visitId, patientId, patientName: "مريض تقويم تجريبي", chiefComplaint: "", examination: "", diagnosis: "", treatmentDone: "", nextPlan: "",
     doctorId, status: "open", signedAt: null, signedBy: null, invoiceId: null, addendum: null,
-    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: ortho ? {
       caseId: 98314, appliance: "fixed_metal", phase: "aligning", slot: "022", upperWire: "014 NiTi", lowerWire: "012 NiTi",
       lastAdjustment: "2026-09-01", daysSinceLast: 28, lastDone: "تبديل سابق تجريبي", elastics: "none", elasticNote: null,

@@ -55,6 +55,7 @@ import {
   selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
   type ToothRowLike, type ToothSelection,
 } from "./dental/invoice-tooth-selection";
+import { selectManualLine } from "./invoice-manual-line";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { invoiceCatalogPrice, type InvoiceCatalogService } from "@/lib/invoice-catalog-price";
 import workspace from "./InvoiceWorkspace.module.css";
@@ -86,6 +87,8 @@ interface OpeningBalance {
   currency?: Currency;
 }
 interface PlanSummary {
+  currentAgreement?: { totalMinor: number; paidMinor: number; remainingMinor: number };
+  agreementReviewRequired?: boolean;
   id: number; title: string; status: "active" | "completed" | "cancelled";
   totalMinor: number; consented: boolean; baseCurrency?: Currency;
   /** (INV-LEGACY) خطة اتفاقٍ تاريخي — مالها في الرصيد السابق لا في الخطة. */
@@ -868,17 +871,17 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
                 </div>
                 <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
                   <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
-                    <p className="font-extrabold">{formatMoney(plan.totalMinor, plan.baseCurrency ?? base)}</p>
-                    <p className="text-[10px] text-slate-500">{plan.legacy ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : "قيمة العمل المتفق عليه (ليست رصيد الحساب)"}</p>
+                    <p className="font-extrabold">{formatMoney(plan.currentAgreement?.totalMinor ?? plan.totalMinor, plan.baseCurrency ?? base)}</p>
+                    <p className="text-[10px] text-slate-500">{plan.currentAgreement ? "إجمالي الاتفاق المالي الحالي" : plan.agreementReviewRequired ? "قيمة الخطة المسجلة؛ الرصيد الحالي غير متاح" : plan.legacy ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : "قيمة العمل المتفق عليه (ليست رصيد الحساب)"}</p>
                   </div>
-                  {plan.installments ? (
+                  {plan.currentAgreement || plan.installments ? (
                     <>
                       <div className="rounded-lg bg-emerald-50 px-1.5 py-1.5">
-                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.installments.paidMinor, plan.baseCurrency ?? base)}</p>
+                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.currentAgreement?.paidMinor ?? plan.installments!.paidMinor, plan.baseCurrency ?? base)}</p>
                         <p className="text-[10px] text-emerald-700">المسدّد</p>
                       </div>
                       <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
-                        <p className="font-extrabold">{formatMoney(plan.installments.remainingMinor, plan.baseCurrency ?? base)}</p>
+                        <p className="font-extrabold">{formatMoney(plan.currentAgreement?.remainingMinor ?? plan.installments!.remainingMinor, plan.baseCurrency ?? base)}</p>
                         <p className="text-[10px] text-slate-500">باقي الاتفاق (ليس المستحق الحالي)</p>
                       </div>
                     </>
@@ -911,7 +914,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
                   </p>
                 ) : null}
                 <p className="mt-1.5 text-[10px] leading-4 text-slate-400">
-                  {plan.legacy
+                  {plan.currentAgreement ? "التحصيل إيصال على الأصل المعتمد وفواتير فروق التعديل، دون إنشاء أصل الاتفاق مرة ثانية." : plan.agreementReviewRequired ? "الرصيد الحالي غير متاح؛ راجع مصدر الاتفاق قبل التحصيل." : plan.legacy
                     ? "متبقي الاتفاق التاريخي يُحصَّل من الرصيد السابق. البنود الأخرى تتبع فواتيرها المثبتة؛ لا تُحصَّل قيمة الخطة التاريخية كدفعة جديدة."
                     : plan.installments
                     ? "قبضُ القسط يُصدر فاتورة ودفعة تظهران في القائمتين أدناه."
@@ -1061,7 +1064,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
   );
 }
 
-type InvoiceRow = ToothRowLike & { doctorId: string; serviceId: string; description: string; price: string; quantity: string; priceReason: string };
+type InvoiceRow = ToothRowLike & { doctorId: string; serviceId: string; description: string; price: string; quantity: string; priceReason: string; manual?: boolean };
 const blankInvoiceRow = (key: string): InvoiceRow => ({
   key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
@@ -1580,14 +1583,17 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 value={row.serviceId ? Number(row.serviceId) : null}
                 onChange={(id, srv) => {
                   setRows((current) => replaceRowService(current, index, {
-                    serviceId: id ? String(id) : "", doctorId: "",
+                    serviceId: id ? String(id) : "", doctorId: "", manual: false, priceReason: "",
                     price: srv && invoiceOfferedPrice(srv, currency) !== null ? formatAmount(invoiceOfferedPrice(srv, currency)!, currency) : "",
-                    description: srv ? srv.name : current[index].description,
+                    // Clear catalogue-origin text before the empty choice loses its service identity.
+                    description: srv ? srv.name : current[index].serviceId ? "" : current[index].description,
                   }, invoiceToothMode(srv?.category)));
                 }}
                 base={currency}
                 catalogCurrency={currency}
                 allowManual={true}
+                manualSelected={row.manual === true}
+                onManualSelect={() => setRows((current) => selectManualLine(current, index))}
                 placeholder="— اختر الخدمة المصنفة أو بند يدوي —"
                 ariaLabel="الخدمة" compact
               />

@@ -320,6 +320,11 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
       ) : (
         <ul className="space-y-3">
           {visiblePlans.map((plan) => {
+            const approved = canSeeFinancial ? plan.approvedAgreement : null;
+            const approvalUnavailable = !!approved && (!approved.available || approved.currency !== plan.baseCurrency);
+            const currentFinancial = approved && !approvalUnavailable ? approved : null;
+            const amended = !!approved?.deltaInvoiceIds?.length;
+            const currentTotal = currentFinancial?.totalMinor ?? (plan.invoiceFinancial?.kind === "invoice_backed" ? plan.progress?.totalMinor : plan.totalMinor);
             const hasHistory = plan.items.some(hasLegacyHistory);
             const currentConsent = planConsentIsCurrent(plan);
             const coverageVerified = plan.items.filter(hasLegacyHistory).every(legacyCoverageIsLive);
@@ -342,21 +347,21 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
               {canSeeFinancial ? <ApprovedAgreementPanel planId={plan.id} totalMinor={plan.totalMinor} currency={plan.baseCurrency}
                 position={plan.approvedAgreement??null} canApprove={currentConsent&&plan.status==="active"&&["admin","reception"].includes(session?.role??"")} isAdmin={session?.role==="admin"} onChanged={load}/> : null}
-              <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
+              {approvalUnavailable ? <p data-testid="plan-amount-summary" role="status" className="mb-2 text-sm text-amber-800">الرصيد الحالي غير متاح؛ يلزم مراجعة مصدر الاتفاق.</p> : <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
-                  <p className="text-sm font-bold">{formatMoney(plan.totalMinor, plan.baseCurrency)}</p>
+                  <p className="text-sm font-bold">{currentTotal === undefined ? "غير متاح" : formatMoney(currentTotal, plan.baseCurrency)}</p>
                   <p className="text-[11px] text-slate-500">
-                    {hasHistory ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
+                    {currentFinancial ? "إجمالي الاتفاق الحالي" : plan.invoiceFinancial?.kind === "invoice_backed" ? "صافي الفواتير المرتبطة" : hasHistory ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
                   </p>
                 </div>
-                {(plan.installments.length > 0 || plan.approvedAgreement || plan.invoiceFinancial?.kind === "invoice_backed") && canSeeFinancial && plan.invoiceFinancial?.kind !== "review_required" && plan.progress ? (
+                {(plan.installments.length > 0 || plan.approvedAgreement || plan.invoiceFinancial?.kind === "invoice_backed") && canSeeFinancial && !approvalUnavailable && plan.invoiceFinancial?.kind !== "review_required" && plan.progress ? (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
-                      <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</p>
+                      <p className="text-sm font-extrabold text-emerald-800">{formatMoney(currentFinancial?.paidMinor ?? plan.progress.paidMinor, plan.baseCurrency)}</p>
                       <p className="text-[11px] text-emerald-700">المدفوع</p>
                     </div>
                     <div className="rounded-xl bg-slate-50 p-2">
-                      <p className="text-sm font-bold">{formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}</p>
+                      <p className="text-sm font-bold">{formatMoney(currentFinancial?.remainingMinor ?? plan.progress.remainingMinor, plan.baseCurrency)}</p>
                       <p className="text-[11px] text-slate-500">الباقي</p>
                     </div>
                   </>
@@ -372,7 +377,8 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                     </div>
                   </>
                 )}
-              </div>
+              </div>}
+              {amended && approved?.originalTotalMinor !== undefined ? <p data-testid="original-plan-agreement" className="mb-2 text-xs text-slate-500">قيمة الاتفاق الأصلي قبل التعديلات: {formatMoney(approved.originalTotalMinor, plan.baseCurrency)}. البنود الأصلية أدناه محفوظة كتاريخ، وليست وصفًا جديدًا للتعديل.</p> : null}
 
               {hasHistory ? (
                 <p role="status" data-testid="plan-legacy-progress-unknown" className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2 text-xs text-indigo-950">
@@ -381,14 +387,14 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </p>
               ) : null}
 
-              {(plan.installments.length > 0 || plan.approvedAgreement || plan.invoiceFinancial?.kind === "invoice_backed") && canSeeFinancial && plan.invoiceFinancial?.kind !== "review_required" && plan.progress ? (
+              {(plan.installments.length > 0 || plan.approvedAgreement || plan.invoiceFinancial?.kind === "invoice_backed") && canSeeFinancial && !approvalUnavailable && plan.invoiceFinancial?.kind !== "review_required" && plan.progress ? (
                 <>
                   <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                     <div className="h-full bg-emerald-500"
-                      style={{ width: `${Math.min(100, Math.round((plan.progress.paidMinor / Math.max(1, plan.totalMinor)) * 100))}%` }} />
+                      style={{ width: `${Math.min(100, Math.round(((currentFinancial?.paidMinor ?? plan.progress.paidMinor) / Math.max(1, currentFinancial?.totalMinor ?? plan.progress.totalMinor)) * 100))}%` }} />
                   </div>
                   <p className="mb-2 text-[11px] text-slate-500">
-                    {plan.progress.paidCount} من {plan.progress.count} أقساط
+                    {plan.progress.paidCount} من {plan.progress.count} {amended ? "أقساط الجدول الأصلي" : "أقساط"}
                     {plan.progress.nextDueDate ? ` · القادم ${friendlyDateLong(plan.progress.nextDueDate)}` : ""}
                     {" · "}
                     <a href={`?tab=account`}
@@ -399,13 +405,13 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </>
               ) : null}
 
-              {canSeeFinancial && plan.invoiceFinancial?.kind !== "review_required" && plan.progress && plan.progress.overdueMinor > 0 ? (
+              {canSeeFinancial && !approvalUnavailable && plan.invoiceFinancial?.kind !== "review_required" && plan.progress && plan.progress.overdueMinor > 0 ? (
                 <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">
-                  متأخر: {formatMoney(plan.progress.overdueMinor, plan.baseCurrency)}
+                  {amended ? "متأخر من الجدول الأصلي: " : "متأخر: "}{formatMoney(plan.progress.overdueMinor, plan.baseCurrency)}
                 </p>
               ) : null}
 
-              {!plan.invoiceFinancial && (!hasHistory || plan.approvedAgreement) && canSeeFinancial && plan.progress && (plan.status === "active" || plan.status === "completed" && plan.approvedAgreement) && (plan.installments.length > 0 || plan.approvedAgreement) ? (
+              {!approvalUnavailable && !plan.invoiceFinancial && (!hasHistory || plan.approvedAgreement) && canSeeFinancial && plan.progress && (plan.status === "active" || plan.status === "completed" && plan.approvedAgreement) && (plan.installments.length > 0 || plan.approvedAgreement) ? (
                 payFor === plan.id ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex flex-wrap gap-2">
@@ -518,9 +524,9 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </div>
               ) : null}
 
-              {canSeeFinancial && plan.invoiceFinancial?.kind !== "review_required" && plan.progress && plan.installments.length > 0 ? (
+              {canSeeFinancial && !approvalUnavailable && plan.invoiceFinancial?.kind !== "review_required" && plan.progress && plan.installments.length > 0 ? (
               <details className="mt-2">
-                <summary className="cursor-pointer text-[11px] font-bold text-slate-500">جدول الأقساط</summary>
+                <summary className="cursor-pointer text-[11px] font-bold text-slate-500">{amended ? "جدول الأقساط الأصلي" : "جدول الأقساط"}</summary>
                 <ul className="mt-2 space-y-1">
                   {plan.installments.map((installment) => (
                     <li key={installment.id} className="flex justify-between gap-2 text-xs">

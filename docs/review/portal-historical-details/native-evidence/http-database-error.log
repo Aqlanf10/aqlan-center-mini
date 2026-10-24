@@ -1,0 +1,20 @@
+Waiting for shared build/HTTP slot: PR 458 (http)
+waiting for server to start.... done
+server started
+Running PR 458 (http), Node v22.23.3, synthetic PG port 55458, HTTP port 3458
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/portal-statement-historical-ui.test.ts -t a real database error
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.12 [39m[90m/workspace/scratch/cf319c8268ad/internal-finance-20261024/pr458[39m
+
+[security-http] الخادم جاهز على http://127.0.0.1:3458 — قاعدة aqlan_sec_http معزولة
+ [32m✓[39m __tests__/security-http/portal-statement-historical-ui.test.ts [2m([22m[2m8 tests[22m[2m | [22m[33m7 skipped[39m[2m)[22m[33m 847[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m1 passed[39m[22m[2m | [22m[33m7 skipped[39m[90m (8)[39m
+[2m   Start at [22m 18:37:13
+[2m   Duration [22m 4.39s[2m (transform 38ms, setup 0ms, import 369ms, tests 847ms, environment 0ms)[22m
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

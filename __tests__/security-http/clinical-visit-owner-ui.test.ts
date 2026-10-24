@@ -45,7 +45,7 @@ const clinicalVisit = (id: number) => ({
   ...notes(`Synthetic saved ${ownerName(id)}`), doctorId,
   status: "open", signedAt: null, signedBy: null, invoiceId: null, addendum: null,
   procedures: [procedure(id)], totalMinor: id === visitA ? 100 : 400,
-  planItemsMatched: 0, planTitle: null, planWarning: null, ortho: null,
+  planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false, ortho: null,
   plannedVisit: null, previousVisit: null, latestDiagnosis: null, activeCases: [],
   outstanding: [], billingCurrency: "YER", sessionPricing: [], labOrders: [],
 });

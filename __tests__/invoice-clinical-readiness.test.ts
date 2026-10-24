@@ -2,12 +2,20 @@ import { describe, expect, it } from "vitest";
 import { hasUnresolvedClinicalFinance, hasVerifiedClinicalCoverage, plannedItemBlock, visitSignatureBlock, type SignatureEvidence } from "../components/invoice-clinical-readiness";
 
 const evidence = (): SignatureEvidence => ({
+  amendedServiceConflict: false,
   procedures: [{ id: 9, planItemId: 5 }],
   outstanding: [{ planItemId: 5, origin: "invoice", financialReviewRequired: false, clinicalConsentRecorded: true }],
   sessionPricing: [{ procedureId: 9, planItemId: 5, financialReviewRequired: false, clinicalConsentRecorded: true }],
 });
 
 describe("invoice clinical draft versus signature boundary", () => {
+  it("blocks amended identities and missing or malformed amendment evidence without claiming zero due", () => {
+    expect(visitSignatureBlock({ ...evidence(), amendedServiceConflict: true })).toContain("ربط الخدمة المعدلة سريريًا غير مدعوم");
+    for (const value of [undefined, null, "false", 0]) {
+      expect(visitSignatureBlock({ ...evidence(), amendedServiceConflict: value as unknown as boolean })).toContain("تعذّر التحقق من تعديلات الاتفاق المالي");
+    }
+    expect(visitSignatureBlock(evidence())).toBeNull();
+  });
   it("keeps the unresolved warning explicit that truthful draft care can be recorded", () => {
     expect(plannedItemBlock({ planItemId: 5, financialReviewRequired: true })).toContain("يمكن توثيق العمل كمسودة");
     expect(plannedItemBlock({ planItemId: 5, origin: "invoice", financialReviewRequired: false,

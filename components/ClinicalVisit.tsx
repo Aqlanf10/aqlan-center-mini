@@ -94,6 +94,7 @@ interface Visit {
   invoiceReferenceState?: import("@/lib/visit-financial-presentation").VisitInvoiceReferenceState;
   procedures: ProcedureLine[]; totalMinor: number;
   planItemsMatched: number; planTitle: string | null; planWarning: string | null;
+  amendedServiceConflict: boolean;
   ortho: {
     caseId: number; appliance: string; phase: string; slot: string;
     upperWire: string | null; lowerWire: string | null;

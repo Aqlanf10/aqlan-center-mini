@@ -31,6 +31,7 @@ import type { Invoice, OpeningBalance, Payment, TreatmentPlan } from "../lib/db"
 import { ledgerBalancesByCurrency } from "../lib/db";
 import { formatMoney } from "../lib/money";
 import { portalStatementView } from "../lib/portal-statement";
+import { historicalOpeningBuckets, type HistoricalStatementAgreement } from "../lib/statement-historical-details";
 import { statementPaymentLabel as printLabel } from "../app/print/statement/[id]/presentation";
 
 const INTERNAL = ["STAFF-USERNAME-SECRET", "INTERNAL-RECEIPT-NOTE", "INTERNAL-INVOICE-NOTE", "INTERNAL-OPENING-NOTE",
@@ -123,7 +124,7 @@ describe("portal statement is the printed statement, without internal data", () 
     const body = await (await GET()).text();
     for (const secret of INTERNAL) expect(body).not.toContain(secret);
     const feed = JSON.parse(body);
-    expect(Object.keys(feed).sort()).toEqual(["agreements", "balances", "baseCurrency", "invoices", "openings", "payments"]);
+    expect(Object.keys(feed).sort()).toEqual(["agreements", "balances", "baseCurrency", "historical", "invoices", "openings", "payments"]);
     for (const row of feed.invoices) expect(Object.keys(row).sort()).toEqual(
       ["baseCurrency", "createdAt", "discountMinor", "invoiceNumber", "items", "netMinor", "status", "totalMinor"]);
     // Treatment lines carry only what the print shows: no line, service, doctor or lineage ids.
@@ -208,8 +209,49 @@ describe("portal statement is the printed statement, without internal data", () 
     const balances = ledgerBalancesByCurrency(17, source, new Map());
     const agreements = plans();
     const plansBefore = structuredClone(agreements);
-    portalStatementView(source, balances, "YER", agreements);
+    portalStatementView(source, balances, "YER", agreements, []);
     expect(agreements).toEqual(plansBefore);
     expect(source).toEqual(before);
   });
+});
+
+it.each([true, false])("keeps current amended agreement tuple identical in portal and print when available=%s", async available => {
+  const source = ledger();mocks.patientLedger.mockResolvedValue(source);
+  const p = { ...plans()[0], totalMinor: 500000, baseCurrency: "YER" as const,
+    progress: { ...plans()[0].progress, totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000 },
+    approvedAgreement: { planId: 41, currency: "YER" as const, totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000, dueNowMinor: 620000, invoiceId: 5, openingCurrency: null, sourceKind: "invoice" as const, available, originalTotalMinor: 500000, deltaInvoiceIds: [6] } };
+  mocks.listPatientPlans.mockResolvedValue([p]);
+  const feed = await (await GET()).json();
+  const html = renderToStaticMarkup(await StatementPage({ params: Promise.resolve({ id: "17" }) }));
+  if (available) {
+    expect(feed.agreements).toEqual([{ title: p.title, currency: "YER", totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000 }]);
+    expect(html).toContain(formatMoney(800000, "YER"));expect(html).toContain(formatMoney(620000, "YER"));
+    expect(html).not.toContain(formatMoney(500000, "YER"));
+  } else { expect(feed.agreements).toEqual([]);expect(feed.agreementsRequireReview).toBe(true);expect(html).toContain("غير متاحة وتحتاج مراجعة مصدرها");expect(html).not.toContain(formatMoney(620000, "YER")); }
+  expect(html).not.toContain(formatMoney(320000, "YER"));
+  // Cross-feature composition: #463 historical allowlisting and #469 current approved balance must
+  // coexist. A bad historical section cannot erase valid current debt; unavailable current debt
+  // cannot invent a classic balance or suppress valid historical facts. Neither changes the ledger.
+  const historical: HistoricalStatementAgreement = {
+    kind: "document", id: 94941, version: 7, currency: "YER", historicalAsOf: "2025-01-01",
+    lines: [{ description: "SYN-HISTORICAL-LINE", site: "36", quantity: 1, unitPriceMinor: 4000, discountMinor: 0, netMinor: 4000 }],
+    grossMinor: 4000, discountMinor: 0, agreedMinor: 4000, previouslyPaidMinor: 1500, remainingMinor: 2500,
+  };
+  const balances = ledgerBalancesByCurrency(17, source, new Map());
+  const before = structuredClone({ source, p, historical, balances });
+  for (const buckets of [historicalOpeningBuckets([historical], source.openings, source.payments), null]) {
+    const combined = portalStatementView(source, balances, "YER", [p], buckets);
+    expect(combined.agreements).toEqual(feed.agreements);
+    expect(combined.agreementsRequireReview).toBe(available ? undefined : true);
+    expect(combined.balances).toEqual(balances);
+    expect(combined.invoices).toEqual(feed.invoices);
+    expect(combined.payments).toEqual(feed.payments);
+    if (buckets === null) expect(combined.historical).toEqual({ available: false });
+    else {
+      expect(combined.historical).toEqual({ available: true, agreements: [{ historicalAsOf: "2025-01-01", currency: "YER", lines: historical.lines,
+        grossMinor: 4000, discountMinor: 0, agreedMinor: 4000, previouslyPaidMinor: 1500, remainingMinor: 2500 }], undetailed: [] });
+      expect(JSON.stringify(combined.historical)).not.toMatch(/94941|"version"|"kind"|"id"/);
+    }
+  }
+  expect({ source, p, historical, balances }).toEqual(before);
 });

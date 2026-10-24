@@ -13,3 +13,15 @@ it.each([false,true])('prints current rows only when schedule requiresReview=%s'
  if(requiresReview){expect(html).toContain('يحتاج جدول السداد إلى مراجعة');expect(html).not.toContain('123.45');}
  else expect(html).toContain('123.45');
 });
+it('prints current approved amounts and the stored original principal, never a mismatched clinical subtotal',async()=>{
+ mock.plan.mockResolvedValue({id:6,patientName:'Synthetic',patientPhone:null,title:'Synthetic amended',baseCurrency:'YER',items:[],
+   totalMinor:550000,startDate:'2026-10-01',note:null,installments:[],paidMinor:180000,
+   progress:{totalMinor:800000,paidMinor:180000,remainingMinor:620000},
+   approvedAgreement:{available:true,planId:6,currency:'YER',totalMinor:800000,originalTotalMinor:500000,originalPaidMinor:180000,
+     paidMinor:180000,remainingMinor:620000,dueNowMinor:620000,invoiceId:5,deltaInvoiceIds:[6]}});
+ const html=renderToStaticMarkup(await Page({params:Promise.resolve({id:'6'})}));
+ expect(html).toContain('800,000');expect(html).toContain('620,000');
+ expect(html).toContain('قيمة الاتفاق الأصلي قبل التعديلات: 500,000');
+ expect(html).not.toContain('550,000');expect(html).not.toContain('320,000');
+ expect(html).toContain('فواتير فروق التعديل: #6');
+});

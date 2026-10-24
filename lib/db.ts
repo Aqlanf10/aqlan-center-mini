@@ -1,3 +1,4 @@
+import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
@@ -10859,7 +10860,7 @@ export { MINOR_UNITS };
 
 import type { ExpenseCategory, PartyKind } from "./expenses";
 import { partyStatementTotals, type PartyCurrencyTotals } from "./party-statement";
-import { readStatementHistoricalAgreements } from "./statement-historical-details";
+import { readStatementHistoricalAgreements, StatementHistoricalDetailsError, type HistoricalStatementAgreement } from "./statement-historical-details";
 
 export interface Party {
   id: number;
@@ -16747,6 +16748,8 @@ export interface ClinicalVisit {
   planTitle: string | null;
   /** تحذير فوترةٍ مزدوجة إن كانت البنود المطابِقة على خطة أقساط. */
   planWarning: string | null;
+  /** Server-derived signing gate; never a claim that the amended service is clinically linked. */
+  amendedServiceConflict: boolean;
   /** حالة التقويم المفتوحة إن كان المريض مريض تقويم. */
   ortho: VisitOrtho | null;
   /** ── الرحلة V2 ── */
@@ -16968,6 +16971,7 @@ export async function getClinicalVisit(
     planItemsMatched: plan.matched,
     planTitle: plan.title,
     planWarning: plan.warning,
+    amendedServiceConflict: plan.amendedServiceConflict,
     ortho,
     plannedVisit: workflow.plannedVisit,
     previousVisit: workflow.previousVisit,
@@ -17160,9 +17164,9 @@ async function unlinkedPlanSessionConflicts(
   db: DbClient | DbPool,
   patientId: number | null,
   procedures: readonly ProcedureLine[],
-): Promise<string[]> {
+): Promise<{ messages: string[]; amendedService: boolean }> {
   const unlinked = procedures.filter((line) => line.planItemId === null);
-  if (!patientId || unlinked.length === 0) return [];
+  if (!patientId || unlinked.length === 0) return { messages: [], amendedService: false };
   // Agreement coverage belongs to the plan, not an invoice item. Preserve it
   // even after completion; same-service work needs an explicit separate identity.
   // Project both current and immutable identities so later same-service matching retains drifted history.
@@ -17192,13 +17196,70 @@ async function unlinkedPlanSessionConflicts(
       ORDER BY i.id`,
     [patientId],
   );
-  return unlinkedSessionConflicts(
+  // An amendment preserves the original clinical item. Its new service is an
+  // additional protected financial identity, never permission to substitute it.
+  // Keep immutable patient ownership even if mutable source lineage has drifted.
+  // Runtime schema requires 0066. Missing or unreadable history is an error,
+  // never evidence that an unlinked procedure is safe to bill.
+  const amended = (await db.query<{
+    id: number; service_id: number; service_name: string; lineage_valid: boolean;
+    has_legacy_lineage: boolean; legacy_context: unknown;
+  }>(
+    `SELECT e.plan_item_id AS id, e.new_service_id AS service_id,
+       COALESCE(label.description, 'تعديل اتفاق العلاج #' || e.id::text) AS service_name,
+       ${PLAN_ITEM_LEGACY_LINEAGE_SQL} AS has_legacy_lineage,
+       CASE WHEN EXISTS (SELECT 1 FROM legacy_treatment_agreements anchor
+         WHERE anchor.plan_item_id = e.plan_item_id AND i.plan_id = e.plan_id
+           AND anchor.patient_id = e.patient_id AND anchor.service_id = i.service_id
+           AND anchor.case_id IS NOT DISTINCT FROM e.case_id)
+         THEN ${PLAN_ITEM_LEGACY_CONTEXT_SQL} ELSE NULL END AS legacy_context,
+       COALESCE(i.plan_id = e.plan_id AND t.patient_id = e.patient_id
+         AND i.case_id IS NOT DISTINCT FROM e.case_id
+         AND (e.case_id IS NULL OR c.id IS NOT NULL)
+         AND a.patient_id = e.patient_id AND a.invoice_id = e.original_invoice_id
+         AND original.patient_id = e.patient_id AND original.base_currency = a.currency
+         AND delta.patient_id = e.patient_id AND delta.base_currency = a.currency
+         AND delta.total_minor - delta.discount_minor = e.delta_minor, FALSE) AS lineage_valid
+     FROM agreement_delta_amendments e
+     LEFT JOIN plan_items i ON i.id = e.plan_item_id
+     LEFT JOIN treatment_plans t ON t.id = e.plan_id
+     LEFT JOIN clinical_cases c ON c.id = e.case_id AND c.patient_id = e.patient_id
+     LEFT JOIN approved_agreement_principals a ON a.plan_id = e.plan_id
+     LEFT JOIN invoices original ON original.id = e.original_invoice_id
+     LEFT JOIN invoices delta ON delta.id = e.delta_invoice_id
+     LEFT JOIN LATERAL (
+       SELECT min(ii.description) AS description FROM invoice_items ii
+       WHERE ii.invoice_id = e.delta_invoice_id AND ii.service_id = e.new_service_id
+       HAVING count(*) = 1
+     ) label ON TRUE
+     WHERE e.patient_id = $1 AND e.new_service_id = ANY($2::int[])
+     ORDER BY e.id`,
+    [patientId, [...new Set(unlinked.map(line => line.serviceId))]],
+  )).rows;
+  // Price-only amendments retain the normal original-service warning. Do not
+  // call clinical linkage unsupported when no service identity changed.
+  const amendedItems = amended.filter(row => !row.lineage_valid || !rows.some(current =>
+    current.id === row.id && current.service_id === row.service_id)).map(row => ({
+    id: row.id, serviceId: row.service_id, serviceName: row.service_name,
+    // Ordinary amendments store no immutable site. Current item/case agreement
+    // cannot establish historical disjointness, even if both labels still agree.
+    // Only source-bound immutable legacy coverage may narrow the existing
+    // unknown-scope review rule; never guess or backfill historical geometry.
+    toothCode: null, caseSite: null,
+    hasLegacyLineage: row.has_legacy_lineage, legacyCoverage: legacyCoverageStateFromContext(row.legacy_context),
+    status: "planned", sessionCount: 1, doneSessions: 0, hasInvoiceLineage: true,
+    amendedService: true,
+  }));
+  const unlinkedKeys = unlinked.map(line => ({ serviceId: line.serviceId, toothCode: line.toothCode }));
+  const messages = unlinkedSessionConflicts(
     rows.map((row) => ({
       id: row.id, serviceId: row.service_id, toothCode: row.tooth_code, serviceName: row.service_name,
       status: row.status, billingStatus: row.financial_review ? "needs_financial_review" : row.billing_status, hasInvoiceLineage: row.has_invoice_lineage, fundedByAgreement: row.funded_by_agreement, hasLegacyLineage: row.has_legacy_lineage, legacyCoverage: legacyCoverageStateFromContext(row.legacy_context), caseSite: row.case_site, sessionCount: row.session_count, doneSessions: Number(row.done_sessions),
     })),
     unlinked.map((line) => ({ serviceId: line.serviceId, toothCode: line.toothCode })),
   );
+  const amendmentMessages = unlinkedSessionConflicts(amendedItems, unlinkedKeys);
+  return { messages: [...new Set([...messages, ...amendmentMessages])], amendedService: amendmentMessages.length > 0 };
 }
 
 /**
@@ -17219,11 +17280,11 @@ async function visitPlanContext(
   pool: DbPool,
   patientId: number | null,
   procedures: ProcedureLine[],
-): Promise<{ matched: number; title: string | null; warning: string | null }> {
-  if (!patientId || procedures.length === 0) return { matched: 0, title: null, warning: null };
+): Promise<{ matched: number; title: string | null; warning: string | null; amendedServiceConflict: boolean }> {
+  if (!patientId || procedures.length === 0) return { matched: 0, title: null, warning: null, amendedServiceConflict: false };
   /* (P1-D) بندٌ متعدد الجلسات أُضيف حرًّا: التوقيع سيرفضه — قلها قبل أن يضغط الطبيب. */
   const sessionConflicts = await unlinkedPlanSessionConflicts(pool, patientId, procedures);
-  if (sessionConflicts.length > 0) return { matched: 0, title: null, warning: sessionConflicts.join(" ") };
+  if (sessionConflicts.messages.length > 0) return { matched: 0, title: null, warning: sessionConflicts.messages.join(" "), amendedServiceConflict: sessionConflicts.amendedService };
 
   const { rows } = await pool.query<{
     id: number; plan_id: number; title: string; service_id: number | null;
@@ -17239,7 +17300,7 @@ async function visitPlanContext(
       ORDER BY i.id`,
     [patientId],
   );
-  if (rows.length === 0) return { matched: 0, title: null, warning: null };
+  if (rows.length === 0) return { matched: 0, title: null, warning: null, amendedServiceConflict: false };
 
   const matchedIds = matchPlanItems(
     rows.map((row) => ({
@@ -17251,7 +17312,7 @@ async function visitPlanContext(
       serviceId: line.serviceId, toothCode: line.toothCode, quantity: line.quantity,
     })),
   );
-  if (matchedIds.length === 0) return { matched: 0, title: null, warning: null };
+  if (matchedIds.length === 0) return { matched: 0, title: null, warning: null, amendedServiceConflict: false };
 
   const matchedSet = new Set(matchedIds);
   const hit = rows.find((row) => matchedSet.has(row.id));
@@ -17259,6 +17320,7 @@ async function visitPlanContext(
 
   return {
     matched: matchedIds.length,
+    amendedServiceConflict: false,
     title: hit?.title ?? null,
     warning: onInstalments
       ? "هذه الإجراءات ضمن خطة لها جدول أقساط — والتوقيع سيصدر فاتورة إضافية عليها. إن كان العمل داخل الاتفاق فحصّله بقسط لا بفاتورة."
@@ -18124,7 +18186,7 @@ export async function signClinicalVisit(input: {
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
     | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-    | "ortho_case_invalid" | "plan_session_unlinked" | "invalid_decision_reason" | null;
+    | "ortho_case_invalid" | "plan_session_unlinked" | "amended_plan_session_unlinked" | "invalid_decision_reason" | null;
   /** (P1-D) إجراءاتٌ حرّة تطابق بنود خطةٍ متعددة الجلسات — مع جلستها المنتظرة. */
   sessionConflicts?: string[];
 }> {
@@ -18133,7 +18195,7 @@ export async function signClinicalVisit(input: {
     reason:
       | "not_found" | "already_signed" | "empty" | "no_patient"
       | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-      | "ortho_case_invalid" | "plan_session_unlinked" | "invalid_decision_reason" | null,
+      | "ortho_case_invalid" | "plan_session_unlinked" | "amended_plan_session_unlinked" | "invalid_decision_reason" | null,
     extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[]; sessionConflicts?: string[] },
   ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
@@ -18331,9 +18393,10 @@ export async function signClinicalVisit(input: {
 
     /* (P1-D) علاج العصب بندٌ واحد بثلاث جلسات — لا يُفوتَر ثلاث مرات بإجراءٍ حرّ في كل زيارة. */
     const sessionConflicts = await unlinkedPlanSessionConflicts(client, patientId, existing.procedures);
-    if (sessionConflicts.length > 0) {
+    if (sessionConflicts.messages.length > 0) {
       await client.query("ROLLBACK");
-      return emptyResult("plan_session_unlinked", { visit: existing, sessionConflicts });
+      return emptyResult(sessionConflicts.amendedService ? "amended_plan_session_unlinked" : "plan_session_unlinked",
+        { visit: existing, sessionConflicts: sessionConflicts.messages });
     }
 
     const sessionOutcome = await progressTreatmentSessions({
@@ -19048,6 +19111,13 @@ async function deductServiceMaterials(input: {
   for (const line of input.procedures) {
     qtyByService.set(line.serviceId, (qtyByService.get(line.serviceId) ?? 0) + line.quantity);
   }
+
+  // Check the same captured mappings used below, after procedure normalization.
+  // Feature-off performs no proposal query or extra item locking.
+  await guardLegacyClinicalMaterials(input.client, mappings.filter(mapping => {
+    const qty = Number(mapping.qty_per_unit) * (qtyByService.get(mapping.service_id) ?? 0);
+    return Number.isFinite(qty) && qty > 0;
+  }).map(mapping => mapping.item_id));
 
   let movements = 0;
   for (const mapping of mappings) {
@@ -19806,6 +19876,8 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient, ba
     rows.filter(row=>!approvedIds.has(row.id)).map(row=>({id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)})),today) : null;
   return Promise.all(rows.map(async (row) => {
     const approvedAgreement = approvedIds.has(row.id) ? await (await import("./approved-agreements")).approvedAgreementPosition(row.id,today,reader) : null;
+    // A known approval without its reader result is unknown, never a classic fallback.
+    if (approvedIds.has(row.id) && !approvedAgreement) throw new Error("Approved plan financial source unavailable");
     const invoiceSource = approvedAgreement ? null : invoiceSources?.has(row.id) ? invoiceSources.get(row.id)! : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
     const invoiceFinancial = invoiceSource?.kind === "classic_installments" ? null : invoiceSource;
     const debtSource = approvedAgreement ? (approvedAgreement.available ? "approved_agreement" as const : null)
@@ -19815,6 +19887,16 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient, ba
     const items = itemsByPlan.get(row.id) ?? [];
     const paidMinor = approvedAgreement?.paidMinor ?? (invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.paidMinor : toMinor(row.paid_minor));
     const lastReminderAt = row.last_reminder_at ? row.last_reminder_at.toISOString() : null;
+    // Keep schedule attribution on the original source. Delta receipts must not
+    // mark original installments paid. Current debt comes from the approved reader.
+    const originalProgress = planProgress(
+      { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments, lastReminderAt },
+      approvedAgreement?.originalPaidMinor ?? paidMinor, today,
+    );
+    const progress = approvedAgreement ? { ...originalProgress,
+      totalMinor: approvedAgreement.totalMinor, paidMinor: approvedAgreement.paidMinor,
+      remainingMinor: approvedAgreement.remainingMinor,
+    } : invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.progress : originalProgress;
     return {
       approvedAgreement, invoiceFinancial, debtSource, agreementApproved: approvedIds.has(row.id),
       id: row.id,
@@ -19833,11 +19915,7 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient, ba
       lastReminderAt,
       installments,
       paidMinor,
-      progress: invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.progress : planProgress(
-        { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments, lastReminderAt },
-        paidMinor,
-        today,
-      ),
+      progress,
       items,
       itemsProgress: planItemsProgress(items),
       totalFromItems: row.total_from_items,
@@ -19929,7 +20007,11 @@ const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
  * A patient statement's ledger, plan currencies and plans from one read-only snapshot, so a
  * payment committed meanwhile is seen by all of them or by none. Standalone readers are unchanged.
  */
-export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean}={}){
+/** historicalAgreements: `true` (current print) fails closed on a malformed historical fact; `"tolerant"`
+ * (patient portal) reports such a fact as `null` (section unavailable) while every other figure still comes
+ * from this same snapshot. Only the reader's own typed validation error is tolerated, never a database
+ * error, so the snapshot transaction is never used after a failed statement. */
+export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant"}={}){
   await ensureSchema();
   return withFinancialReadSnapshot(getPool(),async runner=>{
     const client=runner as DbClient;
@@ -19939,9 +20021,14 @@ export async function patientStatementSnapshot(patientId:number,today:string,opt
     // patientPlanCurrencies; reuse rows already required for statement details.
     const planCurrencies=new Map(rows.map(row=>[row.id,{patientId,currency:requireCurrency(row.base_currency,"خطة علاج",row.id)}]));
     const plans=await hydratePlans(rows,today,client,true);
-    // Opt-in (current print only): historical agreements are saved facts read on this same snapshot client.
-    // Other consumers (the portal) issue no historical query and keep their existing failure surface.
-    const historicalAgreements=options.historicalAgreements?await readStatementHistoricalAgreements(client,patientId):undefined;
+    // Opt-in: historical agreements are saved facts read on this same snapshot client.
+    let historicalAgreements:HistoricalStatementAgreement[]|null|undefined;
+    if(options.historicalAgreements==="tolerant"){
+      try{historicalAgreements=await readStatementHistoricalAgreements(client,patientId);}
+      catch(error){if(!(error instanceof StatementHistoricalDetailsError))throw error;historicalAgreements=null;}
+    }else if(options.historicalAgreements){
+      historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
+    }
     return {ledger,planCurrencies,plans,historicalAgreements};
   });
 }
@@ -21487,7 +21574,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     totalMinor: number; doneMinor: number; remainingMinor: number;
     baseCurrency: Currency;
     clinicalProgress?: ClinicalProgressView;
-    nextDueDate: string | null; overdueMinor: number;
+    nextDueDate: string | null; overdueMinor: number | null;
   }[];
   plannedVisits: PlannedVisitView[];
   counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
@@ -21616,7 +21703,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     consentAt: plan.consentAt, itemsCount: plan.itemsProgress.count,
     doneItems: plan.itemsProgress.doneCount, totalMinor: plan.totalMinor,
     doneMinor: plan.itemsProgress.doneMinor, remainingMinor: plan.itemsProgress.remainingMinor,
-    nextDueDate: plan.progress.nextDueDate, overdueMinor: plan.progress.overdueMinor,
+    nextDueDate: plan.approvedAgreement?.available === false ? null : plan.progress.nextDueDate,
+    overdueMinor: plan.approvedAgreement?.available === false ? null : plan.progress.overdueMinor,
     // (TD-05) عملة الاتفاق مع الخطة — تعرض بها أرقامها ولا تُحوَّل.
     baseCurrency: plan.baseCurrency,
     clinicalProgress: historicalClinicalProgress(plan.items),
@@ -21700,7 +21788,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   // التنبيهات: ما يجب أن يُقال لا ما يمكن أن يُعرض.
   const alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[] = [];
   for (const plan of activePlanViews) {
-    if (plan.overdueMinor > 0) {
+    if (plan.overdueMinor !== null && plan.overdueMinor > 0) {
       alerts.push({
         kind: "overdue_installment", severity: "danger",
         text: `قسط متأخر في «${plan.title}»: ${formatMoney(plan.overdueMinor, plan.baseCurrency)}`,
@@ -21780,7 +21868,9 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     });
   }
 
-  const patientCases = await listPatientCases(patientId);
+  // These workflow projections do not expose waitingOn; blocker alerts were
+  // already read above. Keep this case read fresh without fetching blockers again.
+  const patientCases = (await listPatientCaseRows(patientId)).map(toSpecialtyCase);
   const assessmentCases = patientCases
     .filter((one) => one.kind === "specialty" && one.needsAssessment === true && one.id !== null && one.orthoCaseId === null && one.legacy !== true)
     .map((one) => ({ id: one.id as number, patientId: one.patientId, kind: "specialty" as const,
@@ -24513,6 +24603,10 @@ export async function createInventoryMovementInTransaction(client: DbClient, inp
   if (!items[0].is_active) {
     return { ok: false, message: "البند موقوف — أعد تفعيله قبل أي حركة عليه." };
   }
+  // Expected refusal remains a business result so keyed purchases can persist
+  // their existing durable rejection receipt. Readiness/SQL failures still throw.
+  const trackingRefusal = await legacyInventoryWriteRefusal(client, [input.itemId]);
+  if (trackingRefusal) return { ok: false, message: trackingRefusal.message };
   const { rows: bal } = await client.query<{ balance: string }>(
     `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
        FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
@@ -27393,13 +27487,18 @@ const SPECIALTY_CASE_SELECT = `
     LEFT JOIN parties d ON d.id = COALESCE(o.responsible_doctor_id, t.primary_doctor_id)
    WHERE o.patient_id = $1 AND NOT EXISTS (SELECT 1 FROM clinical_cases b WHERE b.ortho_case_id = o.id)`;
 
-export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
+async function listPatientCaseRows(patientId: number): Promise<SpecialtyCaseRow[]> {
   await ensureSchema();
   const { rows } = await getPool().query<SpecialtyCaseRow>(
     `SELECT * FROM (${SPECIALTY_CASE_SELECT}) x
       ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
     [patientId],
   );
+  return rows;
+}
+
+export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
+  const rows = await listPatientCaseRows(patientId);
   const blockers = await referralBlockersByCase(getPool(), patientId);
   return rows.map((row) => {
     const item = toSpecialtyCase(row);
