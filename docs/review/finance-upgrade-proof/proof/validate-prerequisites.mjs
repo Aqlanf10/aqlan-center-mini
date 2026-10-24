@@ -8,12 +8,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { runPrerequisites } from "./prereq.mjs";
+import { assertLoopbackUrl, assertRuntimeRoots, sanitizedEnv, stripReroutingFromProcess } from "./guard.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { OLD_ROOT, ADMIN_DATABASE_URL, EVIDENCE } = process.env;
-for (const [name, value] of Object.entries({ OLD_ROOT, ADMIN_DATABASE_URL, EVIDENCE })) if (!value) throw new Error(`${name} required`);
-const admin = new URL(ADMIN_DATABASE_URL);
-if (!["127.0.0.1", "localhost"].includes(admin.hostname)) throw new Error("refusing a non-local database: synthetic proof only");
+const { OLD_ROOT, NEW_ROOT, ADMIN_DATABASE_URL, EVIDENCE } = process.env;
+for (const [name, value] of Object.entries({ OLD_ROOT, NEW_ROOT, ADMIN_DATABASE_URL, EVIDENCE })) if (!value) throw new Error(`${name} required`);
+assertLoopbackUrl(ADMIN_DATABASE_URL, "ADMIN_DATABASE_URL");
+stripReroutingFromProcess();
+const roots = assertRuntimeRoots(OLD_ROOT, NEW_ROOT);
 const urlFor = (db) => { const url = new URL(ADMIN_DATABASE_URL); url.pathname = `/${db}`; return url.toString(); };
 const BASE = "aqlan_prereq_base";
 
@@ -25,7 +27,7 @@ const recreate = async (db, template) => {
 };
 await recreate(BASE);
 for (const script of ["init.mjs", "fixtures.mjs"]) {
-  const child = spawnSync("npx", ["tsx", path.join(here, script), OLD_ROOT], { cwd: OLD_ROOT, encoding: "utf8", env: { ...process.env, DATABASE_URL: urlFor(BASE), NODE_ENV: "test" } });
+  const child = spawnSync("npx", ["tsx", path.join(here, script), OLD_ROOT], { cwd: OLD_ROOT, encoding: "utf8", env: sanitizedEnv(urlFor(BASE)) });
   if (child.status !== 0) throw new Error(`${script}: ${child.stderr.slice(-1500)}`);
 }
 
@@ -34,10 +36,10 @@ async function run(db, setup = []) {
   await client.connect();
   try {
     for (const statement of setup) await client.query(statement);
-    const { rows, failing } = await runPrerequisites(client);
+    const { rows, failing, lockedRelations } = await runPrerequisites(client);
     // The script ends in ROLLBACK: the session is back outside any transaction afterwards.
     const [{ inTransaction }] = (await client.query("SELECT now() <> statement_timestamp() AS \"inTransaction\"")).rows;
-    return { rows, failing, inTransactionAfterwards: inTransaction };
+    return { rows, failing, lockedRelations, inTransactionAfterwards: inTransaction };
   } finally { await client.end(); }
 }
 
@@ -66,21 +68,37 @@ const scenarios = [
     expect: ["columns.payments.idempotency_key"] },
   { name: "referenced_key_not_unique", setup: ["ALTER TABLE parties DROP CONSTRAINT parties_pkey CASCADE"],
     expect: ["keys.parties.id"] },
+  { name: "referenced_key_deferrable", setup: [
+      "ALTER TABLE parties DROP CONSTRAINT parties_pkey CASCADE",
+      "ALTER TABLE parties ADD CONSTRAINT parties_pkey PRIMARY KEY (id) DEFERRABLE INITIALLY IMMEDIATE"],
+    expect: ["keys.parties.id"] },
+  // Simulated on a disposable synthetic database by marking the supporting index invalid in the catalog.
+  { name: "referenced_key_index_invalid", setup: ["UPDATE pg_index SET indisvalid = false WHERE indexrelid = 'services_pkey'::regclass"],
+    expect: ["keys.services.id"] },
+  { name: "column_wrong_type", setup: ["ALTER TABLE invoice_items ALTER COLUMN source_id TYPE numeric"],
+    expect: ["columns.invoice_items.source_id"] },
+  { name: "currency_check_inherited", setup: [
+      "CREATE TABLE synthetic_currency_parent (target_currency TEXT, CONSTRAINT invoice_settlement_reclassifications_target_currency_check CHECK (target_currency = 'SAR'))",
+      "ALTER TABLE invoice_settlement_reclassifications INHERIT synthetic_currency_parent"],
+    expect: ["currency.invoice_settlement_reclassifications_target_currency_check"] },
   { name: "registry_drift", setup: [
       "UPDATE schema_migrations SET adopted = TRUE WHERE version = '0051'",
       "UPDATE schema_migrations SET checksum = repeat('0', 64) WHERE version = '0052'"],
     expect: ["registry.names_and_checksums_match_published", "registry.none_adopted"] },
 ];
 
-const evidence = { note: "Synthetic databases only. prerequisites.sql is read-only and ends in ROLLBACK.", scenarios: [] };
+/** @type {Record<string, any>} */
+const evidence = { note: "Synthetic databases only. prerequisites.sql is read-only and ends in ROLLBACK.", roots, scenarios: [] };
 let failures = 0;
 for (const [index, scenario] of scenarios.entries()) {
   const db = `aqlan_prereq_${index}`;
   await recreate(db, BASE);
   const result = await run(db, scenario.setup);
-  const ok = JSON.stringify(result.failing) === JSON.stringify([...scenario.expect].sort());
+  // Only schema_migrations (and its index) may be locked by the check; no other application relation is opened.
+  const onlyRegistryLocked = result.lockedRelations.every((l) => ["schema_migrations", "schema_migrations_pkey"].includes(l.locked_relation) && l.mode === "AccessShareLock");
+  const ok = JSON.stringify(result.failing) === JSON.stringify([...scenario.expect].sort()) && onlyRegistryLocked;
   if (!ok) failures++;
-  evidence.scenarios.push({ scenario: scenario.name, expectedFailing: [...scenario.expect].sort(), failing: result.failing, pass: ok,
+  evidence.scenarios.push({ scenario: scenario.name, expectedFailing: [...scenario.expect].sort(), failing: result.failing, lockedRelations: result.lockedRelations, pass: ok,
     rows: index === 0 ? result.rows : result.rows.filter((r) => !r.ok) });
   await maintenance.query(`DROP DATABASE ${db} WITH (FORCE)`);
 }

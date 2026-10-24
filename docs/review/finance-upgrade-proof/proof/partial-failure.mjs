@@ -11,16 +11,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { runPrerequisites } from "./prereq.mjs";
+import { assertLoopbackUrl, assertRuntimeRoots, sanitizedEnv, stripReroutingFromProcess } from "./guard.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { OLD_ROOT, NEW_ROOT, ADMIN_DATABASE_URL, EVIDENCE } = process.env;
 for (const [name, value] of Object.entries({ OLD_ROOT, NEW_ROOT, ADMIN_DATABASE_URL, EVIDENCE })) if (!value) throw new Error(`${name} required`);
 const DB = "aqlan_upgrade_partial";
 const url = new URL(ADMIN_DATABASE_URL); url.pathname = `/${DB}`;
-if (!["127.0.0.1", "localhost"].includes(url.hostname)) throw new Error("refusing a non-local database: synthetic proof only");
+assertLoopbackUrl(ADMIN_DATABASE_URL, "ADMIN_DATABASE_URL");
+stripReroutingFromProcess();
+const roots = assertRuntimeRoots(OLD_ROOT, NEW_ROOT);
 /** @param {string} script @param {string} root @param {...string} extra */
 const step = (script, root, ...extra) => {
-  const child = spawnSync("npx", ["tsx", path.join(here, script), root, ...extra], { cwd: root, encoding: "utf8", env: { ...process.env, DATABASE_URL: url.toString(), NODE_ENV: "test" } });
+  const child = spawnSync("npx", ["tsx", path.join(here, script), root, ...extra], { cwd: root, encoding: "utf8", env: sanitizedEnv(url.toString()) });
   return { status: child.status, error: child.status === 0 ? null : (child.stderr.match(/(error|Error)[^\n]*/g) ?? []).slice(0, 3) };
 };
 const maintenance = new pg.Client({ connectionString: ADMIN_DATABASE_URL });
@@ -29,13 +32,14 @@ await maintenance.query(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`);
 await maintenance.query(`CREATE DATABASE ${DB}`);
 await maintenance.end();
 /** @type {Record<string, any>} */
-const result = { scenario: "0069 precondition violated: invoice_settlement_reclassifications_target_currency_check absent" };
+const result = { scenario: "0069 precondition violated: invoice_settlement_reclassifications_target_currency_check absent", roots };
 /** @type {Array<{ check: string, ok: boolean }>} */
 const checks = [];
 /** @param {unknown} ok @param {string} message */
 const check = (ok, message) => { checks.push({ check: message, ok: Boolean(ok) }); };
 result.deployedInit = step("init.mjs", OLD_ROOT);
 result.fixtures = step("fixtures.mjs", OLD_ROOT);
+check(result.deployedInit.status === 0 && result.fixtures.status === 0, "deployed initialisation and fixtures exit 0");
 const db = new pg.Client({ connectionString: url.toString() });
 await db.connect();
 /** @param {string} sql @returns {Promise<any[]>} */
@@ -60,12 +64,17 @@ const objects = async () => (await q(`SELECT to_regclass('agreement_delta_amendm
 const strayLocks = async () => (await q(`SELECT count(*)::int AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
   WHERE a.datname = current_database() AND l.pid <> pg_backend_pid()`))[0].n;
 
+const EIGHT = ["0051", "0052", "0056", "0057", "0058", "0063", "0064", "0065"];
+const TEN = [...EIGHT, "0066", "0068"];
+result.registeredBeforeInjection = await versions();
+check(JSON.stringify(result.registeredBeforeInjection) === JSON.stringify(EIGHT), "registry state 8 before the violation is injected");
 await db.query("ALTER TABLE invoice_settlement_reclassifications DROP CONSTRAINT invoice_settlement_reclassifications_target_currency_check");
 result.candidateFirstStart = step("init.mjs", NEW_ROOT);
 result.registeredAfterFailure = await versions();
 result.objectsAfterFailure = await objects();
-check(result.candidateFirstStart.status !== 0, "candidate initialisation fails in 0069");
-check(JSON.stringify(result.registeredAfterFailure) === JSON.stringify(["0051", "0052", "0056", "0057", "0058", "0063", "0064", "0065", "0066", "0068"]),
+check(result.candidateFirstStart.status === 1 && JSON.stringify(result.candidateFirstStart.error).includes("invoice_settlement_reclassifications_target_currency_check"),
+  "candidate initialisation exits 1, failing in 0069 on the missing CHECK");
+check(JSON.stringify(result.registeredAfterFailure) === JSON.stringify(TEN),
   "0066 and 0068 stay committed and registered after the 0069 failure (10 registrations)");
 check(result.objectsAfterFailure.has_0066 && result.objectsAfterFailure.has_0068 && !result.objectsAfterFailure.has_0069 && !result.objectsAfterFailure.has_0067,
   "0066 and 0068 objects exist; 0069 and 0067 objects do not");
@@ -77,14 +86,14 @@ const partialState = await state();
 result.candidateSecondStart = step("init.mjs", NEW_ROOT);
 result.registeredAfterRetry = await versions();
 result.strayLocksAfterRetry = await strayLocks();
-check(result.candidateSecondStart.status !== 0, "a retry fails the same way (fail closed)");
+check(result.candidateSecondStart.status === 1 && JSON.stringify(result.registeredAfterRetry) === JSON.stringify(TEN), "a retry exits 1 the same way and registry state stays 10 (fail closed)");
 check(await state() === partialState, "the retry leaves the partial registry and catalog byte-identical");
 check(result.strayLocksAfterRetry === 0, "no lock is left held after the failed retry");
 result.deployedReinit = step("init.mjs", OLD_ROOT);
 result.deployedWrites = step("fixtures.mjs", OLD_ROOT, "-partial");
 result.registeredAfterDeployedFallback = await versions();
 check(result.deployedReinit.status === 0 && result.deployedWrites.status === 0
-  && JSON.stringify(result.registeredAfterDeployedFallback) === JSON.stringify(result.registeredAfterFailure),
+  && JSON.stringify(result.registeredAfterDeployedFallback) === JSON.stringify(TEN),
   "the deployed runtime re-initialises and its writers succeed on the partial state, registering nothing");
 // Forward repair (synthetic only): restore the exact precondition the prerequisite check names, then start the
 // candidate again. Its validated re-add scans the table under ACCESS EXCLUSIVE, like 0069's own CHECK.
@@ -92,7 +101,7 @@ await db.query("ALTER TABLE invoice_settlement_reclassifications ADD CONSTRAINT 
 result.candidateAfterRollForward = step("init.mjs", NEW_ROOT);
 result.registeredAfterRollForward = await versions();
 result.objectsAfterRollForward = await objects();
-check(result.candidateAfterRollForward.status === 0 && result.registeredAfterRollForward.length === 12
+check(result.candidateAfterRollForward.status === 0 && JSON.stringify(result.registeredAfterRollForward) === JSON.stringify([...TEN, "0067", "0069"].sort())
   && Object.values(result.objectsAfterRollForward).every(Boolean), "after the forward repair the candidate reaches exactly 12 registrations with 0069 and 0067 applied");
 await db.end();
 result.checks = checks;

@@ -1,5 +1,12 @@
 {
   "scenario": "0069 precondition violated: invoice_settlement_reclassifications_target_currency_check absent",
+  "roots": {
+    "deployedRuntime": "f2b5eef97047994438729fe8a2da72e214cdf881",
+    "deployedTreeClean": true,
+    "candidateCheckout": "603ec7517b948fd1c40202b94e027c6bcb845365",
+    "candidateRuntime": "c998b435306f8295a217e49f20080293c479c359",
+    "candidateRuntimeTreeEqualsCandidate": true
+  },
   "deployedInit": {
     "status": 0,
     "error": null
@@ -8,6 +15,16 @@
     "status": 0,
     "error": null
   },
+  "registeredBeforeInjection": [
+    "0051",
+    "0052",
+    "0056",
+    "0057",
+    "0058",
+    "0063",
+    "0064",
+    "0065"
+  ],
   "candidateFirstStart": {
     "status": 1,
     "error": [
@@ -110,7 +127,15 @@
   },
   "checks": [
     {
-      "check": "candidate initialisation fails in 0069",
+      "check": "deployed initialisation and fixtures exit 0",
+      "ok": true
+    },
+    {
+      "check": "registry state 8 before the violation is injected",
+      "ok": true
+    },
+    {
+      "check": "candidate initialisation exits 1, failing in 0069 on the missing CHECK",
       "ok": true
     },
     {
@@ -126,7 +151,7 @@
       "ok": true
     },
     {
-      "check": "a retry fails the same way (fail closed)",
+      "check": "a retry exits 1 the same way and registry state stays 10 (fail closed)",
       "ok": true
     },
     {

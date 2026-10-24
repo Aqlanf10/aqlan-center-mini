@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { assertLoopbackUrl, assertRuntimeRoots, sanitizedEnv, stripReroutingFromProcess } from "./guard.mjs";
 import { runPrerequisites } from "./prereq.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -17,20 +18,22 @@ for (const [name, value] of Object.entries({ OLD_ROOT, NEW_ROOT, ADMIN_DATABASE_
 const PROOF_DB = "aqlan_upgrade_proof";
 const admin = new URL(ADMIN_DATABASE_URL);
 const proofUrl = new URL(ADMIN_DATABASE_URL); proofUrl.pathname = `/${PROOF_DB}`;
-if (!["127.0.0.1", "localhost"].includes(proofUrl.hostname)) throw new Error("refusing a non-local database: synthetic proof only");
+assertLoopbackUrl(ADMIN_DATABASE_URL, "ADMIN_DATABASE_URL");
+stripReroutingFromProcess();
+const roots = assertRuntimeRoots(OLD_ROOT, NEW_ROOT);
 
 const EXPECTED_DEPLOYED = ["0051", "0052", "0056", "0057", "0058", "0063", "0064", "0065"];
 const EXPECTED_ADDED = ["0066", "0067", "0068", "0069"];
-const commitOf = (root) => spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
-// The candidate checkout is this review branch: c998b435 plus this directory only, so its runtime is c998b435's.
-const evidence = { deployedRuntimeCommit: commitOf(OLD_ROOT), candidateCheckoutCommit: commitOf(NEW_ROOT), steps: [] };
+// roots: OLD_ROOT is exactly f2b5eef9 with a clean tree; NEW_ROOT equals c998b435 outside this proof directory.
+/** @type {Record<string, any>} */
+const evidence = { roots, steps: [] };
 const fail = (message) => { evidence.result = "FAIL"; evidence.failure = message; writeFileSync(EVIDENCE, JSON.stringify(evidence, null, 2)); throw new Error(message); };
 const check = (condition, message, detail) => { evidence.steps.push({ check: message, ok: Boolean(condition), ...(detail === undefined ? {} : { detail }) }); if (!condition) fail(message); };
 
 function run(script, root, appName, ...extra) {
   const started = performance.now();
   const child = spawnSync("npx", ["tsx", path.join(here, script), root, ...extra], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, DATABASE_URL: proofUrl.toString(), PGAPPNAME: appName, NODE_ENV: "test" } });
+    env: { ...sanitizedEnv(proofUrl.toString()), PGAPPNAME: appName } });
   const wallMs = Math.round(performance.now() - started);
   if (child.status !== 0) fail(`${script} (${appName}) exited ${child.status}: ${child.stderr.slice(-2000)}`);
   const line = child.stdout.trim().split("\n").filter((l) => l.startsWith("{")).pop();
@@ -132,7 +135,7 @@ const order = [...added].sort((a, b) => a.applied_at.localeCompare(b.applied_at)
 check(JSON.stringify(order) === JSON.stringify(["0066", "0068", "0069", "0067"]), "candidate startup applies 0066, 0068, 0069, then 0067", order);
 const [{ ok: appliedByCandidate }] = await q("SELECT bool_and(applied_at > $1::timestamptz) AS ok FROM schema_migrations WHERE version = ANY($2)", [candidateStartedAt, EXPECTED_ADDED]);
 check(appliedByCandidate === true, "0066/0067/0068/0069 (including 0069's constraint change) were applied only by the candidate's own initialisation", { candidateStartedAt });
-check(JSON.stringify(second.registrations) === JSON.stringify(first.registrations), "second candidate initialisation registers and re-applies nothing");
+check(JSON.stringify(second.registrations) === JSON.stringify(first.registrations), "second candidate initialisation re-applies no migration file and adds no registration (its idempotent runtime schema SQL still runs)");
 const fileChecksums = run("checksums.mjs", NEW_ROOT, "upgrade-proof-checksums").checksums;
 check(added.every((r) => r.checksum === fileChecksums[r.version]), "added registrations carry the published file checksums", Object.fromEntries(added.map((r) => [r.version, r.checksum])));
 const unregistered = Object.keys(fileChecksums).filter((v) => !finalRegs.some((r) => r.version === v));

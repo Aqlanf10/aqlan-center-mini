@@ -6,15 +6,18 @@ The deployed runtime is f2b5eef97047994438729fe8a2da72e214cdf881. The candidate 
 
 ## How to check
 
-`prerequisites.sql` is a single read-only query:
+`prerequisites.sql` is one read-only transaction:
 
 - It runs as `BEGIN TRANSACTION READ ONLY`, with `statement_timeout 10s` and `lock_timeout 2s`, and ends in `ROLLBACK`.
-- It returns `(check_id, ok, detail)` rows. A rollout may start only if **every `ok` is true**.
+- Its first query returns `(check_id, ok, detail)` rows. A rollout may start only if **every `ok` is true**.
 - It reads only:
   - the system catalogs;
   - the 8-row migration registry `schema_migrations` (version, name, checksum, adopted);
-  - planner metadata (`pg_class.reltuples`, relation sizes).
-- No patient, clinical or financial row is read. The only lock on an application table is ACCESS SHARE on `schema_migrations`.
+  - the `pg_class` estimates `reltuples` and `relpages`.
+- No patient, clinical or financial row is read.
+- **Locks.** Sizes come from `relpages`, not from `pg_*_size()`, because those functions open the relation, its indexes and its TOAST table with ACCESS SHARE. As a result, the only application relations it locks are `schema_migrations` and `schema_migrations_pkey`, with ACCESS SHARE.
+  - Its second query lists the relation locks the transaction holds, so this is checked on every run.
+  - The validation asserts it in every scenario.
 - `detail` holds only object names, definitions, counts and estimates.
 
 ## Checks
@@ -32,21 +35,25 @@ The deployed runtime is f2b5eef97047994438729fe8a2da72e214cdf881. The candidate 
 | | `conflict.functions` | none of the 4 functions exist under any signature | 0066 uses plain `CREATE FUNCTION`, which fails; 0068 and 0069 use `CREATE OR REPLACE`, which would silently replace an unrelated function |
 | | `conflict.triggers_on_existing_tables` | none of the 5 triggers on `invoice_items`, `invoices`, `payments` and the two reclassification tables exist | `CREATE TRIGGER` has no `IF NOT EXISTS` |
 | | `conflict.direction_check_name` | `invoice_settlement_reclassifications_direction_check` not used in the schema | 0069 adds it by name |
-| Referenced keys | `keys.<table>.id` × 8 | `patients`, `treatment_plans`, `plan_items`, `clinical_cases`, `invoices`, `services`, `parties`, `users`: integer `id` with a single-column PRIMARY KEY or UNIQUE constraint | required by the new `REFERENCES` clauses |
-| Columns read later | `columns.<table>.<column>` × 26 | each column exists, with the expected type category (number, text, date/time, integer array) | PL/pgSQL bodies are not validated at `CREATE` time, so a missing column would surface as a failed ordinary invoice, payment or reclassification write after the upgrade, not as a failed file |
+| Referenced keys | `keys.<table>.id` × 8 | `patients`, `treatment_plans`, `plan_items`, `clinical_cases`, `invoices`, `services`, `parties`, `users`: an `integer` id with a single-column, **non-deferrable** PRIMARY KEY or UNIQUE constraint, whose index is valid, ready, live and immediate | the new `REFERENCES` clauses; PostgreSQL refuses a foreign key to a deferrable key |
+| Columns read later | `columns.<table>.<column>` × 26 | each column exists with **exactly** the deployed concrete type (`integer`, `bigint`, `text`, `date`, `time without time zone`, `timestamp with time zone`, `integer[]`) | a type *category* would also admit money, floating or incompatible array types. PL/pgSQL bodies are not validated at `CREATE` time, so a missing or retyped column would surface as a failed ordinary invoice, payment or reclassification write after the upgrade, not as a failed file |
 | `appointments_patient_history_idx` | `appointments.index_name_absent` | the name is free | 0067 uses plain `CREATE INDEX` |
 | | `appointments.no_equivalent_index` | no other index on `(patient_id, scheduled_date, scheduled_time, id)` without a predicate | not a correctness failure, but 0067 would build a redundant index while holding the write-blocking lock; the release owner decides |
 | | `appointments.no_invalid_index` | no invalid index on `appointments` | a leftover invalid build is a sign of an interrupted operation |
-| Old currency CHECKs | `currency.invoice_settlement_reclassifications_source_currency_check` | present, validated, definition exactly `CHECK ((source_currency = 'YER'::text))` | 0069 drops it **by name** with no `IF EXISTS` |
-| | `currency.invoice_settlement_reclassifications_target_currency_check` | present, validated, definition exactly `CHECK ((target_currency = 'SAR'::text))` | as above. If it is missing, 0069 fails **after** 0066 and 0068 committed (proven) |
+| Old currency CHECKs | `currency.invoice_settlement_reclassifications_source_currency_check` | present, validated, **local** (`conislocal`, `coninhcount = 0`), definition exactly `CHECK ((source_currency = 'YER'::text))` | 0069 drops it **by name** with no `IF EXISTS`; an inherited constraint cannot be dropped from the child |
+| | `currency.invoice_settlement_reclassifications_target_currency_check` | present, validated, local, definition exactly `CHECK ((target_currency = 'SAR'::text))` | as above. If it is missing, 0069 fails **after** 0066 and 0068 committed (proven) |
 | | `currency.no_other_checks_on_currency_columns` | the only other CHECK is `…_source_invoice_ids_check` | an unknown extra CHECK makes the outcome unproven |
-| Lock planning | `estimate.<table>` × 13 | informational (always `ok`) | `reltuples` and total size for the tables the four files lock |
+| Lock planning | `estimate.<table>` × 13 | informational (always `ok`) | `reltuples`, plus a size estimate from `relpages` of the table, its indexes and TOAST, for the tables the four files lock. These are planner estimates as of the last VACUUM or ANALYZE; "never analyzed" means none is available |
 
-**Why the new CHECK cannot fail on existing rows.** Each row of `invoice_settlement_reclassifications` satisfies `source_currency = 'YER' AND target_currency = 'SAR'`, because both old CHECKs are validated. Each such row also satisfies the new `direction_check`: YER and SAR are both in the allowed set, and they differ. So the validation scan that 0069 runs, under ACCESS EXCLUSIVE, cannot reject an existing row. Its *duration* still grows with the table's size, which is why the estimate is reported.
+**Why the new CHECK cannot fail on existing rows.** Each row of `invoice_settlement_reclassifications` satisfies `source_currency = 'YER' AND target_currency = 'SAR'`, because both old CHECKs are validated. Each such row also satisfies the new `direction_check`: YER and SAR are both in the allowed set, and they differ. So the validation scan that 0069 runs, under ACCESS EXCLUSIVE, cannot reject an existing row. Its *duration* still grows with the table's size, which is why the estimate is reported. No size or duration is assumed in this directory.
 
 ## Validation (synthetic only)
 
-`proof/validate-prerequisites.mjs` builds the database with the deployed runtime and its own fixtures (`aqlan_prereq_base`). Each scenario then runs on a separate template copy and must fail **exactly** the listed checks. Result: `evidence/prerequisites-validation.json` is **PASS**.
+`proof/validate-prerequisites.mjs` builds the database with the deployed runtime and its own fixtures (`aqlan_prereq_base`). Each scenario then runs on a separate template copy and must meet two conditions:
+- it fails **exactly** the listed checks;
+- it locks only `schema_migrations` and its index.
+
+Result: `evidence/prerequisites-validation.json` is **PASS** (13 scenarios).
 
 | Scenario | Failing checks (must match exactly) |
 |---|---|
@@ -58,6 +65,10 @@ The deployed runtime is f2b5eef97047994438729fe8a2da72e214cdf881. The candidate 
 | index name taken, plus an equivalent index | `appointments.index_name_absent`, `appointments.no_equivalent_index`, `conflict.relation_names` |
 | `payments.idempotency_key` renamed | `columns.payments.idempotency_key` |
 | `parties` primary key dropped | `keys.parties.id` |
+| `parties` primary key re-added `DEFERRABLE` | `keys.parties.id` |
+| `services_pkey` index marked invalid (simulated in the synthetic catalog) | `keys.services.id` |
+| `invoice_items.source_id` retyped `bigint` → `numeric` (same type category, so the earlier check would have passed it) | `columns.invoice_items.source_id` |
+| target CHECK made inherited (the table `INHERIT`s a parent with the same-named CHECK) | `currency.…target_currency_check` |
 | registry row adopted, plus a checksum changed | `registry.none_adopted`, `registry.names_and_checksums_match_published` |
 
 In addition, two states are reported rather than asserted:

@@ -2,10 +2,14 @@
 -- completed-work candidate (c998b435), which registers 0066, 0068, 0069, then 0067.
 --
 -- Scope: PostgreSQL system catalogs, plus the 8-row migration registry (schema_migrations:
--- version, name, checksum, adopted). It reads NO patient, clinical or financial row, writes nothing,
--- takes no lock on any application table except an ACCESS SHARE on schema_migrations, and ends in
--- ROLLBACK. Each row is (check_id, ok, detail). Every ok must be true before a rollout is attempted.
--- "detail" carries only object names, definitions, counts and planner estimates.
+-- version, name, checksum, adopted). It reads NO patient, clinical or financial row and writes nothing.
+-- Sizes come from pg_class.relpages/reltuples (planner estimates as of the last VACUUM/ANALYZE), not from
+-- pg_*_size(), so no application relation, index or TOAST table is opened: the only application
+-- relation it locks is schema_migrations (and its index), with ACCESS SHARE. The second statement lists
+-- the relation locks this transaction holds, so that claim is checked on every run. Bounded by
+-- statement_timeout and lock_timeout, and ends in ROLLBACK. Each row is (check_id, ok, detail); every ok
+-- must be true before a rollout is attempted. "detail" carries only object names, definitions, counts and
+-- planner estimates.
 --
 -- This file is a specification artifact. It was validated only against local synthetic databases.
 -- Running it anywhere else is a separate, explicitly authorized operation; it is not authorized here.
@@ -65,48 +69,52 @@ new_triggers(relname, tgname, origin) AS (VALUES
   ('payments', 'collection_key_retirement_fence', '0068'),
   ('invoice_settlement_reclassifications', 'invoice_reclassification_direction_guard', '0069'),
   ('invoice_settlement_reclassification_events', 'invoice_reclassification_event_direction_guard', '0069')),
--- Keys the new foreign keys reference: each needs a single-column PRIMARY KEY or UNIQUE constraint on
--- "id" of an integer type (the referencing columns are INTEGER).
+-- Keys the new foreign keys reference: each needs a single-column, NON-DEFERRABLE PRIMARY KEY or UNIQUE
+-- constraint on an "integer" id (the referencing columns are INTEGER), backed by a valid, ready, live,
+-- immediate index. PostgreSQL refuses a foreign key to a deferrable key.
 referenced_keys(relname) AS (VALUES
   ('patients'), ('treatment_plans'), ('plan_items'), ('clinical_cases'),
   ('invoices'), ('services'), ('parties'), ('users')),
--- Columns the new trigger functions and the new index read. PL/pgSQL bodies are not validated at
--- CREATE time: a missing column would surface later as a failed ordinary write, not as a failed file.
-required_columns(relname, attname, typcategory, origin) AS (VALUES
-  ('invoice_items', 'invoice_id', 'N', '0066 invoice fence'),
-  ('invoice_items', 'plan_item_id', 'N', '0066 invoice fence'),
-  ('invoice_items', 'source_type', 'S', '0066 invoice fence'),
-  ('invoice_items', 'source_id', 'N', '0066 invoice fence'),
-  ('plan_items', 'id', 'N', '0066 invoice fence'),
-  ('plan_items', 'plan_id', 'N', '0066 invoice fence'),
-  ('invoices', 'id', 'N', '0066 invoice fence / 0069 guard'),
-  ('invoices', 'patient_id', 'N', '0066 invoice fence'),
-  ('invoices', 'base_currency', 'S', '0066 invoice fence'),
-  ('invoices', 'total_minor', 'N', '0066 invoice fence'),
-  ('invoices', 'discount_minor', 'N', '0066 invoice fence'),
-  ('invoices', 'plan_id', 'N', '0066 invoice fence'),
-  ('invoices', 'created_at', 'D', '0066 invoice fence'),
-  ('invoices', 'invoice_number', 'S', '0066 invoice fence'),
-  ('invoices', 'status', 'S', '0066 invoice fence'),
-  ('payments', 'idempotency_key', 'S', '0068 key fence'),
-  ('payments', 'invoice_id', 'N', '0069 guard'),
-  ('invoice_settlement_reclassifications', 'id', 'N', '0069 guard'),
-  ('invoice_settlement_reclassifications', 'source_currency', 'S', '0069 constraint / guard'),
-  ('invoice_settlement_reclassifications', 'target_currency', 'S', '0069 constraint / guard'),
-  ('invoice_settlement_reclassifications', 'source_invoice_ids', 'A', '0069 guard (= ANY(array))'),
-  ('invoice_settlement_reclassification_events', 'reclassification_id', 'N', '0069 guard'),
-  ('appointments', 'id', 'N', '0067 index'),
-  ('appointments', 'patient_id', 'N', '0067 index'),
-  ('appointments', 'scheduled_date', 'D', '0067 index'),
-  ('appointments', 'scheduled_time', 'D', '0067 index')),
--- 0069 drops these two by exact name in one ALTER TABLE; both are required, validated, and their
+-- Columns the new trigger functions and the new index read, pinned to the deployed concrete types (a type
+-- category such as "numeric" or "array" would also admit money, floating or incompatible array types).
+-- PL/pgSQL bodies are not validated at CREATE time: a missing or retyped column would surface later as a
+-- failed ordinary write, not as a failed file.
+required_columns(relname, attname, expected_type, origin) AS (VALUES
+  ('invoice_items', 'invoice_id', 'integer', '0066 invoice fence'),
+  ('invoice_items', 'plan_item_id', 'integer', '0066 invoice fence'),
+  ('invoice_items', 'source_type', 'text', '0066 invoice fence'),
+  ('invoice_items', 'source_id', 'bigint', '0066 invoice fence'),
+  ('plan_items', 'id', 'integer', '0066 invoice fence'),
+  ('plan_items', 'plan_id', 'integer', '0066 invoice fence'),
+  ('invoices', 'id', 'integer', '0066 invoice fence / 0069 guard'),
+  ('invoices', 'patient_id', 'integer', '0066 invoice fence'),
+  ('invoices', 'base_currency', 'text', '0066 invoice fence'),
+  ('invoices', 'total_minor', 'bigint', '0066 invoice fence'),
+  ('invoices', 'discount_minor', 'bigint', '0066 invoice fence'),
+  ('invoices', 'plan_id', 'integer', '0066 invoice fence'),
+  ('invoices', 'created_at', 'timestamp with time zone', '0066 invoice fence'),
+  ('invoices', 'invoice_number', 'text', '0066 invoice fence'),
+  ('invoices', 'status', 'text', '0066 invoice fence'),
+  ('payments', 'idempotency_key', 'text', '0068 key fence'),
+  ('payments', 'invoice_id', 'integer', '0069 guard'),
+  ('invoice_settlement_reclassifications', 'id', 'integer', '0069 guard'),
+  ('invoice_settlement_reclassifications', 'source_currency', 'text', '0069 constraint / guard'),
+  ('invoice_settlement_reclassifications', 'target_currency', 'text', '0069 constraint / guard'),
+  ('invoice_settlement_reclassifications', 'source_invoice_ids', 'integer[]', '0069 guard (= ANY(array))'),
+  ('invoice_settlement_reclassification_events', 'reclassification_id', 'integer', '0069 guard'),
+  ('appointments', 'id', 'integer', '0067 index'),
+  ('appointments', 'patient_id', 'integer', '0067 index'),
+  ('appointments', 'scheduled_date', 'date', '0067 index'),
+  ('appointments', 'scheduled_time', 'time without time zone', '0067 index')),
+-- 0069 drops these two by exact name in one ALTER TABLE; both are required, local (not inherited, so the
+-- table can drop them), validated, and their
 -- definitions logically imply the new direction CHECK (YER, SAR are allowed and distinct), so the
 -- validation scan of the new CHECK cannot fail on existing rows.
 old_checks(conname, expected_def) AS (VALUES
   ('invoice_settlement_reclassifications_source_currency_check', 'CHECK ((source_currency = ''YER''::text))'),
   ('invoice_settlement_reclassifications_target_currency_check', 'CHECK ((target_currency = ''SAR''::text))')),
 rel AS (
-  SELECT c.oid, c.relname, c.relkind, c.reltuples FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace
+  SELECT c.oid, c.relname, c.relkind, c.reltuples, c.relpages, c.reltoastrelid FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace
 ),
 checks AS (
   -- Server ------------------------------------------------------------------------------------------
@@ -166,12 +174,16 @@ checks AS (
   -- Referenced keys ---------------------------------------------------------------------------------
   UNION ALL
   SELECT 40, 'keys.' || k.relname || '.id',
-         r.oid IS NOT NULL AND a.atttypid IN ('int4'::regtype, 'int8'::regtype) AND EXISTS (
-           SELECT 1 FROM pg_constraint con WHERE con.conrelid = r.oid AND con.contype IN ('p', 'u') AND con.conkey = ARRAY[a.attnum]),
+         r.oid IS NOT NULL AND a.atttypid = 'int4'::regtype AND EXISTS (
+           SELECT 1 FROM pg_constraint con JOIN pg_index i ON i.indexrelid = con.conindid
+           WHERE con.conrelid = r.oid AND con.contype IN ('p', 'u') AND con.conkey = ARRAY[a.attnum] AND NOT con.condeferrable
+             AND i.indisvalid AND i.indisready AND i.indislive AND i.indimmediate),
          CASE WHEN r.oid IS NULL THEN 'table missing'
               WHEN a.attnum IS NULL THEN 'column id missing'
               ELSE 'type=' || format_type(a.atttypid, a.atttypmod) || ', key=' || coalesce((
-                SELECT string_agg(con.conname || '(' || con.contype::text || ')', ',') FROM pg_constraint con
+                SELECT string_agg(con.conname || '(' || con.contype::text || CASE WHEN con.condeferrable THEN ', DEFERRABLE' ELSE '' END
+                  || ', index valid=' || i.indisvalid || ' ready=' || i.indisready || ' live=' || i.indislive || ' immediate=' || i.indimmediate || ')', ',')
+                FROM pg_constraint con JOIN pg_index i ON i.indexrelid = con.conindid
                 WHERE con.conrelid = r.oid AND con.contype IN ('p', 'u') AND con.conkey = ARRAY[a.attnum]), 'NONE') END
   FROM referenced_keys k
   LEFT JOIN rel r ON r.relname = k.relname AND r.relkind IN ('r', 'p')
@@ -179,17 +191,12 @@ checks AS (
   -- Columns read by the new functions and index ----------------------------------------------------
   UNION ALL
   SELECT 50, 'columns.' || c.relname || '.' || c.attname,
-         a.attnum IS NOT NULL AND (CASE c.typcategory
-           WHEN 'D' THEN t.typcategory::text = 'D'
-           WHEN 'A' THEN t.typcategory::text = 'A' AND et.typcategory::text = 'N'
-           ELSE t.typcategory::text = c.typcategory END),
-         CASE WHEN a.attnum IS NULL THEN 'missing (' || c.origin || ')'
-              ELSE format_type(a.atttypid, a.atttypmod) || ' (' || c.origin || ')' END
+         a.attnum IS NOT NULL AND format_type(a.atttypid, a.atttypmod) = c.expected_type,
+         CASE WHEN a.attnum IS NULL THEN 'missing, expected ' || c.expected_type || ' (' || c.origin || ')'
+              ELSE format_type(a.atttypid, a.atttypmod) || ', expected ' || c.expected_type || ' (' || c.origin || ')' END
   FROM required_columns c
   LEFT JOIN rel r ON r.relname = c.relname AND r.relkind IN ('r', 'p')
   LEFT JOIN pg_attribute a ON a.attrelid = r.oid AND a.attname = c.attname AND a.attnum > 0 AND NOT a.attisdropped
-  LEFT JOIN pg_type t ON t.oid = a.atttypid
-  LEFT JOIN pg_type et ON et.oid = t.typelem AND t.typcategory = 'A'
   -- appointments_patient_history_idx ---------------------------------------------------------------
   UNION ALL
   SELECT 60, 'appointments.index_name_absent', to_regclass('public.appointments_patient_history_idx') IS NULL,
@@ -218,9 +225,11 @@ checks AS (
   -- Old currency CHECKs dropped by name by 0069 ----------------------------------------------------
   UNION ALL
   SELECT 70, 'currency.' || o.conname,
-         con.oid IS NOT NULL AND con.contype = 'c' AND con.convalidated AND pg_get_constraintdef(con.oid) = o.expected_def,
+         con.oid IS NOT NULL AND con.contype = 'c' AND con.convalidated AND con.conislocal AND con.coninhcount = 0
+           AND pg_get_constraintdef(con.oid) = o.expected_def,
          CASE WHEN con.oid IS NULL THEN 'missing: 0069 would fail after 0066 and 0068 committed'
-              ELSE pg_get_constraintdef(con.oid) || ', validated=' || con.convalidated END
+              ELSE pg_get_constraintdef(con.oid) || ', validated=' || con.convalidated || ', local=' || con.conislocal
+                || ', inherited_count=' || con.coninhcount END
   FROM old_checks o
   LEFT JOIN pg_constraint con ON con.conrelid = to_regclass('public.invoice_settlement_reclassifications') AND con.conname = o.conname
   UNION ALL
@@ -233,16 +242,26 @@ checks AS (
                    WHERE con.conrelid = to_regclass('public.invoice_settlement_reclassifications') AND con.contype = 'c'
                      AND con.conname NOT IN (SELECT conname FROM old_checks)
                      AND con.conname <> 'invoice_settlement_reclassifications_source_invoice_ids_check'), 'none')
-  -- Lock planning: planner estimates only (pg_class.reltuples, relation size); no row is read -------
+  -- Lock planning: pg_class estimates only (reltuples; relpages of table, indexes and TOAST). No row is
+  -- read and no application relation is opened. "never analyzed" means the estimate is unavailable.
   UNION ALL
   SELECT 80, 'estimate.' || r.relname, true,
          CASE WHEN r.reltuples < 0 THEN 'reltuples=never analyzed' ELSE 'reltuples=' || r.reltuples::bigint END
-           || ', size=' || pg_size_pretty(pg_total_relation_size(r.oid))
+           || ', pages_estimate_size=' || pg_size_pretty(((r.relpages
+                + coalesce((SELECT sum(ic.relpages) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid WHERE i.indrelid = r.oid), 0)
+                + coalesce((SELECT t.relpages FROM pg_class t WHERE t.oid = r.reltoastrelid), 0))::bigint
+              * current_setting('block_size')::bigint))
   FROM rel r
   WHERE r.relkind IN ('r', 'p') AND r.relname IN ('appointments', 'invoices', 'invoice_items', 'payments', 'patients',
         'treatment_plans', 'plan_items', 'clinical_cases', 'services', 'parties', 'users',
         'invoice_settlement_reclassifications', 'invoice_settlement_reclassification_events')
 )
 SELECT check_id, ok, detail FROM checks ORDER BY ord, check_id;
+
+-- Relation locks this transaction holds on application relations (locks persist to transaction end).
+SELECT c.relname::text AS locked_relation, l.mode
+FROM pg_locks l JOIN pg_class c ON c.oid = l.relation
+WHERE l.pid = pg_backend_pid() AND l.locktype = 'relation' AND c.relnamespace = 'public'::regnamespace
+ORDER BY 1, 2;
 
 ROLLBACK;

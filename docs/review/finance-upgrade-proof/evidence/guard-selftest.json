@@ -1,0 +1,185 @@
+{
+  "result": "PASS",
+  "checks": [
+    {
+      "check": "every helper refuses every unsafe target before importing runtime code (20 cases)",
+      "ok": true
+    },
+    {
+      "check": "rerouting variables (libpq PG*, other runtime database URLs, RAILWAY_*, VERCEL_*) are stripped from child environments",
+      "ok": true
+    },
+    {
+      "check": "loopback targets are accepted",
+      "ok": true
+    },
+    {
+      "check": "control: with a loopback target each helper passes the guard and reaches the runtime import",
+      "ok": true
+    }
+  ],
+  "cases": [
+    {
+      "helper": "init.mjs",
+      "target": "remote host",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 538
+    },
+    {
+      "helper": "init.mjs",
+      "target": "platform host name",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 506
+    },
+    {
+      "helper": "init.mjs",
+      "target": "loopback URL rerouted by ?host=",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 487
+    },
+    {
+      "helper": "init.mjs",
+      "target": "socket-only URL",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 499
+    },
+    {
+      "helper": "init.mjs",
+      "target": "no DATABASE_URL, only POSTGRES_URL",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 523
+    },
+    {
+      "helper": "fixtures.mjs",
+      "target": "remote host",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 517
+    },
+    {
+      "helper": "fixtures.mjs",
+      "target": "platform host name",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 547
+    },
+    {
+      "helper": "fixtures.mjs",
+      "target": "loopback URL rerouted by ?host=",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 523
+    },
+    {
+      "helper": "fixtures.mjs",
+      "target": "socket-only URL",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 525
+    },
+    {
+      "helper": "fixtures.mjs",
+      "target": "no DATABASE_URL, only POSTGRES_URL",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 509
+    },
+    {
+      "helper": "balances.mjs",
+      "target": "remote host",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 519
+    },
+    {
+      "helper": "balances.mjs",
+      "target": "platform host name",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 510
+    },
+    {
+      "helper": "balances.mjs",
+      "target": "loopback URL rerouted by ?host=",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 536
+    },
+    {
+      "helper": "balances.mjs",
+      "target": "socket-only URL",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 583
+    },
+    {
+      "helper": "balances.mjs",
+      "target": "no DATABASE_URL, only POSTGRES_URL",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 521
+    },
+    {
+      "helper": "checksums.mjs",
+      "target": "remote host",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 489
+    },
+    {
+      "helper": "checksums.mjs",
+      "target": "platform host name",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 520
+    },
+    {
+      "helper": "checksums.mjs",
+      "target": "loopback URL rerouted by ?host=",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 549
+    },
+    {
+      "helper": "checksums.mjs",
+      "target": "socket-only URL",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 540
+    },
+    {
+      "helper": "checksums.mjs",
+      "target": "no DATABASE_URL, only POSTGRES_URL",
+      "status": 1,
+      "refusedBeforeRuntimeImport": true,
+      "ms": 522
+    }
+  ],
+  "controls": [
+    {
+      "helper": "init.mjs",
+      "status": 1,
+      "passedGuardThenFailedAtRuntimeImport": true
+    },
+    {
+      "helper": "fixtures.mjs",
+      "status": 1,
+      "passedGuardThenFailedAtRuntimeImport": true
+    },
+    {
+      "helper": "balances.mjs",
+      "status": 1,
+      "passedGuardThenFailedAtRuntimeImport": true
+    },
+    {
+      "helper": "checksums.mjs",
+      "status": 1,
+      "passedGuardThenFailedAtRuntimeImport": true
+    }
+  ]
+}

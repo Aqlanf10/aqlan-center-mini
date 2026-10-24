@@ -1,5 +1,15 @@
-// Synthetic clinical/financial fixtures written by the DEPLOYED runtime's own writers (f2b5eef9),
-// before any candidate code runs. Synthetic data only. Usage: tsx fixtures.mjs <deployed root>
+// Synthetic clinical/financial fixtures on the DEPLOYED runtime (f2b5eef9), before any candidate code runs.
+// Two kinds, kept distinct:
+// - application-writer fixtures: the deployed runtime's own functions (saveSettings, openShift, createInvoice,
+//   recordPayment including a reversal, createPlan, recordPlanConsent, setPatientOpeningBalance);
+// - direct SQL fixtures: the service, doctor party, patient and appointment rows, and the legacy 0063 YER→SAR
+//   reclassification document, inserted with direct SQL that the deployed schema's own constraints and
+//   triggers validate (as the deployed runtime's currency tests build it).
+// Synthetic data only. Usage: tsx fixtures.mjs <deployed root> [tag]
+import { guardHelperProcess } from "./guard.mjs";
+
+// Refuses a non-loopback DATABASE_URL and strips rerouting variables BEFORE any runtime module is imported.
+guardHelperProcess();
 const root = process.argv[2];
 const tag = process.argv[3] ?? "";  // a second fixture set (e.g. after the upgrade) uses distinct synthetic numbers
 if (!root) throw new Error("deployed runtime root required");

@@ -13,18 +13,21 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { assertLoopbackUrl, assertRuntimeRoots, sanitizedEnv, stripReroutingFromProcess } from "./guard.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { OLD_ROOT, NEW_ROOT, ADMIN_DATABASE_URL, EVIDENCE } = process.env;
 for (const [name, value] of Object.entries({ OLD_ROOT, NEW_ROOT, ADMIN_DATABASE_URL, EVIDENCE })) if (!value) throw new Error(`${name} required`);
 const DB = "aqlan_upgrade_locks";
 const url = new URL(ADMIN_DATABASE_URL); url.pathname = `/${DB}`;
-if (!["127.0.0.1", "localhost"].includes(url.hostname)) throw new Error("refusing a non-local database: synthetic proof only");
+assertLoopbackUrl(ADMIN_DATABASE_URL, "ADMIN_DATABASE_URL");
+stripReroutingFromProcess();
+const roots = assertRuntimeRoots(OLD_ROOT, NEW_ROOT);
 const FILES = ["0066_agreement_delta_amendments", "0068_collection_attempt_retirements", "0069_unpaid_currency_transitions", "0067_patient_appointment_history_index"];
 const LOCK_TIMEOUT_MS = 200;
 /** @param {string} script @param {string} root */
 const step = (script, root) => {
-  const child = spawnSync("npx", ["tsx", path.join(here, script), root], { cwd: root, encoding: "utf8", env: { ...process.env, DATABASE_URL: url.toString(), NODE_ENV: "test" } });
+  const child = spawnSync("npx", ["tsx", path.join(here, script), root], { cwd: root, encoding: "utf8", env: sanitizedEnv(url.toString()) });
   if (child.status !== 0) throw new Error(`${script}: ${child.stderr.slice(-1500)}`);
 };
 
@@ -60,7 +63,10 @@ async function probe(sql, migrationPid) {
     const pid = /** @type {any} */ (other).processID;
     const started = performance.now();
     let waitedMs = -1;
-    const running = other.query(sql).then(() => "proceeds", (/** @type {Error} */ error) => /lock timeout/i.test(error.message) ? "BLOCKED" : `error: ${error.message}`)
+    /** @type {string | null} */
+    let sqlstate = null;
+    // 55P03 (lock_not_available) is PostgreSQL's code for a lock_timeout expiry; nothing else counts as BLOCKED.
+    const running = other.query(sql).then(() => "proceeds", (/** @type {any} */ error) => { sqlstate = error.code ?? null; return sqlstate === "55P03" ? "BLOCKED" : `error ${sqlstate}: ${error.message}`; })
       .finally(() => { waitedMs = Math.round(performance.now() - started); });
     /** @type {{ requested: string, blockedByMigration: boolean } | null} */
     let waiting = null;
@@ -73,7 +79,7 @@ async function probe(sql, migrationPid) {
     }
     const outcome = await running;
     await other.query("ROLLBACK").catch(() => undefined);
-    return { outcome, waitedMs, ...(waiting ? { ungrantedRequest: waiting.requested, blockedByMigrationBackend: waiting.blockedByMigration } : {}) };
+    return { outcome, sqlstate, waitedMs, ...(waiting ? { ungrantedRequest: waiting.requested, blockedByMigrationBackend: waiting.blockedByMigration } : {}) };
   } finally { await other.end(); await observer.end(); }
 }
 
@@ -133,11 +139,47 @@ async function inventory() {
 const shape = (report) => JSON.stringify(report.map((f) => ({ file: f.file, locks: f.locksOnPreExistingTables, rollbackClean: f.rollbackClean, afterRollback: f.probesAfterRollback,
   whileOpen: Object.fromEntries(Object.entries(f.probesWhileOpen).map(([t, p]) => [t, Object.fromEntries(Object.entries(p).map(([k, v]) => [k, [v.outcome, v.ungrantedRequest ?? null, v.blockedByMigrationBackend ?? null]]))])) })));
 
+// Expected behaviour, asserted: the exact strong locks each file holds on pre-existing tables, and which
+// ordinary readers (r) and writers (w) must be blocked while the file's transaction is open.
+const SRE = "ShareRowExclusiveLock";
+/** @type {Record<string, Record<string, { locks: string[], blocked: string }>>} */
+const EXPECTED = {
+  "0066_agreement_delta_amendments": Object.fromEntries(["clinical_cases", "invoice_items", "invoices", "parties", "patients", "plan_items", "services", "treatment_plans", "users"]
+    .map((t) => [t, { locks: [SRE], blocked: "w" }])),
+  "0068_collection_attempt_retirements": Object.fromEntries(["agreement_delta_collection_receipts", "patients", "payments"].map((t) => [t, { locks: [SRE], blocked: "w" }])),
+  "0069_unpaid_currency_transitions": {
+    invoice_settlement_reclassification_events: { locks: [SRE], blocked: "w" },
+    invoice_settlement_reclassifications: { locks: ["AccessExclusiveLock", SRE], blocked: "rw" },
+  },
+  "0067_patient_appointment_history_index": { appointments: { locks: ["ShareLock"], blocked: "w" } },
+};
+/** @param {any[]} report */
+const mismatches = (report) => report.flatMap((f) => {
+  const expected = EXPECTED[f.file];
+  const actual = /** @type {Record<string, string[]>} */ ({});
+  for (const l of f.locksOnPreExistingTables) (actual[l.target] ??= []).push(l.mode);
+  const problems = [];
+  if (JSON.stringify(Object.keys(actual).sort()) !== JSON.stringify(Object.keys(expected).sort())) problems.push(`${f.file}: locked tables ${Object.keys(actual).sort()}`);
+  for (const [table, want] of Object.entries(expected)) {
+    if (JSON.stringify((actual[table] ?? []).sort()) !== JSON.stringify([...want.locks].sort())) problems.push(`${f.file}: ${table} locks ${actual[table]}`);
+    const probes = f.probesWhileOpen[table];
+    for (const [kind, letter] of [["read", "r"], ["write", "w"]]) {
+      const shouldBlock = want.blocked.includes(letter);
+      const p = probes?.[kind];
+      if (!p || (shouldBlock ? !(p.outcome === "BLOCKED" && p.sqlstate === "55P03" && p.blockedByMigrationBackend === true) : p.outcome !== "proceeds")) problems.push(`${f.file}: ${table} ${kind} ${JSON.stringify(p)}`);
+    }
+  }
+  return problems;
+});
+
 const first = await inventory();
 const second = await inventory();
 /** @type {Array<{ check: string, ok: boolean }>} */
 const checks = [];
 const everyProbe = (/** @type {(p: any) => boolean} */ predicate) => first.every((f) => Object.values(f.probesWhileOpen).every((p) => predicate(p.read) && predicate(p.write)));
+const unexpected = mismatches(first);
+checks.push({ check: "exact expected lock modes per file and table; expected readers and writers blocked (SQLSTATE 55P03, blocked by the migration backend) and all others proceed",
+  ok: unexpected.length === 0 });
 checks.push({ check: "every blocked probe is recorded by the server as an ungranted request blocked by the migration backend",
   ok: everyProbe((p) => p.outcome !== "BLOCKED" || p.blockedByMigrationBackend === true) });
 checks.push({ check: `every probe is bounded (lock_timeout ${LOCK_TIMEOUT_MS} ms) and ends as proceeds or BLOCKED`, ok: everyProbe((p) => p.outcome === "proceeds" || p.outcome === "BLOCKED") });
@@ -146,6 +188,6 @@ checks.push({ check: "after ROLLBACK every reader and writer probe proceeds", ok
 checks.push({ check: "a clean rerun on a recreated database gives identical lock modes, probe outcomes and blocking records", ok: shape(first) === shape(second) });
 const result = checks.every((c) => c.ok) ? "PASS" : "FAIL";
 writeFileSync(EVIDENCE, JSON.stringify({ note: "Synthetic-size timings; lock modes and blocking are exact. Not a Production performance claim.",
-  lockTimeoutMs: LOCK_TIMEOUT_MS, result, checks, files: first, rerunSyntheticMs: second.map((f) => ({ file: f.file, syntheticMs: f.syntheticMs })) }, null, 2) + "\n");
+  roots, lockTimeoutMs: LOCK_TIMEOUT_MS, result, checks, unexpected, expected: EXPECTED, files: first, rerunSyntheticMs: second.map((f) => ({ file: f.file, syntheticMs: f.syntheticMs })) }, null, 2) + "\n");
 console.log(JSON.stringify(checks, null, 1), result);
 if (result !== "PASS") process.exit(1);

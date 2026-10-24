@@ -1,8 +1,19 @@
 {
   "note": "Synthetic-size timings; lock modes and blocking are exact. Not a Production performance claim.",
+  "roots": {
+    "deployedRuntime": "f2b5eef97047994438729fe8a2da72e214cdf881",
+    "deployedTreeClean": true,
+    "candidateCheckout": "603ec7517b948fd1c40202b94e027c6bcb845365",
+    "candidateRuntime": "c998b435306f8295a217e49f20080293c479c359",
+    "candidateRuntimeTreeEqualsCandidate": true
+  },
   "lockTimeoutMs": 200,
   "result": "PASS",
   "checks": [
+    {
+      "check": "exact expected lock modes per file and table; expected readers and writers blocked (SQLSTATE 55P03, blocked by the migration backend) and all others proceed",
+      "ok": true
+    },
     {
       "check": "every blocked probe is recorded by the server as an ungranted request blocked by the migration backend",
       "ok": true
@@ -24,10 +35,112 @@
       "ok": true
     }
   ],
+  "unexpected": [],
+  "expected": {
+    "0066_agreement_delta_amendments": {
+      "clinical_cases": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "invoice_items": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "invoices": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "parties": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "patients": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "plan_items": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "services": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "treatment_plans": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "users": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      }
+    },
+    "0068_collection_attempt_retirements": {
+      "agreement_delta_collection_receipts": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "patients": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "payments": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      }
+    },
+    "0069_unpaid_currency_transitions": {
+      "invoice_settlement_reclassification_events": {
+        "locks": [
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "w"
+      },
+      "invoice_settlement_reclassifications": {
+        "locks": [
+          "AccessExclusiveLock",
+          "ShareRowExclusiveLock"
+        ],
+        "blocked": "rw"
+      }
+    },
+    "0067_patient_appointment_history_index": {
+      "appointments": {
+        "locks": [
+          "ShareLock"
+        ],
+        "blocked": "w"
+      }
+    }
+  },
   "files": [
     {
       "file": "0066_agreement_delta_amendments",
-      "syntheticMs": 15.4,
+      "syntheticMs": 17.8,
       "locksOnPreExistingTables": [
         {
           "target": "clinical_cases",
@@ -70,10 +183,12 @@
         "clinical_cases": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -82,11 +197,13 @@
         "invoice_items": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
-            "waitedMs": 203,
+            "sqlstate": "55P03",
+            "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
           }
@@ -94,10 +211,12 @@
         "invoices": {
           "read": {
             "outcome": "proceeds",
-            "waitedMs": 2
+            "sqlstate": null,
+            "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -106,10 +225,12 @@
         "parties": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -118,10 +239,12 @@
         "patients": {
           "read": {
             "outcome": "proceeds",
-            "waitedMs": 1
+            "sqlstate": null,
+            "waitedMs": 2
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -130,10 +253,12 @@
         "plan_items": {
           "read": {
             "outcome": "proceeds",
-            "waitedMs": 8
+            "sqlstate": null,
+            "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -142,10 +267,12 @@
         "services": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -154,10 +281,12 @@
         "treatment_plans": {
           "read": {
             "outcome": "proceeds",
-            "waitedMs": 4
+            "sqlstate": null,
+            "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -166,10 +295,12 @@
         "users": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -218,7 +349,7 @@
     },
     {
       "file": "0068_collection_attempt_retirements",
-      "syntheticMs": 2.8,
+      "syntheticMs": 2,
       "locksOnPreExistingTables": [
         {
           "target": "agreement_delta_collection_receipts",
@@ -237,10 +368,12 @@
         "agreement_delta_collection_receipts": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -249,10 +382,12 @@
         "patients": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -261,10 +396,12 @@
         "payments": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -289,7 +426,7 @@
     },
     {
       "file": "0069_unpaid_currency_transitions",
-      "syntheticMs": 1.5,
+      "syntheticMs": 1,
       "locksOnPreExistingTables": [
         {
           "target": "invoice_settlement_reclassification_events",
@@ -308,10 +445,12 @@
         "invoice_settlement_reclassification_events": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -320,12 +459,14 @@
         "invoice_settlement_reclassifications": {
           "read": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "AccessShareLock",
             "blockedByMigrationBackend": true
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -346,7 +487,7 @@
     },
     {
       "file": "0067_patient_appointment_history_index",
-      "syntheticMs": 3.7,
+      "syntheticMs": 0.9,
       "locksOnPreExistingTables": [
         {
           "target": "appointments",
@@ -357,10 +498,12 @@
         "appointments": {
           "read": {
             "outcome": "proceeds",
+            "sqlstate": null,
             "waitedMs": 1
           },
           "write": {
             "outcome": "BLOCKED",
+            "sqlstate": "55P03",
             "waitedMs": 201,
             "ungrantedRequest": "RowExclusiveLock",
             "blockedByMigrationBackend": true
@@ -379,11 +522,11 @@
   "rerunSyntheticMs": [
     {
       "file": "0066_agreement_delta_amendments",
-      "syntheticMs": 14.8
+      "syntheticMs": 20.4
     },
     {
       "file": "0068_collection_attempt_retirements",
-      "syntheticMs": 3.2
+      "syntheticMs": 2.6
     },
     {
       "file": "0069_unpaid_currency_transitions",
@@ -391,7 +534,7 @@
     },
     {
       "file": "0067_patient_appointment_history_index",
-      "syntheticMs": 1.7
+      "syntheticMs": 1
     }
   ]
 }

@@ -3,6 +3,8 @@ node v22.22.0; eslint 9.39.5; @eslint/js 9.39.5; typescript 5.9.3
 ok docs/review/finance-upgrade-proof/proof/balances.mjs
 ok docs/review/finance-upgrade-proof/proof/checksums.mjs
 ok docs/review/finance-upgrade-proof/proof/fixtures.mjs
+ok docs/review/finance-upgrade-proof/proof/guard-selftest.mjs
+ok docs/review/finance-upgrade-proof/proof/guard.mjs
 ok docs/review/finance-upgrade-proof/proof/init.mjs
 ok docs/review/finance-upgrade-proof/proof/lock-inventory.mjs
 ok docs/review/finance-upgrade-proof/proof/partial-failure.mjs
@@ -11,7 +13,7 @@ ok docs/review/finance-upgrade-proof/proof/run-proof.mjs
 ok docs/review/finance-upgrade-proof/proof/static-checks.eslint.config.mjs
 ok docs/review/finance-upgrade-proof/proof/validate-prerequisites.mjs
 == eslint (dedicated harness config; the repository config ignores *.mjs)
-ok eslint: 10 files, 0 problems
+ok eslint: 12 files, 0 problems
 ok eslint negative control rejected
 == tsc --checkJs (types against pg/node declarations; unused locals and parameters)
 ok tsc

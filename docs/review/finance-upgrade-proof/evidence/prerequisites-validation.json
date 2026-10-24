@@ -1,10 +1,27 @@
 {
   "note": "Synthetic databases only. prerequisites.sql is read-only and ends in ROLLBACK.",
+  "roots": {
+    "deployedRuntime": "f2b5eef97047994438729fe8a2da72e214cdf881",
+    "deployedTreeClean": true,
+    "candidateCheckout": "603ec7517b948fd1c40202b94e027c6bcb845365",
+    "candidateRuntime": "c998b435306f8295a217e49f20080293c479c359",
+    "candidateRuntimeTreeEqualsCandidate": true
+  },
   "scenarios": [
     {
       "scenario": "deployed_with_fixtures",
       "expectedFailing": [],
       "failing": [],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
       "pass": true,
       "rows": [
         {
@@ -65,172 +82,172 @@
         {
           "check_id": "keys.clinical_cases.id",
           "ok": true,
-          "detail": "type=integer, key=clinical_cases_pkey(p)"
+          "detail": "type=integer, key=clinical_cases_pkey(p, index valid=true ready=true live=true immediate=true)"
         },
         {
           "check_id": "keys.invoices.id",
           "ok": true,
-          "detail": "type=integer, key=invoices_pkey(p)"
+          "detail": "type=integer, key=invoices_pkey(p, index valid=true ready=true live=true immediate=true)"
         },
         {
           "check_id": "keys.parties.id",
           "ok": true,
-          "detail": "type=integer, key=parties_pkey(p)"
+          "detail": "type=integer, key=parties_pkey(p, index valid=true ready=true live=true immediate=true)"
         },
         {
           "check_id": "keys.patients.id",
           "ok": true,
-          "detail": "type=integer, key=patients_pkey(p)"
+          "detail": "type=integer, key=patients_pkey(p, index valid=true ready=true live=true immediate=true)"
         },
         {
           "check_id": "keys.plan_items.id",
           "ok": true,
-          "detail": "type=integer, key=plan_items_pkey(p)"
+          "detail": "type=integer, key=plan_items_pkey(p, index valid=true ready=true live=true immediate=true)"
         },
         {
           "check_id": "keys.services.id",
           "ok": true,
-          "detail": "type=integer, key=services_pkey(p)"
+          "detail": "type=integer, key=services_pkey(p, index valid=true ready=true live=true immediate=true)"
         },
         {
           "check_id": "keys.treatment_plans.id",
           "ok": true,
-          "detail": "type=integer, key=treatment_plans_pkey(p)"
+          "detail": "type=integer, key=treatment_plans_pkey(p, index valid=true ready=true live=true immediate=true)"
         },
         {
           "check_id": "keys.users.id",
           "ok": true,
-          "detail": "type=integer, key=users_pkey(p)"
+          "detail": "type=integer, key=users_pkey(p, index valid=true ready=true live=true immediate=true)"
         },
         {
           "check_id": "columns.appointments.id",
           "ok": true,
-          "detail": "integer (0067 index)"
+          "detail": "integer, expected integer (0067 index)"
         },
         {
           "check_id": "columns.appointments.patient_id",
           "ok": true,
-          "detail": "integer (0067 index)"
+          "detail": "integer, expected integer (0067 index)"
         },
         {
           "check_id": "columns.appointments.scheduled_date",
           "ok": true,
-          "detail": "date (0067 index)"
+          "detail": "date, expected date (0067 index)"
         },
         {
           "check_id": "columns.appointments.scheduled_time",
           "ok": true,
-          "detail": "time without time zone (0067 index)"
+          "detail": "time without time zone, expected time without time zone (0067 index)"
         },
         {
           "check_id": "columns.invoice_items.invoice_id",
           "ok": true,
-          "detail": "integer (0066 invoice fence)"
+          "detail": "integer, expected integer (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoice_items.plan_item_id",
           "ok": true,
-          "detail": "integer (0066 invoice fence)"
+          "detail": "integer, expected integer (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoice_items.source_id",
           "ok": true,
-          "detail": "bigint (0066 invoice fence)"
+          "detail": "bigint, expected bigint (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoice_items.source_type",
           "ok": true,
-          "detail": "text (0066 invoice fence)"
+          "detail": "text, expected text (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoice_settlement_reclassification_events.reclassification_id",
           "ok": true,
-          "detail": "integer (0069 guard)"
+          "detail": "integer, expected integer (0069 guard)"
         },
         {
           "check_id": "columns.invoice_settlement_reclassifications.id",
           "ok": true,
-          "detail": "integer (0069 guard)"
+          "detail": "integer, expected integer (0069 guard)"
         },
         {
           "check_id": "columns.invoice_settlement_reclassifications.source_currency",
           "ok": true,
-          "detail": "text (0069 constraint / guard)"
+          "detail": "text, expected text (0069 constraint / guard)"
         },
         {
           "check_id": "columns.invoice_settlement_reclassifications.source_invoice_ids",
           "ok": true,
-          "detail": "integer[] (0069 guard (= ANY(array)))"
+          "detail": "integer[], expected integer[] (0069 guard (= ANY(array)))"
         },
         {
           "check_id": "columns.invoice_settlement_reclassifications.target_currency",
           "ok": true,
-          "detail": "text (0069 constraint / guard)"
+          "detail": "text, expected text (0069 constraint / guard)"
         },
         {
           "check_id": "columns.invoices.base_currency",
           "ok": true,
-          "detail": "text (0066 invoice fence)"
+          "detail": "text, expected text (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoices.created_at",
           "ok": true,
-          "detail": "timestamp with time zone (0066 invoice fence)"
+          "detail": "timestamp with time zone, expected timestamp with time zone (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoices.discount_minor",
           "ok": true,
-          "detail": "bigint (0066 invoice fence)"
+          "detail": "bigint, expected bigint (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoices.id",
           "ok": true,
-          "detail": "integer (0066 invoice fence / 0069 guard)"
+          "detail": "integer, expected integer (0066 invoice fence / 0069 guard)"
         },
         {
           "check_id": "columns.invoices.invoice_number",
           "ok": true,
-          "detail": "text (0066 invoice fence)"
+          "detail": "text, expected text (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoices.patient_id",
           "ok": true,
-          "detail": "integer (0066 invoice fence)"
+          "detail": "integer, expected integer (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoices.plan_id",
           "ok": true,
-          "detail": "integer (0066 invoice fence)"
+          "detail": "integer, expected integer (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoices.status",
           "ok": true,
-          "detail": "text (0066 invoice fence)"
+          "detail": "text, expected text (0066 invoice fence)"
         },
         {
           "check_id": "columns.invoices.total_minor",
           "ok": true,
-          "detail": "bigint (0066 invoice fence)"
+          "detail": "bigint, expected bigint (0066 invoice fence)"
         },
         {
           "check_id": "columns.payments.idempotency_key",
           "ok": true,
-          "detail": "text (0068 key fence)"
+          "detail": "text, expected text (0068 key fence)"
         },
         {
           "check_id": "columns.payments.invoice_id",
           "ok": true,
-          "detail": "integer (0069 guard)"
+          "detail": "integer, expected integer (0069 guard)"
         },
         {
           "check_id": "columns.plan_items.id",
           "ok": true,
-          "detail": "integer (0066 invoice fence)"
+          "detail": "integer, expected integer (0066 invoice fence)"
         },
         {
           "check_id": "columns.plan_items.plan_id",
           "ok": true,
-          "detail": "integer (0066 invoice fence)"
+          "detail": "integer, expected integer (0066 invoice fence)"
         },
         {
           "check_id": "appointments.index_name_absent",
@@ -250,12 +267,12 @@
         {
           "check_id": "currency.invoice_settlement_reclassifications_source_currency_check",
           "ok": true,
-          "detail": "CHECK ((source_currency = 'YER'::text)), validated=true"
+          "detail": "CHECK ((source_currency = 'YER'::text)), validated=true, local=true, inherited_count=0"
         },
         {
           "check_id": "currency.invoice_settlement_reclassifications_target_currency_check",
           "ok": true,
-          "detail": "CHECK ((target_currency = 'SAR'::text)), validated=true"
+          "detail": "CHECK ((target_currency = 'SAR'::text)), validated=true, local=true, inherited_count=0"
         },
         {
           "check_id": "currency.no_other_checks_on_currency_columns",
@@ -265,67 +282,67 @@
         {
           "check_id": "estimate.appointments",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=128 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=64 kB"
         },
         {
           "check_id": "estimate.clinical_cases",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=40 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=32 kB"
         },
         {
           "check_id": "estimate.invoice_items",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=80 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=40 kB"
         },
         {
           "check_id": "estimate.invoice_settlement_reclassification_events",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=64 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=24 kB"
         },
         {
           "check_id": "estimate.invoice_settlement_reclassifications",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=64 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=24 kB"
         },
         {
           "check_id": "estimate.invoices",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=88 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=40 kB"
         },
         {
           "check_id": "estimate.parties",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=48 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=16 kB"
         },
         {
           "check_id": "estimate.patients",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=128 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=64 kB"
         },
         {
           "check_id": "estimate.payments",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=128 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=56 kB"
         },
         {
           "check_id": "estimate.plan_items",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=48 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=40 kB"
         },
         {
           "check_id": "estimate.services",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=48 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=16 kB"
         },
         {
           "check_id": "estimate.treatment_plans",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=64 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=24 kB"
         },
         {
           "check_id": "estimate.users",
           "ok": true,
-          "detail": "reltuples=never analyzed, size=32 kB"
+          "detail": "reltuples=never analyzed, pages_estimate_size=24 kB"
         }
       ]
     },
@@ -336,6 +353,16 @@
       ],
       "failing": [
         "currency.invoice_settlement_reclassifications_target_currency_check"
+      ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
       ],
       "pass": true,
       "rows": [
@@ -354,12 +381,22 @@
       "failing": [
         "currency.invoice_settlement_reclassifications_source_currency_check"
       ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
       "pass": true,
       "rows": [
         {
           "check_id": "currency.invoice_settlement_reclassifications_source_currency_check",
           "ok": false,
-          "detail": "CHECK ((source_currency = 'YER'::text)) NOT VALID, validated=false"
+          "detail": "CHECK ((source_currency = 'YER'::text)) NOT VALID, validated=false, local=true, inherited_count=0"
         }
       ]
     },
@@ -370,6 +407,16 @@
       ],
       "failing": [
         "currency.no_other_checks_on_currency_columns"
+      ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
       ],
       "pass": true,
       "rows": [
@@ -395,6 +442,16 @@
         "conflict.relation_names",
         "conflict.triggers_on_existing_tables",
         "conflict.type_names"
+      ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
       ],
       "pass": true,
       "rows": [
@@ -437,6 +494,16 @@
         "appointments.no_equivalent_index",
         "conflict.relation_names"
       ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
       "pass": true,
       "rows": [
         {
@@ -464,12 +531,22 @@
       "failing": [
         "columns.payments.idempotency_key"
       ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
       "pass": true,
       "rows": [
         {
           "check_id": "columns.payments.idempotency_key",
           "ok": false,
-          "detail": "missing (0068 key fence)"
+          "detail": "missing, expected text (0068 key fence)"
         }
       ]
     },
@@ -481,12 +558,130 @@
       "failing": [
         "keys.parties.id"
       ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
       "pass": true,
       "rows": [
         {
           "check_id": "keys.parties.id",
           "ok": false,
           "detail": "type=integer, key=NONE"
+        }
+      ]
+    },
+    {
+      "scenario": "referenced_key_deferrable",
+      "expectedFailing": [
+        "keys.parties.id"
+      ],
+      "failing": [
+        "keys.parties.id"
+      ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "keys.parties.id",
+          "ok": false,
+          "detail": "type=integer, key=parties_pkey(p, DEFERRABLE, index valid=true ready=true live=true immediate=false)"
+        }
+      ]
+    },
+    {
+      "scenario": "referenced_key_index_invalid",
+      "expectedFailing": [
+        "keys.services.id"
+      ],
+      "failing": [
+        "keys.services.id"
+      ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "keys.services.id",
+          "ok": false,
+          "detail": "type=integer, key=services_pkey(p, index valid=false ready=true live=true immediate=true)"
+        }
+      ]
+    },
+    {
+      "scenario": "column_wrong_type",
+      "expectedFailing": [
+        "columns.invoice_items.source_id"
+      ],
+      "failing": [
+        "columns.invoice_items.source_id"
+      ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "columns.invoice_items.source_id",
+          "ok": false,
+          "detail": "numeric, expected bigint (0066 invoice fence)"
+        }
+      ]
+    },
+    {
+      "scenario": "currency_check_inherited",
+      "expectedFailing": [
+        "currency.invoice_settlement_reclassifications_target_currency_check"
+      ],
+      "failing": [
+        "currency.invoice_settlement_reclassifications_target_currency_check"
+      ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
+      ],
+      "pass": true,
+      "rows": [
+        {
+          "check_id": "currency.invoice_settlement_reclassifications_target_currency_check",
+          "ok": false,
+          "detail": "CHECK ((target_currency = 'SAR'::text)), validated=true, local=true, inherited_count=1"
         }
       ]
     },
@@ -499,6 +694,16 @@
       "failing": [
         "registry.names_and_checksums_match_published",
         "registry.none_adopted"
+      ],
+      "lockedRelations": [
+        {
+          "locked_relation": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "locked_relation": "schema_migrations_pkey",
+          "mode": "AccessShareLock"
+        }
       ],
       "pass": true,
       "rows": [
