@@ -55,6 +55,7 @@ import {
   selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
   type ToothRowLike, type ToothSelection,
 } from "./dental/invoice-tooth-selection";
+import { selectManualLine } from "./invoice-manual-line";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { invoiceCatalogPrice, type InvoiceCatalogService } from "@/lib/invoice-catalog-price";
 import workspace from "./InvoiceWorkspace.module.css";
@@ -1061,7 +1062,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
   );
 }
 
-type InvoiceRow = ToothRowLike & { doctorId: string; serviceId: string; description: string; price: string; quantity: string; priceReason: string };
+type InvoiceRow = ToothRowLike & { doctorId: string; serviceId: string; description: string; price: string; quantity: string; priceReason: string; manual?: boolean };
 const blankInvoiceRow = (key: string): InvoiceRow => ({
   key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
@@ -1580,7 +1581,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 value={row.serviceId ? Number(row.serviceId) : null}
                 onChange={(id, srv) => {
                   setRows((current) => replaceRowService(current, index, {
-                    serviceId: id ? String(id) : "", doctorId: "",
+                    serviceId: id ? String(id) : "", doctorId: "", manual: false,
                     price: srv && invoiceOfferedPrice(srv, currency) !== null ? formatAmount(invoiceOfferedPrice(srv, currency)!, currency) : "",
                     description: srv ? srv.name : current[index].description,
                   }, invoiceToothMode(srv?.category)));
@@ -1588,6 +1589,8 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 base={currency}
                 catalogCurrency={currency}
                 allowManual={true}
+                manualSelected={row.manual === true}
+                onManualSelect={() => setRows((current) => selectManualLine(current, index))}
                 placeholder="— اختر الخدمة المصنفة أو بند يدوي —"
                 ariaLabel="الخدمة" compact
               />

@@ -97,15 +97,22 @@ export function categoryDisplayName(cat: string): string {
   return cat;
 }
 
-interface ServiceSelectProps {
+/**
+ * The free manual line is an explicit, controlled state, never a service id: when offered, the owner says
+ * whether it is selected and receives a dedicated callback. `onChange` only ever reports a real catalogue
+ * id (positive safe integer) or 0 for the empty choice — never NaN.
+ */
+type ManualLineOption =
+  | { allowManual?: false; manualSelected?: never; onManualSelect?: never }
+  | { allowManual: true; manualSelected: boolean; onManualSelect: () => void };
+
+type ServiceSelectProps = ManualLineOption & {
   services: ServiceItem[];
   value: number | string | null;
   onChange: (serviceId: number, service: ServiceItem | null) => void;
   base?: Currency;
   placeholder?: string;
   className?: string;
-  allowManual?: boolean;
-  onManualSelect?: () => void;
   showCategoryTabs?: boolean;
   ariaLabel?: string;
   /** Opt-in visit catalogue: native grouped options, with a separate search field. */
@@ -115,7 +122,9 @@ interface ServiceSelectProps {
   disabled?: boolean;
   /** The owning line already displays its unit and price. */
   compact?: boolean;
-}
+};
+
+export const MANUAL_LINE_VALUE = "manual";
 
 /**
  * قائمة منسدلة ذكية مصنفة للخدمات السنية
@@ -129,6 +138,8 @@ export function ServiceSelect({
   placeholder = "— اختر الخدمة من الدليل المصنف —",
   className = "",
   allowManual = false,
+  manualSelected = false,
+  onManualSelect,
   showCategoryTabs = false,
   ariaLabel = "اختيار الخدمة",
   searchable = false,
@@ -212,7 +223,7 @@ export function ServiceSelect({
         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-navy-900 outline-none focus:border-navy-800 disabled:bg-slate-50" /> : null}
       <div className="relative">
         <select
-          value={value ? String(value) : ""}
+          value={allowManual && manualSelected ? MANUAL_LINE_VALUE : value ? String(value) : ""}
           disabled={disabled}
           onChange={(e) => {
             if (disabled) return;
@@ -221,7 +232,12 @@ export function ServiceSelect({
               onChange(0, null);
               return;
             }
+            if (rawVal === MANUAL_LINE_VALUE) {
+              if (allowManual) onManualSelect?.();
+              return;
+            }
             const id = Number(rawVal);
+            if (!Number.isSafeInteger(id) || id <= 0) return;
             const found = services.find((s) => s.id === id) ?? null;
             if (searchable && (!found || !filteredServices.some((service) => service.id === id))) return;
             onChange(id, found);
@@ -230,7 +246,7 @@ export function ServiceSelect({
           className={`w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-navy-900 outline-none transition-colors focus:border-navy-800 ${className}`}
         >
           <option value="">{placeholder}</option>
-          {allowManual ? <option value="manual">✍️ — بند يدوي حر —</option> : null}
+          {allowManual ? <option value={MANUAL_LINE_VALUE}>✍️ — بند يدوي حر —</option> : null}
           {grouped.map(([groupName, list]) => (
             <optgroup key={groupName} label={`❖ ${categoryDisplayName(groupName)}`}>
               {list.map((service) => (
