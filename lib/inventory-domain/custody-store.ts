@@ -116,16 +116,38 @@ async function lots(client:DbClient,ids?:string[]){return (await client.query<Lo
  FROM stock_lots l JOIN inventory_items i ON i.id=l.item_id LEFT JOIN goods_receipt_lines grl ON grl.id=l.receipt_line_id
  WHERE ($1::uuid[] IS NULL OR l.id=ANY($1::uuid[])) ORDER BY l.id`,[ids??null])).rows;}
 async function ledgerRows(client:DbClient,itemIds?:number[]){
- const r=await client.query<{id:number;name:string;unit:string;global_qty:string;allocated_qty:string}>(`SELECT i.id,i.name,i.unit,
+ const r=await client.query<{id:number;name:string;unit:string;global_qty:string;allocated_qty:string;source_allocations_complete:boolean}>(`SELECT i.id,i.name,i.unit,
  COALESCE((SELECT SUM(CASE m.kind WHEN 'out' THEN -m.qty ELSE m.qty END) FROM inventory_movements m WHERE m.item_id=i.id),0)::text AS global_qty,
- COALESCE((SELECT SUM(CASE WHEN m.kind='out' OR(m.kind='adjust' AND m.qty<0) THEN -a.qty ELSE a.qty END) FROM inventory_movement_allocations a JOIN inventory_movements m ON m.id=a.movement_id WHERE m.item_id=i.id),0)::text AS allocated_qty
+ COALESCE((SELECT SUM(CASE WHEN m.kind='out' OR(m.kind='adjust' AND m.qty<0) THEN -a.qty ELSE a.qty END) FROM inventory_movement_allocations a JOIN inventory_movements m ON m.id=a.movement_id WHERE m.item_id=i.id),0)::text AS allocated_qty,
+ NOT EXISTS (
+  SELECT 1 FROM inventory_movements m WHERE m.item_id=i.id AND (
+   ABS(m.qty) <> COALESCE((SELECT SUM(a.qty) FROM inventory_movement_allocations a WHERE a.movement_id=m.id),0)
+   OR EXISTS (SELECT 1 FROM inventory_movement_allocations a JOIN stock_lots l ON l.id=a.lot_id WHERE a.movement_id=m.id AND l.item_id<>m.item_id)
+  )
+ ) AND NOT EXISTS (
+  SELECT 1 FROM inventory_movement_allocations a
+  JOIN stock_lots l ON l.id=a.lot_id JOIN inventory_movements m ON m.id=a.movement_id
+  WHERE l.item_id=i.id AND m.item_id<>l.item_id
+ ) AS source_allocations_complete
  FROM inventory_items i
  WHERE ($1::int[] IS NULL AND (EXISTS (SELECT 1 FROM inventory_movements m WHERE m.item_id=i.id) OR EXISTS (SELECT 1 FROM stock_lots l WHERE l.item_id=i.id)))
     OR i.id=ANY($1::int[])
  ORDER BY i.id`,[itemIds??null]);
  return r.rows;
 }
-function reconciled(row:{global_qty:string;allocated_qty:string}){try{return row.global_qty===row.allocated_qty||decimalRatio(row.global_qty).numerator*decimalRatio(row.allocated_qty).denominator===decimalRatio(row.allocated_qty).numerator*decimalRatio(row.global_qty).denominator;}catch{return false;}}
+function reconciled(row:{global_qty:string;allocated_qty:string;source_allocations_complete:boolean}){try{return row.source_allocations_complete&&(row.global_qty===row.allocated_qty||decimalRatio(row.global_qty).numerator*decimalRatio(row.allocated_qty).denominator===decimalRatio(row.allocated_qty).numerator*decimalRatio(row.global_qty).denominator);}catch{return false;}}
+/** Held inspection quantity remains at its receipt origin until a quarantine
+ * disposition retires it. Custody usage/waste/returns cannot spend that reserve. */
+function locationCapacity(lot:Lot,locationId:string,current:readonly {lot_id:string;location_id:string;qty:string}[]){
+ const at=(id:string)=>quantityAtoms(current.find(row=>row.lot_id===lot.id&&row.location_id===id)?.qty??"0",3,true);
+ const total=at(locationId);
+ const reserve=quantityAtoms(lot.unreleased_qty??"0",3,true);
+ // Check the receipt origin even when reading/spending another location. A
+ // zero/missing origin must not hide held stock that escaped in old data.
+ invariant(reserve<=at(lot.receipt_location_id),"allocation_reconciliation_required","Quarantine reserve exceeds its tracked receipt-origin balance");
+ const held=locationId===lot.receipt_location_id?reserve:0n;
+ return {total,held,available:total-held};
+}
 async function verifyLedgerReconciliation(client:DbClient,itemIds:number[]){const rows=await ledgerRows(client,itemIds);invariant(rows.every(reconciled),"legacy_allocation_incomplete","Clinic movements are not fully allocated to lots/locations; reconcile before transfer");}
 function basePrecision(lot:Lot){const conversion=lot.cost_snapshot.conversion as {basePrecision?:number;baseUnit?:string}|undefined;invariant(conversion&&typeof conversion.basePrecision==="number"&&Number.isInteger(conversion.basePrecision)&&conversion.basePrecision>=0&&conversion.basePrecision<=3&&conversion.baseUnit===lot.unit,"unit_precision_unconfirmed","Use the lot's recorded base unit/precision before transferring it");return conversion.basePrecision;}
 function eligible(lot:Lot,today:string){return lot.status==="accepted"&&((lot.expiry_date===null&&lot.cost_snapshot.requiresExpiry===false)||(lot.expiry_date!==null&&lot.expiry_date>=today));}
@@ -137,12 +159,10 @@ export async function dispatchCustodyTransfer(actor:InventoryActor,key:string,in
   const places=await locations(client,[input.fromLocationId,input.toLocationId,input.transitLocationId]);const source=places.find(row=>row.id===input.fromLocationId),dest=places.find(row=>row.id===input.toLocationId),transit=places.find(row=>row.id===input.transitLocationId);
   invariant(source?.is_active&&dest?.is_active&&transit?.is_active&&source.kind!=="transit"&&dest.kind!=="transit"&&transit.kind==="transit"&&new Set([source.id,dest.id,transit.id]).size===3,"location_forbidden","Use distinct active source, destination and transit locations in this clinic");
   if(dest.kind==="custody"){const party=await client.query<{kind:string;is_active:boolean}>("SELECT kind,is_active FROM parties WHERE id=$1 FOR SHARE",[dest.doctor_party_id]);invariant(party.rows[0]?.kind==="doctor"&&party.rows[0]?.is_active,"doctor_unavailable","Destination must belong to an active doctor");}
-  const stock=await lots(client,[...lotIds]);invariant(stock.length===lotIds.size,"not_found","Transfer lot was not found");await lockItems(client,stock.map(row=>row.item_id));const current=await balances(client);const today=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);
+  let stock=await lots(client,[...lotIds]);invariant(stock.length===lotIds.size,"not_found","Transfer lot was not found");await lockItems(client,stock.map(row=>row.item_id));stock=await lots(client,[...lotIds]);const current=await balances(client);const today=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);
   for(const line of input.lines){
    const lot=stock.find(row=>row.id===line.lotId)!;invariant(eligible(lot,today),"lot_unavailable","Expired or quarantined material cannot be dispatched as available custody");
-   const qty=current.find(row=>row.lot_id===line.lotId&&row.location_id===source.id)?.qty??"0";
-   const heldAtoms=source.id===lot.receipt_location_id?quantityAtoms(lot.unreleased_qty??"0",3,true):0n;
-   const availableAtoms=quantityAtoms(qty,3,true)>heldAtoms?quantityAtoms(qty,3,true)-heldAtoms:0n;
+   const availableAtoms=locationCapacity(lot,source.id,current).available;
    invariant(quantityAtoms(line.quantity,basePrecision(lot))<=availableAtoms,"insufficient_location_stock","Source location has insufficient tracked stock");
   }
   await client.query("INSERT INTO inventory_transfers(id,from_location_id,to_location_id,transit_location_id,reason,created_by) VALUES($1,$2,$3,$4,$5,$6)",[input.id,source.id,dest.id,transit.id,input.reason,actor.userId]);
@@ -295,19 +315,25 @@ export async function recordCustodyUsage(actor:InventoryActor,key:string,input:C
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.usage:${usageKey}`]);
   const dup=await client.query<{id:string}>("SELECT id::text FROM custody_usage_events WHERE usage_key=$1 FOR SHARE",[usageKey]);
   invariant(!dup.rows.length,"duplicate_consumption","This custody usage key was already recorded");
-  const stock=await lots(client,[input.lotId]);const lot=stock[0];invariant(lot,"not_found","Custody lot was not found");
+  const stock=await lots(client,[input.lotId]);let lot=stock[0];invariant(lot,"not_found","Custody lot was not found");
   await lockItems(client,[lot.item_id]);
+  // Quarantine dispositions use the same item lock. Refresh their capacity only
+  // after acquiring it, not from the pre-lock lot snapshot.
+  lot=(await lots(client,[input.lotId]))[0];invariant(lot,"not_found","Custody lot was not found");
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.lot_loc:${source.id}:${lot.id}`]);
   const current=await balances(client);const today=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);
   if(input.kind==="consumed"||input.kind==="returned_to_store")invariant(eligible(lot,today),"lot_unavailable","Expired or quarantined material cannot be consumed or returned as available store stock");
   const precision=basePrecision(lot);const qtyAtoms=quantityAtoms(input.quantity,precision);const normalizedQty=quantityText(qtyAtoms);
-  const availableAtoms=quantityAtoms(current.find(row=>row.lot_id===lot.id&&row.location_id===source.id)?.qty??"0",3,true);
+  const availableAtoms=locationCapacity(lot,source.id,current).available;
   invariant(qtyAtoms<=availableAtoms,"insufficient_location_stock","Doctor custody location has insufficient balance for this lot");
   if(input.kind==="approved_waste"){
    const approvalId=rawWasteApprovalId!;
+   // Serialize the allowance row, but only share-lock its approver. Updating
+   // that joined user after the item lock would invert inventoryOperation's
+   // actor SHARE -> item order against a concurrent admin disposition.
    const approvalRows=await client.query<{id:string;location_id:string;lot_id:string;doctor_party_id:number;max_qty:string;approved_by:number;approver_role:string;approver_active:boolean;approver_party_id:number|null}>(`SELECT a.id::text,a.location_id,a.lot_id::text,a.doctor_party_id,a.max_qty::text,a.approved_by,
     u.role AS approver_role,u.is_active AS approver_active,u.party_id AS approver_party_id
-    FROM custody_waste_approvals a JOIN users u ON u.id=a.approved_by WHERE a.id=$1 FOR UPDATE`,[approvalId]);
+    FROM custody_waste_approvals a JOIN users u ON u.id=a.approved_by WHERE a.id=$1 FOR UPDATE OF a FOR SHARE OF u`,[approvalId]);
    const approval=approvalRows.rows[0];
    invariant(approval&&approval.approver_role==="admin"&&approval.approver_active,"invalid_waste_approval","Approved waste requires an active administrator approval record");
    invariant(approval.approver_party_id===null||approval.approver_party_id!==source.doctor_party_id,"invalid_waste_approval","Self-approval of custody waste is forbidden");
@@ -936,6 +962,7 @@ function roundedQuote(lot:Lot,quantity:string):{currency:Currency;amountMinor:nu
  }catch{return null;}
 }
 export async function readDoctorCustody(actor:InventoryActor,offset=0){invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");await ready();return withTransaction(getPool(),async client=>{
+ await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
  const who=await requireInventoryActor(client,actor,false);invariant(actor.role==="admin"||(actor.role==="doctor"&&who.party_id!==null),"custody_read_forbidden","Custody statements are limited to the doctor owner or administrator");
  const allLocations=await locations(client);const visible=allLocations.filter(row=>actor.role==="admin"||(row.kind==="custody"&&row.doctor_party_id===who.party_id));const visibleIds=visible.map(row=>row.id);const stock=await lots(client);const current=await balances(client);const today=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);const ledger=await ledgerRows(client);const incomplete=new Set(ledger.filter(row=>!reconciled(row)).map(row=>row.id));
  const values=new Map<string,{currency:Currency;amountMinor:number}>();if(actor.role==="admin")for(const lot of stock){const rows=current.filter(row=>row.lot_id===lot.id&&quantityAtoms(row.qty,3,true)>0n);if(!rows.length)continue;const total=rows.reduce((sum,row)=>sum+quantityAtoms(row.qty),0n);const quote=roundedQuote(lot,quantityText(total));if(quote)for(const share of allocateMinor(quote.amountMinor,rows.map(row=>({id:row.location_id,weight:String(quantityAtoms(row.qty))}))))values.set(`${lot.id}:${share.id}`,{currency:quote.currency,amountMinor:share.amountMinor});}
@@ -1082,7 +1109,7 @@ export async function readDoctorCustody(actor:InventoryActor,offset=0){invariant
  return {
   scope:INVENTORY_CLINIC_SCOPE,
   pricesAllowed:actor.role==="admin",
-  locations:visible.map(place=>({id:place.id,label:place.label,kind:place.kind,doctorPartyId:place.doctor_party_id,lots:current.filter(row=>row.location_id===place.id&&quantityAtoms(row.qty,3,true)>0n).map(row=>{const lot=stock.find(lot=>lot.id===row.lot_id)!;const quote=values.get(`${lot.id}:${place.id}`);return {lotId:lot.id,itemId:lot.item_id,name:lot.name,unit:lot.unit,quantity:quantityText(quantityAtoms(row.qty)),lotCode:lot.lot_code,expiryDate:lot.expiry_date,availability:eligible(lot,today)&&!incomplete.has(lot.item_id)?"available":"unavailable",trackingState:incomplete.has(lot.item_id)?"incomplete":"allocated",...(actor.role==="admin"?{quote:quote??null,costState:quote?"estimated":lot.cost_status==="known"?"known":"missing"}:{})};}),closableLots:(closableByLocation.get(place.id)??[]).filter(c=>!c.alreadyClosed)})),
+  locations:visible.map(place=>({id:place.id,label:place.label,kind:place.kind,doctorPartyId:place.doctor_party_id,lots:current.filter(row=>row.location_id===place.id&&quantityAtoms(row.qty,3,true)>0n).map(row=>{const lot=stock.find(lot=>lot.id===row.lot_id)!;const quote=values.get(`${lot.id}:${place.id}`);const capacity=locationCapacity(lot,place.id,current);const canIssue=eligible(lot,today)&&!incomplete.has(lot.item_id);return {lotId:lot.id,itemId:lot.item_id,name:lot.name,unit:lot.unit,quantity:quantityText(capacity.total),availableQuantity:quantityText(canIssue?capacity.available:0n),wasteQuantity:quantityText(!incomplete.has(lot.item_id)?capacity.available:0n),heldQuantity:quantityText(capacity.held),lotCode:lot.lot_code,expiryDate:lot.expiry_date,availability:canIssue&&capacity.available>0n?"available":"unavailable",trackingState:incomplete.has(lot.item_id)?"incomplete":"allocated",...(actor.role==="admin"?{quote:quote??null,costState:quote?"estimated":lot.cost_status==="known"?"known":"missing"}:{})};}),closableLots:(closableByLocation.get(place.id)??[]).filter(c=>!c.alreadyClosed)})),
   closableLots:allClosableLots,
   storeLocations:allLocations.filter(row=>row.kind==="store"&&row.is_active).map(row=>({id:row.id,label:row.label})),
   pendingTransfers:pending,
