@@ -65,15 +65,40 @@ describe.each([390, 1280])("free manual invoice line at %ipx", (width) => {
       expect(await service(page).inputValue()).toBe("manual");
       expect(await description(page).inputValue()).toBe("");
       expect(await price(page).inputValue()).toBe("");
+      // Catalogue → placeholder → manual must also discard catalogue-origin text.
+      await service(page).selectOption(String(consultation));
+      await service(page).selectOption("");
+      await service(page).selectOption("manual");
+      expect(await service(page).inputValue()).toBe("manual");
+      expect(await description(page).inputValue()).toBe("");
+      expect(await price(page).inputValue()).toBe("");
+      // Text typed in the placeholder state is genuinely manual and must survive that transition.
+      await service(page).selectOption(String(consultation));
+      await service(page).selectOption("");
       const text = `بند يدوي اصطناعي ${stamp}-${width}`;
       await description(page).fill(text);
       await price(page).fill("12345");
+      await service(page).selectOption("manual");
       // Re-selecting manual (and the re-render it causes) keeps what the user typed.
       await service(page).selectOption("manual");
-      await page.getByLabel("عملة الفاتورة", { exact: true }).selectOption("YER");
       expect(await service(page).inputValue()).toBe("manual");
       expect(await description(page).inputValue()).toBe(text);
       expect(await price(page).inputValue()).toBe("12345");
+
+      // A real currency switch preserves manual identity/text, but never reinterprets its amount.
+      const currency = page.getByLabel("عملة الفاتورة", { exact: true });
+      expect(await currency.inputValue()).toBe("YER");
+      await currency.selectOption("SAR");
+      expect(await currency.inputValue()).toBe("SAR");
+      expect(await service(page).inputValue()).toBe("manual");
+      expect(await description(page).inputValue()).toBe(text);
+      expect(await price(page).inputValue()).toBe("");
+      await price(page).fill("50");
+      await currency.selectOption("YER");
+      expect(await currency.inputValue()).toBe("YER");
+      expect(await description(page).inputValue()).toBe(text);
+      expect(await price(page).inputValue()).toBe("");
+      await price(page).fill("12345");
 
       // Real preview gate, then a save whose first transport attempt never reaches the server.
       await expect.poll(() => save(page).isEnabled(), { timeout: 30_000 }).toBe(true);

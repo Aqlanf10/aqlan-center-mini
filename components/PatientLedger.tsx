@@ -1581,9 +1581,10 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 value={row.serviceId ? Number(row.serviceId) : null}
                 onChange={(id, srv) => {
                   setRows((current) => replaceRowService(current, index, {
-                    serviceId: id ? String(id) : "", doctorId: "", manual: false,
+                    serviceId: id ? String(id) : "", doctorId: "", manual: false, priceReason: "",
                     price: srv && invoiceOfferedPrice(srv, currency) !== null ? formatAmount(invoiceOfferedPrice(srv, currency)!, currency) : "",
-                    description: srv ? srv.name : current[index].description,
+                    // Clear catalogue-origin text before the empty choice loses its service identity.
+                    description: srv ? srv.name : current[index].serviceId ? "" : current[index].description,
                   }, invoiceToothMode(srv?.category)));
                 }}
                 base={currency}

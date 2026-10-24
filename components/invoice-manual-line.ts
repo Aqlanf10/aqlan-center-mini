@@ -8,7 +8,8 @@ export type ManualLineRow = ToothRowLike & {
 /**
  * Selecting «بند يدوي حر». Re-selecting it (or re-rendering) keeps the typed description and price.
  * Leaving a catalogue service drops that service's name, price, price reason, doctor and tooth/case
- * linkage, so nothing from it leaks into the manual line. From the empty choice, what was typed is kept.
+ * linkage, so nothing from it leaks into the manual line. The owner clears catalogue-origin fields
+ * when entering the empty choice; only text/amounts typed there are retained on entry to manual.
  * The manual line is sent without a serviceId, exactly as before; pricing authority stays on the server.
  */
 export function selectManualLine<R extends ManualLineRow>(rows: readonly R[], index: number): R[] {
