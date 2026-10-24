@@ -21780,7 +21780,9 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     });
   }
 
-  const patientCases = await listPatientCases(patientId);
+  // These workflow projections do not expose waitingOn; blocker alerts were
+  // already read above. Keep this case read fresh without fetching blockers again.
+  const patientCases = (await listPatientCaseRows(patientId)).map(toSpecialtyCase);
   const assessmentCases = patientCases
     .filter((one) => one.kind === "specialty" && one.needsAssessment === true && one.id !== null && one.orthoCaseId === null && one.legacy !== true)
     .map((one) => ({ id: one.id as number, patientId: one.patientId, kind: "specialty" as const,
@@ -27393,13 +27395,18 @@ const SPECIALTY_CASE_SELECT = `
     LEFT JOIN parties d ON d.id = COALESCE(o.responsible_doctor_id, t.primary_doctor_id)
    WHERE o.patient_id = $1 AND NOT EXISTS (SELECT 1 FROM clinical_cases b WHERE b.ortho_case_id = o.id)`;
 
-export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
+async function listPatientCaseRows(patientId: number): Promise<SpecialtyCaseRow[]> {
   await ensureSchema();
   const { rows } = await getPool().query<SpecialtyCaseRow>(
     `SELECT * FROM (${SPECIALTY_CASE_SELECT}) x
       ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
     [patientId],
   );
+  return rows;
+}
+
+export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
+  const rows = await listPatientCaseRows(patientId);
   const blockers = await referralBlockersByCase(getPool(), patientId);
   return rows.map((row) => {
     const item = toSpecialtyCase(row);
