@@ -10,7 +10,8 @@ async function main() {
   if (args.length > 1 || args.some(arg => arg !== "--apply-empty-0051") || process.env.ORTHO_EMPTY51_ENVIRONMENT !== "staging") throw new ReconciliationRefused("target");
   const approval: Empty51Approval = JSON.parse(await readFile(process.env.ORTHO_EMPTY51_APPROVAL_FILE ?? "", "utf8"));
   const reference: Empty51Reference = JSON.parse(await readFile(process.env.ORTHO_EMPTY51_REFERENCE_FILE ?? "", "utf8"));
-  validateEmpty51Approval(approval, reference);
+  const apply = args.includes("--apply-empty-0051");
+  validateEmpty51Approval(approval, reference, apply);
   // Dedicated URL only; no app environment loader, DATABASE_URL fallback or URL
   // query options that could override TLS/host/timeouts. No credential output.
   const url = new URL(process.env.ORTHO_EMPTY51_URL ?? "");
@@ -19,7 +20,6 @@ async function main() {
       || url.hostname !== endpoint.host || Number(url.port || 5432) !== endpoint.port
       || decodeURIComponent(url.pathname.slice(1)) !== endpoint.database || decodeURIComponent(url.username) !== endpoint.user) throw new ReconciliationRefused("target");
   const ca = process.env.ORTHO_EMPTY51_CA_FILE ? await readFile(process.env.ORTHO_EMPTY51_CA_FILE, "utf8") : undefined;
-  const apply = args.includes("--apply-empty-0051");
   const client = new Client({ host: endpoint.host, port: endpoint.port, database: endpoint.database, user: endpoint.user,
     password: decodeURIComponent(url.password), ssl: { rejectUnauthorized: true, ...(ca ? { ca } : {}) },
     connectionTimeoutMillis: OPERATOR_LIMITS.connectionTimeoutMillis, query_timeout: OPERATOR_LIMITS.query_timeout,

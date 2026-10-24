@@ -463,7 +463,7 @@ describe("separate empty 0051 operator path", () => {
     await withClient(name, async client => {
       const before = await snapshot(client);
       const sequence = (await client.query("SELECT last_value::text,is_called FROM ortho_strategy_revisions_id_seq")).rows;
-      expect(await reconcileEmpty51(client, approval, emptyReference)).toMatchObject({ event: "ortho_empty51_report", eligible: true });
+      expect(await reconcileEmpty51(client, approval, emptyReference)).toMatchObject({ event: "ortho_empty51_report", scope: "point_in_time_nonapproval", applyApproved: false, sequenceObservation: "nontransactional_unlocked" });
       expect(await snapshot(client)).toEqual(before);
       expect(await reconcileEmpty51(client, approval, emptyReference, true)).toMatchObject({ event: "ortho_empty51_recorded", historicalExecutionVerified: false });
       expect((await client.query("SELECT last_value::text,is_called FROM ortho_strategy_revisions_id_seq")).rows).toEqual(sequence);
@@ -475,6 +475,47 @@ describe("separate empty 0051 operator path", () => {
     await selectDatabase(name);
     const response = await login(); expect(response.status).toBe(200); expect(auth.verifyCalls).toBe(1);
     expect((await withClient(name, snapshot)).registry.map(row => row.version)).toEqual(reference.runtimeRegistry.map(row => row.version));
+  });
+  it("reports without maintenance while a writer is active; the observation never authorizes apply", async () => {
+    const { name, approval } = await emptyScenario("ereport");
+    delete approval.window;
+    await withClient(name, async writer => {
+      await writer.query("BEGIN");
+      try {
+        await writer.query("INSERT INTO audit_log(action,summary,actor) VALUES('synthetic.active_writer','Synthetic only','synthetic')");
+        await writer.query("SELECT setval('ortho_strategy_revisions_id_seq',41,true)");
+        await withClient(name, async client => {
+          const before = await snapshot(client);
+          const statements: string[] = [];
+          const wrapped = { query: async (sql: string, values?: unknown[]) => { statements.push(sql); return client.query(sql, values); } } as unknown as Client;
+          const report = await reconcileEmpty51(wrapped, approval, emptyReference);
+          expect(report).toMatchObject({ event: "ortho_empty51_report", scope: "point_in_time_nonapproval", applyApproved: false,
+            sequenceObservation: "nontransactional_unlocked", sequence: { last_value: "41", is_called: true } });
+          expect(statements).toContain("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          expect(statements.some(sql => /^(LOCK|INSERT|UPDATE|DELETE|ALTER|CREATE)\b/.test(sql))).toBe(false);
+          expect(await snapshot(client)).toEqual(before);
+          await expect(reconcileEmpty51(client, approval, emptyReference, true)).rejects.toThrow("ORTHO_RECONCILIATION_TARGET");
+          expect((await client.query("SELECT count(*)::int n FROM audit_log WHERE action=$1", [EMPTY51_EVENT])).rows[0].n).toBe(0);
+        });
+      } finally { await writer.query("ROLLBACK"); }
+    });
+  });
+  it("apply revalidates an expired maintenance window after acquiring locks", async () => {
+    const { name, approval } = await emptyScenario("eexpiry");
+    await withClient(name, async client => {
+      const before = await snapshot(client);
+      const now = vi.spyOn(Date, "now");
+      try {
+        const wrapped = { query: async (sql: string, values?: unknown[]) => {
+          const result = await client.query(sql, values);
+          if (sql.startsWith("LOCK TABLE public.ortho_strategy")) now.mockReturnValue(Date.parse(approval.window!.until) + 1);
+          return result;
+        } } as unknown as Client;
+        await expect(reconcileEmpty51(wrapped, approval, emptyReference, true)).rejects.toThrow("ORTHO_RECONCILIATION_TARGET");
+      } finally { now.mockRestore(); }
+      expect(await snapshot(client)).toEqual(before);
+      expect((await client.query("SELECT count(*)::int n FROM audit_log WHERE action=$1", [EMPTY51_EVENT])).rows[0].n).toBe(0);
+    });
   });
   it.each(["target", "registry", "nonempty", "drift", "assessment", "history", "window", "sequence"])("refuses %s without registering or auditing", async defect => {
     const { name, approval } = await emptyScenario(`e${defect}`);
@@ -489,7 +530,7 @@ describe("separate empty 0051 operator path", () => {
       if (defect === "drift") await client.query("ALTER TABLE ortho_strategy_revisions ADD COLUMN unexpected text");
       if (defect === "assessment") await client.query("CREATE TABLE ortho_assessment_case_version_unique(id int)");
       if (defect === "history") await client.query("CREATE TABLE appointments_patient_history_idx(id int)");
-      if (defect === "window") approval.window.until = new Date(0).toISOString();
+      if (defect === "window") approval.window!.until = new Date(0).toISOString();
       if (defect === "sequence") await client.query("SELECT setval('ortho_strategy_revisions_id_seq',2147483647,true)");
       await expect(reconcileEmpty51(client, approval, emptyReference, true)).rejects.toThrow(/ORTHO_RECONCILIATION_/);
       expect((await client.query("SELECT count(*)::int n FROM schema_migrations WHERE version='0051'")).rows[0].n).toBe(0);

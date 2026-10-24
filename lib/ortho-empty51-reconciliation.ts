@@ -17,7 +17,7 @@ export type Empty51Approval = {
   reviewedReferenceDigest: string;
   approvalId: string;
   actionId: string;
-  window: { from: string; until: string; noApplicationOrDDLOrSequenceCallers: true; preserveAuditAndRegistry: true };
+  window?: { from: string; until: string; noApplicationOrDDLOrSequenceCallers: boolean; preserveAuditAndRegistry: boolean };
 };
 export const EMPTY51_EVENT = "schema.ortho_0051_catalog_reconciled";
 const contract = contracts.find(row => row.version === "0051")!;
@@ -41,7 +41,7 @@ function structure(catalog: Catalog) {
     return { ...row, properties };
   });
 }
-export function validateEmpty51Approval(approval: Empty51Approval, reference: Empty51Reference) {
+export function validateEmpty51Approval(approval: Empty51Approval, reference: Empty51Reference, apply = false) {
   if (approval.environment !== "staging" || !identifier.test(approval.approvalId) || !identifier.test(approval.actionId)
       || !digest.test(approval.reviewedReferenceDigest) || catalogHash(reference) !== approval.reviewedReferenceDigest
       || reference.source !== ORTHO_REFERENCE_SOURCE || reference.source !== pinned.source) throw new ReconciliationRefused("target");
@@ -53,6 +53,10 @@ export function validateEmpty51Approval(approval: Empty51Approval, reference: Em
   for (const key of ["catalog", "registryCatalog", "auditCatalog"] as const) {
     if (catalogHash(structure(reference[key])) !== catalogHash(structure(pinned[key]))) throw new ReconciliationRefused("catalog");
   }
+  // Observation is not approval: read-only reporting does not require a
+  // maintenance assertion, even when writers are active. Apply always does.
+  if (!apply) return;
+  if (!approval.window) throw new ReconciliationRefused("target");
   const from = Date.parse(approval.window.from), until = Date.parse(approval.window.until), now = Date.now();
   if (!Number.isFinite(from) || !Number.isFinite(until) || now < from || now >= until || until - from > 30 * 60_000
       || approval.window.noApplicationOrDDLOrSequenceCallers !== true || approval.window.preserveAuditAndRegistry !== true) throw new ReconciliationRefused("target");
@@ -67,8 +71,8 @@ export const EMPTY51_IDENTITY_SQL = `SELECT current_database() AS database,d.oid
  inet_server_port() AS "serverPort",current_setting('server_version_num') AS version
  FROM pg_catalog.pg_database d WHERE d.datname=current_database()`;
 
-async function inspect(client: Client, approval: Empty51Approval, reference: Empty51Reference, recorded = false) {
-  validateEmpty51Approval(approval, reference);
+async function inspect(client: Client, approval: Empty51Approval, reference: Empty51Reference, apply: boolean, recorded = false) {
+  validateEmpty51Approval(approval, reference, apply);
   const identity = (await client.query(EMPTY51_IDENTITY_SQL)).rows;
   if (identity.length !== 1 || Object.entries(approval.identity).some(([key, value]) => identity[0][key] !== value)) throw new ReconciliationRefused("target");
   if ((await client.query("SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_event_trigger) AS present")).rows[0]?.present !== false) throw new ReconciliationRefused("catalog");
@@ -95,12 +99,13 @@ async function inspect(client: Client, approval: Empty51Approval, reference: Emp
     WHERE p.seqrelid='public.ortho_strategy_revisions_id_seq'::regclass`)).rows[0];
   if (sequence?.valid !== true) throw new ReconciliationRefused("invariants");
   if ((await client.query("SELECT EXISTS(SELECT 1 FROM public.audit_log WHERE action=$1 AND details->>'action_id'=$2) AS present", [EMPTY51_EVENT, approval.actionId])).rows[0]?.present !== recorded) throw new ReconciliationRefused("registry");
-  return { event: "ortho_empty51_report", eligible: true, version: "0051", referenceDigest: approval.reviewedReferenceDigest,
+  return { event: "ortho_empty51_report", scope: "point_in_time_nonapproval", applyApproved: false,
+    sequenceObservation: "nontransactional_unlocked", version: "0051", referenceDigest: approval.reviewedReferenceDigest,
     sequence: { last_value: sequence.last_value as string, is_called: sequence.is_called as boolean } };
 }
 
 export async function reconcileEmpty51(client: Client, approval: Empty51Approval, reference: Empty51Reference, apply = false) {
-  validateEmpty51Approval(approval, reference);
+  validateEmpty51Approval(approval, reference, apply);
   await configureOperatorTimeouts(client);
   await client.query(apply ? "BEGIN ISOLATION LEVEL READ COMMITTED" : "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   let committing = false;
@@ -110,26 +115,26 @@ export async function reconcileEmpty51(client: Client, approval: Empty51Approval
       // First check before waiting; again after ordinary locks, and just before
       // inserting. Maintenance is a required external witness, NOT inferred
       // from these locks (functions/ACLs/sequence calls are not protected).
-      await inspect(client, approval, reference);
+      await inspect(client, approval, reference, apply);
       await client.query("SELECT pg_advisory_xact_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
       await client.query("LOCK TABLE public.schema_migrations, public.audit_log IN SHARE ROW EXCLUSIVE MODE");
       await client.query("LOCK TABLE public.ortho_strategy_revisions IN SHARE MODE");
     }
-    const report = await inspect(client, approval, reference);
+    const report = await inspect(client, approval, reference, apply);
     if (!apply) { await client.query("ROLLBACK"); return report; }
     const evidence = { format: 1, evidence_kind: "catalog_equivalence", historical_execution_verified: false,
       version: "0051", name: contract.name, checksum: contract.checksum, source_commit: ORTHO_REFERENCE_SOURCE,
       reference_digest: approval.reviewedReferenceDigest, empty_row_count: 0, original_sequence: report.sequence,
       source_target: approval.identity, action_id: approval.actionId, approval_id: approval.approvalId,
       maintenance_window: approval.window, operator: approval.identity.role };
-    const final = await inspect(client, approval, reference);
+    const final = await inspect(client, approval, reference, apply);
     if (catalogHash(final) !== catalogHash(report)) throw new ReconciliationRefused("invariants");
     await client.query(`INSERT INTO public.audit_log(action,entity,entity_id,summary,details,actor,actor_role)
       VALUES($1,'schema_migrations','0051','Explicit empty 0051 catalog equivalence; historical execution unknown',$2,current_user,'database_operator')`, [EMPTY51_EVENT, JSON.stringify(evidence)]);
     await client.query("INSERT INTO public.schema_migrations(version,name,checksum,adopted) VALUES($1,$2,$3,false)", ["0051", contract.name, contract.checksum]);
     // Revalidate the full catalog/empty/sequence/target contract after both
     // writes as well; registry and audit now must describe this atomic action.
-    const after = await inspect(client, approval, reference, true);
+    const after = await inspect(client, approval, reference, apply, true);
     if (catalogHash(after) !== catalogHash(report)) throw new ReconciliationRefused("invariants");
     committing = true;
     await client.query("COMMIT");
