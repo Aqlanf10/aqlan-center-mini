@@ -7,6 +7,7 @@ import { buildFamilyView } from "@/lib/family-view";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { statementAgreements, statementAgreementsRequireReview } from "@/lib/statement-lines";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +37,10 @@ export default async function FamilyStatementPage({ params }: { params: Promise<
     family.members.some((member) => member.balances?.some((line) => line.currency === currency)));
   const totalOf = (currency: Currency) => family.totals?.find((line) => line.currency === currency)?.balanceMinor;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const agreements = (await Promise.all(family.members.map(async (member) => ({ member,
-    plans: (await listPatientPlans(member.id, today)).filter((plan) => plan.status === "active" && !plan.totalFromItems),
-  })))).filter((row) => row.plans.length > 0);
+  const agreements = (await Promise.all(family.members.map(async (member) => {
+    const plans = await listPatientPlans(member.id, today);
+    return { member, plans: statementAgreements(plans), reviewRequired: statementAgreementsRequireReview(plans) };
+  }))).filter((row) => row.plans.length > 0 || row.reviewRequired);
   const g = family.guarantor;
   const guarantor = g.kind === "none" ? "—"
     : g.hidden ? "ضامنٌ من مرضى آخرين"
@@ -94,8 +96,9 @@ export default async function FamilyStatementPage({ params }: { params: Promise<
           })}
         </div>
 
-        {agreements.map(({ member, plans }) => <div key={member.id} style={{ marginTop: "4mm" }}>
+        {agreements.map(({ member, plans, reviewRequired }) => <div key={member.id} style={{ marginTop: "4mm" }}>
           <p style={{ fontWeight: 700 }}>اتفاقات العلاج — {member.fullName}</p>
+          {reviewRequired ? <p role="status">بعض أرصدة اتفاقات هذا الفرد غير متاحة وتحتاج مراجعة مصدرها؛ لا يعني ذلك أنها مسددة. رصيد الحساب أعلاه مستقل عن هذا الملخص.</p> : null}
           {plans.map((plan) => <div key={plan.id} className="line"><span>{plan.title} — المتبقي من الاتفاق</span><span>{formatMoney(plan.progress.remainingMinor, plan.baseCurrency)}</span></div>)}
         </div>)}
         {agreements.length > 0 ? <p className="footer-note">المتبقي من الاتفاقات يشمل أقساطًا مستقبلية؛ المستحق الحالي مستقل عنه.</p> : null}

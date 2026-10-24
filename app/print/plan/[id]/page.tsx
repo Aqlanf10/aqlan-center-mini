@@ -36,11 +36,20 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
   if (!plan) notFound();
 
   const base = isCurrency(plan.baseCurrency) ? plan.baseCurrency : "YER";
-  const approvedSummary = plan.approvedAgreement ? <section data-testid="approved-agreement-print">
-          <p>التزام مالي معتمد — المصدر: {plan.approvedAgreement.invoiceId ? `فاتورة #${plan.approvedAgreement.invoiceId}` : `رصيد افتتاحي ${base}`}</p>
-          <div className="line"><span>كامل المتبقي</span><span>{formatMoney(plan.approvedAgreement.remainingMinor,base)}</span></div>
-          <div className="line"><span>المستحق حتى اليوم</span><span>{formatMoney(plan.approvedAgreement.dueNowMinor,base)}</span></div>
+  const currentFinancial = plan.approvedAgreement?.available && plan.approvedAgreement.currency === base ? plan.approvedAgreement : null;
+  const approvalUnavailable = !!plan.approvedAgreement && !currentFinancial;
+  const amended = !!plan.approvedAgreement?.deltaInvoiceIds?.length;
+  const approvedSummary = currentFinancial ? <section data-testid="approved-agreement-print">
+          <p>التزام مالي معتمد — المصدر: {currentFinancial.invoiceId ? `فاتورة #${currentFinancial.invoiceId}` : `رصيد افتتاحي ${base}`}</p>
+          {currentFinancial.deltaInvoiceIds?.length ? <p>فواتير فروق التعديل: {currentFinancial.deltaInvoiceIds.map(id => `#${id}`).join("، ")}. المبلغ الحالي يشمل أصل الاتفاق وهذه الفروق فقط.</p> : null}
+          <div className="line"><span>كامل المتبقي</span><span>{formatMoney(currentFinancial.remainingMinor,base)}</span></div>
+          <div className="line"><span>المستحق حتى اليوم</span><span>{formatMoney(currentFinancial.dueNowMinor,base)}</span></div>
         </section> : null;
+  if (approvalUnavailable) return <><PrintButton /><div className="sheet sheet-a4">
+    <PrintHeader settings={settings} title="مراجعة مصدر اتفاق العلاج" />
+    <p>{plan.patientName} — {plan.title}</p>
+    <p role="alert">الرصيد الحالي غير متاح؛ يلزم مراجعة مصدر الاتفاق. لا تثبت هذه الورقة مبلغًا مستحقًا أو مسدّدًا.</p>
+  </div></>;
   // Historical provenance cannot become a new collectible plan contract or invented remaining work.
   // Preserve the ordinary agreement below exactly; history prints as an explicitly read-only reference.
   if (plan.items.some(hasLegacyHistory)) return (
@@ -77,7 +86,7 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
     startDate: plan.startDate,
     note: plan.note,
     installments: plan.installments,
-    paidMinor: plan.paidMinor,
+    paidMinor: plan.approvedAgreement?.originalPaidMinor ?? plan.paidMinor,
   });
 
   return (
@@ -111,24 +120,25 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
 
         <div className="rule" />
 
-        <div style={{ margin: "4mm 0", background: "#f8fafc", padding: "3mm", borderRadius: "2mm", border: "1px solid #e2e8f0" }}>
+        <div data-testid="current-plan-financial-summary" style={{ margin: "4mm 0", background: "#f8fafc", padding: "3mm", borderRadius: "2mm", border: "1px solid #e2e8f0" }}>
           <div className="line line-strong" style={{ fontSize: "14pt" }}>
-            <span>إجمالي تكلفة الخطة المتفق عليها</span>
-            <span className="num">{formatMoney(agreement.totalMinor, base)}</span>
+            <span>{currentFinancial ? "إجمالي الاتفاق المالي الحالي" : "إجمالي تكلفة الخطة المتفق عليها"}</span>
+            <span className="num">{formatMoney(currentFinancial?.totalMinor ?? agreement.totalMinor, base)}</span>
           </div>
           <div className="line" style={{ color: "#059669", fontWeight: 700 }}>
             <span>المسدد حتى تاريخه</span>
-            <span className="num">{formatMoney(plan.progress.paidMinor, base)}</span>
+            <span className="num">{formatMoney(currentFinancial?.paidMinor ?? plan.progress.paidMinor, base)}</span>
           </div>
           <div className="line" style={{ color: "#b91c1c", fontWeight: 700 }}>
             <span>المتبقي من قيمة الخطة</span>
-            <span className="num">{formatMoney(plan.progress.remainingMinor, base)}</span>
+            <span className="num">{formatMoney(currentFinancial?.remainingMinor ?? plan.progress.remainingMinor, base)}</span>
           </div>
         </div>
 
+        {amended && currentFinancial?.originalTotalMinor !== undefined ? <p data-testid="original-plan-agreement">قيمة الاتفاق الأصلي قبل التعديلات: {formatMoney(currentFinancial.originalTotalMinor, base)}. الجدول والبنود الأصلية محفوظة كتاريخ؛ فرق التعديل موثق بفواتير مستقلة ولا يغيّر الجدول الأصلي.</p> : null}
         {approvedSummary}
         <h3 style={{ fontSize: "11pt", fontWeight: 700, margin: "4mm 0 2mm" }}>
-          جدول الأقساط والمواعيد الاستحقاقية ({agreement.installments.length} أقساط)
+          {amended ? "جدول الأقساط الأصلي والمواعيد الاستحقاقية" : "جدول الأقساط والمواعيد الاستحقاقية"} ({agreement.installments.length} أقساط)
         </h3>
 
         {agreement.installments.length === 0 ? (

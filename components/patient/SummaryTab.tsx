@@ -37,7 +37,7 @@ export interface WorkflowSummary {
     id: number; title: string; specialty: string | null; primaryDoctorName: string | null;
     consentAt: string | null; itemsCount: number; doneItems: number;
     totalMinor: number; doneMinor: number; remainingMinor: number;
-    nextDueDate: string | null; overdueMinor: number;
+    nextDueDate: string | null; overdueMinor: number | null;
     /* (TD-05) عملة اتفاق الخطة. */
     baseCurrency?: "YER" | "SAR" | "USD";
     clinicalProgress?: ClinicalProgressView;

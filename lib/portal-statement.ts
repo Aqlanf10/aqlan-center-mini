@@ -1,6 +1,6 @@
 import type { Invoice, OpeningBalance, Payment, TreatmentPlan } from "./db";
 import { invoiceNet, type Balance, type Currency } from "./money";
-import { currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./statement-lines";
+import { currentStatementInvoices, statementAgreements, statementAgreementsRequireReview, statementPaymentLabel } from "./statement-lines";
 
 /**
  * (FIN-INT-8) What the patient portal may show of the ledger: the same current
@@ -46,6 +46,7 @@ export interface PortalStatementPayment {
 }
 
 export interface PortalStatement {
+  agreementsRequireReview?: boolean;
   invoices: PortalStatementInvoice[];
   payments: PortalStatementPayment[];
   openings: { currency: Currency; amountMinor: number; asOfDate: string }[];
@@ -58,9 +59,10 @@ export function portalStatementView(
   ledger: { invoices: readonly Invoice[]; payments: readonly Payment[]; openings: readonly OpeningBalance[] },
   balances: Record<Currency, Balance>,
   baseCurrency: Currency,
-  plans: readonly Pick<TreatmentPlan, "title" | "status" | "totalFromItems" | "totalMinor" | "baseCurrency" | "progress">[],
+  plans: readonly Pick<TreatmentPlan, "title" | "status" | "totalFromItems" | "totalMinor" | "baseCurrency" | "progress" | "approvedAgreement">[],
 ): PortalStatement {
   return {
+    ...(statementAgreementsRequireReview(plans) ? { agreementsRequireReview: true } : {}),
     invoices: currentStatementInvoices(ledger.invoices).map((invoice) => ({
       invoiceNumber: invoice.invoiceNumber,
       createdAt: invoice.createdAt,
@@ -85,7 +87,7 @@ export function portalStatementView(
       currency: opening.currency, amountMinor: opening.amountMinor, asOfDate: opening.asOfDate,
     })),
     agreements: statementAgreements(plans).map((plan) => ({
-      title: plan.title, currency: plan.baseCurrency, totalMinor: plan.totalMinor,
+      title: plan.title, currency: plan.baseCurrency, totalMinor: plan.approvedAgreement ? plan.progress.totalMinor : plan.totalMinor,
       paidMinor: plan.progress.paidMinor, remainingMinor: plan.progress.remainingMinor,
     })),
     balances,

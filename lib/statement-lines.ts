@@ -16,8 +16,13 @@ export function currentStatementInvoices<T extends Pick<Invoice, "status">>(invo
  * than the sum of their items. Their totals, paid and remaining come from the canonical plan
  * progress as-is; nothing is derived by adding agreement totals to invoices.
  */
-export function statementAgreements<T extends Pick<TreatmentPlan, "status" | "totalFromItems">>(plans: readonly T[]): T[] {
-  return plans.filter((plan) => plan.status === "active" && !plan.totalFromItems);
+export function statementAgreements<T extends Pick<TreatmentPlan, "status" | "totalFromItems"> & Partial<Pick<TreatmentPlan, "approvedAgreement">>>(plans: readonly T[]): T[] {
+  return plans.filter((plan) => plan.status === "active" && !plan.totalFromItems && plan.approvedAgreement?.available !== false);
+}
+
+/** Unverified approval amounts are withheld, not presented as a settled agreement. */
+export function statementAgreementsRequireReview(plans: readonly (Pick<TreatmentPlan, "status" | "totalFromItems"> & Partial<Pick<TreatmentPlan, "approvedAgreement">>)[]): boolean {
+  return plans.some(plan => plan.status === "active" && plan.approvedAgreement?.available === false);
 }
 
 export function statementPaymentLabel(

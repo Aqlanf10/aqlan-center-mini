@@ -213,3 +213,19 @@ describe("portal statement is the printed statement, without internal data", () 
     expect(source).toEqual(before);
   });
 });
+
+it.each([true, false])("keeps current amended agreement tuple identical in portal and print when available=%s", async available => {
+  const source = ledger();mocks.patientLedger.mockResolvedValue(source);
+  const p = { ...plans()[0], totalMinor: 500000, baseCurrency: "YER" as const,
+    progress: { ...plans()[0].progress, totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000 },
+    approvedAgreement: { planId: 41, currency: "YER" as const, totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000, dueNowMinor: 620000, invoiceId: 5, openingCurrency: null, sourceKind: "invoice", available, originalTotalMinor: 500000, deltaInvoiceIds: [6] } };
+  mocks.listPatientPlans.mockResolvedValue([p]);
+  const feed = await (await GET()).json();
+  const html = renderToStaticMarkup(await StatementPage({ params: Promise.resolve({ id: "17" }) }));
+  if (available) {
+    expect(feed.agreements).toEqual([{ title: p.title, currency: "YER", totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000 }]);
+    expect(html).toContain(formatMoney(800000, "YER"));expect(html).toContain(formatMoney(620000, "YER"));
+    expect(html).not.toContain(formatMoney(500000, "YER"));
+  } else { expect(feed.agreements).toEqual([]);expect(feed.agreementsRequireReview).toBe(true);expect(html).toContain("غير متاحة وتحتاج مراجعة مصدرها");expect(html).not.toContain(formatMoney(620000, "YER")); }
+  expect(html).not.toContain(formatMoney(320000, "YER"));
+});
