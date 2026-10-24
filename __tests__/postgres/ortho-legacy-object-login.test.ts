@@ -6,8 +6,8 @@ import runtime from "../../lib/ortho-assessment-runtime.generated.json";
 
 /* Reproduces the Staging login blocker on synthetic databases only: an unregistered ortho revision object
  * with 0051/0052 missing from schema_migrations makes the fail-closed runtime guard throw inside
- * ensureSchema(), before password verification, and the login route's outer catch returns a generic 500
- * with no diagnostic. These cases pin that behaviour (guard stays fail closed, nothing is adopted, dropped
+ * ensureSchema(), before password verification, and the login route returns its unchanged generic 500
+ * while logging one sanitised diagnostic line. These cases pin that behaviour (guard stays fail closed, nothing is adopted, dropped
  * or rewritten) so a later explicit reconciliation can be reviewed against them. */
 const auth = vi.hoisted(() => ({ verifyCalls: 0 }));
 vi.mock("../../lib/auth", async importOriginal => {
@@ -109,8 +109,8 @@ async function expectRefusedUnchanged(name: string, before: Awaited<ReturnType<t
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ message: "تعذّر تسجيل الدخول. أعد المحاولة." });
     expect(auth.verifyCalls).toBe(0);
-    // Current behaviour pinned for the logging proposal: the cause reaches neither the response nor a log line.
-    expect(errors).not.toHaveBeenCalled();
+    // Only the sanitised operator line: fixed event, stage, allowlisted category and migration version.
+    expect(errors.mock.calls).toEqual([[JSON.stringify({ event: "staff_login_failed", stage: "rate_limit", category: "ORTHO_UNREGISTERED_OBJECT_COLLISION", version: collidingVersion })]]);
   } finally { errors.mockRestore(); }
   await expect(ensureSchema()).rejects.toThrow(new RegExp(`^ORTHO_UNREGISTERED_OBJECT_COLLISION: ${collidingVersion}: `));
   expect(await withClient(name, snapshot)).toEqual(before);

@@ -11,6 +11,7 @@ import {
   bodyErrorResponse,
 } from "@/lib/http-body";
 import { FORM_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { logLoginFailure, type LoginFailureStage } from "@/lib/login-failure-diagnostics";
 import {
   SESSION_COOKIE,
   SESSION_DURATION_MS,
@@ -85,6 +86,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اسم المستخدم وكلمة المرور مطلوبان." }, { status: 400 });
   }
 
+  // مرحلة التنفيذ الحالية لتشخيص المشغّل وحده — لا تغيّر الاستجابة.
+  let stage: LoginFailureStage = "rate_limit";
   try {
     /* الحدّ الجديد (من مستودع الوكيل الآخر): مفتاح HMAC لل حساب — يعمل بين النسخ
        ومع إعادة التشغيل — وحدُّ المصدر خلف وسيطٍ موثّق فقط. والحدّ القديم
@@ -102,7 +105,9 @@ export async function POST(request: Request) {
         status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) },
       });
     }
+    stage = "user_lookup";
     const user = await findUserByUsername(username);
+    stage = "password_verify";
     if (!user) {
       await verifyPassword(password, "scrypt:0000:0000");
       if (isHtmlRequest) {
@@ -135,6 +140,7 @@ export async function POST(request: Request) {
       /* تصفير العدّاد تحسين — تعذّره لا يمنع دخولًا صحيحًا. */
     }
 
+    stage = "session_issue";
     const expiresAt = Date.now() + SESSION_DURATION_MS;
     const token = createSessionToken({
       userId: user.id,
@@ -185,6 +191,7 @@ export async function POST(request: Request) {
     });
     return response;
   } catch (error) {
+    logLoginFailure(stage, error);
     const missingSecret = error instanceof Error && error.message.includes("SESSION_SECRET");
     if (isHtmlRequest) {
       return NextResponse.redirect(new URL("/login?error=server_error", request.url), 303);
