@@ -1,3 +1,4 @@
+import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
@@ -19049,6 +19050,13 @@ async function deductServiceMaterials(input: {
     qtyByService.set(line.serviceId, (qtyByService.get(line.serviceId) ?? 0) + line.quantity);
   }
 
+  // Check the same captured mappings used below, after procedure normalization.
+  // Feature-off performs no proposal query or extra item locking.
+  await guardLegacyClinicalMaterials(input.client, mappings.filter(mapping => {
+    const qty = Number(mapping.qty_per_unit) * (qtyByService.get(mapping.service_id) ?? 0);
+    return Number.isFinite(qty) && qty > 0;
+  }).map(mapping => mapping.item_id));
+
   let movements = 0;
   for (const mapping of mappings) {
     const executed = qtyByService.get(mapping.service_id) ?? 0;
@@ -24513,6 +24521,10 @@ export async function createInventoryMovementInTransaction(client: DbClient, inp
   if (!items[0].is_active) {
     return { ok: false, message: "البند موقوف — أعد تفعيله قبل أي حركة عليه." };
   }
+  // Expected refusal remains a business result so keyed purchases can persist
+  // their existing durable rejection receipt. Readiness/SQL failures still throw.
+  const trackingRefusal = await legacyInventoryWriteRefusal(client, [input.itemId]);
+  if (trackingRefusal) return { ok: false, message: trackingRefusal.message };
   const { rows: bal } = await client.query<{ balance: string }>(
     `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
        FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id

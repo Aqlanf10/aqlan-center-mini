@@ -1,3 +1,4 @@
+import { InventoryBusy, InventoryTrackingRequired } from "@/lib/inventory-domain/legacy-write-guard";
 import { ClinicalDoctorIdentityConflict } from "@/lib/clinical-doctor-identity";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -297,6 +298,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     if (error instanceof ProcedurePriceRejected) {
       return NextResponse.json({ message: error.message, code: "price_authority" }, { status: 409 });
+    }
+    if (error instanceof InventoryBusy || error instanceof InventoryTrackingRequired) {
+      return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
     }
     if (error instanceof InventoryShortage) {
       return NextResponse.json({ message: error.message, code: "inventory_shortage" }, { status: 409 });
