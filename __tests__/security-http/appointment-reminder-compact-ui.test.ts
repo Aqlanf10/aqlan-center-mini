@@ -82,7 +82,6 @@ beforeAll(async () => {
   });
   await page.goto(`${baseUrl}/appointments?date=${DATE}`, { waitUntil: "domcontentloaded" });
   await row().waitFor({ timeout: 60_000 });
-  await expect.poll(() => row().locator('[data-action="confirm-manual-reminder"]').isEnabled()).toBe(true);
   await page.evaluate(() => document.fonts.ready);
 }, 240_000);
 
@@ -98,6 +97,7 @@ afterAll(async () => {
 
 describe("compact appointment reminders on the built Arabic page", () => {
   it("captures original compact controls plus staff confirmation, without overflow", async () => {
+    await expect.poll(() => row().locator('[data-action="confirm-manual-reminder"]').isEnabled()).toBe(true);
     // The screenshots must contain exactly these three synthetic cards, no other records.
     expect(await page.locator("li[data-appointment]").evaluateAll(nodes => nodes.map(node => Number(node.getAttribute("data-appointment"))))).toEqual(appointmentIds);
     const list = row().locator("..");
