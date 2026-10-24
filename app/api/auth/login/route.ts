@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
+import { reportLoginFailure, type LoginStage } from "@/lib/login-diagnostics";
 import { clearAccountLoginAttempts, consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
 import { accountLimitKey, consumeLoginAttemptFor } from "@/lib/loginLimit";
 import { firstHeaderEntry, isHostTrusted } from "@/lib/net";
@@ -51,6 +52,7 @@ function getRedirectUrl(path: string, request: Request): string {
 export async function POST(request: Request) {
   let username = "";
   let password = "";
+  let stage: LoginStage = "shared_limit";
   const contentType = request.headers.get("content-type") || "";
   const acceptHeader = request.headers.get("accept") || "";
   const isHtmlRequest = acceptHeader.includes("text/html") || contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data");
@@ -96,13 +98,16 @@ export async function POST(request: Request) {
       });
     }
     const legacyAccountKey = createHash("sha256").update(username.toLowerCase()).digest("hex");
+    stage = "legacy_limit";
     const limit = await consumeStaffLoginAttempt(legacyAccountKey);
     if (!limit.allowed) {
       return NextResponse.json({ message: "محاولات دخول كثيرة. أعد المحاولة بعد ربع ساعة." }, {
         status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) },
       });
     }
+    stage = "user_lookup";
     const user = await findUserByUsername(username);
+    stage = "password_verification";
     if (!user) {
       await verifyPassword(password, "scrypt:0000:0000");
       if (isHtmlRequest) {
@@ -135,6 +140,7 @@ export async function POST(request: Request) {
       /* تصفير العدّاد تحسين — تعذّره لا يمنع دخولًا صحيحًا. */
     }
 
+    stage = "session";
     const expiresAt = Date.now() + SESSION_DURATION_MS;
     const token = createSessionToken({
       userId: user.id,
@@ -157,6 +163,7 @@ export async function POST(request: Request) {
        تُستعاد بعد التحديث من /api/auth/me المعتمد بالكوكي.
        التطبيقات الخارجية (native) لها تدفق صريح منفصل غير المتصفح عند
        الحاجة — لا يُفتح من هنا. */
+    stage = "response";
     const response = isHtmlRequest
       ? NextResponse.redirect(getRedirectUrl("/", request), 303)
       : NextResponse.json({
@@ -185,6 +192,7 @@ export async function POST(request: Request) {
     });
     return response;
   } catch (error) {
+    reportLoginFailure(stage, error);
     const missingSecret = error instanceof Error && error.message.includes("SESSION_SECRET");
     if (isHtmlRequest) {
       return NextResponse.redirect(new URL("/login?error=server_error", request.url), 303);
