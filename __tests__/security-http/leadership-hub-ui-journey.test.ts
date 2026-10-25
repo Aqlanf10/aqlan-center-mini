@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, rm } from "node:fs/promises";
 import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
 import { harness } from "./_server";
 import { openHrJourneyServer } from "./_hr-isolated-server";
@@ -7,6 +7,10 @@ import { leadershipFinancialFixture } from "../fixtures/leadership-financial";
 let h: Awaited<ReturnType<typeof harness>>, owned: Awaited<ReturnType<typeof openHrJourneyServer>>, browser: Browser;
 let patient: number, day: string;
 const evidenceDir="/tmp/leadership-hub-evidence";
+const captureStates=["populated","day","lab","tasks","empty","error","finance-cash","finance-billing","finance-debts","finance-period"] as const;
+const captureNames=new Set([1440,390].flatMap(width=>captureStates.map(state=>`leadership-hub-${state}-${width}.png`)));
+captureNames.add("leadership-hub-finance-period-zoom-390.png");
+const evidenceDescription="Owned synthetic clinic overview; typed synthetic finance transport for visual coverage; not Production performance";
 beforeAll(async()=>{
  h=await harness();owned=await openHrJourneyServer(h);const db=owned.db;
  day=(await db.query("SELECT (statement_timestamp() AT TIME ZONE 'Asia/Aden')::date::text AS day")).rows[0].day;
@@ -105,6 +109,17 @@ it("renders a compact real-data desktop/mobile hub; defers finance; preserves so
   expect(denied.status).toBe(403);expect(await denied.text()).not.toContain("counts");
  }
  const before=await snapshot(),captures:Array<{width:number;state:string;png:Buffer}>=[],metrics:unknown[]=[];
+ // Remove only this test's exact known outputs, never broad directories. Save
+ // completed synthetic frames immediately; a later failure must not erase them.
+ await mkdir(evidenceDir,{recursive:true});
+ for(const name of [...captureNames,"leadership-hub-performance.json"]) await rm(`${evidenceDir}/${name}`,{force:true});
+ const persistMetrics=async(acceptanceComplete=false)=>writeFile(`${evidenceDir}/leadership-hub-performance.json`,JSON.stringify({fixture:evidenceDescription,acceptanceComplete,captures:captures.map(c=>`leadership-hub-${c.state}-${c.width}.png`),metrics},null,2));
+ const saveCapture=async(c:{width:number;state:string;png:Buffer})=>{
+  const name=`leadership-hub-${c.state}-${c.width}.png`;
+  if(!captureNames.has(name)) throw new Error("Unexpected leadership evidence name");
+  await writeFile(`${evidenceDir}/${name}`,c.png);captures.push(c);await persistMetrics();
+ };
+ await persistMetrics();
  for(const width of [1440,390]){
   const ctx=await context(width),page=await ctx.newPage(),requests:string[]=[],mutations:string[]=[];
   await page.addInitScript(()=>{
@@ -129,9 +144,9 @@ it("renders a compact real-data desktop/mobile hub; defers finance; preserves so
    await checkControls(page, hub);
    const overview=page.getByTestId("leadership-overview");
    const metricsCards=overview.locator("button").filter({has:page.locator("strong")});
-   captures.push({width,state:"populated",png:await captureSlice(page,await metricsCards.all())});
+   await saveCapture({width,state:"populated",png:await captureSlice(page,await metricsCards.all())});
    for (const [state,panel] of [["day",page.getByTestId("leadership-day-queue")],["lab",page.getByTestId("leadership-lab-preview")],["tasks",tasks]] as const) {
-    captures.push({width,state,png:await captureSlice(page,[panel.getByRole("heading"),panel.locator("li").first()])});
+    await saveCapture({width,state,png:await captureSlice(page,[panel.getByRole("heading"),panel.locator("li").first()])});
    }
    const beforeLabCount=requests.filter(p=>p==="/api/lab/backlog").length;
    const dayControl=page.getByLabel("يوم الوصول والمواعيد",{exact:true});
@@ -164,16 +179,30 @@ it("renders a compact real-data desktop/mobile hub; defers finance; preserves so
      await wheelIntoView(page,[record]); await assertUnobscured(page,record);
     }
     const representative=view==="period" ? finance.locator("section").filter({has:page.getByRole("heading",{name:"تشغيل الفترة، لا تشغيل اليوم",exact:true})}) : finance.locator("article").first();
-    captures.push({width,state:`finance-${view}`,png:await captureSlice(page,[representative])});
+    await saveCapture({width,state:`finance-${view}`,png:await captureSlice(page,[representative])});
+    if(width===390){
+     await page.emulateMedia({reducedMotion:"reduce"});
+     await page.evaluate(()=>{document.documentElement.style.fontSize="200%";});
+     try {
+      const reflow=await hub.evaluate(element=>({clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));
+      // Bounded numeric/style evidence only: no text, HTML, patient identifiers,
+      // URLs, cookies or transport bodies. Persist before the failing assertion.
+      const overflow=await hub.evaluate(element=>{
+       const boundary=element.getBoundingClientRect();
+       return Array.from(element.querySelectorAll("*")).filter(node=>{
+        const box=node.getBoundingClientRect();return box.width>0&&(box.left<boundary.left-1||box.right>boundary.right+1||node.scrollWidth>node.clientWidth+1);
+       }).slice(0,30).map(node=>{const box=node.getBoundingClientRect(),style=getComputedStyle(node);return {tag:node.tagName,clientWidth:node.clientWidth,scrollWidth:node.scrollWidth,width:box.width,left:box.left,right:box.right,display:style.display,minWidth:style.minWidth,maxWidth:style.maxWidth,whiteSpace:style.whiteSpace,overflowWrap:style.overflowWrap};});
+      });
+      metrics.push({width,probe:`finance-${view}-200-percent-reflow`,...reflow,overflow});await persistMetrics();
+      expect(reflow.scrollWidth<=reflow.clientWidth+1).toBe(true);
+      if(view==="period") {
+       await checkControls(page,finance);
+       await saveCapture({width,state:"finance-period-zoom",png:await captureSlice(page,[representative.getByRole("heading"),representative.locator("dl > div").first()])});
+      }
+     } finally { await page.evaluate(()=>{document.documentElement.style.fontSize="";}); }
+    }
    }
    expect(requests.filter(path=>path==="/api/executive")).toHaveLength(financeReadCount);
-   if(width===390){
-    await page.emulateMedia({reducedMotion:"reduce"});
-    await page.evaluate(()=>{document.documentElement.style.fontSize="200%";});
-    const reflow=await hub.evaluate(element=>({clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));
-    expect(reflow.scrollWidth<=reflow.clientWidth+1).toBe(true);metrics.push({width,probe:"finance-period-200-percent-reflow",...reflow});
-    await page.evaluate(()=>{document.documentElement.style.fontSize="";});
-   }
    // Genuine empty responses from the reader shape, intercepted only in this synthetic UI fixture.
    const sourceMatch = (url:URL) => url.pathname==="/api/executive/pulse"||url.pathname==="/api/lab/backlog";
    const emptyRoute = async (route: import("playwright").Route) => {
@@ -185,7 +214,7 @@ it("renders a compact real-data desktop/mobile hub; defers finance; preserves so
    await expect.poll(()=>page.getByTestId("leadership-tasks").innerText()).toContain("لا مهام مفتوحة");
    await expect.poll(()=>page.getByTestId("leadership-lab-preview").innerText()).toContain("لا طلبات معمل");
    const emptyPanel=page.getByTestId("leadership-day-queue");
-   captures.push({width,state:"empty",png:await captureSlice(page,[emptyPanel.getByRole("heading"),emptyPanel.getByText("لا زيارات مفتوحة ضمن يوم الوصول المختار.",{exact:true})])});
+   await saveCapture({width,state:"empty",png:await captureSlice(page,[emptyPanel.getByRole("heading"),emptyPanel.getByText("لا زيارات مفتوحة ضمن يوم الوصول المختار.",{exact:true})])});
    await page.unroute(sourceMatch,emptyRoute);
    await page.route(url=>url.pathname==="/api/executive/pulse"||url.pathname==="/api/lab/backlog",route=>route.fulfill({status:503,contentType:"application/json",body:"{}"}));
    await reachableClick(page,page.getByRole("button",{name:"تحديث التشغيل والمعمل",exact:true}));
@@ -194,7 +223,7 @@ it("renders a compact real-data desktop/mobile hub; defers finance; preserves so
    expect(await hub.locator("button strong").allTextContents()).toEqual(["—","—","—","—"]);
    const errorPanel=page.getByTestId("leadership-day-queue");
    await checkControls(page,errorPanel);
-   captures.push({width,state:"error",png:await captureSlice(page,[errorPanel.getByRole("heading"),errorPanel.getByRole("alert")])});
+   await saveCapture({width,state:"error",png:await captureSlice(page,[errorPanel.getByRole("heading"),errorPanel.getByRole("alert")])});
    await page.route(url=>url.pathname==="/api/executive/pulse",route=>route.fulfill({status:401,contentType:"application/json",body:"{}"}));
    await reachableClick(page,page.getByRole("button",{name:"تحديث التشغيل والمعمل",exact:true}));
    await expect.poll(()=>page.locator("main").last().innerText()).toContain("أُخفيت بيانات القيادة");
@@ -204,7 +233,6 @@ it("renders a compact real-data desktop/mobile hub; defers finance; preserves so
   }finally{await ctx.close();}
  }
  expect(await snapshot()).toEqual(before);
- expect(captures.map(c=>`${c.state}-${c.width}`).sort()).toEqual([1440,390].flatMap(width=>["populated","day","lab","tasks","empty","error","finance-cash","finance-billing","finance-debts","finance-period"].map(state=>`${state}-${width}`)).sort());
- await mkdir(evidenceDir,{recursive:true});for(const c of captures)await writeFile(`${evidenceDir}/leadership-hub-${c.state}-${c.width}.png`,c.png);
- await writeFile(`${evidenceDir}/leadership-hub-performance.json`,JSON.stringify({fixture:"Owned synthetic clinic overview; typed synthetic finance transport for visual coverage; not Production performance",metrics},null,2));
+ expect(captures.map(c=>`${c.state}-${c.width}`).sort()).toEqual([1440,390].flatMap(width=>["populated","day","lab","tasks","empty","error","finance-cash","finance-billing","finance-debts","finance-period"].map(state=>`${state}-${width}`)).concat("finance-period-zoom-390").sort());
+ await persistMetrics(true);
 },240000);

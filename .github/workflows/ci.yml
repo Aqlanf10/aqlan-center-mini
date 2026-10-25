@@ -397,6 +397,7 @@ jobs:
             /tmp/leadership-hub-evidence/leadership-hub-finance-debts-390.png
             /tmp/leadership-hub-evidence/leadership-hub-finance-period-1440.png
             /tmp/leadership-hub-evidence/leadership-hub-finance-period-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-period-zoom-390.png
             /tmp/leadership-hub-evidence/leadership-hub-performance.json
           if-no-files-found: error
           retention-days: 7

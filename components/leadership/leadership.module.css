@@ -3,6 +3,7 @@
   --leadership-teal-soft: #f0fdfa;
   width: 100%; max-width: 1440px; margin-inline: auto; padding: 1.5rem 1.5rem 6rem;
   color: theme("colors.navy.900");
+  overflow-wrap: anywhere;
 }
 .workspace button, .workspace a { -webkit-tap-highlight-color: transparent; }
 .workspace button { cursor: pointer; }
@@ -56,7 +57,7 @@
 .error button { text-decoration: underline; min-height: 44px; font-weight: 600; margin-inline-start: .5rem; }
 .moduleLinks { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; margin-block: 1.25rem; padding: 1rem; border-top: 1px solid theme("colors.slate.200"); font-size: .8rem; color: theme("colors.navy.700"); }
 .moduleLinks a { padding-block: .5rem; text-decoration: underline; text-underline-offset: 3px; }
-.stack { display: flex; flex-direction: column; gap: 1rem; }
+.stack { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
 .disclosure { display: flex; justify-content: space-between; align-items: center; min-height: 56px; padding: 1rem 1.25rem; background: white; border: 1px solid theme("colors.slate.200"); border-radius: .75rem; font-weight: 600; text-align: start; }
 .disclosure span { font-size: .75rem; color: var(--leadership-teal); }
 .factStrip { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-block: 1rem; font-size: .85rem; color: theme("colors.slate.600"); }
@@ -118,3 +119,10 @@
  .factList > div { flex-wrap: wrap; gap: .25rem .75rem; }
 }
 .sectionHeading h1 { font-size: 1.35rem; font-weight: 700; line-height: 1.5; }
+
+/* Text enlargement must reflow inside the existing work surface, not clip it.
+ * Native date fields otherwise impose their intrinsic width on flex labels. */
+.stack > *, .sectionHeading > *, .operationalFacts > div { min-width: 0; max-width: 100%; }
+.financeDates > .dayLabel { flex: 1 1 12rem; min-width: 0; max-width: 100%; }
+.financeDates .dayLabel input { flex: 1 1 10rem; width: 100%; min-width: 0; }
+.sectionNav button, .pillGroup button, .smallButton, .headerLink { max-width: 100%; white-space: normal; }
