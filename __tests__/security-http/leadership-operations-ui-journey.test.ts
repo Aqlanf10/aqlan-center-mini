@@ -39,7 +39,10 @@ beforeAll(async () => {
 }, 180_000);
 afterAll(async () => { await context?.close(); await browser?.close(); await db?.end(); });
 it("shows verified patient destinations and scope on narrow RTL while the financial source fails", async () => {
-  const response = loaded(); await page.goto(`${baseUrl}/executive`, { waitUntil: "domcontentloaded" }); await response;
+  await page.goto(`${baseUrl}/executive`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "المالية", exact: true }).click();
+  await expect.poll(() => page.getByTestId("leadership-finance").innerText()).toContain("اختبار تعذّر المصدر المالي");
+  const response = loaded(); await page.getByRole("button", { name: "مراجعات اليوم", exact: true }).click(); await response;
   await expect.poll(() => panel().getByText(name, { exact: false }).count()).toBe(2);
   expect(await panel().getByLabel("يوم الموعد / اكتمال الإحالة").inputValue()).toBe(day);
   expect(await panel().locator(`a[href='/patients/${patientId}?tab=summary']`).count()).toBe(1);

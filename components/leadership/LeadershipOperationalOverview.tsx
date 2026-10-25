@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "../SessionProvider";
+import styles from "./leadership.module.css";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
 import { canReadOperationalOverview, decodeOperationalOverview, OPERATIONAL_PAGE_SIZE, operationalPatientHref,
   type OperationalItem, type OperationalLane, type OperationalOverview, type OperationalSection, type OperationalSource } from "@/lib/leadership-operations";
 
-const button = "cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-navy-800 hover:bg-navy-50 active:bg-navy-100 disabled:cursor-not-allowed disabled:opacity-50";
+const button = styles.smallButton;
 const sourceTitle: Record<OperationalSource, string> = {
   appointments: "مواعيد لم يحضر أصحابها أو أُلغيت",
   referrals: "نتائج إحالات بانتظار مراجعة الطبيب",
@@ -92,11 +93,11 @@ export function OperationalOverviewPanel() {
     };
   }, []);
 
-  return <section aria-labelledby="operational-title" className="mb-6 rounded-2xl border border-navy-200 bg-white p-4 sm:p-5" data-testid="leadership-operations">
-    <div className="flex flex-wrap items-start justify-between gap-3">
+  return <section aria-labelledby="operational-title" className={styles.panel} data-testid="leadership-operations">
+    <div className={styles.sectionHeading}>
       <div className="min-w-0">
         <p className="mb-1 text-xs font-bold text-navy-600">مراجعة الإدارة · قراءة فقط</p>
-        <h2 id="operational-title" className="text-lg font-black text-navy-900">ما الذي يحتاج مراجعة؟</h2>
+        <h2 id="operational-title" className={styles.recordHeading}>مراجعات المواعيد ونتائج الإحالات</h2>
       </div>
       <button type="button" className={button} onClick={refresh} disabled={loading}>تحديث القراءة</button>
     </div>
@@ -111,22 +112,22 @@ export function OperationalOverviewPanel() {
       </label>
       <fieldset className="min-w-0">
         <legend className="mb-1 text-sm font-bold text-slate-700">نوع السجلات</legend>
-        <div className="flex flex-wrap gap-2">
+        <div className={styles.pillGroup}>
           {([["all", "الكل"], ["reception", "المواعيد"], ["doctor", "الإحالات"]] as const).map(([value, label]) =>
             <button key={value} type="button" aria-pressed={lane === value} onClick={() => { setLane(value); setPages({ appointments: 0, referrals: 0 }); }}
-              className={`${button} ${lane === value ? "border-navy-800 bg-navy-50" : ""}`}>{label}</button>)}
+              className={button}>{label}</button>)}
         </div>
       </fieldset>
     </div>
     {data && <p className="mt-3 text-xs font-bold text-slate-600">يوم الأحداث: <bdi>{data.day}</bdi> · توقيت العيادة: <bdi>{data.timeZone}</bdi> · لقطة قراءة، لا تحديث مباشر</p>}
-    {stale && data && <p role="status" className="mt-3 rounded-xl border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">قد تكون السجلات تغيّرت أثناء غيابك. حدّث القراءة قبل اتخاذ قرار.</p>}
+    {stale && data && <p role="status" className={styles.stale}>قد تكون السجلات تغيّرت أثناء غيابك. حدّث القراءة قبل اتخاذ قرار.</p>}
     <div className="mt-4 min-h-24" aria-busy={loading}>
       {loading && <p role="status" className="py-5 text-sm text-slate-500">جارٍ التحقق من المصادر التشغيلية… الأعداد غير معروفة بعد.</p>}
-      {error && <p role="alert" className="rounded-xl border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900">{error} لا تُعرض أعداد قديمة أو أصفار بدل الخطأ.</p>}
-      {data && <div className="space-y-5">{data.sections.map(section => <OperationalSourceSection key={section.source} section={section} timeZone={data.timeZone}
+      {error && <p role="alert" className={styles.error}>{error} لا تُعرض أعداد قديمة أو أصفار بدل الخطأ.</p>}
+      {data && <div className={styles.sourceGrid}>{data.sections.map(section => <OperationalSourceSection key={section.source} section={section} timeZone={data.timeZone}
         onPage={page => setPages(value => ({ ...value, [section.source]: page }))} onRetry={refresh} />)}</div>}
     </div>
-    <details className="mt-4 border-t border-slate-100 pt-3 text-xs leading-6 text-slate-600">
+    <details className={styles.recordDetails}>
       <summary className="cursor-pointer font-bold text-navy-800">كيف تُقرأ هذه القائمة؟</summary>
       <p className="mt-2">هذه قراءة للحالة الحالية، لا إعادة بناء لحالة يوم سابق. عدد المواعيد يشمل ما له حجز بديل، وليس عدد المتابعات غير المعالجة. الإلغاء لا يعني أن المريض تغيّب، ووقت الموعد الأصلي ليس موعدًا نهائيًا للمتابعة.</p>
       <p className="mt-2">مراجعة الحجز من إجراءات الاستقبال والإدارة، ومراجعة نتائج الإحالة من إجراءات الطبيب المحدد والإدارة بحسب الصلاحيات الحالية. اسم الطبيب سياق في السجل، لا إسناد أو قبول مسؤولية؛ لا يوجد مالك متابعة أو موعد نهائي مثبت هنا.</p>
@@ -138,15 +139,15 @@ export function OperationalOverviewPanel() {
 export function OperationalSourceSection({ section, timeZone, onPage, onRetry }: {
   section: OperationalSection; timeZone: string; onPage: (page: number) => void; onRetry: () => void;
 }) {
-  return <section aria-labelledby={`operational-${section.source}`} className="rounded-xl border border-slate-200 p-3 sm:p-4">
-    <h3 id={`operational-${section.source}`} className="text-sm font-black text-navy-900">{sourceTitle[section.source]}</h3>
+  return <section aria-labelledby={`operational-${section.source}`} className={styles.recordCard}>
+    <h3 id={`operational-${section.source}`} className={styles.recordHeading}>{sourceTitle[section.source]}</h3>
     {section.status === "error" ? <div role="alert" className="mt-3 text-sm text-warning-900">
       <p>{section.message}</p><button type="button" className={`${button} mt-2`} onClick={onRetry}>إعادة التحقق</button>
     </div> : <>
       <p className="mt-1 text-xs leading-5 text-slate-500">المصدر: {section.source === "appointments" ? "المواعيد وروابط الجلسات وسجل إعادة الحجز" : "حالة الإحالة الداخلية"} · وقت القراءة: <bdi>{instant(section.asOf, timeZone)}</bdi></p>
       <p className="mt-2 text-sm font-bold text-slate-700">{section.total} {section.source === "appointments" ? "موعدًا ضمن اليوم (يشمل ما له حجز بديل)" : "نتيجة بانتظار مراجعة الطبيب ضمن هذا اليوم"}</p>
       {section.items.length === 0 ? <p className="mt-3 text-sm text-slate-500">لا سجلات مطابقة لهذا المصدر واليوم. هذا لا ينفي وجود متابعات في أيام أخرى.</p>
-        : <ul className="mt-3 divide-y divide-slate-100">{section.items.map(item => <li key={item.id} className="py-3 first:pt-0 last:pb-0">
+        : <ul className="mt-3 divide-y divide-slate-100">{section.items.map(item => <li key={item.id} className={styles.recordRow}>
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 break-words">
               <p className="text-sm font-bold text-navy-900">{item.patientName} <bdi className="text-xs font-normal text-slate-500">{item.patientNumber}</bdi></p>

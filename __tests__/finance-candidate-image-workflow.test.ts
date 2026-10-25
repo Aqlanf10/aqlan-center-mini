@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 describe("candidate workflow scope and source binding", () => {
-  it("checks the original PR allowlist and one exact push branch without privileged or publishing triggers", () => {
+  it("checks the original PR allowlist and two exact push branches without privileged or publishing triggers", () => {
     expect(workflow).toContain("  pull_request:\n    branches: [main]\n    types: [opened, synchronize, reopened, ready_for_review, edited]");
     for (const guard of [
       "github.repository == 'Aqlanf10/aqlan-center-mini'",
@@ -98,7 +98,7 @@ describe("candidate workflow scope and source binding", () => {
     ]) expect(workflow).toContain(guard);
     expect(workflow.match(/^on:\n([\s\S]*?)\npermissions:/m)?.[1]).toBe(
       "  pull_request:\n    branches: [main]\n    types: [opened, synchronize, reopened, ready_for_review, edited]\n"
-      + "  push:\n    branches: [feat/dot-combined-staging-20261024]\n");
+      + "  push:\n    branches: [feat/dot-combined-staging-20261024, feat/dot-staging-green-composition-20261025]\n");
     expect(workflow).toContain("EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}");
     expect(workflow).toContain("permissions:\n  contents: read\n");
     expect(workflow).toContain("group: finance-candidate-image-${{ github.event.pull_request.number || github.ref }}\n  cancel-in-progress: true");
@@ -109,6 +109,7 @@ describe("candidate workflow scope and source binding", () => {
   });
 
   const candidateRef = "refs/heads/feat/dot-combined-staging-20261024";
+  const greenCandidateRef = "refs/heads/feat/dot-staging-green-composition-20261025";
   const repository = "Aqlanf10/aqlan-center-mini";
   const originalHeads = ["integration/finance-candidate-20261022", "feat/finance-synthetic-verification-20261023",
     "feat/finance-reviewed-composition-20261023", "feat/finance-completed-work-20261023"];
@@ -121,9 +122,13 @@ describe("candidate workflow scope and source binding", () => {
   }
   const cases = [
     { name: "exact candidate push", github: eventContext("push"), allowed: true },
-    ...["refs/heads/main", "refs/heads/feat/other", `${candidateRef}-extra`, "refs/tags/feat/dot-combined-staging-20261024"]
+    { name: "exact green composition push", github: eventContext("push", greenCandidateRef), allowed: true },
+    ...["refs/heads/main", "refs/heads/feat/other", `${candidateRef}-extra`, `${greenCandidateRef}-extra`, "refs/tags/feat/dot-combined-staging-20261024", "refs/tags/feat/dot-staging-green-composition-20261025"]
       .map(ref => ({ name: `reject push ${ref}`, github: eventContext("push", ref), allowed: false })),
     { name: "reject foreign repository push", github: eventContext("push", candidateRef, originalHeads[0], "main", repository, "other/fork"), allowed: false },
+    { name: "reject foreign repository green composition push", github: eventContext("push", greenCandidateRef, originalHeads[0], "main", repository, "other/fork"), allowed: false },
+    { name: "reject green composition PR to main", github: eventContext("pull_request", "refs/pull/475/merge", "feat/dot-staging-green-composition-20261025"), allowed: false },
+    { name: "reject green composition workflow dispatch", github: eventContext("workflow_dispatch", greenCandidateRef), allowed: false },
     ...originalHeads.map(head => ({ name: `retain original PR ${head}`, github: eventContext("pull_request", "refs/pull/451/merge", head), allowed: true })),
     { name: "reject new candidate PR to main", github: eventContext("pull_request", "refs/pull/999/merge", "feat/dot-combined-staging-20261024"), allowed: false },
     { name: "reject feature-base PR", github: eventContext("pull_request", "refs/pull/999/merge", originalHeads[0], "feat/finance-completed-work-20261023"), allowed: false },
@@ -135,8 +140,12 @@ describe("candidate workflow scope and source binding", () => {
     expect(expression).toBeTruthy();
     expect(runInNewContext(expression!, { github }, { timeout: 1_000 })).toBe(allowed);
   });
-  it.each(["push", "pull_request"])("binds checkout and verification to the exact %s source SHA", eventName => {
-    const github = eventContext(eventName);
+  it.each([
+    { eventName: "push", ref: candidateRef },
+    { eventName: "push", ref: greenCandidateRef },
+    { eventName: "pull_request", ref: "refs/pull/451/merge" },
+  ])("binds checkout and verification to the exact $eventName source SHA on $ref", ({ eventName, ref }) => {
+    const github = eventContext(eventName, ref);
     const checkout = workflow.match(/^ {10}ref: \$\{\{ (.+) \}\}/m)?.[1];
     const expected = workflow.match(/^ {10}EXPECTED_HEAD: \$\{\{ (.+) \}\}/m)?.[1];
     expect(checkout).toBe("github.event.pull_request.head.sha || github.sha");

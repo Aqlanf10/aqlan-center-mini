@@ -371,6 +371,36 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Upload leadership hub synthetic visual and loading evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leadership-hub-ui
+          path: |
+            /tmp/leadership-hub-evidence/leadership-hub-populated-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-populated-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-day-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-day-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-lab-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-lab-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-tasks-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-tasks-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-empty-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-empty-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-error-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-error-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-cash-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-cash-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-billing-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-billing-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-debts-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-debts-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-period-1440.png
+            /tmp/leadership-hub-evidence/leadership-hub-finance-period-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-performance.json
+          if-no-files-found: error
+          retention-days: 7
+
       # Exactly four actual-viewport screenshots from the owned synthetic fixture.
       # No cookies, browser state, traces, database dumps, or clinic records.
       - name: Upload laboratory backlog desktop and mobile evidence

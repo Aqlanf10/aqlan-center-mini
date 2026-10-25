@@ -108,6 +108,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/documents/[id]": { GET: CLINIC, DELETE: ADMIN },
   "/api/executive": { GET: CLINICAL },
   "/api/executive/operations": { GET: ADMIN },
+  "/api/executive/pulse": { GET: ADMIN },
   "/api/expense-attachments/[id]": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/expenses": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ["admin", "reception", "cashier"], DELETE: ADMIN },
   "/api/expenses/[id]/attachments": { GET: ["admin", "reception", "cashier", "accountant"], POST: ["admin", "reception", "cashier"] },

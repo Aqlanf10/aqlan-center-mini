@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "../SessionProvider";
+import styles from "./leadership.module.css";
 import { LAB_STATUS_LABEL } from "@/lib/lab";
 import { canReadLabBacklog, decodeLabBacklog, LAB_BACKLOG_FILTERS, LAB_BACKLOG_FILTER_LABEL,
   labBacklogAge, labBacklogNextAction, labBacklogPatientHref, type LabBacklogFilter, type LabBacklogItem,
   type LabBacklogSnapshot } from "@/lib/lab-backlog";
 
-const button = "min-h-11 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-navy-800 hover:bg-navy-50 disabled:opacity-50";
+const button = styles.smallButton;
 const at = (value: string, timeZone: string) => new Intl.DateTimeFormat("ar-YE", { timeZone, dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 const taskStatus = { planned: "مخططة", in_progress: "قيد التنفيذ", blocked: "متوقفة" };
 const eventLabel: Record<string, string> = { create: "إنشاء الطلب", status_change: "تغيير الحالة", due_date: "تغيير الموعد",
@@ -53,26 +54,26 @@ export function LabBacklogPanel() {
     window.addEventListener("focus", mark); window.addEventListener("online", mark); document.addEventListener("visibilitychange", visible);
     return () => { window.removeEventListener("focus", mark); window.removeEventListener("online", mark); document.removeEventListener("visibilitychange", visible); };
   }, []);
-  return <section className="mb-6 rounded-2xl border border-navy-200 bg-white p-4 sm:p-5" aria-labelledby="lab-backlog-title" data-testid="lab-backlog">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 id="lab-backlog-title" className="text-lg font-black text-navy-900">من ينتظر تركيبة أو عمل معمل؟</h2>
+  return <section className={styles.panel} aria-labelledby="lab-backlog-title" data-testid="lab-backlog">
+    <div className={styles.sectionHeading}>
+      <h2 id="lab-backlog-title" className={styles.recordHeading}>متابعة التركيبات والمعمل</h2>
       <button className={button} type="button" disabled={loading} onClick={() => { setStale(false); setRevision(value => value + 1); }}>تحديث متابعة المعمل</button>
     </div>
     <p className="mt-2 text-sm leading-6 text-slate-600">كل الطلبات المفتوحة الآن، مهما كان تاريخها. لا تتأثر بيوم المراجعة أو الفترة المالية، والوصول لا يعني اكتمال التركيب.</p>
     <p className="mt-1 text-xs leading-6 text-slate-500">قراءة للسجلات لا حكم على سبب التأخير أو تقصير شخص. الطبيب المعالج، المسؤول المسند، وآخر من سجّل إجراءً أدوار مختلفة.</p>
-    <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="حالة انتظار المعمل">
+    <div className={styles.pillGroup} role="group" aria-label="حالة انتظار المعمل">
       {LAB_BACKLOG_FILTERS.map(value => <button key={value} type="button" aria-pressed={filter === value}
-        className={`${button} ${filter === value ? "bg-navy-50 border-navy-800" : ""}`} onClick={() => { setFilter(value); setPage(0); setStale(false); }}>{LAB_BACKLOG_FILTER_LABEL[value]}</button>)}
+        className={button} onClick={() => { setFilter(value); setPage(0); setStale(false); }}>{LAB_BACKLOG_FILTER_LABEL[value]}</button>)}
     </div>
     <div className="mt-4" aria-busy={loading}>
       {loading && <p role="status">جارٍ التحقق… الأعداد غير معروفة بعد.</p>}
-      {error && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{error}</p>}
+      {error && <p role="alert" className={styles.error}>{error}</p>}
       {data && <>
         <p className="text-xs text-slate-500">لقطة: {at(data.asOf, data.timeZone)} · توقيت العيادة: <bdi>{data.timeZone}</bdi></p>
-        {stale && <p role="status" className="mt-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">قد تكون السجلات تغيّرت؛ حدّث القراءة قبل اتخاذ قرار.</p>}
+        {stale && <p role="status" className={styles.stale}>قد تكون السجلات تغيّرت؛ حدّث القراءة قبل اتخاذ قرار.</p>}
         <p className="my-3 text-sm font-bold">{data.counts.patients} مريض · {data.counts.orders} طلب مفتوح: {data.counts.preparing} لم يُرسل · {data.counts.withLab} عند المعمل، منها {data.counts.overdue} متأخرة · {data.counts.awaitingFitting} وصلت ولم تُركّب</p>
         {data.total === 0 ? <p className="py-3 text-sm text-slate-600">لا توجد طلبات مفتوحة تطابق المرشح.</p>
-          : <ul className="space-y-3">{data.items.map(item => <li key={item.id}><LabBacklogOrder item={item} today={data.today} timeZone={data.timeZone} /></li>)}</ul>}
+          : <ul className={styles.recordGrid}>{data.items.map(item => <li key={item.id}><LabBacklogOrder item={item} today={data.today} timeZone={data.timeZone} /></li>)}</ul>}
         {data.total > 0 && <nav aria-label="صفحات متابعة المعمل" className="mt-4 flex flex-wrap items-center justify-between gap-2">
           <button type="button" className={button} disabled={data.page === 0} onClick={() => setPage(data.page - 1)}>السابق</button>
           <span className="text-sm">صفحة {data.page + 1} · {data.total} طلب مطابق</span>
@@ -85,17 +86,17 @@ export function LabBacklogPanel() {
 }
 export function LabBacklogOrder({ item, today, timeZone }: { item: LabBacklogItem; today: string; timeZone: string }) {
   const age = labBacklogAge(item, today, timeZone);
-  return <article className="rounded-xl border border-slate-200 p-3" id={`backlog-order-${item.id}`}>
-    <div className="flex flex-wrap items-center justify-between gap-2">
+  return <article className={styles.recordCard} id={`backlog-order-${item.id}`}>
+    <div className={styles.sectionHeading}>
       <a className="font-bold text-navy-900 underline" href={labBacklogPatientHref(item.patientId)}>{item.patientName} · {item.patientNumber ?? "دون رقم ملف"}</a>
-      <span className="rounded-lg bg-sky-50 px-2 py-1 text-xs font-bold">{item.status === "received" ? "وصل إلى العيادة؛ بانتظار المراجعة والتركيب" : LAB_STATUS_LABEL[item.status]}</span>
+      <span className={styles.status}>{item.status === "received" ? "وصل إلى العيادة؛ بانتظار المراجعة والتركيب" : LAB_STATUS_LABEL[item.status]}</span>
     </div>
     <p className="mt-2 text-sm">طلب #{item.id} · {item.workType} · الأسنان: <bdi>{item.teeth ?? "غير موثقة"}</bdi> · المعمل: {item.labName}</p>
     <p className="mt-1 text-xs text-slate-600">الطبيب المسجّل: {item.doctorName ?? "غير موثق"} · {age.label}: {age.days === null ? "المدة غير معروفة" : `${age.days} يوم`}</p>
     {item.status !== "needed" && <p className="mt-1 text-xs text-slate-600">الإرسال المسجّل: <bdi>{item.sentDate}</bdi> · الوصول المتوقع المسجّل: <bdi>{item.dueDate}</bdi></p>}
     {item.status === "received" && <p className="mt-1 text-xs text-slate-600">الوصول المسجّل: {item.receivedAt ? at(item.receivedAt, timeZone) : "غير موثق؛ لا نستخدم تاريخ الإرسال بدلًا منه"}</p>}
     <p className="mt-2 text-sm font-bold text-navy-800">الخطوة المقترحة: {labBacklogNextAction(item.status)}</p>
-    <details className="mt-2 text-sm">
+    <details className={styles.recordDetails}>
       <summary className="min-h-11 cursor-pointer py-2 font-bold text-navy-800">سجل الطلب #{item.id} والمسؤولية المسندة</summary>
       {item.latestAction ? <p className="text-xs leading-6">آخر حدث في سجل الطلب: {eventLabel[item.latestAction.action] ?? item.latestAction.action}
         {item.latestAction.toStatus ? ` ← ${LAB_STATUS_LABEL[item.latestAction.toStatus as keyof typeof LAB_STATUS_LABEL] ?? item.latestAction.toStatus}` : ""}

@@ -110,6 +110,8 @@ it("keeps all-date waiting work visible on desktop/mobile, respects privacy, and
     });
     try {
       await page.goto(`${owned.baseUrl}/executive`, { waitUntil: "domcontentloaded" });
+      const labTab = page.getByRole("button", { name: "متابعة المعمل", exact: true });
+      await wheelIntoView(page, [labTab]); await assertUnobscured(page, labTab); await labTab.click();
       const panel = page.getByTestId("lab-backlog"), order = panel.locator(`#backlog-order-${receivedId}`);
       await expect.poll(() => panel.locator("article").count()).toBe(5);
       expect(await panel.innerText()).toContain("1 مريض · 5 طلب مفتوح");
@@ -119,13 +121,18 @@ it("keeps all-date waiting work visible on desktop/mobile, respects privacy, and
       expect(await panel.locator("details[open]").count()).toBe(0);
       const beforeIds = await panel.locator("article").evaluateAll(elements => elements.map(element => element.id));
       const readCount = backlogReads.length;
+      const reviewTab = page.getByRole("button", { name: "مراجعات اليوم", exact: true });
+      await wheelIntoView(page, [reviewTab]); await assertUnobscured(page, reviewTab); await reviewTab.click();
+      await expect.poll(() => page.getByLabel("يوم الموعد / اكتمال الإحالة").inputValue()).not.toBe("");
       const changedDay = page.waitForResponse(response => new URL(response.url()).pathname === "/api/executive/operations"
         && new URL(response.url()).searchParams.get("day") === "2098-01-01");
       const day = page.getByLabel("يوم الموعد / اكتمال الإحالة");
       await wheelIntoView(page, [day]); await assertUnobscured(page, day);
       await day.fill("2098-01-01"); await changedDay;
-      expect(await panel.locator("article").evaluateAll(elements => elements.map(element => element.id))).toEqual(beforeIds);
       expect(backlogReads).toHaveLength(readCount);
+      await wheelIntoView(page, [labTab]); await assertUnobscured(page, labTab); await labTab.click();
+      await expect.poll(() => panel.locator("article").count()).toBe(5);
+      expect(await panel.locator("article").evaluateAll(elements => elements.map(element => element.id))).toEqual(beforeIds);
       expect(backlogReads.every(url => !new URL(url).searchParams.has("day"))).toBe(true);
       expect(await panel.evaluate(element => getComputedStyle(element).direction)).toBe("rtl");
       expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);

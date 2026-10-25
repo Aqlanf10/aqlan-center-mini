@@ -11,7 +11,7 @@ vi.mock('react',async(original)=>({...await original<typeof import('react')>(),
 vi.mock('../components/PageHeader',()=>({PageHeader:({children}:{children:ReactNode})=>createElement('header',null,children),StatCard:()=>null}));
 vi.mock('../components/financeLinks',()=>({financeLinks:()=>[]}));
 import FxPage from '../app/finance/fx/page';
-import ExecutivePage from '../app/executive/page';
+import ExecutivePage from '../components/leadership/ExecutiveFinancialOverview';
 import { JOURNAL_REVIEW_RESPONSE } from '../lib/journal-read-integrity';
 function render(Page:typeof FxPage){harness.cursor=0;harness.refCursor=0;harness.effects=[];return renderToStaticMarkup(createElement(Page));}
 function deferred(){let resolve!:(value:Response)=>void;const promise=new Promise<Response>(yes=>{resolve=yes;});return{promise,resolve};}
