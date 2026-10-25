@@ -141,6 +141,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/invoices/[id]": { GET: ["admin", "reception", "cashier", "accountant"], PATCH: FRONT_DESK },
   "/api/invoices/[id]/correct": { GET: ADMIN, POST: ADMIN },
   "/api/lab": { GET: CLINIC, POST: CLINIC },
+  "/api/lab/backlog": { GET: ADMIN },
   "/api/lab/[id]": { PATCH: CLINIC, DELETE: ADMIN },
   "/api/lab/pricing": { GET: CLINIC, POST: ADMIN },
   "/api/lab/pricing/[id]": { PUT: ADMIN, DELETE: ADMIN },
