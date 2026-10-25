@@ -61,8 +61,9 @@ const fetchMock = vi.fn();
 const onClose = vi.fn();
 const onSuccess = vi.fn();
 let open = true;
+let patientProp: number | undefined = 91001;
 let intent: "ortho_follow_up" | undefined = "ortho_follow_up";
-function render() {
+function render(flushEffects = true) {
   let tree: ReturnType<typeof QuickAppointmentModal>;
   let commits = 0;
   do {
@@ -71,7 +72,8 @@ function render() {
     hooks.cursor = 0;
     hooks.effectCursor = 0;
     hooks.pending = [];
-    tree = QuickAppointmentModal({ ...{ bookingIntent: intent }, patientId: 91001, patientName: "Synthetic followup patient", isOpen: open, onClose, onSuccess });
+    tree = QuickAppointmentModal({ ...{ bookingIntent: intent }, patientId: patientProp, patientName: "Synthetic followup patient", isOpen: open, onClose, onSuccess });
+    if (!flushEffects) break;
     for (const { index, deps, run } of hooks.pending) {
       const oldCleanup = hooks.effects[index]?.cleanup;
       if (typeof oldCleanup === "function") oldCleanup();
@@ -113,7 +115,7 @@ function selected() { return render().all.filter((node) => node.type === "button
 function cleanup() { for (const effect of hooks.effects) if (typeof effect.cleanup === "function") effect.cleanup(); }
 function resetHooks() { hooks.values = []; hooks.cursor = 0; hooks.effectCursor = 0; hooks.effects = []; hooks.pending = []; hooks.dirty = false; }
 beforeEach(() => {
-  resetHooks(); open = true; intent = "ortho_follow_up"; vi.clearAllMocks();
+  resetHooks(); open = true; patientProp = 91001; intent = "ortho_follow_up"; vi.clearAllMocks();
   serviceRequest = deferred(); vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     if (url === "/api/parties?kind=doctor") return Promise.resolve(response(200, []));
@@ -122,7 +124,7 @@ beforeEach(() => {
     throw new Error(`Unexpected mocked fetch: ${url}`);
   });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("explicit board follow-up booking intent", () => {
   it("shows the existing follow_up proposal but refuses an untouched submission before a service is verified", async () => {
@@ -219,5 +221,89 @@ describe("explicit board follow-up booking intent", () => {
     intent = undefined; render(); await services([catalog()]);
     expect(selected()).toEqual([]); expect(field("duration").props.value).toBe("30");
     await render().submit(); expect(payload().appointmentType).toBe("consultation"); expect(payload()).not.toHaveProperty("serviceId");
+  });
+});
+
+
+describe("doctor suggestion request ownership", () => {
+  function advisory(url: string, kind: "slots" | "unknown" | "error" = "slots") {
+    if (kind === "error") return response(503, {});
+    const query = new URL(url, "http://synthetic.invalid").searchParams;
+    return response(200, {
+      purpose: "advisory_only", bookingGuaranteed: false,
+      doctorId: Number(query.get("doctorId")), date: query.get("date"),
+      durationMinutes: Number(query.get("durationMinutes")), timeZone: "Asia/Aden",
+      rosterStatus: kind === "unknown" ? "unknown" : "resolved",
+      slots: kind === "unknown" ? [] : [
+        { time: "12:00", status: "available", label: "مقترح" },
+        { time: "16:00", status: "blocked", label: "محجوب للاختبار" },
+      ],
+    });
+  }
+  async function start(kind: "slots" | "unknown" | "error" = "slots", withServices = true) {
+    vi.useFakeTimers(); intent = undefined;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url.startsWith("/api/appointments/availability?")
+      ? Promise.resolve(advisory(url, kind)) : fallback(url, init));
+    render(); await services(withServices ? [{ ...catalog(), defaultDurationMinutes: 30 }] : []);
+    change("doctor", "71001");
+    await vi.advanceTimersByTimeAsync(200); await settle();
+  }
+  const slotButtons = (view: ReturnType<typeof render>) => view.all.filter((node) =>
+    node.type === "button" && /^\d{2}:\d{2} — /.test(String(node.props["aria-label"] ?? "")));
+  function assertHiddenBeforeEffects() {
+    const view = render(false);
+    expect(slotButtons(view)).toHaveLength(0);
+    expect(text(view.tree)).not.toContain("الوقت المحدد");
+    expect(text(view.tree)).not.toContain("جدول دوام الطبيب غير مؤكد");
+    expect(text(view.tree)).not.toContain("تعذّر التحقق من الاقتراحات");
+    expect(text(view.tree)).toContain("جارٍ تحميل الأوقات");
+    return view;
+  }
+  it.each(["doctor", "date", "duration", "chair", "service", "appointmentType", "newPatient"])(
+    "hides old slots and selected-time warnings on %s change before any effect runs", async (context) => {
+      await start("slots", context !== "appointmentType");
+      expect(slotButtons(render())).toHaveLength(2);
+      expect(text(render().tree)).toContain("الوقت المحدد محجوب للاختبار");
+      if (context === "service") {
+        click(render().find((node) => node.props["data-service"] === "ORTHO_FOLLOW_UP"));
+      } else if (context === "appointmentType") {
+        click(render().find((node) => node.type === "button" && text(node).startsWith("متابعة دورية")));
+      } else if (context === "newPatient") {
+        patientProp = undefined; render();
+        click(render().find((node) => node.type === "button" && text(node) === "تغيير المريض"));
+      } else {
+        const next = { doctor: "71002", date: "2027-02-03", duration: "45", chair: "2" }[context as "doctor" | "date" | "duration" | "chair"];
+        (field(context).props.onChange as (event: { target: { value: string } }) => void)({ target: { value: next } });
+      }
+      const view = assertHiddenBeforeEffects();
+      expect(view.find((node) => node.props.type === "submit").props.disabled).toBe(false);
+      expect(view.find((node) => node.props.id === "booking-default-audit-time").props.value).toBe("16:00");
+    },
+  );
+  it.each(["unknown", "error"] as const)("hides a previous %s state before effect cleanup", async (kind) => {
+    await start(kind);
+    expect(text(render().tree)).toContain(kind === "unknown" ? "جدول دوام الطبيب غير مؤكد" : "تعذّر التحقق من الاقتراحات");
+    (field("doctor").props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "71002" } });
+    assertHiddenBeforeEffects();
+  });
+  it.each(["success", "error"])("ignores delayed old %s after a new unknown result", async (outcome) => {
+    await start();
+    const oldResponse = deferred<ReturnType<typeof response>>();
+    let oldUrl = "";
+    fetchMock.mockImplementation((url: string) => {
+      if (new URL(url, "http://synthetic.invalid").searchParams.get("doctorId") === "71002") {
+        oldUrl = url; return oldResponse.promise;
+      }
+      return Promise.resolve(advisory(url, "unknown"));
+    });
+    change("doctor", "71002"); await vi.advanceTimersByTimeAsync(200);
+    change("doctor", "71003"); await vi.advanceTimersByTimeAsync(200); await settle();
+    expect(text(render().tree)).toContain("جدول دوام الطبيب غير مؤكد");
+    oldResponse.resolve(advisory(oldUrl, outcome === "success" ? "slots" : "error"));
+    await settle();
+    expect(slotButtons(render())).toHaveLength(0);
+    expect(text(render().tree)).toContain("جدول دوام الطبيب غير مؤكد");
+    expect(text(render().tree)).not.toContain("تعذّر التحقق من الاقتراحات");
   });
 });

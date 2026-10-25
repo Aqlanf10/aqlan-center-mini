@@ -349,6 +349,43 @@ jobs:
           INVENTORY_SCHEMA_TEST: "1"
         run: npm run test:security-http
 
+      # Five exact real-app synthetic invoice views and bounded geometry only.
+      # No browser state, cookies, traces, databases, or broad directory upload.
+      - name: Upload grouped invoice entry evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoice-grouped-entry-ui
+          path: |
+            .settings-ui-artifacts/invoice-grouped-entry/grouped-1280.png
+            .settings-ui-artifacts/invoice-grouped-entry/grouped-1280.json
+            .settings-ui-artifacts/invoice-grouped-entry/grouped-390.png
+            .settings-ui-artifacts/invoice-grouped-entry/grouped-390.json
+            .settings-ui-artifacts/invoice-grouped-entry/split-1280.png
+            .settings-ui-artifacts/invoice-grouped-entry/split-1280.json
+            .settings-ui-artifacts/invoice-grouped-entry/split-390.png
+            .settings-ui-artifacts/invoice-grouped-entry/split-390.json
+            .settings-ui-artifacts/invoice-grouped-entry/split-tooth-390.png
+            .settings-ui-artifacts/invoice-grouped-entry/split-tooth-390.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exactly four actual-viewport screenshots from the owned synthetic fixture.
+      # No cookies, browser state, traces, database dumps, or clinic records.
+      - name: Upload laboratory backlog desktop and mobile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-open-backlog-ui
+          path: |
+            /tmp/lab-backlog-evidence/lab-backlog-summary-1280.png
+            /tmp/lab-backlog-evidence/lab-backlog-summary-390.png
+            /tmp/lab-backlog-evidence/lab-backlog-received-1280.png
+            /tmp/lab-backlog-evidence/lab-backlog-received-390.png
+          if-no-files-found: error
+          retention-days: 7
+
       # Explicit synthetic HR viewports/PDFs only; no browser state, cookies,
       # traces, database dumps or employee data from an external environment.
       - name: Upload employee workflow evidence

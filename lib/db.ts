@@ -21682,7 +21682,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
         }>(
           `SELECT
              (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL)::text AS visits,
-             (SELECT COUNT(*) FROM lab_orders WHERE patient_id = $1 AND status IN ('sent', 'received'))::text AS open_lab,
+             (SELECT COUNT(*) FROM lab_orders WHERE patient_id = $1 AND status IN ('needed', 'sent', 'in_progress', 'remake', 'received'))::text AS open_lab,
              (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1 AND removed_at IS NULL)::text AS documents,
              (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1 AND status IN ('active', 'retention'))::text AS ortho`,
           [patientId],
