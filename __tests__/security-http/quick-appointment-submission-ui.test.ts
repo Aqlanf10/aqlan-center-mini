@@ -33,11 +33,15 @@ async function fixture(width = 1280, existing = false, catalog = false, suggest 
   const waitingRequests: Route[] = [];
   await page.route("**/api/parties?kind=doctor", (route) => json(route, doctors));
   await page.route("**/api/settings/appointment-services", (route) => json(route, { services: catalog ? services : [], chairs: 4 }));
-  await page.route("**/api/appointments/availability?*", (route) => json(route, { slots: [
-    { time: "16:00", status: "available", label: "متاح" },
-    { time: "17:00", status: "available", label: "متاح" },
+  await page.route("**/api/appointments/availability?*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    return json(route, { purpose: "advisory_only", bookingGuaranteed: false, rosterStatus: "resolved", timeZone: "Asia/Aden",
+      doctorId: Number(params.get("doctorId")), date: params.get("date"), durationMinutes: Number(params.get("durationMinutes")), slots: [
+    { time: "16:00", status: "available", label: "مقترح" },
+    { time: "17:00", status: "available", label: "مقترح" },
     { time: "18:00", status: "booked", label: "محجوز" },
-  ] }));
+  ] });
+  });
   await page.route("**/api/patients?*", (route) => json(route, suggest
     ? [{ id: patientId, fullName: patientName, patientNumber: "SYNTHETIC-BOOKING", phone: null }] : []));
   await page.route("**/api/patients", async (route) => {
@@ -97,7 +101,7 @@ describe("quick booking repeated and interrupted flows", () => {
       }
       const suggestion = f.dialog.getByRole("button", { name: /SYNTHETIC-BOOKING/ });
       await expect.poll(() => suggestion.count()).toBe(1);
-      const availableSlot = f.dialog.getByRole("button", { name: "17:00 — متاح", exact: true });
+      const availableSlot = f.dialog.getByRole("button", { name: "17:00 — مقترح", exact: true });
       await expect.poll(() => availableSlot.count()).toBe(1);
       expect(await availableSlot.isEnabled()).toBe(true);
       expect(await f.page.locator("html").getAttribute("dir")).toBe("rtl");

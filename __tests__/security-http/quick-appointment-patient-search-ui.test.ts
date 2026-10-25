@@ -64,7 +64,11 @@ async function fixture(width = 1280) {
         case "/api/appointments":
         case "/api/booking-requests": await json(route, []); return;
         case "/api/settings/appointment-services": await json(route, { services: [], chairs: 0 }); return;
-        case "/api/appointments/availability": await json(route, { slots: [] }); return;
+        case "/api/appointments/availability": {
+          const params = new URL(route.request().url()).searchParams;
+          await json(route, { purpose: "advisory_only", bookingGuaranteed: false, rosterStatus: "unknown", timeZone: "Asia/Aden",
+            doctorId: Number(params.get("doctorId")), date: params.get("date"), durationMinutes: Number(params.get("durationMinutes")), slots: [] }); return;
+        }
         case "/api/lab": await json(route, { late: 0 }); return;
         case "/api/messages": await json(route, { unread: 0, urgent: 0 }); return;
         case "/api/auth/me": await json(route, { username: "secreception", role: "reception" }); return;

@@ -10,6 +10,7 @@ import { APPOINTMENT_TYPES } from "@/lib/schedule";
 import type { AppointmentService } from "@/lib/appointment-services";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "@/lib/ortho-booking-intent";
 import type { DoctorSlot } from "@/lib/appointment-availability";
+import { parseDoctorAvailabilityResponse } from "@/lib/appointment-availability-contract";
 
 function tomorrow() {
   const d = new Date();
@@ -75,6 +76,8 @@ export function QuickAppointmentModal({
   const [doctorSlots, setDoctorSlots] = useState<DoctorSlot[] | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState(false);
+  const [rosterUnknown, setRosterUnknown] = useState(false);
+  const [slotsContext, setSlotsContext] = useState<string | null>(null);
   /* كتالوج الخدمات من القاعدة — لا مصفوفةً في الشيفرة. وحين يتعذّر تحميله يعود
      النموذج إلى الأنواع المدمجة بدل أن يعجز عن الحجز: الاستقبال لا تنتظر شبكة. */
   const [services, setServices] = useState<AppointmentService[]>([]);
@@ -84,6 +87,14 @@ export function QuickAppointmentModal({
   const chairForAvailability = services.find((service) => service.id === selectedServiceId)?.requiresChair === false
     ? "" : chairNo;
   const isNewPatientForBooking = !selectedPatientId || newPatientCreated;
+  // Rendering can precede effect cleanup. Advice belongs only to the exact
+  // request context, so a changed selection never renders the previous advice.
+  const availabilityContext = JSON.stringify([
+    isOpen, selectedDoctorId ?? null, date, duration, selectedServiceId ?? null,
+    appointmentType, chairForAvailability, isNewPatientForBooking,
+  ]);
+  const ownsSlots = slotsContext === availabilityContext;
+  const visibleDoctorSlots = ownsSlots ? doctorSlots : null;
   /* التجاوز لا يُطلب قبل الرفض: يظهر الحقل حين يقول الخادم إن الوقت ممتلئ وإن
      لصاحب الجلسة صلاحيةً — فلا يتعوّد أحدٌ كتابة سببٍ لا يحتاجه. */
   const [conflict, setConflict] = useState<
@@ -127,16 +138,19 @@ export function QuickAppointmentModal({
   }, [isOpen]);
 
   useEffect(() => {
+    setSlotsContext(availabilityContext);
     if (!isOpen || !selectedDoctorId || !date) {
       setDoctorSlots(null);
       setSlotsLoading(false);
       setSlotsError(false);
+      setRosterUnknown(false);
       return;
     }
     const controller = new AbortController();
     setDoctorSlots(null);
     setSlotsLoading(true);
     setSlotsError(false);
+    setRosterUnknown(false);
     const timer = setTimeout(async () => {
       try {
         const params = new URLSearchParams({
@@ -150,8 +164,14 @@ export function QuickAppointmentModal({
           cache: "no-store", signal: controller.signal,
         });
         if (!response.ok) throw new Error("availability failed");
-        const data = await response.json() as { slots?: DoctorSlot[] };
-        if (!controller.signal.aborted) setDoctorSlots(Array.isArray(data.slots) ? data.slots : []);
+        const data = parseDoctorAvailabilityResponse(await response.json(), {
+          doctorId: selectedDoctorId, date, durationMinutes: Number(duration),
+        });
+        if (!data) throw new Error("invalid availability response");
+        if (!controller.signal.aborted) {
+          setRosterUnknown(data.rosterStatus === "unknown");
+          setDoctorSlots(data.slots);
+        }
       } catch {
         if (!controller.signal.aborted) setSlotsError(true);
       } finally {
@@ -159,7 +179,7 @@ export function QuickAppointmentModal({
       }
     }, 200);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [isOpen, selectedDoctorId, date, duration, selectedServiceId, appointmentType, chairForAvailability, isNewPatientForBooking]);
+  }, [availabilityContext, isOpen, selectedDoctorId, date, duration, selectedServiceId, appointmentType, chairForAvailability, isNewPatientForBooking]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -247,7 +267,7 @@ export function QuickAppointmentModal({
   const activeService = services.find((service) => service.id === selectedServiceId);
   /* خدمةٌ لا تشغل كرسيًّا لا يُعرض لها اختيار كرسي — والحقل يُفرَّغ لا يُخفى وقيمته باقية. */
   const chairApplies = !activeService || activeService.requiresChair;
-  const selectedDoctorSlot = doctorSlots?.find((slot) => slot.time === time);
+  const selectedDoctorSlot = visibleDoctorSlots?.find((slot) => slot.time === time);
 
   /**
    * تسجيلُ المريض المردود في قائمة الانتظار.
@@ -823,17 +843,18 @@ export function QuickAppointmentModal({
           {selectedDoctorId && (
             <section aria-label="أوقات الطبيب" className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-black text-navy-900">أوقات الطبيب في هذا اليوم</p>
-                <p className="text-[10px] text-slate-600">الأخضر متاح · الأحمر محجوز · الرمادي غير متاح</p>
+                <p className="text-xs font-black text-navy-900">أوقات مقترحة وفق الدوام المسجّل</p>
+                <p className="text-[10px] text-slate-600">الأخضر مقترح · الأحمر محجوز · الرمادي غير متاح</p>
               </div>
-              {slotsLoading ? <p role="status" className="text-xs text-slate-600">جارٍ تحميل الأوقات…</p> : null}
-              {slotsError ? <p role="alert" className="text-xs text-rose-700">تعذّر تحميل الأوقات. تحقّق من الوقت عند الحجز.</p> : null}
-              {doctorSlots && doctorSlots.length === 0 ? (
-                <p className="text-xs text-slate-600">لا توجد أوقات ضمن ورديات المركز لهذا اليوم والمدة المختارة.</p>
+              {slotsLoading || !ownsSlots ? <p role="status" className="text-xs text-slate-600">جارٍ تحميل الأوقات…</p> : null}
+              {ownsSlots && slotsError ? <p role="alert" className="text-xs text-rose-700">تعذّر التحقق من الاقتراحات؛ راجع الوقت قبل الحجز اليدوي.</p> : null}
+              {ownsSlots && rosterUnknown ? <p role="status" className="text-xs text-amber-800">جدول دوام الطبيب غير مؤكد؛ راجعه قبل الحجز اليدوي.</p> : null}
+              {visibleDoctorSlots && !rosterUnknown && visibleDoctorSlots.length === 0 ? (
+                <p className="text-xs text-slate-600">لا توجد أوقات مقترحة ضمن جدول الدوام وورديات المركز.</p>
               ) : null}
-              {doctorSlots && doctorSlots.length > 0 ? (
+              {visibleDoctorSlots && visibleDoctorSlots.length > 0 ? (
                 <div className="grid max-h-44 grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-4">
-                  {doctorSlots.map((slot) => (
+                  {visibleDoctorSlots.map((slot) => (
                     <button
                       key={slot.time}
                       type="button"
@@ -858,9 +879,10 @@ export function QuickAppointmentModal({
               ) : null}
               {selectedDoctorSlot && selectedDoctorSlot.status !== "available" ? (
                 <p role="alert" className="mt-2 text-xs font-bold text-rose-700">
-                  الوقت المحدد {selectedDoctorSlot.label}. اختر وقتًا متاحًا؛ سيتحقق الخادم مجددًا عند الحجز.
+                  الوقت المحدد {selectedDoctorSlot.label}. راجع الوقت قبل الحجز اليدوي.
                 </p>
               ) : null}
+              <p className="mt-2 text-[10px] text-slate-600">الاقتراح ليس حجزًا مؤكّدًا.</p>
             </section>
           )}
 
