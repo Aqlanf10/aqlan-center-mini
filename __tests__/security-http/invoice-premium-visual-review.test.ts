@@ -4,7 +4,7 @@ import {Client} from "pg";
 import {mkdirSync,writeFileSync} from "node:fs";
 import {baseUrl,harness} from "./_server";
 
-import type {Currency} from "../../lib/money";
+import {formatMoney,type Currency} from "../../lib/money";
 
 let browser:Browser,db:Client,h:Awaited<ReturnType<typeof harness>>,endo:number,ortho:number;
 const doctors:number[]=[];
@@ -38,7 +38,32 @@ describe("approved premium invoice layout in the actual application",()=>{
       await page.getByRole("button",{name:"+ بند آخر",exact:true}).click();
       await page.getByTestId("invoice-row-2").getByLabel("الخدمة",{exact:true}).selectOption(String(ortho));
       await page.getByTestId("invoice-row-2").getByLabel("نطاق العلاج",{exact:true}).selectOption("both");
-      for(let index=0;index<3;index++)await page.getByTestId(`invoice-provider-${index}`).selectOption(String(doctors[index%2]));
+      // Canonical indices stay per tooth; only the new-treatment entry controls are grouped.
+      const visibleIndices=historical?[0,1,2]:[0,2];
+      expect(await page.locator('[data-testid^="invoice-row-"]').count()).toBe(visibleIndices.length);
+      expect(await page.locator('[data-testid^="invoice-provider-"]').count()).toBe(visibleIndices.length);
+      expect(await page.getByLabel("السعر",{exact:true}).count()).toBe(visibleIndices.length);
+      const endoUnitMinor=currency==="YER"?55000:currency==="SAR"?40000:5500;
+      const endoGroup=page.getByTestId("invoice-row-0");
+      expect(await endoGroup.getAttribute("data-tooth-count")).toBe(historical?"1":"2");
+      expect(await endoGroup.getByLabel("الكمية",{exact:true}).inputValue()).toBe(historical?"1":"2");
+      expect(await endoGroup.getByLabel("الكمية",{exact:true}).isDisabled()).toBe(true);
+      expect(await endoGroup.getByLabel("السعر",{exact:true}).count()).toBe(1);
+      expect(await page.getByTestId("invoice-line-total-0").innerText()).toContain(formatMoney(endoUnitMinor*(historical?1:2),currency));
+      if(historical){
+        for(const [index,tooth] of [[0,16],[1,17]]){
+          expect(await page.getByTestId(`invoice-row-${index}`).getAttribute("data-tooth")).toBe(String(tooth));
+          expect(await page.getByTestId(`invoice-row-${index}`).getAttribute("data-display-group")).toBe("");
+          expect(await page.getByTestId(`invoice-row-${index}`).getByLabel("الكمية",{exact:true}).inputValue()).toBe("1");
+          expect(await page.getByTestId(`invoice-line-total-${index}`).innerText()).toContain(formatMoney(endoUnitMinor,currency));
+        }
+      }else{
+        expect(await endoGroup.getAttribute("data-display-group")).toBeTruthy();
+        expect(await page.getByTestId("invoice-row-1").count()).toBe(0);
+        expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 16، 17");
+        expect(await page.getByTestId("invoice-group-details-0").locator('[data-testid^="invoice-clinical-preview-"]').count()).toBe(2);
+      }
+      for(const [position,index] of visibleIndices.entries())await page.getByTestId(`invoice-provider-${index}`).selectOption(String(doctors[position%2]));
       await page.getByLabel("الخصم",{exact:true}).fill(amounts.discount);
       await page.getByLabel("سبب الخصم",{exact:true}).fill("خصم اتفاق معتمد للتجربة");
       if(historical){await page.getByLabel("المدفوع قبل النظام",{exact:true}).fill(amounts.paid);await page.getByLabel("تاريخ المعلومات التاريخية",{exact:true}).fill("2026-10-01");}
@@ -48,6 +73,8 @@ describe("approved premium invoice layout in the actual application",()=>{
       await page.getByLabel("تاريخ السداد 2",{exact:true}).fill("2026-11-20");await page.getByLabel("مبلغ السداد 2",{exact:true}).fill(amounts.second);
       const save=page.getByRole("button",{name:historical?"احفظ الاتفاق التاريخي":"احفظ الفاتورة",exact:true});
       await expect.poll(()=>save.isEnabled()).toBe(true);
+      const canonicalPreviewRows=await page.locator(`[data-testid^="${historical?"historical":"invoice"}-clinical-preview-"]`).count();
+      expect(canonicalPreviewRows).toBe(3);
       expect(await page.getByLabel("الخصم",{exact:true}).count()).toBe(1);
       const summary=await page.getByTestId("invoice-financial-summary").innerText();
       expect(summary).toContain(amounts.remaining);expect(errors).toEqual([]);
@@ -62,7 +89,7 @@ describe("approved premium invoice layout in the actual application",()=>{
       const prefix=`${historical?"historical":"new"}-${width}${currency===(historical?"YER":"SAR")?"":`-${currency}`}`;
       await page.screenshot({path:`${evidence}/${prefix}-page.png`,fullPage:true});
       await page.screenshot({path:`${evidence}/${prefix}-form.png`,fullPage:true,clip:{x:geometry.form.x,y:geometry.form.y,width:geometry.form.width,height:geometry.form.height}});
-      writeFileSync(`${evidence}/${prefix}.json`,JSON.stringify({patientId,historical,currency,width,geometry,summary,errors,source:"real app, synthetic local PostgreSQL catalogue and preview; unsaved review form"},null,2));
+      writeFileSync(`${evidence}/${prefix}.json`,JSON.stringify({patientId,historical,currency,width,geometry,summary,errors,visibleEntryRows:visibleIndices.length,endoDisplayedQuantity:historical?1:2,canonicalPreviewRows,source:"real app, synthetic local PostgreSQL catalogue and preview; unsaved review form"},null,2));
       expect((await db.query("SELECT count(*)::int AS count FROM invoices WHERE patient_id=$1",[patientId])).rows[0].count).toBe(0);
       expect((await db.query("SELECT count(*)::int AS count FROM payments WHERE patient_id=$1",[patientId])).rows[0].count).toBe(0);
     }finally{await context.close();}

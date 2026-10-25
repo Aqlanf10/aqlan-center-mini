@@ -2,7 +2,7 @@
 
 import { invoiceOfferedPrice, INVOICE_ZERO_CONVERSION_MESSAGE } from "@/lib/invoice-price-quote";
 
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {Calculator, FileText, Link2, Plus, Save, Trash2} from "lucide-react";
 import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, invoiceNet, isCurrency, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
@@ -51,11 +51,16 @@ import {
   type InvoiceSelection, type InvoiceSelectionPreviewState,
 } from "./dental/invoice-selection-state";
 import {
-  PER_TOOTH_SPLIT_NOTICE, applyToothSelection, applyHistoricalToothSelection, emptyToothFields, invoiceToothMode, removeRowAt, replaceRowService,
+  applyHistoricalToothSelection, emptyToothFields, invoiceToothMode,
   selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
   type ToothRowLike, type ToothSelection,
 } from "./dental/invoice-tooth-selection";
 import { selectManualLine } from "./invoice-manual-line";
+import {
+  applyGroupedToothSelection, buildInvoiceDisplayGroups, patchDisplayGroupRows, removeDisplayGroupRows,
+  replaceDisplayGroupService, selectionOfDisplayGroup, splitDisplayGroupRow,
+  type InvoiceDisplayGroup,
+} from "./dental/invoice-display-groups";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { invoiceCatalogPrice, type InvoiceCatalogService } from "@/lib/invoice-catalog-price";
 import workspace from "./InvoiceWorkspace.module.css";
@@ -1064,7 +1069,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
   );
 }
 
-type InvoiceRow = ToothRowLike & { doctorId: string; serviceId: string; description: string; price: string; quantity: string; priceReason: string; manual?: boolean };
+type InvoiceRow = ToothRowLike & { displayGroupId?: string | null; doctorId: string; serviceId: string; description: string; price: string; quantity: string; priceReason: string; manual?: boolean };
 const blankInvoiceRow = (key: string): InvoiceRow => ({
   key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
@@ -1114,6 +1119,11 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
   const [commandState, setCommandState] = useState<InvoiceCommandState | null>(null);
   const commandLocked = !!commandState && !commandState.editing || !!recovery && !commandState;
   const editorEnabled = () => canChangeDraft() && (!commandRef.current && !recovery || commandRef.current?.editing === true);
+  // Current permission, not a captured render, owns every grouped editor action.
+  const editorMounted = useRef(true);
+  const canEditRows = useRef<() => boolean>(() => false);
+  canEditRows.current = () => editorMounted.current && editorEnabled() && canSubmit && !busy;
+  useLayoutEffect(() => { editorMounted.current = true; return () => { editorMounted.current = false; }; }, []);
   const recordCommand = (next: InvoiceCommandState) => {
     commandRef.current = next; setCommandState(next); onRecoveryChange(next.outcome === "saved" ? null : next);
   };
@@ -1229,7 +1239,8 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
   });
   // Keep text/price/tooth drafts; only explicit identity selections expire on changed work/context.
   const selectionScope = JSON.stringify({ patientId, currency, base, selectionContextKey, templateDraft,
-    catalog: services.map((service) => [service.id, service.name, service.category, invoiceOfferedPrice(service, currency), service.isActive, service.invoiceQuotes?.[currency]]), rows });
+    catalog: services.map((service) => [service.id, service.name, service.category, invoiceOfferedPrice(service, currency), service.isActive, service.invoiceQuotes?.[currency]]),
+    rows: rows.map(({ displayGroupId, ...row }) => { void displayGroupId; return row; }) });
   const selectionOwner = useMemo(() => ({ selectionScope, authority }), [selectionScope, authority]);
   const selected = selectionForOwner(selection, selectionOwner);
   // Changing any row identity or linkage input invalidates evidence during render, before the debounce/effect.
@@ -1390,20 +1401,54 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
     }
     return { owner: authority, patientId,...(visitId!==undefined?{visitId}:{}), currency, discountMinor, note: null, expectedPlanId: selected.existingPlanId, lines: expectedLines,repaymentTerms:repayment.value };
   };
+  // Presentation only: every child remains in the original ordered preview/save payload.
+  // A chosen batch never absorbs another source merely because its price matches.
+  const displayContext = {
+    currency,
+    priceValue: (row: InvoiceRow) => row.price.trim() ? parseAmount(row.price, currency)
+      : serviceOf(row.serviceId) ? invoiceOfferedPrice(serviceOf(row.serviceId)!, currency) : null,
+    provenance: (row: InvoiceRow) => {
+      const chosen = selected.itemIds.get(row.key);
+      const proof = currentPreview?.byRow.get(row.key);
+      const itemId = chosen ?? (proof?.item?.mode === "existing" ? proof.item.id : null);
+      const source = (selectionEvidence?.itemChoices.get(row.key) ?? []).find(item => item.id === itemId);
+      return itemId !== null && itemId !== undefined
+        ? source ? `existing-plan:${source.planId}` : `unverified-item:${itemId}`
+        : "new-manual-invoice";
+    },
+  };
+  const displayGroups = buildInvoiceDisplayGroups(historical ? rows.map(row => ({ ...row, displayGroupId: null })) : rows, displayContext);
+  const groupForRow = (key: string) => displayGroups.find(group => group.keys.includes(key));
+  const editGroup = (keys: readonly string[], patch: Partial<InvoiceRow>) => {
+    if (canEditRows.current()) setRows(current => canEditRows.current() ? patchDisplayGroupRows(current, keys, patch, displayContext) : current);
+  };
   const dialogIndex = toothDialogFor === null ? -1 : rows.findIndex((row) => row.key === toothDialogFor);
   const dialogRow = dialogIndex >= 0 ? rows[dialogIndex] : null;
+  const dialogGroup = dialogRow ? groupForRow(dialogRow.key) : undefined;
 
   const confirmTeeth = (key: string, serviceId: string, expectedMode: ToothScopeMode, selection: ToothSelection) => {
+    if (!canEditRows.current()) return;
     const index = rows.findIndex((row) => row.key === key);
     if (index < 0 || rows[index].serviceId !== serviceId || modeOf(rows[index]) !== expectedMode) { setToothDialogFor(null); return; }
     const mode = modeOf(rows[index]);
+    const members = groupForRow(key)?.keys ?? [key];
+    if (!historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode")) {
+      const occupied = rows.find(other => !members.includes(other.key) && other.serviceId === serviceId
+        && other.toothCode !== null && selection.teeth.includes(other.toothCode));
+      if (occupied) {
+        setSplitNotice(`سن ${occupied.toothCode} موجود في بند آخر لهذه الخدمة؛ عدّل بنده نفسه أو أزله منه أولًا.`);
+        setToothDialogFor(null); return;
+      }
+    }
     setRows((current) => {
       const at = current.findIndex((row) => row.key === key);
-      return at < 0 || current[at].serviceId !== serviceId || modeOf(current[at]) !== expectedMode
-        ? current : (historical?applyHistoricalToothSelection:applyToothSelection)(current, at, mode, selection, nextRowKey);
+      return !canEditRows.current() || at < 0 || current[at].serviceId !== serviceId || modeOf(current[at]) !== expectedMode
+        ? current : historical ? applyHistoricalToothSelection(current, at, mode, selection, nextRowKey)
+          : applyGroupedToothSelection(current, at, mode, selection, nextRowKey, { ...displayContext, memberKeys: groupForRow(key)?.keys });
     });
     const teeth = [...new Set(selection.teeth)].sort((a, b) => a - b);
-    setSplitNotice(mode === "per_tooth_episode" && teeth.length > 1 ? `${PER_TOOTH_SPLIT_NOTICE}: ${teeth.join("، ")}.` : null);
+    setSplitNotice(!historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode") && teeth.length > 1
+      ? `الخدمة في بند واحد: ${teeth.length} أسنان × سعر الوحدة. يُحفظ ربط كل سن بالعلاج.` : null);
     setToothDialogFor(null);
   };
 
@@ -1417,14 +1462,15 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
     </select>;
   };
 
-  const toothControl = (row: InvoiceRow, index: number) => {
+  const toothControl = (row: InvoiceRow, index: number, group: InvoiceDisplayGroup<InvoiceRow>) => {
     const mode = modeOf(row);
     if (mode === "none") return null;
-    const label = selectionLabel(mode, row);
+    const groupedTeeth = !historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode");
+    const label = groupedTeeth && group.teeth.length ? `الأسنان: ${group.teeth.join("، ")}` : selectionLabel(mode, row);
     const chosenTooth = row.toothCode !== null;
     const problem = toothProblems[index];
     const openButton = (text: string) => (
-      <button type="button" onClick={() => setToothDialogFor(row.key)} data-testid={`invoice-tooth-button-${index}`}
+      <button type="button" onClick={() => { if (canEditRows.current()) setToothDialogFor(row.key); }} data-testid={`invoice-tooth-button-${index}`}
         aria-haspopup="dialog" aria-invalid={problem ? true : undefined}
         className={`min-h-[44px] whitespace-nowrap rounded-xl border px-3 text-xs font-extrabold transition-colors ${
           problem ? "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100"
@@ -1438,9 +1484,9 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
         {scopeButtons(row, index, mode)}
         {mode !== "arch" && chosenTooth && label ? (
           <span data-testid={`invoice-tooth-chip-${index}`}
-            className="inline-flex min-h-[32px] items-center gap-1 rounded-full border border-navy-200 bg-navy-50 px-3 text-xs font-extrabold text-navy-900">
+            className={`inline-flex min-h-[32px] items-center gap-1 ${groupedTeeth && group.teeth.length > 1 ? "rounded-xl" : "rounded-full"} border border-navy-200 bg-navy-50 px-3 text-xs font-extrabold text-navy-900`}>
             🦷 <span>{label}</span>
-            {row.groupId && row.episodeTeeth && row.episodeTeeth.length > 1 ? (
+            {!groupedTeeth && row.groupId && row.episodeTeeth && row.episodeTeeth.length > 1 ? (
               <span className="font-semibold text-slate-500">· هذا السطر: {row.toothCode}</span>
             ) : null}
           </span>
@@ -1501,10 +1547,10 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
             {CURRENCIES.map(option=><option key={option} value={option}>{CURRENCY_LABEL[option]}</option>)}
           </select>
         </label>
-        {historical?<label><span>تاريخ الاتفاق الأصلي</span><input aria-label="تاريخ المعلومات التاريخية" value={historicalDate} onChange={event=>setHistoricalDate(event.target.value)} type="date"/></label>
+        {historical?<label><span>تاريخ الاتفاق الأصلي</span><input aria-label="تاريخ المعلومات التاريخية" value={historicalDate} onChange={event=>{if(canEditRows.current())setHistoricalDate(event.target.value);}} type="date"/></label>
           :<div><span>تاريخ الإصدار</span><time dir="ltr">{clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)}</time></div>}
       </div>
-      {historical ? <label className="mb-3 block text-xs font-bold">ملاحظة الاتفاق التاريخي<input aria-label="ملاحظة الاتفاق التاريخي" className="mt-1 w-full" maxLength={300} value={historicalNote} onChange={event=>setHistoricalNote(event.target.value)}/></label> : null}
+      {historical ? <label className="mb-3 block text-xs font-bold">ملاحظة الاتفاق التاريخي<input aria-label="ملاحظة الاتفاق التاريخي" className="mt-1 w-full" maxLength={300} value={historicalNote} onChange={event=>{if(canEditRows.current())setHistoricalNote(event.target.value);}}/></label> : null}
       <h4 className={workspace.sectionTitle}>الخدمات العلاجية</h4>
       {!historical ? <button type="button" disabled={busy} aria-expanded={templateOpen}
         onClick={() => { if (editorEnabled()) setTemplateOpen(open => !open); }}
@@ -1572,8 +1618,11 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
         </p>
       ) : null}
       <div aria-hidden="true" className={workspace.tableHead}><span>الخدمة</span><span>الأسنان / النطاق</span><span>الطبيب</span><span>سعر الوحدة<br/>{currency}</span><span>الكمية</span><span>الإجمالي<br/>{currency}</span><span/></div>
-      {rows.map((row, index) => (
-        <div key={row.key} data-testid={`invoice-row-${index}`} data-row-key={row.key} data-tooth={row.toothCode ?? ""}
+      {displayGroups.map((group) => {
+        const index = group.indices[0], row = rows[index];
+        const toothCount = !historical && (modeOf(row) === "per_tooth_episode" || modeOf(row) === "multi_tooth_episode") && group.teeth.length > 0;
+        return <div key={group.key} data-testid={`invoice-row-${index}`} data-row-key={row.key} data-tooth={row.toothCode ?? ""}
+          data-display-group={row.displayGroupId ?? ""} data-tooth-count={group.teeth.length}
           className={`${workspace.line} space-y-3 ${
             row.groupId ? "border-sky-200 border-s-4 border-s-sky-400" : "border-slate-100"}`}>
           <div className={workspace.lineGrid}>
@@ -1582,18 +1631,32 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 services={selectorServices}
                 value={row.serviceId ? Number(row.serviceId) : null}
                 onChange={(id, srv) => {
-                  setRows((current) => replaceRowService(current, index, {
-                    serviceId: id ? String(id) : "", doctorId: "", manual: false, priceReason: "",
-                    price: srv && invoiceOfferedPrice(srv, currency) !== null ? formatAmount(invoiceOfferedPrice(srv, currency)!, currency) : "",
-                    // Clear catalogue-origin text before the empty choice loses its service identity.
-                    description: srv ? srv.name : current[index].serviceId ? "" : current[index].description,
-                  }, invoiceToothMode(srv?.category)));
+                  if (!canEditRows.current()) return;
+                  setRows((current) => {
+                    const currentRow = current.find(item => item.key === row.key);
+                    if (!canEditRows.current() || !currentRow || currentRow.serviceId !== row.serviceId) return current;
+                    return replaceDisplayGroupService(current, group.keys, {
+                      serviceId: id ? String(id) : "", doctorId: "", manual: false, priceReason: "",
+                      price: srv && invoiceOfferedPrice(srv, currency) !== null ? formatAmount(invoiceOfferedPrice(srv, currency)!, currency) : "",
+                      // Clear catalogue-origin text before the empty choice loses its service identity.
+                      description: srv ? srv.name : currentRow.serviceId ? "" : currentRow.description,
+                    }, invoiceToothMode(srv?.category), displayContext);
+                  });
                 }}
                 base={currency}
                 catalogCurrency={currency}
                 allowManual={true}
                 manualSelected={row.manual === true}
-                onManualSelect={() => setRows((current) => selectManualLine(current, index))}
+                onManualSelect={() => {
+                  if (!canEditRows.current()) return;
+                  setRows(current => {
+                    const at = current.findIndex(item => item.key === row.key);
+                    if (!canEditRows.current() || at < 0 || current[at].serviceId !== row.serviceId) return current;
+                    if (!current[at].serviceId) return selectManualLine(current, at);
+                    return replaceDisplayGroupService(current, group.keys, { serviceId: "", doctorId: "", manual: true,
+                      description: "", price: "", priceReason: "" }, "none", displayContext);
+                  });
+                }}
                 placeholder="— اختر الخدمة المصنفة أو بند يدوي —"
                 ariaLabel="الخدمة" compact
               />
@@ -1613,8 +1676,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
               <label className="text-[11px] font-bold text-slate-500">سعر الوحدة ({CURRENCY_LABEL[currency]}):</label>
               <input
                 value={row.price}
-                onChange={(event) => setRows((current) => current.map((item, i) =>
-                  i === index ? { ...item, price: event.target.value } : item))}
+                onChange={(event) => editGroup(group.keys, { price: event.target.value })}
                 placeholder="السعر"
                 aria-label="السعر"
                 inputMode="decimal"
@@ -1631,8 +1693,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
               return differs ? (
                 <input
                   value={row.priceReason}
-                  onChange={(event) => setRows((current) => current.map((item, i) =>
-                    i === index ? { ...item, priceReason: event.target.value } : item))}
+                  onChange={(event) => editGroup(group.keys, { priceReason: event.target.value })}
                   placeholder={catalogue===null?"سبب التسعير اليدوي بهذه العملة":"سبب تغيير السعر عن الدليل"}
                   aria-label="سبب تغيير السعر"
                   maxLength={300}
@@ -1648,21 +1709,24 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
             <div className={workspace.quantity}>
               <label className="text-[11px] font-bold text-slate-500">الكمية:</label>
               <input
-                value={row.quantity}
-                onChange={(event) => setRows((current) => current.map((item, i) =>
-                  i === index ? { ...item, quantity: event.target.value } : item))}
+                value={toothCount ? group.teeth.length : row.quantity}
+                onChange={(event) => { if (!toothCount) editGroup(group.keys, { quantity: event.target.value }); }}
                 aria-label="الكمية"
-                disabled={historical&&isClinical(row.serviceId)||!invoiceQuantityAllowed(serviceOf(row.serviceId)?.category??null,2)}
+                disabled={toothCount || historical&&isClinical(row.serviceId)||!invoiceQuantityAllowed(serviceOf(row.serviceId)?.category??null,2)}
+                title={toothCount ? "الكمية من عدد الأسنان المحددة؛ عدّلها من مخطط الأسنان" : undefined}
                 inputMode="numeric"
                 dir="ltr"
                 className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-center"
               />
             </div>
-            <div className={workspace.lineTotal} data-testid={`invoice-line-total-${index}`}><span>إجمالي البند</span><strong>{inputProblems[index]?"راجع المبلغ":formatMoney(previewAmount(index),currency)}</strong></div>
-            {rows.length > 1 ? (
+            <div className={workspace.lineTotal} data-testid={`invoice-line-total-${index}`}><span>إجمالي البند</span><strong>{group.indices.some(one => inputProblems[one])?"راجع المبلغ":formatMoney(group.indices.reduce((sum, one) => sum + previewAmount(one), 0),currency)}</strong></div>
+            {rows.length > 1 || toothCount ? (
               <button
                 type="button"
-                onClick={() => setRows((current) => removeRowAt(current, index))}
+                onClick={() => {
+                  if (!canEditRows.current()) return;
+                  setRows(current => { const next = removeDisplayGroupRows(current, group.keys, displayContext); return next.length ? next : [blankInvoiceRow(nextRowKey())]; });
+                }}
                 className={workspace.removeLine}
                 title="حذف البند"
                 aria-label={`حذف البند ${index+1}`}
@@ -1674,8 +1738,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
               <label className={workspace.provider}>
                 <span className="mb-1 block text-[11px] font-bold text-slate-500">الطبيب المكلّف بهذا العمل</span>
                 <select aria-label="الطبيب المكلّف بالبند" data-testid={`invoice-provider-${index}`} value={row.doctorId}
-                  onChange={(event) => setRows((current) => current.map((item) => item.key === row.key
-                    ? { ...item, doctorId: event.target.value } : item))}
+                  onChange={(event) => editGroup(group.keys, { doctorId: event.target.value })}
                   className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs">
                   <option value="">غير محدد</option>
                   {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
@@ -1683,8 +1746,16 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 {!doctorCatalog ? <span className="mt-1 block text-[10px] text-slate-500">قائمة الأطباء لم تُتحقق بعد؛ لا يُعيّن طبيب تلقائيًا.</span> : null}
               </label>
             ) : null}
-            {isClinical(row.serviceId)?<div className={workspace.toothGroup}>{toothControl(row, index)}</div>:null}
+            {isClinical(row.serviceId)?<div className={workspace.toothGroup}>{toothControl(row, index, group)}</div>:null}
           </div>
+          {(() => {
+            const details = group.indices.map((index) => { const row = rows[index]; return <Fragment key={row.key}>
+          {group.grouped ? <div className="flex items-center justify-between gap-2 text-xs">
+            <strong>سن {row.toothCode}</strong>
+            <button type="button" data-testid={`invoice-split-tooth-${index}`}
+              onClick={() => { if (canEditRows.current()) setRows(current => splitDisplayGroupRow(current, row.key)); }}
+              className="min-h-11 rounded-lg border border-slate-200 px-3">فصل سن {row.toothCode}</button>
+          </div> : null}
           {inputProblems[index] ? <p role="alert" data-testid={`invoice-input-problem-${index}`}
             className="text-[11px] font-bold text-rose-800">{inputProblems[index]}</p> : null}
           {toothProblems[index] ? (
@@ -1752,7 +1823,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
               : null;
             return (
               <details className={workspace.linkProof} open={evidence.status!=="ready"||preview.case?.mode==="choose"}>
-                <summary><Link2 size={14} aria-hidden="true"/> {evidence.status==="ready"?"ربط الخطة والحالة جاهز للمراجعة":"مراجعة ربط العلاج"}</summary>
+                <summary><Link2 size={14} aria-hidden="true"/> {group.grouped ? `سن ${row.toothCode} · ` : ""}{evidence.status==="ready"?"ربط الخطة والحالة جاهز للمراجعة":"مراجعة ربط العلاج"}</summary>
                 <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state={evidence.status} className="text-xs leading-6">
                 {evidence.status === "ready" ? <p>هذه الفاتورة ستنشئ/تربط علاجًا سريريًّا للمريض — {preview.specialtyLabel}: {preview.item?.mode === "existing" ? (preview.item.id !== null ? `بند الخطة القائم #${preview.item.id}` : "بند خطة قائم لا يطابق هذا السطر") : "بند خطة جديد"}
                   {` · ${formatMoney(previewAmount(index), currency)}`}</p> : <p>لا يمكن حفظ هذا البند قبل معالجة سبب الرفض.</p>}
@@ -1771,11 +1842,22 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
               </div></details>
             );
           })()}
-        </div>
-      ))}
+          </Fragment>; });
+            if (!group.grouped) return details;
+            const needsDecision = group.indices.some(one => inputProblems[one] || toothProblems[one]
+              || previewForRow(currentPreview, previewKey, rows[one].key).status === "refused"
+              || currentPreview?.byRow.get(rows[one].key)?.case?.mode === "choose"
+              || (selectionEvidence?.itemChoices.get(rows[one].key)?.length ?? 0) > 1);
+            return <details className="text-xs" data-testid={`invoice-group-details-${index}`} open={needsDecision}>
+              <summary className="cursor-pointer font-bold text-sky-800">تفاصيل الأسنان / فصل سن بطبيب أو سعر مختلف</summary>
+              <div className="mt-2 space-y-2">{details}</div>
+            </details>;
+          })()}
+        </div>;
+      })}
 
       <button type="button"
-        onClick={() => setRows((current) => [...current, blankInvoiceRow(nextRowKey())])}
+        onClick={() => { if (canEditRows.current()) setRows((current) => [...current, blankInvoiceRow(nextRowKey())]); }}
         className={workspace.addLine} aria-label="+ بند آخر">
         <Plus size={17} aria-hidden="true"/> إضافة خدمة علاجية
       </button>
@@ -1786,11 +1868,11 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
         <dl>
           <div><dt>إجمالي الخدمات</dt><dd>{totalInvalid||inputProblems.some(Boolean)?"راجع البنود":formatMoney(total,currency)}</dd></div>
           <div className={workspace.discountRow}><dt><label htmlFor={`${summaryId}-discount`}>خصم الاتفاق</label></dt><dd>
-            <input id={`${summaryId}-discount`} value={discount} onChange={event=>setDiscount(event.target.value)} inputMode="decimal" dir="ltr" placeholder="0" aria-label="الخصم"/>
+            <input id={`${summaryId}-discount`} value={discount} onChange={event=>{if(canEditRows.current())setDiscount(event.target.value);}} inputMode="decimal" dir="ltr" placeholder="0" aria-label="الخصم"/>
           </dd></div>
-          {discountMinor>0?<div className={workspace.discountReason}><dt>سبب الخصم</dt><dd><input value={discountReason} onChange={event=>setDiscountReason(event.target.value)} aria-label="سبب الخصم" maxLength={300} placeholder="سبب الخصم المعتمد"/></dd></div>:null}
+          {discountMinor>0?<div className={workspace.discountReason}><dt>سبب الخصم</dt><dd><input value={discountReason} onChange={event=>{if(canEditRows.current())setDiscountReason(event.target.value);}} aria-label="سبب الخصم" maxLength={300} placeholder="سبب الخصم المعتمد"/></dd></div>:null}
           <div className={workspace.net}><dt>صافي المبلغ المتفق عليه</dt><dd>{totalInvalid||inputProblems.some(Boolean)||templateDraft&&!currentTemplate?"بانتظار اكتمال البنود":formatMoney(net,currency)}</dd></div>
-          {historical?<div><dt><label htmlFor={`${summaryId}-paid`}>المدفوع قبل النظام</label></dt><dd><input id={`${summaryId}-paid`} aria-label="المدفوع قبل النظام" value={historicalPaid} onChange={event=>setHistoricalPaid(event.target.value)} inputMode="decimal" dir="ltr" placeholder="0"/></dd></div>
+          {historical?<div><dt><label htmlFor={`${summaryId}-paid`}>المدفوع قبل النظام</label></dt><dd><input id={`${summaryId}-paid`} aria-label="المدفوع قبل النظام" value={historicalPaid} onChange={event=>{if(canEditRows.current())setHistoricalPaid(event.target.value);}} inputMode="decimal" dir="ltr" placeholder="0"/></dd></div>
             :null}
           {historical?<div className={workspace.remaining}><dt>المتبقي التاريخي الافتتاحي</dt><dd>{totalInvalid||inputProblems.some(Boolean)||historical&&historicalRemaining===null?"راجع المبالغ":formatMoney(historicalRemaining??0,currency)}</dd></div>:null}
         </dl>
@@ -1871,7 +1953,8 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
           patientId={patientId}
           mode={modeOf(dialogRow)}
           serviceName={serviceOf(dialogRow.serviceId)?.name ?? dialogRow.description}
-          initial={selectionOfRow(dialogRow)}
+          initial={!historical && dialogGroup ? selectionOfDisplayGroup(dialogGroup) : selectionOfRow(dialogRow)}
+          groupedInvoice={!historical}
           onConfirm={(selection) => confirmTeeth(dialogRow.key, dialogRow.serviceId, modeOf(dialogRow), selection)}
           onCancel={() => setToothDialogFor(null)}
         />
