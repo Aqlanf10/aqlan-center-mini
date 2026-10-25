@@ -1,0 +1,238 @@
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { mkdir, writeFile, rm } from "node:fs/promises";
+import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
+import { harness } from "./_server";
+import { openHrJourneyServer } from "./_hr-isolated-server";
+import { leadershipFinancialFixture } from "../fixtures/leadership-financial";
+let h: Awaited<ReturnType<typeof harness>>, owned: Awaited<ReturnType<typeof openHrJourneyServer>>, browser: Browser;
+let patient: number, day: string;
+const evidenceDir="/tmp/leadership-hub-evidence";
+const captureStates=["populated","day","lab","tasks","empty","error","finance-cash","finance-billing","finance-debts","finance-period"] as const;
+const captureNames=new Set([1440,390].flatMap(width=>captureStates.map(state=>`leadership-hub-${state}-${width}.png`)));
+captureNames.add("leadership-hub-finance-period-zoom-390.png");
+const evidenceDescription="Owned synthetic clinic overview; typed synthetic finance transport for visual coverage; not Production performance";
+beforeAll(async()=>{
+ h=await harness();owned=await openHrJourneyServer(h);const db=owned.db;
+ day=(await db.query("SELECT (statement_timestamp() AT TIME ZONE 'Asia/Aden')::date::text AS day")).rows[0].day;
+ const admin=Number((await db.query("SELECT id FROM users WHERE username='secadmin'")).rows[0].id);
+ const other=Number((await db.query("SELECT id FROM users WHERE username='secdoctora'")).rows[0].id);
+ patient=Number((await db.query("INSERT INTO patients(patient_number,full_name) VALUES ('SYN-LEAD-HUB','مريض متابعة اصطناعي') RETURNING id")).rows[0].id);
+ await db.query("INSERT INTO visits(patient_name,patient_id,status,arrived_at) VALUES ('مريض متابعة اصطناعي',$1,'waiting',GREATEST(statement_timestamp()-INTERVAL '45 minutes',((statement_timestamp() AT TIME ZONE 'Asia/Aden')::date)::timestamp AT TIME ZONE 'Asia/Aden'))",[patient]);
+ await db.query("INSERT INTO appointments(patient_id,scheduled_date,scheduled_time,status) VALUES ($1,$2,'16:00','no_show'),($1,$2,'17:00','cancelled')",[patient,day]);
+ await db.query("INSERT INTO lab_orders(patient_id,lab_name,work_type,status,sent_date,due_date,received_at) VALUES ($1,'معمل اصطناعي','تاج خزفي','received','2000-01-01','2000-01-10','2000-01-11T12:00:00Z'),($1,'معمل اصطناعي','جسر خزفي','sent','2000-01-01','2000-01-10',NULL)",[patient]);
+ const staff=Number((await db.query("INSERT INTO hr_staff(full_name,created_by) VALUES ('مسؤول متابعة اصطناعي','synthetic') RETURNING id")).rows[0].id);
+ const task=Number((await db.query("INSERT INTO hr_tasks(title,owner_user_id,owner_display_name,created_by,assignee_staff_id,assignee_label,due_at,status) VALUES ('تأكيد موعد التجربة',$1,'مالك اصطناعي','synthetic',$2,'مسؤول متابعة اصطناعي','2000-01-12','blocked') RETURNING id",[admin,staff])).rows[0].id);
+ await db.query("INSERT INTO hr_task_events(task_id,actor_user_id,actor_display_name,action) VALUES ($1,$2,'مسجّل إجراء مختلف','comment')",[task,other]);
+ await db.query("INSERT INTO hr_tasks(title,owner_user_id,owner_display_name,created_by,is_private,due_at) VALUES ('OTHER-PRIVATE-HUB-TASK',$1,'خاص','synthetic',TRUE,'1999-01-01')",[other]);
+ browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined});
+},180000);
+afterAll(async()=>{await browser?.close();await owned?.close();});
+async function context(width:number):Promise<BrowserContext>{
+ const ctx=await browser.newContext({viewport:{width,height:960},locale:"ar-YE"});const[name,...value]=h.sessions.admin.cookie.split("=");
+ await ctx.addCookies([{name,value:value.join("="),url:owned.baseUrl}]);await ctx.route("**/*",route=>new URL(route.request().url()).origin===owned.baseUrl?route.continue():route.abort());return ctx;
+}
+async function snapshot(){const out:Record<string,unknown>={};for(const table of ["visits","appointments","lab_orders","lab_order_tracking","hr_tasks","hr_task_events","hr_task_links","payables","expenses"])out[table]=(await owned.db.query(`SELECT * FROM ${table} ORDER BY id`)).rows;return out;}
+async function usableViewport(page: Page) {
+  return page.locator("header.sticky, div.sticky, nav.fixed").evaluateAll(elements => {
+    let top = 0, bottom = innerHeight;
+    for (const element of elements) {
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      if (rect.top <= 1 && rect.bottom > 0 && rect.height < innerHeight / 2) top = Math.max(top, rect.bottom);
+      if (getComputedStyle(element).position === "fixed" && rect.bottom >= innerHeight - 1 && rect.top > 0) bottom = Math.min(bottom, rect.top);
+    }
+    return { top: top + 12, bottom: bottom - 12, width: innerWidth };
+  });
+}
+/** Native input only: never scroll the DOM, hide chrome, inject styles or resize
+ * the viewport to make a tall panel appear to fit. Each relevant slice must fit
+ * between the real shell bars, and each visible control must be reachable. */
+async function wheelIntoView(page: Page, targets: Locator[]) {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const bounds = await usableViewport(page), boxes = await Promise.all(targets.map(target => target.boundingBox()));
+    if (boxes.some(box => !box)) throw new Error("Viewport target has no rendered box");
+    const rendered = boxes.filter(box => box !== null);
+    const top = Math.min(...rendered.map(box => box.y)), bottom = Math.max(...rendered.map(box => box.y + box.height));
+    expect(bottom - top, "Representative slice must fit the actual usable viewport").toBeLessThanOrEqual(bounds.bottom - bounds.top);
+    if (top >= bounds.top && bottom <= bounds.bottom) return bounds;
+    const delta = top < bounds.top ? top - bounds.top : bottom - bounds.bottom;
+    const first = rendered[0];
+    // Wheel over the real main-content gutter, never a native form field which
+    // could consume the input or change its value instead of scrolling the page.
+    const pointer = await targets[0].evaluate((element, y) => {
+      const main = element.closest("main");
+      const x = Math.max(2, Math.min(innerWidth - 2, (main?.getBoundingClientRect().left ?? 0) + 4));
+      const hit = document.elementFromPoint(x, y);
+      return { x, y, inMain: hit !== null && main?.contains(hit) === true,
+        nativeField: hit?.closest("input, textarea, select, [contenteditable='true']")?.tagName ?? null };
+    }, (bounds.top + bounds.bottom) / 2);
+    expect(pointer.inMain).toBe(true); expect(pointer.nativeField).toBeNull();
+    await page.mouse.move(pointer.x, pointer.y);
+    await page.mouse.wheel(0, Math.sign(delta) * Math.min(600, Math.max(2, Math.abs(delta))));
+    await expect.poll(async () => (await targets[0].boundingBox())?.y, { timeout: 3_000 }).not.toBe(first.y);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  }
+  throw new Error("Native wheel could not reach the viewport target");
+}
+async function assertUnobscured(page: Page, target: Locator) {
+  const bounds = await usableViewport(page);
+  const result = await target.evaluate((element, viewport) => {
+    const rects = Array.from(element.getClientRects()).filter(rect => rect.width && rect.height);
+    return {
+      inside: rects.length > 0 && rects.every(rect => rect.left >= 0 && rect.right <= viewport.width
+        && rect.top >= viewport.top && rect.bottom <= viewport.bottom),
+      hit: rects.length > 0 && rects.every(rect => [0.1, 0.5, 0.9].every(x => [0.1, 0.5, 0.9].every(y => {
+        const hit = document.elementFromPoint(rect.left + rect.width * x, rect.top + rect.height * y);
+        return hit !== null && element.contains(hit);
+      }))),
+    };
+  }, bounds);
+  expect(result, "Target must be in the usable viewport and receive actual pointer hits").toEqual({ inside: true, hit: true });
+}
+async function reachableClick(page: Page, target: Locator) {
+ await wheelIntoView(page, [target]); await assertUnobscured(page, target); await target.click();
+}
+async function checkControls(page: Page, scope: Locator) {
+ for (const control of await scope.locator("button, a, summary, input").all()) {
+  if (!await control.isVisible()) continue;
+  await wheelIntoView(page, [control]); await assertUnobscured(page, control);
+ }
+}
+async function captureSlice(page: Page, targets: Locator[]) {
+ await wheelIntoView(page, targets);
+ for (const target of targets) await assertUnobscured(page, target);
+ return page.screenshot({ fullPage: false });
+}
+it("renders a compact real-data desktop/mobile hub; defers finance; preserves sources and makes no workflow writes",async()=>{
+ for (const session of [h.sessions.doctorA,h.sessions.reception]) {
+  const denied=await fetch(`${owned.baseUrl}/api/executive/pulse?view=tasks`,{headers:{cookie:session.cookie}});
+  expect(denied.status).toBe(403);expect(await denied.text()).not.toContain("counts");
+ }
+ const before=await snapshot(),captures:Array<{width:number;state:string;png:Buffer}>=[],metrics:unknown[]=[];
+ // Remove only this test's exact known outputs, never broad directories. Save
+ // completed synthetic frames immediately; a later failure must not erase them.
+ await mkdir(evidenceDir,{recursive:true});
+ for(const name of [...captureNames,"leadership-hub-performance.json"]) await rm(`${evidenceDir}/${name}`,{force:true});
+ const persistMetrics=async(acceptanceComplete=false)=>writeFile(`${evidenceDir}/leadership-hub-performance.json`,JSON.stringify({fixture:evidenceDescription,acceptanceComplete,captures:captures.map(c=>`leadership-hub-${c.state}-${c.width}.png`),metrics},null,2));
+ const saveCapture=async(c:{width:number;state:string;png:Buffer})=>{
+  const name=`leadership-hub-${c.state}-${c.width}.png`;
+  if(!captureNames.has(name)) throw new Error("Unexpected leadership evidence name");
+  await writeFile(`${evidenceDir}/${name}`,c.png);captures.push(c);await persistMetrics();
+ };
+ await persistMetrics();
+ for(const width of [1440,390]){
+  const ctx=await context(width),page=await ctx.newPage(),requests:string[]=[],mutations:string[]=[];
+  await page.addInitScript(()=>{
+   const state={cls:0};(window as unknown as {leadershipMetrics:{cls:number}}).leadershipMetrics=state;
+   new PerformanceObserver(list=>{for(const entry of list.getEntries() as (PerformanceEntry & {hadRecentInput:boolean;value:number})[])if(!entry.hadRecentInput)state.cls+=entry.value;}).observe({type:"layout-shift",buffered:true});
+  });
+  page.on("request",r=>{requests.push(new URL(r.url()).pathname);if(!["GET","HEAD","OPTIONS"].includes(r.method()))mutations.push(r.method()+" "+new URL(r.url()).pathname);});
+  try{
+   await page.goto(`${owned.baseUrl}/executive`,{waitUntil:"domcontentloaded"});
+   const hub=page.getByTestId("leadership-workspace"),tasks=page.getByTestId("leadership-tasks");
+   await expect.poll(()=>tasks.innerText()).toContain("مسجّل إجراء مختلف");
+   await expect.poll(()=>page.getByTestId("leadership-lab-preview").innerText()).toContain("تاج خزفي");
+   await expect.poll(()=>page.getByTestId("leadership-day-queue").innerText()).toContain("مريض متابعة اصطناعي");
+   expect(await tasks.innerText()).toContain("المسؤول المسند: مسؤول متابعة اصطناعي");expect(await hub.innerText()).not.toContain("OTHER-PRIVATE-HUB-TASK");
+   expect(requests.filter(p=>p==="/api/executive/pulse")).toHaveLength(2);expect(requests.filter(p=>p==="/api/lab/backlog")).toHaveLength(1);
+   expect(requests).not.toContain("/api/executive");expect(requests).not.toContain("/api/hr/attendance");expect(requests).not.toContain("/api/inventory");
+   expect(await hub.evaluate(e=>getComputedStyle(e).direction)).toBe("rtl");expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+   expect(await hub.locator("button").evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=24))).toBe(true);
+   const measured=await page.evaluate(()=>({readyMs:performance.now(),apiReadTimings:performance.getEntriesByType("resource").filter(e=>new URL(e.name).pathname.startsWith("/api/executive")||new URL(e.name).pathname==="/api/lab/backlog").map(e=>({path:new URL(e.name).pathname,duration:e.duration})),navigation:performance.getEntriesByType("navigation").map(e=>({duration:e.duration,domContentLoaded:(e as PerformanceNavigationTiming).domContentLoadedEventEnd})),paint:performance.getEntriesByType("paint").map(e=>({name:e.name,startTime:e.startTime})),cls:(window as unknown as {leadershipMetrics:{cls:number}}).leadershipMetrics.cls}));
+   metrics.push({width,...measured,initialLeadershipRequests:requests.filter(p=>p.startsWith("/api/executive")||p==="/api/lab/backlog")});
+   expect(measured.paint.some(p=>p.name==="first-contentful-paint")).toBe(true);
+   await checkControls(page, hub);
+   const overview=page.getByTestId("leadership-overview");
+   const metricsCards=overview.locator("button").filter({has:page.locator("strong")});
+   await saveCapture({width,state:"populated",png:await captureSlice(page,await metricsCards.all())});
+   for (const [state,panel] of [["day",page.getByTestId("leadership-day-queue")],["lab",page.getByTestId("leadership-lab-preview")],["tasks",tasks]] as const) {
+    await saveCapture({width,state,png:await captureSlice(page,[panel.getByRole("heading"),panel.locator("li").first()])});
+   }
+   const beforeLabCount=requests.filter(p=>p==="/api/lab/backlog").length;
+   const dayControl=page.getByLabel("يوم الوصول والمواعيد",{exact:true});
+   await wheelIntoView(page,[dayControl]); await assertUnobscured(page,dayControl); await dayControl.fill("2098-01-01");
+   await expect.poll(()=>page.getByTestId("leadership-day-queue").innerText()).toContain("لا زيارات مفتوحة");
+   expect(requests.filter(p=>p==="/api/lab/backlog")).toHaveLength(beforeLabCount);
+   expect(await page.getByTestId("leadership-lab-preview").innerText()).toContain("تاج خزفي");
+   const teamControl=page.getByRole("button",{name:"الفريق والمهام",exact:true});
+   await wheelIntoView(page,[teamControl]); await assertUnobscured(page,teamControl);
+   await teamControl.focus();await page.keyboard.press("Enter");
+   await expect.poll(()=>page.getByTestId("leadership-tasks").innerText()).toContain("تأكيد موعد التجربة");
+   expect(await page.locator('a[href="/hr?tab=tasks"]').count()).toBe(1);
+   // The actual app renders a typed synthetic finance transport for cross-currency visual coverage.
+   // Operational/lab/task populated evidence above uses the owned database, not this fixture.
+   await page.route(url=>url.pathname==="/api/executive",route=>{
+    const url=new URL(route.request().url());
+    return route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({...leadershipFinancialFixture(),from:url.searchParams.get("from"),to:url.searchParams.get("to")})});
+   });
+   await reachableClick(page,page.getByRole("button",{name:"المالية",exact:true}));
+   await expect.poll(()=>requests.includes("/api/executive")).toBe(true);
+   const finance=page.getByTestId("leadership-finance");
+   await expect.poll(()=>finance.innerText()).toContain("ما دخل وما خرج، بكل عملة");
+   const financeReadCount=requests.filter(path=>path==="/api/executive").length;
+   for(const [view,label] of [["cash","حركة النقد"],["billing","الفواتير والمصروفات"],["debts","الذمم"],["period","تشغيل الفترة"]]){
+    await reachableClick(page,finance.getByRole("button",{name:label,exact:true}));
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+    await checkControls(page,finance);
+    for(const record of await finance.locator("article, dl > div").all()) {
+     if(!await record.isVisible()) continue;
+     await wheelIntoView(page,[record]); await assertUnobscured(page,record);
+    }
+    const representative=view==="period" ? finance.locator("section").filter({has:page.getByRole("heading",{name:"تشغيل الفترة، لا تشغيل اليوم",exact:true})}) : finance.locator("article").first();
+    await saveCapture({width,state:`finance-${view}`,png:await captureSlice(page,[representative])});
+    if(width===390){
+     await page.emulateMedia({reducedMotion:"reduce"});
+     await page.evaluate(()=>{document.documentElement.style.fontSize="200%";});
+     try {
+      const reflow=await hub.evaluate(element=>({clientWidth:element.clientWidth,scrollWidth:element.scrollWidth}));
+      // Bounded numeric/style evidence only: no text, HTML, patient identifiers,
+      // URLs, cookies or transport bodies. Persist before the failing assertion.
+      const overflow=await hub.evaluate(element=>{
+       const boundary=element.getBoundingClientRect();
+       return Array.from(element.querySelectorAll("*")).filter(node=>{
+        const box=node.getBoundingClientRect();return box.width>0&&(box.left<boundary.left-1||box.right>boundary.right+1||node.scrollWidth>node.clientWidth+1);
+       }).slice(0,30).map(node=>{const box=node.getBoundingClientRect(),style=getComputedStyle(node);return {tag:node.tagName,clientWidth:node.clientWidth,scrollWidth:node.scrollWidth,width:box.width,left:box.left,right:box.right,display:style.display,minWidth:style.minWidth,maxWidth:style.maxWidth,whiteSpace:style.whiteSpace,overflowWrap:style.overflowWrap};});
+      });
+      metrics.push({width,probe:`finance-${view}-200-percent-reflow`,...reflow,overflow});await persistMetrics();
+      expect(reflow.scrollWidth<=reflow.clientWidth+1).toBe(true);
+      if(view==="period") {
+       await checkControls(page,finance);
+       await saveCapture({width,state:"finance-period-zoom",png:await captureSlice(page,[representative.getByRole("heading"),representative.locator("dl > div").first()])});
+      }
+     } finally { await page.evaluate(()=>{document.documentElement.style.fontSize="";}); }
+    }
+   }
+   expect(requests.filter(path=>path==="/api/executive")).toHaveLength(financeReadCount);
+   // Genuine empty responses from the reader shape, intercepted only in this synthetic UI fixture.
+   const sourceMatch = (url:URL) => url.pathname==="/api/executive/pulse"||url.pathname==="/api/lab/backlog";
+   const emptyRoute = async (route: import("playwright").Route) => {
+    const result = await route.fetch(), payload = await result.json();
+    await route.fulfill({response:result,json:{...payload,counts:Object.fromEntries(Object.keys(payload.counts).map(k=>[k,0])),total:0,page:0,hasMore:false,items:[]}});
+   };
+   await page.route(sourceMatch,emptyRoute);
+   await reachableClick(page,page.getByRole("button",{name:"نظرة شاملة",exact:true}));
+   await expect.poll(()=>page.getByTestId("leadership-tasks").innerText()).toContain("لا مهام مفتوحة");
+   await expect.poll(()=>page.getByTestId("leadership-lab-preview").innerText()).toContain("لا طلبات معمل");
+   const emptyPanel=page.getByTestId("leadership-day-queue");
+   await saveCapture({width,state:"empty",png:await captureSlice(page,[emptyPanel.getByRole("heading"),emptyPanel.getByText("لا زيارات مفتوحة ضمن يوم الوصول المختار.",{exact:true})])});
+   await page.unroute(sourceMatch,emptyRoute);
+   await page.route(url=>url.pathname==="/api/executive/pulse"||url.pathname==="/api/lab/backlog",route=>route.fulfill({status:503,contentType:"application/json",body:"{}"}));
+   await reachableClick(page,page.getByRole("button",{name:"تحديث التشغيل والمعمل",exact:true}));
+   await expect.poll(()=>page.getByTestId("leadership-day-queue").innerText()).toContain("العدد غير معروف");
+   await expect.poll(()=>page.getByTestId("leadership-lab-preview").innerText()).toContain("العدد غير معروف");
+   expect(await hub.locator("button strong").allTextContents()).toEqual(["—","—","—","—"]);
+   const errorPanel=page.getByTestId("leadership-day-queue");
+   await checkControls(page,errorPanel);
+   await saveCapture({width,state:"error",png:await captureSlice(page,[errorPanel.getByRole("heading"),errorPanel.getByRole("alert")])});
+   await page.route(url=>url.pathname==="/api/executive/pulse",route=>route.fulfill({status:401,contentType:"application/json",body:"{}"}));
+   await reachableClick(page,page.getByRole("button",{name:"تحديث التشغيل والمعمل",exact:true}));
+   await expect.poll(()=>page.locator("main").last().innerText()).toContain("أُخفيت بيانات القيادة");
+   expect(await page.getByTestId("leadership-workspace").count()).toBe(0);
+   expect(await page.locator('a[href="/patients/'+patient+'?tab=summary"]').count()).toBe(0);
+   expect(mutations).toEqual([]);
+  }finally{await ctx.close();}
+ }
+ expect(await snapshot()).toEqual(before);
+ expect(captures.map(c=>`${c.state}-${c.width}`).sort()).toEqual([1440,390].flatMap(width=>["populated","day","lab","tasks","empty","error","finance-cash","finance-billing","finance-debts","finance-period"].map(state=>`${state}-${width}`)).concat("finance-period-zoom-390").sort());
+ await persistMetrics(true);
+},240000);

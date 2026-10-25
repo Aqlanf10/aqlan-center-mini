@@ -1,0 +1,62 @@
+import {performance} from 'node:perf_hooks';
+import {pathToFileURL} from 'node:url';
+import {writeFileSync} from 'node:fs';
+import {createRequire} from 'node:module';
+const [root,version,mode,out,opOnly='all',offset='0']=process.argv.slice(2);
+const target=new URL(process.env.DATABASE_URL!);
+if(target.hostname!=='127.0.0.1'||target.port!=='55449'||!/^\/perf_(base|candidate)_[a-z0-9_]+$/.test(target.pathname))throw Error('unsafe benchmark target');
+const queryEvidence:any[]=[];let tracing=false;
+if(mode==='profile'){
+ const pg=createRequire(root+'/package.json')('pg');const original=pg.Client.prototype.query;
+ pg.Client.prototype.query=function(...args:any[]){const started=performance.now();const sql=typeof args[0]==='string'?args[0]:args[0]?.text;const active=tracing;const record=()=>queryEvidence.push({sql:String(sql).replace(/\s+/g,' ').trim(),ms:performance.now()-started});if(active&&typeof args.at(-1)==='function'){const callback=args.at(-1);args[args.length-1]=function(...cb:any[]){record();return callback(...cb);};return original.apply(this,args);}const answer=original.apply(this,args);if(active&&answer?.then)return answer.then((r:any)=>{record();return r;});return answer;};
+}
+const imported=performance.now();
+const db=await import(pathToFileURL(root+'/lib/db.ts').href);
+const importMs=performance.now()-imported;
+const q=(sql:string,args:any[]=[])=>db.getPool().query(sql,args);
+const today='2026-10-23';
+if(mode==='seed'){
+ await db.ensureSchema();
+ await q(`INSERT INTO patients(patient_number,full_name) SELECT 'SYN-PERF-'||n,'Synthetic performance patient '||n FROM generate_series(1,1000)n`);
+ const ids=(await q(`SELECT id FROM patients WHERE patient_number LIKE 'SYN-PERF-%' ORDER BY id`)).rows.map((r:any)=>r.id);
+ await q(`INSERT INTO appointments(patient_id,scheduled_date,scheduled_time,duration_minutes,status) SELECT p,'2025-01-01'::date+n,'09:00',30,'done' FROM unnest($1::int[])p CROSS JOIN generate_series(1,100)n`,[ids]);
+ await db.openShift({openedBy:'SYNTHETIC-PERF',opening:{YER:0,SAR:0,USD:0}});
+ for(let i=0;i<100;i++){
+  const inv=await db.createInvoice({patientId:ids[0],baseCurrency:'YER',discountMinor:100,note:null,createdBy:'SYNTHETIC-PERF',items:[{serviceId:null,doctorId:null,description:'Synthetic treatment',quantity:1,unitPriceMinor:10000}]});
+  if(!inv)throw Error('invoice fixture failed');
+  const pay=await db.recordPayment({patientId:ids[0],invoiceId:inv.id,kind:'payment',amountMinor:1000,currency:'YER',baseCurrency:'YER',exchangeRate:1,method:'cash',note:null,createdBy:'SYNTHETIC-PERF',idempotencyKey:'perf-seed-'+i});
+  if(pay.reason||!pay.payment)throw Error('payment fixture failed '+pay.reason);
+ }
+ for(let i=0;i<5;i++){
+  const id=await db.createPlan({patientId:ids[0],title:'Synthetic agreement '+i,totalMinor:100000,baseCurrency:'YER',startDate:'2026-01-01',note:null,createdBy:'SYNTHETIC-PERF',installments:[{number:1,dueDate:'2027-01-01',amountMinor:100000}]});
+  if(!id)throw Error('plan fixture failed');
+ }
+ await q('ANALYZE');
+ writeFileSync(out,JSON.stringify({version,patients:ids.length,appointments:100000,invoices:100,payments:100,plans:5,server:(await q('SHOW server_version')).rows[0],pool:(await q('SHOW statement_timeout')).rows[0]},null,2));
+}else{
+ const ops:any={
+  history_common:async()=>{const r=await db.getPatientFile(1);if(r?.appointments.length!==50)throw Error('history result');},
+  statement:async()=>{
+   const r=version==='candidate'?await db.patientStatementSnapshot(1,today):await Promise.all([db.patientLedger(1),db.patientPlanCurrencies(1),db.listPatientPlans(1,today)]).then(([ledger,planCurrencies,plans])=>({ledger,planCurrencies,plans}));
+   if(r.ledger.invoices.length!==100||r.plans.length!==5)throw Error('statement result');
+   db.ledgerBalancesByCurrency(1,r.ledger,r.planCurrencies);
+  },
+  collection:async(i:number)=>{const n=Number(offset)+i;const r=await db.recordPayment({patientId:2,invoiceId:null,kind:'payment',amountMinor:2000+n,currency:'YER',baseCurrency:'YER',exchangeRate:1,method:'cash',note:null,createdBy:'SYNTHETIC-PERF',actorRole:'admin',idempotencyKey:'perf-collection-'+n,similarityReview:{observedReceiptIds:[]}});if(r.reason||!r.payment)throw Error('collection '+r.reason);},
+ };
+ if(version==='candidate'){
+  const reader=await import(pathToFileURL(root+'/lib/patient-appointments-reader.ts').href);
+  ops.history_keyset_new=async()=>{const r=await reader.readPatientAppointments(1,{view:'history',cursor:null,requestCursor:null},today);if(r?.appointments.length!==20)throw Error('keyset result');};
+ }
+ const results:any={version,mode,importMs,node:process.version,operations:{}};
+ if(mode!=='cold')await db.ensureSchema();
+ for(const [name,fn] of Object.entries(ops) as any){
+  if(opOnly!=='all'&&name!==opOnly)continue;
+  if(mode==='warm'||mode==='profile')for(let i=0;i<10;i++)await fn(i);
+  queryEvidence.length=0;tracing=mode==='profile';
+  const times:number[]=[],errors:any[]=[];const n=mode==='cold'||mode==='profile'?1:200;
+  for(let i=0;i<n;i++){const t=performance.now();try{await fn(i+10)}catch(e:any){errors.push({i,message:e.message});}times.push(performance.now()-t);}
+  results.operations[name]={times,errors,n,...(mode==='profile'?{queries:[...queryEvidence]}:{})};tracing=false;
+ }
+ writeFileSync(out,JSON.stringify(results,null,2));
+}
+await db.resetPoolForTesting();

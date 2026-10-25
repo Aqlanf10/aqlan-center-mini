@@ -75,7 +75,10 @@ const historicalDate = (value: unknown): value is string => typeof value === "st
   && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 
 /** Document totals are not per-case debt. Validate every immutable line owner before exposing them. */
-function historicalDocumentReferences(snapshot: TreatmentFinancialSnapshot) {
+export function historicalDocumentReferences(snapshot: Pick<TreatmentFinancialSnapshot, "patientId" | "legacyAgreements" | "historicalDocuments"> & {
+  plans: Pick<FinancialPlanEvidence, "id" | "patientId" | "currency">[];
+  items: Pick<FinancialItemEvidence, "planItemId" | "patientId" | "planId" | "clinicalCaseId">[];
+}) {
   const agreements = snapshot.legacyAgreements;
   const source = snapshot.historicalDocuments ?? [];
   if (new Set(source.map((document) => document.id)).size !== source.length

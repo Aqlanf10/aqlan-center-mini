@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { arriveAppointment, closeBookedAppointment, deleteAppointment, getAppointment, markReminderSent, resolvePastBooking } from "@/lib/db";
+import { arriveAppointment, closeBookedAppointment, deleteAppointment, getAppointment, resolvePastBooking } from "@/lib/db";
+import { readManualReminderSnapshot, recordManualAppointmentReminder, STALE_MANUAL_REMINDER_MESSAGE } from "@/lib/manual-appointment-reminder";
 import { findWaitingCandidatesForSlot } from "@/lib/waiting-list-match";
 import { authorizeAppointment } from "@/lib/operational-access";
 import { rescheduleAppointment } from "@/lib/book-appointment";
@@ -87,9 +88,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ ok: true });
     }
     if (action === "reminded") {
-      // يُستدعى بعد فتح واتساب لا قبله: التسجيل قبل الفتح يزعم إرسالًا لم يحدث.
-      const ok = await markReminderSent(id);
-      if (!ok) return NextResponse.json({ message: "الموعد غير موجود." }, { status: 404 });
+      // إفادة صريحة من الموظف بأنه ذكّر المريض؛ فتح مسودة واتساب لا يستدعي هذا الإجراء.
+      const snapshot = readManualReminderSnapshot((body as Record<string, unknown>).snapshot);
+      if (!snapshot) return NextResponse.json({ message: "بيانات التذكير المعروض غير صالحة. حدّث القائمة قبل التأكيد." }, { status: 400 });
+      const ok = await recordManualAppointmentReminder(id, allowed.patientId, snapshot);
+      if (!ok) return NextResponse.json({ message: STALE_MANUAL_REMINDER_MESSAGE }, { status: 409 });
       return NextResponse.json({ ok: true });
     }
     if (action === "cancel" || action === "no_show") {

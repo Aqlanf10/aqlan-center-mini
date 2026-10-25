@@ -63,6 +63,20 @@ function expectHidden(body: Record<string, unknown>, route: "generic" | "patient
   expect(raw).not.toMatch(/nextDueDate|nextDueAmountMinor|remainingMinor":14000|paidCount|2026-10-03T15/);
 }
 
+it.each([71, 72, null])("patient plans strip referral authority and project rebooking for doctor %s", async partyId => {
+  mocks.session.mockResolvedValue({ userId: 7, username: "synthetic_doctor", role: "doctor", partyId });
+  const visit = { id: 501, canRebook: true, rebookBlockedReason: null, rebookGeneration: "a".repeat(32), rebookHasReferral: true, rebookReferralReceiverId: 71 };
+  mocks.visits.mockResolvedValue([visit]);
+  const response = await get("patient");
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.plannedVisits[0].canRebook).toBe(partyId === 71);
+  expect(body.plannedVisits[0].rebookGeneration).toBe(visit.rebookGeneration);
+  expect(body.plannedVisits[0]).not.toHaveProperty("rebookHasReferral");
+  expect(body.plannedVisits[0]).not.toHaveProperty("rebookReferralReceiverId");
+  expect(visit.rebookReferralReceiverId).toBe(71);
+});
+
 for (const route of ["generic", "patient"] as const) {
   describe(`${route} raw plan response`, () => {
     it.each(["false", "true"])("per-doctor deny survives global switch %s", async (global) => {
@@ -185,4 +199,31 @@ it("revoking stored plan permission denies the next patient-file read with the s
 it("masked schedule existence is a real boolean, including a verified empty schedule", () => {
   expect(withoutPlanPayments(plan).hasInstallments).toBe(true);
   expect(withoutPlanPayments({ ...plan, installments: [] }).hasInstallments).toBe(false);
+});
+
+it("FIN-INT-4: masked approval existence is a real boolean, never the approved amounts", () => {
+  expect(withoutPlanPayments(plan).agreementApproved).toBe(false);
+  const approved = withoutPlanPayments({ ...plan, agreementApproved: true, approvedAgreement: { remainingMinor: 765432 } as never });
+  expect(approved.agreementApproved).toBe(true);
+  expect(JSON.stringify(approved)).not.toMatch(/765432|approvedAgreement/);
+});
+
+it.each(["generic", "patient"] as const)("does not expose approved current or original payment fields through the denied %s projection", async route => {
+  mocks.plans.mockResolvedValue([{ ...plan, agreementApproved: true, approvedAgreement: { available: true, totalMinor: 800000, paidMinor: 180000,
+    remainingMinor: 620000, originalPaidMinor: 180000, originalTotalMinor: 500000, deltaInvoiceIds: [501] } }]);
+  const body = await (await get(route)).json();
+  expectHidden(body, route);
+  expect(body.plans[0]).not.toHaveProperty("approvedAgreement");
+  expect(body.plans[0]).not.toHaveProperty("currentAgreement");
+  expect(JSON.stringify(body.plans[0])).not.toMatch(/originalPaidMinor|originalTotalMinor|deltaInvoiceIds|620000|180000/);
+});
+it("keeps the authoritative current tuple for restricted finance without exposing clinical notes", async () => {
+  const approvedAgreement = { planId: plan.id, currency: "SAR", available: true, totalMinor: 800000, paidMinor: 180000,
+    remainingMinor: 620000, dueNowMinor: 370000, originalTotalMinor: 500000, originalPaidMinor: 180000, deltaInvoiceIds: [501] };
+  mocks.session.mockResolvedValue({ userId: 8, username: "synthetic-accountant", role: "accountant" });
+  mocks.plans.mockResolvedValue([{ ...plan, totalMinor: 500000, approvedAgreement,
+    progress: { ...plan.progress, totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000 } }]);
+  const body = await (await get("generic")).json();
+  expect(body.plans[0]).toMatchObject({ totalMinor: 500000, approvedAgreement, progress: { totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000 } });
+  expect(body.plans[0]).not.toHaveProperty("note");expect(body.plans[0]).not.toHaveProperty("items");expect(body.plans[0]).not.toHaveProperty("consentNote");
 });

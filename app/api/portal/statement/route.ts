@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import { ledgerBalancesByCurrency, patientLedger, patientPlanCurrencies } from "@/lib/db";
+import { CLINIC_TIME_ZONE, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
 import { requirePortalSession } from "@/lib/portal-server";
+import { portalStatementView } from "@/lib/portal-statement";
+import { clinicDateString } from "@/lib/schedule";
+import { historicalOpeningBuckets } from "@/lib/statement-historical-details";
 
 export const dynamic = "force-dynamic";
 
@@ -18,17 +21,19 @@ export async function GET() {
     return NextResponse.json({ message: "سجّل الدخول إلى البوابة." }, { status: 401 });
   }
   try {
-    const [{ invoices, payments, openings }, planCurrencies] = await Promise.all([
-      patientLedger(session.patientId),
-      patientPlanCurrencies(session.patientId),
-    ]);
+    // The printed statement's readers, in one snapshot: balances and agreement progress
+    // in a response always describe the same committed state.
+    // Previous-treatment details ride the same snapshot. A malformed saved historical fact withholds that
+    // section only (null); it never fails or alters the balances, which never depend on it.
+    const { ledger: { invoices, payments, openings }, planCurrencies, plans, historicalAgreements } =
+      await patientStatementSnapshot(session.patientId, clinicDateString(new Date(), CLINIC_TIME_ZONE), { historicalAgreements: "tolerant" });
     /* (TD-05 · P1-5ب) بوابة المريض ترى ما يراه الصندوق: أرصدةً بعملاتها المستقلة —
        بالقاعدة نفسها التي يقرأ بها كشف الحساب (ledgerBalancesByCurrency). */
     const balances = ledgerBalancesByCurrency(session.patientId, { invoices, payments, openings }, planCurrencies);
-    return NextResponse.json({
-      invoices, payments, opening: openings.find((row) => row.currency === "YER") ?? null, openings,
-      balance: balances.YER, balances, baseCurrency: "YER",
-    });
+    /* (FIN-INT-8) نفس مستندات الكشف المطبوع ونفس تسمياته، ولا شيء داخلي: لا ملغاة،
+       ولا اسم موظف ولا ملاحظة ولا وردية. الأرصدة من الحساب الكانوني كما هي. */
+    const historicalBuckets = historicalAgreements ? historicalOpeningBuckets(historicalAgreements, openings, payments) : null;
+    return NextResponse.json(portalStatementView({ invoices, payments, openings }, balances, "YER", plans, historicalBuckets));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل كشف الحساب." }, { status: 500 });
   }

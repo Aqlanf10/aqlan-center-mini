@@ -54,7 +54,8 @@ vi.mock("@/lib/db", async (importOriginal) => {
 });
 
 import { executeAiTool } from "../lib/ai-tools/registry";
-import { verifyToolConfirmation } from "../lib/ai-confirmation";
+import { buildToolConfirmationPayload, signToolConfirmation, verifyToolConfirmation } from "../lib/ai-confirmation";
+import { buildConfirmationPreview } from "../lib/ai-tools/confirmation-preview";
 import type { AiToolContext } from "../lib/ai-tools/types";
 
 const DOCTOR_A: AiToolContext = {
@@ -107,6 +108,18 @@ beforeEach(() => {
 });
 
 /** يولّد رمز تأكيد ساريًا عبر المسار الرسمي: طلب ← عرض — ويعيد الرمز الخام. */
+/**
+ * record_patient_payment is contained (lib/ai-tools/contained-tools.ts): it no longer issues offers.
+ * Its tamper and reauthorization cases use a token signed exactly as its offer path signed one before
+ * containment — a previously issued confirmation — and must still be refused by the same gates.
+ */
+function issuedPaymentToken(params: Record<string, unknown>, context: AiToolContext): string {
+  return signToolConfirmation(buildToolConfirmationPayload({
+    userId: context.userId!, username: context.username!, tool: "record_patient_payment",
+    params, patientId: typeof params.patientId === "number" ? params.patientId : null,
+  }));
+}
+
 async function obtainOfferToken(
   tool: string,
   params: Record<string, unknown>,
@@ -171,11 +184,7 @@ describe("هجوم إعادة التشغيل (Replay) والنقر المزدو�
 
 describe("التلاعب بالتوقيع — تعديل الجسم مع إبقاء التوقيع القديم", () => {
   it("تعديل المبلغ داخل الجسم مع التوقيع القديم: التحقق يفشل ولا يُستدعى التنفيذ", async () => {
-    const token = await obtainOfferToken(
-      "record_patient_payment",
-      { patientId: 42, amount: "5000", currency: "YER" },
-      RECEPTION,
-    );
+    const token = issuedPaymentToken({ patientId: 42, amount: "5000", currency: "YER" }, RECEPTION);
     /* هجوم حقيقي: جسم معدّل (900000) + توقيع العرض الأصلي. */
     const tampered = tamperToken(token, (parsed) => {
       (parsed.params as Record<string, unknown>).amount = "900000";
@@ -194,11 +203,7 @@ describe("التلاعب بالتوقيع — تعديل الجسم مع إبق�
   });
 
   it("تلاعب بالمستخدم (userId) مع التوقيع القديم: رفض بلا تنفيذ", async () => {
-    const token = await obtainOfferToken(
-      "record_patient_payment",
-      { patientId: 42, amount: "5000", currency: "YER" },
-      RECEPTION,
-    );
+    const token = issuedPaymentToken({ patientId: 42, amount: "5000", currency: "YER" }, RECEPTION);
     const tampered = tamperToken(token, (parsed) => {
       parsed.userId = 99; /* انتحال مستخدم آخر */
     });
@@ -211,11 +216,7 @@ describe("التلاعب بالتوقيع — تعديل الجسم مع إبق�
   });
 
   it("تلاعب بالمريض (patientId) مع التوقيع القديم: رفض بلا تنفيذ", async () => {
-    const token = await obtainOfferToken(
-      "record_patient_payment",
-      { patientId: 42, amount: "5000", currency: "YER" },
-      RECEPTION,
-    );
+    const token = issuedPaymentToken({ patientId: 42, amount: "5000", currency: "YER" }, RECEPTION);
     const tampered = tamperToken(token, (parsed) => {
       (parsed.params as Record<string, unknown>).patientId = 77;
       parsed.patientId = 77;
@@ -229,11 +230,7 @@ describe("التلاعب بالتوقيع — تعديل الجسم مع إبق�
   });
 
   it("تلاعب بالأداة داخل الجسم مع التوقيع القديم: رفض بلا تنفيذ", async () => {
-    const token = await obtainOfferToken(
-      "record_patient_payment",
-      { patientId: 42, amount: "5000", currency: "YER" },
-      RECEPTION,
-    );
+    const token = issuedPaymentToken({ patientId: 42, amount: "5000", currency: "YER" }, RECEPTION);
     const tampered = tamperToken(token, (parsed) => {
       parsed.tool = "add_patient_medical_alert"; /* تحويل الرمز لأداة أشد خطرًا */
     });
@@ -246,11 +243,7 @@ describe("التلاعب بالتوقيع — تعديل الجسم مع إبق�
   });
 
   it("حمولة غير موقعة (JSON خام بلا توقيع) لا تُقبل مهما كان مصدرها", async () => {
-    const token = await obtainOfferToken(
-      "record_patient_payment",
-      { patientId: 42, amount: "5000", currency: "YER" },
-      RECEPTION,
-    );
+    const token = issuedPaymentToken({ patientId: 42, amount: "5000", currency: "YER" }, RECEPTION);
     const payload = verifyToolConfirmation(token)!;
     /* caller داخلي يحاول تمرير حمولة جاهزة بلا توقيع — مرفوضة في الشكل. */
     const unsigned = JSON.stringify({ ...payload, params: { ...payload.params, amount: "999999" } });
@@ -311,11 +304,7 @@ describe("العبور بين المستخدمين وعدم تطابق الأد�
 describe("إعادة التفويض بعد العرض — الصلاحية والملكية", () => {
   it("سحب صلاحية المال من مستخدم بعد العرض يمنع التنفيذ", async () => {
     /* استقبالٌ فقد صلاحية الشات/المال بعد العرض — سياق التنفيذ بلا صلاحية. */
-    const token = await obtainOfferToken(
-      "record_patient_payment",
-      { patientId: 42, amount: "5000", currency: "YER" },
-      RECEPTION,
-    );
+    const token = issuedPaymentToken({ patientId: 42, amount: "5000", currency: "YER" }, RECEPTION);
     const payload = verifyToolConfirmation(token)!;
     const demoted: AiToolContext = {
       ...RECEPTION,
@@ -362,12 +351,16 @@ describe("بوابة العرض — لا كتابة قبل التأكيد", () =
   });
 
   it("عرض التأكيد يبرز القيم الحساسة (المبلغ والعملة والجرعة)", async () => {
-    const offer = await executeAiTool(
+    /* أداة الدفع محتواة: لا عرض يصدر لها من المنفّذ، ومنشئ المعاينة نفسه بلا تغيير. */
+    const refused = await executeAiTool(
       "record_patient_payment",
       { patientId: 42, amount: "5000", currency: "SAR", method: "transfer" },
       RECEPTION,
     );
-    const fields = offer.confirmation!.fields;
+    expect(refused.confirmation).toBeUndefined();
+    expect(mocks.claimToolConfirmation).not.toHaveBeenCalled();
+    const fields = buildConfirmationPreview("record_patient_payment",
+      { patientId: 42, amount: "5000", currency: "SAR", method: "transfer" }, { id: 42, name: "مريض" }).fields;
     expect(fields.some((f) => f.sensitive && f.value.includes("5000"))).toBe(true);
     expect(fields.some((f) => f.sensitive && f.value.includes("ريال سعودي"))).toBe(true);
   });

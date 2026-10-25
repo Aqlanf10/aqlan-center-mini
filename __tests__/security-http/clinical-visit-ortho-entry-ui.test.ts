@@ -17,13 +17,13 @@ const visitId = 98312;
 const patientId = 98311;
 const doctorId = 98313;
 const clinicalPath = `/api/visits/${visitId}/clinical`;
-const signedDestination = `/patients/${patientId}?tab=account`;
+const signedDestination = `/patients/${patientId}?tab=today&checkoutVisit=${visitId}`;
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 function clinicalVisit(ortho = true) {
   return {
     id: visitId, patientId, patientName: "مريض تقويم تجريبي", chiefComplaint: "", examination: "", diagnosis: "", treatmentDone: "", nextPlan: "",
     doctorId, status: "open", signedAt: null, signedBy: null, invoiceId: null, addendum: null,
-    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
+    procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null, amendedServiceConflict: false,
     ortho: ortho ? {
       caseId: 98314, appliance: "fixed_metal", phase: "aligning", slot: "022", upperWire: "014 NiTi", lowerWire: "012 NiTi",
       lastAdjustment: "2026-09-01", daysSinceLast: 28, lastDone: "تبديل سابق تجريبي", elastics: "none", elasticNote: null,
@@ -92,6 +92,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
       await json(route, diagnosisResponse.body, diagnosisResponse.status);
     }
     else if (path === clinicalPath) await json(route, stored);
+    else if (path === `/api/visits/${visitId}/financial-context`) await json(route, { visitId, patientId, signed: true, directReference: null, directReferenceState: "missing", work: [], summary: "no_recorded_work" });
     else if (path === `/api/visits/${visitId}/billing-preview`) await json(route, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "شدّة مشمولة" });
     else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
     else if (path === `/api/patients/${patientId}`) await json(route, { id: patientId, medicalAlert: null, phone: null });
@@ -104,7 +105,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
     else if (path === "/api/auth/me") await json(route, { username: "secadmin", role: "admin" });
     else if (path.startsWith("/api/") || path.startsWith("/print/")) { unexpected.push(`${method} ${path}`); await json(route, { message: "Unexpected synthetic read blocked" }, 404); }
     else if (request.isNavigationRequest() && `${path}${url.search}` === signedDestination) {
-      // A canonical sign result carries this patient ID into account checkout.
+      // A validated sign result opens this patient’s Today checkout for this exact visit.
       // Keep that exact destination inert, then reopen the real visit to verify
       // its signed freeze without reading an unrelated synthetic patient page.
       await route.fulfill({ contentType: "text/html", body: "<html dir=rtl><body>وجهة تجريبية بعد التوقيع</body></html>" });

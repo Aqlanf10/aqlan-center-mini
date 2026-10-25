@@ -10,6 +10,8 @@ interface PlanOption {
   title: string;
   status: "active" | "completed" | "cancelled";
   installmentCount: number;
+  /** Money-free: the full principal was explicitly approved (invoice-backed agreement). */
+  approved: boolean;
 }
 type ReadState = { phase: "ready"; plans: PlanOption[] } | { phase: "loading" | "error" | "denied" };
 interface Props {
@@ -29,12 +31,14 @@ function readPlans(payload: unknown, patientId: number): PlanOption[] {
       || row.patientId !== patientId || typeof row.title !== "string" || !row.title.trim()
       || typeof row.status !== "string" || !["active", "completed", "cancelled"].includes(row.status)
       || !Array.isArray(row.installments)
+      || row.agreementApproved !== undefined && typeof row.agreementApproved !== "boolean"
       || row.installments.some((one) => !one || typeof one !== "object" || Array.isArray(one)
         || !Number.isSafeInteger(one.id) || one.id <= 0)) {
       throw new Error("Invalid patient plan");
     }
     ids.add(Number(row.id));
-    return { id: Number(row.id), title: row.title, status: row.status as PlanOption["status"], installmentCount: row.installments.length };
+    return { id: Number(row.id), title: row.title, status: row.status as PlanOption["status"],
+      installmentCount: row.installments.length, approved: row.agreementApproved === true };
   });
 }
 
@@ -139,9 +143,11 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
   }
 
   const linked = read.phase === "ready" ? read.plans.find((plan) => plan.id === planId) ?? null : null;
-  const agreements = read.phase === "ready" ? read.plans.filter((plan) => plan.status !== "cancelled" && plan.installmentCount > 0) : [];
+  // An approved principal is the agreement itself; installments are only its optional schedule.
+  const fundsCase = (plan: PlanOption) => plan.status !== "cancelled" && (plan.approved || plan.installmentCount > 0);
+  const agreements = read.phase === "ready" ? read.plans.filter(fundsCase) : [];
   const missingLinked = read.phase === "ready" && planId !== null && linked === null;
-  const funded = linked !== null && linked.status !== "cancelled" && linked.installmentCount > 0;
+  const funded = linked !== null && fundsCase(linked);
   return (
     <section aria-label="اتفاق التقويم"
       className={`mt-2 rounded-xl border px-3 py-2 text-[11px] ${funded ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
@@ -162,12 +168,14 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
       ) : linked ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-extrabold text-navy-900">
-            {funded ? "✓ رابط اتفاق أقساط قديم: " : "رابط خطة قديم: "}{linked.title}
+            {funded ? linked.approved ? "✓ اتفاق معتمد بكامل الأصل: " : "✓ رابط اتفاق أقساط قديم: " : "رابط خطة قديم: "}{linked.title}
           </span>
           <span className="text-slate-700">
             {linked.status === "cancelled" ? "الخطة المربوطة ملغاة — راجع الاتفاق قبل متابعة الفوترة."
               : funded
-                ? "رابط قائم محفوظ للتوافق؛ مرجع العلاج وشمول الشدّة يُعرضان بصورة مستقلة أعلاه."
+                ? linked.approved
+                  ? "الاتفاق المعتمد هو أصل العلاج؛ الأقساط إن وُجدت جدول تحصيل فقط ولا تُشترط لشمول الشدّة."
+                  : "رابط قائم محفوظ للتوافق؛ مرجع العلاج وشمول الشدّة يُعرضان بصورة مستقلة أعلاه."
                 : "الخطة بلا أقساط؛ هذا وحده لا ينفي مرجع الفاتورة أو الاتفاق السابق ولا يحدد شمول الشدّة."}
           </span>
           {canLink ? (
@@ -188,7 +196,7 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
               }} disabled={busy} aria-label="اختر اتفاق الأقساط"
                 className="max-w-full rounded-lg border border-slate-300 bg-white px-2 py-0.5">
                 <option value="">اختر اتفاق الأقساط…</option>
-                {agreements.map((plan) => <option key={plan.id} value={plan.id}>{plan.title}</option>)}
+                {agreements.map((plan) => <option key={plan.id} value={plan.id}>{plan.approved ? `${plan.title} — اتفاق معتمد` : plan.title}</option>)}
               </select>
               <button type="button" disabled={busy || !choice} onClick={() => void save(Number(choice))}
                 className="rounded-lg border border-navy-300 bg-white px-2 py-0.5 font-bold text-navy-900 hover:bg-navy-100 disabled:opacity-50">

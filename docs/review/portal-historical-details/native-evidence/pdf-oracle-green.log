@@ -1,0 +1,15 @@
+Running PR 458 (unit), Node v22.23.3, synthetic PG port 55458, HTTP port 3458
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/_temporary-portal-pdf-oracle.test.ts
+
+
+ RUN  v4.1.12 <isolated-worktree>
+
+ ✓ __tests__/_temporary-portal-pdf-oracle.test.ts (6 tests) 8ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  19:37:34
+   Duration  172ms (transform 18ms, setup 0ms, import 30ms, tests 8ms, environment 0ms)
+

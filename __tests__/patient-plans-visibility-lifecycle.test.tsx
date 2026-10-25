@@ -424,3 +424,39 @@ describe("actual consent schedule visibility", () => {
     expect(writes()).toEqual([]);
   });
 });
+
+describe("current approved plan summary", () => {
+  const amended = (available = true) => ({ ...plan(), totalMinor: 500000, baseCurrency: "YER", installments: [],
+    approvedAgreement: { planId: 301, currency: "YER", totalMinor: 800000, paidMinor: 180000, remainingMinor: 620000,
+      dueNowMinor: 620000, invoiceId: 501, openingCurrency: null, sourceKind: "invoice", available, deltaInvoiceIds: [502], originalTotalMinor: 500000 },
+    progress: { ...plan().progress, totalMinor: 500000, paidMinor: 180000, remainingMinor: 320000, count: 0, paidCount: 0 } });
+  it("uses the current approved tuple and explicitly labels the immutable original", async () => {
+    read = async () => response({ ...payload(), plans: [amended()] });
+    await mount();
+    const summary = find(node => node.props["data-testid"] === "plan-amount-summary");
+    expect(text(summary)).toContain("800,000");
+    expect(text(summary)).toContain("180,000");
+    expect(text(summary)).toContain("620,000");
+    expect(text(summary)).not.toContain("500,000");
+    expect(text(summary)).not.toContain("320,000");
+    expect(text(render())).toContain("قيمة الاتفاق الأصلي قبل التعديلات");
+  });
+  it("withholds current figures and collection for an unavailable approved source", async () => {
+    read = async () => response({ ...payload(), plans: [amended(false)] });
+    await mount();
+    const summary = find(node => node.props["data-testid"] === "plan-amount-summary");
+    expect(text(summary)).toContain("غير متاح");
+    expect(text(summary)).not.toMatch(/500,000|320,000|620,000|180,000/);
+    expect(button("تحصيل قسط")).toBeUndefined();
+  });
+});
+it("uses net invoice principal in the financial summary without rewriting the clinical subtotal", async () => {
+  read = async () => response({ ...payload(), plans: [{ ...plan(), totalMinor: 500000, baseCurrency: "YER", installments: [],
+    invoiceFinancial: { kind: "invoice_backed", invoiceIds: [501], paidMinor: 180000, remainingMinor: 270000,
+      progress: { ...plan().progress, totalMinor: 450000, paidMinor: 180000, remainingMinor: 270000 }, schedules: [], message: null },
+    progress: { ...plan().progress, totalMinor: 450000, paidMinor: 180000, remainingMinor: 270000 } }] });
+  await mount();
+  const summary = text(find(node => node.props["data-testid"] === "plan-amount-summary"));
+  expect(summary).toContain("450,000");expect(summary).toContain("180,000");expect(summary).toContain("270,000");
+  expect(summary).not.toContain("500,000");
+});

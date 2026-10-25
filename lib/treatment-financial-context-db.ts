@@ -38,6 +38,7 @@ export async function listTreatmentFinancialReferences(patientId: number) {
   if (!Number.isSafeInteger(patientId) || patientId <= 0) throw new Error("Invalid patient identity");
   await ensureSchema();
   const client = await getPool().connect();
+  let destroy = false;
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const { rows: patients } = await client.query("SELECT id FROM patients WHERE id = $1", [patientId]);
@@ -151,7 +152,7 @@ export async function listTreatmentFinancialReferences(patientId: number) {
     await client.query("COMMIT");
     return result;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    try { await client.query("ROLLBACK"); } catch { destroy = true; }
     throw error;
-  } finally { client.release(); }
+  } finally { client.release(destroy); }
 }

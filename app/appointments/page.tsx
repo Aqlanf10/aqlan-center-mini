@@ -1,19 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrivalPanel } from "@/components/ArrivalPanel";
+import { AppointmentReminder } from "@/components/AppointmentReminder";
 import {
   clinicDateString,
   dayLoad,
+  toMinutes,
   distributeAppointmentsToChairs,
   type Appointment,
   getAppointmentTypeLabel,
   getAppointmentTypeBadge,
 } from "@/lib/schedule";
-import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { CLINIC_ZONE_FALLBACK, resolveClinicZone } from "@/lib/clinicZone";
 import { URGENCY_LABEL, describeWindow, type WaitingEntry } from "@/lib/waiting-list";
 
-import { awaitsReminder, whatsAppLink, friendlyDateLong, reminderNeedsOverride, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
+import { awaitsReminder, friendlyDateLong, bookingConfirmationText, toWhatsAppNumber } from "@/lib/reminders";
 import { useChairCount, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { isAdmin } from "@/lib/roles";
@@ -112,16 +114,14 @@ export default function AppointmentsPage() {
      إلى يومٍ آخر أثناء الانتظار. */
   const dateRef = useRef(today);
   const dateRevisionRef = useRef(0);
-  useEffect(() => {
-    if (dateRef.current !== date) dateRevisionRef.current += 1;
-    dateRef.current = date;
-  }, [date]);
-  const [items, setItems] = useState<Appointment[]>([]);
+  const [dayList, setDayList] = useState<{
+    date: string; revision: number; request: number;
+    status: "loading" | "ready" | "error"; items: Appointment[]; error: string | null;
+    clinicTimeZone?: string;
+  } | null>(null);
   /* (P0-D) المريض الذي سُجّل وصوله للتو — تُفتح له لوحة الوصول. */
   const [arrivalPatient, setArrivalPatient] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  /* خطأ تحميل القائمة وحده — يمسحه أي تحميلٍ ناجح. */
-  const [error, setError] = useState<string | null>(null);
+
   /* نتيجةُ آخر إجراءٍ مرفوض — حالةٌ مستقلّة عن تحميل القائمة: كانت مشتركة معه،
      فيرفض الخادم الإلغاء ثم يمسح تحديثُ القائمة الناجح سببَ الرفض في اللحظة نفسها.
      لا يمسحها إلا نجاحُ إجراءٍ لاحق أو إخفاؤها يدويًّا. */
@@ -132,6 +132,16 @@ export default function AppointmentsPage() {
   /* TD-REG-026 — لا تُسمح لاستجابة تحميل أقدم أن تكتب فوق أحدث يوم.
      الرقم يتزايد مع كل طلب؛ وحده أحدث طلب يملك حق تحديث items/error/loading. */
   const latestLoadRequestRef = useRef(0);
+  const mountedRef = useRef(false);
+  const readyRequestRef = useRef<number | null>(null);
+  // Ownership is checked during render, before the new date's effects run.
+  const ownsDayList = dayList?.date === date && dayList.revision === dateRevisionRef.current
+    && dayList.request === latestLoadRequestRef.current;
+  const ready = ownsDayList && dayList.status === "ready";
+  const loading = !ownsDayList || dayList.status === "loading";
+  const error = ownsDayList ? dayList.error : null;
+  const items = useMemo(() => ownsDayList && dayList.status === "ready" ? dayList.items : [], [ownsDayList, dayList]);
+  const clinicTimeZone = ready ? dayList.clinicTimeZone ?? CLINIC_ZONE_FALLBACK : CLINIC_ZONE_FALLBACK;
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -163,10 +173,28 @@ export default function AppointmentsPage() {
      والمطابقةُ نفسها في الخادم (`lib/waiting-list-match`) لا هنا: كانت هذه
      الشاشة وحدها تعرف كيف يُرشَّح، فكلُّ بابٍ آخر يفتح مكانًا يفتحه صامتًا. */
   const [freed, setFreed] = useState<
-    { slot: FreedSlotInfo; candidates: SlotCandidate[] } | null
+    { slot: FreedSlotInfo; candidates: SlotCandidate[]; request: number; dateRevision: number } | null
   >(null);
   const [candidateBusy, setCandidateBusy] = useState<number | null>(null);
   const [candidateNote, setCandidateNote] = useState<string | null>(null);
+  const candidateRequestRef = useRef(0);
+  const candidateInFlight = useRef(false);
+  // A slot belongs to one displayed-day lifetime, including leaving and returning.
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    // Commit the date fence before browser events can use the previous panel.
+    if (dateRef.current !== date) dateRevisionRef.current += 1;
+    dateRef.current = date;
+    candidateRequestRef.current += 1;
+    setFreed(null);
+    setCandidateNote(null);
+    return () => {
+      mountedRef.current = false;
+      readyRequestRef.current = null;
+      latestLoadRequestRef.current += 1;
+      candidateRequestRef.current += 1;
+    };
+  }, [date]);
   /* نقلُ موعد — يفتح لوحةً صغيرة على الصفّ نفسه. وقبل هذا لم يكن في النظام نقل:
      كان يُلغى الموعد ويُحجز غيره، فيُحتسب المريض «ملغيًا» وهو لم يُلغِ. */
   const [moving, setMoving] = useState<
@@ -174,6 +202,10 @@ export default function AppointmentsPage() {
   >(null);
 
   const findCandidates = useCallback(async (item: Appointment) => {
+    const request = ++candidateRequestRef.current;
+    const revision = dateRevisionRef.current;
+    setFreed(null);
+    setCandidateNote(null);
     try {
       const params = new URLSearchParams({
         date: item.scheduledDate,
@@ -189,6 +221,8 @@ export default function AppointmentsPage() {
       const res = await fetch(`/api/waiting-list?${params.toString()}`, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
+      if (request !== candidateRequestRef.current || revision !== dateRevisionRef.current
+        || item.scheduledDate !== dateRef.current) return;
       const candidates: SlotCandidate[] = Array.isArray(data?.candidates) ? data.candidates : [];
       const slot: FreedSlotInfo = data?.slot ?? {
         date: item.scheduledDate,
@@ -199,7 +233,7 @@ export default function AppointmentsPage() {
       };
       if (candidates.length > 0) {
         setCandidateNote(null);
-        setFreed({ slot, candidates });
+        setFreed({ slot, candidates, request, dateRevision: revision });
       }
     } catch {
       /* تعذّر الترشيح لا يُفشل الإلغاء — الموعد أُلغي فعلًا. */
@@ -210,7 +244,14 @@ export default function AppointmentsPage() {
      نفسها: هذا يُستدعى بضغطةٍ بعد أن يسمع الموظّف موافقة المريض. */
   const candidateAction = useCallback(async (
     id: number, body: Record<string, unknown>, success: string,
+    context: { slot: FreedSlotInfo; request: number; dateRevision: number },
   ) => {
+    if (context.request !== candidateRequestRef.current || context.dateRevision !== dateRevisionRef.current
+      || context.slot.date !== dateRef.current || candidateInFlight.current) return false;
+    candidateInFlight.current = true;
+    const request = candidateRequestRef.current;
+    const revision = dateRevisionRef.current;
+    const isCurrent = () => request === candidateRequestRef.current && revision === dateRevisionRef.current;
     setCandidateBusy(id);
     try {
       const res = await fetch(`/api/waiting-list/${id}`, {
@@ -220,18 +261,21 @@ export default function AppointmentsPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setCandidateNote(data?.message ?? "تعذّر تنفيذ الإجراء.");
+        if (isCurrent()) setCandidateNote(data?.message ?? "تعذّر تنفيذ الإجراء.");
         return false;
       }
-      setCandidateNote(success);
-      setFreed((current) => current
-        ? { ...current, candidates: current.candidates.filter((one) => one.id !== id) }
-        : current);
+      if (isCurrent()) {
+        setCandidateNote(success);
+        setFreed((current) => current
+          ? { ...current, candidates: current.candidates.filter((one) => one.id !== id) }
+          : current);
+      }
       return true;
     } catch {
-      setCandidateNote("تعذّر الاتصال بالخادم.");
+      if (isCurrent()) setCandidateNote("تعذّر الاتصال بالخادم.");
       return false;
     } finally {
+      candidateInFlight.current = false;
       setCandidateBusy(null);
     }
   }, []);
@@ -257,8 +301,15 @@ export default function AppointmentsPage() {
   }, []);
 
   const load = useCallback(async (target: string) => {
+    // A stale completion may request a refresh, but cannot revive a retired day.
+    if (!mountedRef.current || target !== dateRef.current) return;
     const requestId = ++latestLoadRequestRef.current;
-    setLoading(true);
+    const revision = dateRevisionRef.current;
+    const context = { date: target, revision, request: requestId };
+    const isCurrent = () => mountedRef.current && requestId === latestLoadRequestRef.current
+      && target === dateRef.current && revision === dateRevisionRef.current;
+    readyRequestRef.current = null;
+    setDayList({ ...context, status: "loading", items: [], error: null });
     /* رسالةٌ عربية من عندنا دائمًا: نصّ استثناء المتصفح («Failed to fetch» أو خطأ
        تحليل JSON) لا يُعرض للموظّف. */
     let failure = "تعذّر الاتصال بالخادم لتحديث القائمة.";
@@ -269,21 +320,26 @@ export default function AppointmentsPage() {
         failure = typeof payload?.message === "string" && payload.message ? payload.message : "تعذّر التحميل.";
         throw new Error(failure);
       }
-      if (!Array.isArray(payload)) {
+      if (!Array.isArray(payload) || payload.some((item) => !item || typeof item !== "object"
+        || item.scheduledDate !== target || !Number.isInteger(item.id) || item.id <= 0
+        || !Number.isInteger(item.patientId) || item.patientId <= 0
+        || typeof item.patientName !== "string" || typeof item.scheduledTime !== "string"
+        || toMinutes(item.scheduledTime) === null
+        || !Number.isInteger(item.durationMinutes) || item.durationMinutes <= 0
+        || typeof item.status !== "string" || !Object.hasOwn(STATUS_LABEL, item.status))) {
         failure = "وصل ردٌّ غير صالح من الخادم أثناء تحديث القائمة.";
         throw new Error(failure);
       }
 
       /* إن بدأ تحميل أحدث أثناء انتظار هذا الطلب فهذه الاستجابة stale:
          لا items ولا error ولا loading يجوز أن تعود بالواجهة إلى يومٍ سابق. */
-      if (requestId !== latestLoadRequestRef.current) return;
-      setItems(payload as Appointment[]);
-      setError(null);
+      if (!isCurrent()) return;
+      readyRequestRef.current = requestId;
+      setDayList({ ...context, status: "ready", items: payload as Appointment[], error: null,
+        clinicTimeZone: resolveClinicZone(response.headers?.get("X-Clinic-Time-Zone")) });
     } catch {
-      if (requestId !== latestLoadRequestRef.current) return;
-      setError(failure);
-    } finally {
-      if (requestId === latestLoadRequestRef.current) setLoading(false);
+      if (!isCurrent()) return;
+      setDayList({ ...context, status: "error", items: [], error: failure });
     }
   }, []);
 
@@ -293,6 +349,11 @@ export default function AppointmentsPage() {
   }, [date, load, urlStateReady]);
 
   const load_ = useMemo(() => dayLoad(items, date, CHAIRS, dayStart, dayEnd), [items, date, CHAIRS, dayStart, dayEnd]);
+
+  const canActOnDay = useCallback(() => !inFlight.current && mountedRef.current && !!dayList
+    && dayList.status === "ready" && dayList.date === dateRef.current
+    && dayList.revision === dateRevisionRef.current && dayList.request === readyRequestRef.current,
+  [dayList]);
 
   /* تنفيذُ إجراءٍ على موعد ثم تحديثُ القائمة.
      - نتيجةُ الإجراء في actionError، وخطأُ التحديث في error: نجاحُ التحديث لا يمحو
@@ -307,7 +368,7 @@ export default function AppointmentsPage() {
       after?: (context: { current: boolean }) => string | void,
       isSuccess: (payload: unknown) => boolean = isAppointmentPatchSuccess,
     ) => {
-      if (inFlight.current) return;
+      if (!canActOnDay()) return;
       inFlight.current = true;
       const actionDate = dateRef.current;
       const actionDateRevision = dateRevisionRef.current;
@@ -331,6 +392,7 @@ export default function AppointmentsPage() {
       }
 
       /* الخروج ثم العودة إلى اليوم نفسه سياقٌ أحدث أيضًا؛ لا يُحيي أثرًا قديمًا. */
+      if (!mountedRef.current) { inFlight.current = false; return; }
       const current = dateRef.current === actionDate && dateRevisionRef.current === actionDateRevision;
       let reloadDate = dateRef.current;
       if (failure === null) {
@@ -344,10 +406,10 @@ export default function AppointmentsPage() {
         await load(reloadDate);
       } finally {
         inFlight.current = false;
-        setBusy(false);
+        if (mountedRef.current) setBusy(false);
       }
     },
-    [load],
+    [load, canActOnDay],
   );
 
   /* تنفيذُ النقل. والتاريخُ المعروض يتبع الموعد: إن نُقل إلى يومٍ آخر انتقلت
@@ -530,8 +592,9 @@ export default function AppointmentsPage() {
         </div>
       </div>
 
-      {/* شريط مؤشر حمولة اليوم وسعة الكراسي */}
-      <div
+      {/* شريط مؤشر حمولة اليوم وسعة الكراسي: المجهول ليس سعةً فارغة. */}
+      {ready ? <div
+        data-day-load="ready"
         className={`mb-4 rounded-2xl border p-3.5 shadow-xs transition-colors ${
           load_.percent >= 90
             ? "border-red-300 bg-red-50"
@@ -559,7 +622,11 @@ export default function AppointmentsPage() {
             style={{ width: `${Math.min(100, load_.percent)}%` }}
           />
         </div>
-      </div>
+      </div> : (
+        <div data-day-load="unknown" role="status" className="mb-4 rounded-2xl border border-slate-200 bg-white p-3.5 text-xs font-bold text-slate-500">
+          {loading ? "جارٍ تحميل استيعاب اليوم…" : "استيعاب اليوم غير متاح حتى تُحمّل المواعيد بنجاح."}
+        </div>
+      )}
 
       {freed && (
         <div
@@ -579,7 +646,7 @@ export default function AppointmentsPage() {
             </div>
             <button
               type="button"
-              onClick={() => { setFreed(null); setCandidateNote(null); }}
+              onClick={() => { candidateRequestRef.current += 1; setFreed(null); setCandidateNote(null); }}
               aria-label="إخفاء"
               className="rounded-lg p-1 text-emerald-800 hover:bg-emerald-100"
             >
@@ -641,7 +708,7 @@ export default function AppointmentsPage() {
                   <button
                     type="button"
                     data-action="book-candidate"
-                    disabled={candidateBusy === candidate.id}
+                    disabled={candidateBusy !== null}
                     onClick={() => void (async () => {
                       const booked = await candidateAction(candidate.id, {
                         action: "book",
@@ -650,8 +717,8 @@ export default function AppointmentsPage() {
                         durationMinutes: freed.slot.durationMinutes,
                         serviceId: freed.slot.serviceId,
                         doctorId: freed.slot.doctorId,
-                      }, `حُجز الموعد لـ${candidate.patientName ?? "المريض"}.`);
-                      if (booked) await load(date);
+                      }, `حُجز الموعد لـ${candidate.patientName ?? "المريض"}.`, freed);
+                      if (booked) await load(dateRef.current);
                     })()}
                     className="rounded-lg bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
                   >
@@ -660,11 +727,11 @@ export default function AppointmentsPage() {
                   <button
                     type="button"
                     data-action="candidate-no-answer"
-                    disabled={candidateBusy === candidate.id}
+                    disabled={candidateBusy !== null}
                     onClick={() => void candidateAction(candidate.id, {
                       action: "contact", outcome: "no_answer", channel: "phone",
                       slotDate: freed.slot.date, slotTime: freed.slot.time,
-                    }, "سُجّل: لم يردّ.")}
+                    }, "سُجّل: لم يردّ.", freed)}
                     className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     لم يردّ
@@ -672,11 +739,11 @@ export default function AppointmentsPage() {
                   <button
                     type="button"
                     data-action="candidate-declined"
-                    disabled={candidateBusy === candidate.id}
+                    disabled={candidateBusy !== null}
                     onClick={() => void candidateAction(candidate.id, {
                       action: "contact", outcome: "declined_slot", channel: "phone",
                       slotDate: freed.slot.date, slotTime: freed.slot.time,
-                    }, "سُجّل: اعتذر عن هذا الوقت — ويبقى في القائمة لغيره.")}
+                    }, "سُجّل: اعتذر عن هذا الوقت — ويبقى في القائمة لغيره.", freed)}
                     className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     اعتذر عن هذا الوقت
@@ -710,7 +777,7 @@ export default function AppointmentsPage() {
       ) : null}
       {error ? (
         <p role="alert" data-load-error className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
-          {actionError ? "وتعذّر أيضًا تحديث القائمة — ما يظهر قد لا يكون آخر حالة: " : null}
+          {actionError ? "وتعذّر أيضًا تحديث القائمة — أُخفيت المواعيد حتى ينجح التحميل: " : null}
           {error}
         </p>
       ) : null}
@@ -744,7 +811,7 @@ export default function AppointmentsPage() {
                     : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                {st === "all" ? "جميع الحالات" : STATUS_LABEL[st]} ({count})
+                {st === "all" ? "جميع الحالات" : STATUS_LABEL[st]} ({ready ? count : "؟"})
               </button>
             );
           })}
@@ -766,7 +833,7 @@ export default function AppointmentsPage() {
                     : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
             >
-              {label} ({count})
+              {label} ({ready ? count : "؟"})
             </button>
           ))}
 
@@ -800,6 +867,10 @@ export default function AppointmentsPage() {
         {loading ? (
           <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
             جارٍ تحميل المواعيد…
+          </p>
+        ) : error ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-500">
+            لم تُحمّل مواعيد هذا اليوم. <button type="button" onClick={() => void load(date)} className="font-bold underline">إعادة المحاولة</button>
           </p>
         ) : items.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
@@ -870,14 +941,17 @@ export default function AppointmentsPage() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     {item.status === "booked" || item.status === "no_show" ? (
                       <>
-                        <ReminderButton
+                        <AppointmentReminder
                           item={item}
-                          onSent={() =>
+                          clinicTimeZone={clinicTimeZone}
+                          busy={busy}
+                          isCurrent={canActOnDay}
+                          onConfirmed={(snapshot) =>
                             act(() =>
                               fetch(`/api/appointments/${item.id}`, {
                                 method: "PATCH",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ action: "reminded" }),
+                                body: JSON.stringify({ action: "reminded", snapshot }),
                               }),
                             )
                           }
@@ -1154,7 +1228,17 @@ export default function AppointmentsPage() {
                               🪑 إدخال
                             </button>
                           )}
-                          <ReminderButton item={item} onSent={() => void load(date)} />
+                          <AppointmentReminder
+                            item={item}
+                            clinicTimeZone={clinicTimeZone}
+                            busy={busy}
+                            isCurrent={canActOnDay}
+                            onConfirmed={(snapshot) => act(() => fetch(`/api/appointments/${item.id}`, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ action: "reminded", snapshot }),
+                            }))}
+                          />
                           <ConfirmationButton item={item} />
                         </div>
                       </div>
@@ -1231,37 +1315,3 @@ function ConfirmationButton({ item }: { item: Appointment }) {
     </a>
   );
 }
-
-function ReminderButton({ item, onSent }: { item: Appointment; onSent: () => void }) {
-  const link = whatsAppLink(item, item.status === "no_show" ? "missed" : "upcoming");
-  if (!link) {
-    return <span className="rounded-xl bg-slate-100 px-2.5 py-1.5 text-[11px] font-bold text-slate-400">بلا رقم</span>;
-  }
-  const reminded = Boolean(item.reminderSentAt);
-  // قاعدة الاثنتي عشرة ساعة: الضغطة الثانية قبل مرور النافذة تسأل قبل أن تُرسل —
-  // رسالتان في دقيقتين تقولان للمريض إن العيادة روبوت.
-  const needsOverride = reminderNeedsOverride(item.reminderSentAt);
-  return (
-    <a
-      href={link}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={(event) => {
-        if (needsOverride && !window.confirm("ذُكِّر هذا المريض قبل أقل من ١٢ ساعة. أرسل تذكيرًا ثانيًا رغم ذلك؟")) {
-          event.preventDefault();
-          return;
-        }
-        onSent();
-      }}
-      title={reminded && item.reminderSentAt ? `آخر تذكير: ${new Date(item.reminderSentAt).toLocaleString("ar", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" })}` : undefined}
-      className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-opacity hover:opacity-90 ${
-        needsOverride || reminded
-          ? "border border-emerald-300 bg-emerald-50 text-emerald-700"
-          : "bg-[#25D366] text-white shadow-2xs"
-      }`}
-    >
-      {needsOverride ? "إعادة تذكير؟" : reminded ? "ذُكِّر ✓" : "💬 تذكير واتساب"}
-    </a>
-  );
-}
-

@@ -26,6 +26,7 @@ export function withoutPlanPayments(plan: TreatmentPlan, keepInstallmentIds = fa
     consentBy: plan.consentBy,
     consentNote: plan.consentNote,
     hasInstallments: plan.installments.length > 0,
+    agreementApproved: plan.agreementApproved === true,
     installments: keepInstallmentIds ? plan.installments.map(({ id }) => ({ id })) : [],
     paidMinor: null,
     progress: null,

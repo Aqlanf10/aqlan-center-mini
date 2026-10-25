@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { legacyCoverageStateFromSnapshot } from "../lib/legacy-treatment-coverage";
 import { unlinkedSessionConflicts, type SessionPlanItem } from "../lib/plans";
 
 /** (P1-D) إجراءٌ حرّ لبندٍ متعدد الجلسات أو جارٍ = تعارضٌ مسمّى؛ البند أحادي الجلسة المخطَّط ليس تعارضًا. */
@@ -44,4 +45,28 @@ describe("(P1-D) unlinkedSessionConflicts", () => {
     expect(unlinkedSessionConflicts([{ ...funded, fundedByAgreement: false }], [{ serviceId: 30, toothCode: null }])).toEqual([]);
   });
 
+  it("names an amended financial identity without promising unsupported clinical relinking", () => {
+    const amended: SessionPlanItem = { ...crown, toothCode: null, caseSite: null, serviceId: 21, serviceName: "فرق ترقية العلاج — تاج زركون", hasInvoiceLineage: true, amendedService: true };
+    const conflict = unlinkedSessionConflicts([amended], [{ serviceId: 21, toothCode: 21 }]);
+    expect(conflict).toEqual([expect.stringContaining("ربط الخدمة المعدلة سريريًا غير مدعوم حاليًا")]);
+    expect(conflict[0]).not.toContain("اربط العمل ببنده الأصلي");
+    expect(unlinkedSessionConflicts([amended], [{ serviceId: 21, toothCode: 46 }])).toHaveLength(1);
+    expect(unlinkedSessionConflicts([amended], [{ serviceId: 20, toothCode: 21 }])).toEqual([]);
+    expect(unlinkedSessionConflicts([{ ...amended, toothCode: null, caseSite: null }], [{ serviceId: 21, toothCode: 21 }])).toHaveLength(1);
+  });
+
+  it("only verified immutable coverage can prove another tooth disjoint from an amended alias", () => {
+    const legacyCoverage = legacyCoverageStateFromSnapshot({ agreement_id: 1, format_version: 1,
+      service_id: 20, service_category: "crown", anchor_tooth_code: 21,
+      snapshot_mode: "multi_tooth_episode", snapshot_tooth_codes: [21, 22], snapshot_scope: null,
+      snapshot_surfaces: null, recorded_by: "synthetic", recorded_at: "2026-10-01T00:00:00Z" },
+    { agreementId: 1, serviceId: 20, anchorToothCode: 21 });
+    expect(legacyCoverage.kind).toBe("verified");
+    const amended: SessionPlanItem = { ...crown, toothCode: null, caseSite: null, serviceId: 21,
+      hasInvoiceLineage: true, amendedService: true, hasLegacyLineage: true, legacyCoverage };
+    expect(unlinkedSessionConflicts([amended], [{ serviceId: 21, toothCode: 22 }])).toHaveLength(1);
+    expect(unlinkedSessionConflicts([amended], [{ serviceId: 21, toothCode: 46 }])).toEqual([]);
+    expect(unlinkedSessionConflicts([{ ...amended, legacyCoverage: { kind: "unknown", reason: "missing_snapshot" } }],
+      [{ serviceId: 21, toothCode: 46 }])).toHaveLength(1);
+  });
 });

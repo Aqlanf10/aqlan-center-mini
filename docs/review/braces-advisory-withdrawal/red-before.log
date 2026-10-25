@@ -1,0 +1,72 @@
+# New regression suite against the unchanged gate (9881d33c): red
+⎯⎯⎯⎯⎯⎯ Failed Tests 47 ⎯⎯⎯⎯⎯⎯⎯
+TypeError: classifyFullAudit is not a function
+AssertionError: expected [Function] to throw error matching /BRACES_EXCEPTION_REJECTED/ but got '(0 , __vite_ssr_import_5__.classifyFu…'
+AssertionError: expected [Function] to throw error matching /not completely clean|BRACES_EXCEPTION…/ but got '(0 , __vite_ssr_import_5__.classifyFu…'
+TypeError: validateWithdrawnOfficialEvidence is not a function
+
+# With the change: green
+ Test Files  5 passed (5)
+      Tests  132 passed (132)
+
+# Follow-up (installation binding, matching withdrawal instant, runner mode/snapshot): new cases against 229a39f6 implementation: red
+     × rejects a matching-advisory result with the same advisory with a different withdrawal
+     × rejects no pre-audit installation snapshot before any official lookup
+     × requires both complete audits and independent verification before success   (snapshot taken before the first audit and handed to the verifier)
+      Tests  3 failed | 90 passed (93)
+# 229a39f6 also failed 2 existing ci-audit-runner cases (mocked proof without `mode` reached the withdrawn message); fixed by an explicit mode check.
+
+# Unchanged old tests against 229a39f6 (reproduced locally, matches hosted run 40003309562 "Unit tests"):
+     × requires both complete audits and independent verification before success
+     × can recover from two unavailable attempts once complete scoped and production evidence arrives
+      Tests  2 failed | 29 passed (31)
+
+# Explicit CLI proof contract (only active|withdrawn with required fields): new cases against the 229a39f6 CLI
+     × requires both complete audits and independent verification before success
+     × fails closed for a missing mode
+     × fails closed for an unknown mode
+     × fails closed for a non-object proof
+     × fails closed for a withdrawn proof without official evidence
+     × fails closed for a withdrawn proof without a withdrawal instant
+     × fails closed for a withdrawn proof with findings
+     × fails closed for an active proof without counts
+     × fails closed for an active proof without the advisory
+      Tests  9 failed | 31 passed (40)
+
+# With the follow-up: all braces/audit suites green (10 files)
+ Test Files  10 passed (10)
+      Tests  383 passed (383)
+
+# Strict official-evidence consistency (review finding on f5500dcd): new cases against the f5500dcd implementation
+     × rejects an advisory with update before the withdrawal
+     × rejects an advisory with publication after the withdrawal
+     × rejects an advisory with missing publication time
+     × rejects an advisory with update beyond the clock tolerance
+     × rejects an advisory with a changed API url
+     × rejects a matching-advisory result with a partial entry (identity and withdrawal only)
+     × rejects a matching-advisory result with a duplicate complete entry
+     × rejects a matching-advisory result with an entry with a different update time
+     × rejects a matching-advisory result with an entry with different identifiers
+     × rejects a matching-advisory result with an entry with a different affected range
+     × rejects a matching-advisory result with an entry with a different severity
+     × bounds future times with the explicit clock and tolerance, and requires that clock
+     × rejects another active advisory          (now rejected with the exact differing field)
+     × rejects a partial matching entry         (accepted by f5500dcd)
+      Tests  14 failed | 65 passed (79)
+
+# With the change: braces/audit suites + runtime-tracing green
+ Test Files  11 passed (11)
+      Tests  406 passed (406)
+
+# Direct-record schema + CLI proof boundary (review of 969defaf): new cases against the 969defaf implementation
+     × rejects a direct record with {missing type, null type, unreviewed type, missing severity, null severity, changed severity,
+       changed publication time, changed vulnerable functions, missing affected-package field}, with an empty list and with agreeing entries   (9)
+     × fails closed for counts with a missing level / an unknown level / a non-integer count / a total contradicting its levels
+     × fails closed for a non-instant withdrawal time / an impossible withdrawal date
+      Tests  15 failed | 123 passed (138)
+# The file-level installation-binding case (non-manifest file changed, package/lock identity unchanged) is green on 969defaf too:
+# it demonstrates that the existing before/after tree-hash binding, not package validation, rejects the change.
+
+# With the change: braces/audit suites green
+ Test Files  10 passed (10)
+      Tests  420 passed (420)

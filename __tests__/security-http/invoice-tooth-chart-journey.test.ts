@@ -9,7 +9,7 @@ import { revealInvoiceControlByWheel, settleBrowser } from "./_invoice-browser-g
 /**
  * (INV-LINK TOOTH) أسنان بند الفاتورة العلاجية تُختار بالنقر على **مخطط الأسنان نفسه** (Odontogram المشترك مع
  * المخطط السريري) — لا بكتابة الأرقام. على التطبيق المبني وقاعدة معزولة:
- * عصب 36+46 ⇒ سطران وحالتان · جسر 14-16 ⇒ ثلاثة أسطر وحالة واحدة · حشوة 26 MO · تقويم فك علوي بلا مخطط ·
+ * عصب 36+46 ⇒ بند إدخال واحد وسطران محفوظان وحالتان · جسر 14-16 ⇒ بند إدخال واحد وثلاثة أسطر محفوظة وحالة واحدة · حشوة 26 MO · تقويم فك علوي بلا مخطط ·
  * كشف بلا زر أسنان · عصب بلا سن ⇒ الحفظ ممنوع · جوال 390px بلا تمرير أفقي للصفحة.
  */
 
@@ -244,7 +244,7 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     } finally { await context.close(); }
   }, 120_000);
 
-  it("RCT: clicking 36 and 46 on the chart splits into two lines, each previewing its own case; saved as two items and two cases", async () => {
+  it("RCT: clicking 36 and 46 shows one quantity-two group, each tooth previewing its own case; saved as two items and two cases", async () => {
     const patientId = await newPatient("rct");
     const { context, page } = await openInvoice(patientId);
     await chooseService(page, services.rct);
@@ -252,14 +252,27 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     expect(await dialog.getAttribute("role")).toBe("dialog");
     expect(await dialog.getAttribute("aria-modal")).toBe("true");
     expect(await dialog.getByTestId("odontogram-tooth-36").getAttribute("aria-pressed")).toBe("true");
-    expect(await dialog.getByTestId("tooth-dialog-split-notice").innerText()).toContain("سيُنشأ سطر وحالة مستقلة لكل سن");
+    expect(await dialog.getByTestId("tooth-dialog-split-notice").innerText()).toContain("بند واحد في شاشة الإدخال، وحالة علاج مستقلة لكل سن");
     await confirm(page);
 
-    expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth")).toBe("36");
-    expect(await page.getByTestId("invoice-row-1").getAttribute("data-tooth")).toBe("46");
-    expect(await page.getByTestId("invoice-split-notice").innerText()).toContain("سيُنشأ سطر وحالة مستقلة لكل سن");
-    expect(await page.getByTestId("invoice-tooth-chip-1").innerText()).toContain("سن 46");
+    const group = page.getByTestId("invoice-row-0");
+    expect(await page.locator('[data-testid^="invoice-row-"]').count()).toBe(1);
+    expect(await group.getAttribute("data-tooth")).toBe("36");
+    expect(await group.getAttribute("data-display-group")).toBeTruthy();
+    expect(await group.getAttribute("data-tooth-count")).toBe("2");
+    expect(await group.getByLabel("الكمية", { exact: true }).inputValue()).toBe("2");
+    expect(await group.getByLabel("الكمية", { exact: true }).isDisabled()).toBe(true);
+    expect(await group.getByLabel("السعر", { exact: true }).count()).toBe(1);
+    expect(await group.getByLabel("السعر", { exact: true }).inputValue()).toBe("6,000,000");
+    expect(await page.getByTestId("invoice-line-total-0").innerText()).toContain("12,000,000");
+    expect(await page.locator('[data-testid^="invoice-provider-"]').count()).toBe(1);
+    await page.getByTestId("invoice-provider-0").selectOption(String(doctorPartyId));
+    expect(await page.getByTestId("invoice-split-notice").innerText()).toContain("الخدمة في بند واحد: 2 أسنان × سعر الوحدة");
+    expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 36، 46");
+    const details = page.getByTestId("invoice-group-details-0");
+    if (await details.getAttribute("open") === null) await details.locator(":scope > summary").click();
     for (const line of [0, 1]) {
+      expect(await page.getByTestId(`invoice-split-tooth-${line}`).innerText()).toBe(`فصل سن ${[36, 46][line]}`);
       const preview = page.getByTestId(`invoice-clinical-preview-${line}`);
       await preview.filter({ hasText: "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب" }).waitFor({state:"attached"});
       if(!await preview.isVisible())await preview.locator("..").locator("summary").click();
@@ -272,31 +285,63 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     await page.getByTestId("tooth-dialog").getByTestId("odontogram-tooth-11").click();
     await page.keyboard.press("Escape");
     await page.getByTestId("tooth-dialog").waitFor({ state: "detached" });
-    expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth")).toBe("36");
-    expect(await page.getByTestId("invoice-row-2").count()).toBe(0);
+    expect(await group.getAttribute("data-tooth")).toBe("36");
+    expect(await group.getAttribute("data-tooth-count")).toBe("2");
+    expect(await group.getByLabel("الكمية", { exact: true }).inputValue()).toBe("2");
+    expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 36، 46");
+    expect(await page.locator('[data-testid^="invoice-row-"]').count()).toBe(1);
 
     await page.screenshot({ path: `${SHOTS}/invoice-tooth-rct-desktop.png`, fullPage: true }).catch(() => undefined);
     await save(page);
     expect((await db.query(`SELECT 1 FROM invoices WHERE patient_id = $1`, [patientId])).rows).toHaveLength(1);
     expect((await planItems(patientId)).map((row) => row.tooth_code)).toEqual([36, 46]);
+    expect((await db.query(`SELECT total_minor::text FROM invoices WHERE patient_id = $1`, [patientId])).rows)
+      .toEqual([{ total_minor: "12000000" }]);
+    expect((await db.query(`SELECT ii.quantity, ii.unit_price_minor::text, ii.doctor_id, pi.tooth_code
+      FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id LEFT JOIN plan_items pi ON pi.id = ii.plan_item_id
+      WHERE i.patient_id = $1 ORDER BY pi.tooth_code`, [patientId])).rows)
+      .toEqual([36, 46].map(tooth_code => ({ quantity: 1, unit_price_minor: "6000000", doctor_id: doctorPartyId, tooth_code })));
     expect(await cases(patientId)).toEqual([{ specialty: "endodontics", site: "36" }, { specialty: "endodontics", site: "46" }]);
     await context.close();
   });
 
-  it("bridge: 14, 15, 16 on the chart ⇒ three grouped lines carrying the episode, one case", async () => {
+  it("bridge: 14, 15, 16 on the chart ⇒ one quantity-three group, three saved tooth lines carrying the episode, one case", async () => {
     const patientId = await newPatient("bridge");
     const { context, page } = await openInvoice(patientId);
     await chooseService(page, services.bridge);
     const dialog = await pickTeeth(page, 0, [16, 14, 15]);
     expect(await dialog.getByTestId("tooth-dialog-summary").innerText()).toContain("14، 15، 16");
     await confirm(page);
+    const group = page.getByTestId("invoice-row-0");
+    expect(await page.locator('[data-testid^="invoice-row-"]').count()).toBe(1);
+    expect(await group.getAttribute("data-tooth")).toBe("14");
+    expect(await group.getAttribute("data-display-group")).toBeTruthy();
+    expect(await group.getAttribute("data-tooth-count")).toBe("3");
+    expect(await group.getByLabel("الكمية", { exact: true }).inputValue()).toBe("3");
+    expect(await group.getByLabel("الكمية", { exact: true }).isDisabled()).toBe(true);
+    expect(await group.getByLabel("السعر", { exact: true }).count()).toBe(1);
+    expect(await group.getByLabel("السعر", { exact: true }).inputValue()).toBe("9,000,000");
+    expect(await page.getByTestId("invoice-line-total-0").innerText()).toContain("27,000,000");
+    expect(await page.locator('[data-testid^="invoice-provider-"]').count()).toBe(1);
+    await page.getByTestId("invoice-provider-0").selectOption(String(doctorPartyId));
+    expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 14، 15، 16");
+    const details = page.getByTestId("invoice-group-details-0");
+    if (await details.getAttribute("open") === null) await details.locator(":scope > summary").click();
     for (const [line, tooth] of [[0, 14], [1, 15], [2, 16]] as const) {
-      expect(await page.getByTestId(`invoice-row-${line}`).getAttribute("data-tooth")).toBe(String(tooth));
-      expect(await page.getByTestId(`invoice-tooth-chip-${line}`).innerText()).toContain("جسر/حلقة: 14، 15، 16");
+      expect(await page.getByTestId(`invoice-split-tooth-${line}`).innerText()).toBe(`فصل سن ${tooth}`);
+      const preview = page.getByTestId(`invoice-clinical-preview-${line}`);
+      await preview.filter({ hasText: "بند خطة جديد" }).waitFor({ state: "attached" });
+      if (!await preview.isVisible()) await preview.locator("..").locator("summary").click();
+      await preview.waitFor();
     }
-    await page.getByTestId("invoice-clinical-preview-2").waitFor();
     await save(page);
     expect((await planItems(patientId)).map((row) => row.tooth_code)).toEqual([14, 15, 16]);
+    expect((await db.query(`SELECT total_minor::text FROM invoices WHERE patient_id = $1`, [patientId])).rows)
+      .toEqual([{ total_minor: "27000000" }]);
+    expect((await db.query(`SELECT ii.quantity, ii.unit_price_minor::text, ii.doctor_id, pi.tooth_code
+      FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id LEFT JOIN plan_items pi ON pi.id = ii.plan_item_id
+      WHERE i.patient_id = $1 ORDER BY pi.tooth_code`, [patientId])).rows)
+      .toEqual([14, 15, 16].map(tooth_code => ({ quantity: 1, unit_price_minor: "9000000", doctor_id: doctorPartyId, tooth_code })));
     const opened = await cases(patientId);
     expect(opened).toHaveLength(1);
     expect(opened[0].specialty).toBe("prosthodontics");

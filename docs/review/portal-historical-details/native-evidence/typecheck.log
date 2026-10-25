@@ -1,0 +1,31 @@
+(node:6) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> aqlan-center@0.1.0 typecheck
+> tsc --noEmit
+
+
+<--- Last few GCs --->
+
+[20:0x3306b000]    53594 ms: Scavenge (reduce) (interleaved) 2031.3 (2072.7) -> 2030.4 (2072.9) MB, pooled: 0 MB, 7.97 / 0.00 ms  (average mu = 0.461, current mu = 0.430) allocation failure; 
+[20:0x3306b000]    53751 ms: Mark-Compact (reduce) 2046.3 (2088.6) -> 2045.2 (2088.6) MB, pooled: 0 MB, 16.34 / 0.00 ms  (+ 805.3 ms in 0 steps since start of marking, biggest step 0.0 ms, walltime since start of marking 1073 ms) (average mu = 0.436, curr
+
+<--- JS stacktrace --->
+
+FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0xe46bbe node::OOMErrorHandler(char const*, v8::OOMDetails const&) [node]
+ 2: 0x1245390 v8::Utils::ReportOOMFailure(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [node]
+ 3: 0x1245667 v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [node]
+ 4: 0x1474575  [node]
+ 5: 0x148de09 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [node]
+ 6: 0x13df798 v8::internal::StackGuard::HandleInterrupts(v8::internal::StackGuard::InterruptLevel) [node]
+ 7: 0x189e117 v8::internal::Runtime_StackGuardWithGap(int, unsigned long*, v8::internal::Isolate*) [node]
+ 8: 0x7f8ae2e6caf6 
+Aborted
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

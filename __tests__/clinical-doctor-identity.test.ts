@@ -123,7 +123,7 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
     toProcedureLine: (row: Record<string, unknown>) => ({ ...procedure(row.doctor_id as number | null, Number(row.unit_price_minor)),
       id: row.id, planItemId: row.plan_item_id }),
     classifyLinkedProcedureLines: async () => new Map(), visitTotal: (lines: Procedure[]) => lines.reduce((sum, row) => sum + row.totalMinor, 0),
-    unlinkedPlanSessionConflicts: async () => [],
+    unlinkedPlanSessionConflicts: async () => ({ messages: [], amendedService: false }),
     progressTreatmentSessions: vi.fn(async () => ({ sessionsCompleted: 0, itemsDone: 0, touchedItemIds: [], byProcedure: new Map() })),
     matchPlanItems: () => [], unmetPlanItemRequirements: async () => new Map(),
     documentNumberSql: () => "'SYNTHETIC-INVOICE'", conditionForCategory: () => null,
@@ -221,5 +221,26 @@ describe("exact domain bodies reject bad performer identities without effects (q
     expect((await p.sign({ visitId: 201, baseCurrency: "YER", signedBy: "synthetic", signerDoctorPartyId: 92 })).reason).toBe("no_treating_doctor");
     expectPatientFirst(p.query);
     expect(p.state()).toMatchObject({ signed: false, invoiceCount: 0 });
+  });
+});
+
+
+describe("required amendment history fails closed", () => {
+  it.each(["42P01", "42501"])("propagates missing/inaccessible history (%s) instead of returning ready", async (code) => {
+    const failure = Object.assign(new Error("Synthetic required amendment history unavailable"), { code });
+    const compare = vi.fn(() => []);
+    const guard = domain<(client: DbClient, patientId: number, lines: Procedure[]) => Promise<unknown>>(
+      "unlinkedPlanSessionConflicts", {
+        PLAN_ITEM_FINANCIAL_REVIEW_SQL: "FALSE", PLAN_FUNDED_BY_AGREEMENT_SQL: "FALSE",
+        PLAN_ITEM_LEGACY_LINEAGE_SQL: "FALSE", PLAN_ITEM_LEGACY_CONTEXT_SQL: "NULL",
+        PLAN_ITEM_FINANCIAL_LINEAGE_SQL: "FALSE", unlinkedSessionConflicts: compare,
+      });
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM agreement_delta_amendments e")) throw failure;
+      return { rows: [] };
+    });
+    await expect(guard({ query } as unknown as DbClient, 101, [procedure(11)])).rejects.toBe(failure);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(compare).not.toHaveBeenCalled();
   });
 });

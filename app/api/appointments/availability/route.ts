@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { MAX_DURATION, MIN_DURATION } from "@/lib/appointment-services";
-import { doctorAvailabilitySlots } from "@/lib/appointment-availability";
+import { doctorAvailabilitySuggestions } from "@/lib/appointment-availability-advisory";
+import { readDoctorAvailabilityAdvisory } from "@/lib/doctor-availability-advisory";
 import { loadCapacityContext, loadProviderBlockWindows, resolveService } from "@/lib/capacity-context";
 import { CLINIC_TIME_ZONE, findUserByUsername, getParty, listAppointmentsByDate } from "@/lib/db";
 import { clinicDateString, toMinutes } from "@/lib/schedule";
@@ -14,7 +15,7 @@ const validDate = (date: string): boolean => {
   return date >= "0001-01-01" && Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
 };
 
-/** لا أسماء مرضى هنا: الأوقات وحالتها فقط، من قواعد الحجز الفعلية. */
+/** اقتراحات قراءة فقط؛ لا أسماء مرضى أو بيانات موارد بشرية أو ضمان حجز. */
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -46,9 +47,10 @@ export async function GET(request: Request) {
     if (!doctor || doctor.kind !== "doctor" || !doctor.isActive) {
       return NextResponse.json({ message: "الطبيب غير متاح للحجز." }, { status: 404 });
     }
-    const [context, service, appointments, blocks] = await Promise.all([
+    const [context, service, appointments, blocks, roster] = await Promise.all([
       loadCapacityContext(), resolveService({ serviceId, appointmentType }),
       listAppointmentsByDate(date), loadProviderBlockWindows(doctorId, date),
+      readDoctorAvailabilityAdvisory(doctorId, date, CLINIC_TIME_ZONE),
     ]);
     if (chairNo !== null && chairNo > context.chairs) {
       return NextResponse.json({ message: "الكرسي المختار غير موجود." }, { status: 400 });
@@ -57,14 +59,11 @@ export async function GET(request: Request) {
     const clinicTime = new Intl.DateTimeFormat("en-GB", {
       timeZone: CLINIC_TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
     }).format(now);
-    return NextResponse.json({
-      doctorId, date, durationMinutes,
-      slots: doctorAvailabilitySlots({
+    return NextResponse.json(doctorAvailabilitySuggestions({
         date, doctorId, durationMinutes, service, context, appointments, blocks,
-        chairNo, isNewPatient,
+        chairNo, isNewPatient, roster, timeZone: CLINIC_TIME_ZONE,
         today: clinicDateString(now, CLINIC_TIME_ZONE), nowMinutes: toMinutes(clinicTime) ?? 0,
-      }),
-    });
+    }), { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر التحقق من أوقات الطبيب." }, { status: 500 });
   }

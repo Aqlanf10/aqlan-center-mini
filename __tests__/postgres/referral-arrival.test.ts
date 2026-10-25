@@ -85,6 +85,9 @@ describe("(REF-2) appointment outcomes on a scheduled referral", () => {
     await step(id, "accept");
     const first = await appointmentToday(p);
     expect(await step(id, "schedule", { appointmentId: first }, "reception")).toMatchObject({ ok: true });
+    // Model the booked time having elapsed; absence must never close a future appointment.
+    await q(`UPDATE appointments SET scheduled_date = (NOW() AT TIME ZONE $2)::date - 1 WHERE id = $1`,
+      [first, CLINIC_TIME_ZONE]);
     expect(await closeBookedAppointment(first, "no_show", { actor: "reception", actorRole: "reception" })).toBe(true);
     expect(await getReferral(id)).toMatchObject({ workflowState: "accepted", missedAppointment: "no_show", appointmentId: null });
     const later = (await q<{ id: number }>(

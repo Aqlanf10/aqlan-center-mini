@@ -59,22 +59,47 @@ export async function writeInventoryAudit(client: DbClient, actor: InventoryActo
   await insertAuditRow(client, { action: "inventory.item", entity, entityId: id, entityLabel: id,
     actor: actor.username, actorRole: actor.role, details: sanitized });
 }
-export async function inventoryOperation<T extends object>(actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+function inventoryOperationDigest(key: string, payload: unknown): string {
   invariant(typeof key === "string" && /^[A-Za-z0-9_.:-]{8,120}$/.test(key), "invalid_operation_key", "A bounded idempotency key is required");
-  const hash = createHash("sha256").update(payloadIdentity(payload)).digest("hex");
+  return createHash("sha256").update(payloadIdentity(payload)).digest("hex");
+}
+async function applyInventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, hash: string, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+  await requireInventoryActor(client, actor, management);
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
+  const previous = await client.query<{ payload_hash: string; result: T }>("SELECT payload_hash,result FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
+  if (previous.rows[0]) {
+    invariant(previous.rows[0].payload_hash === hash, "idempotency_conflict", "This operation key already identifies different content");
+    return { ...previous.rows[0].result, replayed: true };
+  }
+  const result = await work(client);
+  await client.query("INSERT INTO inventory_operations(scope,actor_id,operation_key,payload_hash,result) VALUES($1,$2,$3,$4,$5::jsonb)", [name,actor.userId,key,hash,JSON.stringify(result)]);
+  return { ...result, replayed: false };
+}
+export async function inventoryOperation<T extends object>(actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+  const hash = inventoryOperationDigest(key, payload);
   await ready();
-  return withTransaction(getPool(), async client => {
-    await requireInventoryActor(client, actor, management);
-    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
-    const previous = await client.query<{ payload_hash: string; result: T }>("SELECT payload_hash,result FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
-    if (previous.rows[0]) {
-      invariant(previous.rows[0].payload_hash === hash, "idempotency_conflict", "This operation key already identifies different content");
-      return { ...previous.rows[0].result, replayed: true };
+  return withTransaction(getPool(), client => applyInventoryOperationInTransaction(client, actor, key, name, hash, management, work));
+}
+/** Caller owns the transaction and must roll it back on any failure. This core
+ * never provisions schema, obtains a connection, commits, releases or retries.
+ * Runtime opt-in and live authority are checked here, not asserted by a caller.
+ * A SAVEPOINT probe rejects autocommit misuse before any business query. It is
+ * immediately released, without committing or rolling back caller work.
+ * Missing proposal objects fail inside the caller transaction, never via fallback.
+ */
+export async function inventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+  requireInventoryIntegration();
+  const hash = inventoryOperationDigest(key, payload);
+  try {
+    await client.query("SAVEPOINT inventory_adapter_transaction_check");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "25P01") {
+      throw new InventoryDomainError("transaction_required", "Inventory adapter requires an explicit caller-owned transaction");
     }
-    const result = await work(client);
-    await client.query("INSERT INTO inventory_operations(scope,actor_id,operation_key,payload_hash,result) VALUES($1,$2,$3,$4,$5::jsonb)", [name,actor.userId,key,hash,JSON.stringify(result)]);
-    return { ...result, replayed: false };
-  });
+    throw error;
+  }
+  await client.query("RELEASE SAVEPOINT inventory_adapter_transaction_check");
+  return applyInventoryOperationInTransaction(client, actor, key, name, hash, management, work);
 }
 async function verifyUnits(client: DbClient, lines: readonly { itemId: number; conversion: RequestRevision["lines"][number]["conversion"] }[]) {
   invariant(lines.length > 0 && lines.length <= 100, "invalid_lines", "Use between one and 100 document lines");
@@ -347,35 +372,62 @@ export async function amendPurchaseOrder(
     };
   });
 }
-export async function postInspectedReceipt(actor:InventoryActor,key:string,receipt:ReceiptRevision){
-  docId(receipt.id);scope(receipt.branchId);
-  return inventoryOperation(actor,key,"receipt.post",receipt,true,async client=>{
-    const order=await lockedOrder(client,receipt.orderId);
-    const prior=await orderPriorInspectedQuantities(client,order);
-    const postingDate=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);
-    const plan=planInspectedReceipt(order,receipt,prior,postingDate);
-    const locations=[...new Set(plan.lines.map(line=>line.locationId))].sort();
-    const places=await client.query<{id:string;branch_key:string;is_active:boolean}>("SELECT id,branch_key,is_active FROM inventory_locations WHERE id=ANY($1::text[]) ORDER BY id FOR SHARE",[locations]);
-    for(const locationId of locations){const place=places.rows.find(row=>row.id===locationId);invariant(place?.is_active && place.branch_key===receipt.branchId,"location_forbidden","Receipt location is unavailable in this inventory scope");}
-    const itemIds=[...new Set(plan.stockEntries.map(line=>line.itemId))].sort((a,b)=>a-b);
-    const items=await client.query<{id:number;is_active:boolean;unit:string}>("SELECT id,is_active,unit FROM inventory_items WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE",[itemIds]);
-    for(const line of plan.stockEntries){const item=items.rows.find(row=>row.id===line.itemId);const source=plan.lines.find(row=>row.id===line.receiptLineId)!;invariant(item?.is_active && item.unit===source.conversion.baseUnit,"item_unit_mismatch","Receipt item/unit has changed since approval");}
-    await client.query("INSERT INTO goods_receipts(id,order_id,document,created_by) VALUES($1,$2,$3::jsonb,$4)",[receipt.id,order.id,JSON.stringify(receipt),actor.userId]);
-    for(const line of plan.lines){await client.query("INSERT INTO goods_receipt_lines(id,receipt_id,order_id,order_line_id,disposition,base_qty,document) VALUES($1,$2,$3,$4,$5,$6::numeric,$7::jsonb)",[line.id,receipt.id,order.id,line.orderLineId,line.disposition,line.baseQuantity,JSON.stringify(line)]);}
-    for(const entry of plan.stockEntries){
-      const line=plan.lines.find(row=>row.id===entry.receiptLineId)!;
-      // Receipt is stock only. No supplierPartyId/payable/expense writer call.
-      // Existing bigint unit cost cannot represent all converted piece costs.
-      // Preserve unknown legacy WAC and an explicit rational provisional quote
-      // snapshot rather than silently rounding a cheap piece to zero.
-      const movement=await client.query<{id:number}>("INSERT INTO inventory_movements(item_id,kind,qty,expiry_date,reason,created_by,unit_cost_minor,is_return) VALUES($1,'in',$2::numeric,$3::date,$4,$5,NULL,FALSE) RETURNING id",[entry.itemId,entry.baseQuantity,line.expiryDate,`Inspected receipt ${receipt.id}`,actor.username]);
-      const source=order.lines.find(row=>row.id===line.orderLineId)!;const lotId=randomUUID();
-      await client.query("INSERT INTO stock_lots(id,receipt_line_id,item_id,location_id,movement_id,lot_code,expiry_date,status,cost_status,cost_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7::date,$8,'estimated',$9::jsonb)",[lotId,line.id,line.itemId,line.locationId,movement.rows[0].id,line.lotCode,line.expiryDate,line.disposition,JSON.stringify({source:"approved_order_quote",currency:order.currency,price:source.price,conversion:line.conversion,requiresExpiry:source.requiresExpiry,financialValuation:"pending_invoice_adapter"})]);
-      await client.query("INSERT INTO inventory_movement_allocations(id,movement_id,lot_id,location_id,qty) VALUES($1,$2,$3,$4,$5::numeric)",[randomUUID(),movement.rows[0].id,lotId,line.locationId,entry.baseQuantity]);
-    }
-    await writeInventoryAudit(client,actor,"goods_receipt",receipt.id,"post",{version:receipt.version,actualArrivalDate:receipt.actualArrivalDate,postingDate,inspection:plan.lines,excessDecisions:plan.excessDecisions});
-    return {id:receipt.id,status:"posted" as const,remaining:plan.remaining,stockEntries:plan.stockEntries,excessDecisions:plan.excessDecisions,financialEffects:plan.financialEffects};
-  });
+export async function postInspectedReceipt(actor: InventoryActor, key: string, receipt: ReceiptRevision) {
+  docId(receipt.id); scope(receipt.branchId);
+  return inventoryOperation(actor, key, "receipt.post", receipt, true, client => writeInspectedReceiptInTransaction(client, actor, receipt));
+}
+/** Lot-aware, stock-only receipt command for a caller-owned transaction. It uses
+ * the same durable identity as the existing wrapper, never the legacy purchase
+ * writer (which also creates supplier debt). No HTTP/legacy entry is wired here.
+ */
+export async function postInspectedReceiptInTransaction(client: DbClient, actor: InventoryActor, key: string, receipt: ReceiptRevision) {
+  requireInventoryIntegration();
+  docId(receipt.id); scope(receipt.branchId);
+  return inventoryOperationInTransaction(client, actor, key, "receipt.post", receipt, true, tx => writeInspectedReceiptInTransaction(tx, actor, receipt));
+}
+async function writeInspectedReceiptInTransaction(client: DbClient, actor: InventoryActor, receipt: ReceiptRevision) {
+  const order=await lockedOrder(client,receipt.orderId);
+  const prior=await orderPriorInspectedQuantities(client,order);
+  const postingDate=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);
+  const plan=planInspectedReceipt(order,receipt,prior,postingDate);
+  const locations=[...new Set(plan.lines.map(line=>line.locationId))].sort();
+  const places = await client.query<{ id: string; branch_key: string; is_active: boolean; kind: string; doctor_party_id: number | null }>(
+    "SELECT id,branch_key,is_active,kind,doctor_party_id FROM inventory_locations WHERE id=ANY($1::text[]) ORDER BY id FOR SHARE", [locations],
+  );
+  for (const locationId of locations) {
+    const place = places.rows.find(row => row.id === locationId);
+    invariant(place?.is_active && place.branch_key === receipt.branchId && ["store", "custody"].includes(place.kind),
+      "location_forbidden", "Final receipt requires an active store or explicitly owned custody location in this scope");
+  }
+  // Reuse the established custody ownership contract, never infer an owner from
+  // the actor or a procedure performer. Lock the complete owner set in order.
+  const ownerIds = [...new Set(places.rows.filter(place => place.kind === "custody").map(place => place.doctor_party_id).filter((id): id is number => id !== null))].sort((a, b) => a - b);
+  const owners = ownerIds.length ? await client.query<{ id: number; kind: string; is_active: boolean }>(
+    "SELECT id,kind,is_active FROM parties WHERE id=ANY($1::int[]) ORDER BY id FOR SHARE", [ownerIds],
+  ) : { rows: [] };
+  for (const place of places.rows) {
+    if (place.kind !== "custody") continue;
+    const owner = owners.rows.find(row => row.id === place.doctor_party_id);
+    invariant(owner?.is_active && owner.kind === "doctor", "doctor_unavailable", "Custody receipt destination must belong to an active doctor");
+  }
+  const itemIds=[...new Set(plan.stockEntries.map(line=>line.itemId))].sort((a,b)=>a-b);
+  const items=await client.query<{id:number;is_active:boolean;unit:string}>("SELECT id,is_active,unit FROM inventory_items WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE",[itemIds]);
+  for(const line of plan.stockEntries){const item=items.rows.find(row=>row.id===line.itemId);const source=plan.lines.find(row=>row.id===line.receiptLineId)!;invariant(item?.is_active && item.unit===source.conversion.baseUnit,"item_unit_mismatch","Receipt item/unit has changed since approval");}
+  await client.query("INSERT INTO goods_receipts(id,order_id,document,created_by) VALUES($1,$2,$3::jsonb,$4)",[receipt.id,order.id,JSON.stringify(receipt),actor.userId]);
+  for(const line of plan.lines){await client.query("INSERT INTO goods_receipt_lines(id,receipt_id,order_id,order_line_id,disposition,base_qty,document) VALUES($1,$2,$3,$4,$5,$6::numeric,$7::jsonb)",[line.id,receipt.id,order.id,line.orderLineId,line.disposition,line.baseQuantity,JSON.stringify(line)]);}
+  for(const entry of plan.stockEntries){
+    const line=plan.lines.find(row=>row.id===entry.receiptLineId)!;
+    // Receipt is stock only. No supplierPartyId/payable/expense writer call.
+    // Existing bigint unit cost cannot represent all converted piece costs.
+    // Preserve unknown legacy WAC and an explicit rational provisional quote
+    // snapshot rather than silently rounding a cheap piece to zero.
+    const movement=await client.query<{id:number}>("INSERT INTO inventory_movements(item_id,kind,qty,expiry_date,reason,created_by,unit_cost_minor,is_return) VALUES($1,'in',$2::numeric,$3::date,$4,$5,NULL,FALSE) RETURNING id",[entry.itemId,entry.baseQuantity,line.expiryDate,`Inspected receipt ${receipt.id}`,actor.username]);
+    const source=order.lines.find(row=>row.id===line.orderLineId)!;const lotId=randomUUID();
+    await client.query("INSERT INTO stock_lots(id,receipt_line_id,item_id,location_id,movement_id,lot_code,expiry_date,status,cost_status,cost_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7::date,$8,'estimated',$9::jsonb)",[lotId,line.id,line.itemId,line.locationId,movement.rows[0].id,line.lotCode,line.expiryDate,line.disposition,JSON.stringify({source:"approved_order_quote",currency:order.currency,price:source.price,conversion:line.conversion,requiresExpiry:source.requiresExpiry,financialValuation:"pending_invoice_adapter"})]);
+    await client.query("INSERT INTO inventory_movement_allocations(id,movement_id,lot_id,location_id,qty) VALUES($1,$2,$3,$4,$5::numeric)",[randomUUID(),movement.rows[0].id,lotId,line.locationId,entry.baseQuantity]);
+  }
+  await writeInventoryAudit(client,actor,"goods_receipt",receipt.id,"post",{version:receipt.version,actualArrivalDate:receipt.actualArrivalDate,postingDate,inspection:plan.lines,excessDecisions:plan.excessDecisions});
+  return {id:receipt.id,status:"posted" as const,remaining:plan.remaining,stockEntries:plan.stockEntries,excessDecisions:plan.excessDecisions,financialEffects:plan.financialEffects};
 }
 export async function resolveQuarantineReceipt(
   actor: InventoryActor,
@@ -400,6 +452,10 @@ export async function resolveQuarantineReceipt(
     );
     const row = receiptLineRows.rows[0];
     invariant(row, "not_found", "Quarantine receipt line was not found");
+    // Every quarantine transition shares the custody item lock. Acquire it
+    // before the lot row: custody allocations take the lot FK's KEY SHARE lock
+    // after locking the item, so lot -> item would create a deadlock cycle.
+    await client.query("SELECT id FROM inventory_items WHERE id=$1 FOR UPDATE", [row.document.itemId]);
     await client.query(
       "SELECT id FROM goods_receipt_lines WHERE order_id=$1 AND order_line_id=$2 ORDER BY id FOR UPDATE",
       [order.id, row.document.orderLineId],
@@ -452,7 +508,6 @@ export async function resolveQuarantineReceipt(
       );
       const lot = lotRows.rows[0];
       invariant(lot, "not_found", "Quarantined stock lot was not found");
-      await client.query("SELECT id FROM inventory_items WHERE id=$1 FOR UPDATE", [plan.stockCompensation.itemId]);
       const movement = await client.query<{ id: number }>(
         "INSERT INTO inventory_movements(item_id,kind,qty,expiry_date,reason,created_by,unit_cost_minor,is_return) VALUES($1,'out',$2::numeric,NULL,$3,$4,NULL,$5) RETURNING id",
         [plan.stockCompensation.itemId, plan.stockCompensation.baseQuantity, plan.stockCompensation.reason, actor.username, plan.stockCompensation.isReturn],

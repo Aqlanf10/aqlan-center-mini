@@ -784,7 +784,12 @@ export async function updateWorkSchedule(
     );
     if (!currentRows[0]) throw new Error("جدول الدوام غير موجود.");
     if ((await client.query("SELECT id FROM hr_attendance_records WHERE schedule_id=$1 LIMIT 1", [schedId])).rows.length) throw new Error("الجدول مستخدم في سجل حضور؛ أنشئ جدولًا جديدًا بتاريخ سريان بدل تعديل التاريخ.");
-    validateSchedule({...mapScheduleRow(currentRows[0]), ...input});
+    const current = mapScheduleRow(currentRows[0]);
+    // Resolve omitted endpoints from the locked row; explicit null clears them.
+    // Validate and persist the same pair, rather than losing null in COALESCE.
+    const secondShiftStart = input.secondShiftStart === undefined ? current.secondShiftStart : input.secondShiftStart;
+    const secondShiftEnd = input.secondShiftEnd === undefined ? current.secondShiftEnd : input.secondShiftEnd;
+    validateSchedule({...current, ...input, secondShiftStart, secondShiftEnd});
 
     const staffId = input.staffId !== undefined ? (input.staffId ? Number(input.staffId) : null) : undefined;
 
@@ -799,8 +804,8 @@ export async function updateWorkSchedule(
            working_days = CASE WHEN $7::jsonb IS NOT NULL THEN $7::jsonb ELSE working_days END,
            shift_start_time = COALESCE($8, shift_start_time),
            shift_end_time = COALESCE($9, shift_end_time),
-           second_shift_start = COALESCE($10, second_shift_start),
-           second_shift_end = COALESCE($11, second_shift_end),
+           second_shift_start = $10,
+           second_shift_end = $11,
            grace_period_mins = COALESCE($12, grace_period_mins),
            expected_daily_hours = COALESCE($13, expected_daily_hours),
            crosses_midnight = COALESCE($14, crosses_midnight),
@@ -818,8 +823,8 @@ export async function updateWorkSchedule(
         input.workingDays ? JSON.stringify(input.workingDays) : null,
         input.shiftStartTime ?? null,
         input.shiftEndTime ?? null,
-        input.secondShiftStart ?? null,
-        input.secondShiftEnd ?? null,
+        secondShiftStart,
+        secondShiftEnd,
         input.gracePeriodMins ?? null,
         input.expectedDailyHours ?? null,
         input.crossesMidnight ?? null,

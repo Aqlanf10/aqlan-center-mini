@@ -146,8 +146,11 @@ export async function POST(request: Request) {
   }
 
   // ٨) الحالة المعقّمة فقط — أسماء وجهات وحالات، بلا مسارات ولا تفاصيل خام.
+  // A completed attempt is successful only with a verified archive. Replication
+  // remains a separate outcome; preserve the existing non-run responses.
+  const archiveFailed = result.ran && result.backup?.status !== "verified";
   return noStore({
-    ok: true,
+    ok: !archiveFailed,
     ran: result.ran,
     reason: result.reason,
     scheduleDayClaim: result.scheduleDayClaim,
@@ -167,5 +170,5 @@ export async function POST(request: Request) {
       destination: entry.destination,
       status: entry.status,
     })),
-  }, 200);
+  }, archiveFailed ? 500 : 200);
 }

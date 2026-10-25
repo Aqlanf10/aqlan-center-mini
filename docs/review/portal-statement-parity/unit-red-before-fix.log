@@ -1,0 +1,10 @@
+     × lists only current invoices at their net amount, with the print's paid/open state 25ms
+     × keeps every receipt with the print's label and the canonical balances unchanged 3ms
+     × sends nothing internal: exact keys, no staff names, notes, shifts, methods, ids or line items 8ms
+     × prints the same current documents, nets and balances the portal returns 22ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  __tests__/portal-statement-parity.test.tsx > portal statement is the printed statement, without internal data > lists only current invoices at their net amount, with the print's paid/open state
+ FAIL  __tests__/portal-statement-parity.test.tsx > portal statement is the printed statement, without internal data > keeps every receipt with the print's label and the canonical balances unchanged
+ FAIL  __tests__/portal-statement-parity.test.tsx > portal statement is the printed statement, without internal data > sends nothing internal: exact keys, no staff names, notes, shifts, methods, ids or line items
+ FAIL  __tests__/portal-statement-parity.test.tsx > portal statement is the printed statement, without internal data > prints the same current documents, nets and balances the portal returns
+      Tests  4 failed | 3 passed (7)

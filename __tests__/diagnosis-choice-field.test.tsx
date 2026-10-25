@@ -61,6 +61,11 @@ const text = (node: ReactNode): string => typeof node === "string" || typeof nod
   : Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object" && "props" in node ? text((node as Element).props.children as ReactNode) : "";
 const onChange = vi.fn();
 const focus = vi.fn();
+type PointerTarget = { target: unknown; pointerType?: string };
+const pointerListeners = new Set<(event: PointerTarget) => void>();
+const outsidePointer = (inside = false, pointerType = "mouse") => {
+  for (const listener of pointerListeners) listener({ target: { inside }, pointerType });
+};
 let props: Parameters<typeof DiagnosisChoiceField>[0];
 
 function render() {
@@ -71,7 +76,7 @@ function render() {
     hooks.cursor = 0; hooks.changed = false; tree = DiagnosisChoiceField(props);
     for (const node of nodes(tree)) {
       const ref = node.props.ref as { current: unknown } | ((value: unknown) => void) | undefined;
-      const target = { focus: () => focus(node.props["aria-label"]), scrollIntoView: vi.fn(),
+      const target = { contains: (value: { inside?: boolean } | null) => value?.inside === true, focus: () => focus(node.props["aria-label"]), scrollIntoView: vi.fn(),
         querySelector: () => ({ scrollIntoView: vi.fn() }) };
       if (typeof ref === "function") ref(target);
       else if (ref) ref.current = target;
@@ -115,6 +120,15 @@ beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false;
   hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
   onChange.mockReset(); focus.mockReset();
+  pointerListeners.clear();
+  vi.stubGlobal("document", {
+    addEventListener: (type: string, listener: (event: PointerTarget) => void, capture: boolean) => {
+      expect(type).toBe("pointerdown"); expect(capture).toBe(true); pointerListeners.add(listener);
+    },
+    removeEventListener: (type: string, listener: (event: PointerTarget) => void, capture: boolean) => {
+      expect(type).toBe("pointerdown"); expect(capture).toBe(true); pointerListeners.delete(listener);
+    },
+  });
   props = { label: "حقل تشخيص تجريبي", value: "", disabled: false, onChange: value => {
     onChange(value); props = { ...props, value };
   }, groups: [
@@ -248,6 +262,26 @@ describe("editable diagnosis choices without inferred clinical values", () => {
     blur({ currentTarget: { contains: () => false }, relatedTarget: null });
     expect(toggle().props["aria-expanded"]).toBe(false);
     expectUnchanged("Unknown synthetic finding");
+  });
+
+  it.each(["mouse", "touch", "pen"])("dismisses an outside %s pointer without blur, edits or focus theft", pointerType => {
+    props = { ...props, value: "صياغة الطبيب الأصلية", dir: "rtl" };
+    expect(pointerListeners.size).toBe(0);
+    open(); change(search(), "skeletal"); key(search(), "ArrowDown");
+    outsidePointer(true, pointerType);
+    expect(toggle().props["aria-expanded"]).toBe(true);
+    focus.mockClear();
+    outsidePointer(false, pointerType);
+    expect(toggle().props["aria-expanded"]).toBe(false);
+    expect(pointerListeners.size).toBe(0);
+    expect(focus).not.toHaveBeenCalled();
+    expectUnchanged("صياغة الطبيب الأصلية");
+    open();
+    expect(search().props.value).toBe("");
+    expect(search().props["aria-activedescendant"]).toBeUndefined();
+    expect(pointerListeners.size).toBe(1);
+    hooks.effects.forEach(effect => effect.cleanup?.());
+    expect(pointerListeners.size).toBe(0);
   });
 
   it("links the combobox to a bounded scrollable list with grouped, non-tabbable options", () => {

@@ -5,6 +5,7 @@ export interface PlannedClinicalEvidence {
   prebilled?: boolean; includedByAgreement?: boolean;
 }
 export interface SignatureEvidence {
+  amendedServiceConflict?: boolean;
   procedures: { id?: number; planItemId: number | null }[];
   outstanding: PlannedClinicalEvidence[];
   sessionPricing: { procedureId?: number; planItemId?: number; financialReviewRequired?: boolean; clinicalConsentRecorded?: boolean }[];
@@ -25,6 +26,12 @@ export function plannedItemBlock(item: PlannedClinicalEvidence): string | null {
 }
 export function visitSignatureBlock(visit: SignatureEvidence | null): string | null {
   if (!visit) return null;
+  if (visit.amendedServiceConflict === true) {
+    return "للخدمة تعديل مالي موثق؛ استقلال هذا العمل عن تغطيته غير متحقق. ربط الخدمة المعدلة سريريًا غير مدعوم حاليًا. يمكن حفظ المسودة للمراجعة؛ لا تُنشأ فاتورة ثانية لهذا العمل.";
+  }
+  if (visit.amendedServiceConflict !== false) {
+    return "يمكن حفظ المسودة؛ تعذّر التحقق من تعديلات الاتفاق المالي. أعد تحميل الزيارة قبل التوقيع أو اعتماد مبلغ للتحصيل.";
+  }
   for (const procedure of visit.procedures.filter((line) => line.planItemId !== null)) {
     const matches = visit.sessionPricing.filter((line) => line.procedureId === procedure.id && line.planItemId === procedure.planItemId);
     const line = matches[0];

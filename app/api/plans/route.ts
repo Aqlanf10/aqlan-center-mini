@@ -71,7 +71,9 @@ export async function GET(request: Request) {
       paidMinor: plan.paidMinor,
       progress: plan.progress,
       invoiceFinancial: plan.invoiceFinancial,
+      approvedAgreement: plan.approvedAgreement,
       debtSource: plan.debtSource,
+      agreementApproved: plan.agreementApproved === true,
     })) : canSeeFinancial ? plans : plans.map((plan) => withoutPlanPayments(plan, true));
     return NextResponse.json({ plans: result, today, baseCurrency: CLINIC_BASE_CURRENCY, canSeeFinancial });
   } catch {

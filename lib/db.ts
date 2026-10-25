@@ -1,4 +1,12 @@
+import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
+import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
+import { counterIdentifierBigintSql } from "./counter-identifier-sql";
+import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
+import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
+import { AGREEMENT_DELTA_SQL } from "./agreement-delta-schema";
+import { COLLECTION_ATTEMPT_RETIREMENT_SQL } from "./collection-attempt-schema";
+import { UNPAID_CURRENCY_TRANSITION_SQL } from "./unpaid-currency-schema";
 import type { AcknowledgmentEvidence } from "./payment-acknowledgment";
 import { provePaymentCalculation, proveCorrectionAcknowledgment } from "./payment-acknowledgment-db";
 import { JournalReadIntegrityError } from "./journal-read-integrity";
@@ -95,7 +103,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { PURCHASE_RESET_FENCE, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -1525,19 +1533,19 @@ export function ensureSchema(): Promise<void> {
       -- مستعمل، وهو ما يُفشل الإدراج بدل أن يُصلحه.
       SELECT setval('patient_number_seq', GREATEST(
         (SELECT last_value FROM patient_number_seq),
-        (SELECT COALESCE(MAX(NULLIF(regexp_replace(patient_number, '\\D', '', 'g'), '')::bigint), 0) FROM patients)
+        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("patient_number")}), 0) FROM patients)
       ), true);
       SELECT setval('invoice_number_seq', GREATEST(
         (SELECT last_value FROM invoice_number_seq),
-        (SELECT COALESCE(MAX(NULLIF(regexp_replace(invoice_number, '\\D', '', 'g'), '')::bigint), 0) FROM invoices)
+        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("invoice_number")}), 0) FROM invoices)
       ), true);
       SELECT setval('receipt_number_seq', GREATEST(
         (SELECT last_value FROM receipt_number_seq),
-        (SELECT COALESCE(MAX(NULLIF(regexp_replace(receipt_number, '\\D', '', 'g'), '')::bigint), 0) FROM payments)
+        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("receipt_number")}), 0) FROM payments)
       ), true);
       SELECT setval('voucher_number_seq', GREATEST(
         (SELECT last_value FROM voucher_number_seq),
-        (SELECT COALESCE(MAX(NULLIF(regexp_replace(voucher_number, '\\D', '', 'g'), '')::bigint), 0) FROM expenses)
+        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("voucher_number")}), 0) FROM expenses)
       ), true);
 
       -- طبعات المستندات المالية.
@@ -2088,6 +2096,9 @@ export function ensureSchema(): Promise<void> {
     await ensureInvoiceCurrencySchema(getPool());
     await applyRuntimeMigrationFiles(getPool(), [{version:"0064",name:"approved_agreement_principal",filename:"0064_approved_agreement_principal.sql",sql:APPROVED_AGREEMENT_SQL,checksum:checksumOf(APPROVED_AGREEMENT_SQL)}]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0065", name: "inventory_purchase_receipts", filename: "0065_inventory_purchase_receipts.sql", sql: INVENTORY_PURCHASE_RECEIPTS_SQL, checksum: checksumOf(INVENTORY_PURCHASE_RECEIPTS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0066", name: "agreement_delta_amendments", filename: "0066_agreement_delta_amendments.sql", sql: AGREEMENT_DELTA_SQL, checksum: checksumOf(AGREEMENT_DELTA_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0068", name: "collection_attempt_retirements", filename: "0068_collection_attempt_retirements.sql", sql: COLLECTION_ATTEMPT_RETIREMENT_SQL, checksum: checksumOf(COLLECTION_ATTEMPT_RETIREMENT_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0069", name: "unpaid_currency_transitions", filename: "0069_unpaid_currency_transitions.sql", sql: UNPAID_CURRENCY_TRANSITION_SQL, checksum: checksumOf(UNPAID_CURRENCY_TRANSITION_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -2095,6 +2106,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(HR_PAYROLL_INTEGRITY_SQL);
     await applyRuntimeMigrationFiles(getPool(), HR_TEMPORAL_RUNTIME_MIGRATIONS);
     await applyOrthoAssessmentRuntime(getPool());
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
 
@@ -4283,6 +4295,8 @@ export async function deleteAppointment(
  */
 export async function writeAppointmentInDay<T>(input: {
   date: string;
+  /** Optional composed-writer fence, before day or table locks. */
+  beforeLocks?: (client: DbClient) => Promise<void>;
   judge: (day: Appointment[], client: DbClient) =>
     | ({ ok: true } | { ok: false; conflict: unknown })
     | Promise<{ ok: true } | { ok: false; conflict: unknown }>;
@@ -4292,6 +4306,7 @@ export async function writeAppointmentInDay<T>(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await input.beforeLocks?.(client);
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`,
       [input.date],
@@ -4467,6 +4482,7 @@ export async function transitionAppointment(
   id: number,
   to: AppointmentStatus,
   who: TransitionActor,
+  admission: { pastBookingOnly?: boolean } = {},
 ): Promise<TransitionResult> {
   await ensureSchema();
 
@@ -4478,6 +4494,25 @@ export async function transitionAppointment(
   try {
     await client.query("BEGIN");
 
+    const result = await transitionAppointmentInTransaction(client, id, to, who, admission);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Shared lifecycle writer; the caller owns the transaction and commits all related writes together. */
+async function transitionAppointmentInTransaction(
+  client: DbClient,
+  id: number,
+  to: AppointmentStatus,
+  who: TransitionActor,
+  admission: { pastBookingOnly?: boolean } = {},
+): Promise<TransitionResult> {
     /* القفل أوّلًا: `FOR UPDATE` يُسلسل المتنافسين على الصفّ نفسه، فالقراءة التالية
        تصف حالًا لا يتغيّر تحت أيدينا حتى نُنهي. وبه يُعرف الحال السابق بيقين —
        وهو ما يحتاجه السجلّ — لا بتخمينه من شرط التحديث. */
@@ -4486,14 +4521,40 @@ export async function transitionAppointment(
       [id],
     );
     if (!locked[0]) {
-      await client.query("ROLLBACK");
       return { ok: false, message: "الموعد غير موجود.", current: null };
     }
     const from = locked[0].status as AppointmentStatus;
 
     if (!canTransition(from, to)) {
-      await client.query("ROLLBACK");
       return { ok: false, message: transitionRejectionMessage(from, to), current: from };
+    }
+
+    // Check admission only after acquiring the appointment lock. A separate
+    // statement also sees visits committed while that lock was waiting.
+    if (to === "no_show" || admission.pastBookingOnly) {
+      const { rows: [eligibility] } = await client.query<{
+        past_date: boolean; started: boolean; arrival_evidence: boolean; visit_evidence: boolean;
+      }>(
+        `SELECT scheduled_date < (clock_timestamp() AT TIME ZONE $2)::date AS past_date,
+                scheduled_date + scheduled_time <= (clock_timestamp() AT TIME ZONE $2) AS started,
+                (arrived_at IS NOT NULL OR started_at IS NOT NULL OR ended_at IS NOT NULL) AS arrival_evidence,
+                EXISTS (SELECT 1 FROM visits v
+                         WHERE (v.appointment_id = a.id OR EXISTS (
+                           SELECT 1 FROM planned_visits pv
+                            WHERE (pv.id = a.planned_visit_id OR pv.appointment_id = a.id)
+                              AND (pv.visit_id = v.id OR v.planned_visit_id = pv.id)
+                         ))
+                          AND (v.status IN ('waiting', 'called', 'in_chair', 'done')
+                            OR v.signed_at IS NOT NULL OR v.finished_at IS NOT NULL)) AS visit_evidence
+           FROM appointments a WHERE a.id = $1`,
+        [id, CLINIC_TIME_ZONE],
+      );
+      if (admission.pastBookingOnly && (from !== "booked" || !eligibility.past_date)) {
+        return { ok: false, message: "هذا الإجراء لموعد محجوز مضى يومه فقط.", current: from };
+      }
+      if (to === "no_show" && (!eligibility.started || eligibility.arrival_evidence || eligibility.visit_evidence)) {
+        return { ok: false, message: "لا يُسجّل الغياب قبل وقت الموعد أو بعد تسجيل حضور المريض أو وجود زيارة مرتبطة به.", current: from };
+      }
     }
 
     /* والشرط يبقى في الجملة مع ذلك: القفل يحمي من متزامنٍ على الصفّ، والشرط يحمي
@@ -4509,7 +4570,6 @@ export async function transitionAppointment(
       [id, to, allowedSources(to), who.reason ?? null],
     );
     if (!rowCount) {
-      await client.query("ROLLBACK");
       return { ok: false, message: transitionRejectionMessage(from, to), current: from };
     }
 
@@ -4533,18 +4593,11 @@ export async function transitionAppointment(
         referralId: linked[0]?.referral_id ?? null, visitId: linked[0]?.visit_id ?? null, who,
       });
     }
-    await client.query("COMMIT");
 
-    const { rows: fresh } = await getPool().query<AppointmentRow>(
+    const { rows: fresh } = await client.query<AppointmentRow>(
       `${APPOINTMENT_SELECT} WHERE a.id = $1`, [id],
     );
     return { ok: true, appointment: toAppointment(fresh[0]), from };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
 }
 
 export interface AppointmentStatusEntry {
@@ -5220,9 +5273,11 @@ export async function mergeDuplicatePatient(
     }
 
     const { rows: [footprint] } = await client.query<{
-      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number;
+      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number; collection_attempts: number;
     }>(
       `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
+              /* (0068) A retired collection key is permanent proof bound to this patient: it never moves. */
+              (SELECT COUNT(*)::int FROM collection_attempt_retirements WHERE patient_id = $1) AS collection_attempts,
               (SELECT COUNT(*)::int FROM inventory_movements
                 WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
               (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
@@ -5232,12 +5287,13 @@ export async function mergeDuplicatePatient(
       [sourceId],
     );
     if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0
-      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0) {
+      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0 || footprint.collection_attempts > 0) {
       await client.query("ROLLBACK");
       return {
         ok: false, reason: "source_has_financial_history",
         counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
-          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments },
+          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments,
+          ...(footprint.collection_attempts > 0 ? { collectionAttempts: footprint.collection_attempts } : {}) },
       };
     }
 
@@ -5590,7 +5646,9 @@ export async function deletePatientCascade(
       financial_links: string;
     }>(
       `SELECT
-         (SELECT COUNT(*) FROM payments WHERE patient_id = $1) AS payments,
+         /* (0068) Retired collection keys are permanent proof for this patient, like receipts. */
+         (SELECT COUNT(*) FROM payments WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM collection_attempt_retirements WHERE patient_id = $1) AS payments,
          (SELECT COUNT(*) FROM invoices WHERE patient_id = $1) AS invoices,
          /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
          (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
@@ -7460,31 +7518,18 @@ export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]>
 
 /**
  * يُغلق موعدًا مضى: «تمّت» أو «لم يحضر».
- *
- * الشرطان في جملة الـUPDATE نفسها لا في فحصٍ قبلها: بين القراءة والكتابة قد تكون
- * الاستقبالُ سجّلت وصوله من شاشةٍ أخرى، فيُكتب «لم يحضر» على مريضٍ جالسٍ على
- * الكرسي — وتلك زيارةٌ حيّة معلّقة بموعدٍ يقول إن صاحبه لم يأتِ. وشرطُ «مضى»
- * يمنع إغلاق موعد الغد من قائمةٍ قديمة بقيت مفتوحة في متصفّح.
+ * فحص التاريخ والحالة تحت قفل الموعد في معاملة الانتقال نفسها، فلا يتجاوز
+ * نقلٌ متزامن إلى المستقبل هذا الحارس، ولا يكتب الغياب فوق وصول مسجّل.
  */
 export async function resolvePastBooking(
   id: number,
   outcome: "done" | "no_show",
   who: TransitionActor = { actor: "الاستقبال" },
 ): Promise<boolean> {
-  await ensureSchema();
-  /* شرطٌ زائدٌ على شرط الحالة: هذا الباب لِما **مضى** ولم يُغلَق. موعد اليوم يُغلق
-     من شاشة اليوم لا من قائمة المعلّقة، وإلّا أُغلق موعدٌ لم يحن بعد. */
-  const { rows } = await getPool().query<{ id: number }>(
-    `SELECT id FROM appointments
-      WHERE id = $1 AND status = 'booked'
-        AND scheduled_date < (NOW() AT TIME ZONE $2)::date`,
-    [id, CLINIC_TIME_ZONE],
-  );
-  if (!rows[0]) return false;
   const result = await transitionAppointment(id, outcome, {
     ...who,
     reason: who.reason ?? null,
-  });
+  }, { pastBookingOnly: true });
   return result.ok;
 }
 
@@ -9521,6 +9566,8 @@ export async function recordPayment(input: {
    * مرفوض (refund_requires_origin). الرد الجزئي مسموح بما تبقى من الأصل.
    */
   reversalOfId?: number | null;
+  /** Human collection entry points only (HTTP). Undefined = no advisory review applies. */
+  similarityReview?: SimilarCollectionReview;
 }): Promise<{
   payment: Payment | null;
   reason:
@@ -9566,7 +9613,8 @@ export async function recordPayment(input: {
      مطالبات متزامنة على PostgreSQL حقيقي. */
   const outcome = await runPaymentTransaction(
     { ...input, planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
-    { idempotencyKey, reversalOfId, receiptAudit: { actorRole: input.actorRole ?? null } },
+    { idempotencyKey, reversalOfId, receiptAudit: { actorRole: input.actorRole ?? null },
+      ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}) },
   );
 
   /* الاتصال محرَّر الآن — الترطيب (قراءة السند كاملًا) خارج الحجز. */
@@ -9600,7 +9648,8 @@ export async function recordSettingsOwnedPayment(
     { ...input, kind: "payment", exchangeRate: observedExchangeRate,
       planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
     { idempotencyKey, reversalOfId: null, settingsOwnedFx: true,
-      receiptAudit: { actorRole: input.actorRole ?? null } },
+      receiptAudit: { actorRole: input.actorRole ?? null },
+      ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}) },
   );
   if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
   return { payment: await getPayment(outcome.paymentId), reason: null,
@@ -9967,6 +10016,8 @@ type PaymentTransactionPrepared = {
   requestHashOverride?: string;
   /** Only ordinary receipts request a generic atomic event; purpose callers own theirs. */
   receiptAudit?: { actorRole: string | null };
+  /** Human collection entry points only: advisory similar-receipt review (lib/similar-collection). */
+  similarityReview?: SimilarCollectionReview;
 };
 type SettingsPaymentOutcome = PaymentOutcome | { kind: "reason"; reason: "exchange_rate_required" };
 // Existing numeric-rate callers retain their outcome contract and cannot enable
@@ -10359,6 +10410,14 @@ async function runPaymentTransaction(
       }
     }
 
+    // Advisory review: the last check before writing — under the shift lock, after exact-key
+    // replay and every refusal above, so a confirmed review is never followed by a refusal.
+    // Without an open shift nothing can be written (no_shift below), so no review is asked.
+    if (input.kind === "payment" && lockedShiftId !== null) {
+      await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+        currency: input.currency, review: prepared.similarityReview });
+    }
+
     /* الإدراج محصور في الوردية المقفولة أعلاه — لا اكتشاف ولا قفل لوردية
        لاحقة بعد أقفال أهداف التسوية. المعرّف الفارغ لا يُنتج صفًا، فيبقى
        فحص مفتاح الإعادة الثاني أدناه قبل رفض no_shift كما هو. */
@@ -10529,6 +10588,7 @@ async function recoveryReplay(
 
 async function runRecoveryTransaction(
   client: DbClient, input: RecoveryWriteInput, key: string, requestHash: string,
+  similarityReview?: SimilarCollectionReview,
 ): Promise<RecoveryOutcome> {
   const previous = await recoveryReplay(client, input, key, requestHash);
   if (previous) return previous;
@@ -10609,7 +10669,9 @@ async function runRecoveryTransaction(
     patientId: input.patientId, invoiceId: target.invoiceId, planId: target.planId, openingCurrency: null,
     kind: "payment", amountMinor: input.amountMinor, currency: input.currency, baseCurrency: CLINIC_BASE_CURRENCY,
     exchangeRate, method: input.method, note: input.note, createdBy: input.createdBy,
-  }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: true, requestHashOverride: requestHash }, client);
+  }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: true, requestHashOverride: requestHash,
+    // Advisory review runs inside the shared payment writer, as its last check before the insert.
+    ...(similarityReview ? { similarityReview } : {}) }, client);
   if (outcome.kind === "reason") return outcome;
   if (outcome.kind === "replay") return await recoveryReplay(client, input, key, requestHash)
     ?? { kind: "reason", reason: "recovery_review_required" };
@@ -10641,7 +10703,8 @@ async function runRecoveryTransaction(
 /** Explicit, append-only recovery on an already issued invoice. Ordinary receipts
  * retain their existing target, fingerprint, overpayment and manual-status semantics.
  */
-export async function recordReversedInstallmentRecovery(input: RecoveryWriteInput & { idempotencyKey: string }): Promise<{
+export async function recordReversedInstallmentRecovery(input: RecoveryWriteInput & { idempotencyKey: string },
+  options: { similarityReview?: SimilarCollectionReview } = {}): Promise<{
   payment: Payment | null; reason: RecoveryPaymentRefusal | null; replayed?: boolean;
 }> {
   if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0 || !isCurrency(input.currency)
@@ -10655,7 +10718,7 @@ export async function recordReversedInstallmentRecovery(input: RecoveryWriteInpu
   let outcome: RecoveryOutcome;
   try {
     await client.query("BEGIN");
-    outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash);
+    outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash, options.similarityReview);
     await client.query(outcome.kind === "reason" ? "ROLLBACK" : "COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -10797,6 +10860,7 @@ export { MINOR_UNITS };
 
 import type { ExpenseCategory, PartyKind } from "./expenses";
 import { partyStatementTotals, type PartyCurrencyTotals } from "./party-statement";
+import { readStatementHistoricalAgreements, StatementHistoricalDetailsError, type HistoricalStatementAgreement } from "./statement-historical-details";
 
 export interface Party {
   id: number;
@@ -15099,7 +15163,9 @@ export async function patientHasVisitToday(patientId: number, client?: DbClient)
     : rows[0]?.ok === true;
 }
 
-export async function doctorOwnsPatient(partyId: number, patientId: number, client?: DbClient): Promise<boolean> {
+export async function doctorOwnsPatient(
+  partyId: number, patientId: number, client?: DbClient, ownershipLockMode?: "nowait",
+): Promise<boolean> {
   if (!client) await ensureSchema();
   // One canonical definition: the legacy EXISTS and transactional witness locks use
   // identical predicates. Any one protected positive witness is sufficient.
@@ -15114,7 +15180,7 @@ export async function doctorOwnsPatient(partyId: number, patientId: number, clie
   if (client) {
     for (const { table, alias, predicate } of witnesses) {
       const { rows } = await client.query(`SELECT ${alias}.id FROM ${table} ${alias}
-        WHERE ${predicate} ORDER BY ${alias}.id LIMIT 1 FOR SHARE`, [partyId, patientId]);
+        WHERE ${predicate} ORDER BY ${alias}.id LIMIT 1 FOR SHARE${ownershipLockMode === "nowait" ? " NOWAIT" : ""}`, [partyId, patientId]);
       if (rows[0]) return true;
     }
     return false;
@@ -16660,6 +16726,8 @@ export interface ClinicalVisit {
   signedAt: string | null;
   signedBy: string | null;
   invoiceId: number | null;
+  /** Same-patient documentary validation; never a coverage or payment decision. */
+  invoiceReferenceState?: import("./visit-financial-presentation").VisitInvoiceReferenceState;
   arrivedAt: string;
   procedures: ProcedureLine[];
   totalMinor: number;
@@ -16680,6 +16748,8 @@ export interface ClinicalVisit {
   planTitle: string | null;
   /** تحذير فوترةٍ مزدوجة إن كانت البنود المطابِقة على خطة أقساط. */
   planWarning: string | null;
+  /** Server-derived signing gate; never a claim that the amended service is clinically linked. */
+  amendedServiceConflict: boolean;
   /** حالة التقويم المفتوحة إن كان المريض مريض تقويم. */
   ortho: VisitOrtho | null;
   /** ── الرحلة V2 ── */
@@ -16786,6 +16856,7 @@ interface ClinicalRow {
   chief_complaint: string | null; examination: string | null; diagnosis: string | null;
   treatment_done: string | null; next_plan: string | null; addendum: string | null;
   doctor_id: number | null; signed_at: Date | null; signed_by: string | null;
+  invoice_reference_state: import("./visit-financial-presentation").VisitInvoiceReferenceState;
   invoice_id: number | null; arrived_at: Date; billing_currency: string | null;
 }
 
@@ -16824,7 +16895,11 @@ export async function getClinicalVisit(
   const { rows } = await pool.query<ClinicalRow>(
     `SELECT id, patient_id, patient_name, patient_phone, chief_complaint, examination, diagnosis,
             treatment_done, next_plan, addendum, doctor_id, signed_at, signed_by,
-            invoice_id, arrived_at, billing_currency
+            invoice_id, arrived_at, billing_currency,
+            CASE WHEN invoice_id IS NULL THEN 'missing' ELSE COALESCE((
+              SELECT CASE WHEN i.status = 'cancelled' THEN 'cancelled' ELSE 'current' END
+                FROM invoices i WHERE i.id = visits.invoice_id AND i.patient_id = visits.patient_id
+            ), 'review') END AS invoice_reference_state
        FROM visits WHERE id = $1`,
     [visitId],
   );
@@ -16887,6 +16962,7 @@ export async function getClinicalVisit(
     signedAt: row.signed_at?.toISOString() ?? null,
     signedBy: row.signed_by,
     invoiceId: row.invoice_id,
+    invoiceReferenceState: row.invoice_reference_state,
     arrivedAt: row.arrived_at.toISOString(),
     procedures,
     totalMinor: visitTotal(procedures),
@@ -16895,6 +16971,7 @@ export async function getClinicalVisit(
     planItemsMatched: plan.matched,
     planTitle: plan.title,
     planWarning: plan.warning,
+    amendedServiceConflict: plan.amendedServiceConflict,
     ortho,
     plannedVisit: workflow.plannedVisit,
     previousVisit: workflow.previousVisit,
@@ -16966,13 +17043,16 @@ async function visitSuggestionsFor(
  */
 /**
  * (P1-B) حالة التقويم «ممولة باتفاق» حين تربطها خطةٌ لنفس المريض، غير ملغاة، لها أقساط.
- * (INV-LINK) أو حين يكون بند التقويم في خطتها (أو في الحالة التخصصية المجسورة إليها) مفوترًا مسبقًا بفاتورةٍ حيّة:
- * الباقة مدفوعة بفاتورتها، فالشدّات مشمولة لا «خارج العقد».
+ * (FIN-INT-4) أو اعتمادٌ ماليٌّ صريح لكامل أصل الخطة: الفاتورة أو الاتفاق المعتمد هو الأصل،
+ * والأقساط جدول تحصيل فقط — فلا تصير الشدّة «خارج العقد» لغياب الجدول. هو الشرط نفسه في
+ * PLAN_FUNDED_BY_AGREEMENT_SQL. مرجع فاتورة بند وحده لا يموّل الشدّات.
  * الربط بخطة مريضٍ آخر مرفوضٌ عند الكتابة، والشرط هنا يكرّره قراءةً فلا يموّلها صفٌّ قديم.
  */
 export const ORTHO_CASE_FUNDED_SQL =
-  `EXISTS (SELECT 1 FROM treatment_plans fp JOIN plan_installments fpi ON fpi.plan_id = fp.id
-    WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled')`;
+  `EXISTS (SELECT 1 FROM treatment_plans fp
+    WHERE fp.id = c.plan_id AND fp.patient_id = c.patient_id AND fp.status <> 'cancelled'
+      AND (EXISTS (SELECT 1 FROM plan_installments fpi WHERE fpi.plan_id = fp.id)
+        OR EXISTS (SELECT 1 FROM approved_agreement_principals fap WHERE fap.plan_id = fp.id AND fap.patient_id = fp.patient_id)))`;
 
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
 export async function orthoAdjustmentBillingClass(
@@ -17084,9 +17164,9 @@ async function unlinkedPlanSessionConflicts(
   db: DbClient | DbPool,
   patientId: number | null,
   procedures: readonly ProcedureLine[],
-): Promise<string[]> {
+): Promise<{ messages: string[]; amendedService: boolean }> {
   const unlinked = procedures.filter((line) => line.planItemId === null);
-  if (!patientId || unlinked.length === 0) return [];
+  if (!patientId || unlinked.length === 0) return { messages: [], amendedService: false };
   // Agreement coverage belongs to the plan, not an invoice item. Preserve it
   // even after completion; same-service work needs an explicit separate identity.
   // Project both current and immutable identities so later same-service matching retains drifted history.
@@ -17116,13 +17196,70 @@ async function unlinkedPlanSessionConflicts(
       ORDER BY i.id`,
     [patientId],
   );
-  return unlinkedSessionConflicts(
+  // An amendment preserves the original clinical item. Its new service is an
+  // additional protected financial identity, never permission to substitute it.
+  // Keep immutable patient ownership even if mutable source lineage has drifted.
+  // Runtime schema requires 0066. Missing or unreadable history is an error,
+  // never evidence that an unlinked procedure is safe to bill.
+  const amended = (await db.query<{
+    id: number; service_id: number; service_name: string; lineage_valid: boolean;
+    has_legacy_lineage: boolean; legacy_context: unknown;
+  }>(
+    `SELECT e.plan_item_id AS id, e.new_service_id AS service_id,
+       COALESCE(label.description, 'تعديل اتفاق العلاج #' || e.id::text) AS service_name,
+       ${PLAN_ITEM_LEGACY_LINEAGE_SQL} AS has_legacy_lineage,
+       CASE WHEN EXISTS (SELECT 1 FROM legacy_treatment_agreements anchor
+         WHERE anchor.plan_item_id = e.plan_item_id AND i.plan_id = e.plan_id
+           AND anchor.patient_id = e.patient_id AND anchor.service_id = i.service_id
+           AND anchor.case_id IS NOT DISTINCT FROM e.case_id)
+         THEN ${PLAN_ITEM_LEGACY_CONTEXT_SQL} ELSE NULL END AS legacy_context,
+       COALESCE(i.plan_id = e.plan_id AND t.patient_id = e.patient_id
+         AND i.case_id IS NOT DISTINCT FROM e.case_id
+         AND (e.case_id IS NULL OR c.id IS NOT NULL)
+         AND a.patient_id = e.patient_id AND a.invoice_id = e.original_invoice_id
+         AND original.patient_id = e.patient_id AND original.base_currency = a.currency
+         AND delta.patient_id = e.patient_id AND delta.base_currency = a.currency
+         AND delta.total_minor - delta.discount_minor = e.delta_minor, FALSE) AS lineage_valid
+     FROM agreement_delta_amendments e
+     LEFT JOIN plan_items i ON i.id = e.plan_item_id
+     LEFT JOIN treatment_plans t ON t.id = e.plan_id
+     LEFT JOIN clinical_cases c ON c.id = e.case_id AND c.patient_id = e.patient_id
+     LEFT JOIN approved_agreement_principals a ON a.plan_id = e.plan_id
+     LEFT JOIN invoices original ON original.id = e.original_invoice_id
+     LEFT JOIN invoices delta ON delta.id = e.delta_invoice_id
+     LEFT JOIN LATERAL (
+       SELECT min(ii.description) AS description FROM invoice_items ii
+       WHERE ii.invoice_id = e.delta_invoice_id AND ii.service_id = e.new_service_id
+       HAVING count(*) = 1
+     ) label ON TRUE
+     WHERE e.patient_id = $1 AND e.new_service_id = ANY($2::int[])
+     ORDER BY e.id`,
+    [patientId, [...new Set(unlinked.map(line => line.serviceId))]],
+  )).rows;
+  // Price-only amendments retain the normal original-service warning. Do not
+  // call clinical linkage unsupported when no service identity changed.
+  const amendedItems = amended.filter(row => !row.lineage_valid || !rows.some(current =>
+    current.id === row.id && current.service_id === row.service_id)).map(row => ({
+    id: row.id, serviceId: row.service_id, serviceName: row.service_name,
+    // Ordinary amendments store no immutable site. Current item/case agreement
+    // cannot establish historical disjointness, even if both labels still agree.
+    // Only source-bound immutable legacy coverage may narrow the existing
+    // unknown-scope review rule; never guess or backfill historical geometry.
+    toothCode: null, caseSite: null,
+    hasLegacyLineage: row.has_legacy_lineage, legacyCoverage: legacyCoverageStateFromContext(row.legacy_context),
+    status: "planned", sessionCount: 1, doneSessions: 0, hasInvoiceLineage: true,
+    amendedService: true,
+  }));
+  const unlinkedKeys = unlinked.map(line => ({ serviceId: line.serviceId, toothCode: line.toothCode }));
+  const messages = unlinkedSessionConflicts(
     rows.map((row) => ({
       id: row.id, serviceId: row.service_id, toothCode: row.tooth_code, serviceName: row.service_name,
       status: row.status, billingStatus: row.financial_review ? "needs_financial_review" : row.billing_status, hasInvoiceLineage: row.has_invoice_lineage, fundedByAgreement: row.funded_by_agreement, hasLegacyLineage: row.has_legacy_lineage, legacyCoverage: legacyCoverageStateFromContext(row.legacy_context), caseSite: row.case_site, sessionCount: row.session_count, doneSessions: Number(row.done_sessions),
     })),
     unlinked.map((line) => ({ serviceId: line.serviceId, toothCode: line.toothCode })),
   );
+  const amendmentMessages = unlinkedSessionConflicts(amendedItems, unlinkedKeys);
+  return { messages: [...new Set([...messages, ...amendmentMessages])], amendedService: amendmentMessages.length > 0 };
 }
 
 /**
@@ -17143,11 +17280,11 @@ async function visitPlanContext(
   pool: DbPool,
   patientId: number | null,
   procedures: ProcedureLine[],
-): Promise<{ matched: number; title: string | null; warning: string | null }> {
-  if (!patientId || procedures.length === 0) return { matched: 0, title: null, warning: null };
+): Promise<{ matched: number; title: string | null; warning: string | null; amendedServiceConflict: boolean }> {
+  if (!patientId || procedures.length === 0) return { matched: 0, title: null, warning: null, amendedServiceConflict: false };
   /* (P1-D) بندٌ متعدد الجلسات أُضيف حرًّا: التوقيع سيرفضه — قلها قبل أن يضغط الطبيب. */
   const sessionConflicts = await unlinkedPlanSessionConflicts(pool, patientId, procedures);
-  if (sessionConflicts.length > 0) return { matched: 0, title: null, warning: sessionConflicts.join(" ") };
+  if (sessionConflicts.messages.length > 0) return { matched: 0, title: null, warning: sessionConflicts.messages.join(" "), amendedServiceConflict: sessionConflicts.amendedService };
 
   const { rows } = await pool.query<{
     id: number; plan_id: number; title: string; service_id: number | null;
@@ -17163,7 +17300,7 @@ async function visitPlanContext(
       ORDER BY i.id`,
     [patientId],
   );
-  if (rows.length === 0) return { matched: 0, title: null, warning: null };
+  if (rows.length === 0) return { matched: 0, title: null, warning: null, amendedServiceConflict: false };
 
   const matchedIds = matchPlanItems(
     rows.map((row) => ({
@@ -17175,7 +17312,7 @@ async function visitPlanContext(
       serviceId: line.serviceId, toothCode: line.toothCode, quantity: line.quantity,
     })),
   );
-  if (matchedIds.length === 0) return { matched: 0, title: null, warning: null };
+  if (matchedIds.length === 0) return { matched: 0, title: null, warning: null, amendedServiceConflict: false };
 
   const matchedSet = new Set(matchedIds);
   const hit = rows.find((row) => matchedSet.has(row.id));
@@ -17183,6 +17320,7 @@ async function visitPlanContext(
 
   return {
     matched: matchedIds.length,
+    amendedServiceConflict: false,
     title: hit?.title ?? null,
     warning: onInstalments
       ? "هذه الإجراءات ضمن خطة لها جدول أقساط — والتوقيع سيصدر فاتورة إضافية عليها. إن كان العمل داخل الاتفاق فحصّله بقسط لا بفاتورة."
@@ -18048,7 +18186,7 @@ export async function signClinicalVisit(input: {
   reason:
     | "not_found" | "already_signed" | "empty" | "no_patient"
     | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-    | "ortho_case_invalid" | "plan_session_unlinked" | "invalid_decision_reason" | null;
+    | "ortho_case_invalid" | "plan_session_unlinked" | "amended_plan_session_unlinked" | "invalid_decision_reason" | null;
   /** (P1-D) إجراءاتٌ حرّة تطابق بنود خطةٍ متعددة الجلسات — مع جلستها المنتظرة. */
   sessionConflicts?: string[];
 }> {
@@ -18057,7 +18195,7 @@ export async function signClinicalVisit(input: {
     reason:
       | "not_found" | "already_signed" | "empty" | "no_patient"
       | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-      | "ortho_case_invalid" | "plan_session_unlinked" | "invalid_decision_reason" | null,
+      | "ortho_case_invalid" | "plan_session_unlinked" | "amended_plan_session_unlinked" | "invalid_decision_reason" | null,
     extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[]; sessionConflicts?: string[] },
   ) => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
@@ -18255,9 +18393,10 @@ export async function signClinicalVisit(input: {
 
     /* (P1-D) علاج العصب بندٌ واحد بثلاث جلسات — لا يُفوتَر ثلاث مرات بإجراءٍ حرّ في كل زيارة. */
     const sessionConflicts = await unlinkedPlanSessionConflicts(client, patientId, existing.procedures);
-    if (sessionConflicts.length > 0) {
+    if (sessionConflicts.messages.length > 0) {
       await client.query("ROLLBACK");
-      return emptyResult("plan_session_unlinked", { visit: existing, sessionConflicts });
+      return emptyResult(sessionConflicts.amendedService ? "amended_plan_session_unlinked" : "plan_session_unlinked",
+        { visit: existing, sessionConflicts: sessionConflicts.messages });
     }
 
     const sessionOutcome = await progressTreatmentSessions({
@@ -18973,6 +19112,13 @@ async function deductServiceMaterials(input: {
     qtyByService.set(line.serviceId, (qtyByService.get(line.serviceId) ?? 0) + line.quantity);
   }
 
+  // Check the same captured mappings used below, after procedure normalization.
+  // Feature-off performs no proposal query or extra item locking.
+  await guardLegacyClinicalMaterials(input.client, mappings.filter(mapping => {
+    const qty = Number(mapping.qty_per_unit) * (qtyByService.get(mapping.service_id) ?? 0);
+    return Number.isFinite(qty) && qty > 0;
+  }).map(mapping => mapping.item_id));
+
   let movements = 0;
   for (const mapping of mappings) {
     const executed = qtyByService.get(mapping.service_id) ?? 0;
@@ -19438,11 +19584,95 @@ export async function setPatientOpeningBalanceInTx(
   return { patientId: rows[0].patient_id, historyId: history.id };
 }
 
+/**
+ * (FIN-INT legacy) A manual correction of a legacy balance never creates a credit or orphans
+ * receipts: the corrected principal must still cover the net receipts settled against it,
+ * and a balance that any receipt (even a later refunded one) references is not deleted.
+ */
+export type OpeningCorrectionRefusal = "below_settled" | "receipts_reference_opening";
+
+export class OpeningCorrectionRefused extends Error {
+  constructor(readonly code: OpeningCorrectionRefusal, message: string) { super(message); }
+}
+
+export interface OpeningCorrectionPreview {
+  patientId: number;
+  currency: Currency;
+  currentAmountMinor: number | null;
+  currentAsOfDate: string | null;
+  /** Net receipts settled against this balance, in its currency. */
+  settledMinor: number;
+  receiptCount: number;
+  /** null: delete the balance. */
+  afterAmountMinor: number | null;
+  currentRemainingMinor: number;
+  afterRemainingMinor: number;
+  allowed: boolean;
+  code: OpeningCorrectionRefusal | null;
+  message: string | null;
+}
+
+async function openingCorrectionPreviewInTx(
+  client: DbClient | DbPool, patientId: number, currency: Currency, afterAmountMinor: number | null,
+): Promise<OpeningCorrectionPreview> {
+  const { rows: [opening] } = await client.query<{ amount_minor: string; as_of_date: string }>(
+    `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`,
+    [patientId, currency]);
+  const { rows: receipts } = await client.query<{ id: number; kind: string; amount_minor: string; base_amount_minor: string; currency: string }>(
+    `SELECT id, kind, amount_minor::text, base_amount_minor::text, currency FROM payments
+      WHERE patient_id = $1 AND opening_currency = $2 ORDER BY id`, [patientId, currency]);
+  let settledMinor = 0;
+  for (const receipt of receipts) {
+    const minor = settlePaymentMinor({ id: receipt.id, amountMinor: toMinor(receipt.amount_minor),
+      baseAmountMinor: toMinor(receipt.base_amount_minor), currency: requireCurrency(receipt.currency, "سند رصيد سابق", receipt.id) }, currency);
+    settledMinor += receipt.kind === "refund" ? -minor : minor;
+  }
+  if (!Number.isSafeInteger(settledMinor)) throw new Error("Invalid opening settlement");
+  const current = opening ? toMinor(opening.amount_minor) : null;
+  const after = afterAmountMinor ?? 0;
+  let code: OpeningCorrectionRefusal | null = null;
+  let message: string | null = null;
+  if (afterAmountMinor === null && receipts.length > 0) {
+    code = "receipts_reference_opening";
+    message = `على هذا الرصيد ${receipts.length} سند قبض أو استرداد مثبت؛ لا يُحذف حتى لا تبقى سندات بلا مصدر. صحّح المبلغ بدلًا من الحذف.`;
+  } else if (after < settledMinor) {
+    code = "below_settled";
+    message = `المبلغ المصحّح أقل من المحصّل المثبت على هذا الرصيد (${formatMoney(settledMinor, currency)})؛ لا يُنشأ رصيدٌ دائن بالتعديل. راجع السندات أو سجّل استردادًا صريحًا.`;
+  }
+  return {
+    patientId, currency, currentAmountMinor: current, currentAsOfDate: opening?.as_of_date ?? null,
+    settledMinor, receiptCount: receipts.length, afterAmountMinor,
+    currentRemainingMinor: Math.max(0, (current ?? 0) - settledMinor), afterRemainingMinor: Math.max(0, after - settledMinor),
+    allowed: code === null, code, message,
+  };
+}
+
+/** Dry run: the same rule the correction applies, from one read-only snapshot. Nothing is written. */
+export async function previewOpeningCorrection(
+  patientId: number, currency: Currency, afterAmountMinor: number | null,
+): Promise<OpeningCorrectionPreview> {
+  await ensureSchema();
+  // The shared snapshot helper keeps the original error and discards a client whose ROLLBACK failed.
+  return withFinancialReadSnapshot(getPool(), (runner) =>
+    openingCorrectionPreviewInTx(runner, patientId, currency, afterAmountMinor), usesSharedLocalDatabaseConnection());
+}
+
+async function assertOpeningCorrectionAllowedInTx(
+  client: DbClient, patientId: number, currency: Currency, afterAmountMinor: number | null,
+): Promise<void> {
+  // The writer's own locks, taken first: a receipt against this balance waits behind them.
+  await lockedOpeningBalance(client, patientId, currency);
+  const preview = await openingCorrectionPreviewInTx(client, patientId, currency, afterAmountMinor);
+  if (!preview.allowed) throw new OpeningCorrectionRefused(preview.code!, preview.message!);
+}
+
 export async function setPatientOpeningBalance(input: SetOpeningBalanceInput): Promise<OpeningBalance | null> {
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
-  const saved = await withTransaction(getPool(), async (client): Promise<number | null> =>
-    (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null);
+  const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
+    if (!input.addOnly) await assertOpeningCorrectionAllowedInTx(client, input.patientId, currency, input.amountMinor);
+    return (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null;
+  });
   return saved === null ? null : getPatientOpeningBalance(saved, currency);
 }
 
@@ -19477,8 +19707,10 @@ export async function clearPatientOpeningBalance(
   expectedBefore?: OpeningBalanceExpectation | null,
 ): Promise<boolean> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client): Promise<boolean> =>
-    (await clearPatientOpeningBalanceInTx(client, patientId, actor, reason, currency, expectedBefore)) !== null);
+  return withTransaction(getPool(), async (client): Promise<boolean> => {
+    await assertOpeningCorrectionAllowedInTx(client, patientId, currency, null);
+    return (await clearPatientOpeningBalanceInTx(client, patientId, actor, reason, currency, expectedBefore)) !== null;
+  });
 }
 
 export async function listOpeningBalanceHistory(patientId: number): Promise<OpeningBalanceHistoryEntry[]> {
@@ -19521,6 +19753,8 @@ export interface TreatmentPlan {
   debtSource?: "approved_agreement" | "invoice" | "classic_installments" | null;
   invoiceFinancial?: import("./plan-financial-position").PlanInvoiceFinancialPosition | null;
   approvedAgreement?: Awaited<ReturnType<typeof import("./approved-agreements").approvedAgreementPosition>>;
+  /** Money-free: an explicit financial approval of the full principal exists (FIN-INT-4). */
+  agreementApproved?: boolean;
   id: number;
   patientId: number;
   patientName: string;
@@ -19603,7 +19837,7 @@ const PLAN_SELECT = `
                      FROM payments y WHERE y.plan_id = t.id), 0) AS paid_minor
     FROM treatment_plans t JOIN patients p ON p.id = t.patient_id`;
 
-async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): Promise<TreatmentPlan[]> {
+async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient, batchInvoiceSources = false): Promise<TreatmentPlan[]> {
   if (rows.length === 0) return [];
   const { rows: installmentRows } = await reader.query<{
     id: number; plan_id: number; number: number; due_date: Date; amount_minor: string;
@@ -19637,9 +19871,14 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): P
   }
 
   const approvedIds = new Set((await reader.query<{plan_id:number}>("SELECT plan_id FROM approved_agreement_principals WHERE plan_id=ANY($1::int[])",[rows.map(r=>r.id)])).rows.map(r=>r.plan_id));
+  // Statement-only batching keeps every ownership/source check on this same snapshot.
+  const invoiceSources = batchInvoiceSources ? await (await import("./plan-financial-position")).readPlanInvoiceFinancialPositions(reader,
+    rows.filter(row=>!approvedIds.has(row.id)).map(row=>({id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)})),today) : null;
   return Promise.all(rows.map(async (row) => {
     const approvedAgreement = approvedIds.has(row.id) ? await (await import("./approved-agreements")).approvedAgreementPosition(row.id,today,reader) : null;
-    const invoiceSource = approvedAgreement ? null : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
+    // A known approval without its reader result is unknown, never a classic fallback.
+    if (approvedIds.has(row.id) && !approvedAgreement) throw new Error("Approved plan financial source unavailable");
+    const invoiceSource = approvedAgreement ? null : invoiceSources?.has(row.id) ? invoiceSources.get(row.id)! : await (await import("./plan-financial-position")).readPlanInvoiceFinancialPosition(reader,{id:row.id,patientId:row.patient_id,currency:requireCurrency(row.base_currency,"خطة",row.id)},today);
     const invoiceFinancial = invoiceSource?.kind === "classic_installments" ? null : invoiceSource;
     const debtSource = approvedAgreement ? (approvedAgreement.available ? "approved_agreement" as const : null)
       : invoiceSource?.kind === "classic_installments" ? "classic_installments" as const
@@ -19648,8 +19887,18 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): P
     const items = itemsByPlan.get(row.id) ?? [];
     const paidMinor = approvedAgreement?.paidMinor ?? (invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.paidMinor : toMinor(row.paid_minor));
     const lastReminderAt = row.last_reminder_at ? row.last_reminder_at.toISOString() : null;
+    // Keep schedule attribution on the original source. Delta receipts must not
+    // mark original installments paid. Current debt comes from the approved reader.
+    const originalProgress = planProgress(
+      { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments, lastReminderAt },
+      approvedAgreement?.originalPaidMinor ?? paidMinor, today,
+    );
+    const progress = approvedAgreement ? { ...originalProgress,
+      totalMinor: approvedAgreement.totalMinor, paidMinor: approvedAgreement.paidMinor,
+      remainingMinor: approvedAgreement.remainingMinor,
+    } : invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.progress : originalProgress;
     return {
-      approvedAgreement, invoiceFinancial, debtSource,
+      approvedAgreement, invoiceFinancial, debtSource, agreementApproved: approvedIds.has(row.id),
       id: row.id,
       patientId: row.patient_id,
       patientName: row.full_name,
@@ -19666,11 +19915,7 @@ async function hydratePlans(rows: PlanRow[], today: string, reader: DbClient): P
       lastReminderAt,
       installments,
       paidMinor,
-      progress: invoiceFinancial?.kind === "invoice_backed" ? invoiceFinancial.progress : planProgress(
-        { totalMinor: toMinor(row.total_minor), status: row.status as PlanStatus, installments, lastReminderAt },
-        paidMinor,
-        today,
-      ),
+      progress,
       items,
       itemsProgress: planItemsProgress(items),
       totalFromItems: row.total_from_items,
@@ -19757,8 +20002,38 @@ async function readPlans(where:string,params:unknown[],today:string):Promise<Tre
     return hydratePlans(rows,today,reader);
   },usesSharedLocalDatabaseConnection());
 }
+const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
+/**
+ * A patient statement's ledger, plan currencies and plans from one read-only snapshot, so a
+ * payment committed meanwhile is seen by all of them or by none. Standalone readers are unchanged.
+ */
+/** historicalAgreements: `true` (current print) fails closed on a malformed historical fact; `"tolerant"`
+ * (patient portal) reports such a fact as `null` (section unavailable) while every other figure still comes
+ * from this same snapshot. Only the reader's own typed validation error is tolerated, never a database
+ * error, so the snapshot transaction is never used after a failed statement. */
+export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant"}={}){
+  await ensureSchema();
+  return withFinancialReadSnapshot(getPool(),async runner=>{
+    const client=runner as DbClient;
+    const ledger=await patientLedgerInSnapshot(patientId,client);
+    const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
+    // The same complete patient plan set and fail-closed currency validation as
+    // patientPlanCurrencies; reuse rows already required for statement details.
+    const planCurrencies=new Map(rows.map(row=>[row.id,{patientId,currency:requireCurrency(row.base_currency,"خطة علاج",row.id)}]));
+    const plans=await hydratePlans(rows,today,client,true);
+    // Opt-in: historical agreements are saved facts read on this same snapshot client.
+    let historicalAgreements:HistoricalStatementAgreement[]|null|undefined;
+    if(options.historicalAgreements==="tolerant"){
+      try{historicalAgreements=await readStatementHistoricalAgreements(client,patientId);}
+      catch(error){if(!(error instanceof StatementHistoricalDetailsError))throw error;historicalAgreements=null;}
+    }else if(options.historicalAgreements){
+      historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
+    }
+    return {ledger,planCurrencies,plans,historicalAgreements};
+  });
+}
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
-  return readPlans("WHERE t.patient_id=$1 ORDER BY t.created_at DESC",[patientId],today);
+  return readPlans(PATIENT_PLANS_WHERE,[patientId],today);
 }
 export async function getPlan(id:number,today:string):Promise<TreatmentPlan|null> {
   return (await readPlans("WHERE t.id=$1",[id],today))[0]??null;
@@ -20424,6 +20699,8 @@ export async function recordPlanInstallment(input: {
    * idempotency_conflict. بلا مفتاح يبقى السلوك كما كان.
    */
   idempotencyKey?: string | null;
+  /** Human collection entry points only (HTTP). Undefined = no advisory review applies. */
+  similarityReview?: SimilarCollectionReview;
 }): Promise<
   | { invoiceId: number; paymentId: number; replayed?: boolean }
   | { reason: "no_shift" | "cross_currency_not_supported" | "idempotency_conflict" | "inactive_plan"
@@ -20609,6 +20886,9 @@ async function runPlanInstallmentTransaction(
   } else {
     return { reason: "cross_currency_not_supported" };
   }
+  // Advisory review: last check before writing (shift held, replay and all refusals done); a throw rolls the caller back.
+  await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
+    currency: input.currency, review: input.similarityReview });
 
   const description = `${input.planTitle} — قسط ${input.installmentNumber}`;
   const { rows: invoices } = await client.query<{ id: number }>(
@@ -20937,6 +21217,13 @@ export interface PlannedVisitView {
   appointmentId: number | null;
   appointmentDate: string | null;
   appointmentTime: string | null;
+  appointmentStatus: AppointmentStatus | null;
+  canRebook: boolean;
+  rebookGeneration: string;
+  rebookBlockedReason: string | null;
+  /** Internal authority hints: API projections strip these before responding. */
+  rebookHasReferral: boolean;
+  rebookReferralReceiverId: number | null;
   visitId: number | null;
   note: string | null;
   createdAt: string;
@@ -20947,6 +21234,8 @@ interface PlannedVisitRow {
   title: string; doctor_id: number | null; doctor_name: string | null;
   duration_minutes: number; status: string; appointment_id: number | null;
   scheduled_date: string | null; scheduled_time: string | null;
+  appointment_status: AppointmentStatus | null; rebook_block_reason: PlannedRebookBlockReason | null;
+  rebook_generation: string; rebook_has_referral: boolean; rebook_referral_receiver_id: number | null;
   visit_id: number | null; note: string | null; created_at: Date;
 }
 
@@ -20954,11 +21243,15 @@ const PLANNED_VISIT_SELECT = `
   SELECT v.id, v.patient_id, v.plan_id, t.title AS plan_title, v.sequence, v.title, v.doctor_id,
          d.name AS doctor_name, v.duration_minutes, v.status, v.appointment_id,
          a.scheduled_date::text AS scheduled_date, a.scheduled_time::text AS scheduled_time,
+         a.status AS appointment_status, ${PLANNED_REBOOK_BLOCK_REASON_SQL} AS rebook_block_reason,
+         ${PLANNED_REBOOK_GENERATION_SQL} AS rebook_generation,
+         a.referral_id IS NOT NULL AS rebook_has_referral, r.to_party_id AS rebook_referral_receiver_id,
          v.visit_id, v.note, v.created_at
     FROM planned_visits v
     LEFT JOIN treatment_plans t ON t.id = v.plan_id
     LEFT JOIN parties d ON d.id = v.doctor_id
-    LEFT JOIN appointments a ON a.id = v.appointment_id`;
+    LEFT JOIN appointments a ON a.id = v.appointment_id
+    LEFT JOIN patient_referrals r ON r.id = a.referral_id`;
 
 function toPlannedVisit(row: PlannedVisitRow): PlannedVisitView {
   return {
@@ -20968,6 +21261,12 @@ function toPlannedVisit(row: PlannedVisitRow): PlannedVisitView {
     appointmentId: row.appointment_id,
     appointmentDate: row.scheduled_date,
     appointmentTime: row.scheduled_time?.slice(0, 5) ?? null,
+    appointmentStatus: row.appointment_status,
+    canRebook: row.rebook_block_reason === null,
+    rebookGeneration: row.rebook_generation,
+    rebookBlockedReason: row.rebook_block_reason ? PLANNED_REBOOK_REASONS[row.rebook_block_reason] : null,
+    rebookHasReferral: row.rebook_has_referral,
+    rebookReferralReceiverId: row.rebook_referral_receiver_id,
     visitId: row.visit_id, note: row.note, createdAt: row.created_at.toISOString(),
   };
 }
@@ -21144,23 +21443,61 @@ class PlannedVisitRejected extends Error {
 export async function startVisitFromPlannedVisit(input: {
   plannedVisitId: number;
   actor: string;
-}): Promise<Visit | null | { alreadyActive: true; visitId: number }> {
+  actorRole?: string;
+}): Promise<Visit | null | { alreadyActive: true; visitId: number } | { appointmentConflict: true }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
 
+    // Appointment first, matching arrival/cancellation. Never acquire it while holding the plan.
+    const { rows: appointments } = await client.query<{ id: number; status: AppointmentStatus; patient_id: number; referral_id: number | null }>(
+      `SELECT a.id, a.status, a.patient_id, a.referral_id FROM appointments a
+        WHERE a.planned_visit_id = $1 OR a.id = (SELECT appointment_id FROM planned_visits WHERE id = $1)
+        ORDER BY a.id FOR UPDATE`, [input.plannedVisitId]);
+
     const { rows: plannedRows } = await client.query<{
       id: number; patient_id: number; full_name: string; phone: string | null;
-      title: string; doctor_id: number | null; status: string; visit_id: number | null;
+      title: string; doctor_id: number | null; status: string; visit_id: number | null; appointment_id: number | null;
     }>(
-      `SELECT v.id, v.patient_id, p.full_name, p.phone, v.title, v.doctor_id, v.status, v.visit_id
+      `SELECT v.id, v.patient_id, p.full_name, p.phone, v.title, v.doctor_id, v.status, v.visit_id, v.appointment_id
          FROM planned_visits v JOIN patients p ON p.id = v.patient_id
         WHERE v.id = $1 FOR UPDATE OF v`,
       [input.plannedVisitId],
     );
     const planned = plannedRows[0];
     if (!planned) { await client.query("ROLLBACK"); return null; }
+
+    // Recheck without taking new appointment locks: a concurrent scheduling/retarget
+    // operation may have committed while we waited for the plan. Retry via the API.
+    const { rows: currentLinks } = await client.query<{ id: number }>(
+      `SELECT id FROM appointments WHERE planned_visit_id = $1 OR id = $2 ORDER BY id`,
+      [input.plannedVisitId, planned.appointment_id]);
+    const appointment = appointments[0];
+    if (appointments.length > 1 || currentLinks.length !== appointments.length
+      || currentLinks.some((row, index) => row.id !== appointments[index]?.id)
+      || (appointment && (appointment.patient_id !== planned.patient_id
+        || !["booked", "arrived"].includes(appointment.status)))) {
+      await client.query("ROLLBACK");
+      return { appointmentConflict: true };
+    }
+    if (appointment) {
+      const { rows: linkedVisits } = await client.query<{
+        id: number; status: string; signed_at: Date | null; finished_at: Date | null;
+      }>(
+        `SELECT id, status, signed_at, finished_at FROM visits
+          WHERE appointment_id = $1 OR planned_visit_id = $2 OR id = $3 ORDER BY id`,
+        [appointment.id, input.plannedVisitId, planned.visit_id]);
+      if (linkedVisits.some(visit => visit.signed_at || visit.finished_at || visit.status === "done")) {
+        await client.query("ROLLBACK");
+        return { appointmentConflict: true };
+      }
+      const active = linkedVisits.find(visit => ["waiting", "called", "in_chair"].includes(visit.status));
+      if (active) {
+        await client.query("ROLLBACK");
+        return { alreadyActive: true, visitId: active.id };
+      }
+    }
 
     // زيارةٌ قائمة لهذه الزيارة المخطَّطة: لا ثانية — المريض على الكرسي مرةً واحدة.
     if (planned.visit_id) {
@@ -21179,10 +21516,10 @@ export async function startVisitFromPlannedVisit(input: {
     }
 
     const { rows: created } = await client.query<VisitRow>(
-      `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id, planned_visit_id)
-       VALUES ($1, $2, $3, $4, $5::int, $6) RETURNING *`,
+      `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id, planned_visit_id, appointment_id)
+       VALUES ($1, $2, $3, $4, $5::int, $6, $7) RETURNING *`,
       [planned.full_name, planned.phone, `مخطَّط: ${planned.title}`,
-       planned.patient_id, planned.doctor_id, input.plannedVisitId],
+       planned.patient_id, planned.doctor_id, input.plannedVisitId, appointment?.id ?? null],
     );
 
     await client.query(
@@ -21190,6 +21527,21 @@ export async function startVisitFromPlannedVisit(input: {
       [input.plannedVisitId, created[0].id],
     );
 
+    if (appointment?.status === "booked") {
+      const arrival = await transitionAppointmentInTransaction(client, appointment.id, "arrived", {
+        actor: input.actor, actorRole: input.actorRole,
+      });
+      if (!arrival.ok) {
+        await client.query("ROLLBACK");
+        return { appointmentConflict: true };
+      }
+    } else if (appointment) {
+      // An earlier arrival may have had no visit. Attach its case without repeating the transition.
+      await referralOnAppointmentArrived(client, {
+        referralId: appointment.referral_id, visitId: created[0].id,
+        who: { actor: input.actor, actorRole: input.actorRole },
+      });
+    }
     await client.query("COMMIT");
     return toVisit(created[0]);
   } catch (error) {
@@ -21222,7 +21574,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     totalMinor: number; doneMinor: number; remainingMinor: number;
     baseCurrency: Currency;
     clinicalProgress?: ClinicalProgressView;
-    nextDueDate: string | null; overdueMinor: number;
+    nextDueDate: string | null; overdueMinor: number | null;
   }[];
   plannedVisits: PlannedVisitView[];
   counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
@@ -21330,7 +21682,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
         }>(
           `SELECT
              (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL)::text AS visits,
-             (SELECT COUNT(*) FROM lab_orders WHERE patient_id = $1 AND status IN ('sent', 'received'))::text AS open_lab,
+             (SELECT COUNT(*) FROM lab_orders WHERE patient_id = $1 AND status IN ('needed', 'sent', 'in_progress', 'remake', 'received'))::text AS open_lab,
              (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1 AND removed_at IS NULL)::text AS documents,
              (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1 AND status IN ('active', 'retention'))::text AS ortho`,
           [patientId],
@@ -21351,7 +21703,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     consentAt: plan.consentAt, itemsCount: plan.itemsProgress.count,
     doneItems: plan.itemsProgress.doneCount, totalMinor: plan.totalMinor,
     doneMinor: plan.itemsProgress.doneMinor, remainingMinor: plan.itemsProgress.remainingMinor,
-    nextDueDate: plan.progress.nextDueDate, overdueMinor: plan.progress.overdueMinor,
+    nextDueDate: plan.approvedAgreement?.available === false ? null : plan.progress.nextDueDate,
+    overdueMinor: plan.approvedAgreement?.available === false ? null : plan.progress.overdueMinor,
     // (TD-05) عملة الاتفاق مع الخطة — تعرض بها أرقامها ولا تُحوَّل.
     baseCurrency: plan.baseCurrency,
     clinicalProgress: historicalClinicalProgress(plan.items),
@@ -21435,7 +21788,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   // التنبيهات: ما يجب أن يُقال لا ما يمكن أن يُعرض.
   const alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[] = [];
   for (const plan of activePlanViews) {
-    if (plan.overdueMinor > 0) {
+    if (plan.overdueMinor !== null && plan.overdueMinor > 0) {
       alerts.push({
         kind: "overdue_installment", severity: "danger",
         text: `قسط متأخر في «${plan.title}»: ${formatMoney(plan.overdueMinor, plan.baseCurrency)}`,
@@ -21515,7 +21868,9 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     });
   }
 
-  const patientCases = await listPatientCases(patientId);
+  // These workflow projections do not expose waitingOn; blocker alerts were
+  // already read above. Keep this case read fresh without fetching blockers again.
+  const patientCases = (await listPatientCaseRows(patientId)).map(toSpecialtyCase);
   const assessmentCases = patientCases
     .filter((one) => one.kind === "specialty" && one.needsAssessment === true && one.id !== null && one.orthoCaseId === null && one.legacy !== true)
     .map((one) => ({ id: one.id as number, patientId: one.patientId, kind: "specialty" as const,
@@ -24248,6 +24603,10 @@ export async function createInventoryMovementInTransaction(client: DbClient, inp
   if (!items[0].is_active) {
     return { ok: false, message: "البند موقوف — أعد تفعيله قبل أي حركة عليه." };
   }
+  // Expected refusal remains a business result so keyed purchases can persist
+  // their existing durable rejection receipt. Readiness/SQL failures still throw.
+  const trackingRefusal = await legacyInventoryWriteRefusal(client, [input.itemId]);
+  if (trackingRefusal) return { ok: false, message: trackingRefusal.message };
   const { rows: bal } = await client.query<{ balance: string }>(
     `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
        FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
@@ -26005,6 +26364,11 @@ export async function listProviderBlocks(
      اتصالًا يحجزه بعضُها بعضًا. */
   if (!client) await ensureSchema();
   const runner: Pick<DbClient, "query"> = client ?? getPool();
+  // Match clinic-day-sql: broad indexed bounds, then exact local dates. Midnight
+  // can repeat (e.g. Havana), so AT TIME ZONE alone may miss its first occurrence.
+  // Each date boundary is converted independently; a clinic day need not be 24h.
+  // PostgreSQL timestamps have microsecond precision: the last included instant
+  // of [starts_at, ends_at) keeps a block ending at midnight out of the next day.
   const { rows } = await runner.query<{
     id: string; provider_id: number; starts_at: Date; ends_at: Date; reason: string;
     cancelled_at: Date | null; created_by: string; created_at: Date;
@@ -26012,10 +26376,12 @@ export async function listProviderBlocks(
     `SELECT id::text, provider_id, starts_at, ends_at, reason, cancelled_at, created_by, created_at
        FROM provider_blocks
       WHERE provider_id = $1 AND cancelled_at IS NULL
-        AND starts_at < ($2::date + 1)::timestamptz
-        AND ends_at > $2::timestamptz
+        AND starts_at < (($2::date + 1)::timestamp AT TIME ZONE $3) + INTERVAL '1 day'
+        AND ends_at > ($2::date::timestamp AT TIME ZONE $3) - INTERVAL '1 day'
+        AND (starts_at AT TIME ZONE $3)::date <= $2::date
+        AND ((ends_at - INTERVAL '1 microsecond') AT TIME ZONE $3)::date >= $2::date
       ORDER BY starts_at`,
-    [providerId, date],
+    [providerId, date, CLINIC_TIME_ZONE],
   );
   return rows.map((row) => ({
     id: row.id, providerId: row.provider_id,
@@ -26787,6 +27153,16 @@ export async function resetClinicData<F>(
       await client.query("LOCK TABLE inventory_purchase_receipts IN EXCLUSIVE MODE");
       const { rows: [purchaseHistory] } = await client.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM inventory_purchase_receipts) AS exists");
       if (purchaseHistory.exists) throw new ProtectedPurchaseHistoryError();
+      // Agreement amendment history (0066) is protected the same way; EXCLUSIVE blocks new rows.
+      await client.query(`LOCK TABLE ${AGREEMENT_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [agreementHistory] } = await client.query<{ exists: boolean }>(
+        `SELECT ${AGREEMENT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
+      if (agreementHistory.exists) throw new ProtectedAgreementHistoryError();
+      // Retired collection keys (0068) are permanent proof; EXCLUSIVE blocks a concurrent retirement.
+      await client.query(`LOCK TABLE ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [attemptHistory] } = await client.query<{ exists: boolean }>(
+        `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
+      if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -26804,7 +27180,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }
@@ -27111,13 +27487,18 @@ const SPECIALTY_CASE_SELECT = `
     LEFT JOIN parties d ON d.id = COALESCE(o.responsible_doctor_id, t.primary_doctor_id)
    WHERE o.patient_id = $1 AND NOT EXISTS (SELECT 1 FROM clinical_cases b WHERE b.ortho_case_id = o.id)`;
 
-export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
+async function listPatientCaseRows(patientId: number): Promise<SpecialtyCaseRow[]> {
   await ensureSchema();
   const { rows } = await getPool().query<SpecialtyCaseRow>(
     `SELECT * FROM (${SPECIALTY_CASE_SELECT}) x
       ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
     [patientId],
   );
+  return rows;
+}
+
+export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
+  const rows = await listPatientCaseRows(patientId);
   const blockers = await referralBlockersByCase(getPool(), patientId);
   return rows.map((row) => {
     const item = toSpecialtyCase(row);
@@ -28127,72 +28508,100 @@ const REFERRAL_ACTION_AUDIT = {
  * والحالة القديمة تتبعها في الكتابة نفسها (والقيد في القاعدة يرفض أي افتراق)، والتدقيق معها.
  * «الحجز» يربط موعدًا قائمًا للمريض نفسه بالإحالة.
  */
-export async function transitionInternalReferral(input: ReferralTransition & {
-  id: number; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "external" | "invalid_transition" | "bad_appointment" }> {
+type InternalReferralTransitionInput = ReferralTransition & { id: number; actor: string; actorRole?: string | null };
+type InternalReferralTransitionResult = { ok: true } | { ok: false; reason: "not_found" | "external" | "invalid_transition" | "bad_appointment" };
+
+/** Apply the canonical referral validation, linkage and audit on the caller's transaction.
+ * Existing appointment locks must precede planned/referral locks. Callers composing
+ * with a planned session pass the complete ascending locked set, including their
+ * newly inserted appointment; no second transaction or pool read is opened here. */
+export async function transitionInternalReferralOnClient(
+  client: DbClient,
+  input: InternalReferralTransitionInput,
+  options?: {
+    lockedAppointmentIds?: readonly number[];
+    authorize?: (current: { patient_id: number; to_party_id: number | null; doctor_party_id: number | null }) => Promise<void>;
+  },
+): Promise<InternalReferralTransitionResult> {
+  /* (REF-2) المواعيد قبل الإحالة — الترتيب نفسه في الوصول والإلغاء — فلا يتقاطع قفلان: الموعد الجديد
+       وكل موعدٍ مربوطٍ بالإحالة الآن (فكّ ربط القديم يلمسه)، مرتّبةً بالرقم. */
+  const lockedAppointmentIds = options?.lockedAppointmentIds ?? (input.action === "schedule"
+    ? (await client.query<{ id: number }>(
+      `SELECT id FROM appointments WHERE id = $1 OR referral_id = $2 ORDER BY id FOR UPDATE`,
+      [input.appointmentId, input.id])).rows.map(row => row.id) : []);
+  const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string; to_party_id: number | null; doctor_party_id: number | null }>(
+    `SELECT patient_id, kind, workflow_state, to_name, to_party_id, doctor_party_id FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);
+  const current = rows[0];
+  if (!current) { return { ok: false, reason: "not_found" }; }
+  if (current.kind !== "internal" || !current.workflow_state) { return { ok: false, reason: "external" }; }
+  await options?.authorize?.(current);
+  // A referral may have acquired another appointment while its row lock waited.
+  // Do not take a newly discovered appointment lock after a planned/referral lock.
+  if (input.action === "schedule") {
+    const { rows: links } = await client.query<{ id: number }>(
+      `SELECT id FROM appointments WHERE id = $1 OR referral_id = $2 ORDER BY id`,
+      [input.appointmentId, input.id]);
+    if (links.some(row => !lockedAppointmentIds.includes(row.id))) return { ok: false, reason: "bad_appointment" };
+  }
+  const next = nextReferralState(current.workflow_state, input.action);
+  if (!next) { return { ok: false, reason: "invalid_transition" }; }
+
+  if (input.action === "schedule") {
+    /* موعدٌ قادم («محجوز»، اليوم أو بعده بتاريخ العيادة) للمريض نفسه مع الطبيب المحال إليه، غير مربوطٍ بإحالةٍ أخرى.
+     * موعدٌ مضى وبقي «محجوزًا» سهوًا لا يُحتسب حجزًا للإحالة. */
+    const { rows: appointment } = await client.query(
+      `SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND doctor_id = $4
+          AND (referral_id IS NULL OR referral_id = $3) AND scheduled_date >= $5::date FOR UPDATE`,
+      [input.appointmentId, current.patient_id, input.id, current.to_party_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)]);
+    if (!appointment[0]) { return { ok: false, reason: "bad_appointment" }; }
+    await client.query(`UPDATE appointments SET referral_id = $2 WHERE id = $1`, [input.appointmentId, input.id]);
+    /* إعادة الحجز تنقل الرابط: موعدٌ محجوزٌ سابقٌ لهذه الإحالة لم يعد موعدها (يبقى موعدًا عاديًّا). */
+    await client.query(
+      `UPDATE appointments SET referral_id = NULL WHERE referral_id = $2 AND id <> $1 AND status = 'booked'`,
+      [input.appointmentId, input.id]);
+  }
+
+  const legacy = legacyStatusOf(next);
+  const closing = legacy !== "sent";
+  await client.query(
+    `UPDATE patient_referrals
+        SET workflow_state = $2, status = $3,
+            closed_at = CASE WHEN $4 THEN COALESCE(closed_at, NOW()) ELSE NULL END,
+            closed_by = CASE WHEN $4 THEN COALESCE(closed_by, $5) ELSE NULL END,
+            accepted_by = CASE WHEN $2 = 'accepted' THEN $5 ELSE accepted_by END,
+            accepted_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE accepted_at END,
+            completed_by = CASE WHEN $2 = 'completed' THEN $5 ELSE completed_by END,
+            completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE completed_at END,
+            returned_at = CASE WHEN $2 = 'returned_to_referrer' THEN NOW() ELSE returned_at END,
+            procedure_performed = CASE WHEN $2 = 'completed' THEN $6::text ELSE procedure_performed END,
+            followup_required = CASE WHEN $2 = 'completed' THEN $7::boolean ELSE followup_required END,
+            may_return = CASE WHEN $2 = 'completed' THEN $8::boolean ELSE may_return END,
+            outcome_note = CASE WHEN $9::text IS NOT NULL AND $2 IN ('completed', 'declined', 'cancelled') THEN $9::text ELSE outcome_note END
+      WHERE id = $1`,
+    [input.id, next, legacy, closing, input.actor, input.procedurePerformed, input.followupRequired,
+      input.mayReturn, input.note],
+  );
+  await insertAuditRow(client, {
+    action: REFERRAL_ACTION_AUDIT[input.action], entity: "patient", entityId: current.patient_id, entityLabel: current.to_name,
+    details: {
+      الإحالة: input.id, من: current.workflow_state, إلى: next, الملاحظة: input.note ?? "—",
+      ...(input.appointmentId ? { الموعد: input.appointmentId } : {}),
+      ...(input.procedurePerformed ? { ما_أُنجز: input.procedurePerformed } : {}),
+    },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+export async function transitionInternalReferral(input: InternalReferralTransitionInput): Promise<
+  { ok: true; referral: Referral } | Exclude<InternalReferralTransitionResult, { ok: true }>
+> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    /* (REF-2) المواعيد قبل الإحالة — الترتيب نفسه في الوصول والإلغاء — فلا يتقاطع قفلان: الموعد الجديد
-       وكل موعدٍ مربوطٍ بالإحالة الآن (فكّ ربط القديم يلمسه)، مرتّبةً بالرقم. */
-    if (input.action === "schedule") {
-      await client.query(
-        `SELECT id FROM appointments WHERE id = $1 OR referral_id = $2 ORDER BY id FOR UPDATE`,
-        [input.appointmentId, input.id]);
-    }
-    const { rows } = await client.query<{ patient_id: number; kind: string; workflow_state: WorkflowState | null; to_name: string; to_party_id: number | null }>(
-      `SELECT patient_id, kind, workflow_state, to_name, to_party_id FROM patient_referrals WHERE id = $1 FOR UPDATE`, [input.id]);
-    const current = rows[0];
-    if (!current) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (current.kind !== "internal" || !current.workflow_state) { await client.query("ROLLBACK"); return { ok: false, reason: "external" }; }
-    const next = nextReferralState(current.workflow_state, input.action);
-    if (!next) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
-
-    if (input.action === "schedule") {
-      /* موعدٌ قادم («محجوز»، اليوم أو بعده بتاريخ العيادة) للمريض نفسه مع الطبيب المحال إليه، غير مربوطٍ بإحالةٍ أخرى.
-       * موعدٌ مضى وبقي «محجوزًا» سهوًا لا يُحتسب حجزًا للإحالة. */
-      const { rows: appointment } = await client.query(
-        `SELECT 1 FROM appointments WHERE id = $1 AND patient_id = $2 AND status = 'booked' AND doctor_id = $4
-            AND (referral_id IS NULL OR referral_id = $3) AND scheduled_date >= $5::date FOR UPDATE`,
-        [input.appointmentId, current.patient_id, input.id, current.to_party_id, clinicDateString(new Date(), CLINIC_TIME_ZONE)]);
-      if (!appointment[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_appointment" }; }
-      await client.query(`UPDATE appointments SET referral_id = $2 WHERE id = $1`, [input.appointmentId, input.id]);
-      /* إعادة الحجز تنقل الرابط: موعدٌ محجوزٌ سابقٌ لهذه الإحالة لم يعد موعدها (يبقى موعدًا عاديًّا). */
-      await client.query(
-        `UPDATE appointments SET referral_id = NULL WHERE referral_id = $2 AND id <> $1 AND status = 'booked'`,
-        [input.appointmentId, input.id]);
-    }
-
-    const legacy = legacyStatusOf(next);
-    const closing = legacy !== "sent";
-    await client.query(
-      `UPDATE patient_referrals
-          SET workflow_state = $2, status = $3,
-              closed_at = CASE WHEN $4 THEN COALESCE(closed_at, NOW()) ELSE NULL END,
-              closed_by = CASE WHEN $4 THEN COALESCE(closed_by, $5) ELSE NULL END,
-              accepted_by = CASE WHEN $2 = 'accepted' THEN $5 ELSE accepted_by END,
-              accepted_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE accepted_at END,
-              completed_by = CASE WHEN $2 = 'completed' THEN $5 ELSE completed_by END,
-              completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE completed_at END,
-              returned_at = CASE WHEN $2 = 'returned_to_referrer' THEN NOW() ELSE returned_at END,
-              procedure_performed = CASE WHEN $2 = 'completed' THEN $6::text ELSE procedure_performed END,
-              followup_required = CASE WHEN $2 = 'completed' THEN $7::boolean ELSE followup_required END,
-              may_return = CASE WHEN $2 = 'completed' THEN $8::boolean ELSE may_return END,
-              outcome_note = CASE WHEN $9::text IS NOT NULL AND $2 IN ('completed', 'declined', 'cancelled') THEN $9::text ELSE outcome_note END
-        WHERE id = $1`,
-      [input.id, next, legacy, closing, input.actor, input.procedurePerformed, input.followupRequired,
-        input.mayReturn, input.note],
-    );
-    await insertAuditRow(client, {
-      action: REFERRAL_ACTION_AUDIT[input.action], entity: "patient", entityId: current.patient_id, entityLabel: current.to_name,
-      details: {
-        الإحالة: input.id, من: current.workflow_state, إلى: next, الملاحظة: input.note ?? "—",
-        ...(input.appointmentId ? { الموعد: input.appointmentId } : {}),
-        ...(input.procedurePerformed ? { ما_أُنجز: input.procedurePerformed } : {}),
-      },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await transitionInternalReferralOnClient(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
     return { ok: true, referral: (await getReferral(input.id))! };
   } catch (error) {
@@ -29057,18 +29466,9 @@ export async function visitWalkout(visitId: number, snapshotClient?: DbClient): 
   // An owning checkout reader supplies its existing read-only snapshot.
   if (snapshotClient) return visitWalkoutInSnapshot(snapshotClient, visitId);
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const walkout = await visitWalkoutInSnapshot(client, visitId);
-    await client.query("COMMIT");
-    return walkout;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+  // The shared snapshot helper keeps the original error and discards a client whose ROLLBACK
+  // failed. Without the shared-local flag it always supplies a dedicated client, as before.
+  return withFinancialReadSnapshot(getPool(), (runner) => visitWalkoutInSnapshot(runner as DbClient, visitId));
 }
 
 async function visitWalkoutInSnapshot(pool: DbClient, visitId: number): Promise<VisitWalkout | null> {

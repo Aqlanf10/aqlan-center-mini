@@ -9,6 +9,7 @@ export function DiagnosisChoiceField({ label, value, onChange, disabled, groups,
   groups: readonly DiagnosisChoiceGroup[]; placeholder?: string; dir?: "ltr" | "rtl";
 }) {
   const id = useId();
+  const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -33,12 +34,24 @@ export function DiagnosisChoiceField({ label, value, onChange, disabled, groups,
     if (disabled || !choices.some((option) => option.value === chosen)) return;
     onChange(chosen); close(); field.current?.focus();
   };
+  useEffect(() => {
+    if (!expanded) return;
+    // Touch/pointer interactions need not move focus (for example a canvas or
+    // a control that prevents pointer defaults), so blur alone is insufficient.
+    const dismissOutside = (event: PointerEvent) => {
+      if (root.current && !root.current.contains(event.target as Node | null)) {
+        setOpen(false); setActive(-1);
+      }
+    };
+    document.addEventListener("pointerdown", dismissOutside, true);
+    return () => document.removeEventListener("pointerdown", dismissOutside, true);
+  }, [expanded]);
   useEffect(() => { if (expanded) search.current?.focus(); }, [expanded]);
   useEffect(() => {
     if (expanded && active >= 0) list.current?.querySelector(`[data-choice-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [expanded, active]);
 
-  return <div className="relative min-w-0" onBlur={(event) => {
+  return <div ref={root} className="relative min-w-0" onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close();
   }}>
     <label htmlFor={`${id}-value`} className="mb-1 block text-[10px] font-bold text-slate-500">{label}</label>

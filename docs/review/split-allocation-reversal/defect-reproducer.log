@@ -1,0 +1,39 @@
+# Reproducer run as a plain test on 9881d33c (no product change): red
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Ubuntu 18.6-1.pgdg24.04+2) (major 18 = عقد الاختبار/التطوير).
+     × KNOWN DEFECT (reproducer): that sibling correction should be an explicit 409 with the guard's Arabic reason, not a generic 500 383ms
+     × KNOWN DEFECT (reproducer): that sibling correction should be an explicit 409 with the guard's Arabic reason, not a generic 500 307ms
+     × KNOWN DEFECT (reproducer): that sibling correction should be an explicit 409 with the guard's Arabic reason, not a generic 500 289ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: {"message":"تعذّر تصحيح السند. أعد المحاولة."}: expected 500 to be 409 // Object.is equality
+      Tests  3 failed | 30 skipped (33)
+
+# Proposed narrow fix applied TEMPORARILY (then reverted):
+diff --git a/app/api/payments/[id]/correct/route.ts b/app/api/payments/[id]/correct/route.ts
+index 4cedb1dd..ec31ebd8 100644
+--- a/app/api/payments/[id]/correct/route.ts
++++ b/app/api/payments/[id]/correct/route.ts
+@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+ import { correctPayment, getPayment, getPaymentByIdempotencyKey, getSettings, type CorrectPaymentRefusal, type CorrectionTarget } from "@/lib/db";
+ import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount } from "@/lib/money";
+ import { rateFromSettings } from "@/lib/settings";
++import { DebtRepaymentError } from "@/lib/debt-installments-db";
+ import { requireSession } from "@/lib/session";
+ 
+ export const dynamic = "force-dynamic";
+@@ -117,7 +118,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
+         ...(result.acknowledgmentEvidence ? { acknowledgmentEvidence: result.acknowledgmentEvidence } : {}) },
+       { status: result.replayed ? 200 : 201 },
+     );
+-  } catch {
++  } catch (error) {
++    if (error instanceof DebtRepaymentError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.code === "unauthorized" ? 403 : 409 });
+     return NextResponse.json({ message: "تعذّر تصحيح السند. أعد المحاولة." }, { status: 500 });
+   }
+ }
+
+# Reproducer as a plain test with the temporary fix: green
+      Tests  6 passed | 27 skipped (33)
+
+# Reverted; product files unchanged:
+?? __tests__/postgres/split-allocation-reversal.test.ts
+?? docs/review/split-allocation-reversal/

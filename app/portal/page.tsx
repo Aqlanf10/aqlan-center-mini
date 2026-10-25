@@ -10,9 +10,10 @@ import {
   type ChatMessage,
 } from "@/components/Chat";
 import { messagePreview } from "@/lib/messages";
-import { CURRENCY_LABEL, activeBalanceCurrencies, formatMoney, type Balance, type Currency } from "@/lib/money";
+import { CURRENCY_LABEL, activeBalanceCurrencies, formatMoney } from "@/lib/money";
 import { INTAKE_CONDITIONS, type IntakeAnswers } from "@/lib/portal";
-import { friendlyDate } from "@/lib/reminders";
+import type { PortalHistoricalTreatment, PortalStatement } from "@/lib/portal-statement";
+import { friendlyDate, friendlyDateLong } from "@/lib/reminders";
 
 /**
  * بوابة المريض.
@@ -46,20 +47,7 @@ interface PortalAppointmentView {
   confirmable: boolean;
 }
 
-interface StatementFeed {
-  invoices: {
-    invoiceNumber: string; createdAt: string; totalMinor: number;
-    discountMinor: number; status: string; baseCurrency?: Currency;
-  }[];
-  payments: {
-    receiptNumber: string; createdAt: string; amountMinor: number;
-    currency: "YER" | "SAR" | "USD"; kind: string;
-  }[];
-  /** (P1-5ب) الأرصدة الافتتاحية بعملاتها، والأرصدة لكل عملة — الريال والسعودي والدولار كلٌّ بدلوه. */
-  openings: { currency: Currency; amountMinor: number; asOfDate: string }[];
-  balances: Record<Currency, Balance>;
-  baseCurrency: Currency;
-}
+type StatementFeed = PortalStatement;
 
 export default function PortalPage() {
   const [session, setSession] = useState<{ fullName: string; patientNumber: string } | null>(null);
@@ -306,6 +294,8 @@ function StatementTab() {
         </div>
       ))}
 
+      <HistoricalTreatment historical={feed.historical} />
+
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-black text-navy-900">الفواتير</h2>
         {feed.invoices.length === 0 ? (
@@ -313,18 +303,55 @@ function StatementTab() {
         ) : (
           <ul className="divide-y divide-slate-100">
             {feed.invoices.map((invoice) => (
-              <li key={invoice.invoiceNumber} className="flex items-center justify-between py-2 text-sm">
-                <span className="font-bold">{invoice.invoiceNumber}</span>
-                <span className="text-slate-500">{friendlyDate(invoice.createdAt.slice(0, 10))}</span>
-                <span className="tabular-nums">{formatMoney(invoice.totalMinor, invoice.baseCurrency ?? feed.baseCurrency)}</span>
-                <span className={invoice.status === "cancelled" ? "text-danger-700" : "text-success-800"}>
-                  {invoice.status === "cancelled" ? "ملغاة" : "معتمدة"}
-                </span>
+              <li key={invoice.invoiceNumber} className="py-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold">{invoice.invoiceNumber}</span>
+                  <span className="text-slate-500">{friendlyDate(invoice.createdAt.slice(0, 10))}</span>
+                  <span className="tabular-nums">
+                    {formatMoney(invoice.netMinor, invoice.baseCurrency)}
+                    {invoice.discountMinor > 0 && <small className="text-slate-500"> (بعد خصم {formatMoney(invoice.discountMinor, invoice.baseCurrency)})</small>}
+                  </span>
+                  <span className={invoice.status === "paid" ? "text-success-800" : "text-warning-700"}>
+                    {invoice.status === "paid" ? "مسدّدة" : "مفتوحة"}
+                  </span>
+                </div>
+                {/* The same treatment lines as the printed statement, at the stored invoice prices. */}
+                {invoice.items.length === 0 ? (
+                  <p className="mt-1 text-xs text-slate-500">تفاصيل البنود غير مسجلة لهذه الفاتورة</p>
+                ) : (
+                  <table className="mt-2 w-full table-fixed text-xs" aria-label={`بنود الفاتورة ${invoice.invoiceNumber}`}>
+                    <thead className="text-slate-500">
+                      <tr><th className="w-1/2 text-start font-bold">العلاج / البيان</th><th className="text-end font-bold">الكمية</th>
+                        <th className="text-end font-bold">سعر الوحدة</th><th className="text-end font-bold">إجمالي البند</th></tr>
+                    </thead>
+                    <tbody>
+                      {invoice.items.map((item, index) => (
+                        <tr key={index}>
+                          <td className="break-words">{item.description}</td>
+                          <td className="text-end tabular-nums">{item.quantity}</td>
+                          <td className="text-end tabular-nums">{formatMoney(item.unitPriceMinor, invoice.baseCurrency)}</td>
+                          <td className="text-end tabular-nums">{formatMoney(item.totalMinor, invoice.baseCurrency)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      {feed.agreementsRequireReview ? <p role="status" className="rounded-xl border border-amber-200 p-3 text-sm">بعض أرصدة اتفاقات العلاج غير متاحة وتحتاج مراجعة مصدرها. الفواتير وكشف الحساب المعروضان مستقلان عن هذا الملخص.</p> : null}
+      {feed.agreements.map((agreement, index) => (
+        <div key={index} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
+          <h2 className="mb-2 text-sm font-black text-navy-900">اتفاق العلاج — {agreement.title}</h2>
+          <p className="flex justify-between"><span>إجمالي الاتفاق</span><span className="tabular-nums">{formatMoney(agreement.totalMinor, agreement.currency)}</span></p>
+          <p className="flex justify-between"><span>المسدّد من الاتفاق</span><span className="tabular-nums">{formatMoney(agreement.paidMinor, agreement.currency)}</span></p>
+          <p className="flex justify-between font-bold"><span>المتبقي من الاتفاق</span><span className="tabular-nums">{formatMoney(agreement.remainingMinor, agreement.currency)}</span></p>
+          <p className="mt-1 text-xs text-slate-500">المتبقي من الاتفاق يشمل الأقساط المستقبلية ولا يعني أن كامل المبلغ مستحق الآن.</p>
+        </div>
+      ))}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-black text-navy-900">الدفعات</h2>
@@ -336,6 +363,7 @@ function StatementTab() {
               <li key={payment.receiptNumber} className="flex items-center justify-between py-2 text-sm">
                 <span className="font-bold">{payment.receiptNumber}</span>
                 <span className="text-slate-500">{friendlyDate(payment.createdAt.slice(0, 10))}</span>
+                <span className="text-slate-600">{payment.label}</span>
                 <span className="tabular-nums">
                   {payment.kind === "refund" ? "−" : ""}{formatMoney(payment.amountMinor, payment.currency)}
                 </span>
@@ -344,6 +372,66 @@ function StatementTab() {
           </ul>
         )}
       </div>
+    </section>
+  );
+}
+
+/** «العلاج السابق»: the same saved historical agreements and labels as the current printed statement. */
+function HistoricalTreatment({ historical }: { historical: PortalHistoricalTreatment }) {
+  if (!historical.available) {
+    return <p role="status" className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+      تفاصيل العلاج السابق غير متاحة حاليًا، والأرصدة المعروضة لا تعتمد عليها. راجع المركز للاطلاع على التفاصيل.
+    </p>;
+  }
+  // As on the print: only genuine historical treatment opens this section.
+  if (historical.agreements.length === 0) return null;
+  return (
+    <section aria-label="العلاج السابق" className="rounded-2xl border border-slate-200 bg-white p-4">
+      <h2 className="mb-3 text-sm font-black text-navy-900">العلاج السابق</h2>
+      <div className="space-y-4">
+        {historical.agreements.map((agreement, index) => {
+          const money = (minor: number | null) => minor === null ? "غير مسجل" : formatMoney(minor, agreement.currency);
+          const heading = `اتفاق علاج بتاريخ ${friendlyDateLong(agreement.historicalAsOf)}`;
+          return (
+            <div key={index} className="text-xs">
+              <h3 className="mb-1 text-sm font-bold text-slate-700">{heading}</h3>
+              <table className="w-full table-fixed" aria-label={heading}>
+                <thead className="text-slate-500">
+                  <tr><th className="w-1/3 text-start font-bold">العلاج / البيان</th><th className="text-start font-bold">الموضع</th>
+                    <th className="text-end font-bold">الكمية</th><th className="text-end font-bold">سعر الوحدة</th>
+                    <th className="text-end font-bold">الخصم</th><th className="text-end font-bold">الصافي</th></tr>
+                </thead>
+                <tbody>
+                  {agreement.lines.map((line, lineIndex) => (
+                    <tr key={lineIndex}>
+                      <td className="break-words">{line.description}</td>
+                      <td>{line.site ?? "—"}</td>
+                      <td className="text-end tabular-nums">{line.quantity}</td>
+                      <td className="text-end tabular-nums">{money(line.unitPriceMinor)}</td>
+                      <td className="text-end tabular-nums">{money(line.discountMinor)}</td>
+                      <td className="text-end tabular-nums">{money(line.netMinor)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <dl className="mt-2 space-y-1 text-sm">
+                {agreement.grossMinor !== null && agreement.discountMinor !== null && <>
+                  <div className="flex justify-between"><dt>الإجمالي قبل الخصم</dt><dd className="tabular-nums">{money(agreement.grossMinor)}</dd></div>
+                  <div className="flex justify-between"><dt>الخصم المسجل</dt><dd className="tabular-nums">{money(agreement.discountMinor)}</dd></div>
+                </>}
+                <div className="flex justify-between"><dt>المبلغ المتفق عليه</dt><dd className="tabular-nums">{money(agreement.agreedMinor)}</dd></div>
+                <div className="flex justify-between"><dt>المدفوع من قبل</dt><dd className="tabular-nums">{money(agreement.previouslyPaidMinor)}</dd></div>
+                <div className="flex justify-between font-bold"><dt>المبلغ المتبقي</dt><dd className="tabular-nums">{money(agreement.remainingMinor)}</dd></div>
+              </dl>
+            </div>
+          );
+        })}
+      </div>
+      {historical.undetailed.map((entry) => (
+        <p key={entry.currency} className="mt-2 text-xs text-slate-500">
+          {entry.partial ? "جزء من الرصيد السابق" : "الرصيد السابق"} ({CURRENCY_LABEL[entry.currency]}) بلا تفاصيل علاج مسجلة.
+        </p>
+      ))}
     </section>
   );
 }

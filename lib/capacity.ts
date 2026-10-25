@@ -327,13 +327,45 @@ export function judgeFullCapacity(input: FullCapacityInput): CapacityVerdict {
        أمّا موعدٌ خدمتُه لا تشغل كرسيًّا (استشارةٌ هاتفية مثلًا) فلا يُعدّ أصلًا —
        وكان يُعدّ، فيُرفض في مركزٍ بكرسيٍّ واحد حجزٌ حقيقيّ بسبب مكالمة. واللقطة
        من الموعد لا من الخدمة اليوم: ما حُجز يُقاس بما كان. */
-    occupiedChairs = live.filter((appointment) => {
-      if (appointment.occupiesChair === false) return false;
+    // Count simultaneous occupancy, not every appointment touched by a long booking.
+    // Clip to the candidate's effective window: saturation elsewhere is irrelevant.
+    const events: { time: number; delta: number }[] = [];
+    const reservedChairs = new Set<number>();
+    let unassignedOverlaps = 0;
+    let hasPinnedChair = false;
+    for (const appointment of live) {
+      if (appointment.occupiesChair === false) continue;
       const other = windowOf(appointment);
-      return other ? windowsOverlap(mine, other) : false;
-    }).length;
+      if (!other) continue;
+      const pinned = appointment.chairNo != null && Number.isInteger(appointment.chairNo)
+        && appointment.chairNo >= 1 && appointment.chairNo <= chairs;
+      // Pins outside this window can constrain an overlapping unassigned booking.
+      if (pinned) hasPinnedChair = true;
+      if (!windowsOverlap(mine, other)) continue;
+      if (pinned && appointment.chairNo != null) reservedChairs.add(appointment.chairNo);
+      else unassignedOverlaps += 1;
+      events.push(
+        { time: Math.max(mine.start, other.start), delta: 1 },
+        { time: Math.min(mine.end, other.end), delta: -1 },
+      );
+    }
+    // Half-open windows: release chairs before taking them at the same minute.
+    events.sort((a, b) => a.time - b.time || a.delta - b.delta);
+    let simultaneous = 0;
+    for (const event of events) {
+      simultaneous += event.delta;
+      occupiedChairs = Math.max(occupiedChairs, simultaneous);
+    }
     if (occupiedChairs >= chairs) {
       reasons.push(`الكراسي ممتلئة في هذا الوقت (${occupiedChairs} من ${chairs}).`);
+    }
+    // Without pins, interval capacity is the peak. With pins, spare pooled capacity
+    // does not prove one chair is free for the entire visit. Conservatively count
+    // every overlapping unassigned booking separately rather than move patients or
+    // assume a feasible reassignment of reservations constrained elsewhere that day.
+    if (hasPinnedChair && occupiedChairs < chairs
+      && reservedChairs.size + unassignedOverlaps >= chairs) {
+      reasons.push("لا يمكن ضمان كرسيٍّ متاح طوال مدة الموعد وفواصله مع الحجوزات الحالية.");
     }
   }
 

@@ -72,7 +72,7 @@ export async function arrivalPanel(patientId: number, options: { includeMoney: b
         .map((row) => ({ currency: row.currency, dueMinor: row.dueMinor })),
       openings: openings.map((row) => ({ currency: row.currency, remainingMinor: row.remainingMinor })),
       arrangements: arrangements.map((row) => ({ id: row.id, currency: row.currency, cadence: row.cadence, progress: row.progress })),
-      plans: plans.map((plan) => ({
+      plans: plans.filter(plan => plan.approvedAgreement?.available !== false).map((plan) => ({
         id: plan.id, title: plan.title, baseCurrency: plan.baseCurrency, status: plan.status,
         installmentCount: plan.installments.length, progress: plan.progress,
       })),

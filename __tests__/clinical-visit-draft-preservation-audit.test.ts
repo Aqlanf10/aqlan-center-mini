@@ -180,7 +180,7 @@ beforeEach(async () => {
     id: 91001, patientId: 92001, patientName: "Synthetic patient", ...savedNotes,
     addendum: null, doctorId: 94001, status: "open", signedAt: null, signedBy: null,
     invoiceId: null, procedures: [], totalMinor: 0, planItemsMatched: 0,
-    planTitle: null, planWarning: null, ortho: null, plannedVisit: null,
+    planTitle: null, planWarning: null, amendedServiceConflict: false, ortho: null, plannedVisit: null,
     previousVisit: null, outstanding: [], sessionPricing: [], labOrders: [],
     billingCurrency: "YER",
   };

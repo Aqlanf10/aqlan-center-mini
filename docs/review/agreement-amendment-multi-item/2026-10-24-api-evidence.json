@@ -1,0 +1,248 @@
+{
+  "kind": "synthetic-built-app-characterization",
+  "characterizationBaseRevision": "4b21d71d2422888f01185bb39f07358cbdd1aa0e",
+  "note": "Tests and evidence only; no production data, no multi-item policy implementation, no fix claim.",
+  "scenarios": {
+    "newTreatment": "not_run",
+    "newTreatmentApi": "passed",
+    "historicalApi": "passed"
+  },
+  "runtime": {
+    "node": "v22.23.3",
+    "observedAt": "2026-10-24T18:39:21.195Z",
+    "sourceRevision": "4b21d71d2422888f01185bb39f07358cbdd1aa0e",
+    "testSourceSha256": "43e20288efe14e7abdc37ca7bf756852c849150d294cbf2dc3c614c135d2099d"
+  },
+  "newTreatmentApi": {
+    "creation": "direct HTTP API for invoice, consent, approval and payment; not browser UI; no direct plan/item financial seeding",
+    "invoiceCount": 1,
+    "invoiceTotalMinor": "950000",
+    "invoiceLines": 19,
+    "planCount": 1,
+    "planItemCount": 19,
+    "itemQuantity": 1,
+    "itemUnitMinor": 50000,
+    "teeth": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      31,
+      32,
+      33,
+      34,
+      35
+    ],
+    "priorPaymentMinor": 180000,
+    "refusal": {
+      "get": {
+        "status": 409,
+        "message": "تعدد بنود العلاج يحتاج تخصيصًا ماليًا مستقلًا؛ لا يُخمّن فرق السعر.",
+        "code": "conflict"
+      },
+      "malformedHashControl": {
+        "status": 400,
+        "message": "يرجى مراجعة الخدمة المحددة والسعر ومفتاح الطلب والسبب.",
+        "code": "invalid"
+      },
+      "posts": [
+        {
+          "status": 409,
+          "message": "تعدد بنود العلاج يحتاج تخصيصًا ماليًا مستقلًا؛ لا يُخمّن فرق السعر.",
+          "code": "conflict"
+        },
+        {
+          "status": 409,
+          "message": "تعدد بنود العلاج يحتاج تخصيصًا ماليًا مستقلًا؛ لا يُخمّن فرق السعر.",
+          "code": "conflict"
+        }
+      ],
+      "postKind": "schema-valid guard probes; preview source hash unavailable for refused source",
+      "twoDistinctWellFormedProbeHashes": true,
+      "staleRejectionRows": 0
+    }
+  },
+  "newTreatmentApiUnchanged": {
+    "fullStoredRowsUnchanged": [
+      "amendments",
+      "approvals",
+      "collections",
+      "doctorCommissionHistory",
+      "historicalAgreements",
+      "historicalCoverage",
+      "historicalDocuments",
+      "historicalRevisions",
+      "installments",
+      "invoiceItems",
+      "invoices",
+      "openingBalances",
+      "openingHistory",
+      "payments",
+      "planItems",
+      "plans",
+      "repaymentArrangements",
+      "repaymentRevisions",
+      "staleRejections"
+    ],
+    "storedRowCounts": {
+      "plans": 1,
+      "invoices": 1,
+      "payments": 1,
+      "approvals": 1,
+      "planItems": 19,
+      "amendments": 0,
+      "collections": 0,
+      "installments": 0,
+      "invoiceItems": 19,
+      "openingHistory": 0,
+      "openingBalances": 0,
+      "staleRejections": 0,
+      "historicalCoverage": 0,
+      "repaymentRevisions": 1,
+      "historicalDocuments": 0,
+      "historicalRevisions": 0,
+      "historicalAgreements": 0,
+      "repaymentArrangements": 1,
+      "doctorCommissionHistory": 1
+    },
+    "cashReaderUnchanged": true,
+    "commissionReaderUnchanged": true,
+    "commission": {
+      "lineCount": 1,
+      "accruedMinor": 190000,
+      "earnedMinor": 36000
+    }
+  },
+  "historicalCreate": {
+    "status": 201,
+    "message": null,
+    "lines": 1
+  },
+  "historical": {
+    "creation": "direct HTTP API, not browser UI; no plan/item direct seeding",
+    "documentLines": 1,
+    "plans": 1,
+    "episodeTeeth": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      31,
+      32,
+      33,
+      34,
+      35
+    ],
+    "agreedMinor": 950000,
+    "previouslyPaidMinor": 180000,
+    "remainingMinor": 770000,
+    "planItems": [
+      {
+        "quantity": 1,
+        "unit_price_minor": "950000",
+        "tooth_code": 11
+      }
+    ],
+    "invoices": 0,
+    "currentPaymentReceipts": 0,
+    "creationCashReaderUnchanged": true
+  },
+  "historicalRefusal": {
+    "get": {
+      "status": 409,
+      "message": "مطلوب اتفاق فعال معتمد ومغطى بفاتورة واحدة مثبتة؛ لم يُنشأ تعديل.",
+      "code": "conflict"
+    },
+    "malformedHashControl": {
+      "status": 400,
+      "message": "يرجى مراجعة الخدمة المحددة والسعر ومفتاح الطلب والسبب.",
+      "code": "invalid"
+    },
+    "posts": [
+      {
+        "status": 409,
+        "message": "مطلوب اتفاق فعال معتمد ومغطى بفاتورة واحدة مثبتة؛ لم يُنشأ تعديل.",
+        "code": "conflict"
+      },
+      {
+        "status": 409,
+        "message": "مطلوب اتفاق فعال معتمد ومغطى بفاتورة واحدة مثبتة؛ لم يُنشأ تعديل.",
+        "code": "conflict"
+      }
+    ],
+    "postKind": "schema-valid guard probes; preview source hash unavailable for refused source",
+    "twoDistinctWellFormedProbeHashes": true,
+    "staleRejectionRows": 0
+  },
+  "historicalUnchanged": {
+    "fullStoredRowsUnchanged": [
+      "amendments",
+      "approvals",
+      "collections",
+      "doctorCommissionHistory",
+      "historicalAgreements",
+      "historicalCoverage",
+      "historicalDocuments",
+      "historicalRevisions",
+      "installments",
+      "invoiceItems",
+      "invoices",
+      "openingBalances",
+      "openingHistory",
+      "payments",
+      "planItems",
+      "plans",
+      "repaymentArrangements",
+      "repaymentRevisions",
+      "staleRejections"
+    ],
+    "storedRowCounts": {
+      "plans": 1,
+      "invoices": 0,
+      "payments": 0,
+      "approvals": 0,
+      "planItems": 1,
+      "amendments": 0,
+      "collections": 0,
+      "installments": 0,
+      "invoiceItems": 0,
+      "openingHistory": 1,
+      "openingBalances": 1,
+      "staleRejections": 0,
+      "historicalCoverage": 1,
+      "repaymentRevisions": 1,
+      "historicalDocuments": 1,
+      "historicalRevisions": 1,
+      "historicalAgreements": 1,
+      "repaymentArrangements": 1,
+      "doctorCommissionHistory": 1
+    },
+    "cashReaderUnchanged": true,
+    "commissionReaderUnchanged": true,
+    "commission": {
+      "lineCount": 0,
+      "accruedMinor": 0,
+      "earnedMinor": 0
+    }
+  }
+}
