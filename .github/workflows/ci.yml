@@ -349,7 +349,7 @@ jobs:
           INVENTORY_SCHEMA_TEST: "1"
         run: npm run test:security-http
 
-      # Exactly two fresh screenshots from the owned synthetic backlog fixture.
+      # Exactly four actual-viewport screenshots from the owned synthetic fixture.
       # No cookies, browser state, traces, database dumps, or clinic records.
       - name: Upload laboratory backlog desktop and mobile evidence
         if: always()
@@ -357,8 +357,10 @@ jobs:
         with:
           name: lab-open-backlog-ui
           path: |
-            /tmp/lab-backlog-evidence/lab-backlog-all-open-1280.png
-            /tmp/lab-backlog-evidence/lab-backlog-all-open-390.png
+            /tmp/lab-backlog-evidence/lab-backlog-summary-1280.png
+            /tmp/lab-backlog-evidence/lab-backlog-summary-390.png
+            /tmp/lab-backlog-evidence/lab-backlog-received-1280.png
+            /tmp/lab-backlog-evidence/lab-backlog-received-390.png
           if-no-files-found: error
           retention-days: 7
 
