@@ -10,6 +10,7 @@ import {
   type PeriodPreset,
 } from "@/lib/executive";
 import { LeadershipOperationalOverview } from "@/components/leadership/LeadershipOperationalOverview";
+import { LabBacklogOverview } from "@/components/leadership/LabBacklogOverview";
 import { friendlyDateLong } from "@/lib/reminders";
 
 /**
@@ -71,6 +72,7 @@ export default function ExecutivePage() {
       />
 
       <LeadershipOperationalOverview />
+      <LabBacklogOverview />
 
       {/* الفترة */}
       <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
