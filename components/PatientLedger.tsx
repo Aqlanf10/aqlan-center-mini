@@ -1484,7 +1484,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
         {scopeButtons(row, index, mode)}
         {mode !== "arch" && chosenTooth && label ? (
           <span data-testid={`invoice-tooth-chip-${index}`}
-            className="inline-flex min-h-[32px] items-center gap-1 rounded-full border border-navy-200 bg-navy-50 px-3 text-xs font-extrabold text-navy-900">
+            className={`inline-flex min-h-[32px] items-center gap-1 ${groupedTeeth && group.teeth.length > 1 ? "rounded-xl" : "rounded-full"} border border-navy-200 bg-navy-50 px-3 text-xs font-extrabold text-navy-900`}>
             🦷 <span>{label}</span>
             {!groupedTeeth && row.groupId && row.episodeTeeth && row.episodeTeeth.length > 1 ? (
               <span className="font-semibold text-slate-500">· هذا السطر: {row.toothCode}</span>

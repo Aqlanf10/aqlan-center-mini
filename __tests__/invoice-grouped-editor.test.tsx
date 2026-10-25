@@ -212,6 +212,8 @@ describe("InvoiceForm grouped tooth editing", () => {
   it.each(["bridge", "crown", "rct"])("%s selection is one visible entry, with canonical per-tooth preview and save", async category => {
     await openForm(); selectService(category); confirmTeeth([33, 31, 32]);
     expect(cards()).toHaveLength(1);
+    expect(node("invoice-tooth-chip-0").props.className).toContain("rounded-xl");
+    expect(node("invoice-tooth-chip-0").props.className).not.toContain("rounded-full");
     expect(elements(renderForm()).filter(one => one.type === ServiceSelect)).toHaveLength(1);
     expect(elements(renderForm()).filter(one => one.props["aria-label"] === "الطبيب المكلّف بالبند")).toHaveLength(1);
     expect(elements(renderForm()).filter(one => one.props["aria-label"] === "السعر")).toHaveLength(1);
@@ -249,6 +251,8 @@ describe("InvoiceForm grouped tooth editing", () => {
     const unchanged = await preview();
     expect(unchanged.items).toEqual(before.items);
     const individual = node("invoice-row-1");
+    expect(node("invoice-tooth-chip-1").props.className).toContain("rounded-full");
+    expect(node("invoice-tooth-chip-1").props.className).not.toContain("rounded-xl");
     change(input("الطبيب المكلّف بالبند", individual), "12");
     change(input("السعر", node("invoice-row-1")), "2000");
     change(input("سبب تغيير السعر", node("invoice-row-1")), "Synthetic individual price");
@@ -456,6 +460,8 @@ describe("InvoiceForm grouped tooth editing", () => {
 
   it("retains a historical bridge as one whole agreed value, not a price multiplied by selected teeth", async () => {
     await openForm(true); selectService("bridge"); confirmTeeth([31, 32, 33]);
+    expect(node("invoice-tooth-chip-0").props.className).toContain("rounded-full");
+    expect(node("invoice-tooth-chip-0").props.className).not.toContain("rounded-xl");
     change(input("السعر"), "9000"); change(input("سبب تغيير السعر"), "Synthetic historical whole agreement");
     change(input("المدفوع قبل النظام"), "2000"); change(input("تاريخ المعلومات التاريخية"), "2026-01-01");
     expect(cards()).toHaveLength(1);
