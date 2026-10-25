@@ -158,12 +158,27 @@ export async function readDoctorClinicalRoster(doctorPartyId: number, date: stri
   let discardClient = false;
   try {
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const sources = await readClinicalRosterSources(client, doctorPartyId, date);
+    if (!sources) {
+      await client.query('COMMIT');
+      return { ...resolveDoctorClinicalRoster(empty, doctorPartyId, date, clinicTimeZone), unresolvedReason: 'schema_unavailable' };
+    }
+    const result = resolveDoctorClinicalRoster(sources, doctorPartyId, date, clinicTimeZone);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch { discardClient = true; }
+    throw error;
+  } finally { client.release(discardClient); }
+}
+
+/** Caller owns the snapshot/transaction. Includes yesterday for civil-day night tails. */
+export async function readClinicalRosterSources(client: Pick<import('./db').DbClient, 'query'>, doctorPartyId: number, date: string): Promise<RosterSources | null> {
     const { rows: tables } = await client.query(`SELECT to_regclass('public.hr_staff') IS NOT NULL AND
       to_regclass('public.hr_work_schedules') IS NOT NULL AND to_regclass('public.hr_leave_requests') IS NOT NULL AS ready,
       to_regclass('public.hr_staff_party_links') IS NOT NULL AS links`);
     if (!tables[0]?.ready) {
-      await client.query('COMMIT');
-      return { ...resolveDoctorClinicalRoster(empty, doctorPartyId, date, clinicTimeZone), unresolvedReason: 'schema_unavailable' };
+      return null;
     }
     // Bound reads to candidates for this doctor, but retain ALL matching staff
     // (including inactive ones) so conflicting identities cannot disappear.
@@ -183,18 +198,12 @@ export async function readDoctorClinicalRoster(doctorPartyId: number, date: stri
         effective_from::text AS "effectiveFrom",effective_to::text AS "effectiveTo",working_days AS "workingDays",
         shift_start_time AS start,shift_end_time AS end,second_shift_start AS "secondStart",second_shift_end AS "secondEnd",
         crosses_midnight AS "crossesMidnight",schedule_type AS "scheduleType",updated_at::text AS "updatedAt"
-        FROM hr_work_schedules WHERE is_active AND effective_from<=$1::date AND (effective_to IS NULL OR effective_to>=$1::date)
+        FROM hr_work_schedules WHERE is_active AND effective_from<=$1::date AND (effective_to IS NULL OR effective_to>=$1::date-1)
         AND (staff_id=ANY($2::int[]) OR (staff_id IS NULL AND department=ANY($3::text[]))) ORDER BY id`,
         [date, staffIds, [...new Set(staff.map(s => s.department))]])).rows,
       leaves: (await client.query(`SELECT id,staff_id AS "staffId",start_date::text AS "startDate",end_date::text AS "endDate",
         status,is_partial_day AS partial,updated_at::text AS "updatedAt" FROM hr_leave_requests
-        WHERE status='approved' AND start_date<=$1::date+1 AND end_date>=$1::date AND staff_id=ANY($2::int[]) ORDER BY id`, [date, staffIds])).rows,
+        WHERE status='approved' AND start_date<=$1::date+1 AND end_date>=$1::date-1 AND staff_id=ANY($2::int[]) ORDER BY id`, [date, staffIds])).rows,
     };
-    const result = resolveDoctorClinicalRoster(sources, doctorPartyId, date, clinicTimeZone);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    try { await client.query('ROLLBACK'); } catch { discardClient = true; }
-    throw error;
-  } finally { client.release(discardClient); }
+  return sources;
 }

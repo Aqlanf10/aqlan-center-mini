@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { seedAdvisoryDuty } from "../helpers/advisory-duty-fixture";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { baseUrl, harness } from "./_server";
 
@@ -9,6 +10,7 @@ let page: Page;
 let db: Client;
 let date = "";
 let doctorId = 0;
+let duty: Awaited<ReturnType<typeof seedAdvisoryDuty>>;
 
 function sessionCookie(raw: string): { name: string; value: string } {
   const [name, ...rest] = raw.split("=");
@@ -24,6 +26,7 @@ beforeAll(async () => {
        FROM users WHERE username = 'secdoctora'`);
   doctorId = doctor.party_id;
   date = doctor.date;
+  duty = await seedAdvisoryDuty(db, doctorId, date);
   const { rows: [otherDoctor] } = await db.query<{ party_id: number }>(
     `SELECT party_id FROM users WHERE username = 'secdoctorb'`);
   await db.query(
@@ -49,7 +52,7 @@ beforeAll(async () => {
   await context.addCookies([{ ...sessionCookie(h.sessions.reception.cookie), url: baseUrl }]);
   page = await context.newPage();
 }, 240_000);
-afterAll(async () => { await browser?.close(); await db?.end(); });
+afterAll(async () => { await browser?.close(); await duty?.cleanup(); await db?.end(); });
 
 describe("appointment booking screen shows doctor availability", () => {
   it("disables booked and blocked times and selects an available time", async () => {
@@ -62,11 +65,11 @@ describe("appointment booking screen shows doctor availability", () => {
     await expect.poll(() => dialog.getByRole("button", { name: "09:00 — محجوز" }).count(), { timeout: 30_000 }).toBe(1);
     expect(await dialog.getByRole("button", { name: "09:00 — محجوز" }).isDisabled()).toBe(true);
     expect(await dialog.getByRole("button", { name: "10:00 — الطبيب غير متاح" }).isDisabled()).toBe(true);
-    const free = dialog.getByRole("button", { name: "09:30 — متاح" });
+    const free = dialog.getByRole("button", { name: "09:30 — مقترح" });
     expect(await free.isEnabled()).toBe(true);
     await free.click();
     expect(await dialog.locator('input[type="time"]').inputValue()).toBe("09:30");
-    expect(await dialog.getByRole("button", { name: "11:00 — متاح" }).isEnabled()).toBe(true);
+    expect(await dialog.getByRole("button", { name: "11:00 — مقترح" }).isEnabled()).toBe(true);
     await dialog.locator('select[id$="-chair"]').selectOption("1");
     await expect.poll(() => dialog.getByRole("button", { name: "11:00 — غير متاح" }).count()).toBe(1);
     expect(await dialog.getByRole("button", { name: "11:00 — غير متاح" }).isDisabled()).toBe(true);

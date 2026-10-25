@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { seedAdvisoryDuty } from "../helpers/advisory-duty-fixture";
 import { authedGet, authedMutation, harness } from "./_server";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let date = "";
 let doctorId = 0;
+let duty: Awaited<ReturnType<typeof seedAdvisoryDuty>>;
 
 const url = (id = doctorId) => `/api/appointments/availability?date=${date}&doctorId=${id}&durationMinutes=30&appointmentType=consultation`;
 
@@ -18,6 +20,7 @@ beforeAll(async () => {
        FROM users WHERE username = 'secdoctora'`);
   doctorId = doctor.party_id;
   date = doctor.date;
+  duty = await seedAdvisoryDuty(db, doctorId, date);
   const { rows: [otherDoctor] } = await db.query<{ party_id: number }>(
     `SELECT party_id FROM users WHERE username = 'secdoctorb'`);
   await db.query(
@@ -37,19 +40,28 @@ beforeAll(async () => {
     [h.seeded.patientBId, otherDoctor.party_id, date],
   );
 }, 120_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => { await duty?.cleanup(); await db?.end(); });
 
 describe("doctor appointment availability over HTTP", () => {
   it("shows free, booked, and blocked slots without disclosing patient details", async () => {
     const response = await authedGet(url(), h.sessions.reception);
     expect(response.status).toBe(200);
     const body = await response.json() as { slots: { time: string; status: string }[] };
+    expect(body).toMatchObject({ purpose: "advisory_only", bookingGuaranteed: false, rosterStatus: "resolved", timeZone: "Asia/Aden" });
+    expect(JSON.stringify(body)).not.toMatch(/Private synthetic|staffId|leaveId|sourceSchedule|salary|payroll/);
     const at = (time: string) => body.slots.find((slot) => slot.time === time)?.status;
     expect(at("09:00")).toBe("booked");
     expect(at("09:15")).toBe("booked");
     expect(at("09:30")).toBe("available");
     expect(at("10:00")).toBe("blocked");
     expect(JSON.stringify(body)).not.toContain("مريض الأمن أ");
+  });
+
+  it("distinguishes an unknown doctor schedule without claiming open slots", async () => {
+    const { rows: [doctor] } = await db.query<{ party_id: number }>("SELECT party_id FROM users WHERE username='secdoctorb'");
+    const response = await authedGet(url(doctor.party_id), h.sessions.reception);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ rosterStatus: "unknown", slots: [], bookingGuaranteed: false });
   });
 
   it("keeps booked and blocked doctor times protected on the booking API", async () => {

@@ -1,0 +1,132 @@
+{
+  "baseCommit": "d9371706931230584aa6c7c7f9374837bb7fa786",
+  "reusedSourceCommit": "354cb6f907227a114ad4dad91142dff6c903b02e",
+  "sourcePullRequest": 432,
+  "reuseMethod": "selected file content only; no ancestry merge",
+  "files": [
+    {
+      "path": "lib/doctor-clinical-roster.ts",
+      "sourceSha256": "643632d1317e328326423202be51b2a367d9184e7235c4445d18a798dd500207",
+      "resultSha256": "643632d1317e328326423202be51b2a367d9184e7235c4445d18a798dd500207",
+      "reuse": "byte-identical"
+    },
+    {
+      "path": "lib/doctor-booking-window.ts",
+      "sourceSha256": "c52338fb64acc579fbbd0f93b1251c1e7a38218f69f2b14514b97d939818b732",
+      "resultSha256": "c52338fb64acc579fbbd0f93b1251c1e7a38218f69f2b14514b97d939818b732",
+      "reuse": "byte-identical"
+    },
+    {
+      "path": "lib/doctor-availability-advisory.ts",
+      "sourceSha256": "788cf0a4a4bbc77735863e1a5b6b5b78d1d7835c732683aca82f9b0f8da68201",
+      "resultSha256": "788cf0a4a4bbc77735863e1a5b6b5b78d1d7835c732683aca82f9b0f8da68201",
+      "reuse": "byte-identical"
+    },
+    {
+      "path": "__tests__/doctor-booking-window.test.ts",
+      "sourceSha256": "a312b8d385614d218a64332a39260543d7bfe6b0a26c1bc3d0e8792e58277712",
+      "resultSha256": "a312b8d385614d218a64332a39260543d7bfe6b0a26c1bc3d0e8792e58277712",
+      "reuse": "byte-identical"
+    },
+    {
+      "path": "__tests__/doctor-availability-advisory.test.ts",
+      "sourceSha256": "443e8be0c17871992afd94986a3fca9c44b57eaa7edf0489efa378ddd8cf140f",
+      "resultSha256": "443e8be0c17871992afd94986a3fca9c44b57eaa7edf0489efa378ddd8cf140f",
+      "reuse": "byte-identical"
+    },
+    {
+      "path": "__tests__/postgres/doctor-availability-advisory.test.ts",
+      "sourceSha256": "95814bf85ac2781daee4350515e9885794b69a75b6c3e43e2ed8ebf226ffffd5",
+      "resultSha256": "3b34b12e8dac55fd727d78f6fb86e80759c28fe86f0b7866ea5a82e8f75f7c00",
+      "reuse": "unchanged source plus added read-only snapshot regression"
+    }
+  ],
+  "unchangedBoundaries": [
+    {
+      "path": "lib/book-appointment.ts",
+      "sha256": "814ccc6fec73a81e5cc1e1e54ff951faa11abeb28a8513849af3ccef4c37b242",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "lib/db.ts",
+      "sha256": "66e833585512181c2d09fab2a50bbb42b1865933be91b644e44977ca9c3373b3",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "lib/capacity.ts",
+      "sha256": "a5073e74e4c1cd7c4122465b6dc982edada8c127e7a0db2916562296c21b8dca",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "lib/capacity-context.ts",
+      "sha256": "69416066168ac80a78ea20d15b3d66a562eb1b6cb2f63519db9b877d130471ab",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "lib/booking.ts",
+      "sha256": "c6ce58e59bfb7f4d5507aff2bedf015a1e6ad38f5becd7f46ed91a2769e4e2a8",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "lib/hr-contracts-attendance.ts",
+      "sha256": "44e5530741bbc831810ce3d2f1f8f61f68879714fd2575720b06736631b4f82f",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "lib/settings-validate.ts",
+      "sha256": "5320293ad36cfe82768a4d2621ba57cb903bb0cbade259e513192cf7cec562fb",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "components/settings/ClinicHoursEditor.tsx",
+      "sha256": "af22123691151a2ce4a2e5d4d5c9e0a5cd62b4648497497b3d7dccc94602ac04",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "app/book/page.tsx",
+      "sha256": "fa671b0de14a4fb871d8b1f8f0f88940fa1a225e8debd46f98eb8ff6efb5111f",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "app/requests/page.tsx",
+      "sha256": "96dc9d0fb1e8b0a517bb4e08f7069fc3fe748dce915e9c9e2f72375efcb9f23b",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "app/api/book/route.ts",
+      "sha256": "b63000997fc81880ef7fbf8a0f4932fddb0358d622d87dcb88f41db4ff528854",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "app/api/booking-requests/[id]/route.ts",
+      "sha256": "c98b6778a9877821c6163596b0f2f7888de714dccf013d575c050912568354e5",
+      "unchangedFromBase": true
+    },
+    {
+      "path": "components/patient/PatientAppointmentsPanel.tsx",
+      "sha256": "16754682eb13214c80120d2060bf2b55dc416d3321b75ff5f95ebba418da1f04",
+      "unchangedFromBase": true
+    }
+  ],
+  "publicApiProjection": {
+    "fields": [
+      "bookingGuaranteed",
+      "date",
+      "doctorId",
+      "durationMinutes",
+      "purpose",
+      "rosterStatus",
+      "slots",
+      "timeZone"
+    ],
+    "slotFields": [
+      "label",
+      "status",
+      "time"
+    ],
+    "purpose": "advisory_only",
+    "bookingGuaranteed": false,
+    "unknownHasNoSlots": true
+  },
+  "projectionSha256": "b154813b4a059795baa710e43dea3f1e2a1603b66b63a31f5fc959b77131fe0b"
+}
