@@ -9,7 +9,7 @@ vi.mock("@/lib/db", async (original) => ({ ...await original<typeof import("../l
   patientLedger: mocks.ledger, getSettingsSafe: async () => ({}),
   patientPlanCurrencies: async () => new Map(), listPatientPlans: async () => [],
   // The current print reads the same sources in one snapshot; here it composes the same mocks.
-  patientStatementSnapshot: async (id: number) => ({ ledger: await mocks.ledger(id), planCurrencies: new Map(), plans: [], historicalAgreements: [] }),
+  patientStatementSnapshot: async (id: number) => ({ ledger: await mocks.ledger(id), planCurrencies: new Map(), plans: [], historicalAgreements: [], statementEvidence: { invoiceCorrections: [], invoiceCancellations: [], paymentCorrections: [], openingHistory: [], allocationEffectiveAt: {} } }),
 }));
 vi.mock("@/components/PrintHeader", () => ({
   PrintHeader: () => createElement("h1", null, "Synthetic statement"), PrintFooter: () => null,
@@ -85,7 +85,7 @@ describe("statement and treatment-account cross-reader acceptance (synthetic, no
     const html = renderToStaticMarkup(await StatementPage({ params: Promise.resolve({ id: "10" }) }));
     const displayedCurrencies = CURRENCIES.filter((key) => key === "YER" || key === currency || key === otherCurrency);
     expect(summaryValues(html, "إجمالي المفوتر")).toEqual(displayedCurrencies.map((key) => formatMoney(balances[key].billedMinor, key)));
-    expect(summaryValues(html, "صافي المحصّل بعد الاستردادات وعكس السندات"))
+    expect(summaryValues(html, "صافي المدفوع"))
       .toEqual(displayedCurrencies.map((key) => formatMoney(balances[key].collectedMinor, key)));
     expect(summaryValues(html, "الرصيد الحالي")).toEqual(displayedCurrencies.map((key) => {
       const due = balances[key].dueMinor;
@@ -97,7 +97,7 @@ describe("statement and treatment-account cross-reader acceptance (synthetic, no
     expect(html).toContain("علاج السن ٢٦ — SYN-LINE-2");
     expect(html).toContain(`الخصم المسجل</td><td class="num">${formatMoney(discountMinor, currency)}`);
     for (const receipt of ledger.payments) expect(html).toContain(receipt.receiptNumber);
-    expect(html).toContain("عكس سند SYN-MATRIX-REC-1");
+    expect(html).not.toContain("عكس سند");
     expect(html).toContain("استرداد");
     // Clinical references retain cancelled document provenance; patient print hides its charge/details.
     expect(account.documents.find((row) => row.invoiceId === 1)).toMatchObject({ status: "cancelled", netMinor: 0,

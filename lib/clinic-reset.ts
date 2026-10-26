@@ -148,7 +148,14 @@ export class ProtectedCollectionAttemptHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد إثبات إلغاء محاولات تحصيل؛ يجب الاحتفاظ بمفاتيحها حتى لا تُسجَّل محاولة متأخرة بعد إعادة الضبط. لم يُمسح شيء."); this.name = "ProtectedCollectionAttemptHistoryError"; }
 }
 
+/** Committed and rejected invoice commands must survive identity reuse. */
+export const INVOICE_ACTION_HISTORY_TABLES = ["invoice_archive_events", "invoice_archive_rejections", "invoice_service_additions", "invoice_service_addition_rejections"] as const;
+export class ProtectedInvoiceActionHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد تسجيل أرشفة فاتورة أو إضافة خدمة أو رفض محفوظ؛ يجب الاحتفاظ بسجل الطلبات ومفاتيحها. لم يُمسح شيء."); this.name = "ProtectedInvoiceActionHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
+  ...INVOICE_ACTION_HISTORY_TABLES,
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,

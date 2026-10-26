@@ -83,6 +83,8 @@ class Refusal extends Error {
   constructor(readonly reason: InvoiceLinkageRefusal | "no_patient", readonly line: number | null) { super(reason); }
 }
 
+export { Refusal as InvoiceLinkageError };
+
 const OPEN_CASE = `status IN ('active', 'waiting')`;
 
 interface ExistingWork {
@@ -295,7 +297,7 @@ export async function recoverLinkedInvoice(input: {
   } finally { client.release(); }
 }
 
-export async function createLinkedInvoice(input: {
+export type LinkedInvoiceInput = {
   patientId: number;visitId?:number;
   existingPlanId?: number | null;
   baseCurrency: Currency;
@@ -313,7 +315,9 @@ export async function createLinkedInvoice(input: {
   catalogueAuthority?: InvoiceTemplateAuthority;
   /** تفاصيل سطر تدقيق `invoice.create` (السلطة السعرية) — يُكتب داخل المعاملة نفسها. */
   auditDetails: Record<string, unknown>;
-}): Promise<CreateLinkedInvoiceResult> {
+};
+
+export async function createLinkedInvoice(input: LinkedInvoiceInput): Promise<CreateLinkedInvoiceResult> {
   await ensureSchema();
   /* Ordinary receipts retain the established post-release read. Template receipts are
      already mapped on the transaction client: no second pool connection while locks are held. */
@@ -327,11 +331,33 @@ type Written =
   | { ok: true; invoiceId: number; invoice?: Invoice; replayed: boolean; planId: number | null; links: LineLink[];visitId?:number }
   | Extract<CreateLinkedInvoiceResult, { ok: false }>;
 
-async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[0]): Promise<Written> {
+async function writeLinkedInvoice(input: LinkedInvoiceInput): Promise<Written> {
   const client = await getPool().connect();
-  const authority = input.templateAuthority ?? input.catalogueAuthority;
   try {
     await client.query("BEGIN");
+    const result = await createLinkedInvoiceInTransaction(client, input);
+    await client.query(result.replayed ? "ROLLBACK" : "COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if(error instanceof InvoiceVisitContextError)return {ok:false,reason:"visit_context_invalid",line:null};
+    if (error instanceof Refusal) return { ok: false, reason: error.reason, line: error.line };
+    // مفتاحٌ واحد لطلبين متزامنين لمريضين مختلفين: الفهرس الفريد يحسم — تعارضٌ لا فاتورة ثانية.
+    if ((error as { code?: string; constraint?: string }).code === "23505"
+      && (error as { constraint?: string }).constraint === "invoices_idempotency_key_uniq") {
+      return { ok: false, reason: "idempotency_conflict", line: null };
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** The caller owns BEGIN/COMMIT/ROLLBACK and may append related immutable evidence
+ * before committing. This is the same clinical writer used by ordinary invoices;
+ * it neither opens a pool connection nor initializes schema. */
+export async function createLinkedInvoiceInTransaction(client: DbClient, input: LinkedInvoiceInput): Promise<Extract<Written, {ok:true}>> {
+  const authority = input.templateAuthority ?? input.catalogueAuthority;
     const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
     if (!patient[0]) throw new Refusal("no_patient", null);
 
@@ -348,7 +374,6 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
           ? await lockedInvoiceReceipt(client, prior.id, input)
           : await existingLinks(client, prior.id);
         if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
-        await client.query("ROLLBACK");
         return { ok: true, invoiceId: prior.id, replayed: true, ...replay };
       }
     }
@@ -626,21 +651,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       || templateInvoice.items.length !== links.length || templateInvoice.items.some((item, line) =>
         (item.planItemId ?? null) !== links[line].planItemId || (item.caseId ?? null) !== links[line].caseId))) throw new Refusal("idempotency_conflict", null);
     if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
-    await client.query("COMMIT");
     return { ok: true, invoiceId, ...(templateInvoice ? { invoice: templateInvoice } : {}), replayed: false, planId, links };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    if(error instanceof InvoiceVisitContextError)return {ok:false,reason:"visit_context_invalid",line:null};
-    if (error instanceof Refusal) return { ok: false, reason: error.reason, line: error.line };
-    // مفتاحٌ واحد لطلبين متزامنين لمريضين مختلفين: الفهرس الفريد يحسم — تعارضٌ لا فاتورة ثانية.
-    if ((error as { code?: string; constraint?: string }).code === "23505"
-      && (error as { constraint?: string }).constraint === "invoices_idempotency_key_uniq") {
-      return { ok: false, reason: "idempotency_conflict", line: null };
-    }
-    throw error;
-  } finally {
-    client.release();
-  }
 }
 
 // ─── المعاينة (قراءة فقط) ─────────────────────────────────────────────────────
@@ -675,9 +686,9 @@ export async function previewInvoiceLinkage(input: {
     toothCode: number | null; caseId: number | null; sessions?: number | null;
     surfaces?: string | null; episodeTeeth?: number[] | null; scope?: string | null; doctorId?: number | null; planItemId?: number | null;
     templatePlan?: LinkedInvoiceLineInput["templatePlan"] }[];
-}): Promise<LinePreview[]> {
-  await ensureSchema();
-  const pool = getPool();
+}, client?: DbClient): Promise<LinePreview[]> {
+  if (!client) await ensureSchema();
+  const pool = client ?? getPool();
   const selectedPlanValid = input.existingPlanId == null || (await pool.query(
     `SELECT id FROM treatment_plans WHERE id = $1 AND patient_id = $2 AND status = 'active' AND base_currency = $3`,
     [input.existingPlanId, input.patientId, input.baseCurrency])).rows.length === 1;

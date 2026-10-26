@@ -97,7 +97,9 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <tbody>
             {invoice.items.map((item) => (
               <tr key={item.id}>
-                <td>{item.description}</td>
+                <td>{item.description}{item.toothCode != null ? <div className="invoice-tooth-site">
+                  سن {item.toothCode}{item.surfaces ? <> — أسطح <bdi>{item.surfaces}</bdi></> : null}
+                </div> : null}</td>
                 <td className="num" dir="ltr">{item.quantity}</td>
                 <td className="num">{formatMoney(item.unitPriceMinor, base)}</td>
                 <td className="num">{formatMoney(item.totalMinor, base)}</td>

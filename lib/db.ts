@@ -1,3 +1,5 @@
+import { INVOICE_SERVICE_ADDITIONS_SQL } from "./invoice-service-additions-schema";
+import { INVOICE_ARCHIVE_SQL } from "./invoice-archive-schema";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
@@ -104,7 +106,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { INVOICE_ACTION_HISTORY_TABLES, ProtectedInvoiceActionHistoryError, AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -2101,6 +2103,8 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0068", name: "collection_attempt_retirements", filename: "0068_collection_attempt_retirements.sql", sql: COLLECTION_ATTEMPT_RETIREMENT_SQL, checksum: checksumOf(COLLECTION_ATTEMPT_RETIREMENT_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0069", name: "unpaid_currency_transitions", filename: "0069_unpaid_currency_transitions.sql", sql: UNPAID_CURRENCY_TRANSITION_SQL, checksum: checksumOf(UNPAID_CURRENCY_TRANSITION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0081", name: "invoice_archive", filename: "0081_invoice_archive.sql", sql: INVOICE_ARCHIVE_SQL, checksum: checksumOf(INVOICE_ARCHIVE_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0082", name: "invoice_service_additions", filename: "0082_invoice_service_additions.sql", sql: INVOICE_SERVICE_ADDITIONS_SQL, checksum: checksumOf(INVOICE_SERVICE_ADDITIONS_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -16125,6 +16129,8 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   // Reconciliation guards freeze these sources after the event header is restored.
   for (const dependency of ["plan_items", "plan_installments", "invoice_items"])
     dependsOn.get("agreement_reconciliations")?.add(dependency);
+  // The immutable supplement validator reads item count beyond declared FKs.
+  dependsOn.get("invoice_service_additions")?.add("invoice_items");
   const ordered = insertionOrder(
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
@@ -16167,7 +16173,8 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     // Immutable revisions must restore in stream order, never physical heap order.
     const restoreOrder = table === "debt_repayment_revisions" ? " ORDER BY arrangement_id, version"
       : table === "legacy_treatment_document_revisions" ? " ORDER BY document_id, version"
-      : table === "hr_effective_revisions" ? " ORDER BY stream_id, revision" : "";
+      : table === "hr_effective_revisions" ? " ORDER BY stream_id, revision"
+      : table === "invoice_archive_events" ? " ORDER BY invoice_id, version" : "";
     const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"${restoreOrder}`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
@@ -20016,7 +20023,8 @@ const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
  * (patient portal) reports such a fact as `null` (section unavailable) while every other figure still comes
  * from this same snapshot. Only the reader's own typed validation error is tolerated, never a database
  * error, so the snapshot transaction is never used after a failed statement. */
-export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant"}={}){
+import {readPatientStatementEvidence} from "./patient-statement-evidence";
+export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant";patientFacing?:boolean}={}){
   await ensureSchema();
   return withFinancialReadSnapshot(getPool(),async runner=>{
     const client=runner as DbClient;
@@ -20034,7 +20042,8 @@ export async function patientStatementSnapshot(patientId:number,today:string,opt
     }else if(options.historicalAgreements){
       historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
     }
-    return {ledger,planCurrencies,plans,historicalAgreements};
+    const statementEvidence=options.patientFacing?await readPatientStatementEvidence(client,patientId,ledger):undefined;
+    return {ledger,planCurrencies,plans,historicalAgreements,statementEvidence};
   });
 }
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
@@ -27168,6 +27177,11 @@ export async function resetClinicData<F>(
       const { rows: [attemptHistory] } = await client.query<{ exists: boolean }>(
         `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
+      // Fence every durable success/refusal before backup; EXCLUSIVE permits backup reads.
+      await client.query(`LOCK TABLE ${INVOICE_ACTION_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [invoiceActionHistory] } = await client.query<{ exists: boolean }>(
+        `SELECT ${INVOICE_ACTION_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
+      if (invoiceActionHistory.exists) throw new ProtectedInvoiceActionHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
@@ -27185,7 +27199,7 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${INVOICE_ACTION_HISTORY_TABLES.join(", ")} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }

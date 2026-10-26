@@ -588,3 +588,11 @@ refuse when reconciliation or rejection history exists, rather than erase it.
 Require exact-head PostgreSQL, schema/ownership, populated SQL/full-archive
 restore, HTTP/browser retry and Staging acceptance evidence before release.
 Neither this listing nor passing unit tests alone authorizes Production rollout.
+
+### 0081_invoice_archive.sql / 0082_invoice_service_additions.sql
+
+Local activation candidate: immutable documentary archive events/refusals and separate dated service-addition receipts/refusals. Runtime registers exact migration bytes under the common migration lock; no baseline adoption or reserved 0079/0080 allocation. Archive never changes financial/clinical rows; adding service creates a separate invoice through existing financial/clinical authority.
+
+All four evidence tables are protected reset history: any row refuses reset before backup; empty tables participate under EXCLUSIVE locks and READ COMMITTED-only empty TRUNCATE guards. Backup restores archive versions in order and invoice items before addition receipts. Historical actor status and subsequent source cancellation do not invalidate restore; current authorization remains enforced by command writers.
+
+These changes are local only pending complete synthetic activation/ownership evidence and root review; no production activation or deployment is claimed.

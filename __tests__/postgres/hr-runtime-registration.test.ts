@@ -1,3 +1,5 @@
+import { INVOICE_ARCHIVE_SQL } from "../../lib/invoice-archive-schema";
+import { INVOICE_SERVICE_ADDITIONS_SQL } from "../../lib/invoice-service-additions-schema";
 import { AGREEMENT_RECONCILIATION_SQL } from "../../lib/agreement-reconciliation-schema";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../../lib/patient-appointment-history-schema";
 import {APPROVED_AGREEMENT_SQL} from "../../lib/approved-agreement-schema";
@@ -42,6 +44,8 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0068", name: "collection_attempt_retirements", checksum: createHash("sha256").update(COLLECTION_ATTEMPT_RETIREMENT_SQL).digest("hex") },
     { version: "0069", name: "unpaid_currency_transitions", checksum: createHash("sha256").update(UNPAID_CURRENCY_TRANSITION_SQL).digest("hex") },
     { version: "0078", name: "agreement_reconciliation", checksum: createHash("sha256").update(AGREEMENT_RECONCILIATION_SQL).digest("hex") },
+    { version: "0081", name: "invoice_archive", checksum: createHash("sha256").update(INVOICE_ARCHIVE_SQL).digest("hex") },
+    { version: "0082", name: "invoice_service_additions", checksum: createHash("sha256").update(INVOICE_SERVICE_ADDITIONS_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);
