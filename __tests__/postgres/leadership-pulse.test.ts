@@ -19,8 +19,8 @@ it("does not mistake a truncated latest-300 task list for the whole overdue popu
  SELECT 'Old task '||n,$1,'Synthetic','synthetic','planned','2000-01-01'::timestamptz+n*INTERVAL '1 minute','2000-01-01' FROM generate_series(1,321) n`,[admin]);
  await q("INSERT INTO hr_tasks(title,owner_user_id,owner_display_name,created_by,is_private,due_at) VALUES ('PRIVATE-OTHER',$1,'Other','synthetic',TRUE,'1999-01-01')",[other]);
  await q("INSERT INTO hr_tasks(title,owner_user_id,owner_display_name,created_by,is_private,due_at) VALUES ('OWN-PRIVATE-VISIBLE',$1,'Owner','synthetic',TRUE,'2199-01-01')",[admin]);
- const r=await read("tasks");expect(r.total).toBe(322);expect(r.counts.overdue).toBe(321);expect(r.items).toHaveLength(10);expect(r.items[0].title).toBe("Old task 1");expect(JSON.stringify(r)).not.toContain("PRIVATE-OTHER");
- const clamped=await read("tasks",999);expect(clamped.page).toBe(32);expect(clamped.items).toHaveLength(2);expect(clamped.items.some(i=>i.title==="OWN-PRIVATE-VISIBLE")).toBe(true);expect(clamped.hasMore).toBe(false);
+ const r=await read("tasks");expect(r.total).toBe(321);expect(r.counts.overdue).toBe(321);expect(r.items).toHaveLength(10);expect(r.items[0].title).toBe("Old task 1");expect(JSON.stringify(r)).not.toContain("PRIVATE-OTHER");
+ const clamped=await read("tasks",999);expect(clamped.page).toBe(32);expect(clamped.items).toHaveLength(1);expect(JSON.stringify(clamped)).not.toContain("OWN-PRIVATE-VISIBLE");expect(clamped.hasMore).toBe(false);
 });
 it("keeps unknown due dates, real assignment and latest actor distinct; terminal tasks excluded",async()=>{
  const staff=Number((await q("INSERT INTO hr_staff(full_name,created_by) VALUES ('Assigned staff','synthetic') RETURNING id"))[0].id);
