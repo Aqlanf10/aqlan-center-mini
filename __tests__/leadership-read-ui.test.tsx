@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 type Slot={value?:unknown;deps?:unknown[];cleanup?:()=>void};type Frame={slots:Slot[];cursor:number;effects:(()=>void)[]};
-const runtime=vi.hoisted(()=>({frame:null as Frame|null}));
+const runtime=vi.hoisted(()=>({frame:null as Frame|null,onForbidden:vi.fn()}));
 vi.mock("react",async original=>{const react=await original<typeof import("react")>();const slot=()=>{const f=runtime.frame!,i=f.cursor++;return f.slots[i]??(f.slots[i]={});};return{...react,
- useContext:()=>null,
+ useContext:()=>runtime.onForbidden,
  useState:(initial:unknown)=>{const s=slot();if(!("value" in s))s.value=typeof initial==="function"?initial():initial;return[s.value,(next:unknown)=>{s.value=typeof next==="function"?next(s.value):next;}];},
  useRef:(initial:unknown)=>{const s=slot();if(!s.value)s.value={current:initial};return s.value;},
  useEffect:(fn:()=>void|(()=>void),deps?:unknown[])=>{const s=slot();if(!s.deps||!deps||deps.some((v,i)=>!Object.is(v,s.deps![i]))){s.deps=deps;runtime.frame!.effects.push(()=>{s.cleanup?.();s.cleanup=fn()||undefined;});}},
@@ -13,13 +13,13 @@ import {MetricCard,LeadershipOverview} from "../components/leadership/Leadership
 const listeners=new Map<string,()=>void>(),response=(body:unknown,status=200)=>({ok:status<400,status,json:async()=>body});
 const turns=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
 // The test scheduler is outside the pure hook-bearing harness; no production hook rules are disabled.
-function ReadHarness({url}:{url:string}) { return useLeadershipRead(url,v=>typeof v==="string"?v:null); }
+function ReadHarness({url}:{url:string|null}) { return useLeadershipRead(url,v=>typeof v==="string"?v:null); }
 function mount(){
- const frame:Frame={slots:[],cursor:0,effects:[]};let url="/synthetic/first";
+ const frame:Frame={slots:[],cursor:0,effects:[]};let url:string|null="/synthetic/first";
  const render=()=>{runtime.frame=frame;frame.cursor=0;const read=ReadHarness({url});frame.effects.splice(0).forEach(f=>f());return read;};
- render();return{render,choose:(next:string)=>{url=next;},unmount:()=>frame.slots.forEach(s=>s.cleanup?.())};
+ render();return{render,choose:(next:string|null)=>{url=next;},unmount:()=>frame.slots.forEach(s=>s.cleanup?.())};
 }
-beforeEach(()=>{vi.useFakeTimers();listeners.clear();vi.stubGlobal("window",{addEventListener:(k:string,fn:()=>void)=>listeners.set(k,fn),removeEventListener:(k:string)=>listeners.delete(k)});vi.stubGlobal("document",{visibilityState:"visible",addEventListener:(k:string,fn:()=>void)=>listeners.set(k,fn),removeEventListener:(k:string)=>listeners.delete(k)});});
+beforeEach(()=>{vi.useFakeTimers();runtime.onForbidden.mockReset();listeners.clear();vi.stubGlobal("window",{addEventListener:(k:string,fn:()=>void)=>listeners.set(k,fn),removeEventListener:(k:string)=>listeners.delete(k)});vi.stubGlobal("document",{visibilityState:"visible",addEventListener:(k:string,fn:()=>void)=>listeners.set(k,fn),removeEventListener:(k:string)=>listeners.delete(k)});});
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();});
 it("shows unknown rather than zero while source data is unavailable",()=>{const html=renderToStaticMarkup(<MetricCard label="مؤشر اصطناعي" value={null} detail="المصدر لم يُتحقق منه" icon="clock" onClick={()=>{}}/>);expect(html).toContain("—");expect(html).not.toContain(">0<");});
 it("clears old data at scope change and rejects superseded replies",async()=>{
@@ -58,4 +58,19 @@ it("refreshes server-today after midnight, retains manually selected/paged cohor
  serverDay="2026-10-27";await click("تحديث التشغيل والمعمل");expect(latestDayUrl()).toContain("page=0&day=2026-10-26");
  await click("اليوم");expect(latestDayUrl()).not.toContain("&day=");expect(walk(render()).find(e=>e.type==="input"&&e.props.type==="date")!.props.value).toBe("2026-10-27");
  frame.slots.forEach(slot=>slot.cleanup?.());
+});
+
+it("disables an invalid financial range immediately and aborts its previous request",async()=>{
+ const fetch=vi.fn().mockResolvedValue(response("verified"));vi.stubGlobal("fetch",fetch);const f=mount();await turns();expect(f.render().data).toBe("verified");
+ f.choose(null);expect(f.render()).toMatchObject({data:null,error:null,loading:false});expect(fetch).toHaveBeenCalledTimes(1);
+ f.choose("/synthetic/corrected");expect(f.render().loading).toBe(true);await turns();expect(f.render().data).toBe("verified");expect(fetch).toHaveBeenCalledTimes(2);f.unmount();
+});
+it("clears the whole hub only for a current permission refusal, never a superseded response",async()=>{
+ const pending:((value:unknown)=>void)[]=[];vi.stubGlobal("fetch",vi.fn(()=>new Promise(resolve=>pending.push(resolve))));const f=mount();
+ f.choose("/synthetic/new-session");f.render();pending[0](response({},401));await turns();expect(runtime.onForbidden).not.toHaveBeenCalled();
+ pending[1](response({},403));await turns();expect(runtime.onForbidden).toHaveBeenCalledOnce();expect(f.render().data).toBeNull();f.unmount();
+});
+it("surfaces financial integrity refusal and clears verified money",async()=>{
+ vi.stubGlobal("fetch",vi.fn().mockResolvedValueOnce(response("verified")).mockResolvedValueOnce(response({},409)));const f=mount();await turns();expect(f.render().data).toBe("verified");
+ f.render().refresh();expect(f.render().data).toBeNull();await turns();expect(f.render().error).toContain("سلامة السجلات");expect(f.render().data).toBeNull();f.unmount();
 });

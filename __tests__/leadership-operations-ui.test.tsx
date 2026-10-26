@@ -5,7 +5,7 @@ import type { OperationalOverview, OperationalSection } from "../lib/leadership-
 type Slot={value?:unknown;deps?:unknown[];cleanup?:()=>void};
 type Frame={slots:Slot[];cursor:number;effects:(()=>void)[]};
 const runtime=vi.hoisted(()=>({frame:null as Frame|null,session:{username:"synthetic",role:"admin"} as {username:string;role:string}|null}));
-vi.mock("react",async original=>{const react=await original<typeof import("react")>();const slot=()=>{const f=runtime.frame!;const i=f.cursor++;return f.slots[i]??(f.slots[i]={});};return {...react,
+vi.mock("react",async original=>{const react=await original<typeof import("react")>();const slot=()=>{const f=runtime.frame!;const i=f.cursor++;return f.slots[i]??(f.slots[i]={});};return {...react, useContext:()=>null,
   useState:(initial:unknown)=>{const s=slot();if(!("value"in s))s.value=typeof initial==="function"?initial():initial;return[s.value,(next:unknown)=>{s.value=typeof next==="function"?next(s.value):next;}];},
   useRef:(initial:unknown)=>{const s=slot();if(!s.value)s.value={current:initial};return s.value;},
   useEffect:(fn:()=>void|(()=>void),deps?:unknown[])=>{const s=slot();if(!s.deps||!deps||deps.some((v,i)=>!Object.is(v,s.deps![i]))){s.deps=deps;runtime.frame!.effects.push(()=>{s.cleanup?.();s.cleanup=fn()||undefined;});}},
@@ -31,7 +31,7 @@ beforeEach(()=>{vi.useFakeTimers();listeners.clear();runtime.session={username:"
 });
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();});
 it.each([null,{username:"synthetic",role:"doctor"},{username:"synthetic",role:"reception"}])("does not mount or fetch operational patient data for a non-admin session",session=>{runtime.session=session;const fetch=vi.fn();vi.stubGlobal("fetch",fetch);expect(LeadershipOperationalOverview()).toBeNull();expect(fetch).not.toHaveBeenCalled();});
-it("keys the complete view by current authenticated account",()=>{expect(LeadershipOperationalOverview()?.key).toBe("synthetic:admin");runtime.session={username:"other",role:"admin"};expect(LeadershipOperationalOverview()?.key).toBe("other:admin");});
+it("keys the complete view by current authenticated account",()=>{expect(LeadershipOperationalOverview()?.key).toBe("synthetic:admin:");runtime.session={username:"other",role:"admin"};expect(LeadershipOperationalOverview()?.key).toBe("other:admin:");});
 it("distinguishes loading from a verified zero and pins the default clinic day across midnight",async()=>{
   const fetch=vi.fn().mockResolvedValue(response(snapshot()));vi.stubGlobal("fetch",fetch);const f=mount();
   expect(words(f.render())).toContain("الأعداد غير معروفة بعد");await turns();expect(f.find("input").props.value).toBe("2026-10-22");

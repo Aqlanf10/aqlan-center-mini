@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useLeadershipRead } from "./useLeadershipRead";
+import { SourceState } from "./LeadershipOverview";
+import { decodeLeadershipFinancial, leadershipPeriodRange, validLeadershipRange } from "@/lib/leadership-financial";
 import { Icon } from "@/components/Icon";
 import styles from "./leadership.module.css";
 import { CURRENCY_LABEL, formatMoney } from "@/lib/money";
 import {
   PERIOD_PRESET_LABEL,
-  periodRange,
   type ExecutiveKpis,
   type PeriodPreset,
 } from "@/lib/executive";
@@ -27,39 +29,16 @@ const PRESETS: PeriodPreset[] = ["thisMonth", "lastMonth", "last3", "thisYear", 
 
 export default function ExecutiveFinancialOverview({ standalone = false }: { standalone?: boolean } = {}) {
   const [preset, setPreset] = useState<PeriodPreset | null>("thisMonth");
-  const [range, setRange] = useState(() => periodRange("thisMonth", new Date()));
-  const [feed, setFeed] = useState<ExecutiveKpis | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const loadSequence = useRef(0);
+  const [range, setRange] = useState(() => leadershipPeriodRange("thisMonth"));
   const [view, setView] = useState<FinanceView>("cash");
-
-  const load = useCallback(async (from: string, to: string) => {
-    const sequence = ++loadSequence.current;
-    setLoading(true);
-    setFeed(null);
-    setError(null);
-    try {
-      const response = await fetch(`/api/executive?from=${from}&to=${to}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      if (sequence !== loadSequence.current) return;
-      setFeed(payload as ExecutiveKpis);
-      setError(null);
-    } catch (loadError) {
-      if (sequence !== loadSequence.current) return;
-      setFeed(null);
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
-    } finally {
-      if (sequence === loadSequence.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(range.from, range.to); }, [range, load]);
+  const validRange = validLeadershipRange(range.from, range.to);
+  const read = useLeadershipRead(validRange ? `/api/executive?from=${range.from}&to=${range.to}` : null,
+    value => decodeLeadershipFinancial(value, range.from, range.to));
+  const { data: feed, loading } = read;
 
   const pickPreset = (next: PeriodPreset) => {
     setPreset(next);
-    setRange(periodRange(next, new Date()));
+    setRange(leadershipPeriodRange(next));
   };
 
   return <section className={styles.stack} data-testid="leadership-finance">
@@ -68,7 +47,7 @@ export default function ExecutiveFinancialOverview({ standalone = false }: { sta
         {standalone ? <h1>المالية والفترات</h1> : <h2>المالية والفترات</h2>}
         <p className={styles.sourceLine}>كل عملة في مكانها. التحصيل والفواتير والذمم ليست رقمًا واحدًا.</p>
       </div>
-      <button type="button" className={styles.smallButton} disabled={loading} onClick={() => void load(range.from, range.to)}>تحديث المالية</button>
+      <button type="button" className={styles.smallButton} disabled={loading || !validRange} onClick={read.refresh}>تحديث المالية</button>
     </div>
     <section className={styles.panel} aria-label="الفترة المالية">
       <div className={styles.pillGroup} role="group" aria-label="فترات مالية جاهزة">{PRESETS.map(option =>
@@ -80,8 +59,9 @@ export default function ExecutiveFinancialOverview({ standalone = false }: { sta
         {feed && <a className={styles.smallButton} href={`/api/executive?from=${range.from}&to=${range.to}&format=csv`}>تصدير CSV</a>}
       </div>
     </section>
-    {error && <div role="alert" className={styles.error}>{error} <button type="button" onClick={() => void load(range.from, range.to)}>إعادة المحاولة</button></div>}
-    {loading && !feed && <p className={styles.sourceState} role="status">جارٍ التحقق من المصدر المالي… القيم غير معروفة بعد.</p>}
+    {!validRange && <p role="alert" className={styles.error}>اختر تاريخين صحيحين؛ البداية لا تتجاوز النهاية. القيم غير معروفة حتى تصحيح الفترة.</p>}
+    <SourceState {...read} onRetry={read.refresh} />
+    {read.receivedAt && <p className={styles.sourceLine}>استُلمت القراءة المالية: <bdi>{new Date(read.receivedAt).toISOString()}</bdi> · UTC · وقت الاستلام، لا لقطة موحدة مع بقية المصادر</p>}
     {feed && <>
       <p className={styles.sourceLine}>من {friendlyDateLong(feed.from)} إلى {friendlyDateLong(feed.to)} · العملة الأساسية {feed.baseCurrency} للمرجع، وليست تحويلًا لبقية العملات</p>
       <nav className={styles.pillGroup} aria-label="أقسام القراءة المالية">{FINANCE_VIEWS.map(item =>
@@ -96,10 +76,10 @@ const FINANCE_VIEWS: { id: FinanceView; label: string }[] = [
   { id: "cash", label: "حركة النقد" }, { id: "billing", label: "الفواتير والمصروفات" },
   { id: "debts", label: "الذمم" }, { id: "operations", label: "تشغيل الفترة" },
 ];
-function AmountCard({ label, value, scope, children }: { label: string; value: string; scope: string; children?: ReactNode }) {
+function AmountCard({ label, value, scope, href, children }: { label: string; value: string; scope: string; href?: string; children?: ReactNode }) {
   return <article className={styles.amountCard}>
     <div className={styles.metricTop}><h3>{label}</h3><Icon name="wallet" className="h-5 w-5" /></div>
-    <p className={styles.amountValue}><bdi>{value}</bdi></p><p className={styles.sourceLine}>{scope}</p>{children}
+    <p className={styles.amountValue}><bdi>{value}</bdi></p><p className={styles.sourceLine}>{scope}</p>{children}{href && <a className={styles.textLink} href={href}>تفاصيل قراءة المصدر (CSV)</a>}
   </article>;
 }
 function Fact({ label, value }: { label: string; value: string | number }) {
@@ -107,11 +87,12 @@ function Fact({ label, value }: { label: string; value: string | number }) {
 }
 /** Presentation only. Values come directly from the existing financial read model, without conversion or recalculation. */
 export function FinancialReadout({ feed, view, showAdminLinks = false }: { feed: ExecutiveKpis; view: FinanceView; showAdminLinks?: boolean }) {
+  const exportHref = `/api/executive?from=${feed.from}&to=${feed.to}&format=csv`;
   const activeCash = feed.cashMovements.filter(row => row.collectedMinor !== 0 || row.paidOutMinor !== 0 || row.netMinor !== 0);
   const quietCash = feed.cashMovements.filter(row => row.collectedMinor === 0 && row.paidOutMinor === 0 && row.netMinor === 0);
   if (view === "cash") return <section className={styles.stack} aria-labelledby="leadership-cash-title">
     <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>حركات الفترة فقط</p><h2 id="leadership-cash-title">ما دخل وما خرج، بكل عملة</h2></div>{showAdminLinks && <a className={styles.textLink} href="/finance/accounting">فتح المحاسبة</a>}</div>
-    <div className={styles.amountGrid}>{activeCash.map(row => <AmountCard key={row.currency} label={`صندوق ${CURRENCY_LABEL[row.currency]}`} value={formatMoney(row.netMinor, row.currency)} scope="صافي حركة الفترة، وليس الرصيد الحالي للصندوق">
+    <div className={styles.amountGrid}>{activeCash.map(row => <AmountCard href={exportHref} key={row.currency} label={`حركة النقد · ${CURRENCY_LABEL[row.currency]}`} value={formatMoney(row.netMinor, row.currency)} scope={`من ${feed.from} إلى ${feed.to} · صافي حركة الفترة، وليس الرصيد الحالي للصندوق`}>
       <dl className={styles.factList}><Fact label="ما دخل" value={formatMoney(row.collectedMinor, row.currency)} /><Fact label="ما خرج" value={formatMoney(row.paidOutMinor, row.currency)} /></dl>
     </AmountCard>)}</div>
     {activeCash.length === 0 && <p className={styles.empty}>لا حركة نقدية مسجّلة في هذه القراءة.</p>}
@@ -120,12 +101,12 @@ export function FinancialReadout({ feed, view, showAdminLinks = false }: { feed:
   </section>;
   if (view === "billing") return <div className={styles.stack}>
     <section aria-labelledby="leadership-billing-title"><div className={styles.sectionHeading}><div><p className={styles.eyebrow}>أساس الاستحقاق · بعملة الفاتورة</p><h2 id="leadership-billing-title">الفواتير</h2></div>{showAdminLinks && <a className={styles.textLink} href="/finance/reports">فتح التقارير المالية</a>}</div>
-      {feed.billingByCurrency.length === 0 ? <p className={styles.empty}>لا فواتير في الفترة.</p> : <div className={styles.amountGrid}>{feed.billingByCurrency.map(row => <AmountCard key={row.currency} label={`صافي الفواتير · ${CURRENCY_LABEL[row.currency]}`} value={formatMoney(row.netMinor, row.currency)} scope="قيمة الفواتير بعد الخصومات، لا إثبات تحصيل">
+      {feed.billingByCurrency.length === 0 ? <p className={styles.empty}>لا فواتير في الفترة.</p> : <div className={styles.amountGrid}>{feed.billingByCurrency.map(row => <AmountCard href={exportHref} key={row.currency} label={`صافي الفواتير · ${CURRENCY_LABEL[row.currency]}`} value={formatMoney(row.netMinor, row.currency)} scope={`من ${feed.from} إلى ${feed.to} · قيمة الفواتير بعد الخصومات، لا إثبات تحصيل`}>
         <dl className={styles.factList}><Fact label="الإجمالي" value={formatMoney(row.grossMinor, row.currency)} /><Fact label="الخصومات" value={formatMoney(row.discountMinor, row.currency)} /></dl>
       </AmountCard>)}</div>}
     </section>
     <section aria-labelledby="leadership-expenses-title"><div className={styles.sectionHeading}><div><p className={styles.eyebrow}>أساس الاستحقاق · حسب الدفتر الأصلي</p><h2 id="leadership-expenses-title">المصروفات</h2></div></div>
-      {feed.expensesByCurrency.length === 0 ? <p className={styles.empty}>لا مصروفات في الفترة.</p> : <div className={styles.amountGrid}>{feed.expensesByCurrency.map(group => <AmountCard key={group.currency} label={`مصروفات ${CURRENCY_LABEL[group.currency]}`} value={formatMoney(group.totalMinor, group.currency)} scope="كل بند بعملته، دون صافي ربح مختلط">
+      {feed.expensesByCurrency.length === 0 ? <p className={styles.empty}>لا مصروفات في الفترة.</p> : <div className={styles.amountGrid}>{feed.expensesByCurrency.map(group => <AmountCard href={exportHref} key={group.currency} label={`مصروفات ${CURRENCY_LABEL[group.currency]}`} value={formatMoney(group.totalMinor, group.currency)} scope={`من ${feed.from} إلى ${feed.to} · كل بند بعملته، دون صافي ربح مختلط`}>
         <details className={styles.recordDetails}><summary>تفصيل بنود المصروفات</summary><dl className={styles.factList}>{group.rows.map(expense => <Fact key={expense.code} label={expense.name} value={formatMoney(expense.amountMinor, group.currency)} />)}</dl></details>
       </AmountCard>)}</div>}
     </section>
@@ -133,10 +114,10 @@ export function FinancialReadout({ feed, view, showAdminLinks = false }: { feed:
   </div>;
   if (view === "debts") return <div className={styles.stack}>
     <section aria-labelledby="leadership-receivables-title"><div className={styles.sectionHeading}><div><p className={styles.eyebrow}>تراكمي حتى نهاية الفترة المختارة</p><h2 id="leadership-receivables-title">ذمم المرضى</h2></div>{showAdminLinks && <a className={styles.textLink} href="/finance/debts">فتح الذمم</a>}</div>
-      {feed.receivableByCurrency.length === 0 ? <p className={styles.empty}>لا ذمم مرضى ضمن نتيجة المصدر لهذه الفترة.</p> : <div className={styles.amountGrid}>{feed.receivableByCurrency.map(row => <AmountCard key={row.currency} label={CURRENCY_LABEL[row.currency]} value={formatMoney(row.dueMinor, row.currency)} scope={`من مرجع أرصدة المرضى حتى ${feed.to}`} />)}</div>}
+      {feed.receivableByCurrency.length === 0 ? <p className={styles.empty}>لا ذمم مرضى ضمن نتيجة المصدر لهذه الفترة.</p> : <div className={styles.amountGrid}>{feed.receivableByCurrency.map(row => <AmountCard key={row.currency} label={CURRENCY_LABEL[row.currency]} href={exportHref} value={formatMoney(row.dueMinor, row.currency)} scope={`من مرجع أرصدة المرضى حتى ${feed.to}`} />)}</div>}
     </section>
     <section aria-labelledby="leadership-payables-title"><div className={styles.sectionHeading}><div><p className={styles.eyebrow}>رصيد الجهات الحالي · ليس مقيدًا بالفترة أعلاه</p><h2 id="leadership-payables-title">المعامل والموردون</h2></div>{showAdminLinks && <a className={styles.textLink} href="/finance/parties">فتح الجهات</a>}</div>
-      {feed.payableByCurrency === undefined ? <p className={styles.empty}>بيانات ذمم الجهات غير متاحة في هذه القراءة.</p> : feed.payableByCurrency.length === 0 ? <p className={styles.empty}>لا رصيد جهات غير صفري في نتيجة المصدر الحالية.</p> : <div className={styles.amountGrid} data-testid="payable-by-currency">{feed.payableByCurrency.map(row => <AmountCard key={row.currency} label={CURRENCY_LABEL[row.currency]} value={formatMoney(row.dueMinor, row.currency)} scope="الالتزامات بعد السداد والأرصدة المقدّمة، من مرجع الجهة" />)}</div>}
+      {feed.payableByCurrency === undefined ? <p className={styles.empty}>بيانات ذمم الجهات غير متاحة في هذه القراءة.</p> : feed.payableByCurrency.length === 0 ? <p className={styles.empty}>لا رصيد جهات غير صفري في نتيجة المصدر الحالية.</p> : <div className={styles.amountGrid} data-testid="payable-by-currency">{feed.payableByCurrency.map(row => <AmountCard key={row.currency} label={CURRENCY_LABEL[row.currency]} href={exportHref} value={formatMoney(row.dueMinor, row.currency)} scope="الرصيد الحالي · الالتزامات بعد السداد والأرصدة المقدّمة، من مرجع الجهة" />)}</div>}
       {feed.parties.filter(party => party.dueMinor > 0).length > 0 && <details className={styles.recordDetails}><summary>جهات ذات رصيد مستحق · أول 5 من المصدر</summary><dl className={styles.factList}>{feed.parties.filter(party => party.dueMinor > 0).slice(0,5).map(party => <Fact key={`${party.kind}-${party.label}-${party.currency}`} label={party.label} value={formatMoney(party.dueMinor,party.currency)} />)}</dl></details>}
     </section>
     <p className={styles.footnote}>ذمم المرضى حتى نهاية الفترة، وأرصدة الجهات حالية. لكل عملة رصيد مستقل؛ لا مقاصة بين العملات أو بين المرضى والجهات.</p>

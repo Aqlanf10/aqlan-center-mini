@@ -50,5 +50,5 @@ it("keeps the operational projection independent of financial authorities and al
   const source = readFileSync("lib/leadership-operations-db.ts", "utf8");
   expect(source).not.toMatch(/\b(?:invoices|invoice_items|payments|expenses|payables|journal_manual|visit_procedures|commission|INSERT|UPDATE|DELETE|ALTER)\b/);
   expect(source).not.toContain("ensureSchema");
-  expect(readFileSync("app/executive/page.tsx", "utf8")).toContain("<LeadershipOperationalOverview />");
+  expect(readFileSync("app/executive/page.tsx", "utf8")).toContain("<LeadershipOperationalOverview initialDay={drilldown.day} />");
 });

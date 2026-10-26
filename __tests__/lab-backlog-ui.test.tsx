@@ -5,7 +5,7 @@ import { backlogItem, backlogSnapshot } from "./fixtures/lab-backlog";
 type Slot = { value?: unknown; deps?: unknown[]; cleanup?: () => void };
 type Frame = { slots: Slot[]; cursor: number; effects: (() => void)[] };
 const runtime = vi.hoisted(() => ({ frame: null as Frame | null, session: { username: "synthetic", role: "admin" } as { username: string; role: string } | null }));
-vi.mock("react", async original => { const react = await original<typeof import("react")>(); const slot = () => { const f = runtime.frame!; const i = f.cursor++; return f.slots[i] ?? (f.slots[i] = {}); }; return { ...react,
+vi.mock("react", async original => { const react = await original<typeof import("react")>(); const slot = () => { const f = runtime.frame!; const i = f.cursor++; return f.slots[i] ?? (f.slots[i] = {}); }; return { ...react, useContext:()=>null,
   useState: (initial: unknown) => { const s = slot(); if (!("value" in s)) s.value = typeof initial === "function" ? initial() : initial; return [s.value, (next: unknown) => { s.value = typeof next === "function" ? next(s.value) : next; }]; },
   useRef: (initial: unknown) => { const s = slot(); if (!s.value) s.value = { current: initial }; return s.value; },
   useEffect: (fn: () => void | (() => void), deps?: unknown[]) => { const s = slot(); if (!s.deps || !deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) { s.deps = deps; runtime.frame!.effects.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; }); } },
@@ -49,11 +49,11 @@ it("turns timeout into unknown and aborts reads on unmount", async () => {
   const fetch = vi.fn().mockImplementation((_url, options) => new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted"))))); vi.stubGlobal("fetch", fetch);
   const f = mount(); await vi.advanceTimersByTimeAsync(20000); await turns(); expect(words(f.render())).toContain("الأعداد غير معروفة"); f.unmount(); expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
 });
-it("renders source-exact responsibility separately from latest actor without inventing patient absence", () => {
+it("keeps linked private-task details in HR, distinguishes event actor and does not invent patient absence", () => {
   const html = renderToStaticMarkup(<LabBacklogOrder today="2026-10-25" timeZone="Asia/Aden" item={backlogItem({ receivedAt: null,
     latestAction: { action: "status_change", fromStatus: "sent", toStatus: "received", actor: "Receiving clerk", at: "2026-10-01T12:00:00Z" },
     visibleTaskCount: 1, tasks: [{ id: 41, title: "Check fitting appointment", status: "planned", assignee: "Follow-up staff", dueAt: null, updatedAt: "2026-10-02T12:00:00Z" }] })} />);
-  expect(html).toContain("المدة غير معروفة"); expect(html).toContain("Receiving clerk"); expect(html).toContain("المسؤول المسند في المهمة: Follow-up staff");
+  expect(html).toContain("المدة غير معروفة"); expect(html).toContain("Receiving clerk"); expect(html).not.toContain("Follow-up staff"); expect(html).not.toContain("Check fitting appointment"); expect(html).toContain("تفاصيل المهام المرتبطة");
   expect(html).toContain("عدم وجود هذا الربط لا يثبت غياب المريض"); expect(html).toContain("الوصول ليس اكتمال العلاج"); expect(html).toContain("/patients/21?tab=treatment&amp;sub=lab");
   expect(html).not.toMatch(/costMinor|payable|عمولة/);
 });

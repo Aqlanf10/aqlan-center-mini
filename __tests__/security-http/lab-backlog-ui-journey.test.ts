@@ -121,7 +121,7 @@ it("keeps all-date waiting work visible on desktop/mobile, respects privacy, and
       expect(await panel.locator("details[open]").count()).toBe(0);
       const beforeIds = await panel.locator("article").evaluateAll(elements => elements.map(element => element.id));
       const readCount = backlogReads.length;
-      const reviewTab = page.getByRole("button", { name: "مراجعات اليوم", exact: true });
+      const reviewTab = page.getByRole("button", { name: "مراجعات المواعيد", exact: true });
       await wheelIntoView(page, [reviewTab]); await assertUnobscured(page, reviewTab); await reviewTab.click();
       await expect.poll(() => page.getByLabel("يوم الموعد / اكتمال الإحالة").inputValue()).not.toBe("");
       const changedDay = page.waitForResponse(response => new URL(response.url()).pathname === "/api/executive/operations"
@@ -154,7 +154,8 @@ it("keeps all-date waiting work visible on desktop/mobile, respects privacy, and
       const disclosure = order.locator("summary");
       await wheelIntoView(page, [disclosure]); await assertUnobscured(page, disclosure); await disclosure.click();
       const details = await order.innerText();
-      expect(details).toContain("المسؤول المسند في المهمة: مسؤول متابعة اصطناعي");
+      expect(details).not.toContain("مسؤول متابعة اصطناعي");
+      expect(details).toContain("تفاصيل المهام المرتبطة ومعلوماتها الخاصة تُراجع في مساحة المهام");
       expect(details).toContain("المسجّل: مسجّل وصول اصطناعي");
       expect(details).toContain("لا يُعدّ ذلك إسناد مسؤولية المتابعة إليه");
       expect(details).toContain("عدم وجود هذا الربط لا يثبت غياب المريض");

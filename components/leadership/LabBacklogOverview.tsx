@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { LeadershipReadAccessContext } from "./useLeadershipRead";
 import { useSession } from "../SessionProvider";
 import styles from "./leadership.module.css";
 import { LAB_STATUS_LABEL } from "@/lib/lab";
@@ -10,18 +11,18 @@ import { canReadLabBacklog, decodeLabBacklog, LAB_BACKLOG_FILTERS, LAB_BACKLOG_F
 
 const button = styles.smallButton;
 const at = (value: string, timeZone: string) => new Intl.DateTimeFormat("ar-YE", { timeZone, dateStyle: "short", timeStyle: "short" }).format(new Date(value));
-const taskStatus = { planned: "مخططة", in_progress: "قيد التنفيذ", blocked: "متوقفة" };
 const eventLabel: Record<string, string> = { create: "إنشاء الطلب", status_change: "تغيير الحالة", due_date: "تغيير الموعد",
   due_date_change: "تغيير الموعد", quality_check: "فحص المطابقة", accounting_updated: "تحديث محاسبي", accounting_posted: "ترحيل محاسبي", remake: "تسجيل إعادة", marked_for_remake: "تسجيل الحاجة إلى إعادة تصنيع", created_as_remake: "إنشاء طلب إعادة تصنيع" };
 
 /** Separate from the selected-day operational view: old open orders must not disappear. */
-export function LabBacklogOverview() {
+export function LabBacklogOverview({ initialFilter = "all" }: { initialFilter?: LabBacklogFilter } = {}) {
   const session = useSession();
   if (!session || !canReadLabBacklog(session.role)) return null;
-  return <LabBacklogPanel key={`${session.username}:${session.role}`} />;
+  return <LabBacklogPanel key={`${session.username}:${session.role}:${initialFilter}`} initialFilter={initialFilter} />;
 }
-export function LabBacklogPanel() {
-  const [filter, setFilter] = useState<LabBacklogFilter>("all");
+export function LabBacklogPanel({ initialFilter = "all" }: { initialFilter?: LabBacklogFilter } = {}) {
+  const onForbidden = useContext(LeadershipReadAccessContext);
+  const [filter, setFilter] = useState<LabBacklogFilter>(initialFilter);
   const [page, setPage] = useState(0);
   const [revision, setRevision] = useState(0);
   const [stale, setStale] = useState(false);
@@ -36,6 +37,7 @@ export function LabBacklogPanel() {
     void (async () => {
       try {
         const response = await fetch(`/api/lab/backlog?filter=${filter}&page=${page}`, { cache: "no-store", signal: controller.signal });
+        if ((response.status === 401 || response.status === 403) && request === sequence.current && !controller.signal.aborted) onForbidden?.();
         if (!response.ok) throw new Error(response.status === 401 || response.status === 403
           ? "انتهت الجلسة أو تغيّرت الصلاحية. أعد تسجيل الدخول." : "تعذّر التحقق من التراكيب المفتوحة؛ الأعداد غير معروفة.");
         const result = decodeLabBacklog(await response.json(), filter);
@@ -48,7 +50,7 @@ export function LabBacklogPanel() {
       } finally { clearTimeout(timeout); }
     })();
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [key, filter, page]);
+  }, [key, filter, page, onForbidden]);
   useEffect(() => {
     const mark = () => setStale(true), visible = () => { if (document.visibilityState === "visible") mark(); };
     window.addEventListener("focus", mark); window.addEventListener("online", mark); document.addEventListener("visibilitychange", visible);
@@ -102,13 +104,7 @@ export function LabBacklogOrder({ item, today, timeZone }: { item: LabBacklogIte
         {item.latestAction.toStatus ? ` ← ${LAB_STATUS_LABEL[item.latestAction.toStatus as keyof typeof LAB_STATUS_LABEL] ?? item.latestAction.toStatus}` : ""}
         {` · المسجّل: ${item.latestAction.actor} · ${at(item.latestAction.at, timeZone)}`}. لا يُعدّ ذلك إسناد مسؤولية المتابعة إليه.</p>
         : <p className="text-xs">لا يوجد حدث تتبع مسجّل لهذا الطلب؛ تاريخ إنشاء السجل: {at(item.createdAt, timeZone)}.</p>}
-      {item.tasks.length === 0 ? <p className="mt-2 text-xs">لا توجد مهمة متابعة مفتوحة ظاهرة لك. لا نستنتج مسؤولًا أو موعد متابعة.</p>
-        : <><p className="mt-2 text-xs">المتابعات المفتوحة الظاهرة لك: {item.visibleTaskCount}{item.visibleTaskCount > 3 ? "؛ معروضة أول 3 حسب الاستحقاق" : ""}.</p>
-          <ul className="mt-2 space-y-2">{item.tasks.map(task => <li key={task.id} className="rounded-lg bg-slate-50 p-2 text-xs leading-6">
-            مهمة #{task.id}: {task.title} · {taskStatus[task.status]}<br />
-            المسؤول المسند في المهمة: {task.assignee ?? "غير مسند"} · الاستحقاق: {task.dueAt ? at(task.dueAt, timeZone) : "غير محدد"}<br />
-            آخر تحديث للمهمة: {at(task.updatedAt, timeZone)}. هذا ليس دليل اتصال أو موعد تركيب.
-          </li>)}</ul></>}
+      <p className="mt-2 text-xs">تفاصيل المهام المرتبطة ومعلوماتها الخاصة تُراجع في مساحة المهام. لا نستنتج مسؤولًا من آخر مسجّل لإجراء المعمل.</p>
       <div className="mt-2 flex flex-wrap gap-3 text-xs font-bold"><a className="underline" href={labBacklogPatientHref(item.patientId)}>فتح ملف المريض · المعمل والتركيبات</a><a className="underline" href="/hr?tab=tasks">فتح المهام المسندة</a></div>
       <p className="mt-2 text-xs text-slate-500">لا يوجد هنا ربط موثّق بين الطلب وموعد محدد؛ راجع المواعيد في الملف. عدم وجود هذا الربط لا يثبت غياب المريض.</p>
     </details>

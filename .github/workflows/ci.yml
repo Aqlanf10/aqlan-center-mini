@@ -398,6 +398,11 @@ jobs:
             /tmp/leadership-hub-evidence/leadership-hub-finance-period-1440.png
             /tmp/leadership-hub-evidence/leadership-hub-finance-period-390.png
             /tmp/leadership-hub-evidence/leadership-hub-finance-period-zoom-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-overview-zoom-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-delayed-lab-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-clinical-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-care-390.png
+            /tmp/leadership-hub-evidence/leadership-hub-care-zoom-390.png
             /tmp/leadership-hub-evidence/leadership-hub-performance.json
           if-no-files-found: error
           retention-days: 7

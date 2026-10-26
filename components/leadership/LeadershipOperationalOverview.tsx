@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { LeadershipReadAccessContext } from "./useLeadershipRead";
 import { useSession } from "../SessionProvider";
 import styles from "./leadership.module.css";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -29,14 +30,15 @@ function instant(value: string, timeZone: string): string {
 }
 
 /** Session-keyed child: logout/role or account changes unmount pending reads and all patient data. */
-export function LeadershipOperationalOverview() {
+export function LeadershipOperationalOverview({ initialDay = "" }: { initialDay?: string } = {}) {
   const session = useSession();
   if (!session || !canReadOperationalOverview(session.role)) return null;
-  return <OperationalOverviewPanel key={`${session.username}:${session.role}`} />;
+  return <OperationalOverviewPanel key={`${session.username}:${session.role}:${initialDay}`} selectedDay={initialDay} />;
 }
 
-export function OperationalOverviewPanel() {
-  const [day, setDay] = useState("");
+export function OperationalOverviewPanel({ selectedDay = "" }: { selectedDay?: string } = {}) {
+  const onForbidden = useContext(LeadershipReadAccessContext);
+  const [day, setDay] = useState(selectedDay);
   const [lane, setLane] = useState<OperationalLane>("all");
   const [pages, setPages] = useState({ appointments: 0, referrals: 0 });
   const [revision, setRevision] = useState(0);
@@ -62,6 +64,7 @@ export function OperationalOverviewPanel() {
     void (async () => {
       try {
         const response = await fetch(`/api/executive/operations?${params}`, { cache: "no-store", signal: controller.signal });
+        if ((response.status === 401 || response.status === 403) && request === sequence.current && !controller.signal.aborted) onForbidden?.();
         const payload = await response.json();
         if (!response.ok) throw new Error(response.status === 401 || response.status === 403
           ? "انتهت الجلسة أو تغيّرت الصلاحية. سجّل الدخول من جديد." : "تعذّر تحميل المراجعة التشغيلية. أعد المحاولة.");
@@ -78,7 +81,7 @@ export function OperationalOverviewPanel() {
       } finally { clearTimeout(timeout); }
     })();
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [requestKey, day, lane, pages.appointments, pages.referrals]);
+  }, [requestKey, day, lane, pages.appointments, pages.referrals, onForbidden]);
 
   useEffect(() => {
     const markStale = () => setStale(true);

@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 export const LeadershipReadAccessContext = createContext<(() => void) | null>(null);
 
 /** Read-only, principal-owned transport. No retries, cache or polling; new scope clears old data synchronously. */
-export function useLeadershipRead<T>(url: string, decode: (value: unknown) => T | null) {
+export function useLeadershipRead<T>(url: string | null, decode: (value: unknown) => T | null) {
   const onForbidden = useContext(LeadershipReadAccessContext);
   const [revision, setRevision] = useState(0);
   const [read, setRead] = useState<{ key: string; value: T | null; error: string | null; receivedAt: string | null }>({ key: "", value: null, error: null, receivedAt: null });
@@ -14,6 +14,7 @@ export function useLeadershipRead<T>(url: string, decode: (value: unknown) => T 
   const key = JSON.stringify([url, revision]);
   const current = read.key === key;
   useEffect(() => {
+    if (url === null) return;
     const request = ++sequence.current, controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 20000);
@@ -21,7 +22,9 @@ export function useLeadershipRead<T>(url: string, decode: (value: unknown) => T 
       try {
         const response = await fetch(url, { cache: "no-store", signal: controller.signal });
         if ((response.status === 401 || response.status === 403) && request === sequence.current && !controller.signal.aborted) onForbidden?.();
-        if (!response.ok) throw new Error(response.status === 401 || response.status === 403
+        if (!response.ok) throw new Error(response.status === 409
+          ? "تحتاج بيانات المصدر إلى مراجعة سلامة السجلات. لا تُعرض قيم حتى تُحل المراجعة في المصدر."
+          : response.status === 401 || response.status === 403
           ? "انتهت الجلسة أو تغيّرت الصلاحية. سجّل الدخول من جديد."
           : "تعذّر التحقق من المصدر. العدد غير معروف؛ أعد المحاولة.");
         const value = decodeRef.current(await response.json());
@@ -42,7 +45,7 @@ export function useLeadershipRead<T>(url: string, decode: (value: unknown) => T 
     window.addEventListener("focus", mark); window.addEventListener("online", mark); document.addEventListener("visibilitychange", visible);
     return () => { window.removeEventListener("focus", mark); window.removeEventListener("online", mark); document.removeEventListener("visibilitychange", visible); };
   }, []);
-  return { data: current ? read.value : null, error: current ? read.error : null,
-    loading: !current || !read.value && !read.error, stale: current && stale, receivedAt: current ? read.receivedAt : null,
+  return { data: url !== null && current ? read.value : null, error: url !== null && current ? read.error : null,
+    loading: url !== null && (!current || !read.value && !read.error), stale: url !== null && current && stale, receivedAt: url !== null && current ? read.receivedAt : null,
     refresh: () => { setStale(false); setRevision(n => n + 1); } };
 }

@@ -7,7 +7,8 @@ import { LAB_STATUS_LABEL } from "@/lib/lab";
 import { useLeadershipRead } from "./useLeadershipRead";
 import styles from "./leadership.module.css";
 
-export type LeadershipSection = "overview" | "reviews" | "lab" | "team" | "finance";
+export type LeadershipSection = "overview" | "reviews" | "lab" | "team" | "clinical" | "finance";
+export type LeadershipDrilldown = { day?: string; labFilter?: "awaiting_fitting" | "overdue" };
 export const leadershipTime = (value: string, timeZone: string) => new Intl.DateTimeFormat("ar-YE", { timeZone, dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 const status: Record<string, string> = { waiting: "في صالة الانتظار", called: "نودي ولم يجلس", in_chair: "على الكرسي", planned: "مخططة", in_progress: "قيد التنفيذ", blocked: "متوقفة" };
 const action: Record<string, string> = { create: "إنشاء", update: "تعديل", status: "تغيير الحالة", assign: "إسناد", comment: "تعليق", checklist: "قائمة العمل", visibility: "تغيير الخصوصية", link: "ربط سجل", unlink: "فك ربط" };
@@ -16,10 +17,10 @@ export function SourceState({ loading, error, stale, onRetry }: { loading: boole
   {error && <div className={styles.error} role="alert">{error} <button type="button" onClick={onRetry}>إعادة التحقق</button></div>}
   {stale && !loading && !error && <p className={styles.stale} role="status">قد تكون البيانات تغيّرت. حدّث القراءة قبل اتخاذ قرار.</p>}</>;
 }
-export function MetricCard({ label, value, detail, icon, onClick, attention = false }: { label: string; value: number | null; detail: string; icon: IconName; onClick: () => void; attention?: boolean }) {
+export function MetricCard({ label, value, detail, icon, onClick, attention = false, scope }: { label: string; value: number | null; detail: string; icon: IconName; onClick: () => void; attention?: boolean; scope?: string }) {
  return <button type="button" className={`${styles.metric} ${attention ? styles.metricAttention : ""}`} onClick={onClick}>
   <span className={styles.metricTop}><span>{label}</span><Icon name={icon} className="h-5 w-5" /></span>
-  <strong>{value === null ? "—" : value.toLocaleString("en")}</strong><span className={styles.metricDetail}>{detail}</span>
+  <strong>{value === null ? "—" : value.toLocaleString("en")}</strong><span className={styles.metricDetail}>{detail}</span>{scope && <span className={styles.metricScope}>{scope}</span>}
  </button>;
 }
 function SectionHeading({ eyebrow, title, children }: { eyebrow: string; title: string; children?: ReactNode }) {
@@ -38,11 +39,11 @@ export function LeadershipTasks({ compact = false }: { compact?: boolean }) {
  const [page, setPage] = useState(0);
  const read = useLeadershipRead(`/api/executive/pulse?view=tasks&page=${page}`, v => decodeLeadershipPulse(v, "tasks", null));
  return <section className={styles.panel} data-testid="leadership-tasks">
-  <SectionHeading eyebrow="المهام المفتوحة الآن · حسب صلاحيتك" title="مسؤولية واضحة، ومتابعة موثّقة"><a className={styles.textLink} href="/hr?tab=tasks">فتح المهام</a></SectionHeading>
+  <SectionHeading eyebrow="المهام المشتركة المفتوحة الآن" title="مسؤولية واضحة، ومتابعة موثّقة"><a className={styles.textLink} href="/hr?tab=tasks">فتح المهام</a></SectionHeading>
   <SourceState {...read} onRetry={read.refresh} />
   {read.data && <><p className={styles.sourceLine}>{read.data.counts.open} مفتوحة · {read.data.counts.overdue} تجاوزت الاستحقاق · {read.data.counts.blocked} متوقفة · قراءة {leadershipTime(read.data.asOf, read.data.timeZone)}</p>
    <ul className={styles.evidenceList}>{read.data.items.slice(0, compact ? 3 : 10).map(row => <TaskRow key={row.id} row={row} data={read.data!} />)}</ul>
-   {read.data.total === 0 && <p className={styles.empty}>لا مهام مفتوحة ظاهرة لك. المهام الخاصة بغيرك لا تظهر هنا.</p>}
+   {read.data.total === 0 && <p className={styles.empty}>لا مهام مفتوحة مشتركة. المهام الخاصة تبقى في مساحة المهام ولا تظهر في ملخص القيادة.</p>}
    {!compact && read.data.total > 10 && <div className={styles.pagination}><button type="button" disabled={read.data.page === 0} onClick={() => setPage(read.data!.page - 1)}>السابق</button><span>{read.data.page + 1} / {Math.ceil(read.data.total / 10)}</span><button type="button" disabled={!read.data.hasMore} onClick={() => setPage(read.data!.page + 1)}>التالي</button></div>}
    {compact && read.data.total > 3 && <p className={styles.sourceLine}>أول 3 مهام حسب الاستحقاق والتوقف؛ القائمة الكاملة في قسم الفريق.</p>}
   </>}
@@ -50,7 +51,7 @@ export function LeadershipTasks({ compact = false }: { compact?: boolean }) {
   <button type="button" className={styles.smallButton} onClick={read.refresh} disabled={read.loading}>تحديث المهام</button>
  </section>;
 }
-export function LeadershipOverview({ onSection }: { onSection: (section: LeadershipSection) => void }) {
+export function LeadershipOverview({ onSection }: { onSection: (section: LeadershipSection, context?: LeadershipDrilldown) => void }) {
  const [day, setDay] = useState("");
  const [page, setPage] = useState(0);
  const [expanded, setExpanded] = useState(false);
@@ -66,12 +67,19 @@ export function LeadershipOverview({ onSection }: { onSection: (section: Leaders
    <button type="button" className={styles.smallButton} disabled={daily.loading} onClick={() => { setDay(""); setPage(0); daily.refresh(); }}>اليوم</button>
    <button type="button" className={styles.primaryButton} disabled={daily.loading || labs.loading} onClick={() => { setPage(0); daily.refresh(); labs.refresh(); }}>تحديث التشغيل والمعمل</button>
   </div>
-  <div className={styles.metrics}>
-   <MetricCard label="في صالة الانتظار" value={daily.data?.counts.waiting ?? null} detail="حضروا ولم يُنادَ عليهم" icon="clock" onClick={() => document.getElementById("leadership-day-queue")?.scrollIntoView({ block: "start" })} attention={(daily.data?.counts.waiting ?? 0) > 0} />
-   <MetricCard label="زيارات لم تنتهِ" value={daily.data?.total ?? null} detail="انتظار + نداء + على الكرسي" icon="tooth" onClick={() => document.getElementById("leadership-day-queue")?.scrollIntoView({ block: "start" })} />
-   <MetricCard label="وصلت ولم تُركّب" value={labs.data?.counts.awaitingFitting ?? null} detail="طلبات معمل مفتوحة من كل الأيام" icon="flask" onClick={() => onSection("lab")} attention={(labs.data?.counts.awaitingFitting ?? 0) > 0} />
-   <MetricCard label="متأخرة عند المعمل" value={labs.data?.counts.overdue ?? null} detail="تجاوزت يوم الوصول المتوقع المسجّل" icon="calendar" onClick={() => onSection("lab")} attention={(labs.data?.counts.overdue ?? 0) > 0} />
+  <div className={styles.metrics} data-testid="leadership-metrics">
+   <MetricCard label="في صالة الانتظار" value={daily.data?.counts.waiting ?? null} scope={currentDay ? `يوم الوصول ${currentDay}` : "يوم الوصول · قيد التحقق"} detail="حضروا ولم يُنادَ عليهم" icon="clock" onClick={() => document.getElementById("leadership-day-queue")?.scrollIntoView({ block: "start" })} attention={(daily.data?.counts.waiting ?? 0) > 0} />
+   <MetricCard label="زيارات لم تنتهِ" value={daily.data?.total ?? null} scope={currentDay ? `يوم الوصول ${currentDay}` : "يوم الوصول · قيد التحقق"} detail="تشمل المنتظرين + النداء + على الكرسي" icon="tooth" onClick={() => document.getElementById("leadership-day-queue")?.scrollIntoView({ block: "start" })} />
+   <MetricCard label="وصلت ولم تُركّب" value={labs.data?.counts.awaitingFitting ?? null} scope="كل الأيام · الحالة عند القراءة" detail="طلبات وصلت إلى العيادة ولم تُركّب" icon="flask" onClick={() => onSection("lab", { labFilter: "awaiting_fitting" })} attention={(labs.data?.counts.awaitingFitting ?? 0) > 0} />
+   <MetricCard label="متأخرة عند المعمل" value={labs.data?.counts.overdue ?? null} scope="كل الأيام · الحالة عند القراءة" detail="تجاوزت يوم الوصول المتوقع المسجّل" icon="calendar" onClick={() => onSection("lab", { labFilter: "overdue" })} attention={(labs.data?.counts.overdue ?? 0) > 0} />
   </div>
+  <section className={styles.appointmentStrip} data-testid="leadership-appointments" aria-label="مواعيد اليوم المختار">
+   <div><p className={styles.eyebrow}>مصدر المواعيد · اليوم المجدول</p><h2>{currentDay || "جارٍ التحقق من اليوم"}</h2></div>
+   <a href={currentDay ? `/appointments?date=${currentDay}` : "/appointments"}><strong>{daily.data?.counts.appointments ?? "—"}</strong><span>المواعيد المسجّلة</span></a>
+   <button type="button" onClick={() => onSection("reviews", {day: currentDay})}><strong>{daily.data?.counts.noShow ?? "—"}</strong><span>لم يحضر · مراجعة السجل</span></button>
+   <button type="button" onClick={() => onSection("reviews", {day: currentDay})}><strong>{daily.data?.counts.cancelled ?? "—"}</strong><span>ملغاة · منفصلة عن عدم الحضور</span></button>
+   <p>العدد من الحالة المسجّلة، وليس استنتاجًا من غياب زيارة. عدم الحضور والإلغاء جزء من المواعيد.</p>
+  </section>
   <div className={styles.overviewGrid}>
    <section className={styles.panel} id="leadership-day-queue" data-testid="leadership-day-queue">
     <SectionHeading eyebrow="اليوم المختار · الأولوية للمنتظرين" title="ما الذي يحتاج تدخّلًا؟"><button type="button" className={styles.textLink} onClick={() => { setExpanded(!expanded); setPage(0); }}>{expanded ? "عرض مختصر" : "عرض قائمة الزيارات"}</button></SectionHeading>
@@ -85,7 +93,7 @@ export function LeadershipOverview({ onSection }: { onSection: (section: Leaders
      {daily.data.total === 0 && <p className={styles.empty}>لا زيارات مفتوحة ضمن يوم الوصول المختار.</p>}
      {!expanded && daily.data.total > 5 && <p className={styles.sourceLine}>أول 5 من {daily.data.total} زيارة مفتوحة. افتح قائمة الزيارات لاستعراض جميع سجلات اليوم المختار.</p>}
      {expanded && daily.data.total > 10 && <div className={styles.pagination}><button type="button" disabled={daily.data.page === 0} onClick={() => { setDay(daily.data!.day); setPage(daily.data!.page - 1); }}>السابق</button><span>{daily.data.page + 1} / {Math.ceil(daily.data.total / 10)}</span><button type="button" disabled={!daily.data.hasMore} onClick={() => { setDay(daily.data!.day); setPage(daily.data!.page + 1); }}>التالي</button></div>}
-     <div className={styles.inlineLinks}><a href="/">شاشة تشغيل اليوم الحالي</a><a href={`/appointments?date=${daily.data.day}`}>مواعيد {daily.data.day}</a><button type="button" onClick={() => onSection("reviews")}>مراجعة عدم الحضور والإحالات</button></div>
+     <div className={styles.inlineLinks}><a href="/">شاشة تشغيل اليوم الحالي</a><a href={`/appointments?date=${daily.data.day}`}>مواعيد {daily.data.day}</a><button type="button" onClick={() => onSection("reviews", {day: currentDay})}>مراجعة عدم الحضور والإحالات</button></div>
     </>}
     <p className={styles.footnote}>وقت الانتظار لا يحدد المتسبب. الطبيب المسجّل سياق علاجي، وليس إسناد متابعة.</p>
    </section>

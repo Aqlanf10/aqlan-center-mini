@@ -6,7 +6,7 @@ import { baseUrl, harness } from "./_server";
 import type { OperationalOverview } from "../../lib/leadership-operations";
 
 /** Hosted acceptance on the standard isolated synthetic harness. Never target Production.
- * Not executed locally where browser execution is denied. */
+ * Executed locally when an installed browser is available. */
 let browser: Browser;
 let context: BrowserContext;
 let page: Page;
@@ -41,8 +41,8 @@ afterAll(async () => { await context?.close(); await browser?.close(); await db?
 it("shows verified patient destinations and scope on narrow RTL while the financial source fails", async () => {
   await page.goto(`${baseUrl}/executive`, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "المالية", exact: true }).click();
-  await expect.poll(() => page.getByTestId("leadership-finance").innerText()).toContain("اختبار تعذّر المصدر المالي");
-  const response = loaded(); await page.getByRole("button", { name: "مراجعات اليوم", exact: true }).click(); await response;
+  await expect.poll(() => page.getByTestId("leadership-finance").innerText()).toContain("تعذّر التحقق من المصدر");
+  const response = loaded(); await page.getByRole("button", { name: "مراجعات المواعيد", exact: true }).click(); await response;
   await expect.poll(() => panel().getByText(name, { exact: false }).count()).toBe(2);
   expect(await panel().getByLabel("يوم الموعد / اكتمال الإحالة").inputValue()).toBe(day);
   expect(await panel().locator(`a[href='/patients/${patientId}?tab=summary']`).count()).toBe(1);
@@ -82,6 +82,7 @@ it("isolates one failed operational source and clears all patient results on a s
   await page.unrouteAll({ behavior: "wait" });
   await page.route(url => operations(url.toString()), route => route.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
   response = loaded(); await panel().getByRole("button", { name: "تحديث القراءة" }).click(); await response;
-  await expect.poll(() => panel().innerText()).toContain("انتهت الجلسة");
-  expect(await panel().getByRole("link").count()).toBe(0);
+  await expect.poll(() => page.locator("main").last().getByRole("alert").innerText()).toContain("أُخفيت بيانات القيادة");
+  expect(await panel().count()).toBe(0);
+  expect(await page.locator(`a[href*='/patients/${patientId}']`).count()).toBe(0);
 });
