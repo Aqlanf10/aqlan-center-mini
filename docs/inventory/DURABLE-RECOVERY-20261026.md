@@ -80,3 +80,11 @@ reservation failure, stale tabs, acknowledgement persistence failure and role
 changes. The hook suite uses controlled lifecycle/storage adapters: it is not
 real-browser/IndexedDB proof. Real IndexedDB multi-tab and built-app evidence must
 be recorded separately by the composed acceptance run on its exact head.
+
+The resumed acceptance recorded in `CONTINUATION-20261026.md` passed the real
+built-app recovery scenario with IndexedDB, reload, generic 403 and concurrent
+tabs. It preserves exact command bytes/key and asserts one committed request and
+operation record. Both retry buttons must disappear and both forms unlock before
+the test asserts acknowledgements, because the request heading can already exist
+after the original committed response was lost. This evidence does not cover the
+explicit unfinished boundaries above or erase their activation holds.

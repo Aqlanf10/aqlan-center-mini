@@ -47,9 +47,10 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
  it("actual missing-price/unnumbered invoice UI saves review evidence without inventing zero or stock/debt/cash",async()=>{const before=await counts(),context=await browser.newContext({viewport:{width:390,height:900}});const [name,...value]=h.sessions.admin.cookie.split("=");await context.addCookies([{name,value:value.join("="),url:baseUrl}]);try{const page=await context.newPage();await page.goto(`${baseUrl}/inventory/procurement/operations`,{waitUntil:"domcontentloaded"});const root=page.getByTestId("procurement-operations");await root.getByRole("button",{name:"فحص واستلام ومطابقة هذا الأمر",exact:true}).first().click();const form=root.getByTestId("supplier-invoice-form");await form.getByRole("checkbox",{name:"رقم الفاتورة غير متوفر، للمراجعة فقط",exact:true}).check();await form.getByLabel("سبب غياب رقم الفاتورة",{exact:true}).fill("SYN official number unavailable");await form.getByLabel("تاريخ فاتورة المورد",{exact:true}).fill("2026-10-14");await form.getByLabel("مصدر تقييم الفاتورة",{exact:true}).fill("SYN supplier price not supplied");await form.getByLabel("كمية الفاتورة",{exact:true}).fill("1");await form.getByRole("checkbox",{name:"سعر البند غير معلوم؛ ليس مجانيًا",exact:true}).check();const pending=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/inventory/procurement"&&response.request().method()==="POST");await form.getByRole("button",{name:"حفظ نتيجة المطابقة",exact:true}).click();const response=await pending;expect(response.status()).toBe(201);const result=await response.json();expect(result.match.total).toBeNull();expect(result.status).toBe("needs_review");expect(result.match.issues).toContain("missing_price");expect(result.match.issues).toContain("missing_invoice_number");await root.getByText("سعر غير معلوم",{exact:true}).waitFor();await page.screenshot({path:`${artifacts}/invoice-missing-review-ar-390.png`,fullPage:true});}finally{await context.close();}expect(await counts()).toEqual(before);});
  it("doctor reads withdraw prices and cannot approve/issue/amend/receive/match",async()=>{expect((await authedMutation("/api/inventory/procurement/unregistered",h.sessions.admin,"POST",operation("request.submit",{}))).status).toBe(404);for(const actor of [h.sessions.doctorA,h.sessions.reception])for(const command of ["request.approve","order.issue","order.amend","receipt.post","invoice.match"]){expect((await authedMutation("/api/inventory/procurement",actor,"POST",operation(command,{}))).status).toBe(403);}for(const actor of [h.sessions.doctorA,h.sessions.reception])expect((await authedGet("/api/inventory/procurement?view=workbench",actor)).status).toBe(403);const requests=await (await authedGet("/api/inventory/procurement",h.sessions.doctorA)).json();expect(requests.items.every((row:{document:{value:unknown}})=>row.document.value===null)).toBe(true);});
  it("revoked actor cannot write through an existing authenticated cookie",async()=>{const before=await counts();await db.query("UPDATE users SET is_active=FALSE WHERE id=$1",[doctorId]);try{const response=await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("request.submit",{document:{}}));expect([401,403]).toContain(response.status);expect(await counts()).toEqual(before);}finally{await db.query("UPDATE users SET is_active=TRUE WHERE id=$1",[doctorId]);}});
- it("P11 durable requester recovery survives reload, refusal and concurrent tabs with the same command",async()=>{
+ it.each([390,1280])("P11 durable requester recovery survives reload, refusal and concurrent tabs with the same command at %ipx",async width=>{
+  const recoveryReason=`SYN-DURABLE-LOST-RESPONSE-${width}`;
   const before=await counts();
-  const context=await browser.newContext({viewport:{width:390,height:900}});
+  const context=await browser.newContext({viewport:{width,height:900}});
   const [name,...value]=h.sessions.doctorA.cookie.split("=");
   await context.addCookies([{name,value:value.join("="),url:baseUrl}]);
   const unexpected:string[]=[],writes:string[]=[],identities:string[]=[];
@@ -79,7 +80,7 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
     await page.goto(`${baseUrl}/inventory/procurement`,{waitUntil:"domcontentloaded"});
     const root=page.getByTestId("inventory-procurement");
     await root.getByRole("button",{name:"إضافة مادة",exact:true}).click();
-    await root.getByLabel("سبب الاحتياج").fill("SYN-DURABLE-LOST-RESPONSE");
+    await root.getByLabel("سبب الاحتياج").fill(recoveryReason);
     await root.getByLabel("المادة والعبوة").selectOption("0");
     await root.getByLabel("الكمية",{exact:true}).fill("1");
     await root.getByRole("button",{name:"تقديم طلب الشراء",exact:true}).click();
@@ -100,10 +101,15 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
     const otherRetry=otherRoot.getByRole("button",{name:"إعادة تأكيد الطلب نفسه",exact:true});
     await otherRetry.waitFor();
     expect(await otherRoot.getByRole("button",{name:"إضافة مادة",exact:true}).isDisabled()).toBe(true);
-    await page.screenshot({path:`${artifacts}/request-durable-uncertain-390.png`,fullPage:true});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:`${artifacts}/request-durable-uncertain-${width}.png`,fullPage:true});
     await Promise.all([retry.click(),otherRetry.click()]);
-    await root.getByRole("heading",{name:"SYN-DURABLE-LOST-RESPONSE",exact:true}).waitFor();
-    await otherRoot.getByRole("heading",{name:"SYN-DURABLE-LOST-RESPONSE",exact:true}).waitFor();
+    // The committed request headings already exist after reload. Wait for each
+    // tab's own acknowledgement and durable retirement before inspecting replies.
+    await Promise.all([retry.waitFor({state:"hidden"}),otherRetry.waitFor({state:"hidden"})]);
+    await Promise.all([page,other].map(tab=>tab.waitForFunction(()=>!(document.querySelector("#procurement-reason") as HTMLTextAreaElement)?.disabled)));
+    await root.getByRole("heading",{name:recoveryReason,exact:true}).waitFor();
+    await otherRoot.getByRole("heading",{name:recoveryReason,exact:true}).waitFor();
     expect(writes).toHaveLength(4);
     expect(new Set(writes).size).toBe(1);expect(new Set(identities).size).toBe(1);
     expect(replays).toEqual([true,true]);

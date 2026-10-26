@@ -3,8 +3,9 @@
 This records the remaining request before implementation. Inventory is not ready
 for activation. No production access, Railway changes, deployment, merge, new
 migration registration or automatic doctor debt/payroll adjustment is authorized
-by this work. Publication is paused pending the parent's explicit clarification;
-local implementation and synthetic tests continue.
+by this work. The initial publication hold was subsequently lifted by explicit
+owner consent for operational source code only. The continuation is published as
+Draft PR #481; secrets, real patient data and backups remain excluded.
 
 ## Verified starting point and branch relationship
 
@@ -24,6 +25,8 @@ local implementation and synthetic tests continue.
   duplicate already published work.
 - `main` has registered migrations through 0069. 0070–0072 are reserved in other
   work and 0073–0080 are also reserved by the supplied coordination instruction.
+  The resumed parent coordination additionally owns 0081/0082, with 0078 locally
+  added, 0079 reserved and 0080 under examination; none is reused here.
   Any new schema remains an **unnumbered proposal**, never an assigned number.
 
 ## Inventory and priorities
@@ -101,6 +104,52 @@ Recovery intentionally retains commands after generic 403/409: durable terminal
 rejection/retirement and an authoritative principal realm contract are still
 required. The real-browser test and final typecheck must be completed on resume.
 
-Publication remains **pending explicit permission**, not attempted or denied by
-GitHub. No PR, push, merge, deployment or flag change occurred. The source-only
-handoff manifest records base/head/tree and the exact changed-file allowlist.
+At the frozen checkpoint publication was **pending explicit permission**, not
+attempted or denied by GitHub. No PR, push, merge, deployment or flag change had
+occurred. Its source-only handoff manifest records base/head/tree and the exact
+changed-file allowlist.
+
+## Resumed acceptance, 2026-10-26
+
+This section supersedes the frozen checkpoint's publication and unrun-check
+status above. The owner authorized public source publication and then renewed
+the execution allowance, requesting GPT-6 Astra at Medium reasoning. The resumed
+verification was delegated to that model. Draft PR:
+https://github.com/Aqlanf10/aqlan-center-mini/pull/481 . No merge or deployment.
+
+The initial published head was `4f06af06908a3eb38f42b43fde6ac3f3ac53221b`.
+Resume fixes affect tests only: the custody form mock follows the current
+recovery hook contract, and the browser recovery assertion waits for both
+confirmations to finish instead of using an already-visible request heading.
+No product permission, financial writer, schema, flag or policy was changed by
+these acceptance repairs.
+
+Local Node 22.23.3 / PostgreSQL 18.6 / existing Chromium 151 evidence:
+
+- Full TypeScript check and production build passed. The build retained its
+  dynamic migration-file tracing warnings; they were not suppressed.
+- Focused units: **63/63**. The first round had three stale test-mock failures;
+  the mock was corrected and all 63 rerun successfully.
+- Focused PostgreSQL payable/custody: **34/34** on the current product sources.
+- Gate-off built HTTP/browser: **4 files / 31 tests**, 51.46 seconds.
+- Gate-on isolated procurement/custody fixture: **17/17**, 41.29 seconds, using
+  the same compiled artifact and a fresh synthetic database. The first round's
+  16/17 result was a test synchronization failure, not the accepted result.
+- The real-browser recovery case now proves persisted-before-retry recovery
+  after reload, no automatic send on reload, preservation after a generic 403,
+  simultaneous exact-key/body retries in two tabs, matching committed replies,
+  one request/operation record and an editable cleared form after confirmation.
+- Final responsive recovery rerun: **2/2 at 390px and 1280px**, 15.12 seconds,
+  after parameterizing that case. The preceding full opt-in run was 17 cases;
+  the now-expanded 18-case file was not rerun in full. Screenshots at both widths
+  were visually inspected: the center logo, blue/orange identity and navigation
+  are retained; the saved-command summary wraps on mobile and retry remains
+  visible, with no horizontal overflow. No design tokens or layout styles changed.
+- Changed-file lint and whitespace checks passed. Hosted CI is tracked on the
+  PR's current head; local results do not substitute for hosted completion.
+
+Both browser rounds use disposable synthetic fixtures. Screenshots, PDFs and
+runtime logs are local evidence outside the committed source handoff. Full
+supplier-invoice posting/reversal, clinical cost integration, command retirement,
+canonical realm identity and upgrade/restore acceptance remain incomplete.
+The private activation gate therefore remains closed.
