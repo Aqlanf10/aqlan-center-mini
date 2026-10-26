@@ -719,3 +719,76 @@ describe("R03, R10, R11, R12 schema, API and UI bilingual/locator invariants", (
     expect(safeInventoryErrorMessage(legacyErr)).toBe("تتطلب إغلاقات العبوات التاريخية على سطر التحويل هذا تحديد نسبتها لكل استلام أولًا.");
   });
 });
+
+describe("patient-only material cost scope", () => {
+  it("includes patient-only allocations without inventing visit membership", () => {
+    const patientIssue = issue({
+      allocations: [
+        {
+          id: "patient-only",
+          patientId: "patient1",
+          visitId: null,
+          caseId: null,
+          procedureId: null,
+          quantityAtoms: 6,
+        },
+      ],
+    });
+    expect(
+      summarizeTreatmentCost({
+        ...costInput(),
+        issues: [patientIssue],
+        scope: { kind: "patient", patientId: "patient1" },
+      }),
+    ).toMatchObject({
+      knownMinor: 300,
+      selectedAllocationIds: ["patient-only"],
+    });
+    expect(
+      summarizeTreatmentCost({
+        ...costInput(),
+        issues: [patientIssue],
+        scope: { kind: "visit", patientId: "patient1", visitId: "visit1" },
+      }),
+    ).toMatchObject({ knownMinor: 0, selectedAllocationIds: [] });
+  });
+  it("rounds patient scope fractions once and leaves incomplete registration missing", () => {
+    const issues = [1, 2, 3].map((n) =>
+      issue({
+        movementId: `p-${n}`,
+        usageKey: `p-${n}`,
+        quantityAtoms: 1,
+        cost: {
+          state: "known",
+          currency: "SAR",
+          amountMinor: 4,
+          pricedQuantityAtoms: 3,
+          sourceId: "invoice",
+          recordedAt: "2026-10-26",
+        },
+        allocations: [
+          {
+            id: `a-${n}`,
+            patientId: "patient1",
+            visitId: null,
+            caseId: null,
+            procedureId: null,
+            quantityAtoms: 1,
+          },
+        ],
+      }),
+    );
+    expect(
+      summarizeTreatmentCost({
+        ...costInput(),
+        issues,
+        scope: { kind: "patient", patientId: "patient1" },
+        registrationComplete: false,
+      }),
+    ).toMatchObject({
+      knownMinor: 4,
+      totalMinor: null,
+      completeness: "missing",
+    });
+  });
+});
