@@ -8,7 +8,7 @@
  */
 export interface FinancialCommandScope { actor: string; patientId: number }
 export interface FinancialCommand {
-  kind: "invoice" | "debt" | "invoice-correction" | "historical-correction" | "receipt-correction" | "collection";
+  kind: "invoice" | "debt" | "invoice-correction" | "historical-correction" | "receipt-correction" | "collection" | "agreement-reconciliation";
   key: string;
   /** Immutable first intent, including its receipt expectations. */
   original: string;
@@ -28,7 +28,7 @@ type StoredJournal = FinancialJournal & { scope: string; acknowledged?: Acknowle
 const DATABASE = "aqlan-financial-command-recovery";
 const STORE = "patient-commands";
 const MAX_BYTES = 1024 * 1024;
-const kinds = new Set(["invoice", "debt", "invoice-correction", "historical-correction", "receipt-correction", "collection"]);
+const kinds = new Set(["invoice", "debt", "invoice-correction", "historical-correction", "receipt-correction", "collection", "agreement-reconciliation"]);
 export class FinancialRecoveryError extends Error {
   constructor(public readonly code: "unavailable" | "invalid" | "changed") {
     super(code === "changed" ? "تغيّر الطلب المالي في نافذة أخرى. راجع الطلب المحفوظ قبل بدء عملية جديدة."
@@ -133,7 +133,9 @@ export async function reserveFinancialCommand(scope: FinancialCommandScope, revi
     return { ...current, command };
   });
 }
-/** Only after a fully validated receipt. Missing/denied/failed reads never clear
+/** Only after a fully validated receipt, or a matching permanent server no-save
+ * tombstone for a workflow whose contract supports terminal retirement.
+ * Missing/denied/failed reads never clear
  * an uncertain command. Keep the revision, discard sensitive command contents. */
 export async function acknowledgeFinancialCommand(scope: FinancialCommandScope, command: FinancialCommand): Promise<FinancialJournal> {
   if (!validateCommand(command)) throw new FinancialRecoveryError("invalid");

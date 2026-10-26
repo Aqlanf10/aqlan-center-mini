@@ -132,7 +132,7 @@ export class ProtectedPurchaseHistoryError extends Error {
 }
 
 /** Agreement amendments (0066) are immutable financial history, like purchase receipts. */
-export const AGREEMENT_HISTORY_TABLES = ["agreement_delta_collection_receipts", "agreement_delta_attempt_rejections", "agreement_delta_amendments"] as const;
+export const AGREEMENT_HISTORY_TABLES = ["agreement_reconciliation_sources", "agreement_reconciliation_rejections", "agreement_reconciliations", "agreement_delta_collection_receipts", "agreement_delta_attempt_rejections", "agreement_delta_amendments"] as const;
 export class ProtectedAgreementHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد تسجيل تعديلات اتفاق علاج أو تحصيلات موزّعة عليها. لم يُمسح شيء؛ يجب الاحتفاظ بسجل تعديلات الاتفاق ومفاتيحها."); this.name = "ProtectedAgreementHistoryError"; }
 }

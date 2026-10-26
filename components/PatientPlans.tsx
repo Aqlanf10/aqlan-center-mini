@@ -2,6 +2,7 @@
 
 import TreatmentFinancialContext from "./TreatmentFinancialContext";
 import { ApprovedAgreementPanel } from "./ApprovedAgreementPanel";
+import { AgreementReconciliationPanel } from "./AgreementReconciliationPanel";
 import { INITIAL_PLAN_ITEM_DRAFT, planItemDraftChanged, type PlanItemDraftSnapshot } from "@/lib/plan-item-draft-navigation";
 import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 
@@ -347,6 +348,9 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
               {canSeeFinancial ? <ApprovedAgreementPanel planId={plan.id} totalMinor={plan.totalMinor} currency={plan.baseCurrency}
                 position={plan.approvedAgreement??null} canApprove={currentConsent&&plan.status==="active"&&["admin","reception"].includes(session?.role??"")} isAdmin={session?.role==="admin"} onChanged={load}/> : null}
+              {canSeeFinancial && session?.role === "admin" && plan.status !== "cancelled"
+                && !plan.approvedAgreement && !plan.totalFromItems && (plan.hasInstallments || plan.installments.length > 0)
+                ? <AgreementReconciliationPanel patientId={patientId} planId={plan.id} onChanged={load} disabled={busy || money.attempt !== null} /> : null}
               {approvalUnavailable ? <p data-testid="plan-amount-summary" role="status" className="mb-2 text-sm text-amber-800">الرصيد الحالي غير متاح؛ يلزم مراجعة مصدر الاتفاق.</p> : <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{currentTotal === undefined ? "غير متاح" : formatMoney(currentTotal, plan.baseCurrency)}</p>

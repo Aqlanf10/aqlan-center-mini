@@ -31,6 +31,8 @@ import { readInvoiceTemplatePreview, type InvoiceTemplatePreviewRow } from "./de
 import { TreatmentEntryChoice } from "./TreatmentEntryChoice";
 import { HistoricalDocuments } from "./HistoricalDocuments";
 import {MoneyCommandRecovery} from "./MoneyCommandRecovery";
+import { AgreementReconciliationPanel } from "./AgreementReconciliationPanel";
+import { restoreReconciliationCommand, type ReconciliationDraft } from "@/lib/agreement-reconciliation-view";
 import {MONEY_JOURNAL_EVENT} from "./useDurableMoneyAttempt";
 import {restoreMoneyCommand,type DurableMoneyCommand} from "@/lib/durable-money-command";
 import { HistoricalCorrection } from "./HistoricalCorrection";
@@ -359,6 +361,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
   const [revisionRecoveries,setRevisionRecoveries]=useState<ReadonlyMap<string,InvoiceRevisionCommand>>(()=>new Map());
   const [historicalRecoveries,setHistoricalRecoveries]=useState<ReadonlyMap<string,HistoricalCorrectionCommand>>(()=>new Map());
   const [moneyRecoveries,setMoneyRecoveries]=useState<ReadonlyMap<string,DurableMoneyCommand>>(()=>new Map());
+  const [reconciliationRecoveries, setReconciliationRecoveries] = useState<ReadonlyMap<string, ReconciliationDraft>>(() => new Map());
   const recoveryKey = JSON.stringify([patientId, principal]);
   const recoveryOwner = useMemo(() => ({ scope }), [scope]);
   const recoveryLifetime = useRef<{ owner: object | null; active: boolean }>({ owner: null, active: false });
@@ -375,12 +378,14 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
     const revision = command?.kind === "invoice-correction" ? restoreInvoiceRevision(command,patientId,session?.username??"") : null;
     const historical=command?.kind==="historical-correction"?restoreHistoricalCorrection(command,patientId,session?.username??""):null;
     const money=command&&(command.kind==="collection"||command.kind==="receipt-correction")?restoreMoneyCommand(command,patientId,session?.username??""):null;
-    if (command && !invoice && !debt && !revision && !historical && !money) throw new FinancialRecoveryError("invalid");
+    const reconciliation = command?.kind === "agreement-reconciliation" ? restoreReconciliationCommand(command, patientId, session?.username ?? "") : null;
+    if (command && !invoice && !debt && !revision && !historical && !money && !reconciliation) throw new FinancialRecoveryError("invalid");
     setRecoveries(current => { const next = new Map(current); if (invoice) next.set(recoveryKey, { patientId, principal, command: invoice }); else next.delete(recoveryKey); return next; });
     setDebtRecoveries(current => { const next = new Map(current); if (debt) next.set(recoveryKey, debt); else next.delete(recoveryKey); return next; });
     setRevisionRecoveries(current=>{const next=new Map(current);if(revision)next.set(recoveryKey,revision);else next.delete(recoveryKey);return next;});
     setHistoricalRecoveries(current=>{const next=new Map(current);if(historical)next.set(recoveryKey,historical);else next.delete(recoveryKey);return next;});
     setMoneyRecoveries(current=>{const next=new Map(current);if(money)next.set(recoveryKey,money);else next.delete(recoveryKey);return next;});
+    setReconciliationRecoveries(current => { const next = new Map(current); if (reconciliation) next.set(recoveryKey, reconciliation); else next.delete(recoveryKey); return next; });
     setRestoredCommandKey(invoice ? command!.key : "");
   }, [patientId, principal, recoveryKey, recoveryOwner, session?.username, setRecoveries, setDebtRecoveries,setRevisionRecoveries,setHistoricalRecoveries,setMoneyRecoveries]);
   useEffect(() => {
@@ -394,7 +399,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
     return () => { active = false;window.removeEventListener(MONEY_JOURNAL_EVENT,read); };
   }, [scope, patientId, session?.username, adoptDurable]);
   const financialRecovery: FinancialRecoveryControl = {
-    ready: journal?.scope === scope && !journal.error,
+    ready: journal?.scope === scope && !journal.error && !reconciliationRecoveries.has(recoveryKey),
     revision: journal?.scope === scope ? journal.revision : 0,
     error: journal?.scope === scope ? journal.error : null,
     reserve: async (command, revision) => {
@@ -418,8 +423,9 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
     },
   };
   const recovery = recoveries.get(recoveryKey) ?? null;
+  const reconciliationRecovery = reconciliationRecoveries.get(recoveryKey) ?? null;
   if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
-  return <PatientLedgerContent key={scope} patientId={patientId} visitId={visitId} selectionContextKey={selectionContextKey} onClinicalChange={onClinicalChange} entryRequestKey={entryRequestKey} onEntryRequestConsumed={onEntryRequestConsumed} onNavigationGuardChange={onNavigationGuardChange}
+  return <PatientLedgerContent key={scope} reconciliationRecovery={reconciliationRecovery} patientId={patientId} visitId={visitId} selectionContextKey={selectionContextKey} onClinicalChange={onClinicalChange} entryRequestKey={entryRequestKey} onEntryRequestConsumed={onEntryRequestConsumed} onNavigationGuardChange={onNavigationGuardChange}
     accountDetails={accountDetails} financialRecovery={financialRecovery} restoredCommandKey={restoredCommandKey}
     debtRecovery={debtRecoveries.get(recoveryKey)??null}
     moneyRecovery={moneyRecoveries.get(recoveryKey)??null} onMoneyRecoveryChange={command=>{
@@ -447,7 +453,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
     }} />;
 }
 
-function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, recovery, onRecoveryChange, debtRecovery,onDebtRecoveryChange,revisionRecovery,onRevisionRecoveryChange,historicalRecovery,onHistoricalRecoveryChange,moneyRecovery,onMoneyRecoveryChange,accountDetails,financialRecovery,restoredCommandKey }: PatientLedgerProps & { recovery: InvoiceCommandState | null; onRecoveryChange: (command: InvoiceCommandState | null) => void;debtRecovery:DebtRepaymentCommand|null;onDebtRecoveryChange:(command:DebtRepaymentCommand|null)=>void;financialRecovery:FinancialRecoveryControl;restoredCommandKey:string;moneyRecovery:DurableMoneyCommand|null;onMoneyRecoveryChange:(command:DurableMoneyCommand|null)=>void;historicalRecovery:HistoricalCorrectionCommand|null;onHistoricalRecoveryChange:(command:HistoricalCorrectionCommand|null)=>void;revisionRecovery:InvoiceRevisionCommand|null;onRevisionRecoveryChange:(command:InvoiceRevisionCommand|null)=>void }) {
+function PatientLedgerContent({ reconciliationRecovery, patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, recovery, onRecoveryChange, debtRecovery,onDebtRecoveryChange,revisionRecovery,onRevisionRecoveryChange,historicalRecovery,onHistoricalRecoveryChange,moneyRecovery,onMoneyRecoveryChange,accountDetails,financialRecovery,restoredCommandKey }: PatientLedgerProps & { reconciliationRecovery: ReconciliationDraft | null; recovery: InvoiceCommandState | null; onRecoveryChange: (command: InvoiceCommandState | null) => void;debtRecovery:DebtRepaymentCommand|null;onDebtRecoveryChange:(command:DebtRepaymentCommand|null)=>void;financialRecovery:FinancialRecoveryControl;restoredCommandKey:string;moneyRecovery:DurableMoneyCommand|null;onMoneyRecoveryChange:(command:DurableMoneyCommand|null)=>void;historicalRecovery:HistoricalCorrectionCommand|null;onHistoricalRecoveryChange:(command:HistoricalCorrectionCommand|null)=>void;revisionRecovery:InvoiceRevisionCommand|null;onRevisionRecoveryChange:(command:InvoiceRevisionCommand|null)=>void }) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -681,6 +687,12 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
         </AccountSecondaryActions> : null}
       </div>
 
+      {reconciliationRecovery ? <div className="my-3">
+        <p role="status" className="text-sm text-amber-900">يوجد طلب تسوية اتفاق محفوظ. تحقّق من نتيجته قبل بدء عملية مالية أخرى.</p>
+        <AgreementReconciliationPanel patientId={patientId} planId={reconciliationRecovery.planId} initiallyOpen onChanged={async () => {
+          await load(); notifyFinancialChange();
+        }} />
+      </div> : null}
       {financialRecovery.error ? <p role="alert" className="my-3 text-sm text-rose-800">{financialRecovery.error}</p> : null}
 
       {mode === "entry" ? <TreatmentEntryChoice canAddLegacy={canAddLegacy}
