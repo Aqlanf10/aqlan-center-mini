@@ -28,6 +28,7 @@ export const AUDIT_EXEMPT: Readonly<Record<string, string>> = {
   "PUT /api/plans/[id]/reconcile": "استعلام قراءة فقط عن نتيجة نفس محاولة تسوية الاتفاق؛ يحجز قفل المحاولة ثم يقرأ الإقرار أو إثبات الرفض ولا يكتب سجلًا أو يحرك مالًا. POST يدقق التسوية أو رفضها داخل معاملته.",
   "PUT /api/plans/[id]/agreement-amendment": "استعلام قراءةٍ فقط عن حالة محاولة تعديل اتفاق بمفتاحها (محفوظة/مرفوضة لقِدمها/غير محسومة): PUT لحمل جسم البصمة، ولا يكتب صفًّا ولا يغيّر رصيدًا؛ قفل استشاري للمعاملة فقط. الكتابة نفسها في POST وتُدقَّق داخل معاملتها.",
   "DELETE /api/reports/saved": "حذف تقرير محفوظ شخصي.",
+  "PUT /api/invoices/[id]/add-service": "معاينة إضافة خدمة إلى فاتورة: قراءة فقط داخل REPEATABLE READ READ ONLY بلا تخصيص أرقام أو كتابة فواتير أو تدقيق نجاح. الحفظ الفعلي في POST ويُدقَّق داخل معاملته.",
   "POST /api/invoices/clinical-preview": "معاينة الربط السريري للفاتورة قبل حفظها — قراءةٌ فقط لا تكتب شيئًا؛ الحفظ يُدقَّق في invoice.create.",
   "POST /api/hr/identity-preview": "معاينة هوية الطاقم بمعرفات صريحة داخل REPEATABLE READ READ ONLY؛ بلا حفظ أو تطبيق أو تخصيص تسلسل. اختبارات PostgreSQL وHTTP تقارن جميع الجداول والتسلسلات قبل المعاينة وبعدها.",
   "POST /api/patients/[id]/legacy-treatments/preview": "معاينة تسجيل علاجٍ بدأ قبل النظام — معاملة READ ONLY لا تكتب شيئًا؛ الحفظ يُدقَّق في legacy_treatment.create.",

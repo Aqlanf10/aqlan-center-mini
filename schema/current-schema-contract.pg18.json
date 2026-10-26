@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6",
+  "generatedOnServerVersion": "18.6 (Debian 18.6-1.pgdg13+2)",
   "counts": {
-    "tables": 133,
-    "columns": 1693,
-    "constraints": 1956,
-    "indexes": 413,
-    "triggers": 100
+    "tables": 146,
+    "columns": 1820,
+    "constraints": 2205,
+    "indexes": 450,
+    "triggers": 144
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -7380,6 +7380,247 @@
         }
       }
     },
+    "invoice_archive_events": {
+      "columns": {
+        "action": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "invoice_created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "invoice_number": {
+          "type": "text",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "version": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "idempotency_key"
+        ],
+        [
+          "invoice_id",
+          "version"
+        ]
+      ],
+      "checks": [
+        "invoice_archive_action",
+        "invoice_archive_actor",
+        "invoice_archive_currency",
+        "invoice_archive_hash",
+        "invoice_archive_key",
+        "invoice_archive_reason",
+        "invoice_archive_version_positive"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_archive_events_idempotency_key_key": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "invoice_archive_events_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "invoice_archive_invoice_version": {
+          "columns": [
+            "invoice_id",
+            "version"
+          ],
+          "unique": true
+        },
+        "invoice_archive_patient_idx": {
+          "columns": [
+            "patient_id",
+            "invoice_id",
+            "version"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "invoice_archive_events_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "invoice_archive_events_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "invoice_archive_rejections": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "code": {
+          "type": "text",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "message": {
+          "type": "text",
+          "nullable": false
+        },
+        "rejected_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "idempotency_key"
+      ],
+      "unique": [],
+      "checks": [
+        "invoice_archive_rejection_code",
+        "invoice_archive_rejection_hash",
+        "invoice_archive_rejection_key",
+        "invoice_archive_rejection_message"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_archive_rejections_pkey": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "invoice_archive_rejections_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "invoice_archive_rejections_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
     "invoice_correction_lines": {
       "columns": {
         "approved_work": {
@@ -7841,6 +8082,253 @@
             "INSERT",
             "DELETE",
             "UPDATE"
+          ]
+        }
+      }
+    },
+    "invoice_service_addition_rejections": {
+      "columns": {
+        "actor_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "expected_source_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "observed_source_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "original_invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "rejected_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "idempotency_key"
+      ],
+      "unique": [],
+      "checks": [
+        "invoice_service_addition_rejections_expected_source_hash_check",
+        "invoice_service_addition_rejections_idempotency_key_check",
+        "invoice_service_addition_rejections_observed_source_hash_check",
+        "invoice_service_addition_rejections_request_hash_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "original_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_service_addition_rejections_pkey": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "invoice_service_addition_rejections_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "invoice_service_addition_rejections_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "invoice_service_additions": {
+      "columns": {
+        "actor_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "additional_invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "occurred_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "original_invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "receipt": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "source_hash": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "additional_invoice_id"
+        ],
+        [
+          "idempotency_key"
+        ]
+      ],
+      "checks": [
+        "invoice_service_additions_check",
+        "invoice_service_additions_currency_check",
+        "invoice_service_additions_idempotency_key_check",
+        "invoice_service_additions_reason_check",
+        "invoice_service_additions_receipt_check",
+        "invoice_service_additions_request_hash_check",
+        "invoice_service_additions_source_hash_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "additional_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "original_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_service_additions_additional_invoice_id_key": {
+          "columns": [
+            "additional_invoice_id"
+          ],
+          "unique": true
+        },
+        "invoice_service_additions_idempotency_key_key": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "invoice_service_additions_original_idx": {
+          "columns": [
+            "original_invoice_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "invoice_service_additions_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "invoice_service_additions_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "invoice_service_additions_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        },
+        "invoice_service_additions_validate": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
           ]
         }
       }
@@ -8484,6 +8972,10 @@
           "type": "int4",
           "nullable": true
         },
+        "lab_work_intent_id": {
+          "type": "uuid",
+          "nullable": true
+        },
         "note": {
           "type": "text",
           "nullable": true
@@ -8580,7 +9072,11 @@
       "primaryKey": [
         "id"
       ],
-      "unique": [],
+      "unique": [
+        [
+          "lab_work_intent_id"
+        ]
+      ],
       "checks": [
         "lab_orders_shade_specification_valid"
       ],
@@ -8608,6 +9104,15 @@
             "lab_service_id"
           ],
           "refTable": "lab_services",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "lab_work_intent_id"
+          ],
+          "refTable": "lab_work_intents",
           "refColumns": [
             "id"
           ]
@@ -8665,6 +9170,12 @@
           ],
           "unique": false
         },
+        "lab_orders_lab_work_intent_id_key": {
+          "columns": [
+            "lab_work_intent_id"
+          ],
+          "unique": true
+        },
         "lab_orders_patient_idx": {
           "columns": [
             "patient_id"
@@ -8704,7 +9215,189 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "lab_order_graph": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        "lab_order_intent_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "lab_prescription_source_memberships": {
+      "columns": {
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "intent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "invoice_item_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "linked_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "linked_by_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "member_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_item_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "visit_procedure_id": {
+          "type": "int8",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "invoice_item_id"
+        ],
+        [
+          "plan_item_id"
+        ],
+        [
+          "visit_procedure_id"
+        ]
+      ],
+      "checks": [
+        "lab_prescription_source_memberships_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "invoice_item_id"
+          ],
+          "refTable": "invoice_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "member_id",
+            "intent_id",
+            "patient_id"
+          ],
+          "refTable": "lab_work_members",
+          "refColumns": [
+            "id",
+            "intent_id",
+            "patient_id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "linked_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "visit_procedure_id"
+          ],
+          "refTable": "visit_procedures",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "lab_prescription_source_memberships_invoice_item_id_key": {
+          "columns": [
+            "invoice_item_id"
+          ],
+          "unique": true
+        },
+        "lab_prescription_source_memberships_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "lab_prescription_source_memberships_plan_item_id_key": {
+          "columns": [
+            "plan_item_id"
+          ],
+          "unique": true
+        },
+        "lab_prescription_source_memberships_visit_procedure_id_key": {
+          "columns": [
+            "visit_procedure_id"
+          ],
+          "unique": true
+        },
+        "lab_prescription_sources_intent_idx": {
+          "columns": [
+            "intent_id",
+            "id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "lab_source_live_scope": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "lab_source_patient": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "lab_sources_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "lab_sources_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "lab_pricing_rules": {
       "columns": {
@@ -8871,6 +9564,473 @@
         }
       },
       "triggers": {}
+    },
+    "lab_work_commands": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "result": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "source_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "source_kind": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "actor_user_id",
+        "request_key"
+      ],
+      "unique": [],
+      "checks": [
+        "lab_work_commands_request_hash_check",
+        "lab_work_commands_request_key_check",
+        "lab_work_commands_result_check",
+        "lab_work_commands_source_id_check",
+        "lab_work_commands_source_kind_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "lab_work_commands_pkey": {
+          "columns": [
+            "actor_user_id",
+            "request_key"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "lab_commands_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "lab_commands_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "lab_work_intent_schema": {
+      "columns": {
+        "singleton": {
+          "type": "bool",
+          "nullable": false
+        },
+        "version": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "singleton"
+      ],
+      "unique": [],
+      "checks": [
+        "lab_work_intent_schema_singleton_check",
+        "lab_work_intent_schema_version_check"
+      ],
+      "foreignKeys": [],
+      "indexes": {
+        "lab_work_intent_schema_pkey": {
+          "columns": [
+            "singleton"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "lab_work_intents": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "group_kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "initial_order_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "origin_invoice_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "origin_kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "origin_visit_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "prescription": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "revision": {
+          "type": "int4",
+          "nullable": false
+        },
+        "state": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "id",
+          "patient_id"
+        ],
+        [
+          "initial_order_id"
+        ]
+      ],
+      "checks": [
+        "lab_work_intents_check",
+        "lab_work_intents_check1",
+        "lab_work_intents_check2",
+        "lab_work_intents_group_kind_check",
+        "lab_work_intents_origin_kind_check",
+        "lab_work_intents_prescription_check",
+        "lab_work_intents_revision_check",
+        "lab_work_intents_state_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "origin_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "initial_order_id"
+          ],
+          "refTable": "lab_orders",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "created_by_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "origin_visit_id"
+          ],
+          "refTable": "visits",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "lab_work_intents_id_patient_id_key": {
+          "columns": [
+            "id",
+            "patient_id"
+          ],
+          "unique": true
+        },
+        "lab_work_intents_initial_order_id_key": {
+          "columns": [
+            "initial_order_id"
+          ],
+          "unique": true
+        },
+        "lab_work_intents_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "lab_intent_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "lab_intent_insert_lock": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "lab_intent_patient": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        "lab_intents_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "lab_work_members": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_revision": {
+          "type": "int4",
+          "nullable": false
+        },
+        "doctor_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "intent_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_item_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "quantity": {
+          "type": "int4",
+          "nullable": false
+        },
+        "retired_revision": {
+          "type": "int4",
+          "nullable": true
+        },
+        "service_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "source_category": {
+          "type": "text",
+          "nullable": false
+        },
+        "tooth_code": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "id",
+          "intent_id"
+        ],
+        [
+          "id",
+          "intent_id",
+          "patient_id"
+        ]
+      ],
+      "checks": [
+        "lab_work_members_check",
+        "lab_work_members_created_revision_check",
+        "lab_work_members_quantity_check",
+        "lab_work_members_source_category_check",
+        "lab_work_members_tooth_code_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "intent_id",
+            "patient_id"
+          ],
+          "refTable": "lab_work_intents",
+          "refColumns": [
+            "id",
+            "patient_id"
+          ]
+        },
+        {
+          "columns": [
+            "doctor_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "service_id"
+          ],
+          "refTable": "services",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "lab_work_members_id_intent_id_key": {
+          "columns": [
+            "id",
+            "intent_id"
+          ],
+          "unique": true
+        },
+        "lab_work_members_id_intent_id_patient_id_key": {
+          "columns": [
+            "id",
+            "intent_id",
+            "patient_id"
+          ],
+          "unique": true
+        },
+        "lab_work_members_intent_idx": {
+          "columns": [
+            "intent_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "lab_work_members_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "lab_member_graph": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        "lab_member_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "lab_member_scope": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "lab_members_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "legacy_balance_arrangements": {
       "columns": {
@@ -10413,6 +11573,10 @@
           "type": "text",
           "nullable": false
         },
+        "followup_coverage_revision_id": {
+          "type": "int8",
+          "nullable": true
+        },
         "id": {
           "type": "int4",
           "nullable": false
@@ -10478,6 +11642,15 @@
         },
         {
           "columns": [
+            "followup_coverage_revision_id"
+          ],
+          "refTable": "ortho_followup_coverage_revisions",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "visit_id"
           ],
           "refTable": "visits",
@@ -10508,7 +11681,29 @@
           "unique": false
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ortho_followup_adjustment_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        },
+        "ortho_followup_adjustment_proof": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_followup_proof_parent": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "ortho_assessment_revisions": {
       "columns": {
@@ -10902,6 +12097,335 @@
         }
       },
       "triggers": {}
+    },
+    "ortho_followup_coverage_rejections": {
+      "columns": {
+        "actor": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "code": {
+          "type": "text",
+          "nullable": false
+        },
+        "command": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "command_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "message": {
+          "type": "text",
+          "nullable": false
+        },
+        "ortho_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "rejected_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "command_id"
+      ],
+      "unique": [],
+      "checks": [
+        "ortho_followup_coverage_rejections_actor_check",
+        "ortho_followup_coverage_rejections_code_check",
+        "ortho_followup_coverage_rejections_command_check",
+        "ortho_followup_coverage_rejections_message_check",
+        "ortho_followup_coverage_rejections_patient_id_check",
+        "ortho_followup_coverage_rejections_request_fingerprint_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "ortho_case_id"
+          ],
+          "refTable": "ortho_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ortho_followup_coverage_rejections_pkey": {
+          "columns": [
+            "command_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "ortho_followup_rejection_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_followup_rejection_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
+    "ortho_followup_coverage_revisions": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "clinical_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "command_id": {
+          "type": "uuid",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "decision": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "ortho_case_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_item_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "schema_version": {
+          "type": "int4",
+          "nullable": false
+        },
+        "scope": {
+          "type": "text",
+          "nullable": false
+        },
+        "source_fingerprint": {
+          "type": "text",
+          "nullable": false
+        },
+        "source_snapshot": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "supersedes_revision_id": {
+          "type": "int8",
+          "nullable": true
+        },
+        "version": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "command_id"
+        ],
+        [
+          "ortho_case_id",
+          "version"
+        ]
+      ],
+      "checks": [
+        "ortho_followup_coverage_revisions_check",
+        "ortho_followup_coverage_revisions_created_by_check",
+        "ortho_followup_coverage_revisions_decision_check",
+        "ortho_followup_coverage_revisions_patient_id_check",
+        "ortho_followup_coverage_revisions_reason_check",
+        "ortho_followup_coverage_revisions_request_fingerprint_check",
+        "ortho_followup_coverage_revisions_schema_version_check",
+        "ortho_followup_coverage_revisions_scope_check",
+        "ortho_followup_coverage_revisions_source_fingerprint_check",
+        "ortho_followup_coverage_revisions_source_snapshot_check",
+        "ortho_followup_coverage_revisions_version_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "clinical_case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "ortho_case_id"
+          ],
+          "refTable": "ortho_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "supersedes_revision_id"
+          ],
+          "refTable": "ortho_followup_coverage_revisions",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_id"
+          ],
+          "refTable": "treatment_plans",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ortho_followup_coverage_head": {
+          "columns": [
+            "ortho_case_id",
+            "version"
+          ],
+          "unique": false
+        },
+        "ortho_followup_coverage_revisions_command_id_key": {
+          "columns": [
+            "command_id"
+          ],
+          "unique": true
+        },
+        "ortho_followup_coverage_revisions_ortho_case_id_version_key": {
+          "columns": [
+            "ortho_case_id",
+            "version"
+          ],
+          "unique": true
+        },
+        "ortho_followup_coverage_revisions_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "ortho_followup_coverage_00_command": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "ortho_followup_coverage_chain": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "ortho_followup_coverage_no_rewrite": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_followup_coverage_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "ortho_strategy_revisions": {
       "columns": {
@@ -11885,6 +13409,55 @@
         }
       }
     },
+    "patient_numbering_policy": {
+      "columns": {
+        "minimum_next": {
+          "type": "int8",
+          "nullable": false
+        },
+        "singleton": {
+          "type": "bool",
+          "nullable": false
+        },
+        "version": {
+          "type": "int8",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "singleton"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_numbering_policy_minimum_next_check",
+        "patient_numbering_policy_singleton_check",
+        "patient_numbering_policy_version_check"
+      ],
+      "foreignKeys": [],
+      "indexes": {
+        "patient_numbering_policy_pkey": {
+          "columns": [
+            "singleton"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "patient_number_policy_monotonic": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "patient_number_policy_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
     "patient_opening_balance_history": {
       "columns": {
         "action": {
@@ -12616,6 +14189,10 @@
           "type": "text",
           "nullable": false
         },
+        "patient_number_version": {
+          "type": "int8",
+          "nullable": false
+        },
         "phone": {
           "type": "text",
           "nullable": true
@@ -12655,6 +14232,7 @@
       ],
       "checks": [
         "patients_family_role_check",
+        "patients_patient_number_version_check",
         "patients_preferred_channel_check"
       ],
       "foreignKeys": [
@@ -12687,6 +14265,14 @@
         }
       ],
       "indexes": {
+        "patient_number_alias_key_idx": {
+          "columns": [],
+          "unique": true
+        },
+        "patient_number_numeric_idx": {
+          "columns": [],
+          "unique": false
+        },
         "patients_family_idx": {
           "columns": [
             "family_id"
@@ -12730,7 +14316,22 @@
           "unique": false
         }
       },
-      "triggers": {}
+      "triggers": {
+        "patient_number_identity_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "patient_number_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "payable_adjustments": {
       "columns": {
@@ -13889,6 +15490,65 @@
       },
       "triggers": {}
     },
+    "retired_patient_numbers": {
+      "columns": {
+        "patient_id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "patient_number": {
+          "type": "text",
+          "nullable": false
+        },
+        "retired_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "patient_number"
+      ],
+      "unique": [],
+      "checks": [],
+      "foreignKeys": [],
+      "indexes": {
+        "retired_patient_number_alias_key_idx": {
+          "columns": [],
+          "unique": true
+        },
+        "retired_patient_number_numeric_idx": {
+          "columns": [],
+          "unique": false
+        },
+        "retired_patient_numbers_pkey": {
+          "columns": [
+            "patient_number"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "retired_patient_number_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "retired_patient_number_insert_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "retired_patient_number_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
     "saved_reports": {
       "columns": {
         "created_at": {
@@ -14694,6 +16354,14 @@
           "type": "int8",
           "nullable": false
         },
+        "lab_work_intent_id": {
+          "type": "uuid",
+          "nullable": true
+        },
+        "lab_work_member_id": {
+          "type": "uuid",
+          "nullable": true
+        },
         "note": {
           "type": "text",
           "nullable": true
@@ -14731,8 +16399,21 @@
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "visit_procedure_lab_identity_pair"
+      ],
       "foreignKeys": [
+        {
+          "columns": [
+            "lab_work_member_id",
+            "lab_work_intent_id"
+          ],
+          "refTable": "lab_work_members",
+          "refColumns": [
+            "id",
+            "intent_id"
+          ]
+        },
         {
           "columns": [
             "doctor_id"
@@ -14771,6 +16452,13 @@
         }
       ],
       "indexes": {
+        "visit_procedure_lab_member_per_visit": {
+          "columns": [
+            "visit_id",
+            "lab_work_member_id"
+          ],
+          "unique": true
+        },
         "visit_procedures_pkey": {
           "columns": [
             "id"
@@ -14868,6 +16556,10 @@
         },
         "note": {
           "type": "text",
+          "nullable": true
+        },
+        "ortho_followup_coverage_proof": {
+          "type": "jsonb",
           "nullable": true
         },
         "patient_id": {
@@ -14996,7 +16688,29 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ortho_followup_manifest_children": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        "ortho_followup_visit_manifest": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ortho_followup_visit_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "waiting_list": {
       "columns": {

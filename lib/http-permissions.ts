@@ -47,6 +47,7 @@ const FRONT_DESK: readonly Role[] = ["admin", "reception"];
 const CLINICAL: readonly Role[] = ["admin", "doctor"];
 
 export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<HttpMethod, HttpAccess>>>>> = {
+  "/api/patients/[id]/statement": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/hr/identity-preview": { GET: ADMIN, POST: ADMIN },
   "/api/hr/staff": { GET: ADMIN, POST: ADMIN },
   "/api/hr/staff/[id]": { GET: ADMIN, PATCH: ADMIN },
@@ -141,6 +142,9 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/invoices/clinical-preview": { POST: FRONT_DESK },
   "/api/invoices/[id]": { GET: ["admin", "reception", "cashier", "accountant"], PATCH: FRONT_DESK },
   "/api/invoices/[id]/correct": { GET: ADMIN, POST: ADMIN },
+  "/api/invoices/[id]/add-service": { GET: ADMIN, PUT: ADMIN, POST: ADMIN },
+  "/api/invoices/[id]/archive": { GET: ["admin", "reception", "cashier", "accountant"], POST: ADMIN },
+  "/api/invoices/archive": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/lab": { GET: CLINIC, POST: CLINIC },
   "/api/lab/backlog": { GET: ADMIN },
   "/api/lab/[id]": { PATCH: CLINIC, DELETE: ADMIN },

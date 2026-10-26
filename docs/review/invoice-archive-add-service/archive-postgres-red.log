@@ -1,0 +1,5 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/invoice-archive.test.ts
+
+sh: 1: vitest: not found

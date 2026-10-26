@@ -7,6 +7,12 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  // Exact root-approved invoice actions are reviewed independently of older tails.
+  if (files.at(-1)?.version === "0082") {
+    if (files.at(-3)?.version !== "0078" || files.at(-2)?.version !== "0081" || files.at(-2)?.filename !== "0081_invoice_archive.sql"
+      || files.at(-1)?.filename !== "0082_invoice_service_additions.sql") throw new Error("Unreviewed invoice action migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -2));
+  }
   const reviewedAdditions: Record<string, string> = {
     "0066": "0066_agreement_delta_amendments.sql",
     "0067": "0067_patient_appointment_history_index.sql",
