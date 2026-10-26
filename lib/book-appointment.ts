@@ -19,10 +19,10 @@ import {
   writeAppointmentAcrossDays, writeAppointmentInDay, type DbClient,
 } from "./db";
 import {
-  evaluateCapacity, loadCapacityContext, resolveService, type CapacityContext,
+  prepareCapacityEvaluator, loadCapacityContext, resolveService, type CapacityContext,
 } from "./capacity-context";
-import type { CapacityVerdict } from "./capacity";
-import { nextFreeTime, type Appointment } from "./schedule";
+import { usableShifts, type CapacityVerdict } from "./capacity";
+import type { Appointment } from "./schedule";
 import {
   MAX_DURATION, MIN_DURATION, type AppointmentService,
 } from "./appointment-services";
@@ -217,7 +217,7 @@ export async function judgeBookingInDay(input: {
       && appointment.id !== input.excludeId,
   ).length;
 
-  const verdict = await evaluateCapacity({
+  const evaluateAt = await prepareCapacityEvaluator({
     sameDay: input.sameDay, date: input.date, time: input.time,
     durationMinutes: input.durationMinutes, service: input.service,
     context: input.context, providerId: input.providerId ?? null,
@@ -225,6 +225,7 @@ export async function judgeBookingInDay(input: {
     isNewPatient: input.isNewPatient ?? false, newPatientsBookedToday,
     client: input.client,
   });
+  const verdict = evaluateAt(input.time);
   /* (P2-3) المريض لا يكون على كرسيّين في وقتٍ واحد — وهذا ليس «سعة» تُتجاوز بسبب:
      الموعد الثاني خطأ حجزٍ دائمًا، فيُرفض لكل الأدوار ويُعرض الموعد القائم. */
   const clash = input.patientId === null ? null : patientOverlap(
@@ -258,9 +259,25 @@ export async function judgeBookingInDay(input: {
     return { ok: true, verdict, overridden: true };
   }
 
-  const suggestion = nextFreeTime(
-    input.sameDay, input.date, input.time, input.durationMinutes, input.context.chairs,
-  );
+  // Use the exact admission policy and one verified provider-block snapshot.
+  // Never offer the rejected slot, an out-of-shift slot or a patient collision.
+  // Minute precision preserves the earliest valid boundary for arbitrary buffers.
+  let suggestion: string | null = null;
+  const shifts = usableShifts(input.context.shifts);
+  const from = timeToMinutes(input.time) + 1;
+  const closing = Math.min(1440, Math.max(0, ...shifts.map(shift => shift.end)));
+  for (let minute = from; minute < closing; minute++) {
+    if (!shifts.some(shift => minute >= shift.start && minute < shift.end)) continue;
+    const time = minutesToTime(minute);
+    if (input.patientId !== null && patientOverlap(
+      input.sameDay, input.patientId, time, input.durationMinutes, input.excludeId,
+    )) continue;
+    const candidate = evaluateAt(time);
+    if (candidate.state !== "OVER_CAPACITY" && !candidate.outsideHours) {
+      suggestion = time;
+      break;
+    }
+  }
   return {
     ok: false,
     verdict,
@@ -276,7 +293,7 @@ export async function judgeBookingInDay(input: {
       suggestion,
       suggestionMessage: suggestion
         ? `أقرب وقت متاح: ${suggestion}`
-        : "لا يوجد وقت متاح في هذا اليوم.",
+        : "لم يُعثر على وقت بديل مناسب ضمن الدوام؛ اختر يومًا آخر.",
     },
   };
 }
