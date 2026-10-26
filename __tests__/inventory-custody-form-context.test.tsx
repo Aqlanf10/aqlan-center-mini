@@ -13,7 +13,7 @@ vi.mock("react", async original => {
  };
 });
 vi.mock("../components/SessionProvider",()=>{const session={userId:4,username:"synthetic-doctor",role:"doctor",displayName:"Synthetic doctor"};return {useSession:()=>session};});
-vi.mock("../components/inventory/useInventoryCommand",()=>({useInventoryCommand:()=>({locked:false,send:runtime.send,pending:false,error:null})}));
+vi.mock("../components/inventory/useInventoryCommand",()=>({useInventoryCommand:()=>({locked:false,busy:false,status:"idle",message:"",describe:()=>"",send:runtime.send,retry:vi.fn(),refresh:vi.fn()})}));
 
 type Element=ReactElement<Record<string,unknown>>;
 function elements(node:ReactNode):Element[]{
