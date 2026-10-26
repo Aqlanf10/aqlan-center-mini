@@ -37,12 +37,15 @@ it.each([390,1280])('reconciles a completed classic agreement at %spx after a lo
   const second=await context.newPage();await second.goto(`${baseUrl}/patients/${patientId}?tab=plans`,{waitUntil:'domcontentloaded'});await second.getByRole('button',{name:'تسوية الاتفاق',exact:true}).click();
   await expect.poll(()=>second.getByTestId('agreement-reconciliation').getByRole('button',{name:'تأكيد التسوية',exact:true}).isEnabled()).toBe(true);
   let secondPosts=0;second.on('request',request=>{if(request.url().endsWith(`/plans/${planId}/reconcile`)&&request.method()==='POST')secondPosts++;});
-  let committed!:()=>void;const saved=new Promise<void>(resolve=>{committed=resolve;});let captured='';
+  let committed!:(result:{ok:boolean;body:string})=>void;const saved=new Promise<{ok:boolean;body:string}>(resolve=>{committed=resolve;});let captured='';
   await page.route(`**/api/plans/${planId}/reconcile`,async route=>{
    if(route.request().method()!=='POST'||captured){await route.continue();return;}
-   captured=route.request().postData()??'';const result=await route.fetch();expect(result.ok(),await result.text()).toBe(true);committed();await route.abort('failed');
+   captured=route.request().postData()??'';
+   try{const result=await route.fetch();committed({ok:result.ok(),body:await result.text()});}
+   catch(error){committed({ok:false,body:String(error)});}
+   finally{await route.abort('failed');}
   });
-  await panel.getByRole('button',{name:'تأكيد التسوية',exact:true}).click();await saved;
+  await panel.getByRole('button',{name:'تأكيد التسوية',exact:true}).click();const response=await saved;expect(response.ok,response.body).toBe(true);
   await panel.getByRole('button',{name:'تحقق من حالة الطلب',exact:true}).waitFor();
   await second.getByRole('button',{name:'تأكيد التسوية',exact:true}).click();
   await second.getByRole('button',{name:'إعادة الطلب المحفوظ نفسه',exact:true}).waitFor();expect(secondPosts).toBe(0);
@@ -53,6 +56,9 @@ it.each([390,1280])('reconciles a completed classic agreement at %spx after a lo
   expect((await db.query('SELECT sum(total_minor-discount_minor)::text AS total,count(*)::int AS count FROM invoices WHERE plan_id=$1',[planId])).rows[0]).toEqual({total:'180000',count:2});
   expect((await db.query('SELECT id,invoice_id,amount_minor::text,currency FROM payments WHERE patient_id=$1 ORDER BY id',[patientId])).rows).toEqual(originalPayments);
   const same=await authedMutation(`/api/plans/${planId}/reconcile`,h.sessions.admin,'POST',captured);expect(same.status).toBe(200);expect((await same.json()).replayed).toBe(true);
+  expect((await db.query('SELECT count(*)::int AS count FROM agreement_reconciliations WHERE plan_id=$1',[planId])).rows[0].count).toBe(1);
+  expect((await db.query('SELECT sum(total_minor-discount_minor)::text AS total,count(*)::int AS count FROM invoices WHERE plan_id=$1',[planId])).rows[0]).toEqual({total:'180000',count:2});
+  expect((await db.query('SELECT id,invoice_id,amount_minor::text,currency FROM payments WHERE patient_id=$1 ORDER BY id',[patientId])).rows).toEqual(originalPayments);
   const geometry=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));expect(geometry.scroll).toBeLessThanOrEqual(geometry.width+1);
   const current=await authedGet(`/api/plans/${planId}/reconcile`,h.sessions.admin);expect(current.status).toBe(200);expect((await current.json()).status).toBe('reconciled');
  }finally{await context.close();}
