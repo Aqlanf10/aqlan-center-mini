@@ -152,7 +152,8 @@ it("renders a compact real-data desktop/mobile hub; defers finance; preserves so
   try{
    await page.goto(`${owned.baseUrl}/executive`,{waitUntil:"domcontentloaded"});
    const hub=page.getByTestId("leadership-workspace"),tasks=page.getByTestId("leadership-tasks");
-   await expect.poll(()=>tasks.innerText()).toContain("مسجّل إجراء مختلف");
+   // The reader has a 20s timeout; a cold synthetic server may exceed Vitest's 1s poll default.
+   await expect.poll(()=>tasks.innerText(),{timeout:25000}).toContain("مسجّل إجراء مختلف");
    await expect.poll(()=>page.getByTestId("leadership-lab-preview").innerText()).toContain("تاج خزفي");
    await expect.poll(()=>page.getByTestId("leadership-day-queue").innerText()).toContain("مريض متابعة اصطناعي");
    expect(await tasks.innerText()).toContain("المسؤول المسند: مسؤول متابعة اصطناعي");expect(await hub.innerText()).not.toContain("PRIVATE-HUB-TASK");
