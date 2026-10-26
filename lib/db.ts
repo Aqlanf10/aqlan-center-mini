@@ -14359,7 +14359,7 @@ const PAYABLE_SELECT = `
          b.source_type, b.as_of_date, b.reference, b.opening_reason
     FROM payables b JOIN parties t ON t.id = b.party_id`;
 
-export async function createPayable(input: {
+export interface CreatePayableInput {
   partyId: number;
   category: string;
   description: string;
@@ -14370,12 +14370,35 @@ export async function createPayable(input: {
   labOrderId: number | null;
   dueDate: string | null;
   createdBy: string;
-}): Promise<Payable | null> {
+}
+
+export async function createPayable(input: CreatePayableInput): Promise<Payable | null> {
   await ensureSchema();
+  return withTransaction(getPool(), client => createPayableInTransaction(client, input));
+}
+
+/**
+ * Existing native-currency payable write on a caller-owned transaction. The
+ * caller owns authorization, party/source locks, source linkage, command replay
+ * and mandatory audit, and must roll back on every error. This primitive does
+ * not acquire another connection, provision schema, commit, release or retry.
+ * Only the existing lab-order uniqueness rule deduplicates this insert; ordinary
+ * supplier invoices require their own immutable source link and operation key.
+ */
+export async function createPayableInTransaction(client: DbClient, input: CreatePayableInput): Promise<Payable | null> {
+  try {
+    await client.query("SAVEPOINT payable_writer_transaction_check");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "25P01") {
+      throw Object.assign(new Error("Payable writer requires an explicit caller-owned transaction"), { code: "transaction_required" });
+    }
+    throw error;
+  }
+  await client.query("RELEASE SAVEPOINT payable_writer_transaction_check");
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
   );
-  const { rows } = await getPool().query<{ id: number }>(
+  const { rows } = await client.query<{ id: number }>(
     `INSERT INTO payables (party_id, category, description, amount_minor, currency,
                            exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::int, $10::date, $11)
@@ -14387,7 +14410,7 @@ export async function createPayable(input: {
     ],
   );
   if (!rows[0]) return null;
-  const { rows: full } = await getPool().query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [rows[0].id]);
+  const { rows: full } = await client.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [rows[0].id]);
   return full[0] ? toPayable(full[0]) : null;
 }
 
