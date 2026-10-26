@@ -82,7 +82,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const bucket = { billedMinor: 0, collectedMinor: 0, openingMinor: 0, dueMinor: 0 };
 const ledger = { invoices: [], payments: [], plans: [], opening: null, openingAccess: { add: true, edit: true }, baseCurrency: "YER", balance: bucket,
   balances: { YER: bucket, SAR: bucket, USD: bucket } };
-const services = ["bridge", "crown", "rct"].map((category, index) => ({
+const services = ["bridge", "crown", "rct", "filling", "cleaning"].map((category, index) => ({
   id: 31 + index, name: `Synthetic ${category}`, category, priceMinor: 1000, priceSarMinor: 2500,
   priceUsdMinor: 1200, priceConfigured: true, isActive: true,
 }));
@@ -151,9 +151,11 @@ function openTeeth(index = 0) {
   const dialog = elements(renderForm()).find(one => one.type === ToothSelectionDialog);
   expect(dialog).toBeDefined(); return dialog!;
 }
-function confirmTeeth(teeth: number[], index = 0) {
+function confirmTeeth(teeth: number[], index = 0, surfacesByTooth?: Record<number, string>) {
   const dialog = openTeeth(index);
-  (dialog.props.onConfirm as (selection: { teeth: number[]; surfaces: string; scope: null }) => void)({ teeth, surfaces: "", scope: null });
+  (dialog.props.onConfirm as (selection: { teeth: number[]; surfaces: string; surfacesByTooth?: Record<number, string>; scope: null }) => void)(
+    { teeth, surfaces: "", scope: null, ...(surfacesByTooth ? { surfacesByTooth } : {}) },
+  );
   renderForm();
 }
 function saveButton() {
@@ -188,7 +190,7 @@ beforeEach(() => {
       const request = JSON.parse(String(init?.body)) as Body;
       return Promise.resolve(json({ existingPlanId: request.existingPlanId,
         planChoices: offerExistingPlan ? [{ id: 801, compatible: true }] : [], lines: request.items.map((item, line) => ({
-        line, kind: "clinical", specialty: item.serviceId === 33 ? "endodontics" : "prosthodontics", specialtyLabel: "Synthetic specialty",
+        line, kind: "clinical", specialty: item.serviceId === 33 ? "endodontics" : item.serviceId === 34 ? "restorative" : "prosthodontics", specialtyLabel: "Synthetic specialty",
         item: item.planItemId ? { mode: "existing", id: item.planItemId } : { mode: "new", id: null },
         itemCandidates: offerExistingPlan ? [{ id: 800 + item.toothCode, planId: 801, clinicalCaseId: null }] : [],
         case: { mode: item.caseId ? "existing" : "new", id: item.caseId ?? null, title: item.caseId ? "Synthetic retained case" : null,
@@ -209,6 +211,166 @@ afterEach(() => {
 });
 
 describe("InvoiceForm grouped tooth editing", () => {
+  it("reviews and saves different filling surfaces in one priced entry with independent canonical teeth", async () => {
+    await openForm(); selectService("filling"); confirmTeeth([26, 16], 0, { 16: "OM", 26: "DB" });
+    expect(cards()).toHaveLength(1);
+    expect(elements(renderForm()).filter(one => one.props["aria-label"] === "الطبيب المكلّف بالبند")).toHaveLength(1);
+    expect(Number(input("الكمية").props.value)).toBe(2);
+    expect(input("الكمية").props.disabled === true || input("الكمية").props.readOnly === true).toBe(true);
+    change(input("الطبيب المكلّف بالبند"), "11");
+    change(input("الخصم"), "200"); change(input("سبب الخصم"), "Synthetic filling discount");
+    const request = await preview();
+    expect(request.items.map(item => [item.toothCode, item.surfaces, item.doctorId, item.quantity, item.catalogPriceMinor])).toEqual([
+      [16, "MO", 11, 1, 1000], [26, "DB", 11, 1, 1000],
+    ]);
+    expect(request.items.every(item => !Object.hasOwn(item, "episodeTeeth"))).toBe(true);
+    expectCanonicalOnly(request.items);
+    expect(text(node("invoice-line-total-0"))).toContain(formatMoney(2000, "YER"));
+    expect(text(node("invoice-financial-summary"))).toContain(formatMoney(1800, "YER"));
+    const dialog = openTeeth();
+    expect(dialog.props.initial).toMatchObject({ teeth: [16, 26], surfacesByTooth: { 16: "MO", 26: "DB" } });
+    (dialog.props.onCancel as () => void)(); renderForm();
+    expect(saveButton().props.disabled).toBe(false);
+    click(saveButton()); await flush();
+    expect(calls("/api/invoices")).toHaveLength(1);
+    expect(body("/api/invoices").items).toEqual(request.items);
+    expect(body("/api/invoices")).toMatchObject({ currency: "YER", discount: "200", discountReason: "Synthetic filling discount" });
+  });
+
+  it("splits a filling for a different doctor and price while retaining each tooth's surfaces", async () => {
+    await openForm(); selectService("filling"); confirmTeeth([16, 26, 36], 0, { 16: "MO", 26: "D", 36: "BL" });
+    change(input("الطبيب المكلّف بالبند"), "11");
+    click(node("invoice-split-tooth-1")); renderForm();
+    expect(cards()).toHaveLength(2);
+    expect(elements(renderForm()).some(one => one.props["data-testid"] === "invoice-split-notice")).toBe(false);
+    change(input("الطبيب المكلّف بالبند", node("invoice-row-1")), "12");
+    change(input("السعر", node("invoice-row-1")), "1500");
+    change(input("سبب تغيير السعر", node("invoice-row-1")), "Synthetic individual filling agreement");
+    const request = await preview();
+    expect(request.items.map(item => [item.toothCode, item.surfaces, item.doctorId, parseAmount(item.price, "YER")])).toEqual([
+      [16, "MO", 11, 1000], [26, "D", 12, 1500], [36, "BL", 11, 1000],
+    ]);
+    expect(text(node("invoice-financial-summary"))).toContain(formatMoney(3500, "YER"));
+    expectCanonicalOnly(request.items);
+    const dialog = openTeeth();
+    expect(dialog.props.initial).toMatchObject({ teeth: [16, 36], surfacesByTooth: { 16: "MO", 36: "BL" } });
+    (dialog.props.onCancel as () => void)();
+  });
+
+  it("changes one filling's surfaces without migrating another tooth's clinical case", async () => {
+    offerCaseChoices = true;
+    await openForm(); selectService("filling"); confirmTeeth([16, 26], 0, { 16: "MO", 26: "D" });
+    await preview();
+    change(input("الحالة", node("invoice-clinical-preview-0")), "501"); await preview();
+    change(input("الحالة", node("invoice-clinical-preview-1")), "502");
+    const before = await preview();
+    expect(before.items.map(item => item.caseId)).toEqual([501, 502]);
+    confirmTeeth([16, 26], 0, { 16: "B", 26: "D" });
+    const changed = await preview();
+    expect(changed.items.map(item => [item.toothCode, item.surfaces, item.caseId ?? null])).toEqual([
+      [16, "B", null], [26, "D", 502],
+    ]);
+    expect(changed.items.every(item => !Object.hasOwn(item, "episodeTeeth"))).toBe(true);
+  });
+
+  it("keeps a cancelled filling review unchanged and removes old surfaces when replacing a tooth", async () => {
+    await openForm(); selectService("filling"); confirmTeeth([16, 26], 0, { 16: "MO", 26: "DB" });
+    const before = await preview(), previewCount = calls("/api/invoices/clinical-preview").length;
+    const dialog = openTeeth();
+    expect(dialog.props.initial).toMatchObject({ teeth: [16, 26], surfacesByTooth: { 16: "MO", 26: "DB" } });
+    (dialog.props.onCancel as () => void)(); renderForm();
+    await vi.advanceTimersByTimeAsync(351); await flush();
+    expect(calls("/api/invoices/clinical-preview")).toHaveLength(previewCount);
+    expect(body().items).toEqual(before.items);
+    confirmTeeth([16, 36], 0, { 16: "MO", 36: "" });
+    const replaced = await preview();
+    expect(replaced.items.map(item => [item.toothCode, item.surfaces ?? null])).toEqual([[16, "MO"], [36, null]]);
+    const reopened = openTeeth();
+    expect(reopened.props.initial).toMatchObject({ teeth: [16, 36], surfacesByTooth: { 16: "MO", 36: "" } });
+    expect((reopened.props.initial as { surfacesByTooth: Record<number, string> }).surfacesByTooth).not.toHaveProperty("26");
+    (reopened.props.onCancel as () => void)();
+  });
+
+  it("refuses filling teeth already present in a separate entry without erasing either set of surfaces", async () => {
+    await openForm(); selectService("filling"); confirmTeeth([16, 26], 0, { 16: "MO", 26: "DB" });
+    click(node("invoice-split-tooth-1")); renderForm();
+    change(input("الطبيب المكلّف بالبند", node("invoice-row-1")), "12");
+    const before = await preview();
+    confirmTeeth([16, 26, 36], 0, { 16: "M", 26: "O", 36: "B" });
+    renderForm(); await vi.advanceTimersByTimeAsync(351); await flush();
+    expect(body().items).toEqual(before.items);
+    expect(cards()).toHaveLength(2);
+    expect(text(node("invoice-split-notice"))).toContain("26");
+    expect(elements(renderForm()).some(one => one.type === ToothSelectionDialog)).toBe(false);
+    click(input("حذف البند 2", node("invoice-row-1"))); renderForm();
+    expect(elements(renderForm()).some(one => one.props["data-testid"] === "invoice-split-notice")).toBe(false);
+  });
+
+  it("reprices every filling in the new currency, clears financial selections and preserves only current tooth surfaces", async () => {
+    offerExistingPlan = true;
+    await openForm(); selectService("filling"); confirmTeeth([16, 26], 0, { 16: "MO", 26: "DB" });
+    change(input("السعر"), "1700"); change(input("سبب تغيير السعر"), "Synthetic YER agreement");
+    change(input("الخصم"), "400"); change(input("سبب الخصم"), "Synthetic YER discount");
+    await preview(); change(node("invoice-existing-plan"), "801"); await preview();
+    change(node("invoice-plan-item-0"), "816"); await preview();
+    change(node("invoice-plan-item-1"), "826");
+    const selected = await preview();
+    expect(selected.items.map(item => item.planItemId)).toEqual([816, 826]);
+    change(input("عملة الفاتورة"), "SAR");
+    expect(elements(renderForm()).some(one => one.props["data-testid"] === "invoice-split-notice")).toBe(false);
+    expect(input("الخصم").props.value).toBe("");
+    expect(input("السعر").props.value).toBe("25.00");
+    change(input("الخصم"), "5"); change(input("سبب الخصم"), "Synthetic SAR discount");
+    const repriced = await preview();
+    expect(repriced).toMatchObject({ currency: "SAR", discount: "5", existingPlanId: null });
+    expect(repriced.items.map(item => [item.toothCode, item.surfaces, item.price, item.priceReason, item.planItemId])).toEqual([
+      [16, "MO", "25.00", "", null], [26, "DB", "25.00", "", null],
+    ]);
+    expect(text(node("invoice-line-total-0"))).toContain(formatMoney(5000, "SAR"));
+    expect(text(node("invoice-financial-summary"))).toContain(formatMoney(4500, "SAR"));
+    expectCanonicalOnly(repriced.items);
+  });
+
+  it("replaces a filling group with a new service without carrying its surfaces, clinical links or manual price", async () => {
+    offerCaseChoices = true;
+    await openForm(); selectService("filling"); confirmTeeth([16, 26], 0, { 16: "MO", 26: "DB" });
+    change(input("الطبيب المكلّف بالبند"), "11");
+    change(input("السعر"), "1700"); change(input("سبب تغيير السعر"), "Synthetic old filling price");
+    await preview(); change(input("الحالة", node("invoice-clinical-preview-0")), "501");
+    await preview();
+    const staleFillingDialog = openTeeth();
+    (staleFillingDialog.props.onCancel as () => void)(); renderForm();
+    selectService("cleaning");
+    expect(elements(renderForm()).some(one => one.props["data-testid"] === "invoice-split-notice")).toBe(false);
+    (staleFillingDialog.props.onConfirm as (selection: { teeth: number[]; surfaces: string; surfacesByTooth: Record<number, string>; scope: null }) => void)(
+      { teeth: [16, 26], surfaces: "", surfacesByTooth: { 16: "MO", 26: "DB" }, scope: null },
+    );
+    expect(cards()).toHaveLength(1);
+    expect(input("السعر").props.value).toBe("1,000");
+    expect(input("الطبيب المكلّف بالبند").props.value).toBe("");
+    const changed = await preview();
+    expect(changed.items).toHaveLength(1);
+    expect(changed.items[0]).toMatchObject({ serviceId: 35, scope: "full_mouth", quantity: 1, priceReason: "", planItemId: null });
+    for (const field of ["toothCode", "surfaces", "caseId", "episodeTeeth"]) expect(changed.items[0]).not.toHaveProperty(field);
+    selectService("filling");
+    const dialog = openTeeth();
+    expect(dialog.props.initial).toMatchObject({ teeth: [] });
+    expect(saveButton().props.disabled).toBe(true);
+    (dialog.props.onCancel as () => void)();
+  });
+
+  it("keeps a refused filling visible inside the group and blocks saving all children", async () => {
+    refusedTooth = 26;
+    await openForm(); selectService("filling"); confirmTeeth([16, 26], 0, { 16: "MO", 26: "DB" }); await preview();
+    expect(cards()).toHaveLength(1);
+    expect(node("invoice-clinical-preview-1").props["data-preview-state"]).toBe("refused");
+    expect(node("invoice-group-details-0").props.open).toBe(true);
+    expect(text(renderForm())).toContain("Synthetic tooth requires review");
+    expect(saveButton().props.disabled).toBe(true);
+    click(saveButton()); await flush();
+    expect(calls("/api/invoices")).toHaveLength(0);
+  });
+
   it.each(["bridge", "crown", "rct"])("%s selection is one visible entry, with canonical per-tooth preview and save", async category => {
     await openForm(); selectService(category); confirmTeeth([33, 31, 32]);
     expect(cards()).toHaveLength(1);

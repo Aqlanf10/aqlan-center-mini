@@ -1182,6 +1182,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
   const [currency, setCurrency] = useState<Currency>(base);
   const changeCurrency = (next: Currency) => {
     if (!editorEnabled() || next === currency) return;
+    setSplitNotice(null);
     setCurrency(next); setDiscount(""); setDiscountReason(""); setHistoricalPaid("");
     setRepaymentDraft({mode:"full",rows:[]});
     setRows(current => current.map(row => {
@@ -1405,6 +1406,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
   // A chosen batch never absorbs another source merely because its price matches.
   const displayContext = {
     currency,
+    modeOf,
     priceValue: (row: InvoiceRow) => row.price.trim() ? parseAmount(row.price, currency)
       : serviceOf(row.serviceId) ? invoiceOfferedPrice(serviceOf(row.serviceId)!, currency) : null,
     provenance: (row: InvoiceRow) => {
@@ -1432,7 +1434,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
     if (index < 0 || rows[index].serviceId !== serviceId || modeOf(rows[index]) !== expectedMode) { setToothDialogFor(null); return; }
     const mode = modeOf(rows[index]);
     const members = groupForRow(key)?.keys ?? [key];
-    if (!historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode")) {
+    if (!historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode" || mode === "tooth_surfaces")) {
       const occupied = rows.find(other => !members.includes(other.key) && other.serviceId === serviceId
         && other.toothCode !== null && selection.teeth.includes(other.toothCode));
       if (occupied) {
@@ -1447,7 +1449,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
           : applyGroupedToothSelection(current, at, mode, selection, nextRowKey, { ...displayContext, memberKeys: groupForRow(key)?.keys });
     });
     const teeth = [...new Set(selection.teeth)].sort((a, b) => a - b);
-    setSplitNotice(!historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode") && teeth.length > 1
+    setSplitNotice(!historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode" || mode === "tooth_surfaces") && teeth.length > 1
       ? `الخدمة في بند واحد: ${teeth.length} أسنان × سعر الوحدة. يُحفظ ربط كل سن بالعلاج.` : null);
     setToothDialogFor(null);
   };
@@ -1465,8 +1467,9 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
   const toothControl = (row: InvoiceRow, index: number, group: InvoiceDisplayGroup<InvoiceRow>) => {
     const mode = modeOf(row);
     if (mode === "none") return null;
-    const groupedTeeth = !historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode");
-    const label = groupedTeeth && group.teeth.length ? `الأسنان: ${group.teeth.join("، ")}` : selectionLabel(mode, row);
+    const groupedTeeth = !historical && (mode === "per_tooth_episode" || mode === "multi_tooth_episode" || mode === "tooth_surfaces");
+    const label = groupedTeeth && group.teeth.length ? `الأسنان: ${group.teeth.map(tooth =>
+      mode === "tooth_surfaces" && group.surfacesByTooth[tooth] ? `${tooth} (${group.surfacesByTooth[tooth]})` : tooth).join("، ")}` : selectionLabel(mode, row);
     const chosenTooth = row.toothCode !== null;
     const problem = toothProblems[index];
     const openButton = (text: string) => (
@@ -1620,7 +1623,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
       <div aria-hidden="true" className={workspace.tableHead}><span>الخدمة</span><span>الأسنان / النطاق</span><span>الطبيب</span><span>سعر الوحدة<br/>{currency}</span><span>الكمية</span><span>الإجمالي<br/>{currency}</span><span/></div>
       {displayGroups.map((group) => {
         const index = group.indices[0], row = rows[index];
-        const toothCount = !historical && (modeOf(row) === "per_tooth_episode" || modeOf(row) === "multi_tooth_episode") && group.teeth.length > 0;
+        const toothCount = !historical && (modeOf(row) === "per_tooth_episode" || modeOf(row) === "multi_tooth_episode" || modeOf(row) === "tooth_surfaces") && group.teeth.length > 0;
         return <div key={group.key} data-testid={`invoice-row-${index}`} data-row-key={row.key} data-tooth={row.toothCode ?? ""}
           data-display-group={row.displayGroupId ?? ""} data-tooth-count={group.teeth.length}
           className={`${workspace.line} space-y-3 ${
@@ -1632,6 +1635,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 value={row.serviceId ? Number(row.serviceId) : null}
                 onChange={(id, srv) => {
                   if (!canEditRows.current()) return;
+                  setSplitNotice(null);
                   setRows((current) => {
                     const currentRow = current.find(item => item.key === row.key);
                     if (!canEditRows.current() || !currentRow || currentRow.serviceId !== row.serviceId) return current;
@@ -1649,6 +1653,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 manualSelected={row.manual === true}
                 onManualSelect={() => {
                   if (!canEditRows.current()) return;
+                  setSplitNotice(null);
                   setRows(current => {
                     const at = current.findIndex(item => item.key === row.key);
                     if (!canEditRows.current() || at < 0 || current[at].serviceId !== row.serviceId) return current;
@@ -1725,6 +1730,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                 type="button"
                 onClick={() => {
                   if (!canEditRows.current()) return;
+                  setSplitNotice(null);
                   setRows(current => { const next = removeDisplayGroupRows(current, group.keys, displayContext); return next.length ? next : [blankInvoiceRow(nextRowKey())]; });
                 }}
                 className={workspace.removeLine}
@@ -1751,9 +1757,9 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
           {(() => {
             const details = group.indices.map((index) => { const row = rows[index]; return <Fragment key={row.key}>
           {group.grouped ? <div className="flex items-center justify-between gap-2 text-xs">
-            <strong>سن {row.toothCode}</strong>
+            <strong>{modeOf(row) === "tooth_surfaces" ? selectionLabel(modeOf(row), row) : `سن ${row.toothCode}`}</strong>
             <button type="button" data-testid={`invoice-split-tooth-${index}`}
-              onClick={() => { if (canEditRows.current()) setRows(current => splitDisplayGroupRow(current, row.key)); }}
+              onClick={() => { if (canEditRows.current()) { setSplitNotice(null); setRows(current => splitDisplayGroupRow(current, row.key)); } }}
               className="min-h-11 rounded-lg border border-slate-200 px-3">فصل سن {row.toothCode}</button>
           </div> : null}
           {inputProblems[index] ? <p role="alert" data-testid={`invoice-input-problem-${index}`}
@@ -1955,6 +1961,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
           serviceName={serviceOf(dialogRow.serviceId)?.name ?? dialogRow.description}
           initial={!historical && dialogGroup ? selectionOfDisplayGroup(dialogGroup) : selectionOfRow(dialogRow)}
           groupedInvoice={!historical}
+          purpose={historical ? "legacy_agreement" : "invoice"}
           onConfirm={(selection) => confirmTeeth(dialogRow.key, dialogRow.serviceId, modeOf(dialogRow), selection)}
           onCancel={() => setToothDialogFor(null)}
         />
