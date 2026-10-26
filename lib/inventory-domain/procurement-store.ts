@@ -270,7 +270,7 @@ async function orderPriorInspectedQuantities(client: DbClient, order: IssuedPurc
     disposedExcessBaseQuantity: row.disposed_excess,
   }));
 }
-async function lockedOrder(client:DbClient,id:string):Promise<IssuedPurchaseOrder>{
+export async function lockedOrder(client:DbClient,id:string):Promise<IssuedPurchaseOrder>{
   docId(id);const order=await client.query<{document:IssuedPurchaseOrder}>("SELECT document FROM purchase_orders WHERE id=$1 FOR UPDATE",[id]);
   invariant(order.rows[0],"not_found","Purchase order was not found");scope(order.rows[0].document.branchId);
   const amended=await client.query<{order_doc:IssuedPurchaseOrder}>("SELECT result->'order' AS order_doc FROM inventory_operations WHERE scope='order.amend' AND result->>'id'=$1 ORDER BY (result->>'version')::int DESC, created_at DESC LIMIT 1",[id]);
@@ -552,8 +552,7 @@ export async function recordSupplierInvoiceMatch(actor:InventoryActor,key:string
       }
       return row.document;
     });
-    const priorRows=await client.query<{id:string;invoice_line_id:string;receipt_line_id:string;base_qty:string}>("SELECT a.id,a.invoice_line_id,a.receipt_line_id,a.base_qty::text FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=$1",[order.id]);
-    const prior:InvoiceReceiptAllocation[]=priorRows.rows.map(row=>({id:row.id,invoiceLineId:row.invoice_line_id,receiptLineId:row.receipt_line_id,baseQuantity:row.base_qty}));
+    const prior=await readEffectiveInvoiceAllocations(client,[order.id]);
     const match=matchSupplierInvoice(order,invoice,effectiveReceiptLines,prior);
     await client.query("INSERT INTO supplier_invoices(id,order_id,supplier_party_id,duplicate_key,document,match_plan,created_by) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7)",[invoice.id,order.id,invoice.supplierPartyId,match.duplicateKey,JSON.stringify(invoice),JSON.stringify(match),actor.userId]);
     if(match.status === "matched")for(const line of invoice.lines)for(const allocation of line.receiptAllocations){await client.query("INSERT INTO supplier_invoice_receipt_allocations(id,invoice_id,invoice_line_id,receipt_line_id,base_qty) VALUES($1,$2,$3,$4,$5::numeric)",[allocation.id,invoice.id,line.id,allocation.receiptLineId,allocation.baseQuantity]);}
@@ -610,10 +609,29 @@ export async function readProcurementWorkbench(actor:InventoryActor,requestOffse
     const quarantineDispositions=hasQuarantineTable.rows[0]?.present
       ? (await client.query<{id:string;receipt_line_id:string;order_id:string;order_line_id:string;action:QuarantineResolutionAction;base_qty:string;reason:string}>("SELECT id::text,receipt_line_id,order_id::text,order_line_id,action,base_qty::text,reason FROM quarantine_dispositions WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds])).rows
       : [];
-    const allocations=await client.query<{receipt_line_id:string;qty:string}>("SELECT a.receipt_line_id,SUM(a.base_qty)::text AS qty FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=ANY($1::uuid[]) GROUP BY a.receipt_line_id",[orderIds]);
-    const invoices=await client.query<{id:string;order_id:string;document:SupplierInvoiceRevision;match_plan:ReturnType<typeof matchSupplierInvoice>}>("SELECT id,order_id,document,match_plan FROM supplier_invoices WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds]);
+    const invoiceSource=await effectiveInvoiceSource(client);
+    const allocationSource=invoiceSource==="inventory_effective_supplier_invoices"
+      ? "inventory_effective_invoice_allocations"
+      : "supplier_invoice_receipt_allocations";
+    const allocations=await client.query<{receipt_line_id:string;qty:string}>(`SELECT a.receipt_line_id,SUM(a.base_qty)::text AS qty FROM ${allocationSource} a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=ANY($1::uuid[]) GROUP BY a.receipt_line_id`,[orderIds]);
+    const invoices=await client.query<{id:string;order_id:string;document:SupplierInvoiceRevision;match_plan:ReturnType<typeof matchSupplierInvoice>}>(`SELECT id,order_id,document,match_plan FROM ${invoiceSource} WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id`,[orderIds]);
     const itemIds=[...new Set([...requests.rows.slice(0,20).flatMap(row=>row.document.lines.map(line=>line.itemId)),...shownOrders.flatMap(row=>row.document.lines.map(line=>line.itemId))])];
     const names=await client.query<{id:number;name:string}>("SELECT id,name FROM inventory_items WHERE id=ANY($1::int[])",[itemIds]);
     return {scope:INVENTORY_CLINIC_SCOPE,requests:requests.rows.slice(0,20),sourceAllocations:sources.rows,suppliers:suppliers.rows,locations:locations.rows,orders:shownOrders,orderResults:effectiveOrderResults,receiptHeaders:receiptHeaders.rows,receipts:receipts.rows,quarantineDispositions,invoiceAllocations:allocations.rows,invoices:invoices.rows,itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMoreRequests:requests.rows.length>20,hasMoreOrders:orders.rows.length>20,requestOffset,orderOffset,financialPosting:"pending_shared_finance_review" as const};
   });
+}
+
+/** One effective reservation projection for legacy matching and the prepared finance core.
+ * Missing additive proposal preserves the existing dormant matching behavior. */
+export async function effectiveInvoiceSource(client:DbClient):Promise<"inventory_effective_supplier_invoices"|"supplier_invoices">{
+ const result=await client.query<{present:boolean}>("SELECT to_regclass('inventory_effective_supplier_invoices') IS NOT NULL AS present");
+ return result.rows[0]?.present?"inventory_effective_supplier_invoices":"supplier_invoices";
+}
+export async function readEffectiveInvoiceAllocations(client:DbClient,orderIds:string[],excludeInvoiceId:string|null=null):Promise<InvoiceReceiptAllocation[]>{
+ const source=await effectiveInvoiceSource(client);
+ const sql=source==="inventory_effective_supplier_invoices"
+  ? "SELECT id,invoice_line_id,receipt_line_id,base_qty::text FROM inventory_effective_invoice_allocations WHERE order_id=ANY($1::uuid[]) AND ($2::uuid IS NULL OR invoice_id<>$2::uuid)"
+  : "SELECT a.id,a.invoice_line_id,a.receipt_line_id,a.base_qty::text FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=ANY($1::uuid[]) AND ($2::uuid IS NULL OR i.id<>$2::uuid)";
+ const result=await client.query<{id:string;invoice_line_id:string;receipt_line_id:string;base_qty:string}>(sql,[orderIds,excludeInvoiceId]);
+ return result.rows.map(row=>({id:row.id,invoiceLineId:row.invoice_line_id,receiptLineId:row.receipt_line_id,baseQuantity:row.base_qty}));
 }

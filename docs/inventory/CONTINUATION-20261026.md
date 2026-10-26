@@ -1,5 +1,11 @@
 # Inventory continuation — local review candidate
 
+Current continuation: the supplier invoice finance **prepared core** is now
+implemented and locally verified; see `SUPPLIER-FINANCE-20261026.md`. Its default
+principal resolver refuses writes, no HTTP/UI command is exposed, and its
+additive schema remains unnumbered and unregistered. The initial inventory below
+records the starting gaps; later sections record what has actually changed.
+
 This records the remaining request before implementation. Inventory is not ready
 for activation. No production access, Railway changes, deployment, merge, new
 migration registration or automatic doctor debt/payroll adjustment is authorized
@@ -153,3 +159,34 @@ runtime logs are local evidence outside the committed source handoff. Full
 supplier-invoice posting/reversal, clinical cost integration, command retirement,
 canonical realm identity and upgrade/restore acceptance remain incomplete.
 The private activation gate therefore remains closed.
+
+## Supplier invoice finance continuation
+
+This slice follows published head
+`f574aa089397f9839e1a29615d8ba25fc7b48d8b` without merging another branch. It adds
+immutable pre-posting invoice revisions, exact accepted-receipt reservation
+readers, source-linked posting to canonical supplier payables, and full unpaid
+cancellation through a source-guarded append-only operational adjustment.
+Original amounts/FX, receipt reservations and stock remain intact. Payment
+reversal must use the existing authorized void path first; no automatic refund,
+doctor debt, payroll writer or permission definition is introduced.
+
+Actual verification: 9 PostgreSQL files / 164 tests passed, including supplier,
+procurement, payment and opening/statement regressions. The final 18 supplier
+cases were rerun successfully after adding historical replay-after-cancellation
+assertions. Four focused unit files / 104 tests, typecheck, money aggregation
+guard, changed-file lint and whitespace checks passed. Eight pre-existing
+`db.ts` lint warnings and existing pg query deprecation warnings remain visible.
+No new build/browser acceptance is claimed for this core, which exposes no UI
+or HTTP dispatch. Earlier UI screenshots belong to the recovery slice.
+
+At this checkpoint hosted CI run 40400242472 is still evaluating **f574aa08**:
+quality/typecheck/unit/audit/build succeeded; PostgreSQL and hosted browser jobs
+remain in progress. Those results cannot accept a subsequent head. The next
+push is deferred until that run completes because CI cancels superseded runs.
+
+Canonical realm/subject identity, operational financial UI/API integration,
+durable command retirement, patient consumption valuation, coordinated schema
+registration/master data and upgrade/restoration acceptance remain incomplete.
+The gate stays closed. Detailed source and test limits are recorded in the
+supplier finance document; no complete inventory-readiness claim is made.

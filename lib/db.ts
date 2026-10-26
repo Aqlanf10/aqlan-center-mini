@@ -12253,7 +12253,7 @@ export function payableSettledTotalSql(p: string, cutoff?: PayableSqlCutoff): st
 
 /**
  * (FIA-1) قيمة الالتزام الفعلية بعملته: مبلغه الأصلي + تصحيحاته الإلحاقية. التصحيحات للرصيد
- * الافتتاحي وحده (payable_adjustments) — والتزام التشغيل بلا تصحيحات فقيمته مبلغه.
+ * الافتتاحي عبر كاتبه، وإلغاء فاتورة مورد عبر مصدر تشغيلي إلحاقي موثّق.
  */
 export function payableAmountSql(p: string, cutoff?: PayableSqlCutoff): string {
   return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id${payableCutoffSql("pa", cutoff)}), 0))`;
@@ -14921,7 +14921,7 @@ export async function listPartyOpenings(): Promise<{
     pool.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.source_type = 'opening' ORDER BY t.name, b.currency, b.id`),
     pool.query<{ id: number; payable_id: number; delta_minor: string; reason: string; created_by: string; created_at: Date }>(
       `SELECT a.id, a.payable_id, a.delta_minor, a.reason, a.created_by, a.created_at
-         FROM payable_adjustments a ORDER BY a.id`,
+         FROM payable_adjustments a JOIN payables p ON p.id=a.payable_id WHERE p.source_type='opening' ORDER BY a.id`,
     ),
     pool.query<AdvanceRow>(`${ADVANCE_SELECT} ORDER BY t.name, o.currency, o.id`),
   ]);
