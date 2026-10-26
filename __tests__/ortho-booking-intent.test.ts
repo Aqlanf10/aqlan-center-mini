@@ -4,14 +4,14 @@ vi.mock("../lib/db", () => ({
   lockAppointmentServiceForBooking: vi.fn(), getAppointment: vi.fn(), insertAppointmentOnClient: vi.fn(), moveAppointmentOnClient: vi.fn(), recordAudit: vi.fn(),
   writeAppointmentAcrossDays: vi.fn(), writeAppointmentInDay: vi.fn(),
 }));
-vi.mock("../lib/capacity-context", () => ({ evaluateCapacity: vi.fn(), loadCapacityContext: vi.fn(), resolveService: vi.fn() }));
+vi.mock("../lib/capacity-context", () => ({ prepareCapacityEvaluator: vi.fn(), loadCapacityContext: vi.fn(), resolveService: vi.fn() }));
 // This suite isolates service admission; real doctor identity/row locking is
 // covered by the PostgreSQL appointment-doctor-bookability suite.
 vi.mock("../lib/appointment-doctor", () => ({ lockBookableAppointmentDoctor: vi.fn(), APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE: "الطبيب غير متاح للحجز." }));
 vi.mock("../lib/session", () => ({ requireSession: vi.fn() }));
 import { bookAppointment, type BookAppointmentInput } from "../lib/book-appointment";
 import { findUserByUsername, insertAppointmentOnClient, lockAppointmentServiceForBooking, writeAppointmentInDay } from "../lib/db";
-import { evaluateCapacity, loadCapacityContext, resolveService } from "../lib/capacity-context";
+import { prepareCapacityEvaluator, loadCapacityContext, resolveService } from "../lib/capacity-context";
 import { requireSession } from "../lib/session";
 import { POST } from "../app/api/appointments/route";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE } from "../lib/ortho-booking-intent";
@@ -31,7 +31,7 @@ beforeEach(() => {
   vi.mocked(loadCapacityContext).mockResolvedValue({ chairs: 3, shifts: [{ start: "09:00", end: "20:00" }], nearCapacityPercent: 80, emergencyReserveMinutes: 0, newPatientDailyLimit: 0 });
   vi.mocked(resolveService).mockResolvedValue(service());
   vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(service());
-  vi.mocked(evaluateCapacity).mockResolvedValue({ state: "AVAILABLE", occupiedChairs: 0, chairs: 3, dayPercent: 0, outsideHours: false, message: "Synthetic capacity available", reasons: [] });
+  vi.mocked(prepareCapacityEvaluator).mockResolvedValue(() => ({ state: "AVAILABLE", occupiedChairs: 0, chairs: 3, dayPercent: 0, outsideHours: false, message: "Synthetic capacity available", reasons: [] }));
   vi.mocked(writeAppointmentInDay).mockImplementation(async ({ judge, commit }) => {
     const client = {} as never;
     const verdict = await judge([], client);
@@ -85,13 +85,13 @@ describe("untouched board intent validates the exact resolved scheduling service
     expect(await bookAppointment(request(), actor)).toEqual({ ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE });
     expect(lockAppointmentServiceForBooking).toHaveBeenCalledWith({}, 81);
     expect(lockAppointmentServiceForBooking).toHaveBeenCalledTimes(1);
-    expect(evaluateCapacity).not.toHaveBeenCalled(); expect(insertAppointmentOnClient).not.toHaveBeenCalled();
+    expect(prepareCapacityEvaluator).not.toHaveBeenCalled(); expect(insertAppointmentOnClient).not.toHaveBeenCalled();
   });
   it.each([undefined, 45])("uses locked metadata and preserves only explicit duration %s", async (durationMinutes) => {
     const current = { ...service(), defaultDurationMinutes: 20, bufferBeforeMinutes: 4, bufferAfterMinutes: 7, requiresChair: false };
     vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(current);
     expect(await bookAppointment({ ...request(), durationMinutes }, actor)).toMatchObject({ ok: true });
-    expect(evaluateCapacity).toHaveBeenCalledWith(expect.objectContaining({ service: current, durationMinutes: durationMinutes ?? 20, client: {} }));
+    expect(prepareCapacityEvaluator).toHaveBeenCalledWith(expect.objectContaining({ service: current, durationMinutes: durationMinutes ?? 20, client: {} }));
     expect(insertAppointmentOnClient).toHaveBeenCalledWith({}, expect.objectContaining({ serviceId: 81,
       durationMinutes: durationMinutes ?? 20, bufferBeforeMinutes: 4, bufferAfterMinutes: 7, occupiesChair: false }));
   });
