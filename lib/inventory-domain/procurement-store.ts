@@ -1,4 +1,6 @@
 import { requireInventoryIntegration } from "./rollout";
+import { readInventoryCommandBinding, authorizeInventoryCommandBinding } from "./command-fence";
+import type { InventoryPrincipal } from "./principal";
 import { createHash, randomUUID } from "node:crypto";
 import { ensureSchema, getPool, insertAuditRow, type DbClient } from "../db";
 import { withTransaction } from "../transactions";
@@ -59,17 +61,27 @@ export async function writeInventoryAudit(client: DbClient, actor: InventoryActo
   await insertAuditRow(client, { action: "inventory.item", entity, entityId: id, entityLabel: id,
     actor: actor.username, actorRole: actor.role, details: sanitized });
 }
-function inventoryOperationDigest(key: string, payload: unknown): string {
+export function inventoryOperationDigest(key: string, payload: unknown): string {
   invariant(typeof key === "string" && /^[A-Za-z0-9_.:-]{8,120}$/.test(key), "invalid_operation_key", "A bounded idempotency key is required");
   return createHash("sha256").update(payloadIdentity(payload)).digest("hex");
 }
-async function applyInventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, hash: string, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+async function applyInventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, hash: string, management: boolean, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
   await requireInventoryActor(client, actor, management);
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
   const previous = await client.query<{ payload_hash: string; result: T }>("SELECT payload_hash,result FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
+  const binding = await readInventoryCommandBinding(client, actor, key, name, !!principal);
+  if (binding) {
+    authorizeInventoryCommandBinding(binding, actor, hash, management, principal);
+    invariant(binding.admitted_in_current_transaction === false, "command_admission_uncommitted", "Admission must commit before execution");
+  }
+  else invariant(!principal, "command_provenance_required", "Prepared execution requires durable command admission");
   if (previous.rows[0]) {
     invariant(previous.rows[0].payload_hash === hash, "idempotency_conflict", "This operation key already identifies different content");
     return { ...previous.rows[0].result, replayed: true };
+  }
+  if (binding) {
+    const terminal = await client.query("SELECT 1 FROM inventory_command_retirements WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
+    invariant(terminal.rows.length === 0, "command_retired", "This exact command was durably retired and cannot execute");
   }
   const result = await work(client);
   await client.query("INSERT INTO inventory_operations(scope,actor_id,operation_key,payload_hash,result) VALUES($1,$2,$3,$4,$5::jsonb)", [name,actor.userId,key,hash,JSON.stringify(result)]);
@@ -87,9 +99,13 @@ export async function inventoryOperation<T extends object>(actor: InventoryActor
  * immediately released, without committing or rolling back caller work.
  * Missing proposal objects fail inside the caller transaction, never via fallback.
  */
-export async function inventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+export async function inventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
   requireInventoryIntegration();
   const hash = inventoryOperationDigest(key, payload);
+  await assertInventoryCallerTransaction(client);
+  return applyInventoryOperationInTransaction(client, actor, key, name, hash, management, work, principal);
+}
+async function assertInventoryCallerTransaction(client: DbClient) {
   try {
     await client.query("SAVEPOINT inventory_adapter_transaction_check");
   } catch (error) {
@@ -99,8 +115,21 @@ export async function inventoryOperationInTransaction<T extends object>(client: 
     throw error;
   }
   await client.query("RELEASE SAVEPOINT inventory_adapter_transaction_check");
-  return applyInventoryOperationInTransaction(client, actor, key, name, hash, management, work);
 }
+/** Admission and retirement use the very same actor/key lock as execution.
+ * This helper writes no operation result and never starts/commits a transaction. */
+export async function withInventoryCommandLockInTransaction<T>(
+  client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown,
+  management: boolean, work: (hash: string) => Promise<T>,
+): Promise<T> {
+  requireInventoryIntegration();
+  const hash = inventoryOperationDigest(key, payload);
+  await assertInventoryCallerTransaction(client);
+  await requireInventoryActor(client, actor, management);
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
+  return work(hash);
+}
+
 async function verifyUnits(client: DbClient, lines: readonly { itemId: number; conversion: RequestRevision["lines"][number]["conversion"] }[]) {
   invariant(lines.length > 0 && lines.length <= 100, "invalid_lines", "Use between one and 100 document lines");
   const itemIds = [...new Set(lines.map(line => line.itemId))].sort((a,b) => a-b);

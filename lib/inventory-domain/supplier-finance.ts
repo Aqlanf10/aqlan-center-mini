@@ -25,19 +25,14 @@ import {
 } from "./procurement-store";
 import { requireInventoryIntegration } from "./rollout";
 
-/** The canonical identity adapter must supply this from authenticated server
- * context. No request field, clinic label or environment flag is a realm. */
-export interface SupplierFinancePrincipal {
-  realmId: string;
-  subjectId: string;
-  actorUserId: number;
-  username: string;
-}
-export interface SupplierFinanceDependencies {
-  resolvePrincipal: (
-    actor: InventoryActor,
-  ) => Promise<SupplierFinancePrincipal | null>;
-}
+import {
+  closedInventoryPrincipalResolver,
+  resolveInventoryPrincipal,
+  type InventoryPrincipal,
+  type InventoryPrincipalDependencies,
+} from "./principal";
+export type SupplierFinancePrincipal = InventoryPrincipal;
+export type SupplierFinanceDependencies = InventoryPrincipalDependencies;
 export const supplierInvoiceDigest = (document: SupplierInvoiceRevision) =>
   createHash("sha256").update(payloadIdentity(document)).digest("hex");
 function reason(value: string) {
@@ -243,9 +238,7 @@ async function rematch(
  * resolver at composition. Default construction refuses all financial work.
  * No HTTP dispatch or runtime schema installation is provided. */
 export function createSupplierInvoiceFinanceService(
-  dependencies: SupplierFinanceDependencies = {
-    resolvePrincipal: async () => null,
-  },
+  dependencies: SupplierFinanceDependencies = closedInventoryPrincipalResolver,
 ) {
   async function run<T extends object>(
     client: DbClient,
@@ -256,21 +249,7 @@ export function createSupplierInvoiceFinanceService(
     work: (principal: SupplierFinancePrincipal) => Promise<T>,
   ) {
     requireInventoryIntegration();
-    const principal = await dependencies.resolvePrincipal(actor);
-    invariant(
-      principal &&
-        typeof principal.realmId === "string" &&
-        principal.realmId.trim() === principal.realmId &&
-        principal.realmId.length > 0 &&
-        principal.realmId.length <= 240 &&
-        typeof principal.subjectId === "string" &&
-        principal.subjectId.trim().length > 0 &&
-        principal.subjectId.length <= 240 &&
-        principal.actorUserId === actor.userId &&
-        principal.username === actor.username,
-      "principal_realm_unavailable",
-      "An authoritative realm and authenticated subject binding are required",
-    );
+    const principal = await resolveInventoryPrincipal(dependencies, actor);
     const scope = `supplier.invoice.${name}:${createHash("sha256")
       .update(
         payloadIdentity({

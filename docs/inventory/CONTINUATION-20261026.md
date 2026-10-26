@@ -1,7 +1,8 @@
 # Inventory continuation — local review candidate
 
-Current continuation: the supplier invoice finance **prepared core** is now
-implemented and locally verified; see `SUPPLIER-FINANCE-20261026.md`. Its default
+Current continuation: the supplier invoice finance and command retirement
+**prepared cores** are now implemented and locally verified; see
+`SUPPLIER-FINANCE-20261026.md` and `COMMAND-RETIREMENT-20261026.md`. The default
 principal resolver refuses writes, no HTTP/UI command is exposed, and its
 additive schema remains unnumbered and unregistered. The initial inventory below
 records the starting gaps; later sections record what has actually changed.
@@ -190,3 +191,32 @@ durable command retirement, patient consumption valuation, coordinated schema
 registration/master data and upgrade/restoration acceptance remain incomplete.
 The gate stays closed. Detailed source and test limits are recorded in the
 supplier finance document; no complete inventory-readiness claim is made.
+
+## Durable command decision continuation
+
+Following local supplier commit `e7ee46af5d46400604c7e7970ce4ea544b1ae62a`,
+the next slice adds immutable, separately committed admission and explicit
+retirement under the existing execution key lock. The central execution helper
+fences retired commands and requires the same authoritative principal for any
+bound command. Success always returns its historical acknowledgement; a generic
+error never becomes terminal proof. Shared principal projection excludes mutable
+permission metadata. No browser/API adapter or legacy adoption is exposed.
+
+Synthetic verification: 17 lifecycle cases passed within 4 PostgreSQL files /
+76 tests covering supplier, procurement and custody regressions; 5 recovery,
+gate and receipt unit files / 51 tests passed. Typecheck and changed-file lint
+passed. The composed run initially exposed a test fixture that assumed all
+workbench documents were SAR. Its assertion now verifies the exact owned source,
+quantity, currency and value; the same 76 cases then passed.
+
+Hosted checks for **f574aa08**, not this local successor, now show 695 unit files /
+12,172 tests and 300 PostgreSQL files / 3,569 tests passed, plus build, schema and
+operational journeys. HTTP/browser remains running. The supplier checkpoint's
+source-only patch was also restored in an isolated worktree: its tree exactly
+matched `04ecfe2e8136b29df399b1d8964a83c7e7071e31`. This is source restoration
+evidence, not a database restoration rehearsal.
+
+Legacy unresolved browser commands still remain held until canonical identity
+and the reviewed transport/adoption contract are supplied. Patient consumption
+valuation and full operational acceptance remain unfinished; activation stays
+closed.

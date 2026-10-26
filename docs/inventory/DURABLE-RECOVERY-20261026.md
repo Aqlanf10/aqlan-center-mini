@@ -48,13 +48,17 @@ old form's operation-specific success message is not durable.
 
 ## Explicit unfinished boundaries
 
-- **Terminal rejection/retirement is not implemented.** The server's existing
+- **Browser/HTTP terminal rejection/retirement is not integrated.** A later
+  prepared core is documented in `COMMAND-RETIREMENT-20261026.md`; it requires
+  canonical principal provenance and separately committed fresh-command
+  admission, and is deliberately unavailable to this legacy browser protocol.
+  It does not permit adopting or discarding an old unresolved command. The existing
   `inventory_operations` records only successes. Generic errors cannot distinguish
   a never-committed command from a previously committed one blocked by a later
   role/schema change. Therefore an already sent invalid/stale command remains
   locked, including an initial server refusal. A separately reviewed durable
-  terminal-result/retirement protocol, under the same server key lock, is required
-  to correct such commands safely. Do not erase browser storage or generate a new
+  transport/adoption contract, under the same server key lock, is still required
+  to correct these legacy commands safely. Do not erase browser storage or generate a new
   key to bypass the hold. This is an activation blocker, not complete recovery UX.
 - **No authoritative realm identifier exists in this interface.** Current storage
   is isolated by browser origin and user ID/name, matching the current single
