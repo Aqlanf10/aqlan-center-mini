@@ -183,6 +183,7 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
   const access: FinanceAccess = financeAccessFor(role, rawAccess);
   // Financial references follow patient-ledger authority, including normalized trailing slashes.
   if (!access.viewPatientLedger && matches("/api/patients/[id]/treatment-financial-context", pathname)) return false;
+  if (matches("/api/patients/[id]/statement", pathname)) return access.viewPatientLedger && READ.includes(verb);
   if (role === "cashier") {
     if (pathname === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
     if ((pathname === "/api/payments" || pathname === "/api/payments/attempts/retire") && verb === "POST" && !access.collectPayments) return false;

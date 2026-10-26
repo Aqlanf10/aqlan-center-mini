@@ -1,6 +1,7 @@
 import type { Invoice, OpeningBalance, Payment, TreatmentPlan } from "./db";
-import { invoiceNet, type Balance, type Currency } from "./money";
-import { currentStatementInvoices, statementAgreements, statementAgreementsRequireReview, statementPaymentLabel } from "./statement-lines";
+import type { Balance, Currency } from "./money";
+import { statementAgreements, statementAgreementsRequireReview } from "./statement-lines";
+import type { PatientStatementProjection } from "./patient-statement-projection";
 import type { HistoricalOpeningBucket } from "./statement-historical-details";
 
 /**
@@ -113,35 +114,36 @@ export function portalHistoricalTreatment(buckets: readonly HistoricalOpeningBuc
 }
 
 export function portalStatementView(
-  ledger: { invoices: readonly Invoice[]; payments: readonly Payment[]; openings: readonly OpeningBalance[] },
-  balances: Record<Currency, Balance>,
+  _ledger: { invoices: readonly Invoice[]; payments: readonly Payment[]; openings: readonly OpeningBalance[] },
+  _balances: Record<Currency, Balance>,
   baseCurrency: Currency,
   plans: readonly Pick<TreatmentPlan, "title" | "status" | "totalFromItems" | "totalMinor" | "baseCurrency" | "progress" | "approvedAgreement">[],
   historicalBuckets: readonly HistoricalOpeningBucket[] | null,
+  projected: PatientStatementProjection,
 ): PortalStatement {
   return {
     ...(statementAgreementsRequireReview(plans) ? { agreementsRequireReview: true } : {}),
-    invoices: currentStatementInvoices(ledger.invoices).map((invoice) => ({
+    invoices: projected.invoices.map((invoice) => ({
       invoiceNumber: invoice.invoiceNumber,
       createdAt: invoice.createdAt,
       totalMinor: invoice.totalMinor,
       discountMinor: invoice.discountMinor,
-      netMinor: invoiceNet(invoice),
+      netMinor: invoice.netMinor,
       status: invoice.status === "paid" ? "paid" : "open",
       baseCurrency: invoice.baseCurrency,
       items: invoice.items.map((item) => ({
         description: item.description, quantity: item.quantity, unitPriceMinor: item.unitPriceMinor, totalMinor: item.totalMinor,
       })),
     })),
-    payments: ledger.payments.map((payment) => ({
+    payments: projected.payments.map((payment) => ({
       receiptNumber: payment.receiptNumber,
       createdAt: payment.createdAt,
       amountMinor: payment.amountMinor,
       currency: payment.currency,
       kind: payment.kind,
-      label: statementPaymentLabel(payment, ledger.payments),
+      label: payment.label,
     })),
-    openings: ledger.openings.map((opening) => ({
+    openings: projected.openings.map((opening) => ({
       currency: opening.currency, amountMinor: opening.amountMinor, asOfDate: opening.asOfDate,
     })),
     agreements: statementAgreements(plans).map((plan) => ({
@@ -149,7 +151,7 @@ export function portalStatementView(
       paidMinor: plan.progress.paidMinor, remainingMinor: plan.progress.remainingMinor,
     })),
     historical: portalHistoricalTreatment(historicalBuckets),
-    balances,
+    balances: projected.balances,
     baseCurrency,
   };
 }

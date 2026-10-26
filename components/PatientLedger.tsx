@@ -7,6 +7,7 @@ import {Calculator, FileText, Link2, Plus, Save, Trash2} from "lucide-react";
 import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, invoiceNet, isCurrency, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
 import { OpeningCorrectionPreview } from "./OpeningCorrectionPreview";
+import { PatientStatementDialog } from "./PatientStatementDialog";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
@@ -665,10 +666,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
           className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-bold text-white">
           قبض دفعة
         </button>
-        <a href={`/print/statement/${patientId}`} target="_blank" rel="noopener"
-          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
-          كشف حساب
-        </a>
+        <PatientStatementDialog patientId={patientId} disabled={loading || !!error} />
         {canAddOpening ? <AccountSecondaryActions>
           <p className="my-2 max-w-sm text-slate-500">الرصيد السابق دون علاج محدد فقط؛ العلاج السابق للنظام يُسجّل من الفاتورة / الاتفاق.</p>
 

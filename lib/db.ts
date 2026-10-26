@@ -20011,7 +20011,8 @@ const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
  * (patient portal) reports such a fact as `null` (section unavailable) while every other figure still comes
  * from this same snapshot. Only the reader's own typed validation error is tolerated, never a database
  * error, so the snapshot transaction is never used after a failed statement. */
-export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant"}={}){
+import {readPatientStatementEvidence} from "./patient-statement-evidence";
+export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant";patientFacing?:boolean}={}){
   await ensureSchema();
   return withFinancialReadSnapshot(getPool(),async runner=>{
     const client=runner as DbClient;
@@ -20029,7 +20030,8 @@ export async function patientStatementSnapshot(patientId:number,today:string,opt
     }else if(options.historicalAgreements){
       historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
     }
-    return {ledger,planCurrencies,plans,historicalAgreements};
+    const statementEvidence=options.patientFacing?await readPatientStatementEvidence(client,patientId,ledger):undefined;
+    return {ledger,planCurrencies,plans,historicalAgreements,statementEvidence};
   });
 }
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {

@@ -629,6 +629,21 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Synthetic fixtures from the statement workflow only; no session state or live patient files.
+      - name: Upload patient statement preview and local export evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-statement-workflow-ui
+          path: |
+            .settings-ui-artifacts/patient-statement-workflow/preview-*.png
+            .settings-ui-artifacts/patient-statement-workflow/statement-*.pdf
+            .settings-ui-artifacts/patient-statement-workflow/statement-*.png
+            .settings-ui-artifacts/patient-statement-workflow/fallback-reviewed.pdf
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exact synthetic portal fallback and SAR PDF evidence only. No session state,
       # cookies, traces, database dump, or broad directory upload.
       - name: Upload portal historical statement evidence

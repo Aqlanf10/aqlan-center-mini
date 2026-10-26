@@ -117,15 +117,15 @@ describe("portal statement detail matches the printed statement on real data", (
     for (const amount of [300_000, 120_000, 180_000]) expect(html).toContain(formatMoney(amount, "SAR"));
   });
 
-  it("balances stay per currency and are the canonical ones; refunds and reversals keep their printed labels", async () => {
+  it("balances stay per currency and are canonical; actual cash refunds remain visible without internal reversal labels", async () => {
     const { feed } = await portalFeed();
     const ledger = await db.patientLedger(patientId);
     expect(feed.balances).toEqual(JSON.parse(JSON.stringify(db.ledgerBalancesByCurrency(patientId, ledger, await db.patientPlanCurrencies(patientId)))));
     const labels = feed.payments.map((row: { label: string }) => row.label);
     expect(labels).toEqual(ledger.payments.map(row => statementPaymentLabel(row, ledger.payments)));
     const reversal = ledger.payments.find(row => row.reversalOfId !== null)!;
-    const original = ledger.payments.find(row => row.id === reversal.reversalOfId)!;
-    expect(labels).toContain(`عكس سند ${original.receiptNumber}`);
+    expect(feed.payments.find((row: { receiptNumber: string }) => row.receiptNumber === reversal.receiptNumber)?.label).toBe("استرداد");
+    expect(JSON.stringify(feed)).not.toContain("عكس سند");
   });
 
   it("nothing internal and nothing from another patient reaches the portal", async () => {
