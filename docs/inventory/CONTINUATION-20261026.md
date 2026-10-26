@@ -1,8 +1,10 @@
 # Inventory continuation — local review candidate
 
-Current continuation: the supplier invoice finance and command retirement
+Current continuation: supplier invoice finance, command retirement and sourced
+patient consumption cost
 **prepared cores** are now implemented and locally verified; see
-`SUPPLIER-FINANCE-20261026.md` and `COMMAND-RETIREMENT-20261026.md`. The default
+`SUPPLIER-FINANCE-20261026.md`, `COMMAND-RETIREMENT-20261026.md` and
+`PATIENT-CONSUMPTION-COST-20261026.md`. The default
 principal resolver refuses writes, no HTTP/UI command is exposed, and its
 additive schema remains unnumbered and unregistered. The initial inventory below
 records the starting gaps; later sections record what has actually changed.
@@ -220,3 +222,63 @@ Legacy unresolved browser commands still remain held until canonical identity
 and the reviewed transport/adoption contract are supplied. Patient consumption
 valuation and full operational acceptance remain unfinished; activation stays
 closed.
+
+## Sourced patient cost and isolated restore continuation
+
+Patient cost commit `3df63540eddb1ba068123b3aa414196fa1da59ed` adds a read-only
+adapter over actual consumed movements, lot allocations, verified saved clinical
+references and posted invoice/receipt valuation. It preserves native currencies
+and frozen FX, rounds selected proportional totals once, and never values an
+unissued item or infers consumption from a service. Partial, cancelled or
+unproven valuation remains missing; saved order quotes remain estimates.
+
+The adapter requires a coherent read-only snapshot and an explicit canonical
+patient/financial read grant. It has no admin-role fallback or HTTP/UI dispatch.
+Full treatment totals remain null because completeness of material registration
+is unproven. Historical doctor identity is not inferred from current assignments.
+No doctor debt, deduction, refund or payroll/commission policy is introduced.
+
+Final composed verification on fresh synthetic PostgreSQL: **5 files / 99 tests**
+including 23 cost-reader cases and supplier, custody, lifecycle and procurement
+regressions. Three unit files / **164 tests**, typecheck, money scan and whitespace
+checks passed. Full lint passed with zero errors and 209 existing warnings,
+none in the changed files. Detailed initial errors and their corrections are
+recorded in the cost document; no product guard was relaxed.
+
+A separate synthetic PostgreSQL 18.6 dump/restore drill passed. All data came from
+the disposable loopback fixture database. Seventeen stock, custody, supplier,
+financial, command and audit tables retained identical counts and full logical
+row hashes. After restore, a committed command replayed without another effect,
+a retired command remained fenced, and a separately admitted pending command
+resumed once with one result/audit and no stock or financial change. Preparation
+and restored verification each passed one focused canary test. Original fixture
+databases were preserved locally; the temporary synthetic dump was removed and
+never uploaded. This proves the isolated fixture restore, not production backup,
+point-in-time recovery, failover or activation across an unverified realm.
+
+The full hosted run for **f574aa08** completed successfully, including HTTP/browser
+and the final required CI gate. Its HTTP log download failed twice with a
+transport-closed error; success was verified from Actions job/gate metadata,
+and no exact HTTP count is inferred from the unavailable log. All new commits
+require their own hosted run on the final published head.
+
+Final local build of the new product sources succeeded, including Next's full
+TypeScript check. The existing dynamic migration-file tracing warnings remain.
+Using that exact build, the opt-in procurement/custody HTTP and browser suite
+passed **18/18**, 69.98 seconds. A fresh gate-off run passed **4 files / 31 tests**,
+53.51 seconds, including legacy purchase recovery. Both runs used disposable
+synthetic databases; the harness stopped each server and dropped its test DB.
+The 390px and 1280px saved-command screenshots were visually reviewed again:
+the center identity, blue/orange styling and navigation remain intact, the
+summary wraps, and retry stays visible without horizontal overflow. New prepared
+financial/retirement/cost cores still have no UI or endpoint acceptance claim.
+
+Remaining activation dependencies are explicit canonical realm/subject and
+patient-cost read adapters; a reviewed transport/adoption contract for legacy
+pending commands; coordinated unnumbered schema/reference-data integration;
+partial supplier credit/replacement and source-linked consumed-material reversal
+lifecycles; complete registration evidence and historical doctor attribution;
+and full operational acceptance of that integrated release. Any future doctor
+material comparison must specify period, agreement version, covered costs,
+actual posted deductions net reversals and an authorized settlement writer.
+This task creates none of that doctor liability or payroll policy implicitly.
