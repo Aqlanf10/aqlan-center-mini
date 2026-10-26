@@ -15,7 +15,7 @@
 
 /** الأفعال المسجَّلة. قائمة مغلقة عمدًا: نصٌّ حرّ يجعل السجل غير قابل للتصفية. */
 export type AuditAction =
-  | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status"
+  | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status" | "invoice.archive" | "invoice.restore" | "invoice.service_add"
   | "payment.create" | "payment.refund" | "payment.idempotent_replay"
   | "payment.recover_installment" | "payment.attempt_retire"
   | "debt_repayment.create" | "debt_repayment.revise" | "debt_repayment.cancel" | "debt_repayment.collect"
@@ -176,6 +176,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "hr.payroll.close": "إقفال فترة مسير رواتب",
   "hr.settings.update": "تحديث سياسات الموارد البشرية",
   "invoice.create": "إنشاء فاتورة",
+  "invoice.archive": "أرشفة فاتورة دون تغيير الحساب",
+  "invoice.restore": "استرجاع فاتورة من الأرشيف",
+  "invoice.service_add": "إضافة خدمة بمستند مرتبط",
   "invoice.cancel": "إلغاء فاتورة",
   "invoice.correct": "تصحيح فاتورة",
   "invoice.status": "تغيير حالة فاتورة يدويًّا",
@@ -403,7 +406,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "appointment_service.activate", "appointment_service.deactivate",
   "system.reset",
   "patient.import", "legacy.import",
-  "invoice.cancel", "invoice.correct", "invoice.status", "plan.status",
+  "invoice.cancel", "invoice.correct", "invoice.status", "invoice.archive", "invoice.restore", "invoice.service_add", "plan.status",
   "party_opening.create", "party_opening.adjust", "party_advance.create", "party_advance.void", "payment.refund", "payment.correct", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
   "legacy_treatment.create", "legacy_treatment.void",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",

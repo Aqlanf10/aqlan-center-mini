@@ -13,6 +13,9 @@ import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
 import { CollectPaymentModal } from "./CollectPaymentModal";
 import { InvoiceCorrection } from "./InvoiceCorrection";
+import { InvoiceArchive, InvoiceArchiveList } from "./InvoiceArchive";
+import { InvoiceAddService } from "./InvoiceAddService";
+import { restoreInvoiceMaintenance, type InvoiceMaintenanceCommand } from "@/lib/invoice-maintenance-view";
 import { restoreInvoiceRevision, type InvoiceRevisionCommand } from "@/lib/invoice-revision-view";
 import { ReceiptCorrection, ReceiptCorrectionTrigger } from "./ReceiptCorrection";
 import { ReceiptProvenance } from "./ReceiptProvenance";
@@ -356,6 +359,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
   const principal = JSON.stringify([session?.username, session?.role]);
   const [recoveries, setRecoveries] = useState<ReadonlyMap<string, RetainedInvoiceRecovery>>(() => new Map());
   const [debtRecoveries,setDebtRecoveries]=useState<ReadonlyMap<string,DebtRepaymentCommand>>(()=>new Map());
+  const [maintenanceRecoveries,setMaintenanceRecoveries]=useState<ReadonlyMap<string,InvoiceMaintenanceCommand>>(()=>new Map());
   const [revisionRecoveries,setRevisionRecoveries]=useState<ReadonlyMap<string,InvoiceRevisionCommand>>(()=>new Map());
   const [historicalRecoveries,setHistoricalRecoveries]=useState<ReadonlyMap<string,HistoricalCorrectionCommand>>(()=>new Map());
   const [moneyRecoveries,setMoneyRecoveries]=useState<ReadonlyMap<string,DurableMoneyCommand>>(()=>new Map());
@@ -375,12 +379,14 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
     const revision = command?.kind === "invoice-correction" ? restoreInvoiceRevision(command,patientId,session?.username??"") : null;
     const historical=command?.kind==="historical-correction"?restoreHistoricalCorrection(command,patientId,session?.username??""):null;
     const money=command&&(command.kind==="collection"||command.kind==="receipt-correction")?restoreMoneyCommand(command,patientId,session?.username??""):null;
-    if (command && !invoice && !debt && !revision && !historical && !money) throw new FinancialRecoveryError("invalid");
+    const maintenance=command?.kind==="invoice-maintenance"?restoreInvoiceMaintenance(command,patientId,session?.username??""):null;
+    if (command && !invoice && !debt && !revision && !historical && !money && !maintenance) throw new FinancialRecoveryError("invalid");
     setRecoveries(current => { const next = new Map(current); if (invoice) next.set(recoveryKey, { patientId, principal, command: invoice }); else next.delete(recoveryKey); return next; });
     setDebtRecoveries(current => { const next = new Map(current); if (debt) next.set(recoveryKey, debt); else next.delete(recoveryKey); return next; });
     setRevisionRecoveries(current=>{const next=new Map(current);if(revision)next.set(recoveryKey,revision);else next.delete(recoveryKey);return next;});
     setHistoricalRecoveries(current=>{const next=new Map(current);if(historical)next.set(recoveryKey,historical);else next.delete(recoveryKey);return next;});
     setMoneyRecoveries(current=>{const next=new Map(current);if(money)next.set(recoveryKey,money);else next.delete(recoveryKey);return next;});
+    setMaintenanceRecoveries(current=>{const next=new Map(current);if(maintenance)next.set(recoveryKey,maintenance);else next.delete(recoveryKey);return next;});
     setRestoredCommandKey(invoice ? command!.key : "");
   }, [patientId, principal, recoveryKey, recoveryOwner, session?.username, setRecoveries, setDebtRecoveries,setRevisionRecoveries,setHistoricalRecoveries,setMoneyRecoveries]);
   useEffect(() => {
@@ -431,6 +437,11 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
       if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
       setHistoricalRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
     }}
+    maintenanceRecovery={maintenanceRecoveries.get(recoveryKey)??null}
+    onMaintenanceRecoveryChange={command=>{
+      if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
+      setMaintenanceRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
+    }}
     revisionRecovery={revisionRecoveries.get(recoveryKey)??null}
     onRevisionRecoveryChange={command=>{
       if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
@@ -447,7 +458,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
     }} />;
 }
 
-function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, recovery, onRecoveryChange, debtRecovery,onDebtRecoveryChange,revisionRecovery,onRevisionRecoveryChange,historicalRecovery,onHistoricalRecoveryChange,moneyRecovery,onMoneyRecoveryChange,accountDetails,financialRecovery,restoredCommandKey }: PatientLedgerProps & { recovery: InvoiceCommandState | null; onRecoveryChange: (command: InvoiceCommandState | null) => void;debtRecovery:DebtRepaymentCommand|null;onDebtRecoveryChange:(command:DebtRepaymentCommand|null)=>void;financialRecovery:FinancialRecoveryControl;restoredCommandKey:string;moneyRecovery:DurableMoneyCommand|null;onMoneyRecoveryChange:(command:DurableMoneyCommand|null)=>void;historicalRecovery:HistoricalCorrectionCommand|null;onHistoricalRecoveryChange:(command:HistoricalCorrectionCommand|null)=>void;revisionRecovery:InvoiceRevisionCommand|null;onRevisionRecoveryChange:(command:InvoiceRevisionCommand|null)=>void }) {
+function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, recovery, onRecoveryChange, debtRecovery,onDebtRecoveryChange,maintenanceRecovery,onMaintenanceRecoveryChange,revisionRecovery,onRevisionRecoveryChange,historicalRecovery,onHistoricalRecoveryChange,moneyRecovery,onMoneyRecoveryChange,accountDetails,financialRecovery,restoredCommandKey }: PatientLedgerProps & { recovery: InvoiceCommandState | null; onRecoveryChange: (command: InvoiceCommandState | null) => void;debtRecovery:DebtRepaymentCommand|null;onDebtRecoveryChange:(command:DebtRepaymentCommand|null)=>void;financialRecovery:FinancialRecoveryControl;restoredCommandKey:string;moneyRecovery:DurableMoneyCommand|null;onMoneyRecoveryChange:(command:DurableMoneyCommand|null)=>void;historicalRecovery:HistoricalCorrectionCommand|null;onHistoricalRecoveryChange:(command:HistoricalCorrectionCommand|null)=>void;maintenanceRecovery:InvoiceMaintenanceCommand|null;onMaintenanceRecoveryChange:(command:InvoiceMaintenanceCommand|null)=>void;revisionRecovery:InvoiceRevisionCommand|null;onRevisionRecoveryChange:(command:InvoiceRevisionCommand|null)=>void }) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -469,6 +480,8 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
   /* (FIN-2) الفاتورة المفتوحة للتصحيح الآن، ورسالة نجاح التصحيح. */
   const [historicalCorrecting,setHistoricalCorrecting]=useState<HistoricalDocumentView|null>(null);
   const [correcting, setCorrecting] = useState<number | null>(null);
+  const [maintenanceOpen,setMaintenanceOpen]=useState<{operation:"archive"|"add-service";invoiceId:number}|null>(null);
+  const maintenanceActive=!!maintenanceRecovery||!!maintenanceOpen;
   const [notice, setNotice] = useState<string | null>(null);
   /* (RC-1) سند القبض المفتوح للتصحيح الآن. */
   const [correctingReceipt, setCorrectingReceipt] = useState<number | null>(null);
@@ -478,7 +491,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
   const canAddOpening = ledger?.openingAccess?.add ?? admin;
   const canEditOpening = ledger?.openingAccess?.edit ?? admin;
   const canAddLegacy = !loading && !error && ledger?.openingAccess?.add === true;
-  const canStartTreatment = financialRecovery.ready && !moneyRecovery && !historicalRecovery && !historicalCorrecting && !revisionRecovery && correcting===null && !loading && !error && !!session && canHandleMoney(session.role);
+  const canStartTreatment = !maintenanceActive && financialRecovery.ready && !moneyRecovery && !historicalRecovery && !historicalCorrecting && !revisionRecovery && correcting===null && !loading && !error && !!session && canHandleMoney(session.role);
   const readRef = useRef({ active: false, authorized: false, generation: 0, controller: null as AbortController | null });
   const writePending = useRef(false);
   const invoiceUnresolved = useRef(false);
@@ -486,7 +499,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
   const holdDebt=useCallback((held:boolean)=>{debtHeld.current=held;},[]);
   const consumedEntryRequest = useRef(0);
   const hasEntryDraft = mode === "invoice" || mode === "legacy" || mode === "opening";
-  const financialBlocked = !financialRecovery.ready || !!recovery || !!debtRecovery || !!revisionRecovery || correcting!==null || !!historicalRecovery || !!historicalCorrecting || !!moneyRecovery;
+  const financialBlocked = maintenanceActive || !financialRecovery.ready || !!recovery || !!debtRecovery || !!revisionRecovery || correcting!==null || !!historicalRecovery || !!historicalCorrecting || !!moneyRecovery;
   const shownRestoredKey=useRef("");
   useEffect(() => {
     if (recovery && restoredCommandKey && shownRestoredKey.current !== restoredCommandKey) {
@@ -494,27 +507,27 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
     }
   }, [recovery, restoredCommandKey]);
   const canLeave = useCallback(() => {
-    return canLeaveTreatmentEntry({ active: readRef.current.active, pending: !!moneyRecovery || !!historicalRecovery || !!revisionRecovery || debtHeld.current || !!debtRecovery&&debtRecovery.outcome!=="refused" || writePending.current || invoiceUnresolved.current || !!recovery && !recovery.editing || busy, hasDraft: hasEntryDraft || correcting!==null || !!historicalCorrecting },
+    return canLeaveTreatmentEntry({ active: readRef.current.active, pending: !!maintenanceRecovery || !!moneyRecovery || !!historicalRecovery || !!revisionRecovery || debtHeld.current || !!debtRecovery&&debtRecovery.outcome!=="refused" || writePending.current || invoiceUnresolved.current || !!recovery && !recovery.editing || busy, hasDraft: maintenanceOpen!==null || hasEntryDraft || correcting!==null || !!historicalCorrecting },
       () => window.confirm("هناك مسودة فاتورة أو اتفاق غير محفوظة. مغادرة الشاشة لا تلغي طلبًا سبق إرساله. هل تريد المغادرة؟"));
-  }, [busy, hasEntryDraft, recovery,debtRecovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery]);
+  }, [busy, hasEntryDraft, recovery,debtRecovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery,maintenanceRecovery,maintenanceOpen]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   useEffect(() => {
-    if (entryRequestKey <= consumedEntryRequest.current || revisionRecovery || correcting!==null || historicalRecovery || historicalCorrecting || moneyRecovery) return;
+    if (maintenanceActive || entryRequestKey <= consumedEntryRequest.current || revisionRecovery || correcting!==null || historicalRecovery || historicalCorrecting || moneyRecovery) return;
     consumedEntryRequest.current = entryRequestKey;
     setLinkNotice(null); setNotice(null);
     setMode(recovery ? isHistoricalRecovery(recovery) ? "legacy" : "invoice" : "entry");
     onEntryRequestConsumed?.(entryRequestKey);
-  }, [entryRequestKey, onEntryRequestConsumed, recovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery]);
+  }, [entryRequestKey, onEntryRequestConsumed, recovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery,maintenanceActive]);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!moneyRecovery&&!historicalRecovery&&!historicalCorrecting&&!revisionRecovery&&correcting===null&&!debtHeld.current&&!debtRecovery&&!writePending.current && !invoiceUnresolved.current && !recovery && !hasEntryDraft) return;
+      if (!maintenanceActive&&!moneyRecovery&&!historicalRecovery&&!historicalCorrecting&&!revisionRecovery&&correcting===null&&!debtHeld.current&&!debtRecovery&&!writePending.current && !invoiceUnresolved.current && !recovery && !hasEntryDraft) return;
       event.preventDefault(); event.returnValue = "";
     };
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [hasEntryDraft, recovery,debtRecovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery]);
+  }, [hasEntryDraft, recovery,debtRecovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery,maintenanceActive]);
   const changeMode = (next: typeof mode) => {
-    if (!readRef.current.active || moneyRecovery || historicalRecovery || historicalCorrecting || revisionRecovery || correcting!==null || debtHeld.current || writePending.current || invoiceUnresolved.current || busy || (next !== "none" && (loading || error))) return;
+    if (maintenanceActive || !readRef.current.active || moneyRecovery || historicalRecovery || historicalCorrecting || revisionRecovery || correcting!==null || debtHeld.current || writePending.current || invoiceUnresolved.current || busy || (next !== "none" && (loading || error))) return;
     if (next === mode) return;
     if (hasEntryDraft && !canLeave()) return;
     // A newly admitted draft may stop at preview refusal without ever sending a write.
@@ -743,7 +756,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
       {mode==="none"&&session&&canHandleMoney(session.role)?<DebtRepaymentPanel patientId={patientId} refreshKey={ledger}
         financialRecovery={financialRecovery}
         recovery={debtRecovery} onRecoveryChange={onDebtRecoveryChange} onHold={holdDebt}
-        enabled={financialRecovery.ready&&!moneyRecovery&&!historicalRecovery&&!historicalCorrecting&&!recovery&&!revisionRecovery&&correcting===null&&!!ledger&&!loading&&!error&&!busy&&mode==="none"} onChanged={()=>{void load();onClinicalChange?.();}}/>:null}
+        enabled={!maintenanceActive&&financialRecovery.ready&&!moneyRecovery&&!historicalRecovery&&!historicalCorrecting&&!recovery&&!revisionRecovery&&correcting===null&&!!ledger&&!loading&&!error&&!busy&&mode==="none"} onChanged={()=>{void load();onClinicalChange?.();}}/>:null}
 
       {mode==="none"&&ledger&&!loading&&!error?<HistoricalDocuments patientId={patientId} refreshKey={ledger} enabled={!financialBlocked&&!busy&&!collectOpen&&correctingReceipt===null} onCorrect={document=>{if(!financialBlocked){setHistoricalCorrecting(document);setNotice(null);}}} />:null}
       {moneyRecovery?<MoneyCommandRecovery command={moneyRecovery} onDone={(message,paymentId)=>{onMoneyRecoveryChange(null);setNotice(message);if(paymentId!==null)setLastReceiptId(paymentId);void load();notifyFinancialChange();}}/>:null}
@@ -979,20 +992,28 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
                       </span>
                     ) : null}
                   </span>
-                  <span className="flex gap-2">
+                  <span className="flex flex-wrap gap-2">
                     {admin && invoice.status !== "cancelled" && correcting !== invoice.id ? (
                       <button type="button" disabled={financialBlocked||mode!=="none"||busy||loading||!!error||collectOpen||correctingReceipt!==null} onClick={() => { if (!financialBlocked) { setCorrecting(invoice.id); setNotice(null); } }}
                         className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">
                         تصحيح الفاتورة
                       </button>
                     ) : null}
+                    {admin?<>
+                      {invoice.status!=="cancelled"?<button type="button" disabled={financialBlocked||mode!=="none"||busy||loading||!!error||collectOpen||correctingReceipt!==null}
+                        onClick={()=>{if(!financialBlocked){setMaintenanceOpen({operation:"add-service",invoiceId:invoice.id});setNotice(null);}}}
+                        className="min-h-11 rounded-xl border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-900">إضافة خدمة</button>:null}
+                      <button type="button" disabled={financialBlocked||mode!=="none"||busy||loading||!!error||collectOpen||correctingReceipt!==null}
+                        onClick={()=>{if(!financialBlocked){setMaintenanceOpen({operation:"archive",invoiceId:invoice.id});setNotice(null);}}}
+                        className="min-h-11 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold">الأرشفة والاسترجاع</button>
+                    </>:null}
                     <a href={`/print/invoice/${invoice.id}`} target="_blank" rel="noopener"
                       className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
                       طباعة
                     </a>
                   </span>
                 </div>
-                {invoice.note && invoice.note.startsWith("تصحيح للفاتورة") ? (
+                {invoice.note && (invoice.note.startsWith("تصحيح للفاتورة") || invoice.note.startsWith("خدمة إضافية مرتبطة بالفاتورة")) ? (
                   <p className="mt-1 text-[11px] font-bold text-amber-800">{invoice.note}</p>
                 ) : null}
               </li>
@@ -1000,6 +1021,15 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
           </ul>
         )}
       </section>
+
+      <InvoiceArchiveList patientId={patientId} refreshKey={ledger} canManage={admin&&!financialBlocked&&mode==="none"&&!busy&&!loading&&!error&&!collectOpen&&correctingReceipt===null}
+        onOpen={invoiceId=>{if(!financialBlocked)setMaintenanceOpen({operation:"archive",invoiceId});}}/>
+      {admin&&maintenanceActive?(()=>{
+        const selected=maintenanceRecovery??maintenanceOpen!;
+        const props={patientId,invoiceId:selected.invoiceId,recovery:maintenanceRecovery,onRecoveryChange:onMaintenanceRecoveryChange,
+          financialRecovery,onCancel:()=>setMaintenanceOpen(null),onChanged:()=>{setMaintenanceOpen({operation:selected.operation,invoiceId:selected.invoiceId});void load();onClinicalChange?.();}};
+        return selected.operation==="archive"?<InvoiceArchive key={`archive:${selected.invoiceId}`} {...props}/>:<InvoiceAddService key={`add-service:${selected.invoiceId}`} {...props}/>;
+      })():null}
 
       {admin&&(revisionRecovery||correcting!==null)?<InvoiceCorrection key={revisionRecovery?.invoiceId??correcting!}
         patientId={patientId} invoiceId={revisionRecovery?.invoiceId??correcting!} recovery={revisionRecovery}
