@@ -7,10 +7,12 @@ import { convertQuantity, type UnitConversionSnapshot } from "@/lib/inventory-do
 import type { RequestRevision } from "@/lib/inventory-domain/procurement";
 import styles from "./inventory.module.css";
 import { useInventoryCommand } from "./useInventoryCommand";
+import { inventoryRecoveryEnglish } from "@/lib/inventory-command-recovery";
 interface Catalog {items:{itemId:number;name:string;conversion:UnitConversionSnapshot}[];scope:string}
 interface RequestRow {id:string;version:number;status:string;document:RequestRevision}
 const labels:Record<string,string>={submitted:"بانتظار الاعتماد",approved:"معتمد",partially_approved:"معتمد جزئيًا",rejected:"مرفوض"};
 const english:Record<string,string>={
+ ...inventoryRecoveryEnglish,
   "بانتظار الاعتماد": "Awaiting approval",
   "معتمد": "Approved",
   "معتمد جزئيًا": "Partially approved",
@@ -61,7 +63,7 @@ function ProcurementRequestForm({session}:{session:SessionInfo|null}){
  const [reload,setReload]=useState(0);const [page,setPage]=useState(0);
  const [read,setRead]=useState<{owner:string;catalog:Catalog;items:RequestRow[];itemNames:Record<string,string>;hasMore:boolean}|null>(null);
  const [failed,setFailed]=useState<{owner:string;message:string}|null>(null);const [lines,setLines]=useState<{id:string;catalogIndex:string;quantity:string}[]>([]);
- const [reason,setReason]=useState("");const command=useInventoryCommand();const busy=command.locked;const [feedback,setFeedback]=useState("");const [fieldError,setFieldError]=useState("");
+ const [reason,setReason]=useState("");const command=useInventoryCommand("requests");const busy=command.locked;const [feedback,setFeedback]=useState("");const [fieldError,setFieldError]=useState("");
  const dirty=Boolean(reason.trim()||lines.length);
  useEffect(()=>{if(!dirty)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue="";};window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn);},[dirty]);
  const firstField=useRef<HTMLTextAreaElement>(null);
@@ -96,7 +98,7 @@ function ProcurementRequestForm({session}:{session:SessionInfo|null}){
      </fieldset>)}
      {!data.catalog.items.length?<p>{text("تحتاج الإدارة لتسجيل وحدات العبوات المعتمدة قبل تقديم الطلب.")}</p>:null}
      <div className={styles.actions}><button type="button" className={styles.button} disabled={busy||!data.catalog.items.length||lines.length>=100} onClick={()=>{edited();addLine();}}><Plus size={16} aria-hidden="true"/>{text("إضافة مادة")}</button><button className={`${styles.button} ${styles.primary}`} disabled={busy||!data.catalog.items.length} type="submit" aria-busy={command.busy}><Send size={16} aria-hidden="true"/>{command.busy?text("جارٍ تقديم الطلب…"):text("تقديم طلب الشراء")}</button></div>
-     {command.message?<p role="alert" className="text-sm text-red-800">{text(command.message)}</p>:null}
+     {command.describe(locale)?<p className="text-sm" data-testid="inventory-saved-command">{command.describe(locale)}</p>:null}{command.message?<p role="alert" className="text-sm text-red-800">{text(command.message)}</p>:null}
      {command.status==="uncertain"?<button type="button" className={styles.button} onClick={async()=>{if(await command.retry())complete();}}>{text("إعادة تأكيد الطلب نفسه")}</button>:null}
      {fieldError?<p id="procurement-error" role="alert" className="text-sm text-red-800">{text(fieldError)}</p>:null}
      {feedback?<p role="status" className="text-sm text-green-800">{text(feedback)}</p>:null}

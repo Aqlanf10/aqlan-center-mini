@@ -4,7 +4,8 @@ import { requireSession } from "@/lib/session";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { InventoryDomainError, invariant } from "@/lib/inventory-domain/quantities";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { INVENTORY_RECOVERY_PROTOCOL, inventoryRecoveryIdentity, isInventoryOperationKey, isInventoryRecoveryDigest, type InventoryRecoveryAcknowledgement } from "@/lib/inventory-command-recovery";
 import {
   DEFAULT_SAFE_INVENTORY_ERROR_MESSAGE,
   publicInventoryErrorCode,
@@ -133,29 +134,53 @@ function shape(document:unknown,command:string){const source=record(document);in
 const DOCTOR_OR_ADMIN_COMMANDS=new Set(["request.submit","custody.acknowledge","custody.consume","custody.return_to_store","custody.stocktake","custody.close_package","custody.object_settlement"]);
 export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{const url=new URL(request.url);if(url.searchParams.get("view")==="workbench")return NextResponse.json(await readProcurementWorkbench(session,Number(url.searchParams.get("requestOffset")??"0"),Number(url.searchParams.get("orderOffset")??"0")));if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
 export async function POST(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{
+  // Optional versioned browser recovery. These headers bind the saved command
+  // to the authenticated session; they never grant identity or permissions.
+  const recoveryHeaders = ["X-Inventory-Recovery", "X-Inventory-Actor", "X-Inventory-Actor-Id", "X-Inventory-Digest"];
+  const recovering = recoveryHeaders.some(name => request.headers.has(name));
+  if (recovering) {
+    let actor: string | null = null;
+    try { actor = decodeURIComponent(request.headers.get("X-Inventory-Actor") ?? ""); } catch { /* Refuse malformed binding. */ }
+    if (request.headers.get("X-Inventory-Recovery") !== INVENTORY_RECOVERY_PROTOCOL || actor !== session.username
+      || request.headers.get("X-Inventory-Actor-Id") !== String(session.userId)) {
+      return NextResponse.json({code:"inventory_recovery_actor_mismatch",message:"تغيّرت الجلسة. سجّل الدخول بالحساب الذي بدأ العملية."},{status:403});
+    }
+  }
   const source=record(await readJsonBody(request,JSON_BODY_LIMIT_BYTES));const command=String(source.command??"");
+  let recovery: InventoryRecoveryAcknowledgement | null = null;
+  if (recovering) {
+    const digest = request.headers.get("X-Inventory-Digest");
+    if (!isInventoryOperationKey(source.operationKey) || !isInventoryRecoveryDigest(digest)
+      || createHash("sha256").update(inventoryRecoveryIdentity(source)).digest("hex") !== digest) {
+      return NextResponse.json({code:"inventory_recovery_payload_mismatch",message:"لا تطابق العملية محتواها المحفوظ. أعد محاولة العملية الأصلية."},{status:409});
+    }
+    recovery = {protocol:INVENTORY_RECOVERY_PROTOCOL,status:"committed",actorUserId:session.userId,key:source.operationKey,digest};
+  }
+  // Only a completed transaction or committed replay receives this proof.
+  // Generic errors cannot retire recovery, including post-commit response loss.
+  const success = (result: Record<string,unknown>, init?: ResponseInit) => NextResponse.json(recovery ? {...result,recovery} : result,init);
   invariant(typeof source.operationKey==="string","invalid_operation_key","Operation key is required");
   invariant(DOCTOR_OR_ADMIN_COMMANDS.has(command) || session.role==="admin","operation_forbidden","This management transition requires administrator authority");
   const actor:InventoryActor={userId:session.userId,username:session.username,role:session.role};
   switch(command){
-    case "request.revise":{const revision=record(source.revision);record(revision.value);return NextResponse.json(await revisePurchaseRequest(actor,source.operationKey,revision as unknown as Parameters<typeof revisePurchaseRequest>[2]),{status:201});}
-    case "custody.dispatch":{const transfer=record(source.transfer);list(transfer.lines);return NextResponse.json(await dispatchCustodyTransfer(actor,source.operationKey,transfer as unknown as CustodyDispatch),{status:201});}
-    case "custody.acknowledge":{const acknowledgement=record(source.acknowledgement);list(acknowledgement.lines);return NextResponse.json(await acknowledgeCustodyTransfer(actor,source.operationKey,acknowledgement as unknown as CustodyAcknowledgement),{status:201});}
-    case "custody.consume":{const usage=record(source.usage ?? source.document);return NextResponse.json(await recordCustodyUsage(actor,source.operationKey,{...usage,kind:usage.kind==="approved_waste"?"approved_waste":"consumed"} as unknown as CustodyUsageInput),{status:201});}
-    case "custody.return_to_store":{const usage=record(source.usage ?? source.document);return NextResponse.json(await recordCustodyUsage(actor,source.operationKey,{...usage,kind:"returned_to_store"} as unknown as CustodyUsageInput),{status:201});}
-    case "custody.stocktake":{const stocktake=record(source.stocktake ?? source.document);return NextResponse.json(await recordCustodyStocktake(actor,source.operationKey,stocktake as unknown as CustodyStocktakeInput),{status:201});}
-    case "custody.close_package":{const closure=record(source.packageClosure ?? source.document);return NextResponse.json(await closeCustodyPackage(actor,source.operationKey,closure as unknown as CustodyPackageClosureInput),{status:201});}
-    case "custody.propose_settlement":{const settlement=record(source.settlement ?? source.document);return NextResponse.json(await proposeAnnualCustodySettlement(actor,source.operationKey,settlement as unknown as CustodySettlementProposalInput),{status:201});}
-    case "custody.object_settlement":{const objection=record(source.objection ?? source.document);return NextResponse.json(await objectCustodySettlement(actor,source.operationKey,objection as unknown as CustodySettlementObjectionInput),{status:201});}
-    case "custody.approve_waste":{const approval=record(source.wasteApproval ?? source.document);return NextResponse.json(await approveCustodyWaste(actor,source.operationKey,approval as unknown as CustodyWasteApprovalInput),{status:201});}
-    case "legacy.reconcile":{const reconciliation=record(source.reconciliation ?? source.document);return NextResponse.json(await reconcileHistoricalMovements(actor,source.operationKey,reconciliation as unknown as LegacyReconciliationInput),{status:201});}
-    case "request.submit":shape(source.document,command);return NextResponse.json(await submitPurchaseRequest(actor,source.operationKey,{...source.document as RequestRevision,requestedBy:actor.userId}),{status:201});
-    case "request.approve":{const approval=record(source.approval);list(approval.decisions);invariant(typeof approval.requestId==="string"&&Number.isSafeInteger(approval.version),"invalid_approval","Approval targets an exact request/version");return NextResponse.json(await approvePurchaseRequest(actor,source.operationKey,approval as Parameters<typeof approvePurchaseRequest>[2]));}
-    case "order.issue":shape(source.document,command);return NextResponse.json(await issuePurchaseOrder(actor,source.operationKey,source.document as PurchaseOrder),{status:201});
-    case "order.amend":{const amendment=record(source.amendment ?? source.document);shape(amendment.order,command);invariant(typeof amendment.reason==="string","reason_required","Amendment reason is required");return NextResponse.json(await amendPurchaseOrder(actor,source.operationKey,{order:amendment.order as PurchaseOrder,reason:amendment.reason}),{status:201});}
-    case "receipt.post":shape(source.document,command);return NextResponse.json(await postInspectedReceipt(actor,source.operationKey,source.document as ReceiptRevision),{status:201});
-    case "quarantine.resolve":{const resolution=record(source.resolution ?? source.document);return NextResponse.json(await resolveQuarantineReceipt(actor,source.operationKey,resolution as unknown as Parameters<typeof resolveQuarantineReceipt>[2]),{status:201});}
-    case "invoice.match":shape(source.document,command);return NextResponse.json(await recordSupplierInvoiceMatch(actor,source.operationKey,source.document as SupplierInvoiceRevision),{status:201});
+    case "request.revise":{const revision=record(source.revision);record(revision.value);return success(await revisePurchaseRequest(actor,source.operationKey,revision as unknown as Parameters<typeof revisePurchaseRequest>[2]),{status:201});}
+    case "custody.dispatch":{const transfer=record(source.transfer);list(transfer.lines);return success(await dispatchCustodyTransfer(actor,source.operationKey,transfer as unknown as CustodyDispatch),{status:201});}
+    case "custody.acknowledge":{const acknowledgement=record(source.acknowledgement);list(acknowledgement.lines);return success(await acknowledgeCustodyTransfer(actor,source.operationKey,acknowledgement as unknown as CustodyAcknowledgement),{status:201});}
+    case "custody.consume":{const usage=record(source.usage ?? source.document);return success(await recordCustodyUsage(actor,source.operationKey,{...usage,kind:usage.kind==="approved_waste"?"approved_waste":"consumed"} as unknown as CustodyUsageInput),{status:201});}
+    case "custody.return_to_store":{const usage=record(source.usage ?? source.document);return success(await recordCustodyUsage(actor,source.operationKey,{...usage,kind:"returned_to_store"} as unknown as CustodyUsageInput),{status:201});}
+    case "custody.stocktake":{const stocktake=record(source.stocktake ?? source.document);return success(await recordCustodyStocktake(actor,source.operationKey,stocktake as unknown as CustodyStocktakeInput),{status:201});}
+    case "custody.close_package":{const closure=record(source.packageClosure ?? source.document);return success(await closeCustodyPackage(actor,source.operationKey,closure as unknown as CustodyPackageClosureInput),{status:201});}
+    case "custody.propose_settlement":{const settlement=record(source.settlement ?? source.document);return success(await proposeAnnualCustodySettlement(actor,source.operationKey,settlement as unknown as CustodySettlementProposalInput),{status:201});}
+    case "custody.object_settlement":{const objection=record(source.objection ?? source.document);return success(await objectCustodySettlement(actor,source.operationKey,objection as unknown as CustodySettlementObjectionInput),{status:201});}
+    case "custody.approve_waste":{const approval=record(source.wasteApproval ?? source.document);return success(await approveCustodyWaste(actor,source.operationKey,approval as unknown as CustodyWasteApprovalInput),{status:201});}
+    case "legacy.reconcile":{const reconciliation=record(source.reconciliation ?? source.document);return success(await reconcileHistoricalMovements(actor,source.operationKey,reconciliation as unknown as LegacyReconciliationInput),{status:201});}
+    case "request.submit":shape(source.document,command);return success(await submitPurchaseRequest(actor,source.operationKey,{...source.document as RequestRevision,requestedBy:actor.userId}),{status:201});
+    case "request.approve":{const approval=record(source.approval);list(approval.decisions);invariant(typeof approval.requestId==="string"&&Number.isSafeInteger(approval.version),"invalid_approval","Approval targets an exact request/version");return success(await approvePurchaseRequest(actor,source.operationKey,approval as Parameters<typeof approvePurchaseRequest>[2]));}
+    case "order.issue":shape(source.document,command);return success(await issuePurchaseOrder(actor,source.operationKey,source.document as PurchaseOrder),{status:201});
+    case "order.amend":{const amendment=record(source.amendment ?? source.document);shape(amendment.order,command);invariant(typeof amendment.reason==="string","reason_required","Amendment reason is required");return success(await amendPurchaseOrder(actor,source.operationKey,{order:amendment.order as PurchaseOrder,reason:amendment.reason}),{status:201});}
+    case "receipt.post":shape(source.document,command);return success(await postInspectedReceipt(actor,source.operationKey,source.document as ReceiptRevision),{status:201});
+    case "quarantine.resolve":{const resolution=record(source.resolution ?? source.document);return success(await resolveQuarantineReceipt(actor,source.operationKey,resolution as unknown as Parameters<typeof resolveQuarantineReceipt>[2]),{status:201});}
+    case "invoice.match":shape(source.document,command);return success(await recordSupplierInvoiceMatch(actor,source.operationKey,source.document as SupplierInvoiceRevision),{status:201});
     default:throw new InventoryDomainError("invalid_command","Use a supported procurement transition");
   }
 }catch(error){return failure(error);}}
