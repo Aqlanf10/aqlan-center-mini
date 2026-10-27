@@ -8,8 +8,10 @@ import { formatMoney } from "@/lib/money";
 import { custodyUsageQuantity } from "@/lib/inventory-domain/presentation";
 import type { readDoctorCustody,CustodyDispatch } from "@/lib/inventory-domain/custody-store";
 import { useInventoryCommand } from "./useInventoryCommand";
+import { inventoryRecoveryEnglish } from "@/lib/inventory-command-recovery";
 import styles from "./inventory.module.css";
 const english:Record<string,string>={
+ ...inventoryRecoveryEnglish,
  "عهد المواد للأطباء": "Doctor material custody",
  "المخزن · قيد النقل · عهدة الطبيب": "Store · In transit · Doctor custody",
  "المخزون": "Inventory",
@@ -187,7 +189,7 @@ function CustodyStatement({session}:{session:SessionInfo|null}){
  const [pkgLocationId,setPkgLocationId]=useState("");const [pkgLotId,setPkgLotId]=useState("");const [pkgId,setPkgId]=useState("");const [pkgEventId,setPkgEventId]=useState("");const [pkgHazard,setPkgHazard]=useState<"none"|"sharp"|"contaminated">("none");const [pkgPolicy,setPkgPolicy]=useState<"safe_empty_return"|"safe_disposal_record"|"bulk_count"|"reusable_custody">("safe_empty_return");const [pkgOriginal,setPkgOriginal]=useState("");const [pkgConsumed,setPkgConsumed]=useState("");const [pkgReturned,setPkgReturned]=useState("0");const [pkgWaste,setPkgWaste]=useState("0");const [pkgRemaining,setPkgRemaining]=useState("0");const [pkgReason,setPkgReason]=useState("");
  const [settleDoctorPartyId,setSettleDoctorPartyId]=useState("");const [settlePeriodId,setSettlePeriodId]=useState("2026-annual");const [settleCurrency,setSettleCurrency]=useState<"YER"|"SAR"|"USD">("SAR");const [settleDeductions,setSettleDeductions]=useState("");const [settleAttributable,setSettleAttributable]=useState("");const [settleReason,setSettleReason]=useState("");
  const [objectionReasons,setObjectionReasons]=useState<Record<string,string>>({});
- const [ackReason,setAckReason]=useState<Record<string,string>>({});const [ackValues,setAckValues]=useState<Record<string,{accepted:string;returned:string}>>({});const [feedback,setFeedback]=useState("");const [pendingFeedback,setPendingFeedback]=useState("تم حفظ التحويل وإثباته. الكمية والقيمة تبقيان ضمن مخزون المركز.");const command=useInventoryCommand();
+ const [ackReason,setAckReason]=useState<Record<string,string>>({});const [ackValues,setAckValues]=useState<Record<string,{accepted:string;returned:string}>>({});const [feedback,setFeedback]=useState("");const [pendingFeedback,setPendingFeedback]=useState("تم حفظ التحويل وإثباته. الكمية والقيمة تبقيان ضمن مخزون المركز.");const command=useInventoryCommand("custody");
  const key=`${session?.username??"none"}:${session?.role??"none"}:${revision}:${offset}`;const data=loaded?.key===key?loaded.data:null;const error=failed?.key===key?failed.message:null;
  useEffect(()=>{if(!session)return;let alive=true;const controller=new AbortController();fetch(`/api/inventory/procurement?view=custody&offset=${offset}`,{cache:"no-store",signal:controller.signal}).then(async response=>{const value=await response.json();if(!response.ok)throw new Error(value.message??"تعذّر تحميل العهد.");if(alive){setLoaded({key,data:value});setFailed(null);}}).catch(error=>{if(alive)setFailed({key,message:error instanceof Error?error.message:"تعذّر تحميل العهد."});});return()=>{alive=false;controller.abort();};},[key,session,offset]);
  const complete=(nextFeedback=pendingFeedback)=>{setQuantity("");setReason("");setLegacyItemId("");setLegacyLocationId("");setLegacyReason("");setUsageQty("");setUsageReason("");setStocktakeCounted("");setStocktakeReason("");setPkgLotId("");setPkgId("");setPkgEventId("");setPkgReason("");setSettleReason("");setValidation("");setFeedback(nextFeedback);setRevision(value=>value+1);};
@@ -216,7 +218,7 @@ function CustodyStatement({session}:{session:SessionInfo|null}){
   if(!usageLocationId||!usageLotId||!usageQty.trim()||!usageReason.trim()||(usageKind==="returned_to_store"&&!usageStoreId)||(usageKind==="approved_waste"&&!usageWasteApproval.trim())){setValidation("اختر موقع العهدة والدفعة والكمية والسبب قبل الحفظ.");return;}
   const cmd=usageKind==="returned_to_store"?"custody.return_to_store":"custody.consume";
   const msg=usageKind==="returned_to_store"?"تم إرجاع المادة الصالحة من العهدة إلى المخزن؛ الكمية والقيمة تبقيان ضمن مخزون المركز.":"تم تسجيل استهلاك العهدة وتخفيض رصيد العهدة ومخزون المركز.";setPendingFeedback(msg);
-  if(await command.send(cmd,{usage:{id:crypto.randomUUID(),locationId:usageLocationId,storeLocationId:usageKind==="returned_to_store"?usageStoreId:null,lotId:usageLotId,kind:usageKind,quantity:usageQty.trim(),quantityState:usageQtyState,patientId:usagePatientId.trim()||null,visitId:usageVisitId.trim()||null,procedureId:usageProcedureId.trim()||null,wasteApprovalId:usageKind==="approved_waste"?usageWasteApproval.trim():null,reason:usageReason.trim()}}))complete(msg);
+  if(await command.send(cmd,{usage:{id:crypto.randomUUID(),locationId:usageLocationId,storeLocationId:usageKind==="returned_to_store"?usageStoreId:null,lotId:usageLotId,kind:usageKind,quantity:usageQty.trim(),quantityState:usageQtyState,patientId:usageKind==="consumed"?usagePatientId.trim()||null:null,visitId:usageKind==="consumed"?usageVisitId.trim()||null:null,procedureId:usageKind==="consumed"?usageProcedureId.trim()||null:null,wasteApprovalId:usageKind==="approved_waste"?usageWasteApproval.trim():null,reason:usageReason.trim()}}))complete(msg);
  }
  async function submitStocktake(event:React.FormEvent){
   event.preventDefault();setValidation("");if(!data||command.locked)return;
@@ -341,7 +343,7 @@ function CustodyStatement({session}:{session:SessionInfo|null}){
    </div>
    <p className={styles.note}>{text("تسليم العبوات الفارغة يخص العبوات الآمنة فقط. الأدوات الحادة والمواد الملوثة توثق إجراءات التخلص الآمن منها؛ لا تعاد للمخزن ولا تستخرج من النفايات للعد أو التصوير.")}</p>
   </>}
-  {validation?<p role="alert" className="text-sm text-red-800">{text(validation)}</p>:null}{command.message?<p role="alert" className="text-sm text-red-800">{text(command.message)}</p>:null}{command.status==="uncertain"?<button type="button" className={styles.button} onClick={async()=>{if(await command.retry())complete(pendingFeedback);}}>{text("إعادة تأكيد العملية نفسها")}</button>:null}{feedback?<p role="status" className="text-sm text-green-800">{text(feedback)}</p>:null}
+  {validation?<p role="alert" className="text-sm text-red-800">{text(validation)}</p>:null}{command.describe(locale)?<p className="text-sm" data-testid="inventory-saved-command">{command.describe(locale)}</p>:null}{command.message?<p role="alert" className="text-sm text-red-800">{text(command.message)}</p>:null}{command.status==="uncertain"?<button type="button" className={styles.button} onClick={async()=>{if(await command.retry())complete("تم تأكيد العملية المحفوظة. راجع سجل العهدة لمعرفة أثرها.");}}>{text("إعادة تأكيد العملية نفسها")}</button>:null}{feedback?<p role="status" className="text-sm text-green-800">{text(feedback)}</p>:null}
  </section>;
 }
 

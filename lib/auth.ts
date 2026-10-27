@@ -44,6 +44,8 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 export interface SessionPayload {
+  /** Signed canonical identity, optional for legacy application compatibility. */
+  authority?: import("./staff-authenticated-identity").StaffIdentityClaims;
   userId: number;
   username: string;
   role: string;

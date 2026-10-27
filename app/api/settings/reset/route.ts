@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { clinicResetPreview, findUserByUsername, resetClinicData } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth";
 import { ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE, RESET_PREVIEW_GROUPS, isResetPhrase } from "@/lib/clinic-reset";
+import { ProtectedInventoryHistoryError } from "@/lib/inventory-domain/reset-protection";
 import { removeFileByKey } from "@/lib/files";
 import { runVerifiedManualBackup } from "@/lib/manual-backup";
 import { isAdmin } from "@/lib/roles";
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
     if (error instanceof ProtectedPurchaseHistoryError) return noStore({ message: error.message, code: "protected-purchase-history" }, 409);
     if (error instanceof ProtectedAgreementHistoryError) return noStore({ message: error.message, code: "protected-agreement-history" }, 409);
     if (error instanceof ProtectedCollectionAttemptHistoryError) return noStore({ message: error.message, code: "protected-collection-attempt-history" }, 409);
+    if (error instanceof ProtectedInventoryHistoryError) return noStore({ message: error.message, code: "protected-inventory-history" }, 409);
     return noStore({ message: "تعذّرت إعادة الضبط ولم يُمسح شيء. أعد المحاولة بعد قليل (قد يكون أحدٌ يُدخل بيانات الآن)." }, 500);
   }
   if (!result.ok) {

@@ -1,4 +1,7 @@
+import { PURCHASE_RESET_FENCE } from "../clinic-reset";
 import { requireInventoryIntegration } from "./rollout";
+import { readInventoryCommandBinding, authorizeInventoryCommandBinding } from "./command-fence";
+import type { InventoryPrincipal } from "./principal";
 import { createHash, randomUUID } from "node:crypto";
 import { ensureSchema, getPool, insertAuditRow, type DbClient } from "../db";
 import { withTransaction } from "../transactions";
@@ -59,17 +62,28 @@ export async function writeInventoryAudit(client: DbClient, actor: InventoryActo
   await insertAuditRow(client, { action: "inventory.item", entity, entityId: id, entityLabel: id,
     actor: actor.username, actorRole: actor.role, details: sanitized });
 }
-function inventoryOperationDigest(key: string, payload: unknown): string {
+export function inventoryOperationDigest(key: string, payload: unknown): string {
   invariant(typeof key === "string" && /^[A-Za-z0-9_.:-]{8,120}$/.test(key), "invalid_operation_key", "A bounded idempotency key is required");
   return createHash("sha256").update(payloadIdentity(payload)).digest("hex");
 }
-async function applyInventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, hash: string, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+async function applyInventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, hash: string, management: boolean, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [PURCHASE_RESET_FENCE]);
   await requireInventoryActor(client, actor, management);
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
   const previous = await client.query<{ payload_hash: string; result: T }>("SELECT payload_hash,result FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
+  const binding = await readInventoryCommandBinding(client, actor, key, name, !!principal);
+  if (binding) {
+    authorizeInventoryCommandBinding(binding, actor, hash, management, principal);
+    invariant(binding.admitted_in_current_transaction === false, "command_admission_uncommitted", "Admission must commit before execution");
+  }
+  else invariant(!principal, "command_provenance_required", "Prepared execution requires durable command admission");
   if (previous.rows[0]) {
     invariant(previous.rows[0].payload_hash === hash, "idempotency_conflict", "This operation key already identifies different content");
     return { ...previous.rows[0].result, replayed: true };
+  }
+  if (binding) {
+    const terminal = await client.query("SELECT 1 FROM inventory_command_retirements WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
+    invariant(terminal.rows.length === 0, "command_retired", "This exact command was durably retired and cannot execute");
   }
   const result = await work(client);
   await client.query("INSERT INTO inventory_operations(scope,actor_id,operation_key,payload_hash,result) VALUES($1,$2,$3,$4,$5::jsonb)", [name,actor.userId,key,hash,JSON.stringify(result)]);
@@ -87,9 +101,13 @@ export async function inventoryOperation<T extends object>(actor: InventoryActor
  * immediately released, without committing or rolling back caller work.
  * Missing proposal objects fail inside the caller transaction, never via fallback.
  */
-export async function inventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+export async function inventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
   requireInventoryIntegration();
   const hash = inventoryOperationDigest(key, payload);
+  await assertInventoryCallerTransaction(client);
+  return applyInventoryOperationInTransaction(client, actor, key, name, hash, management, work, principal);
+}
+async function assertInventoryCallerTransaction(client: DbClient) {
   try {
     await client.query("SAVEPOINT inventory_adapter_transaction_check");
   } catch (error) {
@@ -99,8 +117,22 @@ export async function inventoryOperationInTransaction<T extends object>(client: 
     throw error;
   }
   await client.query("RELEASE SAVEPOINT inventory_adapter_transaction_check");
-  return applyInventoryOperationInTransaction(client, actor, key, name, hash, management, work);
 }
+/** Admission and retirement use the very same actor/key lock as execution.
+ * This helper writes no operation result and never starts/commits a transaction. */
+export async function withInventoryCommandLockInTransaction<T>(
+  client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown,
+  management: boolean, work: (hash: string) => Promise<T>,
+): Promise<T> {
+  requireInventoryIntegration();
+  const hash = inventoryOperationDigest(key, payload);
+  await assertInventoryCallerTransaction(client);
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [PURCHASE_RESET_FENCE]);
+  await requireInventoryActor(client, actor, management);
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
+  return work(hash);
+}
+
 async function verifyUnits(client: DbClient, lines: readonly { itemId: number; conversion: RequestRevision["lines"][number]["conversion"] }[]) {
   invariant(lines.length > 0 && lines.length <= 100, "invalid_lines", "Use between one and 100 document lines");
   const itemIds = [...new Set(lines.map(line => line.itemId))].sort((a,b) => a-b);
@@ -270,7 +302,7 @@ async function orderPriorInspectedQuantities(client: DbClient, order: IssuedPurc
     disposedExcessBaseQuantity: row.disposed_excess,
   }));
 }
-async function lockedOrder(client:DbClient,id:string):Promise<IssuedPurchaseOrder>{
+export async function lockedOrder(client:DbClient,id:string):Promise<IssuedPurchaseOrder>{
   docId(id);const order=await client.query<{document:IssuedPurchaseOrder}>("SELECT document FROM purchase_orders WHERE id=$1 FOR UPDATE",[id]);
   invariant(order.rows[0],"not_found","Purchase order was not found");scope(order.rows[0].document.branchId);
   const amended=await client.query<{order_doc:IssuedPurchaseOrder}>("SELECT result->'order' AS order_doc FROM inventory_operations WHERE scope='order.amend' AND result->>'id'=$1 ORDER BY (result->>'version')::int DESC, created_at DESC LIMIT 1",[id]);
@@ -552,8 +584,7 @@ export async function recordSupplierInvoiceMatch(actor:InventoryActor,key:string
       }
       return row.document;
     });
-    const priorRows=await client.query<{id:string;invoice_line_id:string;receipt_line_id:string;base_qty:string}>("SELECT a.id,a.invoice_line_id,a.receipt_line_id,a.base_qty::text FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=$1",[order.id]);
-    const prior:InvoiceReceiptAllocation[]=priorRows.rows.map(row=>({id:row.id,invoiceLineId:row.invoice_line_id,receiptLineId:row.receipt_line_id,baseQuantity:row.base_qty}));
+    const prior=await readEffectiveInvoiceAllocations(client,[order.id]);
     const match=matchSupplierInvoice(order,invoice,effectiveReceiptLines,prior);
     await client.query("INSERT INTO supplier_invoices(id,order_id,supplier_party_id,duplicate_key,document,match_plan,created_by) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7)",[invoice.id,order.id,invoice.supplierPartyId,match.duplicateKey,JSON.stringify(invoice),JSON.stringify(match),actor.userId]);
     if(match.status === "matched")for(const line of invoice.lines)for(const allocation of line.receiptAllocations){await client.query("INSERT INTO supplier_invoice_receipt_allocations(id,invoice_id,invoice_line_id,receipt_line_id,base_qty) VALUES($1,$2,$3,$4,$5::numeric)",[allocation.id,invoice.id,line.id,allocation.receiptLineId,allocation.baseQuantity]);}
@@ -610,10 +641,29 @@ export async function readProcurementWorkbench(actor:InventoryActor,requestOffse
     const quarantineDispositions=hasQuarantineTable.rows[0]?.present
       ? (await client.query<{id:string;receipt_line_id:string;order_id:string;order_line_id:string;action:QuarantineResolutionAction;base_qty:string;reason:string}>("SELECT id::text,receipt_line_id,order_id::text,order_line_id,action,base_qty::text,reason FROM quarantine_dispositions WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds])).rows
       : [];
-    const allocations=await client.query<{receipt_line_id:string;qty:string}>("SELECT a.receipt_line_id,SUM(a.base_qty)::text AS qty FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=ANY($1::uuid[]) GROUP BY a.receipt_line_id",[orderIds]);
-    const invoices=await client.query<{id:string;order_id:string;document:SupplierInvoiceRevision;match_plan:ReturnType<typeof matchSupplierInvoice>}>("SELECT id,order_id,document,match_plan FROM supplier_invoices WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds]);
+    const invoiceSource=await effectiveInvoiceSource(client);
+    const allocationSource=invoiceSource==="inventory_effective_supplier_invoices"
+      ? "inventory_effective_invoice_allocations"
+      : "supplier_invoice_receipt_allocations";
+    const allocations=await client.query<{receipt_line_id:string;qty:string}>(`SELECT a.receipt_line_id,SUM(a.base_qty)::text AS qty FROM ${allocationSource} a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=ANY($1::uuid[]) GROUP BY a.receipt_line_id`,[orderIds]);
+    const invoices=await client.query<{id:string;order_id:string;document:SupplierInvoiceRevision;match_plan:ReturnType<typeof matchSupplierInvoice>}>(`SELECT id,order_id,document,match_plan FROM ${invoiceSource} WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id`,[orderIds]);
     const itemIds=[...new Set([...requests.rows.slice(0,20).flatMap(row=>row.document.lines.map(line=>line.itemId)),...shownOrders.flatMap(row=>row.document.lines.map(line=>line.itemId))])];
     const names=await client.query<{id:number;name:string}>("SELECT id,name FROM inventory_items WHERE id=ANY($1::int[])",[itemIds]);
     return {scope:INVENTORY_CLINIC_SCOPE,requests:requests.rows.slice(0,20),sourceAllocations:sources.rows,suppliers:suppliers.rows,locations:locations.rows,orders:shownOrders,orderResults:effectiveOrderResults,receiptHeaders:receiptHeaders.rows,receipts:receipts.rows,quarantineDispositions,invoiceAllocations:allocations.rows,invoices:invoices.rows,itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMoreRequests:requests.rows.length>20,hasMoreOrders:orders.rows.length>20,requestOffset,orderOffset,financialPosting:"pending_shared_finance_review" as const};
   });
+}
+
+/** One effective reservation projection for legacy matching and the prepared finance core.
+ * Missing additive proposal preserves the existing dormant matching behavior. */
+export async function effectiveInvoiceSource(client:DbClient):Promise<"inventory_effective_supplier_invoices"|"supplier_invoices">{
+ const result=await client.query<{present:boolean}>("SELECT to_regclass('inventory_effective_supplier_invoices') IS NOT NULL AS present");
+ return result.rows[0]?.present?"inventory_effective_supplier_invoices":"supplier_invoices";
+}
+export async function readEffectiveInvoiceAllocations(client:DbClient,orderIds:string[],excludeInvoiceId:string|null=null):Promise<InvoiceReceiptAllocation[]>{
+ const source=await effectiveInvoiceSource(client);
+ const sql=source==="inventory_effective_supplier_invoices"
+  ? "SELECT id,invoice_line_id,receipt_line_id,base_qty::text FROM inventory_effective_invoice_allocations WHERE order_id=ANY($1::uuid[]) AND ($2::uuid IS NULL OR invoice_id<>$2::uuid)"
+  : "SELECT a.id,a.invoice_line_id,a.receipt_line_id,a.base_qty::text FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=ANY($1::uuid[]) AND ($2::uuid IS NULL OR i.id<>$2::uuid)";
+ const result=await client.query<{id:string;invoice_line_id:string;receipt_line_id:string;base_qty:string}>(sql,[orderIds,excludeInvoiceId]);
+ return result.rows.map(row=>({id:row.id,invoiceLineId:row.invoice_line_id,receiptLineId:row.receipt_line_id,baseQuantity:row.base_qty}));
 }

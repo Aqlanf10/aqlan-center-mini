@@ -1,3 +1,4 @@
+vi.mock("@/lib/staff-authenticated-identity", () => ({ readStaffIdentityClaims: vi.fn().mockResolvedValue(undefined) }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
