@@ -1,3 +1,4 @@
+import { readStaffIdentityClaims } from "@/lib/staff-authenticated-identity";
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -82,6 +83,7 @@ export async function POST(request: Request) {
     }).catch(() => {});
 
     const token = createSessionToken({
+      authority: await readStaffIdentityClaims(updated.id),
       userId: updated.id,
       username: updated.username,
       role: updated.role,
