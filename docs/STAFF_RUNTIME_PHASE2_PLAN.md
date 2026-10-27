@@ -25,7 +25,9 @@ Legacy token reads reject durable markers so a canonical owner cannot enter thro
 
 ## Proposed operation boundary
 
-`admitStaffOperation(client, verifiedSession, exactAction)` returns an opaque private handle. `assertStaffOperation(client, handle, exactAction)` revalidates before SQL and precommit. Bind the exact client object, PostgreSQL XID, action, signed token/expiration and fresh authority state. Reject copied/serialized handles, changed action, another client, new transaction on reused client, changed identity/revisions and expiration while waiting or after writes.
+`withStaffOperation(pool, verifiedSession, exactAction, callback)` owns the READ COMMITTED transaction via the existing helper. It admits a private handle before invoking the callback; `assertStaffOperation(client, handle, exactAction)` is required before protected SQL. The wrapper freshly asserts again immediately before returning to the helper's COMMIT and invalidates the handle in finally. There is no exported raw admission API.
+
+Handles bind the exact client, PostgreSQL top-level XID, action and original verified signed token. Every assertion reacquires the central authority fence and validates fresh authority. XID is explicitly not a subtransaction identifier. Normal callback savepoints occur after authority fences. Trusted callbacks must not issue top-level COMMIT/ROLLBACK/BEGIN: changed/ended XID is rejected, but a malicious earlier commit cannot be undone. Caller-owned transaction composition would require a separately reviewed precommit contract.
 
 Use explicit READ COMMITTED transactions. Lock order is authority fence → control/state → account/current subject/provider → future domain locks. Each assertion freshly checks v2 descriptor, complete immutable history, ready anchors, current target generation/binding, active canonical account, credential/account/provider/control revisions, policy/document validity and explicit capability. Owner authority derives only from exact protected owner binding; it never authorizes legacy entry. Display booleans and projections cannot be operation inputs.
 
@@ -38,3 +40,12 @@ Use explicit READ COMMITTED transactions. Lock order is authority fence → cont
 - Rollback preserves atomic writes when final assertion fails.
 
 No pass here constitutes authorization to prepare an owner, activate routes or import source authority.
+
+
+## Legacy integration remains closed
+
+Removing obsolete claim issuance from legacy login/password renewal preserves their ordinary marker-free behavior; it is not canonical login integration. Before any real canonical conversion/activation, every legacy handler must freshly classify database account authority and refuse canonical accounts even when presented with an older marker-free token. Marker parsing alone does not establish global legacy isolation. No accounts are converted by this slice.
+
+## Current local evidence
+
+The synthetic runtime fixture explicitly constructs a hypothetical trusted-ready state using the frozen control transition shapes. It is not an operator trust or bootstrap test. Version-2 installation itself remains quarantined. Full readiness lifecycle, source restoration and any ready-state reset are unsupported.
