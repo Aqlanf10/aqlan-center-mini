@@ -7,6 +7,7 @@ import { useClinicalLabCommand } from "./useClinicalLabCommand";
 import { UNVERIFIED_VISIT_INVOICE_LABEL } from "@/lib/visit-financial-presentation";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { clinicalSaveFailureMessage } from "@/lib/clinical-save-failure-message";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { isValidTooth, normalizeSurfaces, toothName } from "@/lib/dental";
@@ -682,7 +683,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       return reloaded && currentOwner() && command.current === attempt;
       });
     } catch (reason) {
-      if (currentOwner()) setError(reason instanceof Error ? reason.message : "تعذّر الاتصال بالخادم.");
+      if (currentOwner()) setError(clinicalSaveFailureMessage(reason));
       return false;
     } finally {
       if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }

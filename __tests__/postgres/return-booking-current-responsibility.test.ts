@@ -250,7 +250,7 @@ it("rejects ABA responsibility fingerprints after an audited owner A to B to A c
  expect(restored.sourceFingerprint).not.toBe(originalSettings.sourceFingerprint);
  const freshBooking=await request(f);expect(freshBooking.returnBookingFingerprint).not.toBe(originalBooking.returnBookingFingerprint);
  await expect(patientResponsibilitySettings(target,admin,{expectedSourceFingerprint:originalSettings.sourceFingerprint,doctorId:f.oldDoctorId,reason:"Synthetic stale ABA command"})).rejects.toMatchObject({status:409});
- expect(await bookAppointment(originalBooking,actor)).toMatchObject({ok:false,code:"return_booking_source_changed"});
+ expect(await bookAppointment(originalBooking,actor)).toMatchObject({ok:false,status:400,code:"return_booking_source_changed"});
  expect(await q("SELECT id FROM appointments WHERE patient_id=$1",[f.patientId])).toEqual([]);
  expect(await q("SELECT id FROM audit_log WHERE action='case.responsibility_change' AND entity_id=$1",[String(f.patientId)])).toHaveLength(2);
  expect(await bookAppointment(freshBooking,actor)).toMatchObject({ok:true,appointment:{doctorId:f.doctorId}});

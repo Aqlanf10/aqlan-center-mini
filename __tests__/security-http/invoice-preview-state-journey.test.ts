@@ -750,7 +750,7 @@ describe("invoice form preview safety and shared chart interruption journeys", (
     } finally { await context.close(); }
   });
 
-  it.each(["failure", "malformed"])("%s chart reads show unknown selectable anatomy; surfaces reset on tooth change and focus remains in the dialog", async (failure) => {
+  it.each(["failure", "malformed"])("%s chart reads show unknown selectable anatomy; surfaces stay independent per tooth and focus remains in the dialog", async (failure) => {
     const { page, context } = await openInvoice();
     const charts: string[] = [];
     await page.route("**/api/patients/*/chart", async (route) => {
@@ -775,8 +775,16 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await dialog.getByTestId("surface-M").click();
       await dialog.getByTestId("surface-O").click();
       await dialog.getByTestId("odontogram-tooth-27").click();
-      expect(await dialog.getByTestId("surface-M").getAttribute("aria-pressed")).toBe("false");
-      expect(await dialog.getByTestId("surface-O").getAttribute("aria-pressed")).toBe("false");
+      const firstSurfaces = dialog.getByTestId("tooth-surfaces-26");
+      const secondSurfaces = dialog.getByTestId("tooth-surfaces-27");
+      expect(await firstSurfaces.getByTestId("surface-M").getAttribute("aria-pressed")).toBe("true");
+      expect(await firstSurfaces.getByTestId("surface-O").getAttribute("aria-pressed")).toBe("true");
+      expect(await secondSurfaces.getByTestId("surface-M").getAttribute("aria-pressed")).toBe("false");
+      expect(await secondSurfaces.getByTestId("surface-O").getAttribute("aria-pressed")).toBe("false");
+      await secondSurfaces.getByTestId("surface-D").click();
+      expect(await secondSurfaces.getByTestId("surface-D").getAttribute("aria-pressed")).toBe("true");
+      expect(await firstSurfaces.getByTestId("surface-D").getAttribute("aria-pressed")).toBe("false");
+      expect(await dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]').count()).toBe(2);
       await dialog.getByRole("button", { name: "إغلاق", exact: true }).focus();
       await page.keyboard.press("Shift+Tab");
       expect(await page.getByTestId("tooth-dialog-confirm").evaluate((element) => element === document.activeElement)).toBe(true);
