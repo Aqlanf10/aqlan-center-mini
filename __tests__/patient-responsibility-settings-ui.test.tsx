@@ -42,3 +42,27 @@ it("preserves selection and reason when stale-source save is rejected", async ()
  expect(words(f.render())).toContain("Synthetic source changed"); expect(f.find("textarea").props.value).toBe("Keep draft"); expect(f.find("select").props.value).toBe("9");
 });
 it("single-flight guards repeated save clicks", async () => { const f = mount(); f.click("إعداد الطبيب المسؤول"); await turns(); f.change("select", "9"); f.change("textarea", "Synthetic reason"); fetchMock.mockImplementation(() => new Promise(() => {})); f.click("حفظ المسؤولية"); f.click("حفظ المسؤولية"); expect(fetchMock).toHaveBeenCalledTimes(2); });
+it("opens an unassigned case on the server's suggestion and saves only on the admin's confirmation", async () => {
+ const unassigned = { ...data, doctorId: null, doctorName: null, suggestion: { doctorId: 9, doctorName: "Synthetic incoming", basis: "plan_items" }, suggestionNote: null };
+ fetchMock.mockResolvedValue({ ok: true, json: async () => unassigned });
+ const f = mount(); f.click("إعداد الطبيب المسؤول"); await turns();
+ expect(fetchMock).toHaveBeenCalledTimes(1);
+ const note = elements(f.render()).find(e => e.type === "p" && e.props.role === "note")!;
+ expect(words(note.props.children as ReactNode).replace(/\s+/g, " ")).toBe("مقترح: Synthetic incoming — طبيب بنود علاج هذه الحالة . لا يُعتمد إلا بعد تأكيدك.");
+ expect(f.find("select").props.value).toBe("9");
+ expect(f.find("textarea").props.value).toBe("تأكيد الطبيب المقترح من بنود علاج الحالة");
+ f.click("تأكيد الطبيب المقترح"); await turns();
+ expect(fetchMock.mock.calls[1][1].method).toBe("PATCH");
+ expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ kind: "clinical", sourceId: 3, expectedSourceFingerprint: data.sourceFingerprint, doctorId: 9, reason: "تأكيد الطبيب المقترح من بنود علاج الحالة" });
+});
+it("shows the reason and preselects nothing when no single doctor can be suggested", async () => {
+ fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ...data, doctorId: null, doctorName: null, suggestion: null, suggestionNote: "Synthetic ambiguity note" }) });
+ const f = mount(); f.click("إعداد الطبيب المسؤول"); await turns();
+ expect(words(f.render())).toContain("Synthetic ambiguity note");
+ expect(f.find("select").props.value).toBe(""); expect(f.find("textarea").props.value).toBe("");
+ expect(f.find("button", "حفظ المسؤولية").props.disabled).toBe(true);
+});
+it("an existing responsible doctor keeps the plain save and no suggestion", async () => {
+ const f = mount(); f.click("إعداد الطبيب المسؤول"); await turns();
+ expect(words(f.render())).not.toContain("مقترح"); expect(f.find("select").props.value).toBe("7");
+});
