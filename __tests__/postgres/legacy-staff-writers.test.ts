@@ -2,11 +2,14 @@
  * preexisting database drop, live account or Production connection is used. */
 import { beforeAll, afterAll, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
+import { openLegacyStaffFixture } from "./_legacy-staff-fixture";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { createSessionToken, readSessionToken, legacySessionEvidence, sessionCredentialVersion } from "../../lib/auth";
 import type { DoctorCommissionConfig } from "../../lib/doctor-permissions";
 assertRealPostgresUrl();stubPostgresEnv();
 const db=await import("../../lib/db");
+let fixture:Awaited<ReturnType<typeof openLegacyStaffFixture>>;
+const savedUrl=process.env.DATABASE_URL;
 const prefix=`legacy_bnd_${randomBytes(6).toString("hex")}`;
 let actorId:number, targetId:number;
 const username=`${prefix}_admin`;
@@ -16,10 +19,11 @@ function auth(){const p=readSessionToken(createSessionToken({userId:actorId,user
 async function counts(){return (await db.getPool().query("SELECT (SELECT count(*)::text FROM users) AS users,(SELECT count(*)::text FROM parties) AS parties,(SELECT count(*)::text FROM doctor_commission_history) AS history,(SELECT count(*)::text FROM audit_log) AS audit")).rows[0];}
 async function blockedBy(pid:number){const until=performance.now()+5000;while(performance.now()<until){const r=await db.getPool().query("SELECT pid FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))",[pid]);if(r.rows.length)return;await new Promise(r=>setTimeout(r,10));}throw new Error("expected real writer blocking barrier not observed");}
 beforeAll(async()=>{
+ fixture=await openLegacyStaffFixture({...process.env});process.env.DATABASE_URL=fixture.url;await db.resetPoolForTesting();
  await db.ensureSchema();
  actorId=(await db.getPool().query<{id:number}>("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,$1,'synthetic-hash','admin') RETURNING id",[username])).rows[0].id;
 },120000);
-afterAll(async()=>{vi.restoreAllMocks();await db.resetPoolForTesting();});
+afterAll(async()=>{vi.restoreAllMocks();try{await db.resetPoolForTesting();await fixture?.close();}finally{process.env.DATABASE_URL=savedUrl;}});
 it("ordinary legacy create/update/link succeeds with actual signed evidence and preserved commission history",async()=>{
  const created=await db.createStaffUser({username:`${prefix}_doctor`,displayName:`${prefix} doctor`,passwordHash:"target-hash",role:"doctor",commissionConfig:config},{actor:"forged-audit-label"},auth());
  targetId=created.id;expect(created.partyId).not.toBeNull();
@@ -61,4 +65,18 @@ it("expiry after advanced commission history insertion rolls back user, doctor, 
  try{await blockedBy(pid);vi.spyOn(Date,"now").mockReturnValue(Date.now()+120_000);await holder.query("COMMIT");expect(await pending).toMatchObject({message:"LEGACY_STAFF_SESSION_EXPIRED"});}
  finally{vi.restoreAllMocks();await holder.query("ROLLBACK");holder.release();await pending;await db.getPool().query(`DROP TRIGGER ${trigger} ON doctor_commission_history;DROP FUNCTION ${fn}()`);}
  expect(await counts()).toEqual(before);
+});
+it.each(["disable", "change-kind"])("link revalidates doctor after observed concurrent %s without side effects", async (change) => {
+ const partyId=(await db.getPool().query<{id:number}>("INSERT INTO parties(name,kind,is_active) VALUES($1,'doctor',true) RETURNING id",[`${prefix}_${change}`])).rows[0].id;
+ const before=await counts();
+ const original=(await db.getPool().query("SELECT party_id,commission_config FROM users WHERE id=$1",[targetId])).rows[0];
+ const holder=await db.getPool().connect();await holder.query("BEGIN");
+ const pid=(await holder.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+ await holder.query(change==="disable" ? "UPDATE parties SET is_active=false WHERE id=$1" : "UPDATE parties SET kind='lab' WHERE id=$1",[partyId]);
+ const pending=db.linkUserDoctor(targetId,partyId,{actor:username},auth()).then(value=>({value}),error=>({error}));
+ try {
+  await blockedBy(pid);await holder.query("COMMIT");expect(await pending).toEqual({value:null});
+  expect((await db.getPool().query("SELECT party_id,commission_config FROM users WHERE id=$1",[targetId])).rows[0]).toEqual(original);
+  expect(await counts()).toEqual(before);
+ } finally {await holder.query("ROLLBACK");holder.release();await pending;}
 });

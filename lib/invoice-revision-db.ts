@@ -12,7 +12,8 @@ import { validateDebtRepaymentTerms } from "./debt-installments";
 import { planInvoiceRevision } from "./invoice-correction";
 import { parseAmount, type Currency } from "./money";
 import { clinicDateString } from "./schedule";
-import { revalidateSessionInTransaction } from "./session";
+import { readLegacyStaffSchema } from "./legacy-staff-boundary";
+import { revalidateLegacySessionReadOnlySnapshot, revalidateSessionInTransaction } from "./session";
 import { INVOICE_APPROVED_WORK_SQL } from "./invoice-correction-coverage";
 
 interface RevisionWork {
@@ -84,12 +85,37 @@ async function contextInTx(client: DbClient, invoiceId: number) {
 }
 
 export async function readInvoiceRevision(invoiceId: number, session: SessionPayload) {
-  await ensureSchema(); const client = await getPool().connect(); let destroy=false;
+  // This preflight never repairs an authority footprint. Installation still
+  // requires maintenance drain: no fence spans preflight -> ensureSchema.
+  if (await readLegacyStaffSchema(getPool()) !== "base") bad("تصحيح الفاتورة يحتاج جلسة مدير سارية؛ سجّل الدخول من جديد.", "unauthorized");
+  await ensureSchema();
+  const client = await getPool().connect();
+  let locked=false, began=false, destroy=false;
+  const fence="aqlan.canonical.identity.substrate.v1:public";
   try {
-    // Current authority is checked before the strictly read-only snapshot.
-    await authority(client,session); await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const result = await contextInTx(client,invoiceId); await client.query("COMMIT"); return result;
-  } catch (error) { try{await client.query("ROLLBACK");}catch{destroy=true;} throw error; } finally { client.release(destroy); }
+    try {
+      await client.query("SELECT pg_advisory_lock_shared(hashtextextended($1,0))",[fence]);
+      locked=true;
+    } catch(error) { destroy=true; throw error; }
+    began=true;
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const current=await revalidateLegacySessionReadOnlySnapshot(session,client);
+    if (!current || current.role !== "admin") bad("تصحيح الفاتورة يحتاج جلسة مدير سارية؛ سجّل الدخول من جديد.", "unauthorized");
+    const result = await contextInTx(client,invoiceId);
+    if (session.expiresAt <= Date.now()) bad("انتهت الجلسة؛ سجّل الدخول من جديد.", "unauthorized");
+    await client.query("COMMIT");began=false;return result;
+  } catch (error) {
+    if(began){try{await client.query("ROLLBACK");began=false;}catch{destroy=true;}}
+    throw error;
+  } finally {
+    if(locked){
+      try {
+        const {rows}=await client.query<{unlocked:boolean}>("SELECT pg_advisory_unlock_shared(hashtextextended($1,0)) AS unlocked",[fence]);
+        if(rows.length!==1 || rows[0].unlocked!==true)destroy=true;
+      } catch {destroy=true;}
+    }
+    client.release(destroy);
+  }
 }
 
 /** One transaction owns replacement, settlement lineage, dated repayment terms

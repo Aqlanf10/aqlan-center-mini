@@ -1,3 +1,4 @@
+import { signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -84,7 +85,7 @@ describe("performer commission and settlement reconciliation", () => {
     const a = await doctor(30), b = await doctor(40), p = await patient();
     const creator = await doctor(50);
     const creatorName = `synthetic-invoice-creator-${++seq}`;
-    await db.createStaffUser({ username: creatorName, displayName: "SYNTHETIC signing doctor", passwordHash: "synthetic-creator-hash", role: "doctor", partyId: creator.id });
+    await db.createStaffUser({ username: creatorName, displayName: "SYNTHETIC signing doctor", passwordHash: "synthetic-creator-hash", role: "doctor", partyId: creator.id }, undefined, signedLegacyStaffProof(admin));
     const serviceId = await id(`INSERT INTO services(name,category,price_minor,price_configured,is_active)
       VALUES('SYNTHETIC performed service','endo',10000,TRUE,TRUE) RETURNING id`);
     const visit = await db.addVisit({ patientId: p, patientName: "SYNTHETIC commission patient", patientPhone: null, note: null });

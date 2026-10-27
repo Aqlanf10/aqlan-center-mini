@@ -1,3 +1,5 @@
+import type { SessionPayload } from "../../lib/auth";
+import { seedLegacyStaffAdmin, signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
 let responsibilityFixtureSequence = 0;
 import { Client } from "pg";
@@ -16,6 +18,8 @@ const { session } = vi.hoisted(() => ({
 }));
 vi.mock("../../lib/session", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/session")>()), requireSession: vi.fn(async () => session.current) }));
 
+let staffAdmin: SessionPayload;
+
 assertRealPostgresUrl();
 stubPostgresEnv();
 const db = await import("../../lib/db");
@@ -28,6 +32,7 @@ let serviceId = 0;
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await db.ensureSchema();
+  staffAdmin = await seedLegacyStaffAdmin("case-freeze-admin");
   await db.openShift({ openedBy: "case-freeze-cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
   serviceId = (await q<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured, is_active)
@@ -247,7 +252,7 @@ describe("historical commission case attribution", () => {
     const user = await db.createStaffUser({
       username: `case-freeze-route-${sequence}`, displayName: "SYNTHETIC route user",
       passwordHash: "synthetic-not-a-usable-hash", role, partyId: s.doctorId,
-    });
+    }, undefined, signedLegacyStaffProof(staffAdmin));
     session.current = { userId: user.id, username: user.username, role, expiresAt: 4_102_444_800_000 };
     const request = (caseId: number | null) => new Request(`http://localhost/api/plan-items/${s.itemId}/case`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ caseId, priority: 6 }),

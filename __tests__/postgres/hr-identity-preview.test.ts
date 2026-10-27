@@ -25,12 +25,12 @@ afterAll(async () => {
   finally { process.env.DATABASE_URL=saved.url; process.env.SKIP_SEED=saved.seed; process.env.SESSION_SECRET=saved.secret; }
 });
 it('all preview queries run under PostgreSQL READ ONLY and neither rows nor sequences change, including an unlinked doctor', async () => {
-  const before = await identityDatabaseState(fixture.source), modes: string[] = [], commands: string[] = [];
+  const before = await identityDatabaseState(fixture.source), modes: Array<{sql:string;values:unknown[]|undefined;mode:string}> = [], commands: string[] = [];
   const pool = { connect: async () => {
     const client = await fixture.source.connect();
-    return { release: () => client.release(), query: async (sql: string, values?: unknown[]) => {
+    return { release: (destroy?:boolean) => client.release(destroy), query: async (sql: string, values?: unknown[]) => {
       commands.push(sql);
-      if (/^SELECT/i.test(sql)) modes.push((await client.query('SHOW transaction_read_only')).rows[0].transaction_read_only);
+      if (/^SELECT/i.test(sql)) modes.push({sql,values,mode:(await client.query('SHOW transaction_read_only')).rows[0].transaction_read_only});
       return client.query(sql, values);
     } };
   } } as unknown as Pool;
@@ -39,7 +39,15 @@ it('all preview queries run under PostgreSQL READ ONLY and neither rows nor sequ
   expect(reviewed.candidates[0]).toMatchObject({ action: 'create', userIds: [admin.userId,doctorId], partyIds: [partyId] });
   expect(baseline.candidates.find(c => c.key === `staff:${staffId}`)?.unknowns).toContain('missing_hire_date');
   expect(baseline.candidates.find(c => c.key === `party:${otherPartyId}`)?.action).toBe('skip');
-  expect(new Set(modes)).toEqual(new Set(['on']));
+  const fenceSql=new Set(["SELECT pg_advisory_lock_shared(hashtextextended($1,0))","SELECT pg_advisory_unlock_shared(hashtextextended($1,0)) AS unlocked"]);
+  const fences=modes.filter(entry=>fenceSql.has(entry.sql));
+  expect(fences).toHaveLength(4); // acquire/release for each of the two snapshots
+  for(const entry of modes){
+    if(fenceSql.has(entry.sql)){
+      expect(entry.values).toEqual(['aqlan.canonical.identity.substrate.v1:public']);
+      expect(entry.mode).toBe('off');
+    }else expect(entry.mode).toBe('on'); // every catalogue and data SELECT
+  }
   expect(commands.every(sql => /^(SELECT|BEGIN TRANSACTION|COMMIT)/.test(sql))).toBe(true);
   expect(await identityDatabaseState(fixture.source)).toEqual(before);
   const result = JSON.stringify(reviewed);

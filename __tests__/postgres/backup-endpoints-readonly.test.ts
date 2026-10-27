@@ -1,3 +1,4 @@
+import type { DbPool } from "../../lib/db";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,6 +32,7 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers(),
 }));
 
+let ownedAppPool: DbPool | undefined;
 const DATABASE_NAME = `aqlan_backup_endpoints_${process.pid}_${Date.now()}`.toLowerCase();
 const SESSION_SECRET = "pr21-endpoints-readonly-test-secret-0123456789abcdef";
 
@@ -100,7 +102,8 @@ beforeAll(async () => {
   //    مهم: صفقة pg الداخلية تنادي connect بصيغة callback — المجلّف يحافظ
   //    على الصيغتين (callback + promise) وإلا علق pool.query إلى الأبد.
   const { getPool } = await import("../../lib/db");
-  const pool = getPool() as unknown as {
+  ownedAppPool=getPool();
+  const pool = ownedAppPool as unknown as {
     query: (...args: unknown[]) => unknown;
     connect: (...args: unknown[]) => unknown;
   };
@@ -148,6 +151,8 @@ beforeAll(async () => {
 }, 240_000);
 
 afterAll(async () => {
+  // Close exactly this fixture's application pool before dropping its database.
+  await ownedAppPool?.end?.();
   await client?.end().catch(() => {});
   const { adminClient } = await import("./_setup");
   const admin = adminClient("postgres");
@@ -284,6 +289,15 @@ describe("دخول نقاط النسخ لا يصدر إلا SELECT — إثبا�
     expect(raw.scheduleEnabled).toBe(true);
     expect(raw.scheduleTime).toBe("00:00");
   });
+});
+
+it("marker-free legacy cookie cannot authorize a raw canonical account on bare base", async () => {
+  const previous=(await client.query("SELECT permissions FROM users WHERE username='backupadmin'")).rows[0].permissions;
+  await client.query("UPDATE users SET permissions=$1 WHERE username='backupadmin'",[JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}})]);
+  try{
+    const before=mark();const response=await backupStatusRoute.GET!() as Response;
+    expect(response.status).toBe(503);expectSliceReadOnly(before);
+  }finally{await client.query("UPDATE users SET permissions=$1 WHERE username='backupadmin'",[previous]);}
 });
 
 describe("الفشل المغلق عند نقص الجداول — لا إصلاح مخططٍ من مسار النسخ (الأخير: يُسقط الجداول)", () => {

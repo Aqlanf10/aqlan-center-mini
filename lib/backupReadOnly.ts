@@ -1,4 +1,4 @@
-import { lockLegacyStaffBoundary, assertLegacyPermissionEnvelope } from "./legacy-staff-boundary";
+import { readLegacyStaffSchema, assertLegacyPermissionEnvelope } from "./legacy-staff-boundary";
 import { getPool } from "./db";
 import { isAdmin } from "./roles";
 import { withDefaults, type SettingsMap } from "./settings";
@@ -99,7 +99,8 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
   try {
     client=await getPool().connect();
     await client.query("BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED READ ONLY");
-    await lockLegacyStaffBoundary(client);
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",["aqlan.canonical.identity.substrate.v1:public"]);
+    if(await readLegacyStaffSchema(client)!=="base")throw new Error("LEGACY_STAFF_BASE_SCHEMA_UNREADABLE");
     const { rows } = await client.query<{
       id: number;
       username: string;

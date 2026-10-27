@@ -1,15 +1,23 @@
 import { beforeAll, afterAll, expect, it } from "vitest";
-import { Pool } from "pg";
+import type { Pool } from "pg";
+import { openLegacyStaffFixture } from "./_legacy-staff-fixture";
 import { assertRealPostgresUrl } from "./_setup";
 import { readHrIdentityPreview } from "../../lib/hr-identity-read";
 import { createSessionToken, readSessionToken, sessionCredentialVersion } from "../../lib/auth";
 assertRealPostgresUrl();
-const pool=new Pool({connectionString:process.env.TEST_DATABASE_URL,ssl:false,max:4});
+let pool:Pool,fixture:Awaited<ReturnType<typeof openLegacyStaffFixture>>;
 beforeAll(async()=>{
- // This suite is run alone in the fresh owned runner, not against an existing schema.
+ fixture=await openLegacyStaffFixture({...process.env});pool=fixture.pool;
+ // A newly created, identity-checked database: no dependency on suite ordering.
  await pool.query("CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,role TEXT,is_active BOOLEAN,password_hash TEXT,permissions TEXT);CREATE TABLE parties(id INTEGER PRIMARY KEY);INSERT INTO users VALUES(1,'synthetic-admin','admin',TRUE,'synthetic-hash',NULL)");
 });
-afterAll(async()=>{await pool.end();});
+afterAll(async()=>{await fixture?.close();});
+it("marker-free old admin session cannot preview a raw canonical account",async()=>{
+ const session=readSessionToken(createSessionToken({userId:1,username:"synthetic-admin",role:"admin",expiresAt:Date.now()+60_000,credentialVersion:sessionCredentialVersion("synthetic-hash")}))!;
+ await pool.query("UPDATE users SET permissions=$1 WHERE id=1",[JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}})]);
+ try{await expect(readHrIdentityPreview(pool,session)).rejects.toThrow("PERMISSION_ENVELOPE_HELD");}
+ finally{await pool.query("UPDATE users SET permissions=NULL WHERE id=1");}
+});
 it("RR snapshot starts after observed installer wait and sees newly committed authority marker",async()=>{
  const session=readSessionToken(createSessionToken({userId:1,username:"synthetic-admin",role:"admin",expiresAt:Date.now()+60_000,credentialVersion:sessionCredentialVersion("synthetic-hash")}))!;
  const holder=await pool.connect();await holder.query("BEGIN");const pid=(await holder.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;

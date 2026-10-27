@@ -1,3 +1,5 @@
+import type { SessionPayload } from "../../lib/auth";
+import { seedLegacyStaffAdmin, signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
@@ -8,6 +10,9 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
  * المبدأ: محرّكٌ واحد. التفصيل مصبٌّ له: مجموع السطور = صفّ المجاميع حرفيًّا، والتقرير
  * بلا تفصيل يعطي الأرقام نفسها.
  */
+
+let intentAdmin: SessionPayload, categoryAdmin: SessionPayload;
+let staffAdmin: SessionPayload;
 
 assertRealPostgresUrl();
 stubPostgresEnv();
@@ -32,14 +37,14 @@ async function doctor(name: string, percent: number): Promise<number> {
 
 async function configure(partyId: number, config: Record<string, unknown>): Promise<void> {
   seq += 1;
-  const user = await createStaffUser({ username: `cd${seq}`, displayName: `cd${seq}`, passwordHash: "x", role: "doctor", partyId });
+  const user = await createStaffUser({ username: `cd${seq}`, displayName: `cd${seq}`, passwordHash: "x", role: "doctor", partyId }, undefined, signedLegacyStaffProof(staffAdmin));
   await updateUser(user.id, {
     commissionConfig: {
       calculationMode: "percentage", defaultPercent: 30, categoryRates: {}, fixedAmountPerVisitMinor: 0,
       deductLabCost: false, deductMaterialCost: false, basis: "collected_cash", effectiveDate: "", rateHistory: [],
       ...config,
     },
-  }, { actor: "owner" });
+  }, { actor: "owner" }, signedLegacyStaffProof(staffAdmin));
 }
 
 /** سياسة الإعداد المتقدّم تسري من لحظة حفظها (سجلٌّ زمني) — فأعمال هذه الحالات بعدها. */
@@ -136,6 +141,9 @@ beforeEach(async () => {
   await q("ALTER SEQUENCE services_id_seq RESTART WITH 1");
   await q("DELETE FROM users");
   await q("DELETE FROM parties");
+  staffAdmin = await seedLegacyStaffAdmin("owner");
+  intentAdmin = await seedLegacyStaffAdmin("intent-owner");
+  categoryAdmin = await seedLegacyStaffAdmin("category-owner");
   const [shift] = await q<{ id: number }>(`INSERT INTO cashier_shifts (opened_by) VALUES ('cd') RETURNING id`);
   shiftId = shift.id;
 });
@@ -150,7 +158,7 @@ describe("F-8 — التفصيل من المحرّك نفسه", () => {
   ] as const)("explicit general %s/%s preserves all prior facts and uses the existing event-time cutover", async (basis, percent) => {
     const d = await doctor("د. قصد مالي", 20);
     seq += 1;
-    const user = await createStaffUser({ username: `intent${seq}`, displayName: "قصد مالي", passwordHash: "x", role: "doctor", partyId: d });
+    const user = await createStaffUser({ username: `intent${seq}`, displayName: "قصد مالي", passwordHash: "x", role: "doctor", partyId: d }, undefined, signedLegacyStaffProof(staffAdmin));
     const p = await patient(); const serviceId = await service("عمل قصد مالي", "rct");
     const beforeAt = new Date(Date.now() - 3_600_000).toISOString();
     const old = await visitInvoice({ patientId: p, at: beforeAt, items: [{ doctorId: d, serviceId, amount: 10000 }] });
@@ -169,14 +177,14 @@ describe("F-8 — التفصيل من المحرّك نفسه", () => {
     const before = (await commissionDetailReport("1970-01-01", "2999-12-31")).lines.filter(line => line.invoiceId === old.invoiceId);
     expect(before).toHaveLength(1); expect(before[0]).toMatchObject({ percent: 20, earnedMinor: 1000 });
     expect((await q(`SELECT commission_config FROM users WHERE id = $1`, [user.id]))[0].commission_config).toBeNull();
-    await updateUser(user.id, { displayName: "تحديث أساسي فقط" }, { actor: "intent-owner", actorRole: "admin" });
+    await updateUser(user.id, { displayName: "تحديث أساسي فقط" }, { actor: "intent-owner", actorRole: "admin" }, signedLegacyStaffProof(intentAdmin));
     expect((await q(`SELECT commission_config FROM users WHERE id = $1`, [user.id]))[0].commission_config).toBeNull();
     expect(await history()).toEqual(initialHistory); expect(await audits()).toEqual(initialAudits); expect(await facts()).toEqual(beforeFacts);
     expect((await commissionDetailReport("1970-01-01", "2999-12-31")).lines.filter(line => line.invoiceId === old.invoiceId)).toEqual(before);
     const { parseDoctorCommissionConfig, validateDoctorCommissionConfigInput } = await import("../../lib/doctor-permissions");
     const checked = validateDoctorCommissionConfigInput({ ...parseDoctorCommissionConfig(null), basis, defaultPercent: percent, deductLabCost: false, deductMaterialCost: false });
     if (!checked.ok) throw new Error(checked.message);
-    await updateUser(user.id, { commissionConfig: checked.value }, { actor: "intent-owner", actorRole: "admin", reason: "تعديل مالي صريح" });
+    await updateUser(user.id, { commissionConfig: checked.value }, { actor: "intent-owner", actorRole: "admin", reason: "تعديل مالي صريح" }, signedLegacyStaffProof(intentAdmin));
     const savedHistory = await history();
     // createParty/createStaffUser already establish canonical history; preserve it.
     expect(initialHistory.length).toBeGreaterThan(0);
@@ -246,7 +254,7 @@ describe("F-8 — التفصيل من المحرّك نفسه", () => {
     const beforeFacts = await facts();
     const checked = validateDoctorCommissionConfigInput({ ...initial, categoryRates: { ...initial.categoryRates, rct: 55, filling: 49 } });
     if (!checked.ok) throw new Error(checked.message);
-    await updateUser(user.id, { commissionConfig: checked.value }, { actor: "category-owner", actorRole: "admin", reason: "نسب فئات الدليل" });
+    await updateUser(user.id, { commissionConfig: checked.value }, { actor: "category-owner", actorRole: "admin", reason: "نسب فئات الدليل" }, signedLegacyStaffProof(categoryAdmin));
     const [cutover] = await q<{ at: string; config: typeof initial }>(`SELECT to_char(effective_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at, config
       FROM doctor_commission_history WHERE party_id = $1 ORDER BY effective_from DESC, id DESC LIMIT 1`, [d]);
     expect(cutover.config.categoryRates).toMatchObject({ endo: 72, unknown_saved: 41, rct: 55, filling: 49 });

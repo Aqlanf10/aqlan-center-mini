@@ -3127,6 +3127,20 @@ export async function findUserByUsername(username: string, client?: DbClient): P
   return toUser(rows[0]);
 }
 
+/** SELECT-only authorization input for an owning READ ONLY snapshot. This is
+ * not mutation admission and never initializes schema or takes row locks. */
+export async function findLegacyUserByUsernameReadOnlySnapshot(username: string, client: DbClient): Promise<StaffUser | null> {
+  const { rows: mode } = await client.query<{ mode: string; isolation: string }>("SELECT current_setting('transaction_read_only') AS mode, current_setting('transaction_isolation') AS isolation");
+  if (mode.length !== 1 || mode[0].mode !== "on" || mode[0].isolation !== "repeatable read") throw new Error("LEGACY_READ_ONLY_SNAPSHOT_REQUIRED");
+  if (await readLegacyStaffSchema(client) !== "base") return null;
+  const { rows } = await client.query<UserRow>(
+    `SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND is_active LIMIT 1`, [username],
+  );
+  if (!rows[0]) return null;
+  assertLegacyPermissionEnvelope(rows[0].permissions);
+  return toUser(rows[0]);
+}
+
 export async function countUsers(): Promise<number> {
   await ensureSchema();
   const { rows } = await getPool().query<{ c: string }>(`SELECT count(*)::int AS c FROM users`);
@@ -15284,6 +15298,7 @@ export async function linkUserDoctor(
   await withTransaction(getPool(), client => assertLegacyStaffWrite(client, authorization, userId, "link"));
   await ensureSchema();
   const auditContext={...ctx};
+  let validDoctor = true;
   if (partyId !== null) {
     const { rows: doctor } = await getPool().query<{ id: number; name: string }>(
       `SELECT id, name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active LIMIT 1`,
@@ -15301,9 +15316,16 @@ export async function linkUserDoctor(
       const { rows: current } = await client.query<{ party_id: number | null }>(
         `SELECT party_id FROM users WHERE id = $1 FOR UPDATE`, [userId],
       );
-      return [current[0]?.party_id ?? null, partyId];
+      const partyIds = [...new Set([current[0]?.party_id, partyId]
+        .filter((id): id is number => typeof id === "number" && id > 0))].sort((a, b) => a - b);
+      // Preserve actor/user -> sorted party locking before any commission baseline.
+      const locked = await client.query<{ id: number; kind: string; is_active: boolean }>(
+        `SELECT id, kind, is_active FROM parties WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [partyIds],
+      );
+      validDoctor = partyId === null || locked.rows.some(row => row.id === partyId && row.kind === "doctor" && row.is_active);
+      return validDoctor ? partyIds : [];
     },
-    async (client) => (await client.query<{
+    async (client) => !validDoctor ? [] : (await client.query<{
       id: number; username: string; display_name: string;
       role: string; is_active: boolean; created_at: Date;
       party_id: number | null; party_name: string | null;

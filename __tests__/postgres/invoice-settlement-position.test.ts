@@ -1,3 +1,4 @@
+import { signedLegacyStaffProof } from "./_legacy-staff-proof-fixture";
 import {afterAll,beforeAll,describe,it,expect,vi} from "vitest";
 import {assertRealPostgresUrl,dropPublicSchema,stubPostgresEnv} from "./_setup";
 import {readInvoiceSettlementPosition} from "../../lib/invoice-settlement-position";
@@ -164,14 +165,14 @@ it.each(["replay","receipt","refund"])("serializes a currency correction racing 
 });
 it.each(["collected_cash","invoiced"] as const)("reclassifies unpaid %s commissions with original policy and applies a full refund exactly once",async basis=>{
   const owner=await patient(),doctor=await db.createParty({name:"Synthetic currency commission",kind:"doctor",phone:null,commissionPercent:30,note:null});
-  const staff=await db.createStaffUser({username:`currency-doctor-${++serial}`,displayName:"Synthetic commission",passwordHash:"synthetic",role:"doctor",partyId:doctor.id});
+  const staff=await db.createStaffUser({username:`currency-doctor-${++serial}`,displayName:"Synthetic commission",passwordHash:"synthetic",role:"doctor",partyId:doctor.id}, undefined, signedLegacyStaffProof(session));
   const config={calculationMode:"percentage" as const,defaultPercent:30,categoryRates:{},fixedAmountPerVisitMinor:0,deductLabCost:false,deductMaterialCost:false,basis,effectiveDate:"",rateHistory:[]};
-  await db.updateUser(staff.id,{commissionConfig:config},{actor:session.username});
+  await db.updateUser(staff.id,{commissionConfig:config},{actor:session.username}, signedLegacyStaffProof(session));
   const unrelatedDoctor=await db.createParty({name:"Synthetic unrelated SAR doctor",kind:"doctor",phone:null,commissionPercent:30,note:null});
   await db.createInvoice({patientId:owner,baseCurrency:"SAR",discountMinor:0,note:null,createdBy:session.username,items:[{serviceId:null,doctorId:unrelatedDoctor.id,description:"Synthetic unrelated SAR invoice",quantity:1,unitPriceMinor:10000}]});
   const original=(await db.createInvoice({patientId:owner,baseCurrency:"YER",discountMinor:0,note:null,createdBy:session.username,items:[{serviceId:null,doctorId:doctor.id,description:"Synthetic currency commission",quantity:1,unitPriceMinor:2500}]}))!;
   const paid=await db.recordPayment({patientId:owner,invoiceId:original.id,kind:"payment",amountMinor:90000,currency:"SAR",baseCurrency:"YER",exchangeRate:410,method:"cash",note:null,createdBy:session.username,idempotencyKey:`currency-full-paid-${++serial}`});expect(paid.reason).toBeNull();
-  await db.updateUser(staff.id,{commissionConfig:{...config,defaultPercent:60}},{actor:session.username});
+  await db.updateUser(staff.id,{commissionConfig:{...config,defaultPercent:60}},{actor:session.username}, signedLegacyStaffProof(session));
   const view=await revision.readInvoiceRevision(original.id,session),command={idempotencyKey:`currency-full-correct-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic currency commission correction",lines:[{itemId:original.items[0].id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:160000};
   await expect(revision.reviseInvoice(original.id,command,{...session,role:"cashier"})).rejects.toMatchObject({code:"unauthorized"});
   await revision.reviseInvoice(original.id,command,session);

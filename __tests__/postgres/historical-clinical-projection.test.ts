@@ -95,7 +95,10 @@ describe("DOT-PF14 historical agreement is not an implicit clinical schedule", (
     const visit = await db.addVisit({ patientId: id, patientName: "Synthetic", patientPhone: null, note: null });
     const clinical = await db.getClinicalVisit(visit.id);
     expect(clinical?.outstanding.map((row) => row.planItemId)).toContain(agreement.planItemId);
-    expect(clinical?.suggestions.nextPlan).toContain("Saved future work");
+    // The saved title stays intact; the clinical suggestion uses remaining work,
+    // not an old broad scheduling label for both done and pending sessions.
+    expect(summary.plannedVisits).toContainEqual(expect.objectContaining({ id: planned.id, title: "Saved future work" }));
+    expect(clinical?.suggestions.nextPlan).toBe("الجلسة القادمة: Synthetic historical ortho — جلسة 2");
     expect(await footprint(id)).toEqual(before);
   });
 
