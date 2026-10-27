@@ -188,7 +188,7 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
     // No baseline adoption on drift. Only the pre-existing runtime extensions remain.
     const { rows } = await pool.query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version');
-    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078']);
+    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087']);
     expect(rows.some(row => row.version === BASELINE_VERSION)).toBe(false);
   });
 
