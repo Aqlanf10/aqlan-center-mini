@@ -1,3 +1,4 @@
+import { readStaffIdentityClaims } from "@/lib/staff-authenticated-identity";
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { clearAccountLoginAttempts, consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
@@ -137,6 +138,7 @@ export async function POST(request: Request) {
 
     const expiresAt = Date.now() + SESSION_DURATION_MS;
     const token = createSessionToken({
+      authority: await readStaffIdentityClaims(user.id),
       userId: user.id,
       username: user.username,
       role: user.role,

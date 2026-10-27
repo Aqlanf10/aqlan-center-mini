@@ -1,3 +1,4 @@
+vi.mock("@/lib/staff-authenticated-identity", () => ({ readStaffIdentityClaims: vi.fn().mockResolvedValue(undefined) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**

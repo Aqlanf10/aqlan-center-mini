@@ -115,6 +115,8 @@ import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
 import { LAB_HISTORY_TABLES, ProtectedLabHistoryError, ORTHO_FOLLOWUP_HISTORY_TABLES, ProtectedOrthoFollowupHistoryError, INVOICE_ACTION_HISTORY_TABLES, ProtectedInvoiceActionHistoryError, ProtectedPatientNumberHistoryError, AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { protectInventoryHistoryForReset } from "./inventory-domain/reset-protection";
+import { rotateResetStaffIdentityInTransaction } from "./staff-authority-lifecycle.mjs";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -12408,7 +12410,7 @@ export function payableSettledTotalSql(p: string, cutoff?: PayableSqlCutoff): st
 
 /**
  * (FIA-1) قيمة الالتزام الفعلية بعملته: مبلغه الأصلي + تصحيحاته الإلحاقية. التصحيحات للرصيد
- * الافتتاحي وحده (payable_adjustments) — والتزام التشغيل بلا تصحيحات فقيمته مبلغه.
+ * الافتتاحي عبر كاتبه، وإلغاء فاتورة مورد عبر مصدر تشغيلي إلحاقي موثّق.
  */
 export function payableAmountSql(p: string, cutoff?: PayableSqlCutoff): string {
   return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id${payableCutoffSql("pa", cutoff)}), 0))`;
@@ -14529,7 +14531,7 @@ const PAYABLE_SELECT = `
          b.source_type, b.as_of_date, b.reference, b.opening_reason
     FROM payables b JOIN parties t ON t.id = b.party_id`;
 
-export async function createPayable(input: {
+export interface CreatePayableInput {
   partyId: number;
   category: string;
   description: string;
@@ -14540,12 +14542,35 @@ export async function createPayable(input: {
   labOrderId: number | null;
   dueDate: string | null;
   createdBy: string;
-}): Promise<Payable | null> {
+}
+
+export async function createPayable(input: CreatePayableInput): Promise<Payable | null> {
   await ensureSchema();
+  return withTransaction(getPool(), client => createPayableInTransaction(client, input));
+}
+
+/**
+ * Existing native-currency payable write on a caller-owned transaction. The
+ * caller owns authorization, party/source locks, source linkage, command replay
+ * and mandatory audit, and must roll back on every error. This primitive does
+ * not acquire another connection, provision schema, commit, release or retry.
+ * Only the existing lab-order uniqueness rule deduplicates this insert; ordinary
+ * supplier invoices require their own immutable source link and operation key.
+ */
+export async function createPayableInTransaction(client: DbClient, input: CreatePayableInput): Promise<Payable | null> {
+  try {
+    await client.query("SAVEPOINT payable_writer_transaction_check");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "25P01") {
+      throw Object.assign(new Error("Payable writer requires an explicit caller-owned transaction"), { code: "transaction_required" });
+    }
+    throw error;
+  }
+  await client.query("RELEASE SAVEPOINT payable_writer_transaction_check");
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
   );
-  const { rows } = await getPool().query<{ id: number }>(
+  const { rows } = await client.query<{ id: number }>(
     `INSERT INTO payables (party_id, category, description, amount_minor, currency,
                            exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::int, $10::date, $11)
@@ -14557,7 +14582,7 @@ export async function createPayable(input: {
     ],
   );
   if (!rows[0]) return null;
-  const { rows: full } = await getPool().query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [rows[0].id]);
+  const { rows: full } = await client.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [rows[0].id]);
   return full[0] ? toPayable(full[0]) : null;
 }
 
@@ -15068,7 +15093,7 @@ export async function listPartyOpenings(): Promise<{
     pool.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.source_type = 'opening' ORDER BY t.name, b.currency, b.id`),
     pool.query<{ id: number; payable_id: number; delta_minor: string; reason: string; created_by: string; created_at: Date }>(
       `SELECT a.id, a.payable_id, a.delta_minor, a.reason, a.created_by, a.created_at
-         FROM payable_adjustments a ORDER BY a.id`,
+         FROM payable_adjustments a JOIN payables p ON p.id=a.payable_id WHERE p.source_type='opening' ORDER BY a.id`,
     ),
     pool.query<AdvanceRow>(`${ADVANCE_SELECT} ORDER BY t.name, o.currency, o.id`),
   ]);
@@ -16277,6 +16302,23 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   )) as { rows: { table_name: string }[] };
   const tables = tableRows.map((row) => row.table_name);
 
+  // This registry is derived exactly from immutable invoice sources. Their
+  // INSERT triggers reconstruct it on restore, so replaying registry INSERTs
+  // would duplicate it. Refuse drift before emitting any backup SQL; never omit
+  // historical rows merely because a table happens to have the expected name.
+  if (tables.includes("supplier_invoice_number_claims")) {
+    const { rows: [projection] } = (await pool.query(
+      "SELECT to_regclass('public.inventory_supplier_number_sources') IS NOT NULL AS present")) as { rows: { present: boolean }[] };
+    if (!projection?.present) throw new Error("supplier_number_reconstruction_unavailable");
+    const { rows: [comparison] } = (await pool.query(
+      `SELECT EXISTS(
+        (SELECT * FROM supplier_invoice_number_claims EXCEPT SELECT * FROM inventory_supplier_number_sources)
+        UNION ALL
+        (SELECT * FROM inventory_supplier_number_sources EXCEPT SELECT * FROM supplier_invoice_number_claims)
+      ) AS drift`)) as { rows: { drift: boolean }[] };
+    if (!comparison || comparison.drift) throw new Error("supplier_number_reconstruction_drift");
+  }
+
   // الترتيب من مفاتيح القاعدة نفسها لا من قائمة مكتوبة بيد: قائمةٌ يدوية تنسى جدولًا
   // يُضاف غدًا، فتفشل الاستعادة بخطأ مفتاح أجنبي في أسوأ لحظة.
   const { rows: fkRows } = (await pool.query(
@@ -16331,6 +16373,12 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   // Number history is not a patient FK: it survives deletion. Restore current aliases
   // first, then historical reservations (a canonical spelling edit may share its value).
   dependsOn.get("retired_patient_numbers")?.add("patients");
+  // Inventory insertion guards require admission before a result and every
+  // revision before its immutable financial posting, beyond the FK graph.
+  if (dependsOn.has("inventory_command_bindings"))
+    dependsOn.get("inventory_operations")?.add("inventory_command_bindings");
+  if (dependsOn.has("supplier_invoice_revisions"))
+    dependsOn.get("supplier_invoice_payable_links")?.add("supplier_invoice_revisions");
   const ordered = insertionOrder(
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
@@ -16352,13 +16400,23 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   for (const table of ordered) {
     // Capability belongs to the target migration, never to restored application data.
     if (table === "lab_work_intent_schema") continue;
+    if (table === "supplier_invoice_number_claims") {
+      yield `\n-- supplier_invoice_number_claims: verified exact reconstruction from immutable invoice sources\n`;
+      continue;
+    }
     const { rows: columnRows } = (await pool.query(
       `SELECT column_name, data_type, column_default, is_identity FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = $1
         ORDER BY ordinal_position`,
       [table],
     )) as { rows: { column_name: string; data_type: string; column_default: string | null; is_identity: string }[] };
-    const columns = columnRows.map((row) => row.column_name);
+    // XID8 is local transaction machinery, not historical command identity.
+    // A restored admission belongs to the restore transaction; carrying a source
+    // cluster XID can collide with a later destination transaction and falsely
+    // classify a durable admission as uncommitted. Payload/actor/key stay exact.
+    const restoredColumns = table === "inventory_command_bindings"
+      ? columnRows.filter((row) => row.column_name !== "created_xid") : columnRows;
+    const columns = restoredColumns.map((row) => row.column_name);
     if (columns.length === 0) continue;
     /* (P1.14) التسلسل واعٍ بأنواع الأعمدة: jsonb يُكتب JSON، وARRAY literal
        مصفوفة — القيمة وحدها لا تكفي للتمييز (pg يفكّ الاثنين إلى قيم JS).
@@ -16378,8 +16436,9 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       : table === "legacy_treatment_document_revisions" ? " ORDER BY document_id, version"
       : table === "hr_effective_revisions" ? " ORDER BY stream_id, revision"
       : table === "invoice_archive_events" ? " ORDER BY invoice_id, version"
-      : table === "ortho_followup_coverage_revisions" ? " ORDER BY ortho_case_id, version" : "";
-    const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"${restoreOrder}`);
+      : table === "ortho_followup_coverage_revisions" ? " ORDER BY ortho_case_id, version"
+      : table === "supplier_invoice_revisions" ? " ORDER BY invoice_id, version" : "";
+    const { rows } = await pool.query(`SELECT ${backupSelectColumns(restoredColumns)} FROM "${table}"${restoreOrder}`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
       if (table === "plan_items" && typeof row.id === "number" && typeof row.visit_id === "number") {
@@ -27620,6 +27679,7 @@ export async function resetClinicData<F>(
         const { rows: [history] } = await client.query<{ present: boolean }>(`SELECT ${followupTables.map(table => `EXISTS(SELECT 1 FROM ${table})`).join(" OR ")} AS present`);
         if (history.present) throw new ProtectedOrthoFollowupHistoryError();
       }
+      const emptyInventoryTables = await protectInventoryHistoryForReset(client);
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
       await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_numbering'))");
       await client.query("LOCK TABLE retired_patient_numbers IN EXCLUSIVE MODE");
@@ -27641,17 +27701,20 @@ export async function resetClinicData<F>(
       // The receipt table is KEEP, never an unconditional wipe target. It is
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${INVOICE_ACTION_HISTORY_TABLES.join(", ")}, ${LAB_HISTORY_TABLES.join(", ")}${followupTables.length ? ", " + followupTables.join(", ") : ""} RESTART IDENTITY`);
+      const emptyInventorySuffix = emptyInventoryTables.length ? `, ${emptyInventoryTables.join(", ")}` : "";
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${INVOICE_ACTION_HISTORY_TABLES.join(", ")}, ${LAB_HISTORY_TABLES.join(", ")}${followupTables.length ? ", " + followupTables.join(", ") : ""}${emptyInventorySuffix} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }
       await client.query(`UPDATE hr_leave_balances SET used_days = 0, pending_days = 0`);
+      const staffIdentityRotation = await rotateResetStaffIdentityInTransaction(client);
       await client.query(
         `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
          VALUES ('system.reset', 'system', NULL, $1, $2::jsonb, $3, $4::text, $5::text, $6::text)`,
         [
           describeAudit("system.reset", `${counts.patients ?? 0} مريضًا`),
-          JSON.stringify(sanitizeDetails({ ...counts, نسخة_قبل_المسح: backed.backupId })),
+          JSON.stringify(sanitizeDetails({ ...counts, نسخة_قبل_المسح: backed.backupId,
+            ...(staffIdentityRotation ? { staffExecutionEpochId: staffIdentityRotation.executionEpochId } : {}) })),
           input.actor, input.actorRole, source.ip, source.userAgent,
         ],
       );

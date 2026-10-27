@@ -8,6 +8,7 @@ import { restoreClientConfigFor } from "./client-config";
 import { readTarGzEntries } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
+import { finalizeRestoredStaffIdentityInTransaction } from "../staff-authority-lifecycle.mjs";
 
 /**
  * الاستعادة بإعداد Staging/Cutover (P1.15) — لا حالة نصف مستعادة أبدًا.
@@ -197,6 +198,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
         }
         await client.query("SET CONSTRAINTS ALL DEFERRED");
         await client.query(dataSql);
+        // Preserve historical realm/subjects, but never reopen a rolled-back
+        // command history under the original execution epoch.
+        await finalizeRestoredStaffIdentityInTransaction(client);
         // Force every deferred foreign key check before restoring its original declaration.
         await client.query("SET CONSTRAINTS ALL IMMEDIATE");
         for (const key of cyclicKeys) {
