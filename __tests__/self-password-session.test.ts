@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -80,6 +81,8 @@ async function loginToken(password = OLD_PASSWORD) {
   expect(response.status).toBe(200);
   const token = response.cookies.get(SESSION_COOKIE)?.value;
   expect(token).toBeTruthy();
+  const claims = readSessionToken(token)!;
+  for (const key of ["authority", "staffAuthority", "durableIdentity"]) expect(Object.hasOwn(claims, key)).toBe(false);
   return token!;
 }
 async function renew() {
@@ -112,6 +115,7 @@ describe("self-password session renewal", () => {
     const token = response.cookies.get(SESSION_COOKIE)?.value;
     expect(token).toBeTruthy();
     const payload = readSessionToken(token)!;
+    for (const key of ["authority", "staffAuthority", "durableIdentity"]) expect(Object.hasOwn(payload, key)).toBe(false);
     expect(payload).toMatchObject({ userId: user.id, username: user.username, role, partyId: user.partyId });
     expect(payload.expiresAt).toBeGreaterThanOrEqual(before + SESSION_DURATION_MS);
     expect(payload.expiresAt).toBeLessThanOrEqual(Date.now() + SESSION_DURATION_MS);
@@ -243,6 +247,7 @@ describe("self-password session renewal", () => {
     expect(response.status).toBe(200);
     const token = response.cookies.get(SESSION_COOKIE)?.value;
     const payload = readSessionToken(token)!;
+    for (const key of ["authority", "staffAuthority", "durableIdentity"]) expect(Object.hasOwn(payload, key)).toBe(false);
     expect(payload.credentialVersion).toBe(sessionCredentialVersion(mocks.update.mock.calls[0][1].passwordHash));
     expect(payload.credentialVersion).not.toBe(sessionCredentialVersion(competingHash));
     useToken(token!);
@@ -258,4 +263,12 @@ describe("self-password session renewal", () => {
     expect(response.cookies.get(SESSION_COOKIE)).toBeUndefined();
     expect(mocks.audit).not.toHaveBeenCalled();
   });
+});
+
+it("does not renew a signed canonical-marked session through legacy password flow", async () => {
+ const body = Buffer.from(JSON.stringify({userId:user.id,username:user.username,role:user.role,expiresAt:Date.now()+60_000,durableIdentity:{schemaVersion:2}})).toString("base64url");
+ const signature = createHmac("sha256",process.env.SESSION_SECRET!).update(body).digest("base64url");
+ useToken(`${body}.${signature}`);
+ expect((await renew()).status).toBe(401);
+ expect(mocks.update).not.toHaveBeenCalled();
 });

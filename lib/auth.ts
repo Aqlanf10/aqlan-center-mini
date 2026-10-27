@@ -83,30 +83,38 @@ export function sessionPermissionVersion(role: string, raw: unknown): string {
     .digest("base64url");
 }
 
+const forbiddenLegacyMarkers = ["authority", "staffAuthority", "durableIdentity"] as const;
+export function hasCanonicalSessionMarker(payload: object): boolean {
+  return forbiddenLegacyMarkers.some(key => Object.hasOwn(payload, key));
+}
+
 /** جلسة موقّعة: البيانات ظاهرة، والتوقيع هو ما يمنع تزويرها. */
 export function createSessionToken(payload: SessionPayload): string {
+  if (hasCanonicalSessionMarker(payload)) throw new Error("CANONICAL_SESSION_ISSUANCE_UNSUPPORTED");
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${body}.${sign(body)}`;
 }
 
-export function readSessionToken(token: string | undefined): SessionPayload | null {
-  if (!token) return null;
-  const [body, signature] = token.split(".");
-  if (!body || !signature) return null;
-
-  const expected = sign(body);
+/** Signature envelope only, NOT authentication. Canonical and legacy payloads
+ * have separate strict consumers; no caller-provided identity is trusted here. */
+export function readSignedSessionEnvelope(token: string | undefined): unknown | null {
+  if (typeof token !== "string" || token.length > 32768) return null;
+  const segments = token.split(".");
+  if (segments.length !== 2) return null;
+  const [body, signature] = segments;
+  if (!body || !signature || !/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]+$/.test(signature)) return null;
   const given = Buffer.from(signature);
-  const want = Buffer.from(expected);
+  const want = Buffer.from(sign(body));
   if (given.length !== want.length || !timingSafeEqual(given, want)) return null;
-
-  try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as SessionPayload;
-    // التوقيع يمنع التزوير، والانتهاء يمنع بقاء جلسة مسروقة صالحة إلى الأبد.
-    if (typeof payload.expiresAt !== "number" || payload.expiresAt < Date.now()) return null;
-    if (typeof payload.userId !== "number") return null;
-    return payload;
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(Buffer.from(body, "base64url").toString()); }
+  catch { return null; }
 }
 
+export function readSessionToken(token: string | undefined): SessionPayload | null {
+  const payload = readSignedSessionEnvelope(token);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || hasCanonicalSessionMarker(payload)) return null;
+  const candidate = payload as Partial<SessionPayload>;
+  if (typeof candidate.expiresAt !== "number" || !Number.isFinite(candidate.expiresAt) || candidate.expiresAt <= Date.now()) return null;
+  if (!Number.isSafeInteger(candidate.userId) || (candidate.userId ?? 0) < 1) return null;
+  return candidate as SessionPayload;
+}
