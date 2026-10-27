@@ -141,7 +141,7 @@ it.each([3, 4, 5, 6])("admin label, absent grant or missing prerequisite %s neve
 it("reader advertises create only for owner or exact effective grant; DTO is not authority", async () => {
     for (const id of [1, 2, 4]) {
         const dto = await readCanonicalInventoryReferences(pool, await session(id), "", 0, schema);
-        expect(dto.allowedActions).toEqual(id === 4 ? [] : ["item.create"]);
+        expect(dto.allowedActions).toEqual(id === 1 ? ["item.create", "unit.revise", "location.create"] : id === 4 ? [] : ["item.create"]);
         await expect(commandCanonicalInventoryItemCreate(pool, dto as never, await intent(id), "admit", undefined, schema)).rejects.toThrow(/SESSION/);
     }
 });
@@ -197,27 +197,30 @@ it("only current exact subject/generation intent is accepted; never rewrite old 
 });
 it("lower facade rejects cloned/projection, wrong action/client/schema and expired handles", async () => {
     const original = await intent(), before = await snapshot();
-    let escaped: StaffOperationHandle | undefined;
-    await withStaffOperation(pool, await session(), "inventory.items.create", async (c, h) => {
-        escaped = h;
-        const projection = await staffOperationIdentity(c, h, "inventory.items.create", schema);
-        for (const fake of [{}, { ...h }, projection])
-            await expect(runCanonicalInventoryItemCreateLifecycle(c, fake as StaffOperationHandle, original, "admit", undefined, schema)).rejects.toThrow(/HANDLE_INVALID/);
+    for (const kind of ["empty", "clone", "projection"] as const) {
+        await expect(withStaffOperation(pool, await session(), "inventory.items.create", async (c, h) => {
+            const fake = kind === "empty" ? {} : kind === "clone" ? { ...h } : await staffOperationIdentity(c, h, "inventory.items.create", schema);
+            return runCanonicalInventoryItemCreateLifecycle(c, fake as StaffOperationHandle, original, "admit", undefined, schema);
+        }, schema)).rejects.toThrow(/HANDLE_INVALID/);
+    }
+    await expect(withStaffOperation(pool, await session(), "inventory.items.create", async (_c, h) => {
         const other = await pool.connect();
         try {
-            await expect(runCanonicalInventoryItemCreateLifecycle(other, h, original, "admit", undefined, schema)).rejects.toThrow(/HANDLE_INVALID/);
-        }
-        finally {
+            return await runCanonicalInventoryItemCreateLifecycle(other, h, original, "admit", undefined, schema);
+        } finally {
             other.release();
         }
-        await expect(runCanonicalInventoryItemCreateLifecycle(c, h, original, "admit", undefined, "public")).rejects.toThrow("STAFF_OPERATION_HANDLE_SCHEMA_MISMATCH");
-    }, schema);
-    await withStaffOperation(pool, await session(), "inventory.references.view", async (c, h) => { await expect(runCanonicalInventoryItemCreateLifecycle(c, h, original, "admit", undefined, schema)).rejects.toThrow(/HANDLE_INVALID/); }, schema);
+    }, schema)).rejects.toThrow(/HANDLE_INVALID/);
+    await expect(withStaffOperation(pool, await session(), "inventory.items.create", (c, h) =>
+        runCanonicalInventoryItemCreateLifecycle(c, h, original, "admit", undefined, "public"), schema)).rejects.toThrow("STAFF_OPERATION_HANDLE_SCHEMA_MISMATCH");
+    await expect(withStaffOperation(pool, await session(), "inventory.references.view", (c, h) =>
+        runCanonicalInventoryItemCreateLifecycle(c, h, original, "admit", undefined, schema), schema)).rejects.toThrow(/HANDLE_INVALID/);
+    let escaped: StaffOperationHandle | undefined;
+    await withStaffOperation(pool, await session(), "inventory.items.create", async (_c, h) => { escaped = h; }, schema);
     const c = await pool.connect();
     try {
         await expect(runCanonicalInventoryItemCreateLifecycle(c, escaped!, original, "admit", undefined, schema)).rejects.toThrow(/HANDLE_INVALID/);
-    }
-    finally {
+    } finally {
         c.release();
     }
     expect(await snapshot()).toEqual(before);
@@ -501,4 +504,29 @@ it.each(["execute", "retire"] as const)("temporary decoy journals cannot shadow 
     }, schema);
     expect(outcome.status).toBe(mode === "execute" ? "committed" : "retired");
     expect(await counts(original)).toEqual(mode === "execute" ? { items: 1, units: 1, audits: 1 } : { items: 0, units: 0, audits: 0 });
+});
+it.each(["execute", "retire"] as const)("released admission savepoint is not a committed transaction for %s", async mode => {
+    const original = await intent(), before = await snapshot();
+    await expect(withStaffOperation(pool, await session(), "inventory.items.create", async (c, h) => {
+        const xid = (await c.query<{ xid: string }>("SELECT pg_current_xact_id()::text AS xid")).rows[0].xid;
+        await c.query("SAVEPOINT synthetic_item_admission");
+        await runCanonicalInventoryItemCreateLifecycle(c, h, original, "admit", undefined, schema);
+        await c.query("RELEASE SAVEPOINT synthetic_item_admission");
+        expect((await c.query<{ xid: string }>("SELECT pg_current_xact_id()::text AS xid")).rows[0].xid).toBe(xid);
+        await runCanonicalInventoryItemCreateLifecycle(c, h, original, mode, "Synthetic savepoint refusal", schema);
+    }, schema)).rejects.toMatchObject({ code: "command_admission_uncommitted" });
+    expect(await snapshot()).toEqual(before);
+});
+it.each(["execute", "retire"] as const)("rolled-back admission savepoint leaves no provenance for %s in the same top-level XID", async mode => {
+    const original = await intent(), before = await snapshot();
+    await expect(withStaffOperation(pool, await session(), "inventory.items.create", async (c, h) => {
+        const xid = (await c.query<{ xid: string }>("SELECT pg_current_xact_id()::text AS xid")).rows[0].xid;
+        await c.query("SAVEPOINT synthetic_item_admission");
+        await runCanonicalInventoryItemCreateLifecycle(c, h, original, "admit", undefined, schema);
+        await c.query("ROLLBACK TO SAVEPOINT synthetic_item_admission");
+        await c.query("RELEASE SAVEPOINT synthetic_item_admission");
+        expect((await c.query<{ xid: string }>("SELECT pg_current_xact_id()::text AS xid")).rows[0].xid).toBe(xid);
+        await runCanonicalInventoryItemCreateLifecycle(c, h, original, mode, "Synthetic rolled-back admission", schema);
+    }, schema)).rejects.toMatchObject({ code: "command_provenance_required" });
+    expect(await snapshot()).toEqual(before);
 });

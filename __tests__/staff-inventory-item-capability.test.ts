@@ -6,7 +6,7 @@ const document=(grants:StaffCapabilityDocument["grants"]={}):StaffCapabilityDocu
 const subject={userId:17,role:"doctor",isActive:true,clinicianPartyId:null};
 const resolve=(grants:StaffCapabilityDocument["grants"])=>resolveStaffCapabilities({subject,permissionDocument:document(grants)});
 it("changes policy semantics without changing schema1 documents or inferring creation",()=>{
- expect(STAFF_AUTHORIZATION_POLICY_VERSION).toBe(3);expect(STAFF_CAPABILITY_SCHEMA_VERSION).toBe(1);
+ expect(STAFF_AUTHORIZATION_POLICY_VERSION).toBe(4);expect(STAFF_CAPABILITY_SCHEMA_VERSION).toBe(1);
  const old=document({"inventory.references.view":true});expect(parseStaffCapabilityDocument(old)).toMatchObject({ok:true,value:old});
  const access=resolveStaffCapabilities({subject,permissionDocument:old});expect(hasStaffCapability(access,"inventory.references.view")).toBe(true);expect(hasStaffCapability(access,"inventory.items.create")).toBe(false);
  expect(old.grants).toEqual({"inventory.references.view":true});

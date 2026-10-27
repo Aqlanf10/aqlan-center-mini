@@ -22,6 +22,9 @@ import {
 } from "../inventory-reference-protocol";
 import { createInventoryCommandLifecycle, runCanonicalInventoryItemCreateLifecycle,
   snapshotCanonicalItemCreateIntent, validateCanonicalItemCreateMode,
+  runCanonicalInventoryUnitReviseLifecycle, runCanonicalInventoryLocationCreateLifecycle,
+  snapshotCanonicalUnitReviseIntent, snapshotCanonicalLocationCreateIntent,
+  type CanonicalUnitReviseMode, type CanonicalLocationCreateMode,
   type CanonicalItemCreateMode } from "./command-lifecycle";
 import {
   INVENTORY_CLINIC_SCOPE,
@@ -253,7 +256,11 @@ export async function readCanonicalInventoryReferences(
     );
     invariant(ready.rows[0]?.ready, "schema_not_ready", "Reference read schema is not installed");
     const preview = await staffOperationReferenceCapabilities(client, handle, referenceSchema);
-    return readReferenceFacts(client, Object.freeze({realmId: identity.realmId, subjectId: identity.subjectId, generation: identity.generationId}), preview.includes("inventory.items.create") ? ["item.create"] : [], query, page, referenceSchema);
+    const allowedActions: ReferenceAction[] = [];
+    if (preview.includes("inventory.items.create")) allowedActions.push("item.create");
+    if (preview.includes("inventory.units.revise")) allowedActions.push("unit.revise");
+    if (preview.includes("inventory.locations.create")) allowedActions.push("location.create");
+    return readReferenceFacts(client, Object.freeze({realmId: identity.realmId, subjectId: identity.subjectId, generation: identity.generationId}), allowedActions, query, page, referenceSchema);
   }, schema);
 }
 
@@ -270,6 +277,32 @@ export async function commandCanonicalInventoryItemCreate(
   const referenceSchema = staffIdentitySchemaName(schema);
   return withStaffOperation(pool, session, "inventory.items.create", (client, handle) =>
     runCanonicalInventoryItemCreateLifecycle(client, handle, intent, mode, reason, referenceSchema), referenceSchema);
+}
+
+/** Exact-action unit revision; no item-create authority is inferred or required. */
+export async function commandCanonicalInventoryUnitRevise(
+  pool: DbPool, session: VerifiedDurableSession, original: ReferenceIntent,
+  mode: CanonicalUnitReviseMode, reason?: string, schema = "public",
+): Promise<ReferenceReply> {
+  requireInventoryIntegration();
+  const intent = snapshotCanonicalUnitReviseIntent(original);
+  validateCanonicalItemCreateMode(mode, reason);
+  const referenceSchema = staffIdentitySchemaName(schema);
+  return withStaffOperation(pool, session, "inventory.units.revise", (client, handle) =>
+    runCanonicalInventoryUnitReviseLifecycle(client, handle, intent, mode, reason, referenceSchema), referenceSchema);
+}
+
+/** Existing doctor-party selection is a location binding, not identity authority. */
+export async function commandCanonicalInventoryLocationCreate(
+  pool: DbPool, session: VerifiedDurableSession, original: ReferenceIntent,
+  mode: CanonicalLocationCreateMode, reason?: string, schema = "public",
+): Promise<ReferenceReply> {
+  requireInventoryIntegration();
+  const intent = snapshotCanonicalLocationCreateIntent(original);
+  validateCanonicalItemCreateMode(mode, reason);
+  const referenceSchema = staffIdentitySchemaName(schema);
+  return withStaffOperation(pool, session, "inventory.locations.create", (client, handle) =>
+    runCanonicalInventoryLocationCreateLifecycle(client, handle, intent, mode, reason, referenceSchema), referenceSchema);
 }
 
 // Private bounded SQL shared with the existing admin/journal-restricted setup reader.

@@ -1,7 +1,7 @@
 /** Inert future policy catalogue. Nothing in this module grants access to live routes. */
 export const STAFF_CAPABILITY_SCHEMA_VERSION = 1 as const;
 /** Bump when authorization semantics change, even if the document schema does not. */
-export const STAFF_AUTHORIZATION_POLICY_VERSION = 3 as const;
+export const STAFF_AUTHORIZATION_POLICY_VERSION = 4 as const;
 
 export const STAFF_CAPABILITIES = Object.freeze([
   "patients.create", "patients.edit", "patients.delete", "patients.export",
@@ -17,7 +17,7 @@ export const STAFF_CAPABILITIES = Object.freeze([
   "finance.commissions.view-own", "finance.commissions.view-all", "finance.commissions.manage-rates",
   "finance.revenue.view", "finance.profits.view", "finance.suppliers.view", "finance.reconciliation.view",
   "finance.export", "reports.operational.view", "reports.financial.view", "reports.clinical.view", "reports.export",
-  "inventory.references.view", "inventory.items.create",
+  "inventory.references.view", "inventory.items.create", "inventory.units.revise", "inventory.locations.create",
   "staff.view", "staff.profile.edit", "staff.accounts.create", "staff.accounts.disable", "staff.permissions.edit",
   "settings.view", "settings.operational.edit", "settings.finance.edit", "audit.view", "audit.export",
 ] as const);
@@ -50,6 +50,8 @@ export function isStaffCapability(value: unknown): value is StaffCapability {
 /** Explicit action prerequisites. Reads never imply writes, refunds, exports or delegation. */
 export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapability, readonly StaffCapability[]>>> = Object.freeze({
   "inventory.items.create": Object.freeze(["inventory.references.view"] as const),
+  "inventory.units.revise": Object.freeze(["inventory.references.view"] as const),
+  "inventory.locations.create": Object.freeze(["inventory.references.view"] as const),
   "clinical.plans.edit": Object.freeze(["clinical.plans.view"] as const),
   "clinical.xrays.upload": Object.freeze(["clinical.xrays.view"] as const),
   "finance.invoices.cancel": Object.freeze(["finance.invoices.view"] as const),

@@ -34,8 +34,23 @@ Preflight→ensureSchema is still an unfenced initialization gap. Installation n
 
 ## Evidence scope
 
-New multi-family raw-canonical refusal fixtures and existing actual financial reader suites are queued behind the frozen full-PG run. The shared cleanup remains exercised through the real invoice wrapper by its six failure-injection tests; no unit mock is represented as real authentication evidence. No grants, migration registration or deployment.
+New multi-family raw-canonical refusal fixtures and existing actual financial reader suites passed. The shared cleanup remains exercised through the real invoice wrapper by its six failure-injection tests; no unit mock is represented as real authentication evidence. No grants, migration registration or deployment.
 
 ## Separate HR ownership repair
 
-`getTaskForSession` and `linkReadableForSession` now accept only an actual DbClient for composition. Standalone calls own one explicit transaction and delegate on that same client; inherited calls neither begin nor commit a nested transaction. No pool is cast to a client, no visibility predicate is widened, and the existing user/patient permission checks retain their held transaction context. New synthetic PG tests cover doctor visibility, revoked visibility redacting labels and historical values, and caller-owned rollback/XID preservation. These tests are pending execution at the initial checkpoint.
+`getTaskForSession` and `linkReadableForSession` now accept only an actual DbClient for composition. Standalone calls own one explicit transaction and delegate on that same client; inherited calls neither begin nor commit a nested transaction. No pool is cast to a client, no visibility predicate is widened, and the existing user/patient permission checks retain their held transaction context. New synthetic PG tests cover doctor visibility, revoked visibility redacting labels and historical values, and caller-owned rollback/XID preservation. These three real PostgreSQL tests passed alongside the existing HR visibility/replay suites.
+
+
+## Terminal verification — source checkpoint e6550a2b69684c29b85b8c47dad3eb6e199efdfc
+
+- Financial reader families and shared boundary: 141 PostgreSQL tests across six suites passed.
+- HR ownership/existing task behavior and reviewed inventory-maintenance refusal fixture: 50 PostgreSQL tests across four suites passed.
+- Amended clinical witness, plan summary parity and patient-statement composition: 25 PostgreSQL tests across three suites passed.
+- Focused lifetime/cleanup/session units: 30 passed.
+- Full unit suite: 780 files / 13,124 tests passed, exit 0.
+- Full TypeScript: passed using the established Node22 4096MB heap configuration. The first default-2048MB attempt exhausted its heap (exit134), retained as infrastructure evidence, not a source diagnostic or pass.
+- Focused lint and diff checks passed; independent source review cleared both financial and HR slices.
+
+Evidence under `recovery-evidence-20261027`: `financial-readonly-shared-pg.log`, `hr-task-reader-owned-pg.log`, `financial-readonly-composition-pg.log`, `financial-hr-readonly-unit.log`, `financial-hr-readonly-full-types-4096.log`, `financial-hr-readonly-lint.log`, `e655-full-unit.log`.
+
+These results do not resolve the separate canonical inventory supplier adapter/restore-provenance acceptance blocker. They do not authorize schema activation, real grants or Production deployment.

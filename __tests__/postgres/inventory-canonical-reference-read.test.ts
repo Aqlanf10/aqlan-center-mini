@@ -80,7 +80,7 @@ async function snapshot(){
 it("owner and explicit delegated grant read bounded reference DTO without any whole-row changes",async()=>{
  const before=await snapshot();
  for(const id of [1,2]){
-  const dto=await read(id);expect(dto.allowedActions).toEqual(id===1?["item.create"]:[]);expect(dto.items).toHaveLength(20);expect(dto.hasMore).toBe(true);
+  const dto=await read(id);expect(dto.allowedActions).toEqual(id===1?["item.create","unit.revise","location.create"]:[]);expect(dto.items).toHaveLength(20);expect(dto.hasMore).toBe(true);
   expect(dto.locations.map(l=>l.kind).sort()).toEqual(["custody","store","transit"]);expect(dto.doctors).toEqual([{id:20,name:"Doctor fixture"}]);
   expect(dto.policy).toEqual({version:1,limitMinor:10000,allowSelfApproval:false});
   expect(Object.keys(dto.items[0]).sort()).toEqual(["id","name","category","unit","isActive","version","enteredUnit","factor","enteredPrecision","basePrecision"].sort());

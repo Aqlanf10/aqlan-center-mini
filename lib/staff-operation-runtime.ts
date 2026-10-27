@@ -8,8 +8,8 @@ import { revalidateVerifiedDurableSession, type VerifiedDurableSession } from ".
 import { parseStaffCapabilityDocument } from "./staff-permission-envelope";
 import { hasStaffCapability, ownerContextFromTrustedBinding, resolveStaffCapabilities, staffAuthorizationFingerprint } from "./staff-capabilities";
 
-export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view" | "inventory.items.create";
-const actions = new Set<string>(["staff.view","staff.permissions.edit","inventory.references.view","inventory.items.create"]);
+export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view" | "inventory.items.create" | "inventory.units.revise" | "inventory.locations.create";
+const actions = new Set<string>(["staff.view","staff.permissions.edit","inventory.references.view","inventory.items.create","inventory.units.revise","inventory.locations.create"]);
 declare const operationBrand: unique symbol;
 export interface StaffOperationHandle { readonly [operationBrand]: true }
 interface OperationState {
@@ -97,12 +97,12 @@ export async function assertStaffOperation(client:DbClient,handle:StaffOperation
  await assertAndLoadStaffOperation(client,handle,action,schema);
 }
 /** Bounded display preview, never operation admission. An exact reference-read
- * handle is freshly asserted (including schema) before exposing the sole supported
- * create action. A caller must acquire a separate exact create handle to write. */
-export async function staffOperationReferenceCapabilities(client:DbClient,handle:StaffOperationHandle,schema:string):Promise<readonly "inventory.items.create"[]>{
+ * handle is freshly asserted (including schema) before exposing only implemented reference actions.
+ * Each mutation still requires its own separate exact action handle. */
+export async function staffOperationReferenceCapabilities(client:DbClient,handle:StaffOperationHandle,schema:string):Promise<readonly ("inventory.items.create" | "inventory.units.revise" | "inventory.locations.create")[]>{
  const exactSchema=staffIdentitySchemaName(schema);
  const current=await assertAndLoadStaffOperation(client,handle,"inventory.references.view",exactSchema);
- return Object.freeze(hasStaffCapability(current.access,"inventory.items.create")?["inventory.items.create" as const]:[]);
+ return Object.freeze((["inventory.items.create","inventory.units.revise","inventory.locations.create"] as const).filter(action=>hasStaffCapability(current.access,action)));
 }
 /** Owns transaction/commit. Trusted callback MUST NOT issue top-level transaction
  * control. Changed/ended XID refuses, but a malicious early COMMIT cannot be undone.
