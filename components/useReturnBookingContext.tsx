@@ -7,7 +7,15 @@ import { parseReturnBookingSource, type ReturnBookingSource } from "@/lib/return
 type SettingsTarget = { kind: "clinical" | "ortho"; id: number };
 type ContextOption = { source: ReturnBookingSource; label: string; doctorId: number | null; doctorName: string | null; settingsTarget: SettingsTarget; available: boolean };
 type Verified = { ok: true; patientId: number; source: ReturnBookingSource; doctorId: number; doctorName: string; fingerprint: string; settingsTarget?: SettingsTarget; label?: string };
-type Read = { scope: string; verified: Verified | null; contexts: ContextOption[]; message: string | null; settingsTarget?: SettingsTarget };
+/** Display only: who is suggested while responsibility awaits confirmation. Never a booking authority. */
+type Pending = { doctorName: string | null; message: string };
+type Read = { scope: string; verified: Verified | null; contexts: ContextOption[]; message: string | null; settingsTarget?: SettingsTarget; pending?: Pending | null };
+const readPending = (value: unknown): Pending | null => {
+  if (!value || typeof value !== "object") return null;
+  const { doctorName, message } = value as { doctorName?: unknown; message?: unknown };
+  if (typeof message !== "string" || !message.trim()) return null;
+  return { doctorName: typeof doctorName === "string" && doctorName.trim() ? doctorName : null, message };
+};
 const sourceKey = (source?: ReturnBookingSource | null) => source ? `${source.kind}:${source.id}` : "";
 const isSource = (source: unknown): source is ReturnBookingSource => parseReturnBookingSource(source) !== null;
 const isSettings = (value: unknown): value is SettingsTarget => !!value && typeof value === "object"
@@ -55,7 +63,8 @@ export function useReturnBookingContext({ patientId, source, enabled, locked = f
         if (contexts.length || !selectedKey) setOptionsRead({ scope: baseScope, contexts });
         const target = isSettings(data?.settingsTarget) ? data.settingsTarget : contexts.find(item => sourceKey(item.source) === selectedKey)?.settingsTarget ?? (contexts.length === 1 ? contexts[0].settingsTarget : undefined);
         setRead({ scope, verified: valid ? data : null, contexts,
-          message: valid || (!selectedKey && response.ok) ? null : typeof data?.message === "string" ? data.message : "تعذّر التحقق من سياق الحالة والطبيب المسؤول.", settingsTarget: target });
+          message: valid || (!selectedKey && response.ok) ? null : typeof data?.message === "string" ? data.message : "تعذّر التحقق من سياق الحالة والطبيب المسؤول.", settingsTarget: target,
+          pending: !valid && data?.code === "responsibility_missing" ? readPending(data.responsibilitySuggestion) : null });
       } catch { if (!controller.signal.aborted) fail("تعذّر تحميل الطبيب المسؤول. أعد المحاولة."); }
       finally { clearTimeout(timeout); }
     })();
@@ -83,11 +92,13 @@ export function useReturnBookingContext({ patientId, source, enabled, locked = f
     </label> : null}
     {verified ? <p className="font-bold">الطبيب المسؤول الحالي: {verified.doctorName}</p>
       : <p role="status" className="mt-1 text-xs">{!patientId ? "اختر ملف المريض وسياق الحالة قبل حجز المراجعة." : current?.message ?? (current && !selected ? "اختر الحالة لتحديد طبيبها المسؤول، وليس طبيبًا بديلًا لهذا الموعد فقط." : "جارٍ التحقق من الطبيب المسؤول…")}</p>}
+    {!verified && current?.pending ? <p role="note" data-testid="responsibility-pending" className="mt-1 text-xs font-bold text-amber-900">
+      {current.pending.doctorName ? `مقترح: ${current.pending.doctorName} — ${current.pending.message}` : current.pending.message}</p> : null}
     {!verified && current ? <div className="mt-2 flex flex-wrap gap-3 text-xs">
       <button type="button" disabled={locked} onClick={refresh} className="min-h-9 rounded-lg border border-sky-300 bg-white px-3 font-bold">تحديث الطبيب المسؤول</button>
       {settingsHref ? <a href={settingsHref} className="min-h-9 rounded-lg border border-sky-300 bg-white px-3 py-2 font-bold">إعداد الطبيب المسؤول للحالة</a>
         : patientId ? <a href={`/patients/${patientId}?tab=treatment&sub=cases`} className="py-2 font-bold underline">مراجعة سياق الحالة ومسؤوليتها</a> : null}
-      <span>تُضبط المسؤولية من إعدادات الحالة بواسطة المدير؛ لا يُختار طبيب عابر لهذا الموعد.</span>
+      <span>تُعتمد المسؤولية من إعدادات الحالة بواسطة الإدارة أو من تمنحه الصلاحية؛ لا يُختار طبيب عابر لهذا الموعد.</span>
     </div> : null}
   </section>;
   return { ready: !enabled || !!verified, verified, view, refresh, handleRejection,

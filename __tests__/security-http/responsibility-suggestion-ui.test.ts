@@ -15,6 +15,7 @@ let browser: Browser;
 const stamp = Date.now();
 let serial = 0;
 let doctorA = { id: 0, name: "" }, doctorB = { id: 0, name: "" };
+let reception = { id: 0, permissions: null as unknown };
 
 beforeAll(async () => {
   h = await harness();
@@ -23,9 +24,14 @@ beforeAll(async () => {
   const party = async (username: string) => (await db.query<{ id: number; name: string }>(
     "SELECT p.id, p.name FROM users u JOIN parties p ON p.id = u.party_id WHERE u.username = $1", [username])).rows[0];
   doctorA = await party("secdoctora"); doctorB = await party("secdoctorb");
+  ({ rows: [reception] } = await db.query<{ id: number; permissions: unknown }>("SELECT id, permissions FROM users WHERE username = 'secreception'"));
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
-afterAll(async () => { await browser?.close(); await db?.end(); });
+afterAll(async () => {
+  // Restore the shared harness account exactly; later suites rely on its default grants.
+  if (reception.id) await db?.query("UPDATE users SET permissions = $2 WHERE id = $1", [reception.id, reception.permissions]);
+  await browser?.close(); await db?.end();
+});
 
 /** A case opened without a responsible doctor whose live plan item is recorded for doctor A. */
 async function unassignedCase() {
@@ -48,7 +54,7 @@ async function openSettings(patientId: number, width: number) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=cases`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "إعداد الطبيب المسؤول", exact: true }).click();
+  await page.getByRole("button", { name: "الطبيب المسؤول عن الحالة", exact: true }).click();
   const note = page.getByRole("note").filter({ hasText: "مقترح:" });
   await note.waitFor({ timeout: 30_000 });
   return { context, page, errors, note, select: page.getByLabel("الطبيب المسؤول الجديد", { exact: true }),
@@ -123,4 +129,117 @@ describe.each([390, 1280])("responsibility suggestion at %ipx", (width) => {
       expect(await audits(f.patientId)).toHaveLength(1);
     } finally { await ui.context.close(); }
   }, 120_000);
+});
+
+/** A planned next visit linked through its treatment session to the unassigned case. */
+async function plannedVisitFor(patientId: number, clinicalId: number) {
+  const { rows: [item] } = await db.query<{ id: number; plan_id: number }>("SELECT i.id, i.plan_id FROM plan_items i WHERE i.case_id = $1", [clinicalId]);
+  const { rows: [planned] } = await db.query<{ id: number }>(`INSERT INTO planned_visits (patient_id, plan_id, sequence, title, status)
+    VALUES ($1, $2, 1, 'جلسة مراجعة اصطناعية', 'planned') RETURNING id`, [patientId, item.plan_id]);
+  await db.query("INSERT INTO treatment_sessions (plan_item_id, sequence, planned_visit_id) VALUES ($1, 1, $2)", [item.id, planned.id]);
+  return planned.id;
+}
+async function asRole(role: "admin" | "reception", width = 1280) {
+  const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block" });
+  const [name, ...value] = h.sessions[role].cookie.split("=");
+  await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  return { context, page, errors };
+}
+const confirmGrant = async () => (await db.query("SELECT permissions::jsonb->>'canConfirmCaseResponsibility' AS v FROM users WHERE id = $1", [reception.id])).rows[0].v;
+async function setReceptionConfirm(value: boolean) {
+  const response = await authedMutation(`/api/users/${reception.id}`, h.sessions.admin, "PATCH", JSON.stringify({
+    permissions: { ...JSON.parse((await db.query<{ p: string | null }>("SELECT permissions AS p FROM users WHERE id = $1", [reception.id])).rows[0].p ?? "{}"), canConfirmCaseResponsibility: value } }));
+  expect(response.status, await response.clone().text()).toBe(200);
+}
+
+describe("reception sees the suggestion; confirmation follows the grant managed in settings", () => {
+  it("view-only by default, granted from settings, revoked mid-window (refused), re-granted, confirmed, then booked", async () => {
+    const f = await unassignedCase();
+    const plannedId = await plannedVisitFor(f.patientId, f.clinicalId);
+    // 1. Default reception: the booking form shows who is suggested, awaiting confirmation; booking stays unavailable.
+    const desk = await asRole("reception", 390);
+    try {
+      await desk.page.goto(`${baseUrl}/patients/${f.patientId}?tab=summary`, { waitUntil: "domcontentloaded" });
+      await desk.page.getByRole("button", { name: "جدولها", exact: true }).click();
+      const pending = desk.page.getByTestId("responsibility-pending");
+      await pending.waitFor({ timeout: 30_000 });
+      expect((await pending.innerText()).trim()).toBe(`مقترح: ${doctorA.name} — بانتظار تأكيد المدير.`);
+      expect(await desk.page.getByRole("button", { name: "احجز", exact: true }).isDisabled()).toBe(true);
+      // The case panel is read-only for this grant; a direct save is refused server-side.
+      await desk.page.goto(`${baseUrl}/patients/${f.patientId}?tab=treatment&sub=cases`, { waitUntil: "domcontentloaded" });
+      await desk.page.getByRole("button", { name: "الطبيب المسؤول عن الحالة", exact: true }).click();
+      await desk.page.getByText("بانتظار تأكيد الإدارة.", { exact: false }).waitFor({ timeout: 30_000 });
+      expect(await desk.page.getByRole("button", { name: "تأكيد الطبيب المقترح", exact: true }).count()).toBe(0);
+      const read = await (await authedGet(`/api/patients/${f.patientId}/responsibility?kind=clinical&sourceId=${f.clinicalId}`, h.sessions.reception)).json();
+      const denied = await authedMutation(`/api/patients/${f.patientId}/responsibility`, h.sessions.reception, "PATCH", JSON.stringify({
+        kind: "clinical", sourceId: f.clinicalId, expectedSourceFingerprint: read.sourceFingerprint, doctorId: doctorA.id, reason: "محاولة دون صلاحية" }));
+      expect(denied.status).toBe(403);
+      expect(await responsible(f.clinicalId)).toBeNull();
+      expect(await audits(f.patientId)).toEqual([]);
+      expect(desk.errors).toEqual([]);
+    } finally { await desk.context.close(); }
+
+    // 2. The admin grants confirmation to reception from the users settings screen.
+    const office = await asRole("admin");
+    try {
+      await office.page.goto(`${baseUrl}/settings/users`, { waitUntil: "domcontentloaded" });
+      const card = office.page.locator("div").filter({ hasText: "secreception" }).filter({ has: office.page.getByRole("button", { name: "🔐 الصلاحيات", exact: true }) }).last();
+      await card.getByRole("button", { name: "🔐 الصلاحيات", exact: true }).click();
+      const grant = office.page.getByRole("switch", { name: "اعتماد الطبيب المسؤول أو تغييره", exact: true });
+      expect(await grant.getAttribute("aria-checked")).toBe("false");
+      await grant.click();
+      const saved = office.page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/users/${reception.id}`);
+      await office.page.getByRole("button", { name: "حفظ التغييرات والصلاحيات", exact: true }).click();
+      const savedResponse = await saved;
+      expect(savedResponse.status(), `${savedResponse.url()} ${await savedResponse.text()} ${savedResponse.request().postData()}`).toBe(200);
+      await expect.poll(confirmGrant, { timeout: 30_000 }).toBe("true");
+      expect(office.errors).toEqual([]);
+    } finally { await office.context.close(); }
+
+    // 3. Granted reception opens the confirmation; the grant is withdrawn while the window is open: refused.
+    const granted = await asRole("reception");
+    try {
+      await granted.page.goto(`${baseUrl}/patients/${f.patientId}?tab=treatment&sub=cases`, { waitUntil: "domcontentloaded" });
+      await granted.page.getByRole("button", { name: "الطبيب المسؤول عن الحالة", exact: true }).click();
+      const confirm = granted.page.getByRole("button", { name: "تأكيد الطبيب المقترح", exact: true });
+      await confirm.waitFor({ timeout: 30_000 });
+      await setReceptionConfirm(false);
+      const refusal = granted.page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname.endsWith("/responsibility"));
+      await confirm.click();
+      expect((await refusal).status()).toBe(403);
+      await granted.page.getByText("اعتماد الطبيب المسؤول يحتاج صلاحية تمنحها الإدارة من الإعدادات.", { exact: false }).waitFor({ timeout: 30_000 });
+      expect(await responsible(f.clinicalId)).toBeNull();
+      expect(await audits(f.patientId)).toEqual([]);
+      // 4. Re-granted: the same reception user confirms without an admin role.
+      await setReceptionConfirm(true);
+      await granted.page.getByRole("button", { name: "تحديث البيانات", exact: true }).click();
+      await confirm.waitFor({ timeout: 30_000 });
+      await confirm.click();
+      await granted.page.getByText("حُفظ الطبيب المسؤول للمواعيد القادمة", { exact: false }).waitFor({ timeout: 30_000 });
+      expect(await responsible(f.clinicalId)).toBe(doctorA.id);
+      expect(await audits(f.patientId)).toEqual([{ doctor: doctorA.id, reason: "تأكيد الطبيب المقترح من بنود علاج الحالة" }]);
+      expect((await db.query("SELECT actor, actor_role FROM audit_log WHERE action = 'case.responsibility_change' AND entity_id = $1", [String(f.patientId)])).rows)
+        .toEqual([{ actor: "secreception", actor_role: "reception" }]);
+
+      // 5. Booking now proceeds normally, re-verified against the recorded responsibility.
+      await granted.page.goto(`${baseUrl}/patients/${f.patientId}?tab=summary`, { waitUntil: "domcontentloaded" });
+      await granted.page.getByRole("button", { name: "جدولها", exact: true }).click();
+      const region = granted.page.getByRole("region", { name: "الطبيب المسؤول عن موعد المراجعة" });
+      await expect.poll(() => region.innerText(), { timeout: 30_000 }).toContain(`الطبيب المسؤول الحالي: ${doctorA.name}`);
+      expect(await granted.page.getByTestId("responsibility-pending").count()).toBe(0);
+      const date = new Date(Date.now() + (420 + serial * 7) * 86_400_000);
+      while (date.getUTCDay() !== 0) date.setUTCDate(date.getUTCDate() + 1);
+      const day = date.toISOString().slice(0, 10);
+      await granted.page.getByLabel("التاريخ", { exact: true }).fill(day);
+      await granted.page.getByLabel("الوقت", { exact: true }).fill("17:00");
+      await granted.page.getByRole("button", { name: "احجز", exact: true }).click();
+      await expect.poll(async () => (await db.query("SELECT appointment_id FROM planned_visits WHERE id = $1", [plannedId])).rows[0].appointment_id, { timeout: 30_000 }).not.toBeNull();
+      expect((await db.query(`SELECT a.doctor_id, a.scheduled_date::text AS day FROM appointments a JOIN planned_visits v ON v.appointment_id = a.id WHERE v.id = $1`, [plannedId])).rows)
+        .toEqual([{ doctor_id: doctorA.id, day }]);
+      expect(granted.errors).toEqual([]);
+    } finally { await granted.context.close(); }
+  }, 300_000);
 });

@@ -40,6 +40,10 @@ export interface DoctorPermissions {
    * يُعيد الزحمة التي بُني المحرّك لمنعها.
    */
   canOverrideCapacity: boolean;
+  /** رؤية الطبيب المسؤول عن الحالة واقتراح النظام له (للقراءة فقط؛ ضمن الوصول إلى ملف المريض) */
+  canViewResponsibilitySuggestion: boolean;
+  /** اعتماد الطبيب المسؤول عن الحالة أو تغييره (افتراضياً: ❌ إلا للمدير — يُمنح صراحةً من الإعدادات) */
+  canConfirmCaseResponsibility: boolean;
 
   /* ================== ميزة المالية المخفية (Hidden Finance) ================== */
   /**
@@ -89,6 +93,8 @@ export const DEFAULT_DOCTOR_PERMISSIONS: DoctorPermissions = {
   canUploadXrays: true,
   canViewAllAppointments: false,
   canOverrideCapacity: false,
+  canViewResponsibilitySuggestion: false,
+  canConfirmCaseResponsibility: false,
 
   // ميزة المالية المخفية — مستحقاته الشخصية فقط، وإخفاء أسعار التكلفة والمصروفات والأرباح العامة وإيرادات المركز
   financialScope: "own_commissions_only",
@@ -119,6 +125,8 @@ export const ADMIN_PERMISSIONS: DoctorPermissions = {
   canUploadXrays: true,
   canViewAllAppointments: true,
   canOverrideCapacity: true,
+  canViewResponsibilitySuggestion: true,
+  canConfirmCaseResponsibility: true,
 
   financialScope: "clinic_and_own",
   canViewOwnCommissions: true,
@@ -148,6 +156,8 @@ export const RECEPTION_PERMISSIONS: DoctorPermissions = {
   canUploadXrays: true,
   canViewAllAppointments: true,
   canOverrideCapacity: false,
+  canViewResponsibilitySuggestion: true,
+  canConfirmCaseResponsibility: false,
 
   financialScope: "own_commissions_only",
   canViewOwnCommissions: false,

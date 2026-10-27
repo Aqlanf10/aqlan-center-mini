@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -8,8 +8,11 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
  * booking stays refused (responsibility_missing) until then.
  */
 assertRealPostgresUrl(); stubPostgresEnv();
+const auth = vi.hoisted(() => ({ token: "" }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => ({ value: auth.token }) }), headers: async () => new Headers() }));
 const db = await import("../../lib/db");
-const { sessionCredentialVersion } = await import("../../lib/auth");
+const { sessionCredentialVersion, createSessionToken } = await import("../../lib/auth");
+const { GET: returnContextRoute } = await import("../../app/api/patients/[id]/return-booking-context/route");
 const { patientResponsibilitySettings } = await import("../../lib/patient-responsibility-settings");
 const { readReturnBookingContext } = await import("../../lib/return-booking-context");
 let sequence = 0;
@@ -17,11 +20,13 @@ const q = async (sql: string, args: unknown[] = []) => (await db.getPool().query
 beforeAll(async () => { await dropPublicSchema(assertRealPostgresUrl()); await db.ensureSchema(); });
 afterAll(async () => { await db.resetPoolForTesting(); });
 
-async function admin() {
-  const username = `synthetic-suggest-admin-${++sequence}`, hash = "synthetic-unused-password-hash";
-  const [user] = await q("INSERT INTO users(username,display_name,password_hash,role) VALUES ($1,'Synthetic admin',$2,'admin') RETURNING id", [username, hash]);
-  return { userId: user.id as number, username, role: "admin", credentialVersion: sessionCredentialVersion(hash), expiresAt: Date.now() + 3600000 };
+async function staff(role: string, permissions: Record<string, boolean> | null = null) {
+  const username = `synthetic-suggest-${role}-${++sequence}`, hash = "synthetic-unused-password-hash";
+  const [user] = await q("INSERT INTO users(username,display_name,password_hash,role,permissions) VALUES ($1,'Synthetic staff',$2,$3,$4) RETURNING id",
+    [username, hash, role, permissions === null ? null : JSON.stringify(permissions)]);
+  return { userId: user.id as number, username, role, credentialVersion: sessionCredentialVersion(hash), expiresAt: Date.now() + 3600000 };
 }
+const admin = () => staff("admin");
 async function doctor(label: string, active = true) {
   const [row] = await q("INSERT INTO parties(name,kind,is_active) VALUES ($1,'doctor',$2) RETURNING id,name", [`Synthetic ${label} ${++sequence}`, active]);
   return row as { id: number; name: string };
@@ -86,4 +91,70 @@ it("offers nothing without an active candidate, and nothing once a responsible d
   const owned = await fixture([other.id]);
   await q("UPDATE clinical_cases SET responsible_party_id=$2 WHERE id=$1", [owned.clinicalId, current.id]);
   expect(await patientResponsibilitySettings(owned.target, await admin())).toMatchObject({ doctorId: current.id, suggestion: null, suggestionNote: null });
+});
+
+const writes = async (f: Awaited<ReturnType<typeof fixture>>) => ({ responsible: (await q("SELECT responsible_party_id FROM clinical_cases WHERE id=$1", [f.clinicalId]))[0].responsible_party_id,
+  audit: (await q("SELECT count(*)::int AS n FROM audit_log WHERE action='case.responsibility_change' AND entity_id=$1", [String(f.patientId)]))[0].n });
+const confirmBody = (fingerprint: string, doctorId: number) => ({ expectedSourceFingerprint: fingerprint, doctorId, reason: "Synthetic confirmation" });
+
+it("default reception sees the suggestion read-only; saving is refused and writes nothing", async () => {
+  const itemDoctor = await doctor("item doctor"), f = await fixture([itemDoctor.id]);
+  const reception = await staff("reception");
+  const view = await patientResponsibilitySettings(f.target, reception);
+  expect(view).toMatchObject({ canConfirm: false, doctors: [], suggestion: { doctorId: itemDoctor.id, basis: "plan_items" } });
+  await expect(patientResponsibilitySettings(f.target, reception, confirmBody(view.sourceFingerprint, itemDoctor.id))).rejects.toMatchObject({ status: 403 });
+  expect(await writes(f)).toEqual({ responsible: null, audit: 0 });
+});
+
+it("a non-admin explicitly granted confirmation confirms without an admin role; audit names the actor and role", async () => {
+  const itemDoctor = await doctor("item doctor"), f = await fixture([itemDoctor.id]);
+  const reception = await staff("reception", { canConfirmCaseResponsibility: true });
+  const view = await patientResponsibilitySettings(f.target, reception);
+  expect(view.canConfirm).toBe(true);
+  await patientResponsibilitySettings(f.target, reception, confirmBody(view.sourceFingerprint, itemDoctor.id));
+  expect(await writes(f)).toEqual({ responsible: itemDoctor.id, audit: 1 });
+  expect((await q("SELECT actor, actor_role FROM audit_log WHERE action='case.responsibility_change' AND entity_id=$1", [String(f.patientId)]))[0])
+    .toEqual({ actor: reception.username, actor_role: "reception" });
+});
+
+it("revoking the grant after the window opened stops the save, even with a valid fingerprint", async () => {
+  const itemDoctor = await doctor("item doctor"), f = await fixture([itemDoctor.id]);
+  const reception = await staff("reception", { canConfirmCaseResponsibility: true });
+  const view = await patientResponsibilitySettings(f.target, reception);
+  await q("UPDATE users SET permissions=$2 WHERE id=$1", [reception.userId, JSON.stringify({ canConfirmCaseResponsibility: false })]);
+  await expect(patientResponsibilitySettings(f.target, reception, confirmBody(view.sourceFingerprint, itemDoctor.id))).rejects.toMatchObject({ status: 403 });
+  expect(await writes(f)).toEqual({ responsible: null, audit: 0 });
+});
+
+it("a doctor or cashier without a view grant is refused on read", async () => {
+  const f = await fixture([(await doctor("item doctor")).id]);
+  for (const role of ["doctor", "cashier"]) await expect(patientResponsibilitySettings(f.target, await staff(role))).rejects.toMatchObject({ status: 403 });
+});
+
+async function contextAs(session: Awaited<ReturnType<typeof staff>>, f: Awaited<ReturnType<typeof fixture>>) {
+  auth.token = createSessionToken(session);
+  const response = await returnContextRoute(new Request(`http://localhost/api/patients/${f.patientId}/return-booking-context?kind=clinical_case&sourceId=${f.clinicalId}`),
+    { params: Promise.resolve({ id: String(f.patientId) }) });
+  return { status: response.status, body: await response.json() };
+}
+
+it("reception's refused booking context shows the suggested doctor awaiting confirmation, and books normally after it", async () => {
+  const itemDoctor = await doctor("item doctor"), f = await fixture([itemDoctor.id]);
+  const reception = await staff("reception"), before = await state(f);
+  expect(await contextAs(reception, f)).toMatchObject({ status: 409, body: { code: "responsibility_missing",
+    responsibilitySuggestion: { doctorName: itemDoctor.name, basis: "plan_items", message: "بانتظار تأكيد المدير." } } });
+  expect(await state(f)).toEqual(before);
+  const confirmer = await admin(), view = await patientResponsibilitySettings(f.target, confirmer);
+  await patientResponsibilitySettings(f.target, confirmer, confirmBody(view.sourceFingerprint, itemDoctor.id));
+  const allowed = await contextAs(reception, f);
+  expect(allowed).toMatchObject({ status: 200, body: { ok: true, doctorId: itemDoctor.id } });
+  expect(allowed.body).not.toHaveProperty("responsibilitySuggestion");
+});
+
+it("no guessed name in the booking context: ambiguity says the administration must decide; no view grant shows nothing", async () => {
+  const one = await doctor("first"), two = await doctor("second"), f = await fixture([one.id, two.id]);
+  expect(await contextAs(await staff("reception"), f)).toMatchObject({ status: 409,
+    body: { responsibilitySuggestion: { doctorName: null, basis: null, message: "تحديد الطبيب المسؤول مطلوب من الإدارة." } } });
+  const single = await fixture([one.id]);
+  expect((await contextAs(await staff("reception", { canViewResponsibilitySuggestion: false }), single)).body).toMatchObject({ code: "responsibility_missing", responsibilitySuggestion: null });
 });
