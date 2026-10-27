@@ -96,7 +96,12 @@ async function allow(page: Page, method: string, path: string, count = 1) {
 async function writes(page: Page) { return (await snapshot(page)).requests.filter((one) => one.method !== "GET"); }
 async function latestWrite(page: Page, path: string) {
   await expect.poll(async () => (await writes(page)).filter((one) => one.path === path).length).toBeGreaterThan(0);
-  return (await writes(page)).filter((one) => one.path === path).at(-1)!;
+  const write = (await writes(page)).filter((one) => one.path === path).at(-1)!;
+  if (path === "/api/appointments") expect(write.submitted).toMatchObject({
+    patientId, returnBookingSource: { kind: "ortho_adjustment", id: 934101 },
+    returnBookingFingerprint: "1".repeat(64),
+  });
+  return write;
 }
 async function fields(page: Page) {
   return panel(page).locator("input:not([type=file]),textarea,select").evaluateAll((elements) => elements.map((element) => ({
@@ -330,6 +335,10 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
   it("restores the complete baseline financial/regimen draft without creating historical records", async () => {
     const f = await open();
     try {
+      // Explicit responsibility selection is an administrator action. A doctor
+      // baseline binds to the current doctor instead of showing this selector.
+      await f.page.locator("#session-admin").click();
+      await state(f.page, "loading");
       await grant(f.page, { empty: true }); await panel(f.page).getByRole("button", { name: "تسجيل حالة سابقة (قبل النظام)", exact: true }).click();
       await panel(f.page).getByLabel("المرحلة الحالية", { exact: true }).selectOption("finishing");
       for (const [label, value] of [["السلك العلوي الحالي", "016 NiTi"], ["السلك السفلي الحالي", "012 NiTi"],

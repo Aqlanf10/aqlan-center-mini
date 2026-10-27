@@ -226,7 +226,9 @@ describe("orthodontic board booking defaults satisfy its own follow-up classifie
         const refusal = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/appointments");
         await dialog.locator('button[type="submit"]').click();
         const denied = await refusal;
-        expect(denied.status()).toBe(409);
+        // POST /api/appointments uses 400 for source-contract refusals; 409 is
+        // reserved here for booking conflicts (the rebooking endpoint differs).
+        expect(denied.status()).toBe(400);
         expect(await denied.json()).toMatchObject({ code: "return_booking_source_changed" });
         expect((await db.query("SELECT id FROM appointments WHERE patient_id=$1", [patientId])).rows).toEqual([{ id: unrelatedId }]);
         expect(await storedState(patientId)).toEqual(before);

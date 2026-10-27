@@ -38,3 +38,12 @@ Tests keep all five complete current boundaries pinned as well, and separately a
 - Peripheral services and authentication are stubbed where those suites specify; these are local runtime unit/contract results, not browser, network HTTP, PostgreSQL or Production verification.
 
 Raw focused logs are saved outside the repository under `combined-batch-ci-20261026/visit-workspace-{red,green}.log` and `visit-authority-runtime.log` in the task workspace. Parent retains full combined build/CI release gates.
+
+
+## 2026-10-27 addendum — localized save transport failure only
+
+Reviewed `components/ClinicalVisit.tsx` at `970180b4722755f47c244eeee6493a07e66ca259` against `6c2f5a8`. The only component changes are the `clinicalSaveFailureMessage` import and replacing the existing current-owner-guarded save catch's error-message expression with that helper. Browser fetch `TypeError` failures now use the localized connection guidance; explicit `Error` validation/command-lock messages remain intact. This does not alter save acceptance, retries, ownership, locks, payloads, canonical reloads, or sign outcomes.
+
+The complete prior `send` slice was independently extracted from `6c2f5a8` and hashes to the already recorded `c2e47037edac7e0e9b4fdf374b05a76830803bfb85fc7e1774b7e6e9c8cbb019`. The reviewed localized slice hashes to `42f400b505a7819daee0f87940273e85b234972b049b2c58cd9824ea94f6b3f4`. Replacing the single exact new guarded expression with the exact old guarded expression recovers the prior slice byte-for-byte. A new regression assertion requires that single occurrence and independently recorded old hash; the complete current slice remains pinned. All other complete-handler, original load admission, sign acceptance, linked-plan price, and authority-order pins are unchanged.
+
+Regression evidence: the parent reported the combined unit run at `970180b` had 777 passing files and 13,119 passing tests, with only the stale complete-`send` hash assertion failing. The focused helper tests cover browser transport errors, unknown failures and preservation of actionable validation errors. The earlier focused helper/fixture run passed 16 tests and full type checking passed. These are local unit/type results, not browser, PostgreSQL, hosted CI or Production verification. This addendum's assertion change still requires the parent's independent diff review and sanitized unit rerun; no test result is inferred from updating a pin.

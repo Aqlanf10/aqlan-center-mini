@@ -107,6 +107,12 @@ describe("built patient walkout verifies balances for reception", () => {
         expect(isTreatmentFinancialContext(body, patientId)).toBe(true);
         await json(route, body);
       }
+      // Exact read-only owner lookup: synthetic walkout has no verified care
+      // context, so booking remains unavailable without inventing authority.
+      else if (method === "GET" && path === `/api/patients/${patientId}/return-booking-context`
+        && url.search === `?kind=visit&sourceId=${visitId}`) {
+        await json(route, { ok: false, code: "return_source_missing", message: "اختر الحالة المقصودة قبل حجز موعد المراجعة." }, 409);
+      }
       else if (path === `/api/patients/${patientId}/legacy`) await json(route, { treatments: [], orphanPayments: [] });
       else if (path === `/api/patients/${patientId}/legacy-treatments`) await json(route, { agreements: [], canVoid: false });
       else if (path === "/api/services") await json(route, []);
