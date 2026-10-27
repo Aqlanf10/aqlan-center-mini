@@ -15,7 +15,17 @@ import { NearbyBookingDialog, useNearbyBooking } from "../components/useNearbyBo
 const warning = { kind: "nearby_patient_appointments" as const, confirmationToken: "never-render-token", nearbyAppointments: [{ id: 12, scheduledDate: "2026-10-29", scheduledTime: "16:00", doctorName: "طبيب تجريبي" }] };
 const options = { method: "POST", body: JSON.stringify({ patientId: 8, date: "2026-10-28", time: "17:00" }) };
 const reply = () => new Response(JSON.stringify(warning), { status: 409 });
-const renderHook = (scope: string) => { hooks.cursor = 0; return useNearbyBooking(scope); };
+function HookHarness({ scope, capture }: { scope: string; capture: (value: ReturnType<typeof useNearbyBooking>) => void }) {
+  capture(useNearbyBooking(scope));
+  return null;
+}
+function renderHook(scope: string) {
+  hooks.cursor = 0;
+  const captured: { value?: ReturnType<typeof useNearbyBooking> } = {};
+  renderToStaticMarkup(<HookHarness scope={scope} capture={value => { captured.value = value; }} />);
+  if (!captured.value) throw new Error("Nearby booking hook harness did not render");
+  return captured.value;
+}
 const flush = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
 type Element = ReactElement<Record<string, unknown>>;
 function elements(node: ReactNode): Element[] {
