@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 async function handle(request: Request, context: { params: Promise<{ id: string }> }, write: boolean) {
  const session = await requireSession();
  if (!session) return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
- if (session.role !== "admin") return NextResponse.json({ message: "تحديد الطبيب المسؤول للمدير فقط." }, { status: 403 });
+ // No role-name gate: the library decides from the actor's current grants and patient access, inside its transaction.
  try {
   const rawId = (await context.params).id;
   if (!/^[1-9]\d*$/.test(rawId) || Number(rawId) > 2147483647) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
