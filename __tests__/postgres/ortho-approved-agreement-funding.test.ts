@@ -98,7 +98,7 @@ describe("FIN-INT-4 approved agreement funds the orthodontic case", () => {
     if (!opened.ok) throw new Error(opened.message);
     const visit = await db.addVisit({ patientName: name, patientPhone: null, note: null, patientId, doctorId });
     await adjust(opened.id);
-    expect((await db.getClinicalVisit(visit.id))?.ortho?.adjustmentBillingClass).toBe("OUTSIDE_CONTRACT");
+    expect((await db.getClinicalVisit(visit.id))?.ortho?.adjustmentBillingClass).toBe("REVIEW_REQUIRED");
     expect(await db.linkOrthoCasePlan({ caseId: opened.id, planId, actor: "reception", actorRole: "reception" }))
       .toEqual({ ok: true, changed: true, funded: true });
     expect((await db.getClinicalVisit(visit.id))?.ortho?.adjustmentBillingClass).toBe("INCLUDED");

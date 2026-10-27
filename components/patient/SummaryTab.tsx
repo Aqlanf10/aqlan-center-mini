@@ -1,5 +1,8 @@
 "use client";
 
+import { useReturnBookingContext } from "@/components/useReturnBookingContext";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
+
 import { useEffect, useRef, useState } from "react";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
 import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
@@ -44,6 +47,7 @@ export interface WorkflowSummary {
   }[];
   plannedVisits: {
     id: number; planTitle: string | null; sequence: number; title: string;
+    remainingWork?: string | null; durationWarning?: string | null;
     doctorName: string | null; durationMinutes: number; status: PlannedVisitStatus;
     appointmentId: number | null; appointmentStatus: AppointmentStatus | null;
     canRebook: boolean; rebookBlockedReason: string | null; rebookGeneration: string;
@@ -97,6 +101,8 @@ export function SummaryTab({
   const [scheduleTime, setScheduleTime] = useState("16:00");
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [rebookReason, setRebookReason] = useState("");
+  const returnContext = useReturnBookingContext({ patientId, source: scheduleFor ? { kind: "planned_visit", id: scheduleFor } : null, enabled: scheduleFor !== null, locked: scheduleBusy });
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([patientId, scheduleFor, scheduleDate, scheduleTime, rebookReason, returnContext.fingerprint]));
   const [rebookUncertain, setRebookUncertain] = useState(false);
   const [scheduleError, setScheduleError] = useState<{ field?: "date" | "time" | "reason"; text: string } | null>(null);
   const scheduleInFlight = useRef(false);
@@ -145,6 +151,7 @@ export function SummaryTab({
     const previous = rebookAttempt.current;
     if (previous && previous.plannedVisitId !== visit.id) return;
     if (!previous) {
+      if (visit.durationWarning && !window.confirm(`${visit.durationWarning}\nالمدة الأصلية: ${visit.durationMinutes} دقيقة. هل راجعتها وتريد إعادة الحجز بهذه المدة؟`)) return;
       if (!visit.canRebook || !visit.appointmentId) return;
       if (!/^[a-f0-9]{32}$/.test(visit.rebookGeneration)) {
         setScheduleError({ text: "تعذّر التحقق من نسخة الجلسة. حدّث الملف قبل إعادة الحجز." });
@@ -162,10 +169,11 @@ export function SummaryTab({
         setScheduleError({ field: "reason", text: "اكتب سبب إعادة الحجز من 3 أحرف على الأقل، بحد أقصى 500 حرف." });
         reasonField.current?.focus(); return;
       }
+      if (!returnContext.ready || !returnContext.isCurrent()) { setScheduleError({ text: "تحقق من سياق الحالة والطبيب المسؤول قبل الحجز." }); return; }
       rebookAttempt.current = { plannedVisitId: visit.id, uncertain: false, body: JSON.stringify({
         expectedAppointmentId: visit.appointmentId, expectedGeneration: visit.rebookGeneration,
         date: scheduleDate, time: scheduleTime,
-        reason: rebookReason.trim(), requestId: crypto.randomUUID(),
+        reason: rebookReason.trim(), requestId: crypto.randomUUID(), ...returnContext.intrinsicPayload,
       }) };
     }
     const attempt = rebookAttempt.current!;
@@ -176,10 +184,10 @@ export function SummaryTab({
     setScheduleError(null);
     setMessage(null);
     try {
-      const response = await fetch(`/api/planned-visits/${visit.id}/rebook`, {
+      const response = await bookingFetch(`/api/planned-visits/${visit.id}/rebook`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: attempt.body,
         signal: AbortSignal.timeout(30_000),
-      });
+      }, isCurrent);
       const payload = await response.json().catch(() => null);
       if (!isCurrent()) {
         attempt.uncertain = true;
@@ -193,11 +201,12 @@ export function SummaryTab({
         rebookAttempt.current = null;
         setRebookUncertain(false);
         setScheduleFor(null);
-        setMessage("تمت إعادة حجز الجلسة. بقي الموعد السابق وحالته محفوظين في السجل.");
+        setMessage(`تمت إعادة حجز الجلسة. بقي الموعد السابق وحالته محفوظين في السجل.${typeof payload?.doctorName === "string" ? ` الطبيب: ${payload.doctorName}` : ""}`);
         onChanged();
         return;
       }
       if (!response.ok && response.status < 500 && !attempt.uncertain) {
+        returnContext.handleRejection(payload);
         rebookAttempt.current = null;
         setScheduleError({ text: payload?.message ?? "لم تُقبل إعادة الحجز. راجع الموعد والصلاحية ثم حاول مجددًا." });
         return;
@@ -218,23 +227,26 @@ export function SummaryTab({
   };
 
   const schedule = async (plannedVisitId: number) => {
-    if (scheduleInFlight.current || rebookAttempt.current || !currentWorkflow()) return;
+    if (scheduleInFlight.current || rebookAttempt.current || !currentWorkflow() || !returnContext.ready || !returnContext.isCurrent()) return;
+    const proposal = summary.plannedVisits.find(visit => visit.id === plannedVisitId);
+    if (proposal?.durationWarning && !window.confirm(`${proposal.durationWarning}\nالمدة الأصلية: ${proposal.durationMinutes} دقيقة. هل راجعتها وتريد الحجز بهذه المدة؟`)) return;
     scheduleInFlight.current = true;
     setScheduleBusy(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/planned-visits/${plannedVisitId}/schedule`, {
+      const response = await bookingFetch(`/api/planned-visits/${plannedVisitId}/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: scheduleDate, time: scheduleTime }),
-      });
+        body: JSON.stringify({ date: scheduleDate, time: scheduleTime, ...returnContext.intrinsicPayload }),
+      }, currentWorkflow);
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
+        returnContext.handleRejection(payload);
         setMessage(payload?.message ?? "تعذّر حجز الجلسة.");
         return;
       }
       setScheduleFor(null);
-      setMessage("تم حجز الجلسة القادمة — العلاج يُقرأ من الخطة بلا إعادة إدخال.");
+      setMessage(`تم حجز الجلسة القادمة — العلاج يُقرأ من الخطة بلا إعادة إدخال.${typeof payload?.doctorName === "string" ? ` الطبيب: ${payload.doctorName}` : ""}`);
       onChanged();
     } catch {
       setMessage("تعذّر الاتصال بالخادم.");
@@ -273,6 +285,7 @@ export function SummaryTab({
 
   return (
     <div className="space-y-4">
+      {nearbyBookingDialog}
       {message ? (
         <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
           {message}
@@ -399,14 +412,16 @@ export function SummaryTab({
           <span className="text-xs font-bold text-slate-500">الجلسة التالية المخططة</span>
           <p className="mt-1.5 text-sm font-extrabold text-navy-900">
             {nextSession
-              ? nextSession.title
+              ? (nextSession.remainingWork ?? nextSession.title)
               : "لا جلسة مخطَّطة"}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500">
             {nextSession
-              ? `${plannedStatusLabel(nextSession)} · ${nextSession.durationMinutes} دقيقة`
+              ? `${plannedStatusLabel(nextSession)} · ${nextSession.durationWarning ? "المدة الأصلية: " : ""}${nextSession.durationMinutes} دقيقة`
               : "تُقترح تلقائيًا بعد إنهاء كل زيارة"}
           </p>
+          {nextSession?.remainingWork ? <p className="mt-1 text-[11px] text-slate-500">العنوان الأصلي: {nextSession.title}</p> : null}
+          {nextSession?.durationWarning ? <p className="mt-1 text-xs font-bold text-amber-800">{nextSession.durationWarning}</p> : null}
         </div>
       </div>
 
@@ -427,14 +442,16 @@ export function SummaryTab({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-navy-900">
-                      {visit.title}
+                      {visit.remainingWork ?? visit.title}
                       {visit.planTitle ? <span className="text-[11px] font-normal text-slate-500"> · {visit.planTitle}</span> : null}
                     </p>
                     <p className="text-[11px] text-slate-500">
-                      {plannedStatusLabel(visit)} · {visit.durationMinutes} دقيقة
+                      {plannedStatusLabel(visit)} · {visit.durationWarning ? "المدة الأصلية: " : ""}{visit.durationMinutes} دقيقة
                       {visit.doctorName ? ` · ${visit.doctorName}` : ""}
                       {visit.appointmentDate ? ` · ${terminalAppointment ? "الموعد السابق" : "محجوزة"} ${friendlyDate(visit.appointmentDate)} ${visit.appointmentTime}` : ""}
                     </p>
+                    {visit.remainingWork ? <p className="text-[11px] text-slate-500">العنوان الأصلي: {visit.title}</p> : null}
+                    {visit.durationWarning ? <p className="mt-1 text-xs font-bold text-amber-800">{visit.durationWarning}</p> : null}
                     {terminalAppointment ? <p id={historyId} className="mt-1 text-xs font-bold text-amber-900">
                       {visit.appointmentStatus === "no_show" ? "لم يحضر الموعد السابق." : "أُلغي الموعد السابق."} يبقى الموعد السابق وحالته محفوظين؛ إعادة الحجز تنشئ موعدًا جديدًا ولا تبدأ زيارة.
                     </p> : null}
@@ -478,6 +495,7 @@ export function SummaryTab({
                       if (isRebooking) void rebook(visit); else void schedule(visit.id);
                     }}
                     className="mt-2 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-white p-2.5">
+                    <div className="w-full">{returnContext.view}</div>
                     <label className="text-[11px] font-bold text-slate-600">
                       التاريخ
                       <input ref={dateField} type="date" value={scheduleDate} min={clinicToday()} required
@@ -504,7 +522,7 @@ export function SummaryTab({
                       <span className="font-normal">مطلوب، من 3 إلى 500 حرف. لا تغيّر إعادة الحجز السجل السابق أو الحساب المالي.</span>
                     </label> : null}
                     {scheduleError ? <p id={errorId} role="alert" className="w-full text-xs font-bold text-amber-900">{scheduleError.text}</p> : null}
-                    <button type="submit" disabled={scheduleBusy || (isRebooking && !rebookUncertain && !visit.canRebook)}
+                    <button type="submit" disabled={scheduleBusy || (!rebookUncertain && !returnContext.ready) || (isRebooking && !rebookUncertain && !visit.canRebook)}
                       className="min-w-32 cursor-pointer rounded-xl bg-navy-800 px-4 py-2 text-xs font-bold text-white hover:bg-navy-700 active:bg-navy-900 disabled:cursor-not-allowed disabled:opacity-50">
                       {scheduleBusy ? "جارٍ الحجز…" : rebookUncertain ? "إعادة الطلب نفسه" : isRebooking ? "تأكيد إعادة الحجز" : "احجز"}
                     </button>

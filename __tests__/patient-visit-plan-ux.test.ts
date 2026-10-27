@@ -12,10 +12,10 @@ describe("(P6) zeroDueReason comes from the billing decision", () => {
     ({ classification, amountMinor, planLinked });
 
   it("names the agreement, the legacy ortho cover, and a documentation-only visit", () => {
-    expect(zeroDueReason([line("INCLUDED")], null)).toBe("مشمولة ضمن اتفاق الأقساط");
+    expect(zeroDueReason([line("INCLUDED")], null)).toBe("مشمولة بالتغطية المالية المسجّلة");
     expect(zeroDueReason([], "LEGACY_INCLUDED")).toBe("شدّة تقويم مشمولة بالعلاج السابق");
-    expect(zeroDueReason([], "INCLUDED")).toBe("شدّة تقويم مشمولة ضمن اتفاق الأقساط");
-    expect(zeroDueReason([], "OUTSIDE_CONTRACT")).toBe("زيارة توثيق بلا إجراء مفوتر");
+    expect(zeroDueReason([], "INCLUDED")).toBe("شدّة تقويم مشمولة بالتغطية المالية المسجّلة");
+    expect(zeroDueReason([], "OUTSIDE_CONTRACT")).toContain("معلّق");
     expect(zeroDueReason([], null)).toBe("زيارة توثيق بلا إجراء مفوتر");
   });
 

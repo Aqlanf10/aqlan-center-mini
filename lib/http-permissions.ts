@@ -47,6 +47,10 @@ const FRONT_DESK: readonly Role[] = ["admin", "reception"];
 const CLINICAL: readonly Role[] = ["admin", "doctor"];
 
 export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<HttpMethod, HttpAccess>>>>> = {
+  "/api/lab/work-intents/capability": { GET: CLINICAL },
+  "/api/visits/[id]/lab-work-command": { GET: CLINICAL },
+  "/api/ortho/[id]/followup-coverage": { GET: ADMIN, POST: ADMIN, PUT: ADMIN },
+  "/api/settings/patient-numbering": { GET: ADMIN, PATCH: ADMIN },
   "/api/patients/[id]/statement": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/hr/identity-preview": { GET: ADMIN, POST: ADMIN },
   "/api/hr/staff": { GET: ADMIN, POST: ADMIN },
@@ -164,6 +168,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ortho/[id]": { GET: CLINIC, POST: CLINIC, PATCH: CLINIC },
   "/api/ortho/[id]/strategy": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/assessment": { GET: CLINIC, POST: CLINICAL },
+  "/api/patients/[id]/return-booking-context": { GET: ["admin", "reception", "doctor"] },
+  "/api/patients/[id]/responsibility": { GET: ["admin"], PATCH: ["admin"] },
   "/api/ortho/adjustments/[id]/billing-decision": { POST: CLINIC },
   "/api/ortho/baseline": { POST: CLINICAL },
   "/api/ortho/billing-decisions": { GET: CLINIC },
@@ -202,6 +208,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/[id]/materials": { GET: CLINIC },
   "/api/patients/[id]/medical-history": { GET: CLINIC, POST: CLINIC },
   "/api/patients/[id]/merge": { POST: ADMIN },
+  "/api/patients/[id]/number": { GET: ADMIN, PATCH: ADMIN },
   "/api/patients/[id]/photo": { PUT: CLINIC },
   "/api/patients/[id]/plans": { GET: CLINIC },
   "/api/patients/[id]/clinical-context": { GET: CLINIC },

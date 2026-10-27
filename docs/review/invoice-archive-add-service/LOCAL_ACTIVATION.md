@@ -2,7 +2,7 @@
 
 Base: sequential batch `af5ca4d6`. Integrated source commits `df369d0d`, `2d046207` as `696ed7f8`, `4c82ae16`; additive conflicts retained both reconciliation and maintenance recovery kinds/maps/props and both backup dependency sets. No batch work was replaced.
 
-Root allocated 0081 invoice_archive and 0082 invoice_service_additions; 0079/0080 remain absent/reserved. Numbered DDL is paired byte-for-byte with runtime constants and checksum regression. Numbered archive creation refuses pre-existing unregistered tables instead of silently adopting them. Historical unnumbered proposal files remain archival references only; activation tests and HTTP fixtures no longer install them.
+Root allocated 0081 invoice_archive and 0082 invoice_service_additions; the later composed chain adds 0079 explicit routine orthodontic coverage and 0080 patient numbering without changing 0081/0082 bytes. Numbered DDL is paired byte-for-byte with runtime constants and checksum regression. Numbered archive creation refuses pre-existing unregistered tables instead of silently adopting them. Historical unnumbered proposal files remain archival references only; activation tests and HTTP fixtures no longer install them.
 
 ## Integrity contracts
 

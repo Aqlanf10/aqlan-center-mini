@@ -1,0 +1,20 @@
+import {beforeEach,describe,expect,it,vi} from "vitest";
+const mocks=vi.hoisted(()=>({session:vi.fn(),active:vi.fn(),query:vi.fn(),release:vi.fn(),supported:vi.fn(),read:vi.fn()}));
+vi.mock("../lib/db",()=>({getPool:()=>({connect:async()=>({query:mocks.query,release:mocks.release})})}));
+vi.mock("../lib/session",()=>({requireSession:mocks.session,revalidateSessionInTransaction:mocks.active}));
+vi.mock("../lib/lab-work-intent-db",()=>({labWorkIntentSupported:mocks.supported,readLabWorkCommandInTransaction:mocks.read,LabWorkIntentError:class extends Error{constructor(readonly code:string,readonly status:number){super(code);}}}));
+import {GET as capability} from "../app/api/lab/work-intents/capability/route";
+import {GET as reconcile} from "../app/api/visits/[id]/lab-work-command/route";
+const actor={userId:17,username:"synthetic-doctor",role:"doctor"};
+const request=()=>new Request(`http://localhost/api/visits/7/lab-work-command?key=synthetic-key&hash=${"a".repeat(64)}`);
+const context={params:Promise.resolve({id:"7"})};
+beforeEach(()=>{vi.clearAllMocks();mocks.session.mockResolvedValue(actor);mocks.active.mockResolvedValue(actor);mocks.supported.mockResolvedValue(true);mocks.query.mockImplementation(async(sql:string)=>({rows:sql.startsWith("SELECT patient_id")?[{patient_id:9}]:[]}));mocks.read.mockResolvedValue({labWork:[]});});
+describe("lab operation reference endpoints",()=>{
+ it("capability is disabled for revoked session without schema writes",async()=>{mocks.active.mockResolvedValue(null);expect(await (await capability()).json()).toEqual({supported:false});expect(mocks.supported).not.toHaveBeenCalled();expect(mocks.query.mock.calls.flat().join(" ")).not.toMatch(/CREATE|ALTER|INSERT/);});
+ it("missing proposal stays disabled",async()=>{mocks.supported.mockResolvedValue(false);expect(await (await capability()).json()).toEqual({supported:false});});
+ it("reconciliation returns only exact actor/patient/visit reference and stored receipt",async()=>{const response=await reconcile(request(),context);expect(await response.json()).toEqual({found:true,receipt:{requestKey:"synthetic-key",requestHash:"a".repeat(64),visitId:7,patientId:9,actor:actor.username},result:{labWork:[]}});expect(mocks.read.mock.calls[0][1]).toMatchObject({session:actor,patientId:9,sourceId:7,sourceKind:"visit",requestKey:"synthetic-key",requestHash:"a".repeat(64)});expect(mocks.release).toHaveBeenCalled();});
+ it("source relinking during recovery cannot leak a receipt",async()=>{mocks.query.mockImplementation(async(sql:string)=>({rows:sql.startsWith("SELECT patient_id")?[{patient_id:sql.includes("FOR SHARE")?99:9}]:[]}));expect((await reconcile(request(),context)).status).toBe(409);expect(mocks.read).not.toHaveBeenCalled();});
+ it("unknown outcome is not acknowledged",async()=>{mocks.read.mockResolvedValue(null);expect(await (await reconcile(request(),context)).json()).toEqual({found:false});});
+ it.each(["reception","cashier","assistant"])("does not grant %s clinical recovery authority",async(role)=>{mocks.session.mockResolvedValue({...actor,role});expect((await reconcile(request(),context)).status).toBe(403);expect(mocks.read).not.toHaveBeenCalled();});
+ it("invalid reference never reaches database",async()=>{expect((await reconcile(new Request("http://localhost/?key=x&hash=invalid"),context)).status).toBe(400);expect(mocks.query).not.toHaveBeenCalled();});
+});

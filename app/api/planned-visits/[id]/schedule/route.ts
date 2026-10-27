@@ -1,3 +1,5 @@
+import { readReturnBookingContext } from "@/lib/return-booking-context";
+import { parseReturnBookingSource } from "@/lib/return-booking-source";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -74,18 +76,33 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const overrideReason = typeof source.overrideReason === "string"
       ? source.overrideReason.trim().slice(0, 300) : "";
     /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
-    const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
+    const overrideState: { verdict: CapacityVerdict | null; doctorId: number | null; doctorName: string | null } = { verdict: null, doctorId: null, doctorName: null };
     const result = await schedulePlannedVisit({
       plannedVisitId, date, time, chairs: capacityContext.chairs,
       judge: async (day, client, durationMinutes) => {
+        if (typeof source.returnBookingFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(source.returnBookingFingerprint)) {
+          return { ok: false, conflict: { code: "return_booking_context_required", message: "تحقّق من سياق العودة والطبيب المسؤول قبل الحجز." } };
+        }
+        const origin = { kind: "planned_visit" as const, id: plannedVisitId };
+        const selected = source.returnBookingSource === undefined ? origin : parseReturnBookingSource(source.returnBookingSource);
+        if (!selected) return { ok: false, conflict: { code: "return_booking_source_invalid", message: "اختر الحالة المرتبطة بهذه الجلسة." } };
+        const responsible = await readReturnBookingContext(client, rows[0].patient_id, selected, { lock: true, origin });
+        if (!responsible.ok) return { ok: false, conflict: { code: responsible.code, message: responsible.message } };
+        if (source.returnBookingFingerprint !== undefined && source.returnBookingFingerprint !== responsible.fingerprint) {
+          return { ok: false, conflict: { code: "return_booking_source_changed", message: "تغيّر الطبيب المسؤول. حدّث اقتراح الحجز وراجعه قبل التأكيد." } };
+        }
+        overrideState.doctorId = responsible.doctorId;
+        overrideState.doctorName = responsible.doctorName;
         const judged = await judgeBookingInDay({
           sameDay: day, client, date, time, durationMinutes, service,
-          context: capacityContext, canOverride, overrideReason,
+          context: capacityContext, canOverride, overrideReason, providerId: responsible.doctorId, requireAssignedProvider: true,
+          nearbyAppointmentConfirmation: typeof source.nearbyAppointmentConfirmation === "string" ? source.nearbyAppointmentConfirmation.slice(0, 4096) : null,
+          bookingActor: `${session.userId}:${session.username}`, bookingScope: JSON.stringify({ entry: "planned-schedule", plannedVisitId, source: selected, fingerprint: responsible.fingerprint }),
           patientId: rows[0].patient_id,
         });
         if (!judged.ok) return { ok: false, conflict: judged.conflict };
         if (judged.overridden) overrideState.verdict = judged.verdict;
-        return { ok: true };
+        return { ok: true, doctorId: responsible.doctorId };
       },
     });
 
@@ -98,7 +115,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         });
       }
       return NextResponse.json(
-        { appointmentId: result.appointmentId, title: result.title }, { status: 201 },
+        { appointmentId: result.appointmentId, title: result.title, doctorId: overrideState.doctorId, doctorName: overrideState.doctorName }, { status: 201 },
       );
     }
     if (result.reason === "conflict") {
@@ -113,7 +130,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       { message: messages[result.reason] ?? "تعذّر جدولة الجلسة." },
       { status: 409 },
     );
-  } catch {
+  } catch (error) {
+    if ((error as { code?: string }).code === "55P03") return NextResponse.json({ code: "return_booking_source_changed", message: "يجري تحديث المسؤول عن الحالة. حدّث الاقتراح وأعد المحاولة." }, { status: 409 });
     return NextResponse.json({ message: "تعذّر حجز الجلسة. أعد المحاولة." }, { status: 500 });
   }
 }

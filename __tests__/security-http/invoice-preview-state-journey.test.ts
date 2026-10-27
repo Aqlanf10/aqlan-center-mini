@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { chromium, type Browser, type Locator, type Page, type Request, type Response, type Route } from "playwright";
 import { Client } from "pg";
+import { parseAmount } from "../../lib/money";
 import { authedMutation, baseUrl, harness } from "./_server";
 import { invoiceViewportProof, revealInvoiceControlByWheel, settleBrowser } from "./_invoice-browser-geometry";
 
@@ -650,7 +651,6 @@ describe("invoice form preview safety and shared chart interruption journeys", (
     { price: "abc", quantity: "1", currency: "YER" },
     { price: "", quantity: "1", currency: "SAR" },
     { price: "", quantity: "1", currency: "USD" },
-    { price: "1500000", quantity: "1000", currency: "YER" },
   ])("invalid current values never retain a ready preview or enable save: %j", async (input) => {
     const { page, context } = await openInvoice();
     await page.route("**/api/invoices/clinical-preview", (route) => json(route, success(route)));
@@ -659,11 +659,48 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await ready(page);
       await page.getByLabel("عملة الفاتورة", { exact: true }).selectOption(input.currency);
       await page.getByTestId("invoice-row-0").getByLabel("السعر", { exact: true }).fill(input.price);
-      await page.getByTestId("invoice-row-0").getByLabel("الكمية", { exact: true }).fill(input.quantity);
+      // A selected tooth owns its count-derived quantity; price validation must not
+      // try to edit that deliberately disabled control.
+      const quantity = page.getByTestId("invoice-row-0").getByLabel("الكمية", { exact: true });
+      expect(await quantity.isDisabled()).toBe(true);
+      expect(await quantity.inputValue()).toBe(input.quantity);
       await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="invalid"]').waitFor();
       expect(await save(page).isEnabled()).toBe(false);
       expect(await page.getByTestId("invoice-input-problem-0").innerText()).not.toBe("");
       expect(await page.getByTestId("invoice-clinical-preview-0").innerText()).not.toContain("ستنشئ/تربط");
+    } finally { await context.close(); }
+  });
+
+  it("rejects an excessive manually editable quantity without reusing a ready financial preview", async () => {
+    const { page, context, patientId } = await openInvoice();
+    let hold = false, held: Route | null = null;
+    await page.route("**/api/invoices/clinical-preview", (route) => {
+      if (hold) { held = route; return; }
+      return json(route, success(route));
+    });
+    try {
+      const row = page.getByTestId("invoice-row-0");
+      // Consultation has ordinary financial units, unlike count-derived tooth work.
+      await row.getByLabel("الخدمة", { exact: true }).selectOption(String(consultation));
+      await expect.poll(() => save(page).isEnabled()).toBe(true);
+      expect(await page.getByTestId("invoice-provider-0").count()).toBe(0);
+      expect(parseAmount(await row.getByLabel("السعر", { exact: true }).inputValue(), "YER")).toBe(1500000);
+      const quantity = row.getByLabel("الكمية", { exact: true });
+      expect(await quantity.isEnabled()).toBe(true);
+      await quantity.fill("1000");
+      await page.getByTestId("invoice-input-problem-0").waitFor();
+      expect(await page.getByTestId("invoice-input-problem-0").innerText()).toContain("999");
+      expect(await save(page).isEnabled()).toBe(false);
+      expect(await page.getByTestId("invoice-clinical-preview-0").count()).toBe(0);
+      expect((await db.query("SELECT id FROM invoices WHERE patient_id=$1", [patientId])).rows).toHaveLength(0);
+      // Returning to the earlier valid value must not revive its old ready proof.
+      hold = true;
+      await quantity.fill("1");
+      await expect.poll(() => held !== null).toBe(true);
+      expect(await save(page).isEnabled()).toBe(false);
+      await json(held!, success(held!));
+      await expect.poll(() => save(page).isEnabled()).toBe(true);
+      expect(await page.getByTestId("invoice-input-problem-0").count()).toBe(0);
     } finally { await context.close(); }
   });
 

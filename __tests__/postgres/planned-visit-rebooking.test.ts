@@ -292,6 +292,9 @@ it("rejects completed linked session parent even when the grouping has no parent
 });
 it("two doctors with cross-owned planned witnesses do not deadlock during rebooking authorization",async()=>{
   const a=await fixture();const b=await fixture();
+  // Keep warning windows disjoint so both writers reach the authorization
+  // barrier; overlapping windows intentionally serialize before clinical locks.
+  b.input.date=addDays(a.input.date,3);
   const [d1]=await q("INSERT INTO parties(name,kind) VALUES ('Synthetic cross doctor one','doctor') RETURNING id");
   const [d2]=await q("INSERT INTO parties(name,kind) VALUES ('Synthetic cross doctor two','doctor') RETURNING id");
   const u1=await actor('doctor',d1.id);const u2=await actor('doctor',d2.id);

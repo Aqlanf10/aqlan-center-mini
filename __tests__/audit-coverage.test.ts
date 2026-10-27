@@ -146,6 +146,16 @@ const handlers = walk(join(ROOT, "app", "api"), (name) => name === "route.ts").f
 });
 
 describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
+  it("exempts exact coverage status reads but never decision or terminal-refusal writes", () => {
+    const path = "/api/ortho/[id]/followup-coverage";
+    expect(handlers.find(handler => handler.key === `PUT ${path}`)?.audits).toBe(false);
+    expect(AUDIT_EXEMPT).toHaveProperty(`PUT ${path}`);
+    expect(handlers.find(handler => handler.key === `POST ${path}`)?.audits).toBe(true);
+    expect(AUDIT_EXEMPT).not.toHaveProperty(`POST ${path}`);
+    const route = splitFunctions(readFileSync(join(ROOT, "app/api/ortho/[id]/followup-coverage/route.ts"), "utf8"));
+    expect(callsIn(route.get("PUT")!)).toContain("readFollowupCoverageCommandStatus");
+    expect(callsIn(route.get("PUT")!)).not.toContain("appendFollowupCoverage");
+  });
   it("exempts only the read-only service-addition preview, never its audited POST writer",()=>{
     expect(handlers.find(handler=>handler.key==="PUT /api/invoices/[id]/add-service")?.audits).toBe(false);
     expect(AUDIT_EXEMPT).toHaveProperty("PUT /api/invoices/[id]/add-service");

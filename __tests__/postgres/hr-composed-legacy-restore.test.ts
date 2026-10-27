@@ -45,7 +45,15 @@ it('restores the actual pre-HR archive on the current migration chain without in
   const result = await stagedRestore({ archivePath: join(directory, 'legacy.tar.gz'), targetUrl: fixture.sqlTarget.options.connectionString!, stagingDir: join(directory, 'legacy-documents') });
   expect(result.errors).toEqual([]); expect(result.validationErrors).toEqual([]); expect(result.ok).toBe(true);
   const source = await applicationRows(fixture.source), target = await applicationRows(fixture.sqlTarget);
-  for (const [table, values] of Object.entries(source)) expect(target[table], table).toEqual(values);
+  for (const [table, values] of Object.entries(source)) {
+    if (table === 'patients') {
+      // 0080 adds only the initial CAS version; every original field stays exact.
+      const decode = (rows: unknown[]) => rows.map(row => JSON.parse((row as {value: string}).value));
+      expect(decode(target[table]), table).toEqual(decode(values).map(row => ({...row, patient_number_version: 1})));
+    } else expect(target[table], table).toEqual(values);
+  }
+  expect(target.retired_patient_numbers).toEqual([]);
+  expect(target.patient_numbering_policy).toEqual([]);
   for (const [table, values] of Object.entries(target)) if (table.startsWith('hr_')) expect(values, table).toEqual([]);
   const next = await fixture.sqlTarget.query("INSERT INTO patients(patient_number,full_name) VALUES('AFTER-LEGACY','Synthetic next patient') RETURNING id");
   expect(Number(next.rows[0].id)).toBeGreaterThan(75000);

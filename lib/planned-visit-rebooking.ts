@@ -1,3 +1,4 @@
+import { readReturnBookingContext } from "./return-booking-context";
 import {
   CLINIC_TIME_ZONE, getPool, insertAppointmentOnClient, insertAuditRow,
   lockAppointmentServiceForBooking, transitionInternalReferralOnClient, writeAppointmentInDay,
@@ -20,13 +21,13 @@ import { MAX_DURATION, MIN_DURATION } from "./appointment-services";
 
 export type PlannedRebookResult =
   | { ok: true; appointmentId: number; title: string; replayed: boolean }
-  | { ok: false; status: 400 | 401 | 403 | 404 | 409; message: string; conflict?: BookingConflict };
+  | { ok: false; status: 400 | 401 | 403 | 404 | 409; message: string; code?: string; conflict?: BookingConflict };
 type Success = Extract<PlannedRebookResult, { ok: true }>;
 class RebookRejected extends Error {
   constructor(readonly result: Exclude<PlannedRebookResult, { ok: true }>) { super(result.message); }
 }
-function reject(status: 400 | 401 | 403 | 404 | 409, message: string): never {
-  throw new RebookRejected({ ok: false, status, message });
+function reject(status: 400 | 401 | 403 | 404 | 409, message: string, code?: string): never {
+  throw new RebookRejected({ ok: false, status, message, ...(code ? { code } : {}) });
 }
 interface LockedPlan {
   id: number; patient_id: number; appointment_id: number | null; title: string;
@@ -52,6 +53,9 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
   const parsed = parsePlannedRebookIntent(input.plannedVisitId, {
     expectedAppointmentId: input.expectedAppointmentId, expectedGeneration: input.expectedGeneration, date: input.date, time: input.time,
     reason: input.reason, requestId: input.requestId,
+    ...(input.nearbyAppointmentConfirmation === undefined ? {} : { nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation }),
+    ...(input.returnBookingSource === undefined ? {} : { returnBookingSource: input.returnBookingSource }),
+    ...(input.returnBookingFingerprint === undefined ? {} : { returnBookingFingerprint: input.returnBookingFingerprint }),
   });
   if (!parsed) return { ok: false, status: 400, message: "أدخل موعدًا صحيحًا وسبب إعادة الحجز ورقم محاولة صالحًا." };
   input = parsed;
@@ -71,7 +75,9 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
   let doctorId: number | null = null;
   const intent = { plannedVisitId: input.plannedVisitId, expectedAppointmentId: input.expectedAppointmentId,
     expectedGeneration: input.expectedGeneration,
-    date: input.date, time: input.time, reason: input.reason };
+    date: input.date, time: input.time, reason: input.reason,
+    ...(input.returnBookingSource === undefined ? {} : { returnBookingSource: JSON.stringify(input.returnBookingSource) }),
+    ...(input.returnBookingFingerprint === undefined ? {} : { returnBookingFingerprint: input.returnBookingFingerprint }) };
   try {
     const result = await writeAppointmentInDay({
       date: input.date,
@@ -149,7 +155,16 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
           `SELECT $1::date + $2::time > clock_timestamp() AT TIME ZONE $3 AS valid`, [input.date, input.time, CLINIC_TIME_ZONE]);
         if (!future.valid) reject(400, "اختر موعدًا قادمًا بتوقيت العيادة.");
         if (!Number.isInteger(plan.duration_minutes) || plan.duration_minutes < MIN_DURATION || plan.duration_minutes > MAX_DURATION) reject(409, "مدة الجلسة تحتاج مراجعة قبل إعادة الحجز.");
-        doctorId = plan.doctor_id ?? old.doctor_id;
+        if (typeof input.returnBookingFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(input.returnBookingFingerprint)) {
+          reject(409, "تحقّق من سياق العودة والطبيب المسؤول قبل إعادة الحجز.", "return_booking_context_required");
+        }
+        const origin = { kind: "planned_visit" as const, id: plan.id };
+        const responsible = await readReturnBookingContext(client, plan.patient_id, input.returnBookingSource ?? origin, { lock: true, origin });
+        if (!responsible.ok) reject(409, responsible.message, responsible.code);
+        if (input.returnBookingFingerprint !== undefined && input.returnBookingFingerprint !== responsible.fingerprint) {
+          reject(409, "تغيّر الطبيب المسؤول. حدّث اقتراح الحجز وراجعه قبل التأكيد.", "return_booking_source_changed");
+        }
+        doctorId = responsible.doctorId;
         if (!await lockBookableAppointmentDoctor(client, doctorId)) reject(409, "الطبيب غير متاح للحجز.");
         let serviceId = old.service_id;
         if (!serviceId && old.appointment_type) {
@@ -162,8 +177,10 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
         if (old.chair_no !== null && (old.chair_no < 1 || old.chair_no > capacityContext.chairs)) reject(409, "كرسي الموعد غير متاح. راجع الجلسة أولًا.");
         const judged = await judgeBookingInDay({ sameDay: day, client, date: input.date, time: input.time,
           durationMinutes: plan.duration_minutes, service, context: capacityContext,
-          providerId: doctorId, chairNo: old.chair_no, isNewPatient: old.is_new_patient,
-          patientId: plan.patient_id, canOverride: false, overrideReason: "" });
+          providerId: doctorId, requireAssignedProvider: true, chairNo: old.chair_no, isNewPatient: old.is_new_patient,
+          patientId: plan.patient_id, canOverride: false, overrideReason: "",
+          nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
+          bookingActor: `${session.userId}:${session.username}`, bookingScope: JSON.stringify({ entry: "planned-rebook", ...intent, requestId: input.requestId }) });
         return judged.ok ? { ok: true } : { ok: false, conflict: judged.conflict };
       },
       commit: async (client: DbClient): Promise<Success> => {
@@ -219,7 +236,7 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
       message: (result.conflict as BookingConflict).message, conflict: result.conflict as BookingConflict };
   } catch (error) {
     if (error instanceof RebookRejected) return error.result;
-    if ((error as { code?: string }).code === "55P03") return { ok: false, status: 409,
+    if ((error as { code?: string }).code === "55P03") return { ok: false, status: 409, code: "return_booking_source_changed",
       message: "يجري تحديث العلاج المرتبط بهذه الجلسة. حدّث الملف وأعد المحاولة." };
     throw error;
   }

@@ -22,7 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!intent) return NextResponse.json({ message: "أدخل التاريخ والوقت وسبب إعادة الحجز بشكل صحيح، ثم أعد المحاولة." }, { status: 400 });
   try {
     const result = await rebookPlannedVisit(intent, session);
-    if (!result.ok) return NextResponse.json({ message: result.message, ...(result.conflict ? { conflict: result.conflict } : {}) }, { status: result.status });
+    if (!result.ok) return NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}), ...(result.conflict ? { conflict: result.conflict } : {}) }, { status: result.status });
     return NextResponse.json({ appointmentId: result.appointmentId, title: result.title, replayed: result.replayed },
       { status: result.replayed ? 200 : 201, headers: { "Cache-Control": "private, no-store" } });
   } catch {

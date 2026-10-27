@@ -91,7 +91,7 @@ describe("(CASE-1) orthodontic session sent with the sign", () => {
     expect(checkOrthoSessionDraft({ nextWeeks: 4 })).toEqual({ ok: false, message: "حالة التقويم غير محددة." });
     expect(checkOrthoSessionDraft({ caseId: 3, nextWeeks: 60 }).ok).toBe(false);
     expect(checkOrthoSessionDraft("x").ok).toBe(false);
-    expect(checkOrthoSessionDraft({ caseId: 3, elastics: "weird", upperWire: " 016 NiTi " })).toEqual({
+    expect(checkOrthoSessionDraft({ caseId: 3, done: "Documented review", elastics: "weird", upperWire: " 016 NiTi " })).toEqual({
       ok: true,
       value: expect.objectContaining({ caseId: 3, elastics: "none", upperWire: "016 NiTi", nextWeeks: 4, phase: null }),
     });

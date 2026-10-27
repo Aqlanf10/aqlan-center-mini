@@ -31,7 +31,6 @@ async function insertHistory(table:string,owner:Awaited<ReturnType<typeof owners
 }
 async function state(){return Promise.all(['patients','invoices','invoice_items','audit_log',...INVOICE_ACTION_HISTORY_TABLES].map(async table=>[table,(await q(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows]));}
 it('classifies every invoice action table as retained and permits empty reset with real snapshot',async()=>{
- await owners();
  for(const table of INVOICE_ACTION_HISTORY_TABLES){expect(RESET_KEEP_TABLES).toContain(table);expect(RESET_WIPE_TABLES).not.toContain(table);}
  let sql='';
  const result=await fixture.db.resetClinicData(reset,async client=>{

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -126,18 +126,14 @@ async function expectLinesSumToTotals(from = "1970-01-01", to = "2999-12-31") {
   return detail;
 }
 
-beforeAll(async () => {
+beforeEach(async () => {
+  // Recreate only this guarded disposable fixture; retain all production history guards.
+  await resetPoolForTesting();
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
-});
-
-beforeEach(async () => {
-  // Keep HR append-only/FK guards active: parent TRUNCATE CASCADE would
-  // traverse even empty history tables. These isolated fixtures contain no HR rows.
-  await q(`TRUNCATE commission_case_overrides, doctor_commission_history, payments, expenses, invoice_items, lab_orders,
-                    visit_procedures, inventory_movements, service_materials, inventory_items, plan_items, clinical_cases,
-                    treatment_plans, visits, invoices, patients, cashier_shifts, services
-           RESTART IDENTITY CASCADE`);
+  await q("DELETE FROM services");
+  // The prior isolated fixture reset service IDs too; no patient sequence is touched.
+  await q("ALTER SEQUENCE services_id_seq RESTART WITH 1");
   await q("DELETE FROM users");
   await q("DELETE FROM parties");
   const [shift] = await q<{ id: number }>(`INSERT INTO cashier_shifts (opened_by) VALUES ('cd') RETURNING id`);

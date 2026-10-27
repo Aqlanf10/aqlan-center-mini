@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+let responsibilityFixtureSequence = 0;
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -12,7 +14,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 const { session } = vi.hoisted(() => ({
   session: { current: { userId: 1, username: "case-freeze-admin", role: "admin", expiresAt: 4_102_444_800_000 } },
 }));
-vi.mock("../../lib/session", () => ({ requireSession: vi.fn(async () => session.current) }));
+vi.mock("../../lib/session", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/session")>()), requireSession: vi.fn(async () => session.current) }));
 
 assertRealPostgresUrl();
 stubPostgresEnv();
@@ -42,7 +44,7 @@ async function scenario(options: { sessions?: number; billingRule?: "on_start" |
   ))[0].id;
   const doctor = await db.createParty({ name: `SYNTHETIC case-freeze doctor ${sequence}`, kind: "doctor", phone: null, commissionPercent: 30, note: null });
   const createCase = async (title: string, percent: number) => {
-    const result = await db.createClinicalCase({
+    const result = await db.createClinicalCase({ admittedSession: await responsibilityAdminFixture("commission-case-attribution-freeze-responsibility-" + (++responsibilityFixtureSequence)),
       patientId, specialty: "endodontics", title, site: null, problem: null,
       responsiblePartyId: doctor.id, orthoCaseId: null, actor: "case-freeze-admin", actorRole: "admin",
     });

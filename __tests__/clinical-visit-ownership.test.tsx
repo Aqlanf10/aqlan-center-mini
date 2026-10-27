@@ -65,6 +65,11 @@ vi.mock("react", async (original) => {
     },
   };
 });
+// Ordinary-visit fixtures explicitly prove an empty synthetic command journal.
+// Actual reference/replay ownership is exercised in clinical-lab-command-hook.test.ts.
+vi.mock("../lib/clinical-lab-operation-reference",async original=>({...await original<typeof import("../lib/clinical-lab-operation-reference")>(),readClinicalLabReference:async()=>({revision:0,pending:null})}));
+// This legacy handler harness is single-window; cross-tab arbitration has dedicated hook tests.
+vi.mock("../lib/clinical-visit-browser-lock",()=>({withClinicalVisitBrowserLock:async(_scope:unknown,run:()=>Promise<unknown>)=>run()}));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: hooks.role, username: hooks.username, permissions: hooks.permissions }) }));
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "Synthetic quick phrase" }));
 vi.mock("../components/ToothPicker", () => ({ ToothField: () => null }));
@@ -200,6 +205,7 @@ describe("clinical visit owner retirement", () => {
   it("does not reload A into B after A's already-dispatched save completes", async () => {
     await mount(); const post = deferred<Response>(); pendingWrite = async () => post.promise;
     const saveA = invoke(button("احفظ بلا توقيع"));
+    await flush(); // Wait for asynchronous exclusive admission, not the pending POST.
     expect(writes()[0][0]).toBe("/api/visits/91001/clinical");
     currentVisitId = 91002; await flush();
     post.resolve(response(200, { ok: true })); await saveA; await flush();
@@ -289,6 +295,7 @@ describe("owner lifetime, command and navigation contracts", () => {
     await mount(); const post = deferred<Response>(); pendingWrite = async () => post.promise;
     const saveButton = button("احفظ بلا توقيع");
     const first = invoke(saveButton); const second = invoke(saveButton);
+    await flush();
     expect(writes()).toHaveLength(1);
     expect(navigationGuard?.()).toBe(false);
     expect(window.confirm).not.toHaveBeenCalled();
@@ -301,6 +308,7 @@ describe("owner lifetime, command and navigation contracts", () => {
     const post = deferred<Response>(); pendingWrite = async () => post.promise;
     const signButton = find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));
     const first = invoke(signButton); const second = invoke(signButton);
+    await flush();
     expect(writes().filter(([, options]) => JSON.parse(String(options.body)).action === "sign")).toHaveLength(1);
     post.resolve(response(409, { message: "Synthetic sign rejection" })); await first; await second; await flush();
     expect(onSigned).not.toHaveBeenCalled();
@@ -694,6 +702,9 @@ it("invalidates an in-flight read when a sign response has an unknown outcome", 
   await invoke(button("مراجعة وإنهاء الزيارة")); await flush();
   const post = deferred<Response>(); pendingWrite = async () => post.promise;
   const signing = invoke(find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node))));
+  // The test requires an actually dispatched POST, after fresh-journal admission.
+  await flush();
+  expect(writes().filter(([,options])=>JSON.parse(String(options.body)).action==="sign")).toHaveLength(1);
   const stale = deferred<Response>(); reads.set(91001, () => stale.promise);
   const refreshing = invoke(capturedRetry);
   post.resolve(response(200, {})); await signing; await flush();

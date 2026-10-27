@@ -6,20 +6,42 @@ import { requireCurrency } from "./money";
 export async function readPatientStatementEvidence(client: Pick<DbClient, "query">, patientId: number,
   ledger: { invoices: readonly Invoice[]; payments: readonly Payment[]; openings: readonly OpeningBalance[] }): Promise<StatementEvidence> {
   const evidence = emptyStatementEvidence();
-  const { rows: corrections } = await client.query<{ original_invoice_id: number; corrected_invoice_id: number; created_at: Date }>(
-    `SELECT original_invoice_id, corrected_invoice_id, created_at FROM invoice_corrections WHERE patient_id=$1 ORDER BY id`, [patientId]);
+  const { rows: corrections } = await client.query<{ id: number; patient_id: number; original_invoice_id: number; corrected_invoice_id: number; created_at: Date }>(
+    `SELECT id, patient_id, original_invoice_id, corrected_invoice_id, created_at FROM invoice_corrections WHERE patient_id=$1 ORDER BY id`, [patientId]);
   evidence.invoiceCorrections = corrections.map(row => ({ originalInvoiceId: row.original_invoice_id, correctedInvoiceId: row.corrected_invoice_id, createdAt: row.created_at.toISOString() }));
   const { rows: audit } = await client.query<{ action: string; entity_id: string; details: Record<string, unknown> | null; created_at: Date }>(
     `SELECT action, entity_id, details, created_at FROM audit_log WHERE
       (action='payment.correct' AND entity='payment' AND entity_id=ANY($1::text[])) OR
       (action IN ('invoice.cancel','invoice.correct') AND entity='invoice' AND entity_id=ANY($2::text[])) ORDER BY id`,
     [ledger.payments.map(p => String(p.id)), ledger.invoices.map(i => String(i.id))]);
+  const byCorrectionId = new Map(corrections.map(row => [row.id, row]));
+  if (byCorrectionId.size !== corrections.length) throw new StatementProjectionError();
   const byReceipt = new Map(ledger.payments.map(p => [p.receiptNumber, p]));
   const byInvoiceNumber = new Map(ledger.invoices.map(invoice => [invoice.invoiceNumber, invoice]));
   const byInvoiceId = new Map(ledger.invoices.map(invoice => [invoice.id, invoice]));
   if (byInvoiceNumber.size !== ledger.invoices.length) throw new StatementProjectionError();
   for (const row of audit) {
-    if (!row.details || row.details["المريض"] !== patientId) throw new StatementProjectionError();
+    if (!row.details || typeof row.details !== "object" || Array.isArray(row.details)) throw new StatementProjectionError();
+    if (row.action === "invoice.correct" && ("correctionId" in row.details || "correctedInvoiceId" in row.details)) {
+      // The modern writer records identifiers instead of the legacy Arabic fields.
+      // An audit claim alone is not proof: require its exact independently patient-
+      // scoped immutable correction, both invoice owners, and transaction timestamp.
+      const { correctionId, correctedInvoiceId } = row.details;
+      if (typeof correctionId !== "number" || !Number.isSafeInteger(correctionId) || correctionId <= 0
+        || typeof correctedInvoiceId !== "number" || !Number.isSafeInteger(correctedInvoiceId) || correctedInvoiceId <= 0) throw new StatementProjectionError();
+      const correction = byCorrectionId.get(correctionId);
+      const original = byInvoiceId.get(Number(row.entity_id)), replacement = byInvoiceId.get(correctedInvoiceId);
+      if (!correction || correction.patient_id !== patientId || !original || !replacement
+        || original.patientId !== patientId || replacement.patientId !== patientId || original.status !== "cancelled" || original.id === replacement.id
+        || row.entity_id !== String(original.id) || correction.original_invoice_id !== original.id || correction.corrected_invoice_id !== replacement.id
+        || correction.created_at.toISOString() !== row.created_at.toISOString()
+        || ("المريض" in row.details && row.details["المريض"] !== patientId)
+        || ("الفاتورة_المصححة" in row.details && row.details["الفاتورة_المصححة"] !== replacement.invoiceNumber)) throw new StatementProjectionError();
+      // The table read already supplied this edge. Never add a duplicate or fall
+      // back to the legacy audit path when a modern proof is incomplete.
+      continue;
+    }
+    if (row.details["المريض"] !== patientId) throw new StatementProjectionError();
     if (row.action === "invoice.correct") {
       // Legacy correctInvoice persisted its relationship in structured audit fields,
       // not invoice_corrections. Never infer relationships from free-text notes.

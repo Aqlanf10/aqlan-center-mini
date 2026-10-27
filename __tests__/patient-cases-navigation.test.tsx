@@ -13,6 +13,9 @@ const hooks = vi.hoisted(() => ({
   pending: [] as Array<() => void>,
   session: null as SessionInfo | null,
 }));
+// Responsibility settings has its own lifetime/authorization suite; this recursive
+// harness owns only case-navigation callbacks, not nested admin-form hook slots.
+vi.mock("../components/PatientResponsibilitySettings", () => ({ default: () => null }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();

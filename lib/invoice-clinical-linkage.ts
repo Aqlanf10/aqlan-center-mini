@@ -1,3 +1,4 @@
+import type { LabWorkDraft } from "./lab-work-intent-contract";
 /**
  * (INV-LINK B) الفاتورة العلاجية بدايةٌ مالية مرتبطة بالعلاج — المنطق الخالص.
  *
@@ -277,13 +278,15 @@ export function invoiceRequestFingerprint(input: {
   patientId: number; currency: string; discountMinor: number; note?: string | null; existingPlanId?: number | null;
   items: { serviceId: number | null; description: string; quantity: number; unitPriceMinor: number;
     doctorId: number | null; toothCode?: number | null; caseId?: number | null; sessions?: number | null;
-    surfaces?: string | null; episodeTeeth?: readonly number[] | null; scope?: string | null; planItemId?: number | null }[];
+    surfaces?: string | null; episodeTeeth?: readonly number[] | null; scope?: string | null; planItemId?: number | null; labWork?: LabWorkDraft }[];
 }): string {
   return JSON.stringify([
     input.patientId, input.currency, input.discountMinor, input.note ?? null,
     input.items.map((item) => [item.serviceId, item.description, item.quantity, item.unitPriceMinor,
       item.doctorId, item.toothCode ?? null, item.caseId ?? null, item.sessions ?? null,
       item.surfaces ?? null, item.episodeTeeth ? [...item.episodeTeeth] : null, item.scope ?? null]),
+    ...(input.items.some(item => item.labWork !== undefined)
+      ? [{ labWork: input.items.map(item => item.labWork ?? null) }] : []),
     // Keep all historical unselected fingerprints byte-for-byte compatible.
     ...(input.existingPlanId != null || input.items.some((item) => item.planItemId != null)
       ? [{ existingPlanId: input.existingPlanId ?? null, planItemIds: input.items.map((item) => item.planItemId ?? null) }] : []),
