@@ -14,9 +14,12 @@ import { fileURLToPath } from "node:url";
  */
 export default defineConfig({
   resolve: {
-    alias: {
-      "@": fileURLToPath(new URL(".", import.meta.url)),
-    },
+    alias: [
+      { find: "@", replacement: fileURLToPath(new URL(".", import.meta.url)) },
+      // Vitest executes trusted server modules outside Next's compiler. Match
+      // only the boundary marker; production imports/poisoning are unchanged.
+      { find: /^server-only$/, replacement: fileURLToPath(new URL("./node_modules/next/dist/compiled/server-only/empty.js", import.meta.url)) },
+    ],
   },
   test: {
     // الخادم يبدأ مرة واحدة لكل الجولة (لا لكل ملف) — التوكنات تبقى صالحة
