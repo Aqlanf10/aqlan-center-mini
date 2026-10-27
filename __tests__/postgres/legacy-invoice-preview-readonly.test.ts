@@ -2,6 +2,10 @@ import {beforeAll,afterAll,afterEach,it,expect,vi} from "vitest";
 import {openLegacyStaffFixture} from "./_legacy-staff-fixture";
 import {assertRealPostgresUrl,stubPostgresEnv} from "./_setup";
 import {createSessionToken,readSessionToken,sessionCredentialVersion,type SessionPayload} from "../../lib/auth";
+import {readAgreementAmendment} from "../../lib/agreement-amendment-db";
+import {readInvoiceAddService} from "../../lib/invoice-add-service-db";
+import {readInvoiceArchive} from "../../lib/invoice-archive-db";
+import {previewHistoricalDocument} from "../../lib/legacy-treatment-document-db";
 import {readInvoiceRevision} from "../../lib/invoice-revision-db";
 import {revalidateLegacySessionReadOnlySnapshot} from "../../lib/session";
 import type {QueryResult} from "../../lib/db";
@@ -38,9 +42,15 @@ it("reads real financial preview with every snapshot SELECT read-only and no row
 it("named snapshot lookup rejects ordinary write transactions",async()=>{
  const client=await db.getPool().connect();try{await client.query("BEGIN");await expect(revalidateLegacySessionReadOnlySnapshot(session,client)).rejects.toThrow("READ_ONLY_SNAPSHOT_REQUIRED");}finally{await client.query("ROLLBACK");client.release();}
 });
-it("raw canonical account is refused without financial preview",async()=>{
+it.each([
+ ["invoice revision",()=>readInvoiceRevision(invoiceId,session)],
+ ["agreement amendment",()=>readAgreementAmendment(1,session)],
+ ["invoice add-service",()=>readInvoiceAddService(invoiceId,session)],
+ ["invoice archive",()=>readInvoiceArchive(invoiceId,session)],
+ ["historical document",()=>previewHistoricalDocument(1,{},session)],
+] as const)("%s refuses raw canonical account before financial facts",async(_name,read)=>{
  await db.getPool().query("UPDATE users SET permissions=$1 WHERE id=$2",[JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}}),session.userId]);
- try{await expect(readInvoiceRevision(invoiceId,session)).rejects.toThrow("PERMISSION_ENVELOPE_HELD");}finally{await db.getPool().query("UPDATE users SET permissions=NULL WHERE id=$1",[session.userId]);}
+ try{await expect(read()).rejects.toThrow("PERMISSION_ENVELOPE_HELD");}finally{await db.getPool().query("UPDATE users SET permissions=NULL WHERE id=$1",[session.userId]);}
 });
 it("snapshot begins after observed installer contention and refuses its committed marker",async()=>{
  const holder=await db.getPool().connect();await holder.query("BEGIN");const pid=(await holder.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;

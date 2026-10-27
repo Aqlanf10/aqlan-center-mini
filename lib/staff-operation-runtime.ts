@@ -8,8 +8,8 @@ import { revalidateVerifiedDurableSession, type VerifiedDurableSession } from ".
 import { parseStaffCapabilityDocument } from "./staff-permission-envelope";
 import { hasStaffCapability, ownerContextFromTrustedBinding, resolveStaffCapabilities, staffAuthorizationFingerprint } from "./staff-capabilities";
 
-export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit";
-const actions = new Set<string>(["staff.view","staff.permissions.edit"]);
+export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view";
+const actions = new Set<string>(["staff.view","staff.permissions.edit","inventory.references.view"]);
 declare const operationBrand: unique symbol;
 export interface StaffOperationHandle { readonly [operationBrand]: true }
 interface OperationState {
@@ -75,16 +75,25 @@ async function load(client: DbClient, session: VerifiedDurableSession, action: S
  const fingerprint=staffAuthorizationFingerprint(access);
  if(!fingerprint || !revalidateVerifiedDurableSession(session))refuse("SESSION_EXPIRED");
  if(await xid(client)!==transactionId)refuse("TRANSACTION_CHANGED");
- return {xid:transactionId,fingerprint};
+ return {xid:transactionId,fingerprint,identity:Object.freeze({realmId:d.realmId,subjectId:d.subjectId,generationId:d.generationId})};
 }
 /** Protected SQL callers must assert inside the callback, not accept projections.
  * Reacquires all fences and fresh proof; XID is not a subtransaction identifier. */
-export async function assertStaffOperation(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction):Promise<void>{
+async function assertAndLoadStaffOperation(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction){
  const state=operations.get(handle);
  if(!state || state.client!==client || state.action!==action)refuse("HANDLE_INVALID");
  if(await xid(client)!==state.xid)refuse("TRANSACTION_CHANGED");
  const current=await load(client,state.session,action,state.schema);
  if(current.xid!==state.xid || current.fingerprint!==state.fingerprint)refuse("AUTHORITY_CHANGED");
+ return current.identity;
+}
+/** Fresh proof through the private handle, client, XID and exact action. This frozen
+ * display/provenance projection is never accepted as authority by this runtime. */
+export async function staffOperationIdentity(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction):Promise<Readonly<{realmId:string;subjectId:string;generationId:string}>> {
+ return assertAndLoadStaffOperation(client,handle,action);
+}
+export async function assertStaffOperation(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction):Promise<void>{
+ await assertAndLoadStaffOperation(client,handle,action);
 }
 /** Owns transaction/commit. Trusted callback MUST NOT issue top-level transaction
  * control. Changed/ended XID refuses, but a malicious early COMMIT cannot be undone.

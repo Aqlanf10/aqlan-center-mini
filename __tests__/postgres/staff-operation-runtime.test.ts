@@ -21,7 +21,7 @@ async function claims(userId=2){
  h.realm_id::text,h.generation_id::text,h.registry_revision::text,c.binding_epoch::text,b.subject_id::text
  FROM ${schema}.users u CROSS JOIN ${schema}.staff_identity_state h CROSS JOIN ${schema}.staff_authority_control c
  JOIN ${schema}.staff_identity_current b ON b.user_id=$1 LEFT JOIN ${schema}.parties p ON p.id=u.party_id WHERE u.id=$1`,[userId]);
- return {userId:r.id,username:r.username,expiresAt:Date.now()+60_000,durableIdentity:{schemaVersion:2,policyVersion:1,realmId:r.realm_id,subjectId:r.subject_id,generationId:r.generation_id,registryRevision:r.registry_revision,controlEpoch:r.binding_epoch,accountEpoch:r.authorization_epoch,permissionRevision:r.permissions.revision,credentialVersion:sessionCredentialVersion(r.password_hash),provider:r.party_id===null?null:{partyId:r.party_id,clinicalEpoch:r.clinical_authority_epoch}}};
+ return {userId:r.id,username:r.username,expiresAt:Date.now()+60_000,durableIdentity:{schemaVersion:2,policyVersion:2,realmId:r.realm_id,subjectId:r.subject_id,generationId:r.generation_id,registryRevision:r.registry_revision,controlEpoch:r.binding_epoch,accountEpoch:r.authorization_epoch,permissionRevision:r.permissions.revision,credentialVersion:sessionCredentialVersion(r.password_hash),provider:r.party_id===null?null:{partyId:r.party_id,clinicalEpoch:r.clinical_authority_epoch}}};
 }
 async function session(userId=2){const handle=readVerifiedDurableSession(sign(await claims(userId)));if(!handle)throw new Error("synthetic token fixture invalid");return handle;}
 async function waitForBlockedBy(holderPid:number){

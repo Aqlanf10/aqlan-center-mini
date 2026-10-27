@@ -5,7 +5,10 @@ import {
 } from "./reference-validation";
 import "server-only";
 import { createHash } from "node:crypto";
-import type { DbClient } from "../db";
+import type { DbClient, DbPool } from "../db";
+import { staffIdentitySchemaName } from "../staff-identity-substrate-schema.mjs";
+import type { VerifiedDurableSession } from "../staff-durable-session";
+import { staffOperationIdentity, withStaffOperation } from "../staff-operation-runtime";
 import { PURCHASE_RESET_FENCE } from "../clinic-reset";
 import {
   REFERENCE_PROTOCOL,
@@ -223,6 +226,39 @@ export function createReferenceSetupService<Session = unknown>(
       text(query, 120, "search", true);
       integer(page, 0, 5000);
       const current = await context(client, session, "read");
+      return readReferenceFacts(client, authority(current), current.allowedActions, query, page);
+    },
+  };
+}
+
+/** Canonical read-only binding; intentionally not installed in any HTTP transport.
+ * Owns READ COMMITTED. Central lifecycle/user/provider locks always precede reset.
+ * No caller projection, role label or legacy setup authority can admit this reader. */
+export async function readCanonicalInventoryReferences(
+  pool: DbPool, session: VerifiedDurableSession, query = "", page = 0, schema = "public",
+): Promise<ReferenceRead> {
+  requireInventoryIntegration();
+  text(query, 120, "search", true);
+  integer(page, 0, 5000);
+  const referenceSchema = staffIdentitySchemaName(schema);
+  return withStaffOperation(pool, session, "inventory.references.view", async (client, handle) => {
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [PURCHASE_RESET_FENCE]);
+    // A reset-fence wait may outlive a session: fresh exact-handle proof BEFORE facts.
+    const identity = await staffOperationIdentity(client, handle, "inventory.references.view");
+    const ready = await client.query<{ ready: boolean }>(
+      "SELECT bool_and(to_regclass($1 || '.' || name) IS NOT NULL) AS ready FROM unnest($2::text[]) AS name",
+      [referenceSchema, ["inventory_items", "inventory_item_unit_versions", "inventory_locations", "inventory_approval_policies", "parties"]],
+    );
+    invariant(ready.rows[0]?.ready, "schema_not_ready", "Reference read schema is not installed");
+    return readReferenceFacts(client, Object.freeze({realmId: identity.realmId, subjectId: identity.subjectId, generation: identity.generationId}), [], query, page, referenceSchema);
+  }, schema);
+}
+
+// Private bounded SQL shared with the existing admin/journal-restricted setup reader.
+// Never export a facts reader accepting a caller-constructed authority projection.
+async function readReferenceFacts(client: DbClient, referenceAuthority: ReferenceAuthority,
+  allowedActions: readonly ReferenceAction[], query: string, page: number, schema?: string): Promise<ReferenceRead> {
+  const prefix = schema === undefined ? "" : `${staffIdentitySchemaName(schema)}.`;
       const items = await client.query<{
         id: number;
         name: string;
@@ -235,7 +271,7 @@ export function createReferenceSetupService<Session = unknown>(
         entered_precision: number | null;
         base_precision: number | null;
       }>(
-        `SELECT i.id,i.name,i.category,i.unit,i.is_active,u.version,u.entered_unit,u.factor::text,u.entered_precision,u.base_precision FROM inventory_items i LEFT JOIN LATERAL (SELECT * FROM inventory_item_unit_versions WHERE item_id=i.id ORDER BY version DESC LIMIT 1) u ON TRUE WHERE strpos(lower(i.name),lower($1))>0 ORDER BY i.name,i.id LIMIT 21 OFFSET $2`,
+        `SELECT i.id,i.name,i.category,i.unit,i.is_active,u.version,u.entered_unit,u.factor::text,u.entered_precision,u.base_precision FROM ${prefix}inventory_items i LEFT JOIN LATERAL (SELECT * FROM ${prefix}inventory_item_unit_versions WHERE item_id=i.id ORDER BY version DESC LIMIT 1) u ON TRUE WHERE strpos(lower(i.name),lower($1))>0 ORDER BY i.name,i.id LIMIT 21 OFFSET $2`,
         [query, page * 20],
       );
       const locations = await client.query<{
@@ -245,11 +281,11 @@ export function createReferenceSetupService<Session = unknown>(
         doctor_party_id: number | null;
         is_active: boolean;
       }>(
-        "SELECT id,label,kind,doctor_party_id,is_active FROM inventory_locations WHERE branch_key=$1 ORDER BY label,id LIMIT 501",
+        `SELECT id,label,kind,doctor_party_id,is_active FROM ${prefix}inventory_locations WHERE branch_key=$1 ORDER BY label,id LIMIT 501`,
         [INVENTORY_CLINIC_SCOPE],
       );
       const doctors = await client.query<{ id: number; name: string }>(
-        "SELECT id,name FROM parties WHERE kind='doctor' AND is_active ORDER BY name,id LIMIT 501",
+        `SELECT id,name FROM ${prefix}parties WHERE kind='doctor' AND is_active ORDER BY name,id LIMIT 501`,
       );
       invariant(
         locations.rows.length <= 500 && doctors.rows.length <= 500,
@@ -261,13 +297,13 @@ export function createReferenceSetupService<Session = unknown>(
         limit_minor: string;
         allow_self_approval: boolean;
       }>(
-        "SELECT version,limit_minor::text,allow_self_approval FROM inventory_approval_policies WHERE branch_key=$1 ORDER BY version DESC LIMIT 1",
+        `SELECT version,limit_minor::text,allow_self_approval FROM ${prefix}inventory_approval_policies WHERE branch_key=$1 ORDER BY version DESC LIMIT 1`,
         [INVENTORY_CLINIC_SCOPE],
       );
       const p = policies.rows[0];
       return {
-        authority: authority(current),
-        allowedActions: [...current.allowedActions],
+        authority: referenceAuthority,
+        allowedActions: [...allowedActions],
         items: items.rows.slice(0, 20).map((i) => ({
           id: i.id,
           name: i.name,
@@ -299,8 +335,6 @@ export function createReferenceSetupService<Session = unknown>(
         hasMore: items.rows.length > 20,
         query,
       };
-    },
-  };
 }
 
 async function write(

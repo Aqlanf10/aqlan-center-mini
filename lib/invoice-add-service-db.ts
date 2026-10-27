@@ -1,3 +1,4 @@
+import {withLegacyStaffReadOnlySnapshot} from "./legacy-staff-readonly-snapshot";
 /** A new service is a separate dated receivable, never a rewrite of an issued invoice. */
 import type {SessionPayload} from "./auth";
 import {CLINIC_TIME_ZONE,ensureSchema,getPool,getInvoice,getSettingsInTransaction,insertAuditRow,type DbClient,type Service,type Invoice} from "./db";
@@ -108,10 +109,10 @@ function prepare(view:Snapshot,body:InvoiceAddServiceCommand,session:SessionPayl
 }
 async function readTransaction<T>(invoiceId:number,session:SessionPayload,read:(client:DbClient,view:Snapshot)=>Promise<T>):Promise<T>{
   if(!positive(invoiceId))fail("invalid","رقم الفاتورة غير صالح.");
-  await ensureSchema();const client=await getPool().connect();let destroy=false;
-  try{await authorize(client,session);await ready(client);await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const result=await read(client,await snapshot(client,invoiceId));await client.query("COMMIT");return result;
-  }catch(error){try{await client.query("ROLLBACK");}catch{destroy=true;}throw error;}finally{client.release(destroy);}
+  return withLegacyStaffReadOnlySnapshot(session,{
+    allows:current=>current.role==="admin"&&current.username===session.username,
+    unauthorized:()=>new InvoiceAddServiceError("unauthorized","إضافة خدمة إلى فاتورة قائمة تحتاج جلسة مدير سارية."),
+  },async client=>{await ready(client);return read(client,await snapshot(client,invoiceId));});
 }
 export async function readInvoiceAddService(invoiceId:number,session:SessionPayload){
   return readTransaction(invoiceId,session,async(_client,view)=>({original:view.original,sourceHash:view.sourceHash,accountDueMinor:view.accountDueMinor,

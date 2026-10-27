@@ -111,7 +111,7 @@ it("backup failure and mandatory reset-audit failure preserve the prior epoch an
   expect((await fixture.sqlTarget.query("SELECT patient_name FROM visits")).rows).toEqual([{ patient_name: "Synthetic unlinked reset rollback visit" }]);
 });
 
-it("successful empty-history reset rotates only inventory execution authority and preserves general session authentication", async () => {
+it("legacy empty-history reset rotates its inventory epoch but cannot reopen held staff authentication", async () => {
   const before = await authority(fixture.sqlTarget);
   const signed: SessionPayload = { userId: 501, username: "SYN-OLD-ADMIN", role: "admin", expiresAt: Date.now() + 3_600_000,
     credentialVersion: sessionCredentialVersion("synthetic-maintenance-hash"), authority: await readStaffIdentityClaims(501) };
@@ -123,10 +123,16 @@ it("successful empty-history reset rotates only inventory execution authority an
   expect(after.subjects).toEqual(before.subjects); expect(after.epochs).toHaveLength(before.epochs.length + 1);
   expect((await fixture.sqlTarget.query("SELECT count(*)::int AS n FROM patients")).rows[0].n).toBe(0);
   expect((await fixture.sqlTarget.query("SELECT count(*)::int AS n FROM visits")).rows[0].n).toBe(0);
-  expect(await withTransaction(db.getPool(), c => revalidateSessionInTransaction(signed, c))).not.toBeNull();
-  await expect(withTransaction(db.getPool(), c => authenticateSupplierSession(c, signed))).rejects.toMatchObject({ code: "supplier_reauthentication_required" });
+  // The old independent authority footprint is a global legacy-authentication
+  // hold. Rotating or rereading its claims must not revive that obsolete path.
   const fresh = { ...signed, authority: await readStaffIdentityClaims(501) };
-  expect((await withTransaction(db.getPool(), c => authenticateSupplierSession(c, fresh))).authority).toEqual(fresh.authority);
+  for (const claims of [signed, fresh]) {
+    await expect(withTransaction(db.getPool(), c => revalidateSessionInTransaction(claims, c)))
+      .rejects.toThrow("LEGACY_STAFF_AUTHORITY_SCHEMA_HELD");
+    await expect(withTransaction(db.getPool(), c => authenticateSupplierSession(c, claims)))
+      .rejects.toThrow("LEGACY_STAFF_AUTHORITY_SCHEMA_HELD");
+  }
+  expect(await authority(fixture.sqlTarget)).toEqual(after);
 });
 
 it("patient-number history refuses reset before backup and preserves execution authority", async () => {

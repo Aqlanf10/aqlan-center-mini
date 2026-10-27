@@ -1,3 +1,4 @@
+import {withLegacyStaffReadOnlySnapshot} from "./legacy-staff-readonly-snapshot";
 import { foreignRatesFromSettings } from "./service-pricing";
 import { invoicePricingAudit } from "./invoice-price-settings-db";
 import type {SessionPayload} from "./auth";
@@ -80,11 +81,10 @@ export async function readHistoricalDocumentInTx(client:DbClient,id:number,patie
 }
 
 export async function previewHistoricalDocument(patientId:number,source:Record<string,unknown>,session:SessionPayload){
-  await ensureSchema();const client=await getPool().connect();
-  try{
-    // Authentication uses its canonical user row lock before this read-only preview snapshot.
-    await assertDebtSession(client,session);
-    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  return withLegacyStaffReadOnlySnapshot(session,{
+    allows:current=>["admin","reception"].includes(current.role),
+    unauthorized:()=>new DebtRepaymentError("unauthorized","انتهت الجلسة أو تغيّرت صلاحية إدارة الاتفاق؛ سجّل الدخول من جديد."),
+  },async client=>{
     if(!(await client.query("SELECT id FROM patients WHERE id=$1",[patientId])).rows.length)bad("المريض غير موجود.","missing");
     const {input,access,settings}=await inputInTx(client,patientId,source,session,false);
     const prior=await openingEvidence(client,patientId,input.currency);
@@ -97,9 +97,9 @@ export async function previewHistoricalDocument(patientId:number,source:Record<s
     }
     const remainingMinor=prior.position.remainingMinor+input.remainingMinor;
     const accountDueMinor=(await debtAccountDue(client,patientId,input.currency)).due+input.remainingMinor;
-    await client.query("COMMIT");return {patientId,currency:input.currency,lines,remainingMinor,accountDueMinor,sourceHash:prior.sourceHash,scheduleVersion:prior.scheduleVersion,
+    return {patientId,currency:input.currency,lines,remainingMinor,accountDueMinor,sourceHash:prior.sourceHash,scheduleVersion:prior.scheduleVersion,
       requiresAllocationReview:remainingMinor>Math.max(0,accountDueMinor),openingPrincipalMinor:prior.position.principalMinor+input.remainingMinor};
-  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+  });
 }
 
 async function writeOpening(client:DbClient,input:{patientId:number;currency:Currency;after:number;asOf:string;reason:string;session:SessionPayload;prior:Awaited<ReturnType<typeof openingEvidence>>;addOnly:boolean;allowCredit?:boolean}){

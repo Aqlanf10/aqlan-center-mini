@@ -1,3 +1,4 @@
+import {withLegacyStaffReadOnlySnapshot} from "./legacy-staff-readonly-snapshot";
 import type { SessionPayload } from "./auth";
 import { CLINIC_TIME_ZONE, ensureSchema, getInvoice, getPool, insertAuditRow, listPatientInvoices, type DbClient, type Invoice } from "./db";
 import { debtRequestHash } from "./debt-source-proof";
@@ -101,13 +102,10 @@ async function view(client: DbClient, invoice: Invoice, ready: boolean): Promise
     readiness: ready ? "ready" : "migration_pending", eligibility };
 }
 async function readOnly<T>(session: SessionPayload, run: (client: DbClient) => Promise<T>): Promise<T> {
-  await ensureSchema(); const client = await getPool().connect(); let destroy = false;
-  try {
-    await authority(client, session, false);
-    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const result = await run(client); await client.query("COMMIT"); return result;
-  } catch (error) { try { await client.query("ROLLBACK"); } catch { destroy = true; } throw error; }
-  finally { client.release(destroy); }
+  return withLegacyStaffReadOnlySnapshot(session,{
+    allows:current=>canViewMoney(current.role)&&(!["cashier","accountant"].includes(current.role)||!!current.financeAccess?.viewPatientLedger),
+    unauthorized:()=>new InvoiceArchiveError("unauthorized","قراءة الأرشيف تحتاج صلاحية قراءة الفواتير."),
+  },client=>run(client));
 }
 export async function readInvoiceArchive(invoiceId: number, session: SessionPayload): Promise<InvoiceArchiveView> {
   if (!positiveId(invoiceId)) throw new InvoiceArchiveError("invalid", "رقم الفاتورة غير صالح.");

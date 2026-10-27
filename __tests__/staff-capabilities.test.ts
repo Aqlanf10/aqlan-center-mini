@@ -329,3 +329,12 @@ describe("explicit legacy review adapter, never an authorization fallback", () =
     expect(assistant.ok && assistant.value.patientRead).toBe("today");
   });
 });
+
+it.each(["admin","reception","doctor","cashier","accountant","assistant"])("inventory reference capability is an independent explicit grant for active %s", role=>{
+ const identity=subject({role});
+ const granted=resolve(document({grants:{"inventory.references.view":true}}),identity);
+ expect(granted.status).toBe("allowed");expect(hasStaffCapability(granted,"inventory.references.view")).toBe(true);
+ expect(hasStaffCapability(granted,"staff.view")).toBe(false);
+ expect(hasStaffCapability(resolve(document(),identity),"inventory.references.view")).toBe(false);
+ expect(hasStaffCapability(resolve(document({grants:{"inventory.references.view":true}}),subject({role,isActive:false})),"inventory.references.view")).toBe(false);
+});
