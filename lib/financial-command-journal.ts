@@ -8,7 +8,7 @@
  */
 export interface FinancialCommandScope { actor: string; patientId: number }
 export interface FinancialCommand {
-  kind: "invoice" | "debt" | "invoice-correction" | "historical-correction" | "receipt-correction" | "collection";
+  kind: "invoice" | "debt" | "invoice-correction" | "historical-correction" | "receipt-correction" | "collection" | "agreement-reconciliation" | "invoice-maintenance" | "ortho-followup-coverage";
   key: string;
   /** Immutable first intent, including its receipt expectations. */
   original: string;
@@ -28,7 +28,7 @@ type StoredJournal = FinancialJournal & { scope: string; acknowledged?: Acknowle
 const DATABASE = "aqlan-financial-command-recovery";
 const STORE = "patient-commands";
 const MAX_BYTES = 1024 * 1024;
-const kinds = new Set(["invoice", "debt", "invoice-correction", "historical-correction", "receipt-correction", "collection"]);
+const kinds = new Set(["invoice", "debt", "invoice-correction", "historical-correction", "receipt-correction", "collection", "agreement-reconciliation", "invoice-maintenance", "ortho-followup-coverage"]);
 export class FinancialRecoveryError extends Error {
   constructor(public readonly code: "unavailable" | "invalid" | "changed") {
     super(code === "changed" ? "تغيّر الطلب المالي في نافذة أخرى. راجع الطلب المحفوظ قبل بدء عملية جديدة."
@@ -133,7 +133,9 @@ export async function reserveFinancialCommand(scope: FinancialCommandScope, revi
     return { ...current, command };
   });
 }
-/** Only after a fully validated receipt. Missing/denied/failed reads never clear
+/** Only after a fully validated receipt, or a matching permanent server no-save
+ * tombstone for a workflow whose contract supports terminal retirement.
+ * Missing/denied/failed reads never clear
  * an uncertain command. Keep the revision, discard sensitive command contents. */
 export async function acknowledgeFinancialCommand(scope: FinancialCommandScope, command: FinancialCommand): Promise<FinancialJournal> {
   if (!validateCommand(command)) throw new FinancialRecoveryError("invalid");
@@ -146,4 +148,39 @@ export async function acknowledgeFinancialCommand(scope: FinancialCommandScope, 
       || current.command.original !== command.original) throw new FinancialRecoveryError("changed");
     return { scope: current.scope, revision: current.revision + (sameAcknowledgement(current.acknowledged, identity) ? 0 : 1), command: null, acknowledged: identity };
   });
+}
+
+/** Read-only discovery for an actor's historical patient scopes (e.g. a merged
+ * patient). Filter by the encoded scope BEFORE validating/returning row content;
+ * no foreign actor command or patient identity is exposed by this API. */
+export async function readFinancialJournalsForActor(actor: string): Promise<{ scope: FinancialCommandScope; journal: FinancialJournal }[]> {
+  scopeKey({ actor, patientId: 1 });
+  const db = await database();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const request = tx.objectStore(STORE).getAll();
+      let result: { scope: FinancialCommandScope; journal: FinancialJournal }[] = [], failure: unknown;
+      request.onsuccess = () => {
+        try {
+          if (!Array.isArray(request.result)) throw new FinancialRecoveryError("invalid");
+          result = request.result.flatMap((value: unknown) => {
+            if (!value || typeof value !== "object" || !("scope" in value) || typeof value.scope !== "string") return [];
+            let parsed: unknown; try { parsed = JSON.parse(value.scope); } catch { return []; }
+            if (!Array.isArray(parsed) || parsed[0] !== actor) return [];
+            if (parsed.length !== 2) throw new FinancialRecoveryError("invalid");
+            const scope = { actor, patientId: parsed[1] } as FinancialCommandScope;
+            if (scopeKey(scope) !== value.scope) throw new FinancialRecoveryError("invalid");
+            const saved = readStored(value, value.scope);
+            return [{ scope, journal: { revision: saved.revision, command: saved.command } }];
+          });
+        } catch (error) { failure = error; tx.abort(); }
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = () => {};
+      tx.onabort = () => reject(failure ?? new FinancialRecoveryError("unavailable"));
+    });
+  } catch (error) {
+    throw error instanceof FinancialRecoveryError ? error : new FinancialRecoveryError("unavailable");
+  } finally { db.close(); }
 }

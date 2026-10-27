@@ -153,6 +153,12 @@ export const CRITICAL_SCHEMA_TABLES = [
  *  إذا كانت الهجرة المسجَّلة مطبَّقة؛ أما وهي ناقصة (pending) فغيابها متوقَّع لا انحراف. */
 export const CRITICAL_SCHEMA_COLUMNS: Array<{ table: string; column: string; sinceVersion: string }> = [
   ...[
+    ["lab_work_intents", "revision"], ["lab_work_members", "created_revision"],
+    ["lab_prescription_source_memberships", "member_id"],
+    ["lab_work_commands", "request_hash"], ["lab_work_intent_schema", "version"],
+    ["visit_procedures", "lab_work_member_id"], ["lab_orders", "lab_work_intent_id"],
+  ].map(([table, column]) => ({ table, column, sinceVersion: "0074" })),
+  ...[
     ["invoice_corrections","original_currency"],
     ["invoice_settlement_reclassifications","correction_id"],["invoice_settlement_reclassifications","source_invoice_ids"],
     ["invoice_settlement_reclassifications","patient_id"],["invoice_settlement_reclassifications","source_currency"],["invoice_settlement_reclassifications","target_currency"],

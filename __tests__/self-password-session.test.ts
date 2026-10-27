@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   cookie: vi.fn(), header: vi.fn(), user: vi.fn(), update: vi.fn(), audit: vi.fn(),
   limit: vi.fn(), sharedLimit: vi.fn(), clearLimits: vi.fn(),
 }));
+vi.mock("@/lib/staff-authenticated-identity", () => ({ readStaffIdentityClaims: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: mocks.cookie }),
   headers: async () => ({ get: mocks.header }),

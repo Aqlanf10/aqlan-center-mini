@@ -1,0 +1,11 @@
+import { beforeEach, expect, it, vi } from "vitest";
+const fixture = vi.hoisted(()=>({number: "P-07000", payload: {patientId: 42,patientNumber:"P-07000"} as {patientId:number;patientNumber:string}|null, fail:false}));
+vi.mock("next/headers",()=>({cookies:async()=>({get:()=>({value:"synthetic"})})}));
+vi.mock("../lib/portal",()=>({PORTAL_COOKIE:"synthetic",readPortalToken:()=>fixture.payload}));
+vi.mock("../lib/db",()=>({getPatient: async(id:number)=>{if(fixture.fail)throw new Error("offline");return id===42?{id,patientNumber:fixture.number}:null;}}));
+import {requirePortalSession} from "../lib/portal-server";
+beforeEach(()=>{fixture.number="P-07000";fixture.payload={patientId:42,patientNumber:"P-07000"};fixture.fail=false;});
+it("keeps the signed stable patient ID while its current alias matches",async()=>{expect(await requirePortalSession()).toEqual(fixture.payload);});
+it("invalidates old alias tokens after an explicit file-number edit",async()=>{fixture.number="P-07001";expect(await requirePortalSession()).toBeNull();});
+it("never moves an existing token to another patient",async()=>{fixture.payload={patientId:43,patientNumber:"P-07000"};expect(await requirePortalSession()).toBeNull();});
+it("fails closed without a current patient or when validation is unavailable",async()=>{fixture.fail=true;expect(await requirePortalSession()).toBeNull();fixture.payload=null;expect(await requirePortalSession()).toBeNull();});

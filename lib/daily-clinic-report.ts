@@ -1,4 +1,5 @@
-import {attachCurrencyReclassifications} from "./invoice-currency-evidence";
+import { DAILY_CLINIC_CORRECTION_LINEAGE_SQL } from "./daily-clinic-correction-lineage";
+import {attachCurrencyReclassifications, readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
 import { legacyCoverageStateFromSnapshot } from "./legacy-treatment-coverage";
 import { SITE_SCOPE_LABEL } from "./invoice-clinical-linkage";
 import { CLINIC_TIME_ZONE, getPool } from "./db";
@@ -241,6 +242,22 @@ export async function loadDailyClinicReportSource(
     sourceType: nullableText(row.source_type), sourceId: nullableInteger(row.source_id),
     sourceVisitId: nullableInteger(row.source_visit_id), sourceVisitPatientId: nullableInteger(row.source_visit_patient_id),
   }));
+  // Validate only mismatches, in this same read-only snapshot. Never treat a
+  // cancelled invoice or an audit-log description alone as currency proof.
+  const invoiceById = new Map(invoices.map((invoice) => [invoice.id, invoice]));
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const mismatchingLines = invoiceLines.filter((line) => line.planId !== null
+    && planById.get(line.planId)?.currency !== invoiceById.get(line.invoiceId)?.currency);
+  if (mismatchingLines.length) {
+    // Validate currency documents even for unpaid patients (the payment adapter
+    // normally scopes its proof reads to patients with recorded receipts).
+    await readCurrencyReclassificationEvidence({query: async<T>(sql: string, values: unknown[] = []) =>
+      ({rows: (await runner.query(sql, values)).rows as T[]})},
+    [...new Set(mismatchingLines.map((line) => invoiceById.get(line.invoiceId)!.patientId))]);
+    const proven = new Set((await rows(runner, DAILY_CLINIC_CORRECTION_LINEAGE_SQL,
+      [mismatchingLines.map((line) => line.id)])).map((row) => integer(row.root_id)));
+    for (const line of mismatchingLines) line.historicalCurrencyLinkVerified = proven.has(line.id);
+  }
   const invoiceCorrections: DailyClinicSourceInvoiceCorrection[] = (await rows(runner, DAILY_CLINIC_INVOICE_CORRECTIONS_SQL,
     [invoiceIds.map(String), invoices.map((invoice) => invoice.invoiceNumber)])).map((row) => ({
     originalInvoiceId: integer(row.original_invoice_id), correctedInvoiceNumber: String(row.corrected_invoice_number),

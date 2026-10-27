@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+import type { SessionPayload } from "../../lib/auth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../../lib/specialty-templates";
@@ -18,6 +20,7 @@ assertRealPostgresUrl();
 stubPostgresEnv();
 
 const db = await import("../../lib/db");
+let responsibilityAdmin: SessionPayload;
 const { createLegacyTreatment } = await import("../../lib/legacy-treatment-db");
 const { createLinkedInvoice } = await import("../../lib/invoice-linkage-db");
 const { invoiceRequestFingerprint } = await import("../../lib/invoice-clinical-linkage");
@@ -38,6 +41,7 @@ let fixture = 0;
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  responsibilityAdmin = await responsibilityAdminFixture("synthetic-ortho-case-identity-admin");
   doctor = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'Synthetic Doctor') RETURNING id`))[0].id;
   orthoService = (await q<{ id: number }>(
     `INSERT INTO services (name, price_minor, is_active, price_configured, category)
@@ -169,7 +173,7 @@ const baseline = (patientId: number, arches: "both" | "upper" | "lower") => {
     remainingObjectives: "Synthetic remaining objective",
   }, TODAY);
   if (!draft.ok) throw new Error(draft.message);
-  return recordOrthoBaseline({ ...draft.value, responsibleDoctorId: doctor, patientId, actor: "dr", actorRole: "doctor" });
+  return recordOrthoBaseline({ admittedSession: responsibilityAdmin, ...draft.value, responsibleDoctorId: doctor, patientId, actor: "dr", actorRole: "doctor" });
 };
 const footprint = async (patientId: number) => (await q<Record<string, number | string | null>>(
   `SELECT (SELECT COUNT(*)::int FROM clinical_cases WHERE patient_id = $1) AS cases,
@@ -244,7 +248,7 @@ describe("(ORTHO-ID) jaw scope is one value in the general bridge and the ortho 
       plannedMonths: 18, planId: null, note: null, createdBy: "ortho-id-test",
     });
     if (!ortho.ok) throw new Error(ortho.message);
-    const bridged = await createClinicalCase({
+    const bridged = await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId, specialty: "orthodontics", title: "Synthetic bridge", site: null, problem: null,
       responsiblePartyId: null, orthoCaseId: ortho.id, actor: "reception",
     });
@@ -259,7 +263,7 @@ describe("(ORTHO-ID) jaw scope is one value in the general bridge and the ortho 
       plannedMonths: 18, planId: null, note: null, createdBy: "ortho-id-test",
     });
     if (!ortho.ok) throw new Error(ortho.message);
-    const bridged = await createClinicalCase({
+    const bridged = await createClinicalCase({ admittedSession: responsibilityAdmin,
       patientId, specialty: "orthodontics", title: "Synthetic bridge", site: null, problem: null,
       responsiblePartyId: null, orthoCaseId: ortho.id, actor: "reception",
     });
@@ -348,5 +352,58 @@ describe("(ORTHO-ID) bridge failures write nothing", () => {
         expect(cases[0].ortho_case_id).not.toBeNull();
       }
     }
+  });
+});
+
+describe("(ORTHO-ID) bridge creation is not responsibility reassignment", () => {
+  async function ownedShell(label: string, sameOwner = false) {
+    const patientId = await newPatient(label);
+    const [incoming] = await q<{ id: number }>("INSERT INTO parties(kind,name) VALUES ('doctor',$1) RETURNING id", [`Synthetic baseline clinician ${fixture}`]);
+    const passwordHash = "synthetic-baseline-existing-access-hash";
+    const username = `synthetic-baseline-owner-${fixture}`;
+    const [user] = await q<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role,party_id) VALUES ($1,$1,$2,'doctor',$3) RETURNING id", [username,passwordHash,incoming.id]);
+    // An independent preexisting witness makes initial self-assignment legitimate;
+    // it must not permit replacing another case's established current owner.
+    await q("UPDATE patients SET primary_doctor_id=$2 WHERE id=$1", [patientId,incoming.id]);
+    const shellDoctorId = sameOwner ? incoming.id : doctor;
+    const [shell] = await q<{ id: number }>(`INSERT INTO clinical_cases(patient_id,specialty,title,site,created_by,origin,responsible_party_id)
+      VALUES ($1,'orthodontics','Synthetic established shell','الفكّان','synthetic','invoice',$2) RETURNING id`, [patientId,shellDoctorId]);
+    const { sessionCredentialVersion } = await import("../../lib/auth");
+    const admitted: SessionPayload = { userId:user.id,username,role:"doctor",partyId:incoming.id,
+      credentialVersion:sessionCredentialVersion(passwordHash),expiresAt:Date.now()+3_600_000 };
+    const draft = checkBaselineDraft({ phase:"working", financialMode:"opening_balance", monthsElapsed:10, monthsRemaining:8,
+      arches:"both",remainingObjectives:"Synthetic remaining objective" },TODAY);
+    if (!draft.ok) throw new Error(draft.message);
+    return { patientId, shell, shellDoctorId, incoming, admitted, draft: draft.value };
+  }
+  it("rejects baseline self-assignment over a different established shell owner and rolls back", async () => {
+    const f = await ownedShell("different established owner");
+    expect(await db.doctorOwnsPatient(f.incoming.id,f.patientId)).toBe(true);
+    const before = await footprint(f.patientId);
+    const auditBefore = await q("SELECT id FROM audit_log WHERE entity='patient' AND entity_id=$1 ORDER BY id", [String(f.patientId)]);
+    const result = await recordOrthoBaseline({ ...f.draft,patientId:f.patientId,responsibleDoctorId:f.incoming.id,
+      admittedSession:f.admitted,actor:f.admitted.username,actorRole:"doctor" });
+    expect(result).toEqual({ok:false,reason:"bridge_conflict"});
+    expect(await footprint(f.patientId)).toEqual(before);
+    expect(await q("SELECT responsible_party_id,ortho_case_id FROM clinical_cases WHERE id=$1",[f.shell.id])).toEqual([{responsible_party_id:f.shellDoctorId,ortho_case_id:null}]);
+    expect(await q("SELECT id FROM audit_log WHERE entity='patient' AND entity_id=$1 ORDER BY id",[String(f.patientId)])).toEqual(auditBefore);
+  });
+  it("allows the same established owner to create the canonical baseline", async () => {
+    const f = await ownedShell("same established owner",true);
+    const result = await recordOrthoBaseline({ ...f.draft,patientId:f.patientId,responsibleDoctorId:f.incoming.id,
+      admittedSession:f.admitted,actor:f.admitted.username,actorRole:"doctor" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(await q("SELECT responsible_party_id,ortho_case_id FROM clinical_cases WHERE id=$1",[f.shell.id])).toEqual([{responsible_party_id:f.incoming.id,ortho_case_id:result.id}]);
+  });
+  it("preserves an established bridge owner when the new canonical case has no owner", async () => {
+    const f = await ownedShell("unset canonical owner");
+    const result = await createOrthoCase({patientId:f.patientId,appliance:"fixed_metal",arches:"both",slot:"022",bracketSystem:null,
+      startDate:TODAY,plannedMonths:12,planId:null,note:null,createdBy:f.admitted.username});
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    const { readReturnBookingContext } = await import("../../lib/return-booking-context");
+    expect(await readReturnBookingContext(getPool(),f.patientId,{kind:"ortho_case",id:result.id})).toMatchObject({ok:true,doctorId:f.shellDoctorId});
+    expect(await q("SELECT responsible_doctor_id FROM ortho_cases WHERE id=$1",[result.id])).toEqual([{responsible_doctor_id:null}]);
   });
 });

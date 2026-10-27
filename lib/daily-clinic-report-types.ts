@@ -260,6 +260,8 @@ export interface DailyClinicSourceInvoice {
   invoiceNumber: string; createdAt: string; clinicDate: string;
 }
 export interface DailyClinicSourceInvoiceLine {
+  /** Internal loader proof, never accepted from a client or inferred from audit text. */
+  historicalCurrencyLinkVerified?: boolean;
   id: number; invoiceId: number; description: string; totalMinor: number;
   planItemId: number | null; planId: number | null; caseId: number | null; toothCode: number | null;
   /** invoice_items.source_type/source_id and, for a visit-procedure source, that procedure's visit and patient. */

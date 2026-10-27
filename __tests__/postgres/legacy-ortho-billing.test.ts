@@ -137,9 +137,9 @@ describe("P0-B legacy orthodontic billing guard", () => {
   it("does not claim legacy coverage when its opening receivable is missing", async () => {
     const { caseId, visitId } = await legacyPatient({ mode: "opening_balance", opening: false });
     await adjustment(caseId);
-    expect((await getClinicalVisit(visitId))?.ortho?.adjustmentBillingClass).toBe("OUTSIDE_CONTRACT");
+    expect((await getClinicalVisit(visitId))?.ortho?.adjustmentBillingClass).toBe("REVIEW_REQUIRED");
     const signed = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: doctorId });
-    expect(signed.orthoBillingClass).toBe("OUTSIDE_CONTRACT");
+    expect(signed.orthoBillingClass).toBe("REVIEW_REQUIRED");
     expect(signed.invoiceId).toBeNull();
   });
 });

@@ -706,7 +706,11 @@ describe("existing planned-session / plan-item / clinical-case read projection",
     await q("UPDATE visits SET signed_at=NOW(), signed_by=$2, status='done' WHERE id=$1", [visit.id, ACTOR]);
     expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("unresolved_planned_visit_record");
     const foreignPatient = await patient();
-    await q("UPDATE visits SET signed_at=NULL, signed_by=NULL, patient_id=$2, status='in_chair' WHERE id=$1", [visit.id, foreignPatient]);
+    // A separate unsigned foreign link must not erase the prior signed visit.
+    const [foreignVisit] = await q<{ id: number }>(`INSERT INTO visits (patient_id, patient_name, planned_visit_id, status)
+      VALUES ($1, 'Synthetic foreign planned visit', $2, 'in_chair') RETURNING id`, [foreignPatient, target.planned]);
+    await q("UPDATE planned_visits SET visit_id=$2 WHERE id=$1", [target.planned, foreignVisit.id]);
+    await q("UPDATE treatment_sessions SET visit_id=$2 WHERE id=$1", [target.session, foreignVisit.id]);
     expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("unresolved_planned_visit_record");
   });
 });

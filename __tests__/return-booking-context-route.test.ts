@@ -1,0 +1,17 @@
+import { beforeEach, expect, it, vi } from "vitest";
+const deps = vi.hoisted(() => ({ session: vi.fn(), access: vi.fn(), read: vi.fn(), list: vi.fn() }));
+vi.mock("../lib/session", () => ({ requireSession: deps.session }));
+vi.mock("../lib/patient-access", () => ({ canAccessPatient: deps.access }));
+vi.mock("../lib/db", () => ({ ensureSchema: async () => {}, getPool: () => ({}) }));
+vi.mock("../lib/return-booking-context", async () => ({ ...await vi.importActual("../lib/return-booking-source"), readReturnBookingContext: deps.read, listReturnBookingContexts: deps.list }));
+import { GET } from "../app/api/patients/[id]/return-booking-context/route";
+const request = (query = "kind=clinical_case&sourceId=10") => new Request(`http://localhost/api/patients/19/return-booking-context?${query}`);
+const context = { params: Promise.resolve({ id: "19" }) };
+beforeEach(() => { vi.clearAllMocks(); deps.session.mockResolvedValue({ role: "reception", username: "synthetic" }); deps.access.mockResolvedValue(true); deps.read.mockResolvedValue({ ok: true, doctorId: 8, doctorName: "Current" }); deps.list.mockResolvedValue([{ source: { kind: "clinical_case", id: 10 }, available: false, code: "responsibility_missing" }]); });
+it("returns private no-store current context after patient authorization", async () => { const result = await GET(request(), context); expect(result.status).toBe(200); expect(result.headers.get("Cache-Control")).toBe("private, no-store"); expect(await result.json()).toMatchObject({ doctorId: 8 }); });
+it("returns exact origin to resolver rather than trusting source selection", async () => { await GET(request("kind=clinical_case&sourceId=10&originKind=visit&originId=40"), context); expect(deps.read).toHaveBeenCalledWith({},19,{kind:"clinical_case",id:10},{origin:{kind:"visit",id:40}}); });
+it("lists missing-owner contexts without inventing a doctor", async () => { const result = await GET(request(""), context); expect(await result.json()).toMatchObject({ contexts: [{ available: false, code: "responsibility_missing" }] }); });
+it.each(["kind=clinical_case", "sourceId=10", "kind=doctor&sourceId=10", "kind=clinical_case&sourceId=10&sourceId=11", "doctorId=8", "originKind=visit&originId=40"])("rejects malformed or unrecognized selector %s", async query => { expect((await GET(request(query), context)).status).toBe(400); expect(deps.read).not.toHaveBeenCalled(); });
+it("denies anonymous requests before lookup", async () => { deps.session.mockResolvedValue(null); expect((await GET(request(),context)).status).toBe(401); expect(deps.read).not.toHaveBeenCalled(); });
+it("denies foreign patients before lookup", async () => { deps.access.mockResolvedValue(false); expect((await GET(request(),context)).status).toBe(403); expect(deps.read).not.toHaveBeenCalled(); });
+it("returns a blocking responsibility refusal, not a successful blank provider", async () => { deps.read.mockResolvedValue({ok:false,code:"responsibility_missing",message:"Set responsible clinician"}); expect((await GET(request(),context)).status).toBe(409); });

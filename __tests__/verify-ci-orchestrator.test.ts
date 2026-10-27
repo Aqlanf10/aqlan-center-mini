@@ -13,8 +13,8 @@ import { JOURNEYS } from "../scripts/verify-ci-journeys.mjs";
 describe("مُنسِّق رحلات التحقق", () => {
   it("سقوط رحلةٍ واحدة يجعل الخروج ١", async () => {
     const results = await runJourneys([
-      { phase: 1, name: "ناجحة", script: "__tests__/fixtures/passing-journey.mjs", needsPostgres: false },
-      { phase: 1, name: "ساقطة", script: "__tests__/fixtures/failing-journey.mjs", needsPostgres: false },
+      { phase: 1, name: "ناجحة", script: "__tests__/fixtures/passing-journey.ts", needsPostgres: false },
+      { phase: 1, name: "ساقطة", script: "__tests__/fixtures/failing-journey.ts", needsPostgres: false },
     ], { postgresAvailable: false });
 
     expect(results.map((r) => r.status)).toEqual(["PASS", "FAIL"]);
@@ -23,7 +23,7 @@ describe("مُنسِّق رحلات التحقق", () => {
 
   it("ونجاح الكل يجعله صفرًا — فالأحمر ليس حالَه الدائم", async () => {
     const results = await runJourneys([
-      { phase: 1, name: "ناجحة", script: "__tests__/fixtures/passing-journey.mjs", needsPostgres: false },
+      { phase: 1, name: "ناجحة", script: "__tests__/fixtures/passing-journey.ts", needsPostgres: false },
     ], { postgresAvailable: false });
 
     expect(summarize(results)).toBe(0);
@@ -31,7 +31,7 @@ describe("مُنسِّق رحلات التحقق", () => {
 
   it("والرحلة المتخطّاة لنقص البيئة لا تُعدّ ناجحة", async () => {
     const results = await runJourneys([
-      { phase: 2, name: "تحتاج خادمًا", script: "__tests__/fixtures/passing-journey.mjs", needsPostgres: true },
+      { phase: 2, name: "تحتاج خادمًا", script: "__tests__/fixtures/passing-journey.ts", needsPostgres: true },
     ], { postgresAvailable: false });
 
     expect(results[0].status).toBe("SKIP");

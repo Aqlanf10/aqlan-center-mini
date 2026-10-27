@@ -9,7 +9,7 @@ import { SurfaceSelector, toggleSurface } from "../components/dental/SurfaceSele
 import { ToothSelectionDialog } from "../components/dental/ToothSelectionDialog";
 import {
   PER_TOOTH_SPLIT_NOTICE, TOOTH_REQUIRED_MESSAGE, applyToothSelection, applyHistoricalToothSelection, emptyToothFields, invoiceToothMode, removeRowAt,
-  replaceRowService, selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
+  replaceRowService, selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart, multiSelect,
   type ToothRowLike,
 } from "../components/dental/invoice-tooth-selection";
 import { PERMANENT_LOWER, PERMANENT_UPPER, buildChart, toothName } from "../lib/dental";
@@ -91,6 +91,17 @@ describe("(INV-LINK TOOTH) chart selection → invoice lines", () => {
     expect(toggleSurface(["M", "O"], "M")).toEqual(["O"]);
   });
 
+  it("filling: multiple teeth keep their own surfaces without inventing an episode or broadcasting legacy surfaces", () => {
+    expect(multiSelect("tooth_surfaces")).toBe(true);
+    const rows = applyToothSelection([row({ caseId: "99", toothCode: 26, surfaces: "MO" })], 0, "tooth_surfaces",
+      { teeth: [26, 36, 36], surfaces: "MO", surfacesByTooth: { 26: "MO", 36: "B" }, scope: null }, key);
+    expect(rows.map(one => [one.toothCode, one.surfaces, one.caseId, one.groupId, one.episodeTeeth])).toEqual([
+      [26, "MO", "99", null, null], [36, "B", "", null, null],
+    ]);
+    expect(applyToothSelection([row()], 0, "tooth_surfaces", { teeth: [26, 36], surfaces: "MO", scope: null }, key)
+      .map(one => one.surfaces)).toEqual(["", ""]);
+  });
+
   it("ortho arch and cleaning region use scopes, not a tooth", () => {
     const [ortho] = setRowScope([row(emptyToothFields("arch"))], 0, "upper");
     expect(toothPayload("arch", ortho)).toEqual({ scope: "upper" });
@@ -168,6 +179,12 @@ describe("(INV-LINK TOOTH) one shared odontogram", () => {
 
 
 describe("historical original episode pricing", () => {
+  it("does not extend historical filling agreements to multiple teeth", () => {
+    const result = applyHistoricalToothSelection([row()], 0, "tooth_surfaces",
+      { teeth: [26, 36], surfaces: "", surfacesByTooth: { 26: "MO", 36: "B" }, scope: null }, key);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ toothCode: 26, surfaces: "MO", groupId: null });
+  });
   it("keeps a 300000 bridge over 14–16 as one original value and one coverage identity", () => {
     const original=row({price:"300000"});
     const result=applyHistoricalToothSelection([original],0,"multi_tooth_episode",{teeth:[16,14,15],surfaces:"",scope:null},key);

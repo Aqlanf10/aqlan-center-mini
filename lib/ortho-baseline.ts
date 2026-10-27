@@ -177,8 +177,14 @@ export function checkBaselineDraft(
 
 /* ─────────────────── جلسة التقويم داخل توقيع الزيارة ─────────────────── */
 
+export function resolveOrthoWire(current: string | null, wire: string | null, action?: "remove"): string | null {
+  return action === "remove" ? null : wire?.trim() || current;
+}
+
 export interface OrthoSessionDraft {
   caseId: number;
+  upperWireAction?: "remove";
+  lowerWireAction?: "remove";
   phase: OrthoPhase | null;
   upperWire: string | null;
   lowerWire: string | null;
@@ -200,21 +206,31 @@ export function checkOrthoSessionDraft(
   const source = value as Record<string, unknown>;
   const caseId = Number(source.caseId);
   if (!Number.isInteger(caseId) || caseId <= 0) return { ok: false, message: "حالة التقويم غير محددة." };
-  const nextWeeks = Math.round(Number(source.nextWeeks ?? 4));
-  if (!Number.isFinite(nextWeeks) || nextWeeks < 1 || nextWeeks > 52) {
+  const rawWeeks = source.nextWeeks === undefined ? 4 : source.nextWeeks;
+  const nextWeeks = typeof rawWeeks === "number" || typeof rawWeeks === "string" ? Number(rawWeeks) : NaN;
+  if (!Number.isInteger(nextWeeks) || nextWeeks < 1 || nextWeeks > 52) {
     return { ok: false, message: "المدة حتى الشدّة القادمة بين أسبوع و52 أسبوعًا." };
   }
-  const phase = typeof source.phase === "string" && source.phase in PHASE_LABEL ? source.phase as OrthoPhase : null;
+  const done = text(source.done, 400);
+  if (!done) return { ok: false, message: "وثّق ما تم في جلسة التقويم، أو المراجعة دون تغيير." };
+  for (const arch of ["upper", "lower"] as const) {
+    const action = source[`${arch}WireAction`];
+    if (action !== undefined && action !== "remove") return { ok: false, message: "إجراء السلك غير صالح." };
+    if (action === "remove" && text(source[`${arch}Wire`], 40)) return { ok: false, message: "اختر إزالة السلك أو تسجيل سلك، لا كليهما." };
+  }
+  const phase = typeof source.phase === "string" && Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase) ? source.phase as OrthoPhase : null;
   return {
     ok: true,
     value: {
       caseId,
+      ...(source.upperWireAction === "remove" ? { upperWireAction: "remove" as const } : {}),
+      ...(source.lowerWireAction === "remove" ? { lowerWireAction: "remove" as const } : {}),
       phase,
       upperWire: text(source.upperWire, 40),
       lowerWire: text(source.lowerWire, 40),
       elastics: isElasticClass(source.elastics) ? source.elastics : "none",
       elasticNote: text(source.elasticNote, 120),
-      done: text(source.done, 400),
+      done,
       nextWeeks,
       note: text(source.note, 300),
     },

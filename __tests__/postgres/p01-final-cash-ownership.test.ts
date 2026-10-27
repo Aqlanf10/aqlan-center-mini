@@ -97,10 +97,11 @@ beforeAll(async () => {
     seedDoctor("طبيب التسوية السعودية"),
     seedDoctor("طبيب الدولار على اليمني"),
   ]);
-  [patSar, patUsdToYer] = await Promise.all([
-    seedPatient("P01-FC-SAR", "مريض التسوية السعودية"),
-    seedPatient("P01-FC-USD-YER", "مريض الدولار على اليمني"),
-  ]);
+  // Raw historical-number fixtures are sequential; allocator concurrency is tested separately.
+  [patSar, patUsdToYer] = [
+    await seedPatient("P01-FC-SAR", "مريض التسوية السعودية"),
+    await seedPatient("P01-FC-USD-YER", "مريض الدولار على اليمني"),
+  ];
 
   /* س: فاتورة سعودية 2,000.00 (200,000 هللة) وتحصيل 1,500.00 (150,000) @130
    *    — تسويةً سعوديةً سعوديةً بمبلغها نفسه. */

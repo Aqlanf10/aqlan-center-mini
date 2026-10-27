@@ -34,7 +34,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = fixture.source.options.connectionString!;
   process.env.SKIP_SEED = 'true';
   db = await import('../../lib/db'); await db.resetPoolForTesting(); await db.ensureSchema();
-  expect((await fixture.source.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069']);
+  expect((await fixture.source.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082']);
   await fixture.source.query("INSERT INTO users(id,username,display_name,password_hash,role) VALUES(710,'composed-admin','Synthetic administrator','synthetic-hash','admin')");
   await fixture.source.query("INSERT INTO hr_staff(id,full_name,created_by,contract_kind,salary_amount_minor,salary_currency,salary_period,salary_effective_on,hire_date) VALUES(810,'Synthetic receptionist','test','salary',90000,'YER','monthly','2020-01-01','2020-01-01')");
   // A real financial DATE must survive both supported restore entry points too.
@@ -72,7 +72,7 @@ it('SQL backup restores every application table, explicit identities, revision o
   // Exercise the supported SQL restore CLI against a runtime-owned target registry.
   const restored = await promisify(execFile)(process.execPath, ['scripts/restore.mjs', join(directory, 'synthetic-backup.sql')], { env: { ...process.env } });
   expect(restored.stdout).toContain('تمت الاستعادة');
-  expect((await fixture.sqlTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069']);
+  expect((await fixture.sqlTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082']);
   expect(await rows(fixture.sqlTarget)).toEqual(await rows(fixture.source));
   expect(await recordHrHistory(db.getPool(),hrTemporalAuthority(actor),originalCommand)).toEqual(originalReceipt);
   expect((await fixture.sqlTarget.query('SELECT count(*)::int AS n FROM hr_effective_revisions')).rows[0].n).toBe(2);
@@ -93,19 +93,18 @@ it('reset explicitly classifies all immutable HR history and receipt tables as r
   for(const table of ['hr_staff','hr_contracts','hr_effective_streams','hr_effective_revisions','hr_temporal_write_receipts']) expect(RESET_KEEP_TABLES).toContain(table);
 });
 
-it('actual reset backs up history under the freeze, retains it byte for byte, and leaves original receipt replay valid', async () => {
+it('patient-free reset backs up HR history under the freeze, retains it byte for byte, and leaves original receipt replay valid', async () => {
   process.env.DATABASE_URL = fixture.sqlTarget.options.connectionString!;
   await db.resetPoolForTesting();
   const retained = ['users', 'hr_staff', 'hr_contracts', 'hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts'];
   const before = await rows(fixture.sqlTarget);
-  await fixture.sqlTarget.query("INSERT INTO patients(patient_number,full_name) VALUES('HR-RESET-SYNTHETIC','Synthetic reset patient')");
+  expect(before.patients).toEqual([]); // Issued patient identities are now protected from reset.
   let snapshot = '';
   const result = await db.resetClinicData({ actor: actor.username, actorRole: actor.role }, async (client) => {
     for await (const line of db.backupSqlLines(client)) snapshot += line;
     return { ok: true, backupId: 'synthetic-local-reset-backup' };
   });
-  expect(result).toMatchObject({ ok: true, backupId: 'synthetic-local-reset-backup', counts: { patients: 1 } });
-  expect(snapshot).toContain('HR-RESET-SYNTHETIC');
+  expect(result).toMatchObject({ ok: true, backupId: 'synthetic-local-reset-backup', counts: { patients: 0 } });
   expect(snapshot).toContain('composed-durable-request-0001');
   const after = await rows(fixture.sqlTarget);
   for (const table of retained) expect(after[table], table).toEqual(before[table]);

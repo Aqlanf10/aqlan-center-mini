@@ -148,7 +148,7 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(await statementInvoice.locator("thead").innerText()).toContain(ledger.invoices[0].invoiceNumber);
       expect(await statementInvoice.locator("tbody tr").filter({hasText:"صافي الفاتورة بعد الخصم"}).innerText()).toContain("1,500.00");
       expect(await statement.locator(".line").filter({hasText:"إجمالي المفوتر"}).innerText()).toContain("1,500.00");
-      expect(await statement.locator(".line").filter({hasText:"صافي المحصّل بعد الاستردادات وعكس السندات"}).innerText()).toContain("0.00");
+      expect(await statement.locator(".line").filter({hasText:"صافي المدفوع"}).innerText()).toContain("0.00");
       await statement.emulateMedia({media:"print"});await statement.screenshot({path:`.settings-ui-artifacts/invoice-statement-${role}-${width}.png`,fullPage:true});await statement.close();
       const audit = (await db.query("SELECT details FROM audit_log WHERE action='invoice.create' AND details->>'المريض'=$1", [String(patientId)])).rows[0].details;
       expect(audit.invoicePriceSnapshots[0]).toMatchObject({ quote: { source: "converted", rate: 440, rounding: "nearest-major-unit", minor: 500 }, agreedPriceSource:"manual", requestedMinor: 150000, reason: "Synthetic explicit manual agreement" });

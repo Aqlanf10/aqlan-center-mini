@@ -229,7 +229,7 @@ describe("safe pre-treatment clinical identity correction",()=>{
     const result=await revision.reviseInvoice(issued.invoice.id,change,session);
     expect(result).toMatchObject({original:{items:[{serviceId:service,doctorId:doctor,toothCode:36}]},corrected:{items:[{serviceId:nextService,doctorId:nextDoctor,toothCode:46,planItemId:issued.links[0].planItemId,caseId:issued.links[0].caseId,financialReviewRequired:false}]}});
     expect((await db.getInvoice(issued.invoice.id))?.items[0]).toMatchObject({serviceId:service,doctorId:doctor,toothCode:36});
-    expect(await q("SELECT id,site,responsible_party_id FROM clinical_cases WHERE patient_id=$1",[patientId])).toEqual([{id:issued.links[0].caseId,site:"46",responsible_party_id:nextDoctor}]);
+    expect(await q("SELECT id,site,responsible_party_id FROM clinical_cases WHERE patient_id=$1",[patientId])).toEqual([{id:issued.links[0].caseId,site:"46",responsible_party_id:null}]);
     expect(await q("SELECT id FROM plan_items WHERE plan_id=$1",[issued.planId])).toEqual([{id:issued.links[0].planItemId}]);
     const expectedLine={...issued.invoice.items[0],serviceId:nextService,doctorId:nextDoctor,toothCode:46,description:"Synthetic corrected root canal",unitPriceMinor:12000,totalMinor:12000};
     const lease:InvoiceRevisionCommand={key:change.idempotencyKey,actor:session.username,patientId,invoiceId:issued.invoice.id,body:JSON.stringify(change),
@@ -240,6 +240,29 @@ describe("safe pre-treatment clinical identity correction",()=>{
     expect(()=>restoreInvoiceRevision(durableInvoiceRevision(altered),patientId,session.username)).toThrow();
     expect(await revision.reviseInvoice(issued.invoice.id,change,session)).toEqual({...result,replayed:true});
     expect(await q("SELECT id FROM payments WHERE patient_id=$1",[patientId])).toEqual([]);
+  });
+  it("financial service/tooth correction preserves the admin-reassigned current clinician and new return booking",async()=>{
+    const {patientId,doctor,nextDoctor,nextService,issued}=await identityFixture();
+    const { patientResponsibilitySettings }=await import("../../lib/patient-responsibility-settings");
+    const { readReturnBookingContext }=await import("../../lib/return-booking-context");
+    const { bookAppointment }=await import("../../lib/book-appointment");
+    const caseId=issued.links[0].caseId!;
+    const target={patientId,kind:"clinical" as const,sourceId:caseId};
+    const unassigned=await patientResponsibilitySettings(target,session);
+    const before=await patientResponsibilitySettings(target,session,{expectedSourceFingerprint:unassigned.sourceFingerprint,doctorId:doctor,reason:"Synthetic original clinical assignment"});
+    await patientResponsibilitySettings(target,session,{expectedSourceFingerprint:before.sourceFingerprint,doctorId:nextDoctor,reason:"Synthetic clinician travel handover"});
+    const input=await command(issued.invoice.id,12000);
+    const result=await revision.reviseInvoice(issued.invoice.id,{...input,lines:[{...input.lines[0],serviceId:nextService,doctorId:doctor,toothCode:46,surfaces:null}]},session);
+    expect(result).toMatchObject({corrected:{items:[{doctorId:doctor,toothCode:46}]}});
+    expect((await db.getInvoice(issued.invoice.id))?.items[0]).toMatchObject({doctorId:doctor,toothCode:36});
+    expect(await q("SELECT responsible_party_id,site FROM clinical_cases WHERE id=$1",[caseId])).toEqual([{responsible_party_id:nextDoctor,site:"46"}]);
+    expect(await q("SELECT doctor_id FROM plan_items WHERE id=$1",[issued.links[0].planItemId])).toEqual([{doctor_id:doctor}]);
+    const client=await db.getPool().connect();
+    const source={kind:"clinical_case" as const,id:caseId};
+    const context=await readReturnBookingContext(client,patientId,source).finally(()=>client.release());
+    expect(context.ok).toBe(true);if(!context.ok)throw new Error(context.message);
+    const booked=await bookAppointment({patientId,date:"2039-04-04",time:"16:00",durationMinutes:15,appointmentType:"follow_up",returnBookingSource:source,returnBookingFingerprint:context.fingerprint},{username:session.username,role:"admin",channel:"ui"});
+    expect(booked).toMatchObject({ok:true,appointment:{doctorId:nextDoctor}});
   });
   it("keeps an unstarted whole-mouth scope singular while correcting its provider/service",async()=>{
     const {patientId,doctor,nextDoctor}=await identityFixture();
@@ -287,7 +310,13 @@ it.each([false,true])("currency correction preserves clinical identity; shared p
   const before=await revision.readInvoiceRevision(issued.invoice.id,session);
   const request={idempotencyKey:`currency-clinical-correction-${serial}`,expectedSourceHash:before.sourceHash,currency:"SAR",reason:"Synthetic documented currency correction",lines:[{itemId:issued.invoice.items[0].id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:terms(240000),expectedRemainingMinor:240000};
   if(shared){expect(before.currencyCorrection).toMatchObject({available:false});await expect(revision.reviseInvoice(issued.invoice.id,request,session)).rejects.toThrow(/الخطة مشتركة/);expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[patientId])).toHaveLength(0);}
-  else{const result=await revision.reviseInvoice(issued.invoice.id,request,session);expect(result).toMatchObject({settledMinor:10000,remainingMinor:240000});
+  else{
+    const {getDailyClinicReportToday,loadDailyClinicReport}=await import("../../lib/daily-clinic-report");
+    const reportDate=getDailyClinicReportToday();
+    // This legitimate linked correction must not make a previously readable day fail.
+    await expect(loadDailyClinicReport(reportDate)).resolves.toMatchObject({date:reportDate});
+    const result=await revision.reviseInvoice(issued.invoice.id,request,session);expect(result).toMatchObject({settledMinor:10000,remainingMinor:240000});
+    await expect(loadDailyClinicReport(reportDate)).resolves.toMatchObject({date:reportDate});
     expect(await q("SELECT id,base_currency,total_minor::text FROM treatment_plans WHERE patient_id=$1",[patientId])).toEqual([{id:issued.planId,base_currency:"SAR",total_minor:"250000"}]);
     expect(await q("SELECT id,quantity,case_id FROM plan_items WHERE plan_id=$1",[issued.planId])).toEqual([{id:item,quantity:1,case_id:caseId}]);
     expect((await db.getInvoice((result as {corrected:{id:number}}).corrected.id))?.items[0]).toMatchObject({planItemId:item,caseId,financialReviewRequired:false});
@@ -453,4 +482,88 @@ describe("six-direction currency correction of an unpaid, standalone invoice", (
       expect((restored as {payments:number}).payments).toBe(0);
     } finally { await isolated.close(); }
   });
+});
+
+it.each((['YER','SAR','USD'] as const).flatMap(from => (['YER','SAR','USD'] as const)
+  .filter(to => to !== from).map(to => ({from,to}))))(
+  'daily report preserves proven linked unpaid $from -> $to history and rejects damaged proof', async ({from,to}) => {
+    const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic daily currency lineage') RETURNING id",[`DAILY-LINEAGE-${++serial}`]))[0].id;
+    const serviceId=(await q("INSERT INTO services(name,category,price_minor,is_active) VALUES('Synthetic daily lineage service','rct',2500,TRUE) RETURNING id"))[0].id;
+    const doctorId=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic daily lineage doctor','doctor') RETURNING id"))[0].id;
+    const issued=await linked.createLinkedInvoice({patientId,baseCurrency:from,discountMinor:0,note:null,createdBy:session.username,actorRole:'admin',
+      items:[{serviceId,category:'rct',doctorId,description:'Synthetic daily lineage service',quantity:1,unitPriceMinor:2500,toothCode:36,caseId:null,sessions:null}],
+      templates:DEFAULT_SPECIALTY_TEMPLATES,idempotencyKey:null,requestHash:null,auditDetails:{}});
+    if(!issued.ok)throw new Error('Synthetic daily lineage fixture');
+    await db.addVisit({patientId,patientName:'Synthetic daily lineage attendee',patientPhone:null,note:null});
+    const {getDailyClinicReportToday,loadDailyClinicReport,loadDailyClinicReportSource}=await import('../../lib/daily-clinic-report');
+    const {buildDailyClinicReport}=await import('../../lib/daily-clinic-report-model');
+    const {DAILY_CLINIC_CORRECTION_LINEAGE_SQL}=await import('../../lib/daily-clinic-correction-lineage');
+    const date=getDailyClinicReportToday();
+    await expect(loadDailyClinicReport(date)).resolves.toMatchObject({date});
+    const view=await revision.readInvoiceRevision(issued.invoice.id,session);
+    const targetMinor=to==='YER'?2500:250000;
+    const result=await revision.reviseInvoice(issued.invoice.id,{idempotencyKey:`daily-lineage-${++serial}`,expectedSourceHash:view.sourceHash,currency:to,
+      reason:'Synthetic linked currency correction',lines:[{itemId:issued.invoice.items[0].id,quantity:1,unitPrice:'2500'}],discount:'0',
+      repaymentTerms:{mode:'full',installments:[]},expectedRemainingMinor:targetMinor},session);
+    if(!('corrected' in result)||!result.corrected)throw new Error('Synthetic missing correction');
+    const correctedId=result.corrected.id, originalLine=issued.invoice.items[0].id;
+    const report=await loadDailyClinicReport(date);
+    expect(report.invoices.find(row=>row.id===issued.invoice.id)).toMatchObject({currency:from,status:'cancelled',originalNetMinor:2500,netMinor:0});
+    expect(report.invoices.find(row=>row.id===correctedId)).toMatchObject({currency:to,netMinor:targetMinor});
+    const [edge]=await q('SELECT id FROM invoice_corrections WHERE original_invoice_id=$1',[issued.invoice.id]);
+    // Synthetic-only fault injection, always rolled back. Neither a cancelled
+    // flag, an audit record nor a partial line handoff is sufficient evidence.
+    for(const fault of ['missing-line','wrong-patient','wrong-item','missing-currency-document','wrong-currency-document','cycle','unsupported-source','wrong-approved-work'] as const){
+      const client=await db.getPool().connect();
+      try{
+        await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");
+        if(fault==='unsupported-source')await client.query("UPDATE invoice_items SET source_type='synthetic_external',source_id=123 WHERE id=$1",[originalLine]);
+        if(fault==='wrong-approved-work')await client.query("UPDATE invoice_correction_lines SET approved_work=jsonb_set(approved_work,'{quantity}','999'::jsonb) WHERE correction_id=$1",[edge.id]);
+        if(fault==='missing-line')await client.query('DELETE FROM invoice_correction_lines WHERE correction_id=$1',[edge.id]);
+        if(fault==='wrong-patient')await client.query('UPDATE invoice_corrections SET patient_id=patient_id+100000 WHERE id=$1',[edge.id]);
+        if(fault==='wrong-item')await client.query('UPDATE invoice_correction_lines SET plan_item_id=NULL WHERE correction_id=$1',[edge.id]);
+        if(fault==='missing-currency-document')await client.query('DELETE FROM invoice_settlement_reclassifications WHERE correction_id=$1',[edge.id]);
+        if(fault==='wrong-currency-document')await client.query('UPDATE invoice_settlement_reclassifications SET target_currency=$2 WHERE correction_id=$1',[edge.id,(['YER','SAR','USD'] as const).find(currency=>currency!==from&&currency!==to)]);
+        if(fault==='cycle')await client.query(`INSERT INTO invoice_corrections(patient_id,currency,original_currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by)
+          SELECT patient_id,original_currency,currency,corrected_invoice_id,original_invoice_id,idempotency_key||'-cycle',request_hash,reason,created_by FROM invoice_corrections WHERE id=$1`,[edge.id]);
+        expect((await client.query(DAILY_CLINIC_CORRECTION_LINEAGE_SQL,[[originalLine]])).rows, fault).toEqual([]);
+        await expect(loadDailyClinicReportSource(client,date,db.CLINIC_TIME_ZONE).then(buildDailyClinicReport),fault).rejects.toThrow();
+      }finally{await client.query('ROLLBACK');client.release();}
+    }
+    await expect(loadDailyClinicReport(date)).resolves.toMatchObject({date});
+    // A later same-currency correction must preserve the complete original handoff.
+    const later=await command(correctedId,targetMinor);
+    await revision.reviseInvoice(correctedId,later,session);
+    await expect(loadDailyClinicReport(date)).resolves.toMatchObject({date});
+  });
+
+it('daily report retains currency proof when a later acknowledged revision removes an unstarted line',async()=>{
+  const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic removed lineage') RETURNING id",[`REMOVED-LINEAGE-${++serial}`]))[0].id;
+  const serviceId=(await q("INSERT INTO services(name,category,price_minor,is_active) VALUES('Synthetic removed service','rct',2500,TRUE) RETURNING id"))[0].id;
+  const doctorId=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic removed doctor','doctor') RETURNING id"))[0].id;
+  const issued=await linked.createLinkedInvoice({patientId,baseCurrency:'YER',discountMinor:0,note:null,createdBy:session.username,actorRole:'admin',
+    items:[36,46].map(toothCode=>({serviceId,category:'rct',doctorId,description:'Synthetic removed service',quantity:1,unitPriceMinor:2500,toothCode,caseId:null,sessions:null})),
+    templates:DEFAULT_SPECIALTY_TEMPLATES,idempotencyKey:null,requestHash:null,auditDetails:{}});
+  if(!issued.ok)throw new Error('Synthetic removal fixture');
+  await db.addVisit({patientId,patientName:'Synthetic removed attendee',patientPhone:null,note:null});
+  const first=await revision.readInvoiceRevision(issued.invoice.id,session);
+  const corrected=await revision.reviseInvoice(issued.invoice.id,{idempotencyKey:`removed-currency-${++serial}`,expectedSourceHash:first.sourceHash,currency:'SAR',
+    reason:'Synthetic currency before removal',lines:first.invoice.items.map(item=>({itemId:item.id,quantity:1,unitPrice:'2500'})),discount:'0',
+    repaymentTerms:{mode:'full',installments:[]},expectedRemainingMinor:500000},session);
+  if(!('corrected' in corrected)||!corrected.corrected)throw new Error('Synthetic removal correction');
+  const {getDailyClinicReportToday,loadDailyClinicReport,loadDailyClinicReportSource}=await import('../../lib/daily-clinic-report');
+  const {buildDailyClinicReport}=await import('../../lib/daily-clinic-report-model');
+  const date=getDailyClinicReportToday();
+  await expect(loadDailyClinicReport(date)).resolves.toMatchObject({date});
+  const next=await revision.readInvoiceRevision(corrected.corrected.id,session);
+  await revision.reviseInvoice(corrected.corrected.id,{idempotencyKey:`removed-line-${++serial}`,expectedSourceHash:next.sourceHash,
+    reason:'Synthetic unstarted line removal',lines:[{itemId:next.invoice.items[0].id,quantity:1,unitPrice:'2500'}],discount:'0',
+    repaymentTerms:{mode:'full',installments:[]},expectedRemainingMinor:250000},session);
+  await expect(loadDailyClinicReport(date)).resolves.toMatchObject({date});
+  const client=await db.getPool().connect();
+  try{
+    await client.query('BEGIN');await client.query("SET LOCAL session_replication_role='replica'");
+    await client.query('DELETE FROM invoice_correction_receipts WHERE correction_id IN (SELECT id FROM invoice_corrections WHERE original_invoice_id=$1)',[corrected.corrected.id]);
+    await expect(loadDailyClinicReportSource(client,date,db.CLINIC_TIME_ZONE).then(buildDailyClinicReport)).rejects.toThrow('Invoice line plan currency conflict');
+  }finally{await client.query('ROLLBACK');client.release();}
 });

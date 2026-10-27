@@ -25,12 +25,11 @@ export function statementAgreementsRequireReview(plans: readonly (Pick<Treatment
   return plans.some(plan => plan.status === "active" && plan.approvedAgreement?.available === false);
 }
 
+/** A reversal edge can also be a real cash refund. Only audited projection evidence
+ * decides which rows are internal; the patient-visible label never narrates a reversal. */
 export function statementPaymentLabel(
   payment: Pick<Payment, "kind" | "reversalOfId">,
-  payments: readonly Pick<Payment, "id" | "receiptNumber">[],
+  _payments: readonly Pick<Payment, "id" | "receiptNumber">[] = [],
 ): string {
-  if (payment.kind !== "refund") return "دفعة";
-  if (!payment.reversalOfId) return "استرداد";
-  const original = payments.find((candidate) => candidate.id === payment.reversalOfId);
-  return original ? `عكس سند ${original.receiptNumber}` : "عكس سند سابق";
+  return payment.kind === "refund" ? "استرداد" : "دفعة";
 }

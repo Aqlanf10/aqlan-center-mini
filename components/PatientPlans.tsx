@@ -2,6 +2,7 @@
 
 import TreatmentFinancialContext from "./TreatmentFinancialContext";
 import { ApprovedAgreementPanel } from "./ApprovedAgreementPanel";
+import { AgreementReconciliationPanel } from "./AgreementReconciliationPanel";
 import { INITIAL_PLAN_ITEM_DRAFT, planItemDraftChanged, type PlanItemDraftSnapshot } from "@/lib/plan-item-draft-navigation";
 import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 
@@ -74,6 +75,7 @@ interface Plan {
   } | null;
 }
 interface PlannedVisit {
+  remainingWork?: string | null; durationWarning?: string | null;
   id: number; planTitle: string | null; sequence: number; title: string;
   doctorName: string | null; durationMinutes: number; status: PlannedVisitStatus;
   appointmentDate: string | null; appointmentTime: string | null; note: string | null;
@@ -347,6 +349,9 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
               {canSeeFinancial ? <ApprovedAgreementPanel planId={plan.id} totalMinor={plan.totalMinor} currency={plan.baseCurrency}
                 position={plan.approvedAgreement??null} canApprove={currentConsent&&plan.status==="active"&&["admin","reception"].includes(session?.role??"")} isAdmin={session?.role==="admin"} onChanged={load}/> : null}
+              {canSeeFinancial && session?.role === "admin" && plan.status !== "cancelled"
+                && !plan.approvedAgreement && !plan.totalFromItems && (plan.hasInstallments || plan.installments.length > 0)
+                ? <AgreementReconciliationPanel patientId={patientId} planId={plan.id} onChanged={load} disabled={busy || money.attempt !== null} /> : null}
               {approvalUnavailable ? <p data-testid="plan-amount-summary" role="status" className="mb-2 text-sm text-amber-800">الرصيد الحالي غير متاح؛ يلزم مراجعة مصدر الاتفاق.</p> : <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{currentTotal === undefined ? "غير متاح" : formatMoney(currentTotal, plan.baseCurrency)}</p>
@@ -557,13 +562,15 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
               <li key={visit.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-bold text-navy-900">
-                    زيارة {visit.sequence}: {visit.title}
+                    زيارة {visit.sequence}: {visit.remainingWork ?? visit.title}
                     {visit.planTitle ? <span className="font-normal text-slate-500"> · {visit.planTitle}</span> : null}
                   </span>
                   <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                    {PLANNED_VISIT_STATUS_LABEL[visit.status]} · {visit.durationMinutes} دقيقة
+                    {PLANNED_VISIT_STATUS_LABEL[visit.status]} · {visit.durationWarning ? "المدة الأصلية: " : ""}{visit.durationMinutes} دقيقة
                   </span>
                 </div>
+                {visit.remainingWork ? <p className="mt-1 text-[11px] text-slate-500">العنوان الأصلي: {visit.title}</p> : null}
+                {visit.durationWarning ? <p className="mt-1 text-xs font-bold text-amber-800">{visit.durationWarning}</p> : null}
                 {visit.appointmentDate ? (
                   <p className="mt-0.5 text-[11px] text-slate-500">
                     محجوزة {friendlyDateLong(visit.appointmentDate)} · {visit.appointmentTime}

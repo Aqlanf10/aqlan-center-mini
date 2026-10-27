@@ -265,6 +265,22 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     expect(await doctorFk(client)).toEqual(initialFk);
   });
 
+  it("refuses a same-named lab index with the opposite intent predicate", async () => {
+    const before = await projectDetailedSchemaReadOnly(client);
+    const original = (await client.query<{ definition: string }>("SELECT pg_get_indexdef('public.lab_orders_visit_tooth_uniq'::regclass) AS definition")).rows[0].definition;
+    try {
+      await client.query("DROP INDEX lab_orders_visit_tooth_uniq");
+      await client.query("CREATE UNIQUE INDEX lab_orders_visit_tooth_uniq ON lab_orders(visit_id,tooth_code) WHERE visit_id IS NOT NULL AND status <> 'cancelled' AND lab_work_intent_id IS NOT NULL");
+      const probe = await runBaselineSchemaProbe(pool as unknown as db.DbPool, files[0].sql);
+      expect(probe.ok).toBe(false);
+      expect(probe.missingIndexes).toContain("CREATE UNIQUE INDEX lab_orders_visit_tooth_uniq ON lab_orders USING btree (visit_id, tooth_code) WHERE ((visit_id IS NOT NULL) AND (status <> 'cancelled'::text))");
+    } finally {
+      await client.query("DROP INDEX lab_orders_visit_tooth_uniq");
+      await client.query(original);
+    }
+    expect(await projectDetailedSchemaReadOnly(client)).toEqual(before);
+  });
+
   it("keeps the baseline probe action-sensitive and leaves schema, registry, and rows unchanged", async () => {
     const before = await projectDetailedSchemaReadOnly(client);
     const registryBefore = (await client.query("SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version")).rows;
@@ -295,7 +311,7 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     expect((await client.query("SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
     // Runtime registers the exact reviewed additive extensions. The probe
     // must still never adopt the legacy baseline or rewrite any existing row.
-    const expectedFiles = path === "fresh_numbered" ? files : files.filter(file => ["0051", "0052", "0056", "0057", "0058", "0063", "0064", "0065", "0066", "0067", "0068", "0069"].includes(file.version));
+    const expectedFiles = path === "fresh_numbered" ? files : files.filter(file => ["0051", "0052", "0056", "0057", "0058", "0063", "0064", "0065", "0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082"].includes(file.version));
     expect(registryBefore.map(({version,name,checksum,adopted}) => ({version,name,checksum,adopted})))
       .toEqual(expectedFiles.map(({version,name,checksum}) => ({version,name,checksum,adopted:false})));
     expect((await client.query(

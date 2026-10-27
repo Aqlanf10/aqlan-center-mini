@@ -134,7 +134,7 @@ beforeAll(async () => {
   const candidateVersion = periodontalCandidateMigrationVersion(shipped);
   // The shared validator checks exact filenames and the reviewed branch gaps.
   shippedCount = shipped.length;
-  expect(candidateVersion).toBe(["0063","0064","0065","0066","0067","0068","0069"].includes(shipped.at(-1)!.version) ? "9000" : String(Number(shipped[shippedCount-1].version)+1).padStart(4,"0"));
+  expect(candidateVersion).toBe(["0063","0064","0065","0066","0067","0068","0069","0074","0078", "0079", "0080", "0081", "0082"].includes(shipped.at(-1)!.version) ? "9000" : String(Number(shipped[shippedCount-1].version)+1).padStart(4,"0"));
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
   const candidatePath = path.resolve("__tests__/postgres/fixtures/0041_periodontal_candidate.sql");
   expect(await readFile(candidatePath, "utf8")).toBe(PERIODONTAL_SQL);

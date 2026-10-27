@@ -1,3 +1,4 @@
+import type { LabWorkDraft } from "./lab-work-intent-contract";
 /**
  * (INV-LINK B) الفاتورة العلاجية بدايةٌ مالية مرتبطة بالعلاج — المنطق الخالص.
  *
@@ -170,6 +171,9 @@ export function validateLineSite(input: {
       return { ok: true, site: { mode, toothCode: tooth, surfaces: null, episodeTeeth: episode, scope: null } };
     }
     case "tooth_surfaces": {
+      if (teeth !== null && (teeth.length > 1 || (teeth.length === 1 && teeth[0] !== tooth))) {
+        return { ok: false, reason: "episode_split_required" };
+      }
       const raw = (input.surfaces ?? "").trim();
       if (raw !== "" && !SURFACE_INPUT.test(raw)) return { ok: false, reason: "bad_surfaces" };
       return { ok: true, site: { mode, toothCode: tooth, surfaces: normalizeSurfaces(raw), episodeTeeth: null, scope: null } };
@@ -274,13 +278,15 @@ export function invoiceRequestFingerprint(input: {
   patientId: number; currency: string; discountMinor: number; note?: string | null; existingPlanId?: number | null;
   items: { serviceId: number | null; description: string; quantity: number; unitPriceMinor: number;
     doctorId: number | null; toothCode?: number | null; caseId?: number | null; sessions?: number | null;
-    surfaces?: string | null; episodeTeeth?: readonly number[] | null; scope?: string | null; planItemId?: number | null }[];
+    surfaces?: string | null; episodeTeeth?: readonly number[] | null; scope?: string | null; planItemId?: number | null; labWork?: LabWorkDraft }[];
 }): string {
   return JSON.stringify([
     input.patientId, input.currency, input.discountMinor, input.note ?? null,
     input.items.map((item) => [item.serviceId, item.description, item.quantity, item.unitPriceMinor,
       item.doctorId, item.toothCode ?? null, item.caseId ?? null, item.sessions ?? null,
       item.surfaces ?? null, item.episodeTeeth ? [...item.episodeTeeth] : null, item.scope ?? null]),
+    ...(input.items.some(item => item.labWork !== undefined)
+      ? [{ labWork: input.items.map(item => item.labWork ?? null) }] : []),
     // Keep all historical unselected fingerprints byte-for-byte compatible.
     ...(input.existingPlanId != null || input.items.some((item) => item.planItemId != null)
       ? [{ existingPlanId: input.existingPlanId ?? null, planItemIds: input.items.map((item) => item.planItemId ?? null) }] : []),
@@ -307,7 +313,7 @@ export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
   amount_mismatch: "يوجد بند خطة مفتوح لنفس الخدمة والسن بمبلغٍ مختلف — فوتِر البند بمبلغه في الخطة أو صحّح الخطة أولًا.",
   bad_tooth: "رقم السن غير صحيح بالترقيم الدولي.",
   tooth_required: "هذه الخدمة تخص سنًّا بعينه — حدّد السن من مخطط الأسنان قبل الحفظ.",
-  episode_split_required: "علاج العصب/الزراعة/الخلع حالةٌ مستقلة لكل سن — قسّم البند سطرًا لكل سن.",
+  episode_split_required: "هذا العلاج عمل مستقل لكل سن — قسّم البند سطرًا لكل سن مع أسطحه إن وُجدت.",
   bad_surfaces: "أسطح السن غير صحيحة — المسموح M و D و O و B و L.",
   bad_scope: "نطاق العلاج غير مناسب لهذه الخدمة (التقويم: علوي/سفلي/الفكّان، اللثة: كامل الفم/فك أو سن).",
   case_mismatch: "بند الخطة المطابق لهذا العلاج مرتبط بحالةٍ أخرى — اختر حالته أو اترك الحالة للربط التلقائي.",

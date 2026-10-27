@@ -1,3 +1,4 @@
+vi.mock("../lib/inventory-domain/supplier-transport", () => ({ admitSupplierIntent: vi.fn(), executeSupplierIntent: vi.fn(), readSupplierFinance: vi.fn() }));
 vi.mock("server-only", () => ({}));
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { inventoryIntegrationEnabled, requireInventoryIntegration } from "../lib/inventory-domain/rollout";

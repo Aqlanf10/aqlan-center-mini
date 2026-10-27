@@ -3,6 +3,7 @@ import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
 import { prepareBackupSql } from "../lib/restore/sql.mjs";
+import { finalizeRestoredStaffIdentityInTransaction } from "../lib/staff-authority-lifecycle.mjs";
 import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
 /**
@@ -41,7 +42,7 @@ try {
 
 let sql;
 try {
-  sql = prepareBackupSql(readFileSync(file, "utf8")).sql;
+  sql = prepareBackupSql(readFileSync(file, "utf8")).dataSql;
 } catch (error) {
   console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
   process.exit(1);
@@ -52,13 +53,17 @@ try {
   await client.connect();
   // Match the backup writer's quote escaping even on a differently configured server.
   await client.query("SET standard_conforming_strings = on");
+  await client.query("BEGIN");
   await client.query(sql);
+  await finalizeRestoredStaffIdentityInTransaction(client);
+  await client.query("COMMIT");
   const { rows } = await client.query(
     `SELECT COUNT(*)::int AS tables FROM information_schema.tables
       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,
   );
   console.log(`تمت الاستعادة. الجداول: ${rows[0].tables}`);
 } catch (error) {
+  await client.query("ROLLBACK").catch(() => {});
   console.error(`فشلت الاستعادة: ${error.message}`);
   process.exitCode = 1;
 } finally {

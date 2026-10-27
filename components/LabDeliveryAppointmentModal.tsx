@@ -1,5 +1,8 @@
 "use client";
 
+import { useReturnBookingContext } from "@/components/useReturnBookingContext";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
+
 import React, { useState } from "react";
 import { type LabOrder, type LabOrderClinicalDTO } from "@/lib/lab";
 import { APPOINTMENT_TYPES, type AppointmentTypeOption } from "@/lib/schedule";
@@ -45,7 +48,10 @@ export function LabDeliveryAppointmentModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bookedSuccess, setBookedSuccess] = useState(false);
+  const [bookedDoctorName, setBookedDoctorName] = useState<string | null>(null);
 
+  const returnContext = useReturnBookingContext({ patientId: order.patientId, source: { kind: "lab_work", id: order.id }, enabled: isOpen && !bookedSuccess, locked: busy });
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([order.id, order.patientId, isOpen, date, time, appointmentType, duration, note, returnContext.fingerprint]));
   if (!isOpen) return null;
 
   /* رقم واتساب معياري: الأرقام المحلية القصيرة تُسبق ببادئة الدولة كما في بقية
@@ -66,17 +72,17 @@ export function LabDeliveryAppointmentModal({
 
   const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy || !date || !time) return;
+    if (busy || !date || !time || !returnContext.ready || !returnContext.isCurrent()) return;
 
     setBusy(true);
     setError(null);
 
     try {
-      const res = await fetch("/api/appointments", {
+      const res = await bookingFetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patientId: order.patientId,
+          patientId: order.patientId, ...returnContext.payload,
           date,
           time,
           durationMinutes: Number(duration) || 30,
@@ -87,10 +93,12 @@ export function LabDeliveryAppointmentModal({
 
       const data = await res.json().catch(() => null);
       if (!res.ok) {
+        returnContext.handleRejection(data);
         setError(data?.message ?? data?.suggestionMessage ?? "تعذّر حجز موعد التسليم.");
         return;
       }
 
+      setBookedDoctorName(typeof data?.doctorName === "string" ? data.doctorName : null);
       setBookedSuccess(true);
       if (onAppointmentBooked) {
         onAppointmentBooked();
@@ -113,6 +121,8 @@ export function LabDeliveryAppointmentModal({
       }}
     >
       <div className="relative my-6 w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 shadow-2xl transition-all">
+      {nearbyBookingDialog}
+      {returnContext.view}
         {/* Header with visual badge */}
         <div className="mb-4 flex items-start justify-between border-b border-slate-100 pb-3.5">
           <div className="flex items-center gap-3">
@@ -190,6 +200,7 @@ export function LabDeliveryAppointmentModal({
         {bookedSuccess ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center text-xs font-black text-emerald-800">
             ✓ تم حجز موعد تسليم وتركيب العمل في جدول المواعيد بنجاح!
+            {bookedDoctorName ? <p className="mt-1">الطبيب: {bookedDoctorName}</p> : null}
           </div>
         ) : (
           /* Appointment Booking Form */
@@ -282,14 +293,14 @@ export function LabDeliveryAppointmentModal({
               <button
                 type="button"
                 onClick={onClose}
-                disabled={busy}
+                disabled={busy || !returnContext.ready}
                 className="flex-1 rounded-xl border border-slate-200 bg-white py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 تخطي لاحقاً
               </button>
               <button
                 type="submit"
-                disabled={busy}
+                disabled={busy || !returnContext.ready}
                 className="flex-1 rounded-xl bg-navy-950 py-2 text-xs font-black text-white shadow-xs hover:bg-navy-900 disabled:opacity-50"
               >
                 {busy ? "جارٍ الحجز…" : "📅 تأكيد حجز موعد التسليم"}

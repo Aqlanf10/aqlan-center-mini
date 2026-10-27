@@ -6,6 +6,7 @@ import {
   LEGACY_TREATMENT_MESSAGE, LEGACY_TREATMENT_STATUS, legacyCaseTitle, legacyTreatmentFingerprint, parseLegacyTreatmentRequest,
 } from "../lib/legacy-treatment";
 import { classifyOrthoAdjustment } from "../lib/billing-classification";
+import { LEGACY_FINANCIAL_MODES } from "../lib/ortho-baseline";
 import { planLedgerSummary, unlinkedSessionConflicts } from "../lib/plans";
 import { legacyCoverageStateFromSnapshot, type LegacyCoverageSnapshotRow } from "../lib/legacy-treatment-coverage";
 
@@ -107,11 +108,21 @@ describe("(INV-LEGACY) labels, messages and coverage classification", () => {
       .toBe("تركيبات — أسنان 14، 15، 16 — حالة بدأت قبل النظام");
   });
 
-  it("an ortho adjustment covered by a live historical agreement is LEGACY_INCLUDED, whatever the baseline mode", () => {
+  it.each([null, ...LEGACY_FINANCIAL_MODES])("a verified live historical agreement includes the adjustment regardless of baseline mode %s", financialMode => {
+    for (const legacy of [false, true]) {
+      expect(classifyOrthoAdjustment({ legacy, financialMode, openingCurrencies: [], fundedPlan: false, legacyAgreement: true }))
+        .toBe("LEGACY_INCLUDED");
+    }
+  });
+
+  it("does not confuse absent coverage evidence with an explicitly per-session legacy agreement", () => {
     const common = { openingCurrencies: [], fundedPlan: false };
-    expect(classifyOrthoAdjustment({ legacy: false, financialMode: null, ...common, legacyAgreement: true })).toBe("LEGACY_INCLUDED");
-    expect(classifyOrthoAdjustment({ legacy: true, financialMode: "per_session", ...common, legacyAgreement: true })).toBe("LEGACY_INCLUDED");
-    expect(classifyOrthoAdjustment({ legacy: false, financialMode: null, ...common })).toBe("OUTSIDE_CONTRACT");
+    // A new case with no verified coverage must be reviewed, not declared included
+    // or outside the agreement. A known per-session baseline remains distinct.
+    for (const legacyAgreement of [undefined, false]) {
+      expect(classifyOrthoAdjustment({ legacy: false, financialMode: null, ...common, legacyAgreement })).toBe("REVIEW_REQUIRED");
+      expect(classifyOrthoAdjustment({ legacy: true, financialMode: "per_session", ...common, legacyAgreement })).toBe("OUTSIDE_CONTRACT");
+    }
   });
 
   it("the ledger summary flags a historical-agreement plan whenever an item retains historical agreement identity, including void", () => {

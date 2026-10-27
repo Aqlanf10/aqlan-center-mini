@@ -8,6 +8,7 @@ import {
   type LabToothMap,
   type LabToothRole,
   type LabToothSummary,
+  type LabDispatchExternalDTO,
   parseLabTeeth,
   serializeLabTeeth,
   summarizeLabTeeth,
@@ -797,6 +798,8 @@ interface ToothCellProps {
   onContextMenu: (e: React.MouseEvent) => void;
   readOnly?: boolean;
   isBridgeStart?: boolean;
+  unknownRole?: boolean;
+  fitWidth?: boolean;
 }
 
 function ToothCell({
@@ -811,8 +814,10 @@ function ToothCell({
   onContextMenu,
   readOnly = false,
   isBridgeStart = false,
+  unknownRole = false,
+  fitWidth = false,
 }: ToothCellProps) {
-  const isSelected = Boolean(role);
+  const isSelected = Boolean(role) || unknownRole;
   const meta = role ? LAB_TOOTH_ROLE_META[role] : null;
 
   // Determine tooth type for anatomical outline
@@ -833,8 +838,11 @@ function ToothCell({
       onMouseEnter={() => onHover(code)}
       onMouseLeave={() => onHover(null)}
       disabled={readOnly}
+      data-lab-tooth={code}
+      data-primary-tooth={isPrimary ? code : undefined}
+      data-selected={isSelected}
       title={`${toothName(code)} (FDI: ${code}, Univ: #${toUniversal(code)})${
-        meta ? ` · ${meta.label}` : ""
+        meta ? ` · ${meta.label}` : unknownRole ? " · دور غير محدد" : ""
       }`}
       className={`group relative flex flex-col items-center rounded-xl p-1 transition-all ${
         isSelected
@@ -843,7 +851,7 @@ function ToothCell({
             ? "bg-navy-50/80 shadow-2xs"
             : "hover:bg-slate-100/80"
       } ${isBridgeStart ? "ring-2 ring-indigo-500 animate-pulse bg-indigo-50" : ""}`}
-      style={{ minWidth: isMolar ? "36px" : isPremolar ? "32px" : "28px" }}
+      style={{ minWidth: fitWidth ? 0 : isMolar ? "36px" : isPremolar ? "32px" : "28px", width: fitWidth ? "100%" : undefined, padding: fitWidth ? "2px" : undefined }}
     >
       {/* Top Number Label for Upper arch, Bottom for Lower arch */}
       {isUpper && (
@@ -857,9 +865,10 @@ function ToothCell({
       )}
 
       {/* SVG Anatomical Tooth Representation */}
-      <div className="relative flex items-center justify-center">
+      <div className="relative flex items-center justify-center" style={fitWidth ? { width: "100%", minWidth: 0 } : undefined}>
         <svg
           viewBox="0 0 28 34"
+          style={fitWidth ? { maxWidth: "100%" } : undefined}
           className={`transition-transform duration-150 ${
             isPrimary ? "h-6 w-5" : isMolar ? "h-8 w-7" : isPremolar ? "h-7 w-6" : "h-7 w-5"
           } ${isHovered ? "scale-110" : ""}`}
@@ -872,7 +881,7 @@ function ToothCell({
               <path
                 d="M7 6 C6 12, 4 18, 5 22 C6 22, 9 18, 11 12 C13 18, 16 22, 17 22 C18 18, 16 12, 15 6 Z"
                 className={isSelected ? "opacity-90" : "fill-slate-100 stroke-slate-300"}
-                fill={isSelected && meta ? meta.fillHex : undefined}
+                fill={meta ? meta.fillHex : unknownRole ? "#94a3b8" : undefined}
                 stroke={isSelected ? "#1e293b" : "#cbd5e1"}
                 strokeWidth="1.2"
               />
@@ -881,7 +890,7 @@ function ToothCell({
               <path
                 d="M9 7 C8 13, 7 19, 9 22 C11 22, 12 18, 14 12 C16 18, 17 22, 19 22 C21 19, 20 13, 19 7 Z"
                 className={isSelected ? "opacity-90" : "fill-slate-100 stroke-slate-300"}
-                fill={isSelected && meta ? meta.fillHex : undefined}
+                fill={meta ? meta.fillHex : unknownRole ? "#94a3b8" : undefined}
                 stroke={isSelected ? "#1e293b" : "#cbd5e1"}
                 strokeWidth="1.2"
               />
@@ -890,7 +899,7 @@ function ToothCell({
               <path
                 d="M10 7 C9 13, 11 22, 14 24 C17 22, 19 13, 18 7 Z"
                 className={isSelected ? "opacity-90" : "fill-slate-100 stroke-slate-300"}
-                fill={isSelected && meta ? meta.fillHex : undefined}
+                fill={meta ? meta.fillHex : unknownRole ? "#94a3b8" : undefined}
                 stroke={isSelected ? "#1e293b" : "#cbd5e1"}
                 strokeWidth="1.2"
               />
@@ -912,7 +921,7 @@ function ToothCell({
                   ? ""
                   : "fill-white stroke-slate-400 group-hover:stroke-navy-700 group-hover:fill-slate-50"
               }
-              fill={isSelected && meta ? meta.fillHex : undefined}
+              fill={meta ? meta.fillHex : unknownRole ? "#94a3b8" : undefined}
               stroke={isSelected ? "#0f172a" : undefined}
               strokeWidth={isSelected ? "1.6" : "1.2"}
             />
@@ -957,4 +966,27 @@ function ToothCell({
       )}
     </button>
   );
+}
+
+/** The same canonical anatomical cells as the editor, without interactive tools or private fields. */
+export function LabDispatchDentalChart({ teeth }: { teeth: LabDispatchExternalDTO["teeth"] }) {
+  const selected = new Map(teeth.map(tooth => [tooth.code, tooth.role]));
+  const arches = [
+    { label: "الأسنان الدائمة — الفك العلوي", codes: [...ADULT_FDI_TEETH.upperRight, ...ADULT_FDI_TEETH.upperLeft], upper: true, primary: false },
+    { label: "الأسنان الدائمة — الفك السفلي", codes: [...ADULT_FDI_TEETH.lowerRight, ...ADULT_FDI_TEETH.lowerLeft], upper: false, primary: false },
+    { label: "الأسنان اللبنية — الفك العلوي", codes: [...PRIMARY_FDI_TEETH.upperRight, ...PRIMARY_FDI_TEETH.upperLeft], upper: true, primary: true },
+    { label: "الأسنان اللبنية — الفك السفلي", codes: [...PRIMARY_FDI_TEETH.lowerRight, ...PRIMARY_FDI_TEETH.lowerLeft], upper: false, primary: true },
+  ];
+  const hasPrimary = teeth.some(tooth => tooth.code >= 51);
+  return <div style={{ breakInside: "avoid", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "8px", marginTop: "12px" }}>
+    <h3 style={{ fontSize: "12px", fontWeight: 800 }}>مخطط الأسنان — FDI</h3>
+    {arches.filter(arch => !arch.primary || hasPrimary).map(arch => <section key={arch.label} aria-label={arch.label}>
+      <div style={{ fontSize: "10px", textAlign: "center", marginTop: "6px" }}>{arch.label}</div>
+      <div dir="ltr" style={{ display: "grid", gridTemplateColumns: `repeat(${arch.codes.length}, minmax(0, 1fr))`, width: "100%" }}>
+        {arch.codes.map(code => <ToothCell key={code} code={code} role={selected.get(code) ?? undefined} unknownRole={selected.has(code) && !selected.get(code)} isUpper={arch.upper} isPrimary={arch.primary} fitWidth readOnly onHover={() => {}} onClick={() => {}} onContextMenu={() => {}} />)}
+      </div>
+    </section>)}
+    <div style={{ fontSize: "10px", marginTop: "8px" }}>السن المحدد محاط بإطار؛ الرمادي = دور غير محدد، وليس تاجًا أو دعامة مفترضة.</div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", fontSize: "10px" }}>{teeth.map(tooth => <span key={tooth.code}>{tooth.code}: {tooth.role ? LAB_TOOTH_ROLE_META[tooth.role].label : "دور غير محدد"}</span>)}</div>
+  </div>;
 }

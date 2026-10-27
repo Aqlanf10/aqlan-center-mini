@@ -5,10 +5,12 @@ import {
   CLINIC_TIME_ZONE, closeOrthoCase, findUserByUsername, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
   setOrthoPhase, setRetainer,
 } from "@/lib/db";
-import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
+import { PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+
+import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 
 export const dynamic = "force-dynamic";
 
@@ -48,30 +50,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const doneOn = typeof source.doneOn === "string" && DATE_PATTERN.test(source.doneOn)
     ? source.doneOn : today;
-  const phase = typeof source.phase === "string" && Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)
-    ? (source.phase as keyof typeof PHASE_LABEL) : null;
-  const elastics = isElasticClass(source.elastics) ? source.elastics : "none";
-  const nextWeeks = Math.round(Number(source.nextWeeks ?? 4));
-  if (!Number.isFinite(nextWeeks) || nextWeeks < 1 || nextWeeks > 52) {
-    return NextResponse.json({ message: "المدة حتى الشدّة القادمة بين أسبوع و52 أسبوعًا." }, { status: 400 });
+  const checked = checkOrthoSessionDraft({ ...source, caseId });
+  if (!checked.ok || !checked.value) {
+    return NextResponse.json({ message: checked.ok ? "بيانات جلسة التقويم غير صالحة." : checked.message }, { status: 400 });
   }
-
-  const text = (value: unknown, limit: number) =>
-    typeof value === "string" && value.trim() ? value.trim().slice(0, limit) : null;
 
   try {
     const result = await recordAdjustment({
-      caseId,
       visitId: Number.isInteger(Number(source.visitId)) && Number(source.visitId) > 0
         ? Number(source.visitId) : null,
-      doneOn, phase,
-      upperWire: text(source.upperWire, 40),
-      lowerWire: text(source.lowerWire, 40),
-      elastics,
-      elasticNote: text(source.elasticNote, 120),
-      done: text(source.done, 400),
-      nextWeeks,
-      note: text(source.note, 300),
+      ...checked.value,
+      doneOn,
       recordedBy: session.username,
       actorRole: session.role,
     });

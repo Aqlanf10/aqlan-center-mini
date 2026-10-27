@@ -1,3 +1,4 @@
+import { parseLabWorkDraft, normalizeLabWorkGroups, type LabWorkRetirement } from "./lab-work-intent-contract";
 import type { Service } from "./db";
 import type { LinkedInvoiceLineInput } from "./invoice-linkage-db";
 import type { InvoiceLineAuthorityInput } from "./invoice-pricing";
@@ -9,6 +10,7 @@ import type { ForeignRates } from "./service-pricing";
 
 export type ParsedInvoiceInput = {
   visitId?:number;
+  labRetirements?: LabWorkRetirement[];
   patientId: number; baseCurrency: Currency; existingPlanId: number | null; items: LinkedInvoiceLineInput[];
   authorityLines: InvoiceLineAuthorityInput[]; discountMinor: number; note: string | null; idempotencyKey: string | null;
   pricingSnapshots: { line: number; serviceId: number; quote: InvoicePriceQuote; requestedMinor: number; reason: string | null; agreedPriceSource: "catalog" | "converted" | "manual" }[];
@@ -133,9 +135,13 @@ export function parseInvoiceInput(
     const siteFields = parseLineSiteFields(raw);
     if (!siteFields) return { ok: false, message: "بيانات موضع البند (الأسنان/الأسطح/النطاق) غير صالحة." };
 
+    let labWork;
+    try { labWork = parseLabWorkDraft(raw.labWork); }
+    catch (error) { return { ok: false, message: error instanceof Error ? error.message : "هوية عمل المختبر غير صالحة." }; }
+    if (labWork && !idempotencyKey) return { ok: false, message: "مفتاح الطلب مطلوب لحفظ عمل المختبر مع الفاتورة." };
     items.push({
       serviceId: service ? service.id : null, category: service?.category ?? null, doctorId, description, quantity,
-      unitPriceMinor, toothCode, caseId, planItemId, sessions, ...siteFields,
+      unitPriceMinor, toothCode, caseId, planItemId, sessions, ...siteFields, ...(labWork ? { labWork } : {}),
     });
     authorityLines.push({
       description, service: service ?? null, requestedMinor: unitPriceMinor, quantity,
@@ -148,6 +154,15 @@ export function parseInvoiceInput(
       reason: typeof raw.priceReason === "string" ? raw.priceReason.trim().slice(0, 300) || null : null });
   }
 
+  let labRetirements: LabWorkRetirement[] | undefined;
+  try {
+    const command = normalizeLabWorkGroups(items.map(item => ({ ...item, serviceId: item.serviceId ?? 0, planItemId: item.planItemId ?? null })), source.labRetirements);
+    if (Object.hasOwn(source, "labRetirements")) {
+      if (!idempotencyKey) return { ok: false, message: "مفتاح الطلب مطلوب لمراجعة أعضاء عمل المختبر." };
+      if(command.retirements.length) return {ok:false,message:"إزالة أعضاء وصفة المختبر من الفاتورة غير مدعومة بعد؛ افتح الوصفة للمراجعة دون حذف رابط العمل."};
+      labRetirements = command.retirements;
+    }
+  } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "مجموعة عمل المختبر غير صالحة." }; }
   const discountMinor = source.discount === undefined || String(source.discount).trim() === ""
     ? 0 : parseAmount(String(source.discount), base);
   if (discountMinor === null) {
@@ -158,5 +173,6 @@ export function parseInvoiceInput(
     ? source.note.trim().slice(0, 300) : null;
 
   return { ok: true, patientId, baseCurrency: base, existingPlanId, items, authorityLines, discountMinor, note, idempotencyKey, pricingSnapshots,
+    ...(labRetirements ? { labRetirements } : {}),
     ...(quoted.length ? { quotedFingerprint: JSON.stringify(quoted) } : {}), ...(visitId!==null?{visitId}:{}) };
 }

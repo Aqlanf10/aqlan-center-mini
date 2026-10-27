@@ -83,6 +83,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/payments/attempts/retire", methods: ["POST"] },
     { path: "/api/invoices" },
     { path: "/api/invoices/[id]" },
+    { path: "/api/invoices/[id]/archive" },
+    { path: "/api/invoices/archive" },
     { path: "/api/expenses", methods: ["GET", "POST"] },
     { path: "/api/expenses/quote", methods: ["POST"] },
     { path: "/api/expenses/[id]/attachments", methods: ["GET", "POST"] },
@@ -115,6 +117,8 @@ const RULES: Record<RestrictedRole, Rule[]> = {
     { path: "/api/payments" },
     { path: "/api/invoices" },
     { path: "/api/invoices/[id]" },
+    { path: "/api/invoices/[id]/archive" },
+    { path: "/api/invoices/archive" },
     { path: "/api/expenses" },
     { path: "/api/expenses/[id]/attachments" },
     { path: "/api/expense-attachments/[id]" },
@@ -181,8 +185,11 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
     return ASSISTANT_RULES.some((rule) => matches(rule.path, pathname) && (rule.methods ?? READ).includes(verb));
   }
   const access: FinanceAccess = financeAccessFor(role, rawAccess);
+  // Archive previews include actual settlement, so retain patient-ledger authority.
+  if (!access.viewPatientLedger && (matches("/api/invoices/archive", pathname) || matches("/api/invoices/[id]/archive", pathname))) return false;
   // Financial references follow patient-ledger authority, including normalized trailing slashes.
   if (!access.viewPatientLedger && matches("/api/patients/[id]/treatment-financial-context", pathname)) return false;
+  if (matches("/api/patients/[id]/statement", pathname)) return access.viewPatientLedger && READ.includes(verb);
   if (role === "cashier") {
     if (pathname === "/api/shifts" && (verb === "POST" || verb === "PATCH") && !access.operateShift) return false;
     if ((pathname === "/api/payments" || pathname === "/api/payments/attempts/retire") && verb === "POST" && !access.collectPayments) return false;

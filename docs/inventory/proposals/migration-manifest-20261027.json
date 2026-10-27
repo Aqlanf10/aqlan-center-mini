@@ -1,0 +1,221 @@
+{
+  "status": "four_names_reserved_all_sources_unregistered_synthetic_only",
+  "date": "2026-10-27",
+  "branch": "feat/inventory-continuation-20261026",
+  "current_changes": "Published supplier checkpoint45447909; new uncommitted official-number completion and exact derived registry restoration in progress. Canonical contract adaptation blocked on exact source, not declared complete.",
+  "parent_candidate": "6c2adca6be3615ce6d87ee097bc456de1525179a",
+  "do_not_allocate": [
+    "0070",
+    "0071",
+    "0072",
+    "0073",
+    "0074",
+    "0075",
+    "0076",
+    "0077",
+    "0078",
+    "0079",
+    "0080",
+    "0081",
+    "0082"
+  ],
+  "identity_review": "CONFIRMED INCOMPATIBLE with reserved0076 local b4a65c2ec9f4b686ac483d4d8cc5744f8cd28ad5. Consume single staff_authority_control realm and opaque canonical staff session/capabilities; no per-domain realm/user subject. Target-owned execution generation may be separate only with explicit restore composition.",
+  "proposals_in_dependency_order": [
+    {
+      "proposed_filename": "migrations/0083_inventory_procurement.sql",
+      "source": "lib/inventory-domain/schema-proposal.ts",
+      "depends_on": [],
+      "tables": [
+        "inventory_locations",
+        "inventory_item_unit_versions",
+        "inventory_approval_policies",
+        "purchase_requests",
+        "purchase_request_revisions",
+        "purchase_request_lines",
+        "purchase_approval_events",
+        "purchase_orders",
+        "purchase_order_lines",
+        "purchase_order_source_allocations",
+        "goods_receipts",
+        "goods_receipt_lines",
+        "stock_lots",
+        "quarantine_dispositions",
+        "inventory_movement_allocations",
+        "supplier_invoices",
+        "supplier_invoice_payable_links",
+        "supplier_invoice_receipt_allocations",
+        "inventory_operations"
+      ],
+      "functions": [
+        "inventory_procurement_append_only"
+      ],
+      "views": [],
+      "existing_table_changes": [],
+      "schema_export": "INVENTORY_PROCUREMENT_SQL",
+      "reservation_status": "reserved_name_only_not_registered_or_activated"
+    },
+    {
+      "proposed_filename": "migrations/0084_inventory_custody.sql",
+      "source": "lib/inventory-domain/custody-schema-proposal.ts",
+      "depends_on": [
+        "inventory_procurement"
+      ],
+      "tables": [
+        "inventory_transfers",
+        "inventory_transfer_lines",
+        "inventory_transfer_acknowledgements",
+        "inventory_transfer_ack_lines",
+        "custody_waste_approvals",
+        "custody_usage_events",
+        "custody_stocktakes",
+        "custody_package_closures",
+        "custody_annual_settlements",
+        "custody_settlement_objections"
+      ],
+      "functions": [],
+      "views": [],
+      "existing_table_changes": [],
+      "schema_export": "INVENTORY_CUSTODY_SQL",
+      "reservation_status": "reserved_name_only_not_registered_or_activated"
+    },
+    {
+      "proposed_filename": "migrations/0085_inventory_supplier_finance.sql",
+      "source": "lib/inventory-domain/supplier-finance-schema-proposal.ts",
+      "depends_on": [
+        "inventory_procurement"
+      ],
+      "tables": [
+        "supplier_invoice_finance_roots",
+        "supplier_invoice_revisions",
+        "supplier_invoice_postings",
+        "supplier_invoice_cancellations"
+      ],
+      "functions": [
+        "inventory_linked_payable_immutable",
+        "inventory_invoice_posting_source_guard",
+        "inventory_invoice_revision_guard",
+        "inventory_invoice_adjustment_source_guard"
+      ],
+      "views": [
+        "inventory_effective_supplier_invoices",
+        "inventory_effective_invoice_allocations"
+      ],
+      "existing_table_changes": [],
+      "schema_export": "INVENTORY_SUPPLIER_FINANCE_SQL",
+      "reservation_status": "reserved_name_only_not_registered_or_activated"
+    },
+    {
+      "proposed_filename": "migrations/0086_inventory_command_lifecycle.sql",
+      "source": "lib/inventory-domain/command-lifecycle-schema-proposal.ts",
+      "depends_on": [
+        "inventory_procurement"
+      ],
+      "tables": [
+        "inventory_command_bindings",
+        "inventory_command_retirements"
+      ],
+      "functions": [
+        "inventory_command_terminal_guard"
+      ],
+      "views": [],
+      "existing_table_changes": [],
+      "schema_export": "INVENTORY_COMMAND_LIFECYCLE_SQL",
+      "reservation_status": "reserved_name_only_not_registered_or_activated"
+    },
+    {
+      "proposed_filename": "migrations/<assigned>_staff_authority_identity.sql",
+      "source": "lib/staff-authority-schema-proposal.ts",
+      "depends_on": [],
+      "tables": [
+        "staff_execution_epochs",
+        "staff_authority_identity"
+      ],
+      "functions": [
+        "staff_subject_identity_immutable",
+        "staff_realm_identity_immutable",
+        "staff_execution_epoch_immutable"
+      ],
+      "views": [],
+      "existing_table_changes": [
+        "users.staff_subject_id UUID NOT NULL DEFAULT gen_random_uuid()"
+      ],
+      "schema_export": "STAFF_AUTHORITY_SQL",
+      "activation_status": "UNACCEPTED: competing realm; replace with adapter to canonical0076, do not activate"
+    },
+    {
+      "proposed_filename": "migrations/<assigned>_inventory_supplier_transport.sql",
+      "source": "lib/inventory-domain/supplier-transport-schema-proposal.ts",
+      "depends_on": [
+        "staff_authority_identity",
+        "inventory_procurement",
+        "inventory_supplier_finance",
+        "inventory_command_lifecycle"
+      ],
+      "tables": [
+        "inventory_supplier_intents",
+        "inventory_supplier_intent_rejections"
+      ],
+      "functions": [
+        "inventory_supplier_nonce_exclusive"
+      ],
+      "views": [],
+      "existing_table_changes": [],
+      "schema_export": "INVENTORY_SUPPLIER_TRANSPORT_SQL",
+      "activation_status": "HOLD: align principal and restore provenance with canonical0076 before numbering"
+    }
+  ],
+  "not_yet_schema_complete": [
+    "reference-data management history if required",
+    "source-linked partial supplier returns/credits",
+    "historical doctor attribution and consumption correction/reversal"
+  ],
+  "activation_holds": [
+    "parent-assigned numbers and canonical identity contract",
+    "registered migration/schema ownership/current contract/reset classification",
+    "empty-target forward migration and actual managed restore using registered migrations",
+    "complete usable workflow and required exact-head CI",
+    "separate deployment authorization"
+  ],
+  "numbering_status": "Parent formally reserves0083–0086.0087/0088 HOLD UNACCEPTED NOTRESERVED. No numbered SQL file written or migration registered.",
+  "future_composition_dependency": {
+    "reserved_migration": "0077",
+    "proposal_path": "docs/proposals/0077_manual_payable_command_identity.sql",
+    "parent_branch": "finance-next-atomic-audit",
+    "reported_head": "4c1ab8fb",
+    "purpose": "manual payable command identity columns/guards",
+    "retrieval_status": "Pinned GitHub contents read returned 404 No commit found; object absent locally. Future composition test not executed.",
+    "hold": "Test both current registered baseline and exact future proposal when available; do not replace its guards or rewrite 0065."
+  },
+  "published_head_before_checkpoint": "97e6a7dce698d869dd1c023b3eb90d4c5f26a699",
+  "product_code_head": "e34b8d082febadd6fdcadd2428fad0a584db2b52",
+  "canonical_contract": {
+    "realm_table": "staff_authority_control",
+    "principal_key": "SHA256(JSON([staff-principal-v1, realmId, userId]))",
+    "restore": "Target-owned canonical realm retained; source authority excluded; preflight/migration fence/quarantine before replay/verified quarantine/explicit owner recovery. Do not auto-adopt old pending commands or rewrite business realm roots.",
+    "source_library_file_id": "libfile_e6348e6adc108191a65bbc356eab9bbd",
+    "source_materialization": "Two supported fresh materialization attempts failed download; no local file. Native read of archive returned no readable text. Await source references through supported read route."
+  },
+  "parent_reserved_mapping": {
+    "inventory_procurement": "0083_inventory_procurement.sql",
+    "inventory_custody": "0084_inventory_custody.sql",
+    "inventory_supplier_finance": "0085_inventory_supplier_finance.sql",
+    "inventory_command_lifecycle": "0086_inventory_command_lifecycle.sql"
+  },
+  "in_progress_supplier_finance_companion": {
+    "source": "lib/inventory-domain/supplier-number-schema-proposal.ts",
+    "schema_export": "INVENTORY_SUPPLIER_NUMBER_SQL",
+    "proposed_registration_group": "0085_inventory_supplier_finance.sql after base supplier finance SQL, before schema activation; no additional number allocated",
+    "tables": [
+      "supplier_invoice_number_claims"
+    ],
+    "functions": [
+      "inventory_supplier_number_revision_guard",
+      "inventory_supplier_number_claim",
+      "inventory_supplier_number_claim_source_guard"
+    ],
+    "views": [
+      "inventory_supplier_number_sources"
+    ],
+    "restore": "Exact deterministic derived number registry; validate bidirectional EXCEPT against source projection before backup omission; source INSERT triggers reconstruct original claim bytes. Actual restore tests being extended, not accepted yet."
+  }
+}
