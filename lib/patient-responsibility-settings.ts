@@ -4,8 +4,12 @@ import { ensureSchema, getPool, insertAuditRow, type DbClient } from "./db";
 import { revalidateSessionInTransaction } from "./session";
 import type { SessionPayload } from "./auth";
 export type ResponsibilityTarget = { patientId: number; kind: "clinical" | "ortho"; sourceId: number };
+/** A read-only proposal for a case without a responsible doctor. Never written: only an admin's confirmed
+ * save (the audited command below) records responsibility. */
+export type ResponsibilitySuggestion = { doctorId: number; doctorName: string; basis: "plan_items" | "primary_doctor" };
 export interface ResponsibilitySettings extends ResponsibilityTarget {
  doctorId: number | null; doctorName: string | null; sourceFingerprint: string; doctors: { id: number; name: string }[];
+ suggestion: ResponsibilitySuggestion | null; suggestionNote: string | null;
 }
 export class ResponsibilityError extends Error { constructor(public status: number, message: string) { super(message); } }
 function reject(status: number, message: string): never { throw new ResponsibilityError(status, message); }
@@ -35,6 +39,19 @@ async function source(client: DbClient, target: ResponsibilityTarget, lock: bool
  const sourceFingerprint = createHash("sha256").update(JSON.stringify({ target, ortho, bridges, revision })).digest("hex");
  return { ortho, bridges, doctorId, sourceFingerprint };
 }
+/** One active doctor recorded on the case's live plan items, else the patient's active primary doctor.
+ * Several item doctors are never resolved by guessing: no suggestion, an explicit note instead. */
+async function suggest(client: DbClient, patientId: number, caseIds: number[]): Promise<{ suggestion: ResponsibilitySuggestion | null; note: string | null }> {
+ const { rows: items } = await client.query<{ doctor_id: number; name: string; active: boolean }>(`SELECT DISTINCT i.doctor_id, p.name, (p.kind='doctor' AND p.is_active) AS active
+   FROM plan_items i JOIN parties p ON p.id=i.doctor_id WHERE i.case_id=ANY($1::int[]) AND i.status<>'cancelled' ORDER BY i.doctor_id`, [caseIds]);
+ if (items.length > 1) return { suggestion: null, note: "بنود هذه الحالة مسجّلة لأكثر من طبيب؛ اختر الطبيب المسؤول يدويًا." };
+ if (items.length === 1 && items[0].active) return { suggestion: { doctorId: items[0].doctor_id, doctorName: items[0].name, basis: "plan_items" }, note: null };
+ const { rows: [primary] } = await client.query<{ id: number; name: string }>(`SELECT p.id, p.name FROM patients pt JOIN parties p ON p.id=pt.primary_doctor_id
+   WHERE pt.id=$1 AND p.kind='doctor' AND p.is_active`, [patientId]);
+ const inactive = items.length === 1 ? "طبيب بنود الحالة غير نشط" : null;
+ if (primary) return { suggestion: { doctorId: primary.id, doctorName: primary.name, basis: "primary_doctor" }, note: inactive && `${inactive}؛ المقترح هو الطبيب الأساسي للمريض.` };
+ return { suggestion: null, note: inactive && `${inactive} ولا يوجد طبيب أساسي نشط؛ اختر الطبيب يدويًا.` };
+}
 async function authority(client: DbClient, admitted: SessionPayload) {
  const session = await revalidateSessionInTransaction(admitted, client);
  if (!session || session.role !== "admin") reject(403, "تحديد الطبيب المسؤول للمدير فقط بجلسة سارية.");
@@ -62,8 +79,10 @@ export async function patientResponsibilitySettings(target: ResponsibilityTarget
   const after = command ? await source(client, target, false) : before;
   const { rows: doctors } = await client.query<{ id: number; name: string }>("SELECT id,name FROM parties WHERE kind='doctor' AND is_active ORDER BY name,id");
   const { rows: names } = after.doctorId === null ? { rows: [] } : await client.query<{ name: string }>("SELECT name FROM parties WHERE id=$1", [after.doctorId]);
+  const proposal = after.doctorId === null ? await suggest(client, target.patientId, after.bridges.map(row => row.id)) : { suggestion: null, note: null };
   await authority(client, admitted); await client.query("COMMIT");
-  return { ...target, doctorId: after.doctorId, doctorName: names[0]?.name ?? null, sourceFingerprint: after.sourceFingerprint, doctors };
+  return { ...target, doctorId: after.doctorId, doctorName: names[0]?.name ?? null, sourceFingerprint: after.sourceFingerprint, doctors,
+   suggestion: proposal.suggestion, suggestionNote: proposal.note };
  } catch (error) {
   await client.query("ROLLBACK").catch(() => {});
   if ((error as { code?: string }).code === "55P03") reject(409, "يجري تحديث الحالة. أعد المحاولة بعد لحظة.");
