@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import type { DbClient, DbPool } from "../db";
 import { staffIdentitySchemaName } from "../staff-identity-substrate-schema.mjs";
 import type { VerifiedDurableSession } from "../staff-durable-session";
-import { staffOperationIdentity, withStaffOperation } from "../staff-operation-runtime";
+import { staffOperationIdentity, staffOperationReferenceCapabilities, withStaffOperation } from "../staff-operation-runtime";
 import { PURCHASE_RESET_FENCE } from "../clinic-reset";
 import {
   REFERENCE_PROTOCOL,
@@ -20,7 +20,9 @@ import {
   type ReferenceReply,
   type ReferenceResult,
 } from "../inventory-reference-protocol";
-import { createInventoryCommandLifecycle } from "./command-lifecycle";
+import { createInventoryCommandLifecycle, runCanonicalInventoryItemCreateLifecycle,
+  snapshotCanonicalItemCreateIntent, validateCanonicalItemCreateMode,
+  type CanonicalItemCreateMode } from "./command-lifecycle";
 import {
   INVENTORY_CLINIC_SCOPE,
   writeInventoryAudit,
@@ -244,14 +246,30 @@ export async function readCanonicalInventoryReferences(
   return withStaffOperation(pool, session, "inventory.references.view", async (client, handle) => {
     await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [PURCHASE_RESET_FENCE]);
     // A reset-fence wait may outlive a session: fresh exact-handle proof BEFORE facts.
-    const identity = await staffOperationIdentity(client, handle, "inventory.references.view");
+    const identity = await staffOperationIdentity(client, handle, "inventory.references.view", referenceSchema);
     const ready = await client.query<{ ready: boolean }>(
       "SELECT bool_and(to_regclass($1 || '.' || name) IS NOT NULL) AS ready FROM unnest($2::text[]) AS name",
       [referenceSchema, ["inventory_items", "inventory_item_unit_versions", "inventory_locations", "inventory_approval_policies", "parties"]],
     );
     invariant(ready.rows[0]?.ready, "schema_not_ready", "Reference read schema is not installed");
-    return readReferenceFacts(client, Object.freeze({realmId: identity.realmId, subjectId: identity.subjectId, generation: identity.generationId}), [], query, page, referenceSchema);
+    const preview = await staffOperationReferenceCapabilities(client, handle, referenceSchema);
+    return readReferenceFacts(client, Object.freeze({realmId: identity.realmId, subjectId: identity.subjectId, generation: identity.generationId}), preview.includes("inventory.items.create") ? ["item.create"] : [], query, page, referenceSchema);
   }, schema);
+}
+
+/** Server-only command seam, deliberately absent from HTTP routes. Gate and copy
+ * before acquiring a pool connection; each admission/execution is its own commit.
+ * Original authority/generation/envelope remain unmodified in all modes. */
+export async function commandCanonicalInventoryItemCreate(
+  pool: DbPool, session: VerifiedDurableSession, original: ReferenceIntent,
+  mode: CanonicalItemCreateMode, reason?: string, schema = "public",
+): Promise<ReferenceReply> {
+  requireInventoryIntegration();
+  const intent = snapshotCanonicalItemCreateIntent(original);
+  validateCanonicalItemCreateMode(mode, reason);
+  const referenceSchema = staffIdentitySchemaName(schema);
+  return withStaffOperation(pool, session, "inventory.items.create", (client, handle) =>
+    runCanonicalInventoryItemCreateLifecycle(client, handle, intent, mode, reason, referenceSchema), referenceSchema);
 }
 
 // Private bounded SQL shared with the existing admin/journal-restricted setup reader.

@@ -1,3 +1,4 @@
+import { STAFF_AUTHORIZATION_POLICY_VERSION } from "../../lib/staff-capability-catalogue";
 /** Synthetic trusted-ready runtime evidence ONLY. This setup proves no operator,
  * owner bootstrap, source recovery or real account activation authority. */
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
@@ -24,7 +25,7 @@ async function claims(userId=2){
  h.realm_id::text,h.generation_id::text,h.registry_revision::text,c.binding_epoch::text,b.subject_id::text
  FROM ${schema}.users u CROSS JOIN ${schema}.staff_identity_state h CROSS JOIN ${schema}.staff_authority_control c
  JOIN ${schema}.staff_identity_current b ON b.user_id=$1 LEFT JOIN ${schema}.parties p ON p.id=u.party_id WHERE u.id=$1`,[userId]);
- return {userId:r.id,username:r.username,expiresAt:Date.now()+60_000,durableIdentity:{schemaVersion:2,policyVersion:2,realmId:r.realm_id,subjectId:r.subject_id,generationId:r.generation_id,registryRevision:r.registry_revision,controlEpoch:r.binding_epoch,accountEpoch:r.authorization_epoch,permissionRevision:r.permissions.revision,credentialVersion:sessionCredentialVersion(r.password_hash),provider:r.party_id===null?null:{partyId:r.party_id,clinicalEpoch:r.clinical_authority_epoch}}};
+ return {userId:r.id,username:r.username,expiresAt:Date.now()+60_000,durableIdentity:{schemaVersion:2,policyVersion:STAFF_AUTHORIZATION_POLICY_VERSION,realmId:r.realm_id,subjectId:r.subject_id,generationId:r.generation_id,registryRevision:r.registry_revision,controlEpoch:r.binding_epoch,accountEpoch:r.authorization_epoch,permissionRevision:r.permissions.revision,credentialVersion:sessionCredentialVersion(r.password_hash),provider:r.party_id===null?null:{partyId:r.party_id,clinicalEpoch:r.clinical_authority_epoch}}};
 }
 async function session(userId=2){const handle=readVerifiedDurableSession(sign(await claims(userId)));if(!handle)throw new Error("synthetic token fixture invalid");return handle;}
 async function waitForBlockedBy(holderPid:number){
@@ -79,7 +80,7 @@ async function snapshot(){
 it("owner and explicit delegated grant read bounded reference DTO without any whole-row changes",async()=>{
  const before=await snapshot();
  for(const id of [1,2]){
-  const dto=await read(id);expect(dto.allowedActions).toEqual([]);expect(dto.items).toHaveLength(20);expect(dto.hasMore).toBe(true);
+  const dto=await read(id);expect(dto.allowedActions).toEqual(id===1?["item.create"]:[]);expect(dto.items).toHaveLength(20);expect(dto.hasMore).toBe(true);
   expect(dto.locations.map(l=>l.kind).sort()).toEqual(["custody","store","transit"]);expect(dto.doctors).toEqual([{id:20,name:"Doctor fixture"}]);
   expect(dto.policy).toEqual({version:1,limitMinor:10000,allowSelfApproval:false});
   expect(Object.keys(dto.items[0]).sort()).toEqual(["id","name","category","unit","isActive","version","enteredUnit","factor","enteredPrecision","basePrecision"].sort());
@@ -105,7 +106,8 @@ it("identity projections cannot replace exact opaque handle/client/action/transa
  let escaped:StaffOperationHandle|undefined;
  await withStaffOperation(pool,await session(),"inventory.references.view",async(c,h)=>{
   escaped=h;const identity=await staffOperationIdentity(c,h,"inventory.references.view");expect(Object.isFrozen(identity)).toBe(true);
-  expect(Object.keys(identity).sort()).toEqual(["realmId","subjectId","generationId"].sort());
+  expect(Object.keys(identity).sort()).toEqual(["realmId","subjectId","generationId","userId","username","role"].sort());
+  expect(identity).toMatchObject({userId:2,username:"synthetic-2",role:"doctor"});
   for(const fake of [{},{...h},identity])await expect(staffOperationIdentity(c,fake as StaffOperationHandle,"inventory.references.view")).rejects.toThrow("HANDLE_INVALID");
   await expect(staffOperationIdentity(c,h,"staff.view")).rejects.toThrow("HANDLE_INVALID");
   const other=await pool.connect();try{await expect(staffOperationIdentity(other,h,"inventory.references.view")).rejects.toThrow("HANDLE_INVALID");}finally{other.release();}

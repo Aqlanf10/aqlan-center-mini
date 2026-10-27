@@ -8,8 +8,8 @@ import { revalidateVerifiedDurableSession, type VerifiedDurableSession } from ".
 import { parseStaffCapabilityDocument } from "./staff-permission-envelope";
 import { hasStaffCapability, ownerContextFromTrustedBinding, resolveStaffCapabilities, staffAuthorizationFingerprint } from "./staff-capabilities";
 
-export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view";
-const actions = new Set<string>(["staff.view","staff.permissions.edit","inventory.references.view"]);
+export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view" | "inventory.items.create";
+const actions = new Set<string>(["staff.view","staff.permissions.edit","inventory.references.view","inventory.items.create"]);
 declare const operationBrand: unique symbol;
 export interface StaffOperationHandle { readonly [operationBrand]: true }
 interface OperationState {
@@ -75,25 +75,34 @@ async function load(client: DbClient, session: VerifiedDurableSession, action: S
  const fingerprint=staffAuthorizationFingerprint(access);
  if(!fingerprint || !revalidateVerifiedDurableSession(session))refuse("SESSION_EXPIRED");
  if(await xid(client)!==transactionId)refuse("TRANSACTION_CHANGED");
- return {xid:transactionId,fingerprint,identity:Object.freeze({realmId:d.realmId,subjectId:d.subjectId,generationId:d.generationId})};
+ return {xid:transactionId,fingerprint,access,identity:Object.freeze({realmId:d.realmId,subjectId:d.subjectId,generationId:d.generationId,userId:user.id,username:user.username,role:user.role})};
 }
 /** Protected SQL callers must assert inside the callback, not accept projections.
  * Reacquires all fences and fresh proof; XID is not a subtransaction identifier. */
-async function assertAndLoadStaffOperation(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction){
+async function assertAndLoadStaffOperation(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,schema?:string){
  const state=operations.get(handle);
  if(!state || state.client!==client || state.action!==action)refuse("HANDLE_INVALID");
+ if(schema!==undefined && staffIdentitySchemaName(schema)!==state.schema)refuse("HANDLE_SCHEMA_MISMATCH");
  if(await xid(client)!==state.xid)refuse("TRANSACTION_CHANGED");
  const current=await load(client,state.session,action,state.schema);
  if(current.xid!==state.xid || current.fingerprint!==state.fingerprint)refuse("AUTHORITY_CHANGED");
- return current.identity;
+ return current;
 }
 /** Fresh proof through the private handle, client, XID and exact action. This frozen
  * display/provenance projection is never accepted as authority by this runtime. */
-export async function staffOperationIdentity(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction):Promise<Readonly<{realmId:string;subjectId:string;generationId:string}>> {
- return assertAndLoadStaffOperation(client,handle,action);
+export async function staffOperationIdentity(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,schema?:string):Promise<Readonly<{realmId:string;subjectId:string;generationId:string;userId:number;username:string;role:string}>> {
+ return (await assertAndLoadStaffOperation(client,handle,action,schema)).identity;
 }
-export async function assertStaffOperation(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction):Promise<void>{
- await assertAndLoadStaffOperation(client,handle,action);
+export async function assertStaffOperation(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,schema?:string):Promise<void>{
+ await assertAndLoadStaffOperation(client,handle,action,schema);
+}
+/** Bounded display preview, never operation admission. An exact reference-read
+ * handle is freshly asserted (including schema) before exposing the sole supported
+ * create action. A caller must acquire a separate exact create handle to write. */
+export async function staffOperationReferenceCapabilities(client:DbClient,handle:StaffOperationHandle,schema:string):Promise<readonly "inventory.items.create"[]>{
+ const exactSchema=staffIdentitySchemaName(schema);
+ const current=await assertAndLoadStaffOperation(client,handle,"inventory.references.view",exactSchema);
+ return Object.freeze(hasStaffCapability(current.access,"inventory.items.create")?["inventory.items.create" as const]:[]);
 }
 /** Owns transaction/commit. Trusted callback MUST NOT issue top-level transaction
  * control. Changed/ended XID refuses, but a malicious early COMMIT cannot be undone.

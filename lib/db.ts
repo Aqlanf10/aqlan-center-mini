@@ -1,3 +1,4 @@
+import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { readLegacyStaffSchema, assertLegacyPermissionEnvelope, lockLegacyStaffBoundary, assertLegacyStaffWrite, finishLegacyStaffWrite, type LegacyStaffWriteAuthorization } from "./legacy-staff-boundary";
 import { CommissionLabLineageError } from "./commission-lab-lineage";
 import { LabFinancialBoundaryError, savedLabPayableSnapshot } from "./lab-financial-boundary";
@@ -16898,10 +16899,12 @@ export interface AuditInput {
 export async function insertAuditRow(
   executor: { query: (text: string, values?: unknown[]) => Promise<unknown> },
   input: AuditInput,
+  schema?: string,
 ): Promise<void> {
+  const prefix = schema === undefined ? "" : `${staffIdentitySchemaName(schema)}.`;
   const source = await currentAuditSource();
   await executor.query(
-    `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
+    `INSERT INTO ${prefix}audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
      VALUES ($1, $2::text, $3::text, $4, $5::jsonb, $6, $7::text, $8::text, $9::text)`,
     [
       input.action,

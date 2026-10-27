@@ -1,3 +1,4 @@
+import { staffIdentitySchemaName } from "../staff-identity-substrate-schema.mjs";
 import type { DbClient } from "../db";
 import type { InventoryActor } from "./procurement-store";
 import type { InventoryPrincipal } from "./principal";
@@ -17,10 +18,13 @@ export async function readInventoryCommandBinding(
   key: string,
   scope: string,
   required = false,
+  schemaName?: string,
 ): Promise<InventoryCommandBinding | null> {
+  const prefix = schemaName === undefined ? "" : `${staffIdentitySchemaName(schemaName)}.`;
   const schema = (
     await client.query<{ bindings: boolean; retirements: boolean }>(
-      "SELECT to_regclass('inventory_command_bindings') IS NOT NULL AS bindings,to_regclass('inventory_command_retirements') IS NOT NULL AS retirements",
+      "SELECT to_regclass($1) IS NOT NULL AS bindings,to_regclass($2) IS NOT NULL AS retirements",
+      [`${prefix}inventory_command_bindings`, `${prefix}inventory_command_retirements`],
     )
   ).rows[0];
   invariant(
@@ -34,7 +38,7 @@ export async function readInventoryCommandBinding(
   return (
     (
       await client.query<InventoryCommandBinding>(
-        "SELECT payload_hash,realm_id,subject_id,username,management,(created_xid=pg_current_xact_id()) AS admitted_in_current_transaction FROM inventory_command_bindings WHERE scope=$1 AND actor_id=$2 AND operation_key=$3",
+        `SELECT payload_hash,realm_id,subject_id,username,management,(created_xid=pg_current_xact_id()) AS admitted_in_current_transaction FROM ${prefix}inventory_command_bindings WHERE scope=$1 AND actor_id=$2 AND operation_key=$3`,
         [scope, actor.userId, key],
       )
     ).rows[0] ?? null
