@@ -28,8 +28,6 @@ import { POST as retiredPlanPOST } from "../app/api/plans/route";
 
 const ROOT = process.cwd();
 const FUNCTION_START = /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*[<(]|^(?:export\s+)?const\s+([A-Za-z0-9_]+)\s*=\s*(?:async\s*)?\(/gm;
-/** استدعاء: `name(` أو `name<T>(` (الأنواع العامة، على سطرٍ واحد — فلا يبتلع نوعٌ عامٌّ ما بعده). */
-const CALL = /\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^()\n;]*?>)?\s*\(/g;
 const WRITES_AUDIT = /recordAudit\(|insertAuditRow\(|INSERT INTO audit_log|auditVisitStep\(|saveSettingsAudited\(/;
 const MUTATING = ["POST", "PUT", "PATCH", "DELETE"] as const;
 
@@ -56,11 +54,10 @@ function splitFunctions(source: string): Map<string, string> {
 }
 
 function callsIn(body: string): Set<string> {
-  // recordExpense has a read-only quote branch that returns before its audit/write
-  // path. Do not count that edge as proof of auditing. Only a literal, unambiguous
-  // quoteOnly:true qualifies; dynamic options remain conservatively audited.
+  // This guard tracks unqualified calls to named library functions. A similarly
+  // named object method, declaration or string is not evidence of auditing.
   const source = ts.createSourceFile("audit-scan.ts", body, ts.ScriptTarget.Latest, true);
-  const quoteCalls = new Set<number>();
+  const calls = new Set<string>();
   function visit(node: ts.Node) {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
       && node.expression.text === "recordExpense" && node.arguments.length === 1) {
@@ -73,15 +70,17 @@ function callsIn(body: string): Set<string> {
           && property.name.text === "quoteOnly");
         if (flags.length === 1 && ts.isPropertyAssignment(flags[0])
           && flags[0].initializer.kind === ts.SyntaxKind.TrueKeyword) {
-          quoteCalls.add(node.expression.getStart(source));
+          // Read-only quote does not audit, but argument expressions may do so.
+          ts.forEachChild(node, visit);
+          return;
         }
       }
     }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) calls.add(node.expression.text);
     ts.forEachChild(node, visit);
   }
   visit(source);
-  return new Set([...body.matchAll(CALL)]
-    .filter(match => !quoteCalls.has(match.index!)).map(match => match[1]));
+  return calls;
 }
 
 /** دوال lib التي تكتب سطر تدقيق — مباشرةً أو عبر دالةٍ تكتبه (نقطة ثابتة). */
@@ -146,6 +145,20 @@ const handlers = walk(join(ROOT, "app", "api"), (name) => name === "route.ts").f
 });
 
 describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
+  it("does not confuse member methods or declarations with named audit calls", () => {
+    expect([...callsIn('socket.write(data); stream.write(data); target?.write(data); target["write"](data);')]).toEqual([]);
+    expect([...callsIn('function write() {} // write()\nconst text = "write()";')]).toEqual([]);
+    expect([...callsIn('write(data); write<Row>(data);')]).toEqual(["write"]);
+    expect(handlerAudits(new Map([["POST", "socket.write(data);"]]), "POST", new Set(["write"]))).toBe(false);
+    expect(audited.has("sendOutbound")).toBe(false);
+    expect(audited.has("runBackupCycle")).toBe(false);
+  });
+  it("retains argument audit calls while excluding only literal read-only quotes", () => {
+    expect(callsIn('recordExpense({ quoteOnly: true, amount: auditWork() });')).not.toContain("recordExpense");
+    expect(callsIn('recordExpense({ quoteOnly: true, amount: auditWork() });')).toContain("auditWork");
+    expect(callsIn('recordExpense({ quoteOnly: flag });')).toContain("recordExpense");
+  });
+
   it("exempts exact coverage status reads but never decision or terminal-refusal writes", () => {
     const path = "/api/ortho/[id]/followup-coverage";
     expect(handlers.find(handler => handler.key === `PUT ${path}`)?.audits).toBe(false);
