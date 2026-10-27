@@ -78,10 +78,14 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   const faultyArchive = tarGzBytes(parsed.order.map(name => ({ name, data: name === 'database.sql' ? faultySql : name === 'manifest.json' ? Buffer.from(JSON.stringify(manifest)) : parsed.entries.get(name)!.data })));
   const path = join(directory, 'late-failure.tar.gz');
   await writeFile(path, faultyArchive);
-  const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents') });
+  // Snapshot the current schema-owned seed before replay; it must survive exactly,
+  // while none of the archived application rows may survive the late failure.
+  await migrate(fixture.archiveTarget, { apply: true });
+  const beforeReplay = await applicationRows(fixture.archiveTarget);
+  const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents'), allowNonEmptyTarget: true });
   expect(result.validationErrors).toEqual([]); expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
   expect(result.errors.join(' ')).toContain('division by zero');
-  for (const [table, values] of Object.entries(await applicationRows(fixture.archiveTarget))) expect(values, table).toEqual([]);
+  expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
   expect((await fixture.archiveTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual((await loadMigrationFiles()).map(file => file.version));
   expect((await fixture.archiveTarget.query("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgenabled <> 'O'")).rows).toEqual([]);
   expect((await fixture.archiveTarget.query('SHOW session_replication_role')).rows[0].session_replication_role).toBe('origin');

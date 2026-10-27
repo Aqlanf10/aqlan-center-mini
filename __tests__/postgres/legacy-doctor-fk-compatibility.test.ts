@@ -265,6 +265,22 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     expect(await doctorFk(client)).toEqual(initialFk);
   });
 
+  it("refuses a same-named lab index with the opposite intent predicate", async () => {
+    const before = await projectDetailedSchemaReadOnly(client);
+    const original = (await client.query<{ definition: string }>("SELECT pg_get_indexdef('public.lab_orders_visit_tooth_uniq'::regclass) AS definition")).rows[0].definition;
+    try {
+      await client.query("DROP INDEX lab_orders_visit_tooth_uniq");
+      await client.query("CREATE UNIQUE INDEX lab_orders_visit_tooth_uniq ON lab_orders(visit_id,tooth_code) WHERE visit_id IS NOT NULL AND status <> 'cancelled' AND lab_work_intent_id IS NOT NULL");
+      const probe = await runBaselineSchemaProbe(pool as unknown as db.DbPool, files[0].sql);
+      expect(probe.ok).toBe(false);
+      expect(probe.missingIndexes).toContain("CREATE UNIQUE INDEX lab_orders_visit_tooth_uniq ON lab_orders USING btree (visit_id, tooth_code) WHERE ((visit_id IS NOT NULL) AND (status <> 'cancelled'::text))");
+    } finally {
+      await client.query("DROP INDEX lab_orders_visit_tooth_uniq");
+      await client.query(original);
+    }
+    expect(await projectDetailedSchemaReadOnly(client)).toEqual(before);
+  });
+
   it("keeps the baseline probe action-sensitive and leaves schema, registry, and rows unchanged", async () => {
     const before = await projectDetailedSchemaReadOnly(client);
     const registryBefore = (await client.query("SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version")).rows;

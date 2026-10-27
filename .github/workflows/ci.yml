@@ -342,12 +342,40 @@ jobs:
       - name: HTTP security integration tests
         env:
           HR_EVIDENCE_DIR: /tmp/hr-evidence
-        run: npm run test:security-http
+        # Raw JSON stays runner-local. Preserve Vitest's original exit status.
+        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-security-raw.json --includeTaskLocation
+
+      - name: Sanitize security HTTP test locations
+        if: always()
+        run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-security-raw.json" "${{ runner.temp }}/http-security-locations.json"
+
+      - name: Upload security HTTP test locations only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-security-test-locations
+          path: ${{ runner.temp }}/http-security-locations.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Isolated inventory proposal HTTP tests (explicit opt-in)
         env:
           INVENTORY_SCHEMA_TEST: "1"
-        run: npm run test:security-http
+        # Raw JSON stays runner-local. Preserve Vitest's original exit status.
+        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-inventory-raw.json --includeTaskLocation
+
+      - name: Sanitize inventory HTTP test locations
+        if: always()
+        run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-inventory-raw.json" "${{ runner.temp }}/http-inventory-locations.json"
+
+      - name: Upload inventory HTTP test locations only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-inventory-test-locations
+          path: ${{ runner.temp }}/http-inventory-locations.json
+          if-no-files-found: error
+          retention-days: 7
 
       # Five exact real-app synthetic invoice views and bounded geometry only.
       # No browser state, cookies, traces, databases, or broad directory upload.

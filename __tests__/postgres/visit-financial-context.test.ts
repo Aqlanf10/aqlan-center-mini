@@ -18,7 +18,7 @@ beforeAll(async()=>{
 });
 afterAll(async()=>db.resetPoolForTesting());
 async function patient(){return (await q<{id:number}>("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic source patient') RETURNING id",[`SOURCE-${++serial}`]))[0].id;}
-async function visit(patientId:number,currency:string|null="YER"){return (await q<{id:number}>("INSERT INTO visits(patient_name,patient_id,status,signed_at,arrived_at,billing_currency) VALUES('Synthetic source visit',$1,'done',NOW(),'2026-10-01 10:00+03',$2) RETURNING id",[patientId,currency]))[0].id;}
+async function visit(patientId:number,currency:string|null="YER",signed=true){return (await q<{id:number}>("INSERT INTO visits(patient_name,patient_id,status,signed_at,arrived_at,billing_currency) VALUES('Synthetic source visit',$1,'done',CASE WHEN $3 THEN NOW() ELSE NULL END,'2026-10-01 10:00+03',$2) RETURNING id",[patientId,currency,signed]))[0].id;}
 async function procedure(visitId:number,itemId:number|null=null,price=10000){return Number((await q<{id:string}>("INSERT INTO visit_procedures(visit_id,service_id,quantity,unit_price_minor,tooth_code,plan_item_id) VALUES($1,$2,1,$3,16,$4) RETURNING id::text",[visitId,serviceId,price,itemId]))[0].id);}
 async function invoice(patientId:number,procedureId:number,status="open",source=true,currency="YER"){
  const [invoice]=await q<{id:number}>("INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,status) VALUES($1,$2,10000,$4,'synthetic',$3) RETURNING id",[`SOURCE-INV-${++serial}`,patientId,status,currency]);
@@ -123,8 +123,8 @@ it("separates invalid direct references from independently proven work coverage"
  expect(await getVisitFinancialContext(v,p)).toMatchObject({directReference:null,directReferenceState:"review",summary:"verified"});
 });
 it("does not certify unsigned work or conflicting no-charge decisions",async()=>{
- const p=await patient(),v=await visit(p),inv=await invoice(p,await procedure(v));
- await q("UPDATE visits SET signed_at=NULL WHERE id=$1",[v]);expect((await getVisitFinancialContext(v,p))?.summary).toBe("unresolved");
+ const p=await patient(),v=await visit(p,"YER",false),inv=await invoice(p,await procedure(v));
+ expect((await getVisitFinancialContext(v,p))?.summary).toBe("unresolved");
  const other=await visit(p);const [c]=await q<{id:number}>("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'synthetic') RETURNING id",[p]);
  await q("INSERT INTO ortho_adjustments(case_id,visit_id,recorded_by,billing_class,billing_decision,billing_decision_reason,billing_decided_by,billing_decided_at,billing_invoice_id) VALUES($1,$2,'synthetic','OUTSIDE_CONTRACT','no_charge','Synthetic conflicting decision','synthetic',NOW(),$3)",[c.id,other,inv]);
  expect((await getVisitFinancialContext(other,p))?.summary).toBe("unresolved");
