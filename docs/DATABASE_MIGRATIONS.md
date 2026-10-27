@@ -588,3 +588,18 @@ refuse when reconciliation or rejection history exists, rather than erase it.
 Require exact-head PostgreSQL, schema/ownership, populated SQL/full-archive
 restore, HTTP/browser retry and Staging acceptance evidence before release.
 Neither this listing nor passing unit tests alone authorizes Production rollout.
+
+### 0087_agreement_reminder_metadata.sql
+
+Additive replacement of the reconciliation terms guard permits only
+`plan_installments.last_reminder_at` to change on reconciled installments.
+Whole-row JSON equality excluding that field keeps all other current and future
+columns immutable; INSERT/DELETE and invoice-item guards remain unchanged.
+Published 0078 bytes and its registry checksum are preserved. Numbered and
+runtime 0087 SQL are identical and checksum checked. Reminder timestamps and
+mandatory audit rows commit together in one transaction, including bulk requests.
+
+An application rollback does not undo this migration: old 480 startup preserves
+the new guard, but its old preflight manifest reports 0087 as unknown. Do not
+delete registry history to hide that mismatch. Exact-head CI and Staging
+acceptance remain required before Production rollout.
