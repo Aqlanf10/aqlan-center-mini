@@ -13,10 +13,13 @@ const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sq
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("accepts the exact composed 0066–0069 chain and reviewed branch variants, retaining sentinel 9000", async () => {
     const files = await loadMigrationFiles();
-    expect(files).toHaveLength(66);
-    expect(files[65]).toMatchObject({ version: "0082", filename: "0082_invoice_service_additions.sql" });
-    expect(files[64]).toMatchObject({ version: "0081", filename: "0081_invoice_archive.sql" });
-    expect(files[63]).toMatchObject({ version: "0078", filename: "0078_agreement_reconciliation.sql" });
+    expect(files).toHaveLength(69);
+    expect(files[68]).toMatchObject({ version: "0082", filename: "0082_invoice_service_additions.sql" });
+    expect(files[67]).toMatchObject({ version: "0081", filename: "0081_invoice_archive.sql" });
+    expect(files[66]).toMatchObject({ version: "0080", filename: "0080_patient_numbering.sql" });
+    expect(files[65]).toMatchObject({version:"0079",filename:"0079_ortho_followup_coverage.sql"});
+    expect(files[64]).toMatchObject({ version: "0078", filename: "0078_agreement_reconciliation.sql" });
+    expect(files[63]).toMatchObject({version:"0074",filename:"0074_lab_work_intents.sql"});
     expect(files[62]).toMatchObject({ version: "0069", filename: "0069_unpaid_currency_transitions.sql" });
     expect(files[61]).toMatchObject({ version: "0068", filename: "0068_collection_attempt_retirements.sql" });
     expect(files[60]).toMatchObject({ version: "0067", filename: "0067_patient_appointment_history_index.sql" });
@@ -28,14 +31,14 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(periodontalCandidateMigrationVersion(files.slice(0,61))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,60))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0067"))).toBe("9000");
-    expect(periodontalCandidateMigrationVersion(files.filter(file => !["0066", "0068", "0069", "0078", "0081", "0082"].includes(file.version)))).toBe("9000");
+    expect(periodontalCandidateMigrationVersion(files.filter(file => !["0066", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082"].includes(file.version)))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,59))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,58))).toBe("9000");
     expect(periodontalCandidateMigrationVersion(files.slice(0,57))).toBe("9000");
     expect(()=>periodontalCandidateMigrationVersion([...files,{version:"0067",filename:"0067_unknown.sql"}])).toThrow();
     for (let index = 40; index < files.length; index++) {
       expect(()=>periodontalCandidateMigrationVersion(files.map((file,n)=>n===index?{...file,filename:`${file.version}_unknown.sql`}:file))).toThrow();
-      if(index < files.length-1 && files[index].version !== "0067") expect(()=>periodontalCandidateMigrationVersion(files.filter((_,n)=>n!==index))).toThrow();
+      if(index < files.length-1 && !["0067","0074","0079","0080"].includes(files[index].version)) expect(()=>periodontalCandidateMigrationVersion(files.filter((_,n)=>n!==index))).toThrow();
     }
   });
   it("keeps the pre-invoice baseline at test-only 0041", () => {

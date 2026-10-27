@@ -1,8 +1,8 @@
 /**
  * إعادة الضبط — مسح البيانات التجريبية وإبقاء الإعداد (قرار المالك).
  *
- * المركز جرّب النظام ببياناتٍ تجريبية، ثم يبدأ عمله الحقيقي من الصفر: فتُمسح المرضى
- * وكل ما تعلّق بهم والمال والتشغيل، ويبقى ما أُعدّ مرةً ليُستعمل كل يوم — المستخدمون
+ * يُرفض المسح عند وجود ملفات مرضى أو أرقام سابقة لحماية هوية الملفات.
+ * عند خلوها يمكن مسح التشغيل التجريبي، ويبقى ما أُعدّ للاستعمال اليومي — المستخدمون
  * والإعدادات والخدمات بأسعارها والأطباء والمختبرات وبنود المصروفات وأصناف المخزون.
  *
  * كل جدولٍ في القاعدة مصنَّف هنا **صراحةً** في إحدى القائمتين؛ واختبارٌ على القاعدة
@@ -154,8 +154,28 @@ export class ProtectedInvoiceActionHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد تسجيل أرشفة فاتورة أو إضافة خدمة أو رفض محفوظ؛ يجب الاحتفاظ بسجل الطلبات ومفاتيحها. لم يُمسح شيء."); this.name = "ProtectedInvoiceActionHistoryError"; }
 }
 
+export class ProtectedPatientNumberHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط مع وجود ملفات مرضى أو أرقام ملفات سابقة؛ يجب الاحتفاظ بالأرقام السابقة لمنع إعادة استخدامها. لم يُمسح شيء."); this.name = "ProtectedPatientNumberHistoryError"; }
+}
+
+export const ORTHO_FOLLOWUP_HISTORY_TABLES = ["ortho_followup_coverage_revisions", "ortho_followup_coverage_rejections"] as const;
+export class ProtectedOrthoFollowupHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد تسجيل قرارات أو نتائج طلبات تغطية التقويم؛ يجب الاحتفاظ بمفاتيح الطلبات وقرارات التغطية وأدلة الزيارات الموقعة. لم يُمسح شيء."); this.name = "ProtectedOrthoFollowupHistoryError"; }
+}
+
+/** Durable lab source identity and terminal outcomes are never erased. */
+export const LAB_HISTORY_TABLES = ["lab_prescription_source_memberships", "lab_work_commands", "lab_work_members", "lab_work_intents"] as const;
+export class ProtectedLabHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد حفظ هويات أعمال المختبر أو نتائج طلباتها. لم يُمسح شيء؛ يجب الاحتفاظ بالمصادر ومفاتيح إعادة المحاولة."); this.name = "ProtectedLabHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
+  ...LAB_HISTORY_TABLES,
+  "lab_work_intent_schema",
+  ...ORTHO_FOLLOWUP_HISTORY_TABLES,
   ...INVOICE_ACTION_HISTORY_TABLES,
+  "patient_numbering_policy",
+  "retired_patient_numbers",
   "inventory_purchase_receipts",
   // (#390) Kept like purchase receipts: a reset refuses while any row exists, and truncates them only when empty.
   ...AGREEMENT_HISTORY_TABLES,
@@ -199,7 +219,6 @@ export const RESET_KEEP_TABLES = [
 
 /** ترقيم المستندات وملفات المرضى — يعود إلى ١ مع البداية الجديدة. */
 export const RESET_SEQUENCES = [
-  "patient_number_seq",
   "invoice_number_seq",
   "receipt_number_seq",
   "voucher_number_seq",

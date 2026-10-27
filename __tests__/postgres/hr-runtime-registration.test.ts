@@ -1,3 +1,6 @@
+import { LAB_WORK_INTENT_SQL } from "../../lib/lab-work-intent-schema";
+import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "../../lib/ortho-followup-coverage-schema";
+import { PATIENT_NUMBERING_SQL } from "../../lib/patient-numbering-schema";
 import { INVOICE_ARCHIVE_SQL } from "../../lib/invoice-archive-schema";
 import { INVOICE_SERVICE_ADDITIONS_SQL } from "../../lib/invoice-service-additions-schema";
 import { AGREEMENT_RECONCILIATION_SQL } from "../../lib/agreement-reconciliation-schema";
@@ -43,7 +46,10 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0067", name: "patient_appointment_history_index", checksum: createHash("sha256").update(PATIENT_APPOINTMENT_HISTORY_SQL).digest("hex") },
     { version: "0068", name: "collection_attempt_retirements", checksum: createHash("sha256").update(COLLECTION_ATTEMPT_RETIREMENT_SQL).digest("hex") },
     { version: "0069", name: "unpaid_currency_transitions", checksum: createHash("sha256").update(UNPAID_CURRENCY_TRANSITION_SQL).digest("hex") },
+    { version: "0074", name: "lab_work_intents", checksum: createHash("sha256").update(LAB_WORK_INTENT_SQL).digest("hex") },
     { version: "0078", name: "agreement_reconciliation", checksum: createHash("sha256").update(AGREEMENT_RECONCILIATION_SQL).digest("hex") },
+    { version: "0079", name: "ortho_followup_coverage", checksum: createHash("sha256").update(ORTHO_FOLLOWUP_COVERAGE_SQL).digest("hex") },
+    { version: "0080", name: "patient_numbering", checksum: createHash("sha256").update(PATIENT_NUMBERING_SQL).digest("hex") },
     { version: "0081", name: "invoice_archive", checksum: createHash("sha256").update(INVOICE_ARCHIVE_SQL).digest("hex") },
     { version: "0082", name: "invoice_service_additions", checksum: createHash("sha256").update(INVOICE_SERVICE_ADDITIONS_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));

@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-reception", role: "reception" }) }));
 
 // Exercise the real component's rendered handlers and state across renders.
 // This repository has no DOM unit-test dependency. Effects are intentionally
@@ -40,7 +41,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const response = (status: number, body: unknown) => ({
-  ok: status >= 200 && status < 300, status, json: async () => body,
+  ok: status >= 200 && status < 300, status, json: async () => body, clone: () => ({ json: async () => body }),
 });
 const onClose = vi.fn();
 const onSuccess = vi.fn();
@@ -235,4 +236,32 @@ describe("quick booking owns the complete patient-create and appointment request
     await enterNewPatient().submit();
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
+  it.each([false, true])("requires explicit nearby-booking decision (confirm=%s) without losing the new-patient draft", async confirm => {
+    const warning = { kind: "nearby_patient_appointments", message: "للمريض موعد قائم قريب", canOverride: false,
+      confirmationToken: "scoped-token", nearbyAppointments: [{ id: 10, scheduledDate: "2030-01-16", scheduledTime: "16:00", doctorName: "طبيب تجريبي" }] };
+    fetchMock.mockResolvedValueOnce(response(201, { id: 91001 }))
+      .mockResolvedValueOnce(response(409, warning));
+    if (confirm) fetchMock.mockResolvedValueOnce(response(201, {}));
+    enterNewPatient(); changeField("date", "2030-01-15"); changeField("time", "17:00"); changeField("note", "مسودة محفوظة");
+    const pending = render().submit();
+    let dialog: Element | undefined;
+    await vi.waitFor(() => { dialog = render().all.find(node => node.props.warning === warning); expect(dialog).toBeTruthy(); });
+    expect(writes("/api/appointments")).toHaveLength(1);
+    (dialog!.props.onDecision as (value: boolean) => void)(confirm); await pending;
+    expect(writes("/api/patients")).toHaveLength(1);
+    expect(writes("/api/appointments")).toHaveLength(confirm ? 2 : 1);
+    if (confirm) {
+      const original = JSON.parse(writes("/api/appointments")[0][1].body);
+      expect(JSON.parse(writes("/api/appointments")[1][1].body)).toEqual({ ...original, nearbyAppointmentConfirmation: "scoped-token" });
+      expect(onSuccess).toHaveBeenCalledTimes(1);
+    } else {
+      expect(onClose).not.toHaveBeenCalled(); expect(onSuccess).not.toHaveBeenCalled();
+      const form = render();
+      expect(form.find(node => node.props.id === "quick-appointment-date").props.value).toBe("2030-01-15");
+      expect(form.find(node => node.props.id === "quick-appointment-time").props.value).toBe("17:00");
+      expect(form.find(node => node.props.id === "quick-appointment-note").props.value).toBe("مسودة محفوظة");
+      expectControlGroup(form, false);
+    }
+  });
+
 });

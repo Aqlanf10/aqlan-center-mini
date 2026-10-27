@@ -1,3 +1,4 @@
+import { linkedLabWorkForInvoiceInTransaction, aliasCorrectedInvoiceLabWorkInTransaction } from "./lab-invoice-source-links";
 import type { InvoiceCurrencyScopeReason } from "./invoice-currency-scope";
 import {currencyCorrectionTargets,prepareInvoiceCurrencyChange,writeInvoiceCurrencyEvidence,InvoiceCurrencyScopeError} from "./invoice-currency-plan";
 import {invoiceQuantityAllowed} from "./invoice-clinical-linkage";
@@ -48,6 +49,8 @@ async function contextInTx(client: DbClient, invoiceId: number) {
       EXISTS (SELECT 1 FROM legacy_treatment_agreements a WHERE a.plan_item_id=i.id) AS legacy
      FROM plan_items i LEFT JOIN clinical_cases c ON c.id=i.case_id
      WHERE i.id IN (SELECT plan_item_id FROM invoice_items WHERE invoice_id=$1) ORDER BY i.id`, [invoiceId]);
+  const labLinks = await linkedLabWorkForInvoiceInTransaction(client,{patientId:invoice.patientId,invoiceId});
+  for(const item of work) if(labLinks.planItemIds.includes(item.id)) item.clinical_locked=true;
   const { rows: [schedule] } = await client.query<{ id: number; version: number; status: string; terms: unknown }>(
     `SELECT a.id,r.version,r.status,r.terms FROM debt_repayment_arrangements a JOIN LATERAL
       (SELECT version,status,terms FROM debt_repayment_revisions WHERE arrangement_id=a.id ORDER BY version DESC LIMIT 1) r ON TRUE
@@ -165,7 +168,13 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       if (unitPriceMinor === null || typeof line.itemId !== "number" || typeof line.quantity !== "number") bad("السعر والكمية وهوية البند مطلوبة.");
       return { itemId: line.itemId, quantity: line.quantity, unitPriceMinor };
     });
+    const labLinks = await linkedLabWorkForInvoiceInTransaction(client,{patientId:owner.patient_id,invoiceId,lock:true});
     const amendments=await validateInvoiceIdentityAmendments(client,before.invoice,source.lines,before.work,before.identityAmendmentAvailable);
+    for(const itemId of labLinks.invoiceItemIds){
+      const original=before.invoice.items.find(item=>item.id===itemId);
+      const retained=lines.find(item=>item.itemId===itemId);
+      if(!original||!retained||retained.quantity!==original.quantity||amendments.has(itemId)) bad("بند مرتبط بوصفة مختبر؛ التصحيح المالي لا يغيّر هويته أو كميته ولا يحذفه.","conflict");
+    }
     if(changingCurrency&&amendments.size)bad("تصحيح العملة لا يغيّر هوية العلاج أو الطبيب أو السن؛ استخدم مسار تصحيح العلاج المستقل.");
     const discountMinor = typeof source.discount === "string" ? parseAmount(source.discount,currency as "YER"|"SAR"|"USD") : null;
     if (discountMinor === null) bad("الخصم غير صالح.");
@@ -202,6 +211,8 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       || new Set(result.itemPairs.map(pair => pair.correctedItemId)).size !== retainedIds.size) {
       bad("رابط بنود التصحيح غير مكتمل؛ لم يُحفظ التصحيح.", "conflict");
     }
+    if(!session.userId && labLinks.sources.length) bad("جلسة غير صالحة لربط وصفة المختبر.","unauthorized");
+    if(session.userId) await aliasCorrectedInvoiceLabWorkInTransaction(client,{patientId:owner.patient_id,originalInvoiceId:invoiceId,correctedInvoiceId:result.correctedId,actorUserId:session.userId,itemPairs:result.itemPairs});
     const correctedItems = new Map(result.itemPairs.map(pair => [pair.originalItemId, pair.correctedItemId]));
     const { rows: [revision] } = await client.query<{ id: number }>(
       `INSERT INTO invoice_corrections(patient_id,currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by,original_currency)
@@ -219,7 +230,9 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
         if(identity){
           await client.query("UPDATE plan_items SET service_id=$2,doctor_id=$3,service_name=$4,category=$5,tooth_code=$6,surfaces=$7 WHERE id=$1",
             [work.id,identity.serviceId,identity.doctorId,identity.description,identity.category,identity.toothCode,identity.surfaces]);
-          if(work.case_id!==null)await client.query("UPDATE clinical_cases SET site=$2,responsible_party_id=$3 WHERE id=$1",[work.case_id,identity.caseSite,identity.doctorId]);
+          // Financial identity correction may update the clinical site, never the
+          // current care owner established through responsibility settings.
+          if(work.case_id!==null)await client.query("UPDATE clinical_cases SET site=$2 WHERE id=$1",[work.case_id,identity.caseSite]);
         }
         await client.query("UPDATE plan_items SET quantity=$2,unit_price_minor=$3,billed_invoice_id=$4,billing_status='billed' WHERE id=$1",
           [work.id,line.quantity,line.unitPriceMinor,result.correctedId]);

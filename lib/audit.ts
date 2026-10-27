@@ -23,7 +23,7 @@ export type AuditAction =
   | "payment.correct"
   | "expense.create"
   | "shift.open" | "shift.close"
-  | "patient.create" | "patient.update"
+  | "patient.create" | "patient.update" | "patient.number.change" | "patient.numbering.configure"
   /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
   | "patient.merge"
   /* (P1-5) استيراد دفعة مرضى من ملف المركز القديم — ببصمة الملف. */
@@ -78,7 +78,7 @@ export type AuditAction =
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
   | "lab.create" | "lab.update" | "lab.delete"
-  | "lab_order.cancel" | "lab_order.delete"
+  | "lab_order.cancel" | "lab_order.delete" | "lab_order.prescription_updated"
   | "lab_service.create" | "lab_service.update" | "lab_service.delete" | "lab_service.deactivate" | "lab_services.seed"
   | "lab_pricing.create" | "lab_pricing.update" | "lab_pricing.delete"
   | "lab.accounting.update"
@@ -92,14 +92,14 @@ export type AuditAction =
   | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
-  | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
+  | "ortho.followup_coverage.append" | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
   | "ortho.strategy_revision" | "ortho.assessment.append"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
      ومن فعل ولماذا» سؤالُ إدارةٍ لا يُجاب عليه إن اختلط التجاوز بالحجز العادي. */
-  | "appointment.capacity_override" | "appointment.reschedule" | "planned_visit.rebook"
+  | "appointment.capacity_override" | "appointment.reschedule" | "planned_visit.rebook" | "planned_visit.reconcile"
   /* (المرحلة ٤ب) إدارة كتالوج خدمات المواعيد وحجب الأطباء — أفعالٌ مستقلّة،
      فتُستخرج وحدها ولا تختلط بتغييرات الإعدادات ولا بحجز المواعيد. */
   | "appointment_service.create" | "appointment_service.update"
@@ -122,7 +122,7 @@ export type AuditAction =
   /* (REF-2) خطوات النظام: الوصول، والتقدّم بالتوقيع، وعودة الإحالة لانتظار الحجز. */
   | "referral.arrive" | "referral.progress" | "referral.unschedule"
   /* (CASE-MODEL-1) الحالات التخصصية وقائمة المشاكل وترتيب بنود الخطة واعتمادياتها. */
-  | "case.create" | "case.status" | "problem.create" | "problem.status"
+  | "case.create" | "case.status" | "case.responsibility_change" | "problem.create" | "problem.status"
   | "plan.item_case" | "plan.dependency_add" | "plan.dependency_remove" | "plan.dependency_override"
   | "plan.item_add" | "plan.item_update" | "plan.item_remove"
   /* (PAT-4) العائلات والضامن — معلومةٌ لا مال. */
@@ -197,6 +197,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "shift.close": "إغلاق وردية وجرد",
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
+  "patient.number.change": "تعديل رقم ملف المريض",
+  "patient.numbering.configure": "تعديل حد ترقيم الملفات الجديدة",
   "patient.merge": "دمج ملف مريض مكرر",
   "system.reset": "إعادة ضبط — مسح البيانات التجريبية",
   "patient.import": "استيراد مرضى من ملف",
@@ -283,6 +285,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "lab.create": "إضافة مختبر جديد",
   "lab.update": "تعديل بيانات مختبر",
   "lab.delete": "حذف/تعطيل مختبر",
+  "lab_order.prescription_updated": "تحديث مواصفات إرسالية المختبر",
   "lab_order.cancel": "إلغاء إرسالية مختبر",
   "lab_order.delete": "حذف أمر مختبر نهائيًا",
   "lab_service.create": "إضافة خدمة مختبر",
@@ -340,6 +343,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "referral.unschedule": "عودة الإحالة لانتظار الحجز (أُلغي موعدها أو لم يحضر)",
   "case.create": "فتح حالة تخصصية",
   "case.status": "تغيير حالة تخصصية",
+  "case.responsibility_change": "تغيير الطبيب المسؤول عن الحالة",
   "problem.create": "تسجيل مشكلة في قائمة المشاكل",
   "problem.status": "تغيير حالة مشكلة",
   "endo.open": "فتح نوبة علاج جذور",
@@ -373,11 +377,13 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "recall.contact": "متابعة مريض (موعد فائت أو انقطاع)",
   "plan.installment_reminder": "تنبيه مريض بقسط مستحق",
   "ortho.adjustment": "تسجيل شدّة تقويم",
+  "ortho.followup_coverage.append": "اعتماد نطاق المتابعات الروتينية للتقويم",
   "ortho.plan_link": "ربط حالة التقويم باتفاقها المالي",
   "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
   "appointment.reschedule": "نقل موعد",
+  "planned_visit.reconcile": "تسوية جلسة مخطَّطة أُنجز عملها",
   "planned_visit.rebook": "إعادة حجز جلسة مخطَّطة",
   "appointment_service.create": "إنشاء خدمة موعد",
   "appointment_service.update": "تعديل خدمة موعد",
@@ -403,6 +409,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
  * على المالك قراءة ألف سطر ليصل إلى العشرة التي تهمّه.
  */
 export const SENSITIVE_ACTIONS: AuditAction[] = [
+  "case.responsibility_change",
   "appointment.capacity_override",
   "appointment_service.create", "appointment_service.update",
   "appointment_service.activate", "appointment_service.deactivate",

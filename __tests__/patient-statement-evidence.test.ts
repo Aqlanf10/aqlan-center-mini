@@ -61,7 +61,7 @@ describe("legacy structured invoice correction evidence", () => {
   ] as Invoice[];
   const correction = { action: "invoice.correct", entity_id: "5", created_at: created,
     details: { المريض: 17, الفاتورة_المصححة: "SYN-I-6", السبب: "PRIVATE-CORRECTION" } };
-  const structured = { original_invoice_id: 5, corrected_invoice_id: 6, created_at: created };
+  const structured = { id: 31, patient_id: 17, original_invoice_id: 5, corrected_invoice_id: 6, created_at: created };
   it("reads the supported legacy writer's exact relationship without parsing notes or adding a query", async () => {
     const { reader, query } = client([correction]);
     const evidence = await readPatientStatementEvidence(reader, 17, { invoices, payments: [], openings: [] });
@@ -82,5 +82,61 @@ describe("legacy structured invoice correction evidence", () => {
     await expect(run([invoices[0], { ...invoices[1], patientId: 18 }])).rejects.toBeInstanceOf(StatementProjectionError);
     await expect(run([{ ...invoices[0], status: "open" }, invoices[1]])).rejects.toBeInstanceOf(StatementProjectionError);
     await expect(run(invoices, { ...correction, details: { ...correction.details, المريض: 18 } })).rejects.toBeInstanceOf(StatementProjectionError);
+  });
+});
+
+
+describe("modern invoice revision evidence", () => {
+  const invoices = [
+    { id: 5, patientId: 17, invoiceNumber: "SYN-I-5", status: "cancelled" },
+    { id: 6, patientId: 17, invoiceNumber: "SYN-I-6", status: "open" },
+  ] as Invoice[];
+  const structured = { id: 31, patient_id: 17, original_invoice_id: 5, corrected_invoice_id: 6, created_at: created };
+  const correction = { action: "invoice.correct", entity_id: "5", created_at: created,
+    details: { correctionId: 31, correctedInvoiceId: 6, reason: "PRIVATE-MODERN-CORRECTION", receiptsPreserved: true, cashMovement: 0 } };
+  const run = (row: unknown = correction, records: unknown[] = [structured], invoiceRows = invoices) =>
+    readPatientStatementEvidence(client([row], records).reader, 17, { invoices: invoiceRows, payments: [], openings: [] });
+  it("verifies the current writer's exact patient-scoped correction without requiring legacy Arabic fields", async () => {
+    const { reader, query } = client([correction], [structured]);
+    const evidence = await readPatientStatementEvidence(reader, 17, { invoices, payments: [], openings: [] });
+    expect(evidence.invoiceCorrections).toEqual([{ originalInvoiceId: 5, correctedInvoiceId: 6, createdAt: created.toISOString() }]);
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(query.mock.calls[0][0]).toContain("patient_id=$1");
+    expect(query).toHaveBeenNthCalledWith(1, expect.stringContaining("patient_id=$1"), [17]);
+    expect(JSON.stringify(evidence)).not.toMatch(/PRIVATE-|correctionId|receiptsPreserved|cashMovement/);
+  });
+  it.each([
+    null, "invalid-details", [],
+    { ...correction.details, correctionId: 32 },
+    { ...correction.details, correctionId: "31" },
+    { ...correction.details, correctionId: null },
+    { ...correction.details, correctionId: undefined },
+    { ...correction.details, correctedInvoiceId: 7 },
+    { ...correction.details, correctedInvoiceId: "6" },
+    { ...correction.details, correctedInvoiceId: undefined },
+    { ...correction.details, المريض: 18 },
+    { ...correction.details, الفاتورة_المصححة: "SYN-I-OTHER" },
+  ])("rejects malformed, mismatched or contradictory modern audit details", async details => {
+    await expect(run({ ...correction, details })).rejects.toBeInstanceOf(StatementProjectionError);
+  });
+  it("requires independent exact correction proof, not an audit claim or legacy-field fallback", async () => {
+    await expect(run(correction, [])).rejects.toBeInstanceOf(StatementProjectionError);
+    await expect(run({ ...correction, details: { ...correction.details, المريض: 17, الفاتورة_المصححة: "SYN-I-6" } }, []))
+      .rejects.toBeInstanceOf(StatementProjectionError);
+    await expect(run(correction, [structured, structured])).rejects.toBeInstanceOf(StatementProjectionError);
+    for (const bad of [
+      { ...structured, patient_id: 18 },
+      { ...structured, original_invoice_id: 7 },
+      { ...structured, corrected_invoice_id: 7 },
+      { ...structured, created_at: new Date("2026-03-02T10:00:00Z") },
+    ]) await expect(run(correction, [bad])).rejects.toBeInstanceOf(StatementProjectionError);
+  });
+  it("rejects missing invoices, wrong owners, active originals, mismatched audit targets and dates", async () => {
+    await expect(run(correction, [structured], [invoices[0]])).rejects.toBeInstanceOf(StatementProjectionError);
+    await expect(run(correction, [structured], [invoices[0], { ...invoices[1], patientId: 18 }])).rejects.toBeInstanceOf(StatementProjectionError);
+    await expect(run(correction, [structured], [{ ...invoices[0], patientId: 18 }, invoices[1]])).rejects.toBeInstanceOf(StatementProjectionError);
+    await expect(run(correction, [structured], [{ ...invoices[0], status: "open" }, invoices[1]])).rejects.toBeInstanceOf(StatementProjectionError);
+    await expect(run({ ...correction, entity_id: "6" })).rejects.toBeInstanceOf(StatementProjectionError);
+    await expect(run({ ...correction, created_at: new Date("2026-03-02T10:00:00Z") })).rejects.toBeInstanceOf(StatementProjectionError);
   });
 });

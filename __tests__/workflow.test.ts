@@ -70,6 +70,18 @@ describe("قواعد الفوترة — مبالغ الجلسات", () => {
 });
 
 describe("شرح السعر — الصفر بلا تفسير يبدو خطأً فيُكتب فوقه", () => {
+  it.each(["on_start", "on_completion", "per_session"] as const)("verified existing coverage does not promise a duplicate charge for %s", (rule) => {
+    const note = sessionPriceNote(rule, 3, 3, { prebilled: true });
+    expect(note).toContain("لا فاتورة جديدة");
+    expect(note).toContain("رصيد الاتفاق السابق لا يتغير");
+    expect(note).not.toContain("يُفوتر كاملًا");
+    expect(sessionPriceNote(rule, 3, 3, { includedByAgreement: true })).toBe(note);
+  });
+  it("source review takes precedence over stale covered flags", () => {
+    const note = sessionPriceNote("on_completion", 3, 3, { prebilled: true, financialReviewRequired: true });
+    expect(note).toContain("يحتاج مراجعة");
+    expect(note).not.toContain("لا فاتورة جديدة");
+  });
   it("جلسة البدء تُفسَّر بأن البند يُفوتر كاملًا", () => {
     expect(sessionPriceNote("on_start", 1, 3)).toContain("كاملًا عند بدئه");
   });

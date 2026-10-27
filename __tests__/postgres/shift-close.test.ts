@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -18,13 +18,11 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
   return (await getPool().query(sql, params)).rows as T[];
 }
 let patientId = 0;
-beforeAll(async () => {
+beforeEach(async () => {
+  // Recreate the disposable fixture instead of erasing issued patient identities.
+  await resetPoolForTesting();
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
-});
-beforeEach(async () => {
-  // TRUNCATE لا يطلق حرّاس الصفوف — تنظيف قاعدة اختبارٍ معزولة فقط.
-  await q(`TRUNCATE payments, expenses, cashier_shifts, patients RESTART IDENTITY CASCADE`);
   const [p] = await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ('Z-1', 'مريض الجرد') RETURNING id`);
   patientId = p.id;
 });

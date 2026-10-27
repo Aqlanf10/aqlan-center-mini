@@ -17,7 +17,10 @@ describe("patient appointment history index provenance", () => {
       "0067_patient_appointment_history_index.sql",
       "0068_collection_attempt_retirements.sql",
       "0069_unpaid_currency_transitions.sql",
+      "0074_lab_work_intents.sql",
       "0078_agreement_reconciliation.sql",
+      "0079_ortho_followup_coverage.sql",
+      "0080_patient_numbering.sql",
       "0081_invoice_archive.sql",
       "0082_invoice_service_additions.sql",
     ]);

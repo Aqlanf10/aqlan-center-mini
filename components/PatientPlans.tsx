@@ -75,6 +75,7 @@ interface Plan {
   } | null;
 }
 interface PlannedVisit {
+  remainingWork?: string | null; durationWarning?: string | null;
   id: number; planTitle: string | null; sequence: number; title: string;
   doctorName: string | null; durationMinutes: number; status: PlannedVisitStatus;
   appointmentDate: string | null; appointmentTime: string | null; note: string | null;
@@ -561,13 +562,15 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
               <li key={visit.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-bold text-navy-900">
-                    زيارة {visit.sequence}: {visit.title}
+                    زيارة {visit.sequence}: {visit.remainingWork ?? visit.title}
                     {visit.planTitle ? <span className="font-normal text-slate-500"> · {visit.planTitle}</span> : null}
                   </span>
                   <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                    {PLANNED_VISIT_STATUS_LABEL[visit.status]} · {visit.durationMinutes} دقيقة
+                    {PLANNED_VISIT_STATUS_LABEL[visit.status]} · {visit.durationWarning ? "المدة الأصلية: " : ""}{visit.durationMinutes} دقيقة
                   </span>
                 </div>
+                {visit.remainingWork ? <p className="mt-1 text-[11px] text-slate-500">العنوان الأصلي: {visit.title}</p> : null}
+                {visit.durationWarning ? <p className="mt-1 text-xs font-bold text-amber-800">{visit.durationWarning}</p> : null}
                 {visit.appointmentDate ? (
                   <p className="mt-0.5 text-[11px] text-slate-500">
                     محجوزة {friendlyDateLong(visit.appointmentDate)} · {visit.appointmentTime}

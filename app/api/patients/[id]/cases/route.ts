@@ -35,7 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!draft.ok) return json(draft.message, 400);
   try {
     const result = await createClinicalCase({
-      ...draft.value, patientId, actor: guard.session.username, actorRole: guard.session.role,
+      ...draft.value, patientId, admittedSession: guard.session, actor: guard.session.username, actorRole: guard.session.role,
     });
     if (!result.ok) {
       const messages = {

@@ -17,7 +17,7 @@ it("registers exact numbered invoice action bytes, preserving reserved gaps", as
   expect(sql).toContain("transaction_isolation");
   expect(sql).not.toContain("DISABLE TRIGGER");
  }
- expect(files.some(file=>["0079","0080"].includes(file.version))).toBe(false);
+ expect(files.find(file=>file.version === "0079")?.filename).toBe("0079_ortho_followup_coverage.sql");
 });
 it("classifies all durable command successes and refusals as protected history",()=>{
  expect(INVOICE_ACTION_HISTORY_TABLES).toEqual(["invoice_archive_events","invoice_archive_rejections","invoice_service_additions","invoice_service_addition_rejections"]);

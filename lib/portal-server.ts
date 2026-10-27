@@ -1,3 +1,4 @@
+import { getPatient } from "./db";
 import { cookies } from "next/headers";
 import { PORTAL_COOKIE, readPortalToken, type PortalPayload } from "./portal";
 
@@ -10,5 +11,11 @@ import { PORTAL_COOKIE, readPortalToken, type PortalPayload } from "./portal";
  */
 export async function requirePortalSession(): Promise<PortalPayload | null> {
   const store = await cookies();
-  return readPortalToken(store.get(PORTAL_COOKIE)?.value);
+  const payload = readPortalToken(store.get(PORTAL_COOKIE)?.value);
+  if (!payload) return null;
+  // File-number edits invalidate the old login alias, never transfer an ID/session.
+  try {
+    const patient = await getPatient(payload.patientId);
+    return patient?.patientNumber === payload.patientNumber ? payload : null;
+  } catch { return null; }
 }

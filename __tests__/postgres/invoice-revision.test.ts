@@ -229,7 +229,7 @@ describe("safe pre-treatment clinical identity correction",()=>{
     const result=await revision.reviseInvoice(issued.invoice.id,change,session);
     expect(result).toMatchObject({original:{items:[{serviceId:service,doctorId:doctor,toothCode:36}]},corrected:{items:[{serviceId:nextService,doctorId:nextDoctor,toothCode:46,planItemId:issued.links[0].planItemId,caseId:issued.links[0].caseId,financialReviewRequired:false}]}});
     expect((await db.getInvoice(issued.invoice.id))?.items[0]).toMatchObject({serviceId:service,doctorId:doctor,toothCode:36});
-    expect(await q("SELECT id,site,responsible_party_id FROM clinical_cases WHERE patient_id=$1",[patientId])).toEqual([{id:issued.links[0].caseId,site:"46",responsible_party_id:nextDoctor}]);
+    expect(await q("SELECT id,site,responsible_party_id FROM clinical_cases WHERE patient_id=$1",[patientId])).toEqual([{id:issued.links[0].caseId,site:"46",responsible_party_id:null}]);
     expect(await q("SELECT id FROM plan_items WHERE plan_id=$1",[issued.planId])).toEqual([{id:issued.links[0].planItemId}]);
     const expectedLine={...issued.invoice.items[0],serviceId:nextService,doctorId:nextDoctor,toothCode:46,description:"Synthetic corrected root canal",unitPriceMinor:12000,totalMinor:12000};
     const lease:InvoiceRevisionCommand={key:change.idempotencyKey,actor:session.username,patientId,invoiceId:issued.invoice.id,body:JSON.stringify(change),
@@ -240,6 +240,29 @@ describe("safe pre-treatment clinical identity correction",()=>{
     expect(()=>restoreInvoiceRevision(durableInvoiceRevision(altered),patientId,session.username)).toThrow();
     expect(await revision.reviseInvoice(issued.invoice.id,change,session)).toEqual({...result,replayed:true});
     expect(await q("SELECT id FROM payments WHERE patient_id=$1",[patientId])).toEqual([]);
+  });
+  it("financial service/tooth correction preserves the admin-reassigned current clinician and new return booking",async()=>{
+    const {patientId,doctor,nextDoctor,nextService,issued}=await identityFixture();
+    const { patientResponsibilitySettings }=await import("../../lib/patient-responsibility-settings");
+    const { readReturnBookingContext }=await import("../../lib/return-booking-context");
+    const { bookAppointment }=await import("../../lib/book-appointment");
+    const caseId=issued.links[0].caseId!;
+    const target={patientId,kind:"clinical" as const,sourceId:caseId};
+    const unassigned=await patientResponsibilitySettings(target,session);
+    const before=await patientResponsibilitySettings(target,session,{expectedSourceFingerprint:unassigned.sourceFingerprint,doctorId:doctor,reason:"Synthetic original clinical assignment"});
+    await patientResponsibilitySettings(target,session,{expectedSourceFingerprint:before.sourceFingerprint,doctorId:nextDoctor,reason:"Synthetic clinician travel handover"});
+    const input=await command(issued.invoice.id,12000);
+    const result=await revision.reviseInvoice(issued.invoice.id,{...input,lines:[{...input.lines[0],serviceId:nextService,doctorId:doctor,toothCode:46,surfaces:null}]},session);
+    expect(result).toMatchObject({corrected:{items:[{doctorId:doctor,toothCode:46}]}});
+    expect((await db.getInvoice(issued.invoice.id))?.items[0]).toMatchObject({doctorId:doctor,toothCode:36});
+    expect(await q("SELECT responsible_party_id,site FROM clinical_cases WHERE id=$1",[caseId])).toEqual([{responsible_party_id:nextDoctor,site:"46"}]);
+    expect(await q("SELECT doctor_id FROM plan_items WHERE id=$1",[issued.links[0].planItemId])).toEqual([{doctor_id:doctor}]);
+    const client=await db.getPool().connect();
+    const source={kind:"clinical_case" as const,id:caseId};
+    const context=await readReturnBookingContext(client,patientId,source).finally(()=>client.release());
+    expect(context.ok).toBe(true);if(!context.ok)throw new Error(context.message);
+    const booked=await bookAppointment({patientId,date:"2039-04-04",time:"16:00",durationMinutes:15,appointmentType:"follow_up",returnBookingSource:source,returnBookingFingerprint:context.fingerprint},{username:session.username,role:"admin",channel:"ui"});
+    expect(booked).toMatchObject({ok:true,appointment:{doctorId:nextDoctor}});
   });
   it("keeps an unstarted whole-mouth scope singular while correcting its provider/service",async()=>{
     const {patientId,doctor,nextDoctor}=await identityFixture();

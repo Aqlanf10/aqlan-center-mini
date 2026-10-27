@@ -591,8 +591,46 @@ Neither this listing nor passing unit tests alone authorizes Production rollout.
 
 ### 0081_invoice_archive.sql / 0082_invoice_service_additions.sql
 
-Local activation candidate: immutable documentary archive events/refusals and separate dated service-addition receipts/refusals. Runtime registers exact migration bytes under the common migration lock; no baseline adoption or reserved 0079/0080 allocation. Archive never changes financial/clinical rows; adding service creates a separate invoice through existing financial/clinical authority.
+Local activation candidate: immutable documentary archive events/refusals and separate dated service-addition receipts/refusals. Runtime registers exact migration bytes under the common migration lock; no baseline adoption;0079 is the separately reviewed routine orthodontic coverage migration and0080 is the separately reviewed patient-numbering migration below. Archive never changes financial/clinical rows; adding service creates a separate invoice through existing financial/clinical authority.
 
 All four evidence tables are protected reset history: any row refuses reset before backup; empty tables participate under EXCLUSIVE locks and READ COMMITTED-only empty TRUNCATE guards. Backup restores archive versions in order and invoice items before addition receipts. Historical actor status and subsequent source cancellation do not invalidate restore; current authorization remains enforced by command writers.
 
 These changes are local only pending complete synthetic activation/ownership evidence and root review; no production activation or deployment is claimed.
+
+### 0080_patient_numbering.sql
+
+Local patient-file numbering activation: new generated files start at P-07000 or
+above the sequence/current/retired high-water. Existing numbers are never mass
+rewritten. Explicit admin edits retain stable patient IDs and immutable aliases;
+normalized current/retired ownership is enforced, including official restore.
+Runtime/file SQL bytes and checksum must match;0079 is separately registered routine orthodontic coverage.0081/0082
+may already be locally registered before this migration is added.
+
+Predeployment `--patient-numbering-readiness` is a mandatory count-only read-only
+gate: ambiguous historical aliases block release and require separate reviewed
+correction, never automatic cleanup. Current patients or historical aliases block
+factory reset; the patient-number sequence is never restarted. Local verification
+is not a Production readiness claim.
+
+### 0079_ortho_followup_coverage.sql
+
+Local activation of explicit routine-adjustment coverage revisions and durable
+exact-command refusal receipts. An ordinary invoice alone does not imply covered
+followups. Current source applicability is checked separately from immutable
+historical decisions; signed visits carry exact adjustment/revision manifests.
+Existing signed history cannot acquire a new proof or have its proof rewritten.
+Patient reassignment preserves recorded ownership and requires current-source
+review, not retrospective financial or clinical mutation.
+
+Numbered and runtime SQL are byte-identical and registered by checksum. Prior
+migration files remain unchanged. An exact registered 0080/0081/0082 database may
+apply missing 0079 as an additive migration; pre-existing unregistered proposal
+tables are refused, not adopted. Both coverage history tables are protected from
+populated reset and restore with their guards enabled. Migration-driven populated
+SQL/full-archive replay, upgrade, ownership and local UI evidence are required;
+local activation does not authorize Production deployment.
+
+
+## Local laboratory identity reservation (2026-10-26)
+
+`0074_lab_work_intents.sql` is locally registered in the isolated unified lab branch, with exact paired runtime SQL. It excludes deferred0073 clinical authorization and keeps0075 cross-domain corrections unregistered. It adds explicit work/member/source/command identity without legacy-source backfill, protects historical graphs and fresh-snapshot lab history, and uses READ COMMITTED UUID insertion fences compatible with0080. See [local scope, baseline adoption refusal and remaining gates](LAB_UNIFIED_LOCAL_ACCEPTANCE_20261026.md). This is not a live migration or deployment approval.

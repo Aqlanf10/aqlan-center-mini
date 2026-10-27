@@ -6,7 +6,9 @@ import {
 } from "@/lib/db";
 import { labReadinessFor, type LabReadinessItem } from "@/lib/lab-readiness";
 import { clinicDateString, type Appointment } from "@/lib/schedule";
+import type { ReturnBookingSource } from "@/lib/return-booking-context";
 import { bookAppointment } from "@/lib/book-appointment";
+import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -88,6 +90,10 @@ export async function POST(request: Request) {
   };
 
   try {
+    const patientId = Number(source.patientId);
+    if (Number.isInteger(patientId) && patientId > 0 && !await canAccessPatient(session, patientId)) {
+      return NextResponse.json({ message: "غير مصرّح لك بحجز موعد لهذا المريض." }, { status: 403 });
+    }
     /* التجاوز يُقرأ من المستخدم في القاعدة لا من الجلسة: الجلسة كوكي، والصلاحية
        قرارٌ يُغيَّر من شاشة المستخدمين فيسري فورًا لا بعد خروجٍ ودخول. */
     const actor = await findUserByUsername(session.username).catch(() => null);
@@ -104,9 +110,13 @@ export async function POST(request: Request) {
       doctorId: integer("doctorId"),
       chairNo: source.chairNo == null || source.chairNo === "" ? null : Number(source.chairNo),
       overrideReason: text("overrideReason", 300),
+      nearbyAppointmentConfirmation: text("nearbyAppointmentConfirmation", 4096),
+      returnBookingSource: source.returnBookingSource as ReturnBookingSource | null | undefined,
+      returnBookingOrigin: source.returnBookingOrigin as ReturnBookingSource | null | undefined,
+      returnBookingFingerprint: text("returnBookingFingerprint", 128),
       isNewPatient: source.isNewPatient === true,
     }, {
-      username: session.username,
+      username: session.username, userId: session.userId,
       role: session.role,
       doctorPartyId: actor?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null),
       canOverrideCapacity: actor?.permissions?.canOverrideCapacity === true,
@@ -116,7 +126,7 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return result.status === 409
         ? NextResponse.json(result.conflict, { status: 409 })
-        : NextResponse.json({ message: result.message }, { status: 400 });
+        : NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}) }, { status: 400 });
     }
     /* تنبيهٌ لا خطأ: الموعد حُجز، والاستقبال تُخبَر لتتأكّد قبل أن تَعِد المريض. */
     return NextResponse.json(

@@ -32,7 +32,10 @@ function patch(body: unknown) {
 function writerInput() {
   expect(boundary.updateLabOrderAccounting).toHaveBeenCalledTimes(1);
   expect(boundary.updateLabOrderAccounting.mock.calls[0][0]).toBe(91001);
-  return boundary.updateLabOrderAccounting.mock.calls[0][1];
+  const { session, ...input } = boundary.updateLabOrderAccounting.mock.calls[0][1];
+  expect(session).toMatchObject({ username: "synthetic-finance" });
+  expect(typeof session.role).toBe("string");
+  return input;
 }
 
 beforeEach(() => {
@@ -176,5 +179,20 @@ describe("optional expected-rate fence never authorizes a caller-owned rate", ()
     expect(boundary.getSettings).not.toHaveBeenCalled();
     expect(writerInput()).toMatchObject({ isPosted: false,
       costMinor: undefined, costCurrency: undefined, exchangeRate: undefined });
+  });
+});
+
+
+describe("lab currency and FX are not guessed", () => {
+  it.each([undefined, null, "invalid"])("refuses positive cost without a valid currency %s", async costCurrency => {
+    const response = await patch({ action: "update_accounting", cost: "25", costCurrency });
+    expect(response.status).toBe(400);
+    expect(boundary.updateLabOrderAccounting).not.toHaveBeenCalled();
+  });
+  it("refuses missing current FX even without a preview fence", async () => {
+    boundary.getSettings.mockResolvedValue({});
+    const response = await patch({ action: "update_accounting", cost: "25", costCurrency: "USD" });
+    expect(response.status).toBe(409);
+    expect(boundary.updateLabOrderAccounting).not.toHaveBeenCalled();
   });
 });

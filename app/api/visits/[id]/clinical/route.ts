@@ -1,3 +1,7 @@
+import {settleRejectedClinicalLabCommand} from "@/lib/clinical-lab-command-settlement";
+import { createHash } from "node:crypto";
+import { parseLabWorkDraft, parseLabWorkRetirements, LabWorkContractError } from "@/lib/lab-work-intent-contract";
+import { LabWorkIntentError } from "@/lib/lab-work-intent-db";
 import { InventoryBusy, InventoryTrackingRequired } from "@/lib/inventory-domain/legacy-write-guard";
 import { ClinicalDoctorIdentityConflict } from "@/lib/clinical-doctor-identity";
 import { NextResponse } from "next/server";
@@ -78,6 +82,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const source = (body ?? {}) as Record<string, unknown>;
   const action = String(source.action ?? "save");
+  const hasLabCommand = Object.hasOwn(source,"labRequestKey") || Object.hasOwn(source,"labRetirements")
+    || (Array.isArray(source.procedures) && source.procedures.some(row=>!!row && typeof row==="object" && !!(row as Record<string,unknown>).labWork));
+  if (hasLabCommand && !["admin","doctor"].includes(session.role)) return clinicalOnly();
+  if (hasLabCommand && (action !== "save" || !Array.isArray(source.procedures)
+    || !Number.isSafeInteger(source.labPatientId) || Number(source.labPatientId) <= 0
+    || typeof source.labRequestKey !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/.test(source.labRequestKey))) {
+    return NextResponse.json({message:"هوية عملية مسوّدة المختبر غير صالحة."},{status:400});
+  }
+  const labRequestHash = hasLabCommand ? createHash("sha256").update(JSON.stringify(source)).digest("hex") : null;
+  let labPatientId: number | null = null;
   const text = (value: unknown, max = 2000) =>
     typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 
@@ -87,6 +101,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (visit.patientId !== null && !(await canAccessPatient(session, visit.patientId))) {
       return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
     }
+    if (hasLabCommand && source.labPatientId !== visit.patientId) {
+      return NextResponse.json({code:"source_changed",message:"تغيّر المريض المرتبط بالزيارة؛ حدّث الملف قبل حفظ عمل المختبر."},{status:409});
+    }
+    labPatientId = visit.patientId;
     if (assistant && assistantOutsideToday(visit)) {
       return NextResponse.json({ message: "المساعد السريري يعمل على زيارات اليوم وحدها." }, { status: 403 });
     }
@@ -135,7 +153,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         dependencyOverrideReason: typeof source.dependencyOverrideReason === "string" ? source.dependencyOverrideReason : null,
         orthoSession: orthoSession.value,
         outsideContractDecision,
-        signerRole: session.role,
+        signerRole: session.role, session,
+        labSignVersion: typeof source.labSignVersion === "string" ? source.labSignVersion : null,
       });
       const messages: Record<string, string> = {
         not_found: "الزيارة غير موجودة.",
@@ -146,6 +165,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         no_treating_doctor: "حدّد الطبيب المعالج للزيارة (أو لكل إجراء) قبل التوقيع — لا يُفوتر إجراءٌ بلا طبيب، وإلا ضاعت عمولته.",
         unmet_dependency: "بنودٌ في هذه الزيارة تتطلب ما لم يكتمل بعد — اكتب سبب المتابعة لتُكمل التوقيع.",
         invalid_override_reason: "سبب المتابعة طويل جدًا — الحد الأقصى ٣٠٠ حرف.",
+        ortho_adjustments_ambiguous: "توجد أكثر من شدّة تقويم مرتبطة بهذه الزيارة؛ راجع الحالة والعمل المقصود قبل التوقيع. لم يُسجّل أي رسم أو توقيع.",
         ortho_case_invalid: "حالة التقويم المرسلة مغلقة أو لا تخص مريض هذه الزيارة — حدّث الشاشة وأعد التوقيع.",
         plan_session_unlinked: "إجراءٌ حرّ يطابق بندًا له تمويل قائم أو جلسات في خطة المريض — اربطه ببنده الأصلي، أو ببند جديد صريح للعمل الإضافي، قبل التوقيع.",
         amended_plan_session_unlinked: "للخدمة تعديل مالي موثق؛ استقلال هذا العمل عن تغطيته غير متحقق. ربط الخدمة المعدلة سريريًا غير مدعوم حاليًا. تبقى الزيارة مسودة للمراجعة؛ لن تُنشأ فاتورة ثانية لهذا العمل.",
@@ -236,6 +256,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         .map((row) => row as Record<string, unknown>)
         .filter((row) => Number(row.serviceId) > 0)
         .map((row) => ({
+          ...(row.labWork !== undefined ? {labWork:parseLabWorkDraft(row.labWork)} : {}),
           serviceId: Number(row.serviceId),
           toothCode: Number(row.toothCode) || null,
           surfaces: typeof row.surfaces === "string" ? row.surfaces : null,
@@ -253,10 +274,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const overrides: ProcedurePriceOverride[] = [];
       // (DAY1) عملة الزيارة للإجراءات الحرّة، وأسعار الصرف للتحويل حين لا سعر خاص بها.
       if (source.billingCurrency !== undefined && source.billingCurrency !== null && !isCurrency(source.billingCurrency)) {
+        if(hasLabCommand)throw new LabWorkIntentError("invalid_billing_currency","عملة الزيارة غير صالحة.",409);
         return NextResponse.json({ message: "عملة الزيارة غير صالحة." }, { status: 400 });
       }
       const ok = await setVisitProcedures({
         visitId,
+        ...(hasLabCommand ? {labCommand:{expectedPatientId:source.labPatientId as number,requestKey:source.labRequestKey as string,requestHash:labRequestHash!,
+          retirements:parseLabWorkRetirements(source.labRetirements),session}} : {}),
         procedures,
         clinicalNotes,
         authority: { role: session.role, maxDiscountPercent: Number.isFinite(maxDiscount) ? maxDiscount : 0 },
@@ -265,6 +289,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         rates: foreignRatesFromSettings(settings),
       });
       if (!ok) {
+        if (hasLabCommand) throw new LabWorkIntentError("visit_signed","الزيارة موقَّعة — لا تُعدَّل إجراءاتها.",409);
         return NextResponse.json({ message: "الزيارة موقَّعة — لا تُعدَّل إجراءاتها." }, { status: 409 });
       }
       for (const override of overrides) {
@@ -289,8 +314,35 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     }
 
-    return NextResponse.json(await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null }));
+    const saved = await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null });
+    return NextResponse.json(hasLabCommand ? {...saved,labWorkCommand:{requestKey:source.labRequestKey,
+      requestHash:labRequestHash,visitId,patientId:saved?.patientId,actor:session.username}} : saved);
   } catch (error) {
+    // A deterministic rolled-back refusal is terminal only after durable command settlement.
+    // Busy/authorization/schema/idempotency/unknown failures remain unresolved; HTTP status is not evidence.
+    const unresolved = new Set(["command_busy","intent_busy","clinical_boundary_busy","unauthorized","schema_unavailable","idempotency_conflict","source_changed","invalid_receipt"]);
+    const rejectionCode = error instanceof LabWorkContractError ? error.code
+      : error instanceof LabWorkIntentError && error.status === 409 && !unresolved.has(error.code) ? error.code
+      : error instanceof ClinicalDoctorIdentityConflict ? error.code
+      : error instanceof ClinicalPlanConflict ? "clinical_plan_conflict"
+      : error instanceof ProcedurePriceRejected ? "procedure_price_rejected" : null;
+    if (hasLabCommand && labPatientId !== null && labRequestHash && rejectionCode) {
+      try {
+        const result=await settleRejectedClinicalLabCommand({patientId:labPatientId,visitId,session,
+          requestKey:source.labRequestKey as string,requestHash:labRequestHash,code:rejectionCode});
+        const labWorkCommand={requestKey:source.labRequestKey,requestHash:labRequestHash,patientId:labPatientId,visitId,actor:session.username};
+        if(result.outcome === "applied") {
+          const saved=await getClinicalVisit(visitId,{actorPartyId:session.partyId??null});
+          if(saved?.patientId!==labPatientId)throw new Error("source changed");
+          return NextResponse.json({...saved,labWorkCommand});
+        }
+        return NextResponse.json({labWorkCommand,labWorkOutcome:"rejected",code:result.code,
+          message:"لم يُحفظ الطلب. حدّث البيانات وصحّحها ثم احفظ من جديد."},{status:409});
+      }catch { /* No terminal evidence: keep the reference unresolved and preserve the original error. */ }
+    }
+    if (error instanceof LabWorkContractError) return NextResponse.json({message:error.message,code:error.code},{status:400});
+    if (error instanceof LabWorkIntentError) return NextResponse.json({message:error.message,code:error.code},{status:error.status});
+    if ((error as {code?:string}).code === "55P03") return NextResponse.json({message:"يوجد تحديث سريري جارٍ؛ حدّث الزيارة وأعد المحاولة."},{status:409});
     if (error instanceof ClinicalDoctorIdentityConflict) {
       return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
     }

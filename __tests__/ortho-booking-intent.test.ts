@@ -4,6 +4,7 @@ vi.mock("../lib/db", () => ({
   lockAppointmentServiceForBooking: vi.fn(), getAppointment: vi.fn(), insertAppointmentOnClient: vi.fn(), moveAppointmentOnClient: vi.fn(), recordAudit: vi.fn(),
   writeAppointmentAcrossDays: vi.fn(), writeAppointmentInDay: vi.fn(),
 }));
+vi.mock("../lib/return-booking-context", () => ({ readReturnBookingContext: async () => ({ ok: true, doctorId: 7, doctorName: "Current clinician", fingerprint: "a".repeat(64) }) }));
 vi.mock("../lib/capacity-context", () => ({ prepareCapacityEvaluator: vi.fn(), loadCapacityContext: vi.fn(), resolveService: vi.fn() }));
 // This suite isolates service admission; real doctor identity/row locking is
 // covered by the PostgreSQL appointment-doctor-bookability suite.
@@ -23,17 +24,20 @@ const service = (): AppointmentService => ({ id: 81, code: "ORTHO_FOLLOW_UP", na
   allowsConcurrentProviderWork: false, consumesEmergencyReserve: false, priority: 50, badgeClass: null,
   sortOrder: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01", createdBy: null, updatedBy: null });
 const request = (): BookAppointmentInput => ({ patientId: 19, date: "2030-01-15", time: "16:00", durationMinutes: 45,
-  serviceId: 81, appointmentType: "follow_up", bookingIntent: "ortho_follow_up", doctorId: 7 });
+  serviceId: 81, appointmentType: "follow_up", bookingIntent: "ortho_follow_up", doctorId: 7,
+  returnBookingSource: { kind: "clinical_case", id: 1 }, returnBookingFingerprint: "a".repeat(64) });
+const transactionClient = { query: vi.fn() };
 const actor = { username: "synthetic", role: "reception", channel: "ui" as const };
 beforeEach(() => {
   vi.resetAllMocks();
+  transactionClient.query.mockResolvedValue({ rows: [] });
   vi.mocked(lockBookableAppointmentDoctor).mockResolvedValue(true);
   vi.mocked(loadCapacityContext).mockResolvedValue({ chairs: 3, shifts: [{ start: "09:00", end: "20:00" }], nearCapacityPercent: 80, emergencyReserveMinutes: 0, newPatientDailyLimit: 0 });
   vi.mocked(resolveService).mockResolvedValue(service());
   vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(service());
   vi.mocked(prepareCapacityEvaluator).mockResolvedValue(() => ({ state: "AVAILABLE", occupiedChairs: 0, chairs: 3, dayPercent: 0, outsideHours: false, message: "Synthetic capacity available", reasons: [] }));
   vi.mocked(writeAppointmentInDay).mockImplementation(async ({ judge, commit }) => {
-    const client = {} as never;
+    const client = transactionClient as never;
     const verdict = await judge([], client);
     return verdict.ok ? { ok: true, value: await commit(client) } : verdict;
   });
@@ -69,7 +73,7 @@ describe("untouched board intent validates the exact resolved scheduling service
     vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue({ ...service(), legacyType });
     expect(await bookAppointment(request(), actor)).toMatchObject({ ok: true });
     expect(resolveService).toHaveBeenCalledTimes(1);
-    expect(insertAppointmentOnClient).toHaveBeenCalledWith({}, expect.objectContaining({ patientId: 19, serviceId: 81,
+    expect(insertAppointmentOnClient).toHaveBeenCalledWith(transactionClient, expect.objectContaining({ patientId: 19, serviceId: 81,
       appointmentType: "follow_up", durationMinutes: 45, doctorId: 7, bufferBeforeMinutes: 1, bufferAfterMinutes: 2 }));
   });
   it("leaves explicit manual choices and generic entrypoints on their existing path", async () => {
@@ -83,7 +87,7 @@ describe("untouched board intent validates the exact resolved scheduling service
     if (change === "specialty") current.specialty = "endodontics";
     vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(change === "removed" ? null : current);
     expect(await bookAppointment(request(), actor)).toEqual({ ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE });
-    expect(lockAppointmentServiceForBooking).toHaveBeenCalledWith({}, 81);
+    expect(lockAppointmentServiceForBooking).toHaveBeenCalledWith(transactionClient, 81);
     expect(lockAppointmentServiceForBooking).toHaveBeenCalledTimes(1);
     expect(prepareCapacityEvaluator).not.toHaveBeenCalled(); expect(insertAppointmentOnClient).not.toHaveBeenCalled();
   });
@@ -91,8 +95,8 @@ describe("untouched board intent validates the exact resolved scheduling service
     const current = { ...service(), defaultDurationMinutes: 20, bufferBeforeMinutes: 4, bufferAfterMinutes: 7, requiresChair: false };
     vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(current);
     expect(await bookAppointment({ ...request(), durationMinutes }, actor)).toMatchObject({ ok: true });
-    expect(prepareCapacityEvaluator).toHaveBeenCalledWith(expect.objectContaining({ service: current, durationMinutes: durationMinutes ?? 20, client: {} }));
-    expect(insertAppointmentOnClient).toHaveBeenCalledWith({}, expect.objectContaining({ serviceId: 81,
+    expect(prepareCapacityEvaluator).toHaveBeenCalledWith(expect.objectContaining({ service: current, durationMinutes: durationMinutes ?? 20, client: transactionClient }));
+    expect(insertAppointmentOnClient).toHaveBeenCalledWith(transactionClient, expect.objectContaining({ serviceId: 81,
       durationMinutes: durationMinutes ?? 20, bufferBeforeMinutes: 4, bufferAfterMinutes: 7, occupiesChair: false }));
   });
   it("does not acquire a follow-up service lock for explicit generic/manual bookings", async () => {

@@ -8,7 +8,7 @@ import path from "node:path";
  *
  * الحالات الإلزامية الخمس:
  *  ١) قاعدة فارغة → كل الهجرات تطبَّق.
- *  ٢) قاعدة موجودة على خط الأساس (أنشأتها ensureSchema) → اعتماد بلا فقد بيانات.
+ *  ٢) قاعدة مطابقة لخط الأساس → اعتماد بلا فقد؛ امتدادات runtime تحتاج توافقًا مثبتًا.
  *  ٣) تشغيل ثانٍ → no-op.
  *  ٤) هجرة تفشل في المنتصف → تراجع كامل وحالة صحيحة وإعادة محاولة تنجح.
  *  ٥) بصمة لا تطابق → مكتشفة (fail closed).
@@ -69,24 +69,36 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     expect(Number(rows[0].count)).toBe(0); // migrations لا تبذر بيانات
   });
 
-  it("قاعدة موجودة من النظام الحالي (ensureSchema) → اعتماد خط الأساس بلا تنفيذ ولا فقد بيانات", async () => {
-    // قاعدة «إنتاج حالي»: أنشأها ensureSchema (مع بذر الحسابات) قبل معرفة نظام الهجرات.
-    await ensureSchema();
-    const seeded = await listUsers();
-    expect(seeded.length).toBeGreaterThan(0);
-
+  it("a matching immutable baseline can be adopted without changing its synthetic rows", async () => {
     const pool = getPool();
+    await pool.query(realFiles[0].sql);
+    await pool.query("INSERT INTO patients(patient_number,full_name) VALUES('BASELINE-ADOPTION-SYNTHETIC','Synthetic baseline adoption')");
+    const before = (await pool.query("SELECT id,patient_number,full_name FROM patients")).rows;
     const result = await migrate(pool, { apply: true, files: realFiles });
     expect(result.adoptedBaseline).toBe(true);
-
-    // البيانات بقيت كما هي — الاعتماد لم يمس صفًّا واحدًا.
-    expect(await listUsers()).toHaveLength(seeded.length);
-
+    expect((await pool.query("SELECT id,patient_number,full_name FROM patients")).rows).toEqual(before);
     const status = await migrationStatus(pool, realFiles);
     expect(status.consistent).toBe(true);
     expect(status.pending).toHaveLength(0);
-    const baseline = status.applied.find((row) => row.version === BASELINE_VERSION);
-    expect(baseline?.adopted).toBe(true);
+    expect(status.applied.find(row => row.version === BASELINE_VERSION)?.adopted).toBe(true);
+  });
+
+  it("runtime 0074 requires reviewed extension-aware adoption rather than weakening the immutable baseline probe", async () => {
+    await ensureSchema();
+    const seeded = await listUsers();
+    expect(seeded.length).toBeGreaterThan(0);
+    const pool = getPool();
+    const before = (await pool.query("SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version")).rows;
+    expect(before.some(row => row.version === "0074")).toBe(true);
+    // 0074 deliberately scopes legacy visit/tooth uniqueness to non-intent rows.
+    // The old baseline index cannot be silently adopted against that new predicate.
+    await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH[\s\S]*lab_orders_visit_tooth_uniq/);
+    expect(await listUsers()).toEqual(seeded);
+    expect((await pool.query("SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version")).rows).toEqual(before);
+    expect(before.some(row => row.version === BASELINE_VERSION)).toBe(false);
+    const status = await migrationStatus(pool, realFiles);
+    expect(status.consistent).toBe(false);
+    expect(status.baselineDiff?.ok).toBe(false);
   });
 
   it("تشغيل ثانٍ → no-op كامل (idempotent)", async () => {
@@ -188,7 +200,7 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
     // No baseline adoption on drift. Only the pre-existing runtime extensions remain.
     const { rows } = await pool.query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version');
-    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0081', '0082']);
+    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082']);
     expect(rows.some(row => row.version === BASELINE_VERSION)).toBe(false);
   });
 

@@ -1,3 +1,4 @@
+import { readSignedFollowupProofs } from "./ortho-followup-coverage-db";
 import { getPool, PLAN_ITEM_PREBILLED_SQL, PLAN_ITEM_LEGACY_COVERED_SQL, PLAN_ITEM_FINANCIAL_REVIEW_SQL,
   PLAN_ITEM_LEGACY_CONTEXT_SQL, usesSharedLocalDatabaseConnection, type DbClient, type DbPool } from "./db";
 import { withFinancialReadSnapshot } from "./financial-read-snapshot";
@@ -160,12 +161,14 @@ async function loadBatch(db:Runner,ids:number[],cache:ReadCache) {
   const requests=visits.filter(v=>v.invoice_id!==null).map(v=>({id:v.invoice_id!,patientId:v.patient_id}));
   const owners=new Map(visits.map(v=>[v.id,v.patient_id]));
   for(const row of adjustments)if(row.owned&&row.billing_invoice_id!==null)requests.push({id:row.billing_invoice_id,patientId:owners.get(row.visit_id)??null});
+  const followupProofs=await readSignedFollowupProofs(db,adjustments.filter(a=>a.owned).map(a=>a.id));
+  for(const [id,proof] of followupProofs){const adjustment=adjustments.find(a=>a.id===id)!; requests.push({id:proof.invoiceId,patientId:owners.get(adjustment.visit_id)??null});}
   await loadInvoiceReferences(db,requests,cache);
   const itemRequests=procedures.filter(row=>row.plan_item_id!==null&&row.item_matches)
     .map(row=>({itemId:row.plan_item_id!,patientId:owners.get(row.visit_id)??null}));
   for(const row of items)itemRequests.push({itemId:row.id,patientId:owners.get(row.visit_id)??null});
   await loadItemEvidence(db,itemRequests,cache);
-  return {visits,procedures:byKey(procedures,row=>row.visit_id),items:byKey(items,row=>row.visit_id),
+  return {visits,followupProofs,procedures:byKey(procedures,row=>row.visit_id),items:byKey(items,row=>row.visit_id),
     adjustments:byKey(adjustments,row=>row.visit_id),endo:byKey(endo,row=>row.visit_id),sourceLines:byKey(sourceLines,row=>Number(row.procedure_id))};
 }
 
@@ -206,7 +209,13 @@ async function projectVisit(visit:VisitRow,batch:Awaited<ReturnType<typeof loadB
     const line=work("orthodontic_adjustment",adjustment.id);lines.push(line);
     if(!adjustment.owned){line.reasons.push("adjustment_owner_unverified");continue;}
     if(adjustment.billing_class)line.recordedClassification=adjustment.billing_class;
-    if(adjustment.billing_class==="OUTSIDE_CONTRACT"&&adjustment.billing_decision==="no_charge"&&adjustment.billing_decision_reason?.trim()
+    const proof=batch.followupProofs.get(adjustment.id);
+    if(proof){
+      const reference=invoiceReference(proof.invoiceId,visit.patient_id,"routine_followup_coverage",cache);
+      if(reference)line.references.push(reference);
+      if(proof.valid&&reference?.state==="current")line.coverage="verified";
+      else line.reasons.push("routine_followup_source_changed");
+    }else if(["OUTSIDE_CONTRACT","REVIEW_REQUIRED"].includes(adjustment.billing_class??"")&&adjustment.billing_decision==="no_charge"&&adjustment.billing_decision_reason?.trim()
       &&adjustment.billing_decided_by&&adjustment.billing_decided_at&&adjustment.billing_invoice_id===null)line.decision="no_charge";
     else if(adjustment.billing_decision==="billed") {
       line.decision="billed";

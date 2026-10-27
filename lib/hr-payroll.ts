@@ -1,3 +1,4 @@
+import { CommissionLabLineageError } from "./commission-lab-lineage";
 import { readOperationalEmployment } from "./hr-operational-employment";
 import { employmentPeriodReview } from "./hr-operational-employment-shared";
 import { explicitStaffFinancialParty } from "./hr-person-financial-identity";
@@ -56,6 +57,9 @@ async function withPayrollTransaction<T>(session: SessionPayload, authorize: HrP
   }); } catch (error) {
     // Preserve the existing payroll API error contract after the transaction
     // rolls back; identity conflicts are actionable refusals, not server faults.
+    if (error instanceof CommissionLabLineageError) {
+      throw new HrPayrollError(error.code, error.status, error.message);
+    }
     if (error instanceof IdentityPreviewError) {
       throw new HrPayrollError(error.status === 503 ? "identity_schema_unavailable" : "identity_conflict", error.status, error.message);
     }

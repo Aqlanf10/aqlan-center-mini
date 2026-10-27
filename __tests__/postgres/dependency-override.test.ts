@@ -1,3 +1,5 @@
+import { responsibilityAdminFixture } from "./_responsibility-admin-fixture";
+let responsibilityFixtureSequence = 0;
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
@@ -79,7 +81,7 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
 
   it("the patient summary says what is waiting: blocked item, waiting case, active problems", async () => {
     await createPatientProblem({ patientId, label: "التهاب لب", site: "21", specialty: "endodontics", caseId: null, actor: "dr" });
-    const created = await createClinicalCase({ patientId, specialty: "prosthodontics", title: "تاج ٢١", site: "21", problem: null, responsiblePartyId: doctorId, orthoCaseId: null, actor: "dr" });
+    const created = await createClinicalCase({ admittedSession: await responsibilityAdminFixture("dependency-override-responsibility-" + (++responsibilityFixtureSequence)), patientId, specialty: "prosthodontics", title: "تاج ٢١", site: "21", problem: null, responsiblePartyId: doctorId, orthoCaseId: null, actor: "dr" });
     if (!created.ok) throw new Error(created.reason);
     // Establish attribution before signing; a retained invoice source freezes it.
     expect(await setPlanItemCase({ itemId: crownItem, caseId: created.case.id, priority: 1, actor: "dr" })).toEqual({ ok: true });

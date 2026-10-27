@@ -110,7 +110,7 @@ describe("(P6) billing preview = the sign decision", () => {
     const preview = await previewVisitBilling(visitId);
     expect(preview?.lines.map((line) => line.classification)).toEqual(["INCLUDED"]);
     expect(preview?.duesByCurrency).toEqual({});
-    expect(preview?.zeroReason).toBe("مشمولة ضمن اتفاق الأقساط");
+    expect(preview?.zeroReason).toBe("مشمولة بالتغطية المالية المسجّلة");
 
     const signed = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: doctorId });
     expect(signed).toMatchObject({ reason: null, invoiceId: null, duesMinor: 0 });

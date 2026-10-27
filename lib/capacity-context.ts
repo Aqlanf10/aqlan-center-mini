@@ -116,6 +116,8 @@ export interface CapacityEvaluationInput {
   service: AppointmentService | null;
   context: CapacityContext;
   providerId?: number | null;
+  /** A sourced clinical return consumes its clinician even without a catalogue service. */
+  requireAssignedProvider?: boolean;
   chairNo?: number | null;
   isNewPatient?: boolean;
   newPatientsBookedToday?: number;
@@ -127,8 +129,10 @@ export interface CapacityEvaluationInput {
 /** Freeze verified block windows once for the decision and its alternatives. */
 export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): Promise<(time: string) => CapacityVerdict> {
   const { service, context } = input;
+  const capacityService = service ?? (input.requireAssignedProvider
+    ? { ...FALLBACK_SERVICE, requiresProvider: true } : FALLBACK_SERVICE);
   const blocks: ProviderBlockWindow[] = [];
-  if (service?.requiresProvider && input.providerId) {
+  if (capacityService.requiresProvider && input.providerId) {
     /* **يفشل مغلقًا.** كان `.catch(() => [])` يبتلع فشل القراءة فيصير الطبيب
        «متاحًا دائمًا» — فيُحجز فوق إجازته أو عمليّته بلا أن يشكو شيء. وحارسٌ
        يفشل مفتوحًا ليس حارسًا: ما لا يُتحقَّق منه يُردّ برسالةٍ صريحة، ولصاحب
@@ -154,7 +158,7 @@ export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): 
     chairs: context.chairs,
     shifts: context.shifts,
     nearCapacityPercent: context.nearCapacityPercent,
-    service: service ?? FALLBACK_SERVICE,
+    service: capacityService,
     providerId: input.providerId ?? null,
     chairNo: input.chairNo ?? null,
     providerBlocks: blocks,

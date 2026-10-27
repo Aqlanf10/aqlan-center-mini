@@ -1,3 +1,4 @@
+import type { ReturnBookingSource } from "./return-booking-source";
 /**
  * تحويلُ انتظارٍ إلى موعد — بقرار إنسان، وعبر محرّك السعة نفسه.
  *
@@ -40,13 +41,16 @@ export interface ConvertWaitingInput {
   chairNo?: number | null;
   note?: string | null;
   overrideReason?: string | null;
+  nearbyAppointmentConfirmation?: string | null;
+  returnBookingSource?: ReturnBookingSource | null;
+  returnBookingFingerprint?: string | null;
 }
 
 export type ConvertWaitingResult =
   | { ok: true; appointment: Appointment; entry: WaitingEntry; warning: string | null }
   /** الصفُّ كان محجوزًا سلفًا — والنتيجة نفسها تُعاد بلا موعدٍ ثانٍ. */
   | { ok: true; appointment: null; entry: WaitingEntry; warning: null; alreadyBooked: number }
-  | { ok: false; status: 400 | 404 | 409; message: string; conflict?: BookingConflict };
+  | { ok: false; status: 400 | 404 | 409; message: string; code?: string; conflict?: BookingConflict };
 
 export async function convertWaitingToAppointment(
   input: ConvertWaitingInput, actor: BookingActor,
@@ -109,10 +113,15 @@ export async function convertWaitingToAppointment(
          داخل المحرّك — ولا ثابتَ هنا. */
       durationMinutes: input.durationMinutes ?? entry.durationMinutes ?? null,
       serviceId: input.serviceId ?? entry.serviceId ?? null,
-      doctorId: input.doctorId ?? entry.doctorId ?? null,
+      // A current case owner is resolved by the canonical booking writer. A
+      // waiting preference must not override that ownership.
+      doctorId: input.returnBookingSource ? null : input.doctorId ?? entry.doctorId ?? null,
+      returnBookingSource: input.returnBookingSource ?? null,
+      returnBookingFingerprint: input.returnBookingFingerprint ?? null,
       chairNo: input.chairNo ?? null,
       note: input.note ?? entry.note ?? null,
       overrideReason: input.overrideReason ?? null,
+      nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation ?? null,
       /* الوسمُ يُكتب مع الموعد — لا بعده: لحظةَ وجود الموعد يوجد دليلُ نسبه. */
       waitingListId: waitingId,
     }, actor);
@@ -121,7 +130,7 @@ export async function convertWaitingToAppointment(
       await releaseWaitingClaim(waitingId).catch(() => {});
       return booked.status === 409
         ? { ok: false, status: 409, message: booked.conflict.message, conflict: booked.conflict }
-        : { ok: false, status: 400, message: booked.message };
+        : { ok: false, status: 400, message: booked.message, ...(booked.code ? { code: booked.code } : {}) };
     }
 
     const appointmentId = Number(booked.appointment.id);

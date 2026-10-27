@@ -30,6 +30,8 @@ import {
 } from "@/lib/lab";
 import { PageHeader, StatCard as Stat } from "@/components/PageHeader";
 import { LabDentalChart } from "@/components/LabDentalChart";
+import { LabPrescriptionEditor } from "@/components/LabPrescriptionEditor";
+import { hasPostedLabPayable } from "@/lib/lab-prescription-input";
 import { LabPrescriptionModal } from "@/components/LabPrescriptionModal";
 import { LabDeliveryAppointmentModal } from "@/components/LabDeliveryAppointmentModal";
 import { LabOrderAccountingModal, type ExpenseCategoryOption } from "@/components/LabOrderAccountingModal";
@@ -128,6 +130,11 @@ export default function LabPage() {
 
   // Dental Chart & Prescription Sheet Modals
   const [showDentalChart, setShowDentalChart] = useState(true);
+  const editorPrincipal = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
+  const editorOwner = useMemo(() => ({ principal: editorPrincipal }), [editorPrincipal]);
+  const [editorSelection, setEditorSelection] = useState<{ owner: typeof editorOwner; order: LabOrder } | null>(null);
+  const editorOrder = editorSelection?.owner === editorOwner ? editorSelection.order : null;
+  const setEditorOrder = (order: LabOrder | null) => setEditorSelection(order ? { owner: editorOwner, order } : null);
   const [prescriptionOrder, setPrescriptionOrder] = useState<LabOrder | null>(null);
   const [deliveryAppointmentOrder, setDeliveryAppointmentOrder] = useState<LabOrder | null>(null);
   /* الربط المحاسبي (بنود المصروفات): نافذة الترحيل، قائمة البنود، واختيار النموذج. */
@@ -1114,7 +1121,7 @@ export default function LabPage() {
                         </span>
                       ) : null}
 
-                      {order.isPosted ? (
+                      {hasPostedLabPayable(order) ? (
                         <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 text-[10px] font-bold">
                           <span>✓</span>
                           <span>مُرحّل محاسبياً (حـ/ {order.expenseAccountCode || "5101"})</span>
@@ -1141,7 +1148,7 @@ export default function LabPage() {
                       id={`lab-accounting-btn-${order.id}`}
                       onClick={() => setAccountingOrder(order)}
                       className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-bold shadow-2xs transition-colors ${
-                        order.isPosted
+                        hasPostedLabPayable(order)
                           ? "border-emerald-300 bg-emerald-50/90 text-emerald-800 hover:bg-emerald-100"
                           : order.expenseCategoryId
                           ? "border-amber-300 bg-amber-50/90 text-amber-900 hover:bg-amber-100"
@@ -1151,7 +1158,7 @@ export default function LabPage() {
                     >
                       <span>⚖️</span>
                       <span>
-                        {order.isPosted
+                        {hasPostedLabPayable(order)
                           ? "الربط المحاسبي (مُرحّل ✓)"
                           : order.expenseCategoryId
                           ? "معاينة وترحيل القيد"
@@ -1172,14 +1179,14 @@ export default function LabPage() {
                     {/* رحلة المريض V2 (§١٩): الطلب غير المُرسل يُرسل أو يُلغى من هنا. */}
                     {order.status === "needed" && (
                       <>
-                        <button
+                        {["admin", "doctor"].includes(session?.role ?? "") && <button
                           type="button"
-                          onClick={() => updateOrderStatus(order.id, "sent")}
+                          onClick={() => setEditorOrder(order)}
                           disabled={busy}
                           className="rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-sky-700 disabled:opacity-40"
                         >
-                          📦 أُرسل للمعمل
-                        </button>
+                          استكمال الإرسالية
+                        </button>}
                         <button
                           type="button"
                           onClick={() => updateOrderStatus(order.id, "cancelled")}
@@ -1324,6 +1331,7 @@ export default function LabPage() {
         </ul>
       )}
 
+      {editorOrder && <LabPrescriptionEditor key={`${editorPrincipal}:${editorOrder.id}`} order={editorOrder} onClose={() => { setEditorOrder(null); void load(false); }} onSaved={() => { setEditorOrder(null); void load(false); }} />}
       {/* نافذة استمارة طلب المختبر الرسمية مع مخطط الأسنان السريري */}
       {prescriptionOrder && (
         <LabPrescriptionModal

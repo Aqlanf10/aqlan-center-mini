@@ -21,6 +21,11 @@ const rows = async (pool: Pool) => {
   }
   return out;
 };
+function expectOnlyNumberingVersionAdded(before: Awaited<ReturnType<typeof rows>>, after: Awaited<ReturnType<typeof rows>>) {
+  const patientRows = (snapshot: Awaited<ReturnType<typeof rows>>) => snapshot.patients.map(row => JSON.parse((row as { row: string }).row));
+  expect(patientRows(after)).toEqual(patientRows(before).map(row => ({ ...row, patient_number_version: 1 })));
+  expect({ ...after, patients: [] }).toEqual({ ...before, patients: [] });
+}
 const registry = async (pool: Pool) => (await pool.query("SELECT version,name,checksum,adopted FROM schema_migrations WHERE version='0067'")).rows;
 const catalog = async (pool: Pool) => (await pool.query(`SELECT pg_get_indexdef(i.indexrelid) AS definition,
   i.indisvalid AS valid, i.indisready AS ready, i.indisunique AS unique, i.indpred IS NULL AS unfiltered
@@ -92,19 +97,19 @@ it("serializes numbered/runtime racers and retries idempotently on a populated 0
   const competitor = new Pool({ connectionString: pool.options.connectionString!, ssl: false });
   try {
     const [runtime, numbered] = await Promise.all([applyRuntimeMigrationFiles(pool, [index]), migrate(competitor, { apply: true, files })]);
-    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0078", "0081", "0082"]);
+    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082"]);
   } finally { await competitor.end(); }
   const oid = (await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows;
   expect(await applyRuntimeMigrationFiles(pool, [index])).toEqual([]);
   expect((await migrate(pool, { apply: true, files })).appliedVersions).toEqual([]);
   expect((await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows).toEqual(oid);
-  expect(await registry(pool)).toEqual(expectedRegistry()); expect(await rows(pool)).toEqual(before);
+  expect(await registry(pool)).toEqual(expectedRegistry()); expectOnlyNumberingVersionAdded(before, await rows(pool));
 });
 
 it("upgrades through actual runtime and fresh runtime with the exact index, no financial or patient row changes", async () => {
   const before = await rows(fixture.sqlTarget);
   await runtimeAt(fixture.sqlTarget); await runtimeAt(fixture.sqlTarget);
-  expect(await rows(fixture.sqlTarget)).toEqual(before);
+  expectOnlyNumberingVersionAdded(before, await rows(fixture.sqlTarget));
   await runtimeAt(fixture.archiveTarget);
   for (const pool of [fixture.source, fixture.sqlTarget, fixture.archiveTarget]) {
     expect(await registry(pool)).toEqual(expectedRegistry());
@@ -117,18 +122,21 @@ it("upgrades through actual runtime and fresh runtime with the exact index, no f
   expect(classified.openConvergenceFindings).toHaveLength(16); expect(classified.unexpectedDifferences).toEqual([]);
 });
 
-it("adds no reset ownership, and keeps the index and registry through backup-protected synthetic reset", async () => {
+it("adds no reset ownership, and keeps patient history, index and registry through protected reset refusal", async () => {
   await runtimeAt(fixture.sqlTarget);
   const tables = (await fixture.sqlTarget.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows.map(row => row.tablename);
   expect([...RESET_KEEP_TABLES, ...RESET_WIPE_TABLES].sort()).toEqual(tables);
   const prior = await catalog(fixture.sqlTarget), registration = await registry(fixture.sqlTarget);
-  let backup = "";
-  const result = await db.resetClinicData({ actor: "synthetic-index-test", actorRole: "admin" }, async client => {
-    for await (const line of db.backupSqlLines(client)) backup += line;
+  const patients = (await fixture.sqlTarget.query("SELECT to_jsonb(p) AS row FROM patients p ORDER BY id")).rows;
+  const appointments = (await fixture.sqlTarget.query("SELECT to_jsonb(a) AS row FROM appointments a ORDER BY id")).rows;
+  let backupCalled = false;
+  await expect(db.resetClinicData({ actor: "synthetic-index-test", actorRole: "admin" }, async () => {
+    backupCalled = true;
     return { ok: true, backupId: "synthetic-index-reset-backup" };
-  });
-  expect(result).toMatchObject({ ok: true, backupId: "synthetic-index-reset-backup", counts: { patients: 1, appointments: 76 } });
-  expect(backup).toContain("INDEX-SYNTHETIC"); expect(backup).toContain("Synthetic existing treatment");
+  })).rejects.toMatchObject({ name: "ProtectedPatientNumberHistoryError" });
+  expect(backupCalled).toBe(false);
+  expect((await fixture.sqlTarget.query("SELECT to_jsonb(p) AS row FROM patients p ORDER BY id")).rows).toEqual(patients);
+  expect((await fixture.sqlTarget.query("SELECT to_jsonb(a) AS row FROM appointments a ORDER BY id")).rows).toEqual(appointments);
   expect(await catalog(fixture.sqlTarget)).toEqual(prior); expect(await registry(fixture.sqlTarget)).toEqual(registration);
   expect((await fixture.sqlTarget.query("SHOW session_replication_role")).rows[0].session_replication_role).toBe("origin");
 });

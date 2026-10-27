@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { addDays } from "../../lib/schedule";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "pg";
@@ -82,11 +83,16 @@ async function fixture(): Promise<{ patientId: number; caseId: number; request: 
   const patientId = (await observer.query<{ id: number }>(
     "INSERT INTO patients (patient_number,full_name) VALUES ($1,$2) RETURNING id", [`ATOMIC-${serial}`, `Synthetic atomic patient ${serial}`],
   )).rows[0].id;
-  const caseId = (await observer.query<{ id: number }>(
-    "INSERT INTO ortho_cases (patient_id,start_date,created_by) VALUES ($1,'2026-01-01',$2) RETURNING id", [patientId, actor.username],
+  const doctorId = (await observer.query<{ id: number }>("INSERT INTO parties(name,kind) VALUES ($1,'doctor') RETURNING id", [`Synthetic service doctor ${serial}`])).rows[0].id;
+  const caseId = (await observer.query<{ id: number }> (
+    "INSERT INTO ortho_cases (patient_id,start_date,created_by,responsible_doctor_id) VALUES ($1,'2026-01-01',$2,$3) RETURNING id", [patientId, actor.username,doctorId],
   )).rows[0].id;
+  const { readReturnBookingContext } = await import("../../lib/return-booking-context");
+  const returnBookingSource = { kind: "ortho_case" as const, id: caseId };
+  const source = await readReturnBookingContext(observer,patientId,returnBookingSource);
+  if (!source.ok) throw new Error(source.message);
   return { patientId, caseId, request: { patientId, date: `2030-01-${String(serial).padStart(2, "0")}`, time: "10:00",
-    durationMinutes: 15, serviceId, appointmentType: "follow_up", bookingIntent: "ortho_follow_up" } };
+    durationMinutes: 15, serviceId, appointmentType: "follow_up", bookingIntent: "ortho_follow_up", returnBookingSource, returnBookingFingerprint: source.fingerprint } };
 }
 async function blockedBy(pid: number, query: string, finished?: () => boolean): Promise<number> {
   const deadline = performance.now() + 6_000;
@@ -172,6 +178,9 @@ describe("protected follow-up service admission is atomic with booking", () => {
 
   it("lets two different-day bookings hold compatible service read locks concurrently", async () => {
     const fixtures = [await fixture(), await fixture()];
+    // Non-overlapping warning windows: exercise service row-lock compatibility,
+    // not the intentional D..D+2 booking serialization.
+    fixtures[1].request.date = addDays(fixtures[0].request.date, 3);
     const blockers = [await external(), await external()];
     const bookings: Array<ReturnType<typeof observe<BookingResult>>> = [];
     try {
