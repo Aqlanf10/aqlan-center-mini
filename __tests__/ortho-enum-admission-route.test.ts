@@ -225,17 +225,29 @@ describe("writer outcomes stay unchanged", () => {
   });
   it("retains POST conflict handling after inherited phase normalization", async () => {
     vi.mocked(recordAdjustment).mockResolvedValue({ ok: false, message: "Synthetic closed case" });
-    expect((await call("POST", { phase: "constructor" })).status).toBe(409);
+    expect((await call("POST", { phase: "constructor", done: "Explicit synthetic review" })).status).toBe(409);
     expect(recordAdjustment).toHaveBeenCalledWith(expect.objectContaining({ phase: null }));
   });
   it("retains POST replay response after normalization", async () => {
     vi.mocked(recordAdjustment).mockResolvedValue({ ok: true, id: 501, created: false, visitId: null, attachedToToday: false });
-    const response = await call("POST", { phase: "__proto__" });
+    const response = await call("POST", { phase: "__proto__", done: "Explicit synthetic review" });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ id: 501, existing: true, visitId: null, attachedToToday: false });
   });
   it("retains POST exception handling after normalization", async () => {
     vi.mocked(recordAdjustment).mockRejectedValue(new Error("Synthetic failure"));
-    expect((await call("POST", { phase: "toString" })).status).toBe(500);
+    expect((await call("POST", { phase: "toString", done: "Explicit synthetic review" })).status).toBe(500);
+  });
+});
+
+
+describe("POST adjustment input integrity", () => {
+  it.each(["", "   ", undefined])("rejects undocumented work %s", async done => {
+    expect((await call("POST", { done, nextWeeks: 4 })).status).toBe(400);
+    noWriters();
+  });
+  it("preserves explicit wire removal and legacy empty no-change", async () => {
+    expect((await call("POST", { done: "Documented removal", upperWireAction: "remove", upperWire: "", lowerWire: "" })).status).toBe(201);
+    expect(recordAdjustment).toHaveBeenCalledWith(expect.objectContaining({ upperWireAction: "remove", upperWire: null, lowerWire: null }));
   });
 });

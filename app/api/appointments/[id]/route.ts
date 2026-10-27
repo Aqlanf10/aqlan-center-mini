@@ -1,3 +1,4 @@
+import type { ReturnBookingSource } from "@/lib/return-booking-source";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -127,10 +128,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           ? undefined : (body_.doctorId == null ? null : Number(body_.doctorId)),
         chairNo: body_.chairNo === undefined
           ? undefined : (body_.chairNo == null ? null : Number(body_.chairNo)),
+        nearbyAppointmentConfirmation: typeof body_.nearbyAppointmentConfirmation === "string" ? body_.nearbyAppointmentConfirmation.slice(0, 4096) : null,
+        transferToCurrentResponsibleDoctor: body_.transferToCurrentResponsibleDoctor === true,
+        returnBookingSource: body_.returnBookingSource as ReturnBookingSource | null | undefined,
+        returnBookingOrigin: body_.returnBookingOrigin as ReturnBookingSource | null | undefined,
+        returnBookingFingerprint: typeof body_.returnBookingFingerprint === "string" ? body_.returnBookingFingerprint.slice(0, 128) : null,
         reason: bodyReason ?? "",
         overrideReason: typeof body_.overrideReason === "string" ? body_.overrideReason : null,
       }, {
-        username: session.username,
+        username: session.username, userId: session.userId,
         role: session.role,
         doctorPartyId: user?.partyId ?? null,
         /* صلاحيةُ التجاوز من المستخدم في الخادم لا من الطلب. */
@@ -144,7 +150,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         });
       }
       return NextResponse.json(
-        { message: result.message, conflict: result.conflict ?? null },
+        { message: result.message, conflict: result.conflict ?? null, ...(result.code ? { code: result.code } : {}) },
         { status: result.status },
       );
     }

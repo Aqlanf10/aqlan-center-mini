@@ -1,3 +1,6 @@
+import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
+import { labPrescriptionVersion } from "../../lib/lab-prescription-input";
+import { completeLabPrescription } from "../../lib/lab-prescription-write";
 import { labWorkForCategory } from "../../lib/workflow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -10,10 +13,15 @@ const q = async <T = Record<string, unknown>>(sql: string, values: unknown[] = [
 let serial = 0;
 let fillingId: number;
 let crownId: number;
+let labId: number;
+let admin: SessionPayload;
 
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await db.ensureSchema();
+  const actor=(await q<{id:number}>("INSERT INTO users(username,display_name,password_hash,role) VALUES('lab-attribution-editor','Synthetic','synthetic-attribution-hash','admin') RETURNING id"))[0];
+  admin={userId:actor.id,username:"lab-attribution-editor",role:"admin",expiresAt:Date.now()+3_600_000,credentialVersion:sessionCredentialVersion("synthetic-attribution-hash")};
+  labId=(await db.createLaboratory({name:"Synthetic attribution lab"})).id;
   await db.openShift({ openedBy: "lab-test-cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
   const service = async (category: string, price: number) => (await q<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, is_active, price_configured)
@@ -46,11 +54,21 @@ const sign = (visitId: number, signerDoctorPartyId?: number) => db.signClinicalV
 const orders = (visitId: number) => q<{ id: number; doctor_id: number | null; tooth_code: number | null; source: string }>(
   `SELECT id, doctor_id, tooth_code, source FROM lab_orders WHERE visit_id = $1 ORDER BY id`, [visitId]);
 async function accountAndDeliver(orderId: number) {
+  const order=(await db.getLabOrderById(orderId))!;
+  if(order.toothCode !== null) {
+    await completeLabPrescription(orderId,{partyId:labId,shade:"A2",stumpShade:"",toothNumbers:`${order.toothCode}(Crown)`,dueDate:"2026-11-01",impressionType:"physical",priority:"normal"},labPrescriptionVersion(order),true,admin);
+  } else {
+    // Historical null-tooth attribution is not permission to invent clinical geometry.
+    // The new dispatch command refuses this incomplete legacy scope; seed only its
+    // already-sent historical status to retain downstream attribution coverage.
+    await expect(db.setLabOrderStatus(orderId,"sent")).rejects.toMatchObject({code:"lab_prescription_required"});
+    await q("UPDATE lab_orders SET status='sent' WHERE id=$1 AND status='needed'",[orderId]);
+  }
   await db.updateLabOrderAccounting(orderId, {
     costMinor: 20000, costCurrency: "YER", exchangeRate: 1,
     actor: "lab-test-accountant", actorRole: "accountant",
   });
-  for (const status of ["sent", "received", "delivered"] as const) {
+  for (const status of ["received", "delivered"] as const) {
     expect((await db.setLabOrderStatus(orderId, status, {
       actor: "lab-test-reception", actorRole: "reception",
     }))?.status).toBe(status);

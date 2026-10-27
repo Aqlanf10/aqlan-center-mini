@@ -60,6 +60,15 @@ vi.mock("react", async (original) => {
     useLayoutEffect: effect(true), useEffect: effect(false),
   };
 });
+// This suite owns prescription/visit lifetimes, not browser IndexedDB/Web Locks.
+// Keep the real clinical command hook; supply only its independent platform boundaries.
+vi.mock("../lib/clinical-lab-operation-reference", async original => ({
+  ...await original<typeof import("../lib/clinical-lab-operation-reference")>(),
+  readClinicalLabReference: async () => ({ revision: 0, pending: null }),
+}));
+vi.mock("../lib/clinical-visit-browser-lock", () => ({
+  withClinicalVisitBrowserLock: async (_scope: unknown, run: () => Promise<unknown>) => run(),
+}));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: state.username, role: state.role, permissions: state.permissions }) }));
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "", useClinicName: () => "Synthetic clinic" }));
 vi.mock("../components/ToothPicker", () => ({ ToothField: () => null }));

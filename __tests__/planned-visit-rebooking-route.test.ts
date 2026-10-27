@@ -33,3 +33,21 @@ it("preserves complete 500-character reasons in canonical intent",()=>{
 it("registers exactly existing clinical appointment permissions",()=>{
   expect(apiRouteVerdict("/api/planned-visits/10/rebook","POST")).toEqual({kind:"registered",pattern:"/api/planned-visits/[id]/rebook",access:["admin","reception","doctor"]});
 });
+
+it("passes nearby confirmation through strict parsing and preserves nested warning", async () => {
+  const conflict = { kind: "nearby_patient_appointments", confirmationToken: "fresh-signed-token", nearbyAppointments: [{ id: 51, scheduledDate: "2026-12-24", scheduledTime: "16:00", doctorName: "Synthetic doctor" }] };
+  deps.rebook.mockResolvedValue({ ok: false, status: 409, message: "Synthetic warning", conflict });
+  const response = await post({ ...body, nearbyAppointmentConfirmation: "signed-token" });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ message: "Synthetic warning", conflict });
+  expect(deps.rebook.mock.calls[0][0].nearbyAppointmentConfirmation).toBe("signed-token");
+});
+it("binds an exact return source and source fingerprint without allowing an appointment doctor override", async () => {
+  const context = { returnBookingSource: { kind: "clinical_case", id: 23 }, returnBookingFingerprint: "b".repeat(64) };
+  expect((await post({ ...body, ...context })).status).toBe(201);
+  expect(deps.rebook.mock.calls[0][0]).toMatchObject(context);
+  expect(parsePlannedRebookIntent(10, { ...body, returnBookingSource: { ...context.returnBookingSource, doctorId: 999 } })).toBeNull();
+  expect(parsePlannedRebookIntent(10, { ...body, returnBookingFingerprint: "bad" })).toBeNull();
+  deps.rebook.mockResolvedValue({ ok: false, status: 409, code: "return_booking_source_changed", message: "Synthetic stale source" });
+  expect(await (await post({ ...body, ...context })).json()).toEqual({ code: "return_booking_source_changed", message: "Synthetic stale source" });
+});

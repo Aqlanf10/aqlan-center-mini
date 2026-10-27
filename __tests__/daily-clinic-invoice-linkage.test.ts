@@ -250,3 +250,28 @@ describe("daily clinic report — legacy agreements' current effect and coverage
       .toEqual([["verified", "سن 36 · الأسطح: إنسي (M)، إطباقي (O)"], ["conflict", null]]);
   });
 });
+
+describe('historical line currency proof boundary', () => {
+  it.each([undefined,false])('rejects a cancelled mismatching line without verified evidence (%s)', proof => {
+    expect(()=>buildDailyClinicReport(source({plans:[plan({currency:'SAR'})],
+      invoices:[invoice({status:'cancelled'})],invoiceLines:[line({historicalCurrencyLinkVerified:proof})]})))
+      .toThrow('Invoice line plan currency conflict');
+  });
+  it('never accepts the historical proof flag for an active invoice',()=>{
+    expect(()=>buildDailyClinicReport(source({plans:[plan({currency:'SAR'})],
+      invoices:[invoice()],invoiceLines:[line({historicalCurrencyLinkVerified:true})]})))
+      .toThrow('Invoice line plan currency conflict');
+  });
+  it('retains cancelled original currency and money after the loader verifies lineage',()=>{
+    const report=buildDailyClinicReport(source({plans:[plan({currency:'SAR'})],
+      invoices:[invoice({status:'cancelled'})],invoiceLines:[line({historicalCurrencyLinkVerified:true})]}));
+    expect(report.invoices[0]).toMatchObject({currency:'YER',status:'cancelled',originalNetMinor:150000,netMinor:0});
+    expect(report.invoices[0].lines[0].totalMinor).toBe(150000);
+    expect(JSON.stringify(report)).not.toContain('historicalCurrencyLinkVerified');
+  });
+  it('still rejects cross-patient linkage even with a historical proof flag',()=>{
+    expect(()=>buildDailyClinicReport(source({plans:[plan({currency:'SAR',patientId:2})],
+      invoices:[invoice({status:'cancelled'})],invoiceLines:[line({historicalCurrencyLinkVerified:true})]})))
+      .toThrow('Unresolved or cross-patient agreement link');
+  });
+});

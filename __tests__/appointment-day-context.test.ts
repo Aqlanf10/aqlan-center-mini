@@ -126,6 +126,11 @@ beforeEach(async () => {
       const pending = deferred<ReturnType<typeof response>>();
       reads.push({ date: url.split("date=")[1], pending }); return pending.promise;
     }
+    if (url.startsWith("/api/patients/31/return-booking-context")) {
+      const context = { source: { kind: "clinical_case", id: 41 }, label: "Synthetic clinical case", available: true,
+        doctorId: 10, doctorName: "Synthetic current responsible", settingsTarget: { kind: "clinical", id: 41 } };
+      return response(url.includes("sourceId=41") ? { ...context, ok: true, patientId: 31, fingerprint: "c".repeat(64) } : { contexts: [context] });
+    }
     if (url.startsWith("/api/parties") || url.startsWith("/api/waiting-list?")) return response([]);
     if (init?.method === "PATCH") return response({ ok: true });
     throw new Error(`Unexpected request: ${url}`);
@@ -380,5 +385,33 @@ describe("manual reminder page wiring (shared control, synthetic transport)", ()
     const fresh = confirmReminder()(); await flush();
     expect(writes().map(([url]) => url)).toEqual(["/api/appointments/9"]);
     reads[3].pending.resolve(response([])); await fresh;
+  });
+});
+
+
+describe("appointment clinician transfer is an explicit opt-in", () => {
+  function openMove() {
+    (find(node => node.props["data-action"] === "reschedule").props.onClick as () => void)();
+    (find(node => node.props["data-field"] === "reschedule-reason").props.onChange as (event: unknown) => void)({ target: { value: "طلب المريض" } });
+  }
+  function move() { (find(node => node.props["data-action"] === "reschedule-submit").props.onClick as () => void)(); }
+  it("ordinary date/time move does not fetch another clinician or send a transfer/source", async () => {
+    openMove(); expect(find(node => node.props["aria-label"] === "نقل إلى الطبيب المسؤول الحالي").props.checked).toBe(false);
+    move(); await flush(); const body = JSON.parse(writes()[0][1].body);
+    expect(body).toEqual({ action: "reschedule", date: day, time: "10:00", reason: "طلب المريض" });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("return-booking-context"))).toBe(false);
+    reads.at(-1)!.pending.resolve(response([appointment])); await flush();
+  });
+  it("blocks an opted-in transfer until exact context is verified, then sends only its scoped fingerprint", async () => {
+    openMove(); (find(node => node.props["aria-label"] === "نقل إلى الطبيب المسؤول الحالي").props.onChange as (event: unknown) => void)({ target: { checked: true } });
+    render(); move(); expect(writes()).toHaveLength(0); await flush();
+    (find(node => node.props["aria-label"] === "سياق موعد المراجعة").props.onChange as (event: unknown) => void)({ target: { value: "clinical_case:41" } });
+    render(); await flush(); render();
+    expect(text(find(node => node.props["aria-label"] === "الطبيب المسؤول عن موعد المراجعة"))).toContain("Synthetic current responsible");
+    move(); await flush();
+    expect(JSON.parse(writes()[0][1].body)).toMatchObject({ transferToCurrentResponsibleDoctor: true,
+      returnBookingSource: { kind: "clinical_case", id: 41 }, returnBookingFingerprint: "c".repeat(64) });
+    expect(JSON.parse(writes()[0][1].body)).not.toHaveProperty("doctorId");
+    reads.at(-1)!.pending.resolve(response([appointment])); await flush();
   });
 });

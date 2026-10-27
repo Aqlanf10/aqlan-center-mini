@@ -20,13 +20,13 @@ const base = {
 };
 
 describe("(VISIT-1) visit suggestions", () => {
-  it("chief complaint: the planned session first, then the appointment reason, then ortho follow-up", () => {
+  it("chief complaint: the planned session first, then the appointment reason, never assumes an ortho adjustment", () => {
     expect(buildVisitSuggestions({ ...base, plannedTitle: "تشكيل القنوات — سن 36", appointmentNote: "ألم" }).chiefComplaint)
       .toBe("جلسة مخطَّطة: تشكيل القنوات — سن 36");
     expect(buildVisitSuggestions({ ...base, appointmentType: "emergency", appointmentNote: "ألم شديد في الضرس" }).chiefComplaint)
       .toBe("طوارئ — ألم شديد في الضرس");
     expect(buildVisitSuggestions({ ...base, appointmentType: "follow_up" }).chiefComplaint).toBe("متابعة دورية");
-    expect(buildVisitSuggestions({ ...base, inOrtho: true }).chiefComplaint).toBe("متابعة تقويم — شدّ دوري");
+    expect(buildVisitSuggestions({ ...base, inOrtho: true }).chiefComplaint).toBeNull();
     expect(buildVisitSuggestions(base).chiefComplaint).toBeNull();
   });
 
@@ -42,6 +42,14 @@ describe("(VISIT-1) visit suggestions", () => {
   it("doctor: the first known candidate in priority order", () => {
     expect(buildVisitSuggestions({ ...base, doctorCandidates: [null, 7, 3] }).doctorId).toBe(7);
     expect(buildVisitSuggestions({ ...base, doctorCandidates: [null, null] }).doctorId).toBeNull();
+  });
+
+  it("uses only a unanimous verified existing-work doctor as a last-resort editable suggestion", () => {
+    expect(buildVisitSuggestions({ ...base, workDoctorCandidates: [7, 7] }).doctorId).toBe(7);
+    for (const candidates of [[7, 8], [7, null], [], [0], [-1]]) {
+      expect(buildVisitSuggestions({ ...base, workDoctorCandidates: candidates }).doctorId).toBeNull();
+    }
+    expect(buildVisitSuggestions({ ...base, doctorCandidates: [3], workDoctorCandidates: [7] }).doctorId).toBe(3);
   });
 
   it("«ما نُفّذ» is written from the procedures, same procedure on the same tooth counted", () => {

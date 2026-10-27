@@ -329,7 +329,11 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
     if (line.planId !== null) {
       const plan = checkedPlan(line.planId, invoice.patientId);
       // Same patient is not enough: a line must not tie an invoice to a plan in another currency.
-      if (plan.currency !== invoice.currency) throw new DailyClinicReportIntegrityError("Invoice line plan currency conflict");
+      if (plan.currency !== invoice.currency
+        && !(invoice.status === "cancelled" && invoice.planId === null && line.planItemId !== null
+          && line.historicalCurrencyLinkVerified === true)) {
+        throw new DailyClinicReportIntegrityError("Invoice line plan currency conflict");
+      }
     }
     // A visit-procedure source must belong to the invoice's own patient.
     if (line.sourceVisitId != null && line.sourceVisitPatientId !== invoice.patientId) {

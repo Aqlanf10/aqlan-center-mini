@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { readLabBacklog } from "../../lib/lab-backlog-db";
@@ -10,13 +10,12 @@ const q = async (sql: string, params: unknown[] = []) => (await db.getPool().que
 let adminId: number, otherId: number, patientId: number;
 const read = (filter: "all" | "preparing" | "with_lab" | "overdue" | "awaiting_fitting" = "all", page = 0) =>
   readLabBacklog(db.getPool(), { filter, page }, "Asia/Aden", { role: "admin", userId: adminId });
-beforeAll(async () => {
+beforeEach(async () => {
+  await db.resetPoolForTesting();
   await dropPublicSchema(target.testUrl.toString()); await db.ensureSchema();
   const users = await q("INSERT INTO users(username,display_name,password_hash,role) VALUES ('synthetic-backlog-admin','Synthetic admin','unused','admin'),('synthetic-backlog-other','Synthetic other','unused','admin') RETURNING id");
   [adminId, otherId] = users.map(row => Number(row.id));
-});
-beforeEach(async () => {
-  await q("TRUNCATE lab_orders, patients, hr_tasks RESTART IDENTITY CASCADE");
+
   [patientId] = (await q("INSERT INTO patients(patient_number,full_name) VALUES ('SYN-BACKLOG','Synthetic backlog patient') RETURNING id")).map(row => Number(row.id));
 });
 afterAll(async () => { await db.resetPoolForTesting(); });

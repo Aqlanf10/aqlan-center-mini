@@ -1035,7 +1035,7 @@ export function toLabDispatchExternal(order: LabOrderClinicalDTO): LabDispatchEx
     stumpShade,
     priority,
     impressionType,
-    sentDate: date(order.sentDate),
+    sentDate: order.status === "needed" ? "لم يُرسل بعد" : date(order.sentDate),
     dueDate: date(order.dueDate),
     reviewWarnings,
   };

@@ -91,7 +91,9 @@ function ownerFunctions() {
     const start = source.indexOf(`export async function ${name}(`); expect(start).toBeGreaterThan(0);
     return source.slice(start, source.indexOf("\n}", start) + 2).replace("export ", "");
   }).join("\n");
-  const js = ts.transpile(chunks, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None });
+  const bridge = source.match(/const ORTHO_BRIDGE_RESPONSIBILITY = `[\s\S]*?`;/)?.[0];
+  expect(bridge).toBeTruthy();
+  const js = ts.transpile(`${bridge}\n${chunks}`, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None });
   const query = vi.fn().mockResolvedValue({ rows: [] }); const ensure = vi.fn(); const getPool = vi.fn(() => ({ query }));
   const date = vi.fn(() => "2026-10-06");
   const owners = new Function("ensureSchema", "getPool", "toUser", "CLINIC_TIME_ZONE", "clinicDateString",
@@ -113,18 +115,27 @@ describe("canonical database-reader executor contract", () => {
     expect(query).toHaveBeenCalledExactlyOnceWith("SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND is_active LIMIT 1 FOR SHARE", ["Synthetic"]);
     expect(f.ensure).toHaveBeenCalledOnce(); expect(f.getPool).toHaveBeenCalledOnce();
   });
-  it("derives legacy EXISTS and all six row locks from the same canonical predicates", async () => {
+  it("derives legacy EXISTS and all historical/current-responsibility row locks from the same canonical predicates", async () => {
     const f = ownerFunctions(); f.query.mockResolvedValue({ rows: [{ ok: true }] });
     expect(await f.owners.doctorOwnsPatient(42, 8)).toBe(true);
     const legacy = f.query.mock.calls[0][0] as string;
     const query = vi.fn().mockResolvedValue({ rows: [] }); const locked = { query, release: vi.fn() } as DbClient;
     expect(await f.owners.doctorOwnsPatient(42, 8, locked)).toBe(false);
-    expect(query).toHaveBeenCalledTimes(6);
-    for (const [sql, values] of query.mock.calls) {
+    expect(query).toHaveBeenCalledTimes(9);
+    for (const [sql, values] of query.mock.calls.slice(0, 8)) {
       const match = (sql as string).match(/FROM (\w+) (\w+)\s+WHERE ([\s\S]+) ORDER BY \w+\.id LIMIT 1 FOR SHARE$/)!;
       expect(match).not.toBeNull(); expect(legacy).toContain(`SELECT 1 FROM ${match[1]} ${match[2]} WHERE ${match[3]}`);
       expect(values).toEqual([42, 8]);
     }
+    const [bridgeSql, bridgeValues] = query.mock.calls[8];
+    const bridgePredicate = (bridgeSql as string).match(/WHERE ([\s\S]+)\s+ORDER BY cc.id LIMIT 1 FOR SHARE OF cc, oc$/)![1].trim();
+    expect(legacy).toContain(bridgePredicate);
+    expect(bridgeSql).toContain("JOIN ortho_cases oc ON oc.id = cc.ortho_case_id");
+    expect(bridgePredicate).toContain("oc.responsible_doctor_id IS NULL");
+    expect(bridgePredicate).toContain("cc.patient_id = oc.patient_id");
+    expect(bridgePredicate).toContain("cc.specialty = 'orthodontics'");
+    expect(bridgePredicate).toContain("NOT EXISTS");
+    expect(bridgeValues).toEqual([42, 8]);
     expect(f.ensure).toHaveBeenCalledOnce(); expect(f.getPool).toHaveBeenCalledOnce();
   });
   it("locks only one positive witness and never enters initialization or a pool fallback", async () => {

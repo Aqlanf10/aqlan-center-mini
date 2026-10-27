@@ -1,6 +1,6 @@
 import labelStyles from "./labels.module.css";
 import { statementAgreementsRequireReview } from "@/lib/statement-lines";
-import { StatementHistoricalDetails, StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
+import { StatementHistoricalDetails, StatementInvoiceDetails, currentStatementInvoices, statementAgreements } from "./presentation";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
 import {
@@ -11,8 +11,11 @@ import { clinicDateString } from "@/lib/schedule";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
-import { PrintableReportDocument } from "@/components/reports/PrintableReportDocument";
-import { buildReport, parseFilters, ReportInputError } from "@/lib/reports";
+import { PatientStatementDocument } from "@/components/PatientStatementDocument";
+import { loadPatientStatementDocument } from "@/lib/patient-statement-build";
+import { parsePatientStatementOptions, StatementInputError } from "@/lib/patient-statement-options";
+import { projectPatientStatement, StatementProjectionError } from "@/lib/patient-statement-projection";
+import { financeAccessFor } from "@/lib/finance-permissions";
 import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { historicalOpeningBuckets } from "@/lib/statement-historical-details";
@@ -28,12 +31,6 @@ export const dynamic = "force-dynamic";
  */
 type SearchValue = string | string[] | undefined;
 
-function isClinicDate(value: SearchValue): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
-
 export default async function StatementPage({ params, searchParams }: {
   params: Promise<{ id: string }>;
   searchParams?: Promise<Record<string, SearchValue>>;
@@ -42,6 +39,7 @@ export default async function StatementPage({ params, searchParams }: {
   // مفتوحة لكل من يملك جلسة.
   const session = await requireSession();
   if (!session || !canViewMoney(session.role)) notFound();
+  if ((session.role === "cashier" || session.role === "accountant") && !financeAccessFor(session.role, session.financeAccess).viewPatientLedger) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);
@@ -50,34 +48,29 @@ export default async function StatementPage({ params, searchParams }: {
   const query = await searchParams ?? {};
   // The path remains the patient authority; a copied/tampered query cannot retarget it.
   if (query.patientId !== undefined && query.patientId !== String(id)) notFound();
-  if (query.to !== undefined || query.from !== undefined) {
-    if (!isClinicDate(query.to) || (query.from !== undefined && !isClinicDate(query.from))) notFound();
-    const from = query.from ?? query.to;
-    if (from > query.to) notFound();
-    const filters = parseFilters(new URLSearchParams({
-      report: "patient-statement", patientId: String(id), preset: "custom", from, to: query.to,
-    }), query.to);
-    let result;
+  if (query.type !== undefined || query.to !== undefined || query.from !== undefined) {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (Array.isArray(value)) notFound();
+      if (value !== undefined) search.set(key, value);
+    }
+    let document;
     try {
-      result = await buildReport("patient-statement", filters);
+      document = await loadPatientStatementDocument(id, parsePatientStatementOptions(search, id));
     } catch (error) {
-      if (error instanceof ReportInputError) notFound();
+      if (error instanceof StatementInputError) notFound();
       throw error;
     }
-    const settings = await getSettingsSafe();
-    const generatedAt = new Intl.DateTimeFormat("ar-YE", {
-      timeZone: CLINIC_TIME_ZONE, dateStyle: "medium", timeStyle: "short",
-    }).format(new Date());
-    return <><PrintButton /><PrintableReportDocument result={result} settings={settings}
-      generatedAt={generatedAt} generatedBy={session.username} /></>;
+    if (!document) notFound();
+    return <><PrintButton /><PatientStatementDocument document={document} /></>;
   }
 
   // The existing no-query print remains the current, all-history ledger and plan agreement view.
   // Its ledger, plan currencies and agreement progress come from one read-only snapshot, so the
   // receipts, balances and agreement on one sheet always describe the same committed state.
-  const [patient, settings, { ledger, planCurrencies, plans, historicalAgreements }] = await Promise.all([
+  const [patient, settings, { ledger, planCurrencies, plans, historicalAgreements, statementEvidence }] = await Promise.all([
     getPatient(id), getSettingsSafe(),
-    patientStatementSnapshot(id, clinicDateString(new Date(), CLINIC_TIME_ZONE), { historicalAgreements: true }),
+    patientStatementSnapshot(id, clinicDateString(new Date(), CLINIC_TIME_ZONE), { historicalAgreements: true, patientFacing: true }),
   ]);
   if (!patient) notFound();
 
@@ -85,6 +78,8 @@ export default async function StatementPage({ params, searchParams }: {
      فاتورةٌ بعملتها، ورصيدٌ لكل عملة — لا رقمٌ واحد يمزج الريال بالسعودي بالدولار. */
   const base = CLINIC_BASE_CURRENCY;
   const balances = ledgerBalancesByCurrency(id, ledger, planCurrencies);
+  if (!statementEvidence) throw new StatementProjectionError();
+  const patientView = projectPatientStatement({ patientId: id, ledger, planCurrencies, evidence: statementEvidence });
   if (!historicalAgreements) throw new Error("Current statement requires its historical agreements from the same snapshot");
   const historicalBuckets = historicalOpeningBuckets(historicalAgreements, ledger.openings, ledger.payments);
   // Patient handout: a currency whose previous balance is explained by its historical agreements shows those
@@ -132,7 +127,6 @@ export default async function StatementPage({ params, searchParams }: {
         {ledger.openings.filter((opening) => !explainedOpenings.has(opening.currency)).map((opening) => (
           <div className="line" key={opening.currency}>
             <span>رصيد افتتاحي — ما كان على المريض قبل بدء العمل بالبرنامج
-              {opening.note ? ` (${opening.note})` : ""}
             </span>
             <span className="num">{formatMoney(opening.amountMinor, opening.currency)}</span>
           </div>
@@ -150,17 +144,15 @@ export default async function StatementPage({ params, searchParams }: {
             </tr>
           </thead>
           <tbody>
-            {ledger.payments.length === 0 ? (
+            {patientView.payments.length === 0 ? (
               <tr><td colSpan={4}>لا دفعات</td></tr>
-            ) : ledger.payments.map((payment) => (
-              <tr key={payment.id}>
+            ) : patientView.payments.map((payment) => (
+              <tr key={payment.receiptNumber}>
                 <td dir="ltr">{payment.receiptNumber}</td>
                 <td>{friendlyDateLong(payment.createdAt.slice(0, 10))}</td>
                 <td>
-                  {statementPaymentLabel(payment, ledger.payments)}{" — "}
+                  {payment.label}{" — "}
                   {formatMoney(payment.amountMinor, payment.currency)}
-                  {payment.currency !== base ? ` (سعر ${payment.exchangeRate})` : ""}
-                  {payment.settlementAllocation?<small> — تسوية مصححة {formatMoney(payment.settlementAllocation.targetMinor,payment.settlementAllocation.targetCurrency)}، دون نقد جديد</small>:null}
                 </td>
                 <td className="num">
                   {payment.kind === "refund" ? "− " : ""}{formatMoney(payment.baseAmountMinor, base)}
@@ -191,7 +183,7 @@ export default async function StatementPage({ params, searchParams }: {
                   <span className="num">{formatMoney(bucket.billedMinor, currency)}</span>
                 </div>
                 <div className={`line ${labelStyles.labelRow}`}>
-                  <span>صافي المحصّل بعد الاستردادات وعكس السندات</span>
+                  <span>صافي المدفوع</span>
                   <span className="num">{formatMoney(bucket.collectedMinor, currency)}</span>
                 </div>
                 <div className="line line-strong">

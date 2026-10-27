@@ -63,6 +63,11 @@ vi.mock("react", async (original) => {
     },
   };
 });
+// Ordinary-visit fixtures explicitly prove an empty synthetic command journal.
+// Actual reference/replay ownership is exercised in clinical-lab-command-hook.test.ts.
+vi.mock("../lib/clinical-lab-operation-reference",async original=>({...await original<typeof import("../lib/clinical-lab-operation-reference")>(),readClinicalLabReference:async()=>({revision:0,pending:null})}));
+// This legacy handler harness is single-window; cross-tab arbitration has dedicated hook tests.
+vi.mock("../lib/clinical-visit-browser-lock",()=>({withClinicalVisitBrowserLock:async(_scope:unknown,run:()=>Promise<unknown>)=>run()}));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: hooks.role, username: hooks.username }) }));
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "Synthetic quick phrase" }));
 vi.mock("../components/ToothPicker", () => ({ ToothField: () => null }));
@@ -183,7 +188,76 @@ beforeEach(() => {
 afterEach(() => { hooks.effects.forEach((effect) => effect.cleanup?.()); vi.unstubAllGlobals(); });
 
 describe("orthodontic chairside entry", () => {
+  it("shows remaining grouped work instead of stale original first-session title and preserves original duration warning", async () => {
+    stored.plannedVisit = { ...(stored.plannedVisit as object), title: "Original session 1", durationMinutes: 360,
+      remainingWork: "Remaining session 2 through 12", durationWarning: "Original group estimate; review before booking" };
+    await mount();
+    expect(contents(render())).toContain("مخطَّط لهذه الزيارة: Remaining session 2 through 12");
+    expect(contents(render())).toContain("العنوان الأصلي: Original session 1");
+    expect(contents(render())).toContain("Original group estimate; review before booking");
+    expect(contents(render())).toContain("المدة الأصلية 360 دقيقة");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it.each(["0", "abc", "", "1.5", "53"])("rejects explicit invalid follow-up %s before review without substituting four weeks", async weeks => {
+    await mount(); await start(); edit("ما نُفّذ في الشدّة", "Documented review without change");
+    edit("أسابيع حتى الشدّة القادمة", weeks);
+    await review(); await flush();
+    expect(writes()).toHaveLength(0);
+    expect(contents(render())).toContain("بين أسبوع و52 أسبوعًا");
+  });
+
+  it("requires documented adjustment work or review, not merely adding an empty session", async () => {
+    await mount(); await start();
+    await review(); await flush();
+    expect(writes()).toHaveLength(0);
+    expect(contents(render())).toContain("وثّق ما تم");
+  });
+
+  it("sends explicit wire removal only after selection and shows removal in review", async () => {
+    await mount(); await start(); edit("ما نُفّذ في الشدّة", "Documented wire removal");
+    const removal = input("إزالة السلك العلوي لهذه الشدّة");
+    (removal.props.onChange as (event: unknown) => void)({ target: { checked: true } });
+    expect(input("السلك العلوي لهذه الشدّة").props.value).toBe("");
+    await review(); await flush();
+    expect(contents(find(node => node.props["data-testid"] === "ortho-session-review"))).toContain("إزالة السلك");
+    await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ upperWire: "", upperWireAction: "remove", lowerWire: "012 NiTi" });
+  });
+
+  it("accepts only a roster-verified suggested doctor and keeps selection editable", async () => {
+    stored.doctorId = null;
+    await mount();
+    const provider = find(node => node.type === "select" && node.props.value === 94001);
+    expect(provider.props.disabled).toBe(false);
+    (provider.props.onChange as (event: unknown) => void)({ target: { value: "" } });
+    expect(nodes().some(node => node.type === "select" && node.props.value === "")).toBe(true);
+  });
+
+  it("does not select an unverified suggested doctor", async () => {
+    stored.doctorId = null;
+    stored.suggestions = { doctorId: 99999, chiefComplaint: null, nextPlan: null };
+    await mount();
+    expect(nodes().some(node => node.type === "select" && node.props.value === 99999)).toBe(false);
+    expect(nodes().some(node => node.type === "select" && node.props.value === "")).toBe(true);
+  });
+
+  it("opens a general return in contextual mode without inventing performed work", async () => {
+    stored.ortho = null;
+    stored.previousVisit = { ...(stored.previousVisit as object), examination: "Prior exam reference", diagnosis: "Prior diagnosis reference" };
+    await mount();
+    expect(field("شكوى جديدة أو تغيّر اليوم (إن وجد)").props.value).toBe("");
+    expect(field("ما نُفّذ اليوم").props.value).toBe("");
+    expect(field("فحص اليوم (إن أُجري)").props.value).toBe("");
+    expect(contents(render())).toContain("Prior exam reference");
+    expect(contents(render())).toContain("Prior diagnosis reference");
+    expect(nodes().some(node => node.props.label === "① الشكوى الرئيسية")).toBe(false);
+    expect(nodes().some(node => node.props["aria-label"] === "ما نُفّذ في الشدّة")).toBe(false);
+    expect(writes()).toHaveLength(0);
+  });
+
   it("does not classify an unrelated visit as orthodontic merely because a case is active", async () => {
+    stored.previousVisit = null;
     stored.suggestions = { chiefComplaint: "Restorative appointment", nextPlan: null, doctorId: 94001 };
     await mount();
     expect(field("① الشكوى الرئيسية").props.value).toBe("Restorative appointment");
@@ -195,6 +269,7 @@ describe("orthodontic chairside entry", () => {
   });
 
   it.each(["saved", "edited"] as const)("retains %s findings through entering and cancelling adjustment mode, even if complaint equals suggestion", async (source) => {
+    stored.previousVisit = null;
     if (source === "saved") stored = { ...stored, chiefComplaint: "Scheduled adjustment reason", examination: "Current exam", diagnosis: "Current diagnosis" };
     await mount();
     if (source === "edited") {
@@ -335,7 +410,7 @@ describe("orthodontic chairside entry", () => {
   });
 
   it.each(["assistant", "reception"])("keeps adjustment creation restricted for %s", async (role) => {
-    hooks.role = role; await mount();
+    hooks.role = role; stored.previousVisit = null; await mount();
     expect(nodes().some((node) => node.type === "button" && contents(node).startsWith("+ شدّة"))).toBe(false);
     expect(field("① الشكوى الرئيسية")).toBeTruthy();
     expect(nodes().some((node) => node.props.label === "شكوى جديدة أو تغيّر اليوم (إن وجد)")).toBe(false);
@@ -343,7 +418,7 @@ describe("orthodontic chairside entry", () => {
   });
 
   it("preserves the ordinary visit's five fields, suggestions and progress", async () => {
-    stored.ortho = null; await mount();
+    stored.ortho = null; stored.previousVisit = null; await mount();
     expect(field("① الشكوى الرئيسية").props.value).toBe("Scheduled adjustment reason");
     expect(field("② الفحص").props.value).toBe("");
     expect(field("② التشخيص").props.value).toBe("");
@@ -355,7 +430,7 @@ describe("orthodontic chairside entry", () => {
   it("keeps outside-contract billing decisions intact without synthesizing financial work", async () => {
     stored.ortho = { ...orthodontics, adjustmentBillingClass: "OUTSIDE_CONTRACT" };
     await mount(); await start(); edit("ما نُفّذ في الشدّة", "Actual adjustment");
-    const checkbox = find((node) => node.type === "input" && node.props.type === "checkbox");
+    const checkbox = find((node) => node.type === "input" && node.props.type === "checkbox" && !node.props["aria-label"]);
     (checkbox.props.onChange as (event: unknown) => void)({ target: { checked: true } });
     edit("سبب بلا رسوم للشدّة", "Synthetic approved clinical reason");
     await review(); await flush(); await sign(); await flush();
@@ -409,8 +484,9 @@ describe("baseline-only elastic class confirmation", () => {
     await mount(); await start(); edit("مطاطات هذه الشدّة", "none");
     expect(nodes().some((node) => node.props["aria-label"] === "وصف مطاطات هذه الشدّة")).toBe(false);
     expect(stored.ortho).toEqual(original);
+    edit("ما نُفّذ في الشدّة", "Explicit current review");
     await review(); await flush(); await sign(); await flush();
-    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics: "none", elasticNote: "", done: "" });
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics: "none", elasticNote: "", done: "Explicit current review" });
     expect(onSigned).toHaveBeenCalledOnce();
   });
 
@@ -455,6 +531,7 @@ describe("baseline-only elastic class confirmation", () => {
 
   it("guards the sign handler itself when an unresolved class reaches an already-open review", async () => {
     baseline(); await mount(); await start(); edit("مطاطات هذه الشدّة", "class_ii");
+    edit("ما نُفّذ في الشدّة", "Explicit current review");
     await review(); await flush();
     // Exercise the actual handler independently of the review-entry guard.
     edit("مطاطات هذه الشدّة", "");
@@ -476,8 +553,9 @@ describe("baseline-only elastic class confirmation", () => {
     expect(input("أسابيع حتى الشدّة القادمة").props.value).toBe("6");
     expect(nodes().some((node) => node.props["data-testid"] === "visit-baseline-elastics")).toBe(false);
     expect(input("ما نُفّذ في الشدّة").props.value).toBe("");
+    edit("ما نُفّذ في الشدّة", "Explicit current review");
     await review(); await flush(); await sign(); await flush();
-    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics, elasticNote: "Saved historical instructions", nextWeeks: 6, done: "" });
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics, elasticNote: "Saved historical instructions", nextWeeks: 6, done: "Explicit current review" });
     expect(onSigned).toHaveBeenCalledOnce();
   });
 
@@ -486,8 +564,9 @@ describe("baseline-only elastic class confirmation", () => {
     await mount(); await start();
     expect(input("مطاطات هذه الشدّة").props.value).toBe("none");
     expect(nodes().some((node) => node.props["data-testid"] === "visit-baseline-elastics")).toBe(false);
+    edit("ما نُفّذ في الشدّة", "Explicit current review");
     await review(); await flush(); await sign(); await flush();
-    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics: "none", elasticNote: elasticNote ?? "", done: "" });
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics: "none", elasticNote: elasticNote ?? "", done: "Explicit current review" });
   });
 
   it("retains the explicit baseline choice after rejected sign and review dismissal", async () => {
@@ -588,3 +667,44 @@ describe("lazy case diagnosis reference in explicit orthodontic follow-up", () =
   });
 });
 
+
+
+describe("pending orthodontic financial preview", () => {
+  it.each(["OUTSIDE_CONTRACT", null])("does not present mixed prepaid work and %s adjustment as whole-visit zero due", async (classification) => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "/api/visits/91001/billing-preview") return response(200, {
+        lines: [{ classification: "INCLUDED", amountMinor: 0, planLinked: true }],
+        duesByCurrency: {}, mixedCurrencies: false, orthoAdjustment: classification,
+        zeroReason: "مشمولة ضمن اتفاق الأقساط",
+      });
+      return original(url, options);
+    });
+    await mount(); await start(); edit("ما نُفّذ في الشدّة", "Synthetic review");
+    await review(); await flush();
+    const dialog = find((node) => node.props["aria-label"] === "مراجعة وإنهاء الزيارة");
+    expect(contents(dialog)).toContain("قرار الشدّة المالي غير محسوم");
+    expect(contents(dialog)).not.toContain("لا يوجد استحقاق إضافي على المريض لهذه الزيارة");
+    expect(contents(dialog)).not.toContain("وقّع الزيارة — دون استحقاق إضافي");
+    expect(nodes().some(node => node.props["data-testid"] === "ortho-adjustment-financial-pending")).toBe(true);
+    expect(bodies().some(body => body.action === "sign")).toBe(false);
+  });
+});
+
+
+it.each([false, true])("keeps verified/no-session zero due truthful (actual adjustment: %s)", async (actual) => {
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+    if (url === "/api/visits/91001/billing-preview") return response(200, {
+      duesByCurrency: {}, mixedCurrencies: false, orthoAdjustment: actual ? "INCLUDED" : "OUTSIDE_CONTRACT",
+      zeroReason: "Synthetic covered work",
+    });
+    return original(url, options);
+  });
+  await mount();
+  if (actual) { await start(); edit("ما نُفّذ في الشدّة", "Synthetic included adjustment"); }
+  else setNote("تشخيص جديد أو محدّث (إن وجد)", "Synthetic unrelated visit");
+  await review(); await flush();
+  expect(nodes().some(node => node.props["data-testid"] === "ortho-adjustment-financial-pending")).toBe(false);
+  expect(nodes().some(node => node.props["data-testid"] === "no-additional-due")).toBe(true);
+});

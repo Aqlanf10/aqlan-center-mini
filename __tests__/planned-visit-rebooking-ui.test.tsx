@@ -18,6 +18,12 @@ vi.mock("react", async original => {
         runtime.frame!.effects.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; }); } },
   };
 });
+// The shared context reader/selector has its own real hook tests. This suite
+// isolates rebooking idempotency after an already-verified clinical context.
+vi.mock("../components/useReturnBookingContext", () => ({ useReturnBookingContext: ({ source }: { source: unknown }) => ({
+  ready: true, verified: { doctorId: 9, doctorName: "Synthetic current owner" }, fingerprint: "b".repeat(64), view: null,
+  intrinsicPayload: { returnBookingSource: source, returnBookingFingerprint: "b".repeat(64) }, isCurrent: () => true, handleRejection: () => {},
+}) }));
 vi.mock("../components/CollectPaymentModal", () => ({ CollectPaymentModal: () => null }));
 vi.mock("../components/ReceiptCorrectionLauncher", () => ({ ReceiptCorrectionLauncher: () => null }));
 vi.mock("../components/PortalInviteRow", () => ({ PortalInviteRow: () => null }));
@@ -34,7 +40,7 @@ function words(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   return node && typeof node === "object" && "props" in node ? words((node as Element).props.children as ReactNode) : "";
 }
-const reply = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body });
+const reply = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body, clone: () => ({ json: async () => body }) });
 const turns = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 const summary = (): WorkflowSummary => ({ today: "2026-10-22", timeZone: "Asia/Aden",
   openVisit: null, lastVisit: null, nextAppointment: null, activePlans: [], financial: null, canSeeFinancial: false, alerts: [],
@@ -104,7 +110,7 @@ describe("explicit planned-session rebooking UI", () => {
     expect(f.find("button", "إلغاء").props.disabled).toBe(true);
     const [url, request] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/planned-visits/71/rebook");
-    expect(JSON.parse(request.body as string)).toMatchObject({ expectedAppointmentId: 101, expectedGeneration: "a".repeat(32), date: "2026-10-24", time: "16:00", reason: "طلب المريض", requestId: expect.any(String) });
+    expect(JSON.parse(request.body as string)).toMatchObject({ expectedAppointmentId: 101, expectedGeneration: "a".repeat(32), date: "2026-10-24", time: "16:00", reason: "طلب المريض", requestId: expect.any(String), returnBookingSource: { kind: "planned_visit", id: 71 }, returnBookingFingerprint: "b".repeat(64) });
     resolve(reply({ appointmentId: 102, title: "جلسة اختبار", replayed: false }, 201)); await turns();
     expect(f.props.onChanged).toHaveBeenCalledTimes(1); expect(f.props.onVisitStarted).not.toHaveBeenCalled();
     expect(words(f.render())).toContain("تمت إعادة حجز الجلسة"); expect(f.find("form")).toBeUndefined();

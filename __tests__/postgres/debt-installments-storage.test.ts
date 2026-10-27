@@ -34,7 +34,7 @@ describe("0059 existing-debt allocation storage",()=>{
   it("keeps migration/bootstrap byte-identical, applies with gaps and leaves prior invoice facts intact",async()=>{
     expect(readFileSync("migrations/0059_invoice_debt_installments.sql","utf8")).toBe(DEBT_INSTALLMENTS_SQL);
     expect((await q("SELECT to_jsonb(i) AS facts FROM invoices i WHERE id=$1",[invoiceId]))[0].facts).toEqual(oldInvoice);
-    expect((await q("SELECT version FROM schema_migrations ORDER BY version")).map(r=>r.version).at(-1)).toBe("0069");
+    expect((await q("SELECT version FROM schema_migrations ORDER BY version")).map(r=>r.version).at(-1)).toBe("0082");
   });
   it("creates exact terms without a second invoice or receipt; exact retry returns the same version",async()=>{
     const first=await schedules.saveDebtRepayment(input("debt-create-exact"));

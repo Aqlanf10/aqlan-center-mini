@@ -1,7 +1,12 @@
 "use client";
 
+import { useReturnBookingContext } from "@/components/useReturnBookingContext";
+import PatientResponsibilitySettings from "./PatientResponsibilitySettings";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
+
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
+import { OrthoFollowupCoveragePanel } from "./OrthoFollowupCoveragePanel";
 import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import { OrthoPackageLink } from "./OrthoPackageLink";
 import { canViewMoney } from "@/lib/roles";
@@ -31,7 +36,7 @@ import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-asses
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
-  LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore,
+  LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore, checkOrthoSessionDraft,
   type LegacyFinancialMode,
 } from "@/lib/ortho-baseline";
 import { useSession, type SessionInfo } from "./SessionProvider";
@@ -605,6 +610,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
           patientPhone={patient?.phone ?? null}
           draftKey={`next:${saved.adjustmentId}`} contactReady={owner.contact}
           caseId={saved.caseId}
+          adjustmentId={saved.adjustmentId}
           doneOn={saved.doneOn}
           nextWeeks={saved.nextWeeks}
           photosUploaded={saved.photosUploaded}
@@ -701,6 +707,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                   live ? "border-navy-200 bg-white" : "border-slate-200 bg-slate-50/70 opacity-80"
                 }`}
               >
+                {live ? <PatientResponsibilitySettings patientId={patientId} kind="ortho" sourceId={row.id} onSaved={refreshAfterConfirmedChange} /> : null}
                 {/* رأس الحالة التقويمية */}
                 <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "px-3 py-1 sm:p-4" : "p-4"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -747,6 +754,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
                       planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={row.id}
                       onOpenClinicalContext={(reference) => onContextChange?.(reference)} />
+                    <OrthoFollowupCoveragePanel patientId={patientId} orthoCaseId={row.id} onSaved={refreshAfterConfirmedChange} />
                     {(row.status === "active" || row.status === "retention")
                       ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
                           refreshRevision={onboardingRevision} onOpenAccount={onOpenAccount} /> : null}
@@ -1231,11 +1239,11 @@ function SignTodayVisitCard({ visitId, patientId, onError, onUncertain, onSigned
 }
 
 function NextAppointmentCard({
-  patientId, patientName, patientPhone, caseId, doneOn, nextWeeks,
+  patientId, patientName, patientPhone, caseId, adjustmentId, doneOn, nextWeeks,
   photosUploaded, onDismiss, onError, draftKey, contactReady,
 }: {
   patientId: number; patientName: string; patientPhone: string | null;
-  caseId: number; doneOn: string; nextWeeks: number; photosUploaded: number;
+  caseId: number; adjustmentId: number; doneOn: string; nextWeeks: number; photosUploaded: number;
   draftKey: string; contactReady: boolean;
   onDismiss: () => void; onError: (message: string | null) => void;
 }) {
@@ -1247,7 +1255,9 @@ function NextAppointmentCard({
   const [date, setDate] = form.field("date", suggested);
   const [time, setTime] = form.field("time", "16:00");
   const busy = form.draft.busy;
-  const [booked] = form.field<{ date: string; time: string } | null>("booked", null);
+  const [booked] = form.field<{ date: string; time: string; doctorName: string | null } | null>("booked", null);
+  const returnContext = useReturnBookingContext({ patientId, source: { kind: "ortho_adjustment", id: adjustmentId }, enabled: contactReady && !booked, locked: busy });
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([patientId, caseId, adjustmentId, draftKey, date, time, booking, returnContext.fingerprint]));
   // The card survives Back/success, but a captured form command must not.
   // Retained draft values alone cannot distinguish two separate form openings.
   const bookingView = useMemo(() => makeViewLease(), [booking, form.draft]);
@@ -1276,27 +1286,28 @@ function NextAppointmentCard({
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const operation = form.begin(currentBookingView() && contactReady && form.owner.contact);
+    const operation = form.begin(currentBookingView() && contactReady && form.owner.contact && returnContext.ready && returnContext.isCurrent());
     if (!operation) return;
     onError(null);
     try {
-      const response = await fetch("/api/appointments", {
+      const response = await bookingFetch("/api/appointments", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patientId, date, time, durationMinutes: 15,
+          patientId, date, time, durationMinutes: 15, ...returnContext.payload,
           appointmentType: "follow_up",
           note: "جلسة شدّ تقويم — من كابينة التقويم",
         }),
-      });
+      }, () => form.current(operation) && currentBookingView() && contactReady && returnContext.isCurrent());
       if (!form.checkHeaders(response, operation)) return;
       const payload = await response.json().catch(() => null);
       if (!form.current(operation)) return;
       if (!response.ok) {
+        returnContext.handleRejection(payload);
         if (response.status >= 500) form.uncertain();
         onError(payload?.suggestionMessage || payload?.message || "تعذّر الحجز.");
         return;
       }
-      form.commit("booked", { date, time });
+      form.commit("booked", { date, time, doctorName: typeof payload?.doctorName === "string" ? payload.doctorName : null });
       bookingView.retire();
       form.commit("booking", false);
     } catch {
@@ -1308,6 +1319,7 @@ function NextAppointmentCard({
 
   return (
     <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-4 shadow-xs">
+      {nearbyBookingDialog}
       <p className="mb-1 text-sm font-black text-emerald-900">
         {booked ? "تم حجز الجلسة القادمة بنجاح" : "📅 الجلسة القادمة المقترحة"}
       </p>
@@ -1323,6 +1335,7 @@ function NextAppointmentCard({
         {booked ? ` · الساعة ${friendlyTime(booked.time)}` : ""}
       </p>
 
+      {booked ? <p className="mb-2 text-xs font-bold text-emerald-900">الطبيب: {booked.doctorName ?? "راجع الطبيب المسجل في الموعد"}</p> : returnContext.view}
       {booked ? (
         <>
           {contactReady && waLink && message ? (
@@ -1373,7 +1386,7 @@ function NextAppointmentCard({
             </label>
           </div>
           <div className="flex gap-2">
-            <button type="submit" disabled={busy || form.draft.uncertain || !contactReady || !date || !time}
+            <button type="submit" disabled={busy || form.draft.uncertain || !contactReady || !returnContext.ready || !date || !time}
               className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-black text-white disabled:opacity-50">
               {busy ? "جارٍ الحجز…" : "أكّد الحجز"}
             </button>
@@ -1515,6 +1528,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   // Recording a session must not advance either arch without an explicit selection.
   const [upperWire, setUpperWire] = form.field("upperWire", caseRow.upperWire ?? "");
   const [lowerWire, setLowerWire] = form.field("lowerWire", caseRow.lowerWire ?? "");
+  const [removeUpperWire, setRemoveUpperWire] = form.field("removeUpperWire", false);
+  const [removeLowerWire, setRemoveLowerWire] = form.field("removeLowerWire", false);
   const previousAdjustment = caseRow.adjustments[0] ?? null;
   // The baseline stores a description, not an elastic class. Never infer one from its text.
   const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
@@ -1553,6 +1568,15 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       if (form.editable()) onError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
       return;
     }
+    const sessionDraft = {
+      upperWire: removeUpperWire ? "" : upperWire,
+      lowerWire: removeLowerWire ? "" : lowerWire,
+      ...(removeUpperWire ? { upperWireAction: "remove" as const } : {}),
+      ...(removeLowerWire ? { lowerWireAction: "remove" as const } : {}),
+      elastics, elasticNote, done, nextWeeks: Number(nextWeeks),
+    };
+    const checked = checkOrthoSessionDraft({ ...sessionDraft, caseId: caseRow.id });
+    if (!checked.ok) { if (form.editable()) onError(checked.message); return; }
     const operation = form.begin(caseRow.status === "active" || caseRow.status === "retention");
     if (!operation) return;
     const submittedPhotos = [...queue];
@@ -1560,8 +1584,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     try {
       const response = await fetch(`/api/ortho/${caseRow.id}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doneOn, upperWire, lowerWire, elastics, elasticNote, done,
-          nextWeeks: Number(nextWeeks) || 4 }),
+        body: JSON.stringify({ doneOn, ...sessionDraft }),
       });
       if (!form.checkHeaders(response, operation)) return;
       const payload = await response.json().catch(() => null);
@@ -1605,7 +1628,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       if (failed > 0) onError(`رُفعت ${uploaded} صورة وفشل ${failed} — أعد المحاولة من المستندات.`);
       for (const photo of submittedPhotos) form.release(photo.preview);
       form.commit("queue", []);
-      onSaved({ adjustmentId, caseId: caseRow.id, doneOn, nextWeeks: Number(nextWeeks) || 4, photosUploaded: uploaded, visitId });
+      onSaved({ adjustmentId, caseId: caseRow.id, doneOn, nextWeeks: Number(nextWeeks), photosUploaded: uploaded, visitId });
     } catch {
       if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد نتيجة تسجيل الشدّة. راجع السجل قبل تكرارها."); }
     } finally { form.finish(operation); }
@@ -1639,23 +1662,27 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             <span className="mb-1 block text-[10px] font-bold text-slate-500">
               السلك العلوي {caseRow.upperWire ? `(الحالي ${caseRow.upperWire})` : ""}
             </span>
-            <select value={upperWire} onChange={(event) => setUpperWire(event.target.value)}
+            <select disabled={removeUpperWire} value={upperWire} onChange={(event) => setUpperWire(event.target.value)}
               aria-label="السلك العلوي" dir="ltr"
               className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
               <option value="">— بلا تغيير —</option>
               {options.map((code) => <option key={code} value={code}>{code}</option>)}
             </select>
+            <span className="mt-1 block text-xs"><input type="checkbox" aria-label="إزالة السلك العلوي" checked={removeUpperWire}
+              onChange={(event) => setRemoveUpperWire(event.target.checked)} /> إزالة السلك العلوي صراحةً</span>
           </label>
           <label className="min-w-[9rem] flex-1">
             <span className="mb-1 block text-[10px] font-bold text-slate-500">
               السلك السفلي {caseRow.lowerWire ? `(الحالي ${caseRow.lowerWire})` : ""}
             </span>
-            <select value={lowerWire} onChange={(event) => setLowerWire(event.target.value)}
+            <select disabled={removeLowerWire} value={lowerWire} onChange={(event) => setLowerWire(event.target.value)}
               aria-label="السلك السفلي" dir="ltr"
               className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-mono">
               <option value="">— بلا تغيير —</option>
               {options.map((code) => <option key={code} value={code}>{code}</option>)}
             </select>
+            <span className="mt-1 block text-xs"><input type="checkbox" aria-label="إزالة السلك السفلي" checked={removeLowerWire}
+              onChange={(event) => setRemoveLowerWire(event.target.checked)} /> إزالة السلك السفلي صراحةً</span>
           </label>
         </div>
       ) : null}
@@ -1800,7 +1827,9 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       </div>
 
       <p className="mb-2 text-[10px] text-slate-500">
-        الموعد المقترح: {friendlyDateLong(nextAdjustmentDate(doneOn, Number(nextWeeks) || 4))}
+        {Number.isInteger(Number(nextWeeks)) && Number(nextWeeks) >= 1 && Number(nextWeeks) <= 52
+          ? `الموعد المقترح: ${friendlyDateLong(nextAdjustmentDate(doneOn, Number(nextWeeks)))}`
+          : "حدّد مدة صحيحة من أسبوع إلى 52 أسبوعًا؛ لا يوجد موعد مقترح صالح."}
       </p>
 
       <button type="submit" disabled={saving || form.draft.uncertain}
@@ -1949,17 +1978,18 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
   const saving = form.draft.busy;
 
   useEffect(() => {
+    if (form.session?.role !== "admin") return;
     let alive = true;
     void fetch("/api/parties?kind=doctor", { cache: "no-store" })
       .then(async (response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (!alive || !payload) return;
         const list = Array.isArray(payload) ? payload : payload.balances ?? [];
-        setDoctors(list.map((one: { id: number; name: string }) => ({ id: one.id, name: one.name })));
+        setDoctors(list.filter((one: { isActive?: boolean }) => one.isActive === true).map((one: { id: number; name: string }) => ({ id: one.id, name: one.name })));
       })
       .catch(() => {});
     return () => { alive = false; };
-  }, []);
+  }, [form.session?.role]);
 
   const elapsedNumber = Number(monthsElapsed);
   const derivedStart = Number.isInteger(elapsedNumber) && elapsedNumber >= 0 && elapsedNumber <= 120
@@ -1969,6 +1999,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
     event.preventDefault();
     if (saving || form.draft.uncertain) return;
     if (!financialMode) { onError("اختر كيف عومل المال قبل النظام."); return; }
+    if (form.session?.role === "admin" && !doctors.some(doctor => doctor.id === Number(doctorId))) { onError("اختر طبيبًا مسؤولًا نشطًا للحالة."); return; }
     const operation = form.begin((form.session?.role === "admin" || form.session?.role === "doctor") && !form.owner.cases.some((row) => row.status === "active" || row.status === "retention"));
     if (!operation) return;
     onError(null);
@@ -1979,7 +2010,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
           patientId, appliance, arches, slot, phase, upperWire, lowerWire, elastics,
           monthsElapsed: Number(monthsElapsed), monthsRemaining: Number(monthsRemaining),
           financialMode, remainingObjectives: objectives,
-          responsibleDoctorId: doctorId ? Number(doctorId) : null,
+          responsibleDoctorId: form.session?.role === "admin" && doctorId ? Number(doctorId) : null,
         }),
       });
       if (!form.checkHeaders(response, operation)) return;
@@ -2079,11 +2110,11 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
         </label>
         <label>
           <span className={label}>الطبيب المسؤول</span>
-          <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
+          {form.session?.role === "admin" ? <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
             aria-label="الطبيب المسؤول" className={field}>
-            <option value="">— الطبيب الذي يسجّل —</option>
+            <option value="">— اختر الطبيب المسؤول —</option>
             {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
-          </select>
+          </select> : <p className="text-xs text-slate-600">تُسجّل المسؤولية على حساب الطبيب الحالي بعد التحقق من نشاطه وصلاحيته؛ تغيير المسؤولية لاحقًا للمدير.</p>}
         </label>
       </div>
 
@@ -2105,7 +2136,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
           aria-label="الأهداف المتبقية" placeholder="إغلاق فراغ القلع العلوي، تصحيح الخط المتوسط…" className={field} />
       </label>
 
-      <button type="submit" disabled={saving || form.draft.uncertain}
+      <button type="submit" disabled={saving || form.draft.uncertain || (form.session?.role === "admin" && !doctorId)}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white disabled:opacity-50">
         {saving ? "جارٍ التسجيل…" : "سجّل الحالة السابقة"}
       </button>

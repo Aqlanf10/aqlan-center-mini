@@ -1,7 +1,31 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { getDailyClinicReportToday, loadDailyClinicReport } from "@/lib/daily-clinic-report";
-import { isDailyClinicReportDate } from "@/lib/daily-clinic-report-model";
+import { DailyClinicReportIntegrityError, isDailyClinicReportDate } from "@/lib/daily-clinic-report-model";
+
+import { DailyClinicExpenseIntegrityError } from "@/lib/daily-clinic-expense-report";
+import { FinancialCurrencyIntegrityError } from "@/lib/money";
+import { ReclassificationProofError } from "@/lib/invoice-currency-reclassification";
+
+// Only literals from this whitelist may reach server logs. Never forward an
+// exception's message/name/stack, SQL, request parameters or financial evidence.
+function diagnosticCode(error: unknown): string {
+  if (error instanceof DailyClinicReportIntegrityError) {
+    switch (error.message) {
+      case "Invoice line plan currency conflict": return "INVOICE_LINE_PLAN_CURRENCY";
+      case "Invoice/plan currency conflict": return "INVOICE_PLAN_CURRENCY";
+      case "Unresolved or cross-patient agreement link": return "AGREEMENT_OWNERSHIP";
+      case "Cross-patient invoice line source": return "INVOICE_LINE_OWNERSHIP";
+      case "Historical document line count conflict": return "HISTORICAL_DOCUMENT_LINES";
+      case "Historical document clinical ownership conflict": return "HISTORICAL_DOCUMENT_OWNERSHIP";
+      default: return "REPORT_INTEGRITY";
+    }
+  }
+  if (error instanceof DailyClinicExpenseIntegrityError) return "EXPENSE_INTEGRITY";
+  if (error instanceof FinancialCurrencyIntegrityError) return "FINANCIAL_CURRENCY_INTEGRITY";
+  if (error instanceof ReclassificationProofError) return "RECLASSIFICATION_PROOF";
+  return "UNEXPECTED_FAILURE";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +52,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: "اختر تاريخًا صحيحًا بصيغة YYYY-MM-DD." }, { status: 400, headers });
     }
     return NextResponse.json(await loadDailyClinicReport(date), { headers });
-  } catch {
+  } catch (error) {
+    console.error("[daily-clinic-report]", diagnosticCode(error));
     // Integrity diagnostics can contain patient/financial evidence. Never
     // serialize an exception, SQL or partial financial report to the browser.
     return NextResponse.json({ message: "تعذّر إعداد كشف إقفال اليوم. أعد المحاولة." }, { status: 500, headers });
