@@ -5,6 +5,7 @@ import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 assertRealPostgresUrl(); stubPostgresEnv();
 process.env.SESSION_SECRET = "synthetic-rebooking-test-secret-not-for-production";
 const db = await import("../../lib/db");
+const { readReturnBookingContext } = await import("../../lib/return-booking-context");
 const { rebookPlannedVisit } = await import("../../lib/planned-visit-rebooking");
 const observer = rawPool(assertRealPostgresUrl(), 3);
 let serial = 0;
@@ -25,13 +26,21 @@ beforeAll(async () => {
   await q("UPDATE settings SET value = '20' WHERE key = 'clinic.chairs'");
 });
 afterAll(async () => { await db.resetPoolForTesting(); await observer.end(); });
+async function bookingContext(patientId: number, plannedVisitId: number) {
+  const context = await readReturnBookingContext(db.getPool(), patientId, {kind: "planned_visit", id: plannedVisitId});
+  expect(context.ok).toBe(true);
+  if (!context.ok) throw new Error(context.message);
+  return {returnBookingSource: context.source, returnBookingFingerprint: context.fingerprint};
+}
 async function fixture(status: "no_show" | "cancelled" = "no_show") {
   const [patient] = await q("INSERT INTO patients(patient_number,full_name) VALUES ($1,'Synthetic rebooking patient') RETURNING id", [`SYN-REBOOK-${++serial}`]);
   const [invoice] = await q("INSERT INTO invoices(invoice_number,patient_id,total_minor) VALUES ($1,$2,1200) RETURNING id", [`SYN-INV-${serial}`,patient.id]);
   await q("INSERT INTO invoice_items(invoice_id,description,unit_price_minor,total_minor) VALUES ($1,'Synthetic retained item',1200,1200)",[invoice.id]);
   await q("INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,amount_minor,currency,base_amount_minor) VALUES ($1,$2,$3,$4,100,'YER',100)",[`SYN-PAY-${serial}`,patient.id,invoice.id,shiftId]);
   const [plan] = await q("INSERT INTO treatment_plans(patient_id,title,total_minor,status) VALUES ($1,'Synthetic treatment plan',1200,'active') RETURNING id", [patient.id]);
-  const [item] = await q("INSERT INTO plan_items(plan_id,service_name,unit_price_minor) VALUES ($1,'Synthetic clinical item',1200) RETURNING id", [plan.id]);
+  const [doctor] = await q("INSERT INTO parties(kind,name) VALUES ('doctor','Synthetic responsible doctor') RETURNING id");
+  const [clinical] = await q("INSERT INTO clinical_cases(patient_id,specialty,title,responsible_party_id,created_by) VALUES ($1,'general','Synthetic current case',$2,'synthetic') RETURNING id", [patient.id,doctor.id]);
+  const [item] = await q("INSERT INTO plan_items(plan_id,case_id,service_name,unit_price_minor) VALUES ($1,$2,'Synthetic clinical item',1200) RETURNING id", [plan.id,clinical.id]);
   const [appointment] = await q(`INSERT INTO appointments(patient_id,scheduled_date,scheduled_time,status,ended_at,cancel_reason)
     VALUES ($1, (NOW() AT TIME ZONE $2)::date - 1,'10:00',$3,NOW(),'Synthetic historical reason') RETURNING id`, [patient.id, db.CLINIC_TIME_ZONE, status]);
   const [planned] = await q(`INSERT INTO planned_visits(patient_id,plan_id,sequence,title,status,appointment_id)
@@ -39,10 +48,10 @@ async function fixture(status: "no_show" | "cancelled" = "no_show") {
   await q("UPDATE appointments SET planned_visit_id = $2 WHERE id = $1", [appointment.id, planned.id]);
   await q("INSERT INTO treatment_sessions(plan_item_id,sequence,planned_visit_id) VALUES ($1,1,$2)", [item.id, planned.id]);
   await q("INSERT INTO appointment_status_log(appointment_id,from_status,to_status,reason,actor) VALUES ($1,'booked',$2,'Synthetic historical reason','synthetic')", [appointment.id, status]);
-  const input = {plannedVisitId: planned.id as number, expectedAppointmentId: appointment.id as number,
+  const input = {...await bookingContext(patient.id, planned.id), plannedVisitId: planned.id as number, expectedAppointmentId: appointment.id as number,
     expectedGeneration: (await db.listPatientPlannedVisits(patient.id))[0].rebookGeneration,
     date: addDays(tomorrow, serial), time: "10:00", reason: "المريض طلب موعدًا بديلًا", requestId: `synthetic-rebook-request-${serial}`};
-  return { patient: patient.id as number, plan: plan.id as number, item: item.id as number,
+  return { doctor: doctor.id as number, clinical: clinical.id as number, patient: patient.id as number, plan: plan.id as number, item: item.id as number,
     planned: planned.id as number, old: appointment.id as number, input };
 }
 async function untouchedFingerprint() {
@@ -73,6 +82,34 @@ it.each(["no_show", "cancelled"] as const)("rebooks %s explicitly, retaining his
     oldAppointment: {status, planned_visit_id: f.planned}, newAppointment: {status: "booked", planned_visit_id: f.planned}, intent: {reason: f.input.reason},
   });
   expect((await db.listPatientPlannedVisits(f.patient))[0]).toMatchObject({appointmentStatus: "booked", canRebook: false});
+});
+it("requires a verified return context and refuses stale responsibility without writes", async () => {
+  const f = await fixture();
+  const {returnBookingFingerprint: _fingerprint, ...unverified} = f.input;
+  expect(await rebookPlannedVisit(unverified, reception)).toMatchObject({ok:false,status:409,code:"return_booking_context_required"});
+  await assertNoReplacement(f);
+  const [doctor] = await q("INSERT INTO parties(kind,name) VALUES ('doctor','Synthetic new responsible doctor') RETURNING id");
+  await q("UPDATE clinical_cases SET responsible_party_id=$2 WHERE id=$1",[f.clinical,doctor.id]);
+  const before = await untouchedFingerprint();
+  expect(await rebookPlannedVisit(f.input, reception)).toMatchObject({ok:false,status:409,code:"return_booking_source_changed"});
+  await assertNoReplacement(f);
+  expect(await untouchedFingerprint()).toEqual(before);
+  expect(await q("SELECT id FROM audit_log WHERE action='planned_visit.rebook' AND entity_id=$1",[String(f.planned)])).toEqual([]);
+  const refreshed = {...f.input,...await bookingContext(f.patient,f.planned)};
+  expect(refreshed.returnBookingFingerprint).not.toBe(f.input.returnBookingFingerprint);
+  const saved = await rebookPlannedVisit(refreshed,reception);
+  expect(saved.ok).toBe(true);if(!saved.ok)throw new Error(saved.message);
+  expect((await q("SELECT doctor_id FROM appointments WHERE id=$1",[saved.appointmentId]))[0].doctor_id).toBe(doctor.id);
+  expect(await rebookPlannedVisit(refreshed,reception)).toEqual({...saved,replayed:true});
+  expect(await untouchedFingerprint()).toEqual(before);
+});
+it("refuses a return case with no responsible doctor rather than falling back to historical attribution", async () => {
+  const f = await fixture();
+  await q("UPDATE appointments SET doctor_id=$2 WHERE id=$1",[f.old,f.doctor]);
+  await q("UPDATE planned_visits SET doctor_id=$2 WHERE id=$1",[f.planned,f.doctor]);
+  await q("UPDATE clinical_cases SET responsible_party_id=NULL WHERE id=$1",[f.clinical]);
+  expect(await rebookPlannedVisit(f.input,reception)).toMatchObject({ok:false,status:409,code:"responsibility_missing"});
+  await assertNoReplacement(f);
 });
 it("lost reply: identical request returns the saved replacement, changed payload conflicts", async () => {
   const f = await fixture(); const first = await rebookPlannedVisit(f.input, reception);
@@ -139,7 +176,7 @@ it("rejects a different-patient doctor and expired/revoked accounts including re
   expect(await rebookPlannedVisit(f.input,user)).toMatchObject({ok:false,status:401});
 });
 async function referralFixture() {
-  const f=await fixture(); const [doctor]=await q("INSERT INTO parties(kind,name) VALUES ('doctor','Synthetic receiver') RETURNING id");
+  const f=await fixture(); const doctor={id:f.doctor};
   await q("UPDATE planned_visits SET doctor_id=$2 WHERE id=$1",[f.planned,doctor.id]);
   const [r]=await q(`INSERT INTO patient_referrals(patient_id,to_name,to_specialty,reason,created_by,kind,to_party_id,workflow_state)
     VALUES ($1,'Synthetic receiver','endodontics','Synthetic request','synthetic','internal',$2,'accepted') RETURNING id`,[f.patient,doctor.id]);
@@ -278,6 +315,7 @@ it("does not detach an unexpected other live referral booking",async()=>{
 });
 it("protects linked session parent plans even when the grouping has no parent plan",async()=>{
   const f=await fixture();await q("UPDATE planned_visits SET plan_id=NULL WHERE id=$1",[f.planned]);
+  Object.assign(f.input, await bookingContext(f.patient, f.planned));
   const blocker=await observer.connect();try{
     await blocker.query("BEGIN");await blocker.query("SELECT id FROM treatment_plans WHERE id=$1 FOR UPDATE",[f.plan]);
     expect(await rebookPlannedVisit(f.input,reception)).toMatchObject({ok:false,status:409});await assertNoReplacement(f);

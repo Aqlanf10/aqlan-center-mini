@@ -110,11 +110,34 @@ export function readSignedSessionEnvelope(token: string | undefined): unknown | 
   catch { return null; }
 }
 
+declare const legacyEvidenceBrand: unique symbol;
+export interface VerifiedLegacySession { readonly [legacyEvidenceBrand]: true }
+const legacyPayloadSources = new WeakMap<object, string>();
+const legacyEvidenceSources = new WeakMap<VerifiedLegacySession, string>();
+/** Only an actual verified parser result (or server-derived result retaining its
+ * private source) can yield evidence. Copies and request JSON never qualify. */
+export function legacySessionEvidence(payload: SessionPayload): VerifiedLegacySession | null {
+  const token=legacyPayloadSources.get(payload);
+  if(!token || !readSessionToken(token))return null;
+  const evidence=Object.freeze({}) as VerifiedLegacySession;
+  legacyEvidenceSources.set(evidence,token);return evidence;
+}
+export function revalidateLegacySessionEvidence(evidence: VerifiedLegacySession): SessionPayload | null {
+  const token=legacyEvidenceSources.get(evidence);return token?readSessionToken(token):null;
+}
+/** Carries original signed provenance, never trust in the caller's overrides. */
+export function carryLegacySessionEvidence(source: SessionPayload, derived: SessionPayload): SessionPayload {
+  const token=legacyPayloadSources.get(source);
+  if(token)legacyPayloadSources.set(derived,token);
+  return derived;
+}
+
 export function readSessionToken(token: string | undefined): SessionPayload | null {
   const payload = readSignedSessionEnvelope(token);
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || hasCanonicalSessionMarker(payload)) return null;
   const candidate = payload as Partial<SessionPayload>;
   if (typeof candidate.expiresAt !== "number" || !Number.isFinite(candidate.expiresAt) || candidate.expiresAt <= Date.now()) return null;
   if (!Number.isSafeInteger(candidate.userId) || (candidate.userId ?? 0) < 1) return null;
+  legacyPayloadSources.set(candidate,token!);
   return candidate as SessionPayload;
 }

@@ -20,7 +20,7 @@ import { POST as login } from "../app/api/auth/login/route";
 import { POST as changePassword } from "../app/api/auth/password/route";
 import {
   SESSION_COOKIE, SESSION_DURATION_MS, hashPassword, readSessionToken,
-  sessionCredentialVersion, sessionPermissionVersion, verifyPassword,
+  sessionCredentialVersion, sessionPermissionVersion, verifyPassword, revalidateLegacySessionEvidence,
 } from "../lib/auth";
 import type { StaffUser } from "../lib/db";
 import { parseDoctorPermissions } from "../lib/doctor-permissions";
@@ -123,7 +123,10 @@ describe("self-password session renewal", () => {
     expect(payload.credentialVersion).not.toBe(sessionCredentialVersion(originalHash));
     expect(await verifyPassword(NEW_PASSWORD, user.passwordHash)).toBe(true);
     expect(await verifyPassword(OLD_PASSWORD, user.passwordHash)).toBe(false);
-    expect(mocks.update).toHaveBeenCalledWith(user.id, { passwordHash: user.passwordHash });
+    expect(mocks.update).toHaveBeenCalledWith(user.id, { passwordHash: user.passwordHash },
+      {actor:user.username,actorRole:role,reason:"تغيير كلمة المرور ذاتياً"},
+      {evidence:expect.any(Object),selfPassword:true});
+    expect(revalidateLegacySessionEvidence(mocks.update.mock.calls[0][3].evidence)?.userId).toBe(user.id);
 
     const restricted = role === "accountant" || role === "cashier";
     const expectedAccess = restricted ? financeAccessFor(role, access) : undefined;

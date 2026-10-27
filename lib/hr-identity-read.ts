@@ -8,7 +8,16 @@ import { authorizeIdentityAdmin, readHrIdentitySources } from './hr-identity-sou
 export async function readHrIdentityPreview(pool: Pick<DbPool, 'connect'>, session: SessionPayload | null, request?: unknown) {
   if (!session?.credentialVersion || session.expiresAt <= Date.now()) throw new IdentityPreviewError(401, 'انتهت الجلسة. سجّل الدخول من جديد.');
   const client = await pool.connect();
+  let locked=false, began=false, discard=false;
+  const fence="aqlan.canonical.identity.substrate.v1:public";
   try {
+    // Acquire outside RR: its first snapshot must be taken AFTER any installer
+    // wait, never before a blocking transaction-lock SELECT.
+    try {
+      await client.query("SELECT pg_advisory_lock_shared(hashtextextended($1,0))",[fence]);
+      locked=true;
+    } catch(error) { discard=true; throw error; }
+    began=true;
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
     await authorizeIdentityAdmin(client, session);
     const sources = await readHrIdentitySources(client);
@@ -20,9 +29,20 @@ export async function readHrIdentityPreview(pool: Pick<DbPool, 'connect'>, sessi
     }
     if (session.expiresAt <= Date.now()) throw new IdentityPreviewError(401, 'انتهت الجلسة. سجّل الدخول من جديد.');
     await client.query('COMMIT');
+    began=false;
     return preview;
   } catch (error) {
-    await client.query('ROLLBACK');
+    if(began){try{await client.query('ROLLBACK');began=false;}catch{discard=true;}}
     throw error;
-  } finally { client.release(); }
+  } finally {
+    if(locked){
+      try{
+        const {rows}=await client.query<{unlocked:boolean}>("SELECT pg_advisory_unlock_shared(hashtextextended($1,0)) AS unlocked",[fence]);
+        if(rows.length!==1 || rows[0].unlocked!==true)discard=true;
+      }catch{discard=true;}
+    }
+    // DbClient.release(true) is supported by node-postgres and removes the
+    // connection rather than recycling a possibly locked/aborted backend.
+    client.release(discard);
+  }
 }

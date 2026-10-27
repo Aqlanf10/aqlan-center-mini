@@ -1,3 +1,4 @@
+import { lockLegacyStaffBoundary, assertLegacyPermissionEnvelope } from "./legacy-staff-boundary";
 import { getPool } from "./db";
 import { isAdmin } from "./roles";
 import { withDefaults, type SettingsMap } from "./settings";
@@ -18,7 +19,7 @@ import { sessionCredentialVersion } from "./auth";
  * بالكود.
  *
  * فكل ما يلمسه مسار النسخ من القاعدة يمر من هنا: SELECT مباشر عبر
- * `getPool().query()` حصرًا — بلا ensureSchema، بلا saveSettings، بلا أي دالة
+ * SELECT مباشر (وجلسة النسخ بمعاملة READ ONLY محكومة) — بلا ensureSchema، بلا saveSettings، بلا أي دالة
  * كتبت يومًا. والنقص أو الخطأ يخرج فشلًا مغلقًا صريحًا لا تخمينًا بصمت.
  */
 
@@ -91,30 +92,41 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
     role: string;
     is_active: boolean;
     party_id: number | null;
+    permissions: unknown;
   } | null = null;
+  let client: Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>> | null = null;
+  let discard=false;
   try {
-    const { rows } = await getPool().query<{
+    client=await getPool().connect();
+    await client.query("BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED READ ONLY");
+    await lockLegacyStaffBoundary(client);
+    const { rows } = await client.query<{
       id: number;
       username: string;
       password_hash: string;
       role: string;
       is_active: boolean;
       party_id: number | null;
+      permissions: unknown;
     }>(
-      `SELECT id, username, password_hash, role, is_active, party_id
+      `SELECT id, username, password_hash, role, is_active, party_id, permissions
          FROM users
         WHERE LOWER(username) = LOWER($1)
         LIMIT 1`,
       [payload.username],
     );
     userRow = rows[0] ?? null;
+    if(userRow)assertLegacyPermissionEnvelope(userRow.permissions);
+    await client.query("COMMIT");
   } catch {
+    if(client)await client.query("ROLLBACK").catch(()=>{discard=true;});
     return { ok: false, reason: "users-unreadable" };
-  }
+  } finally { client?.release(discard); }
 
   if (!userRow) return { ok: false, reason: "user-gone" };
+  if(payload.expiresAt<=Date.now())return {ok:false,reason:"no-session"};
   if (!userRow.is_active) return { ok: false, reason: "inactive" };
-  if (userRow.id !== payload.userId) return { ok: false, reason: "user-gone" };
+  if (userRow.id !== payload.userId || userRow.username !== payload.username || userRow.role !== payload.role) return { ok: false, reason: "user-gone" };
   if (payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash)) {
     return { ok: false, reason: "credential-changed" };
   }

@@ -1,3 +1,4 @@
+import { readLegacyStaffSchema, assertLegacyPermissionEnvelope, lockLegacyStaffBoundary, assertLegacyStaffWrite, finishLegacyStaffWrite, type LegacyStaffWriteAuthorization } from "./legacy-staff-boundary";
 import { CommissionLabLineageError } from "./commission-lab-lineage";
 import { LabFinancialBoundaryError, savedLabPayableSnapshot } from "./lab-financial-boundary";
 import { LAB_WORK_INTENT_SQL } from "./lab-work-intent-schema";
@@ -3112,12 +3113,18 @@ function toUser(row: UserRow): StaffUser {
  * الدخول لهذا السبب يعني اتصالًا بك في أول صباح.
  */
 export async function findUserByUsername(username: string, client?: DbClient): Promise<StaffUser | null> {
-  if (!client) await ensureSchema();
-  const { rows } = await (client ?? getPool()).query<UserRow>(
-    `SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND is_active LIMIT 1${client ? " FOR SHARE" : ""}`,
-    [username],
+  if (!client) {
+    if (await readLegacyStaffSchema(getPool()) !== "base") return null;
+    await ensureSchema();
+    return withTransaction(getPool(), held => findUserByUsername(username, held));
+  }
+  await lockLegacyStaffBoundary(client);
+  const { rows } = await client.query<UserRow>(
+    `SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND is_active LIMIT 1 FOR SHARE`, [username],
   );
-  return rows[0] ? toUser(rows[0]) : null;
+  if (!rows[0]) return null;
+  assertLegacyPermissionEnvelope(rows[0].permissions);
+  return toUser(rows[0]);
 }
 
 export async function countUsers(): Promise<number> {
@@ -3133,72 +3140,56 @@ export async function countUsers(): Promise<number> {
  * خطوتين يترك نافذة يستطيع فيها طلبان متزامنان إنشاء مديرين اثنين، وأحدهما ليس أنت.
  */
 export async function createFirstAdmin(input: {
-  username: string;
-  displayName: string;
-  passwordHash: string;
+  username: string; displayName: string; passwordHash: string;
 }): Promise<StaffUser | null> {
+  await readLegacyStaffSchema(getPool());
   await ensureSchema();
-  const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (username, display_name, password_hash, role)
-     SELECT $1, $2, $3, 'admin'
-      WHERE NOT EXISTS (SELECT 1 FROM users)
-     RETURNING *`,
-    [input.username, input.displayName, input.passwordHash],
-  );
-  return rows[0] ? toUser(rows[0]) : null;
+  return withTransaction(getPool(), async client => {
+    // Separate empty-base initialization: exclusive fence serializes two setups.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["aqlan.canonical.identity.substrate.v1:public"]);
+    if (await readLegacyStaffSchema(client) !== "base") throw new Error("LEGACY_STAFF_BASE_SCHEMA_UNREADABLE");
+    const { rows } = await client.query<UserRow>(
+      `INSERT INTO users (username, display_name, password_hash, role)
+       SELECT $1, $2, $3, 'admin' WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING *`,
+      [input.username, input.displayName, input.passwordHash],
+    );
+    return rows[0] ? toUser(rows[0]) : null;
+  });
 }
 
 export async function createStaffUser(input: {
-  username: string;
-  displayName: string;
-  passwordHash: string;
-  role: string;
-  /** جهة الطبيب المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب. */
-  partyId?: number | null;
-  /** التخصص والفرع والصلاحيات والعمولة (اختيارية — الأعمدة الجديدة). */
-  specialty?: string;
-  branch?: string;
-  permissions?: DoctorPermissions;
-  commissionConfig?: DoctorCommissionConfig;
-}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT): Promise<StaffUser> {
+  username: string; displayName: string; passwordHash: string; role: string;
+  partyId?: number | null; specialty?: string; branch?: string;
+  permissions?: DoctorPermissions; commissionConfig?: DoctorCommissionConfig;
+}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT, authorization?: LegacyStaffWriteAuthorization): Promise<StaffUser> {
+  assertLegacyPermissionEnvelope(input.permissions ?? null);
+  await withTransaction(getPool(), client => assertLegacyStaffWrite(client, authorization, null, "create"));
   await ensureSchema();
   let assignedPartyId: number | null = input.partyId ?? null;
-
-  // إذا كان المستخدم طبيباً ولم يُحدد له partyId صراحة، ننشئ له جهة طبيب أو نربطه بجهته القائمة تلقائياً
-  if (input.role === "doctor" && !assignedPartyId) {
-    const pool = getPool();
-    const existing = await pool.query<{ id: number }>(
-      `SELECT id FROM parties WHERE kind = 'doctor' AND (LOWER(name) = LOWER($1) OR name = $2) LIMIT 1`,
-      [input.displayName, input.displayName],
-    );
-    if (existing.rows[0]) {
-      assignedPartyId = existing.rows[0].id;
-    } else {
-      const createdParty = await pool.query<{ id: number }>(
-        `INSERT INTO parties (name, kind, is_active) VALUES ($1, 'doctor', true) RETURNING id`,
-        [input.displayName],
-      );
-      assignedPartyId = createdParty.rows[0]?.id ?? null;
-    }
-  }
-
-  /* (P0-1) مستخدمٌ بإعدادٍ متقدّم يغيّر سياسة جهته **من الآن**: خط الأساس يُلتقط
-     قبل الإدراج، واللقطة الجديدة بعده، في معاملةٍ واحدة. */
-  const partyForHistory = assignedPartyId;
+  const auditContext = { ...ctx };
   const { result: rows } = await withDoctorCommissionChange(
-    ctx, "advanced",
-    async () => [partyForHistory],
-    async (client) => (await client.query<UserRow>(
-    `INSERT INTO users (username, display_name, password_hash, role, party_id,
-                        specialty, branch, permissions, commission_config)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-    [
-      input.username, input.displayName, input.passwordHash, input.role, assignedPartyId,
-      input.specialty ?? null, input.branch ?? null,
-      input.permissions ? JSON.stringify(input.permissions) : null,
-      input.commissionConfig ? JSON.stringify(input.commissionConfig) : null,
-    ],
+    auditContext, "advanced",
+    async client => {
+      const actor = await assertLegacyStaffWrite(client, authorization, null, "create");
+      auditContext.actor = actor.username; auditContext.actorRole = actor.role;
+      // Doctor creation is now inside the same guarded transaction: denial or
+      // final-expiry rollback cannot leave an orphan party.
+      if (input.role === "doctor" && !assignedPartyId) {
+        const existing = await client.query<{ id: number }>(
+          `SELECT id FROM parties WHERE kind='doctor' AND (LOWER(name)=LOWER($1) OR name=$2) LIMIT 1`, [input.displayName,input.displayName]);
+        if (existing.rows[0]) assignedPartyId=existing.rows[0].id;
+        else assignedPartyId=(await client.query<{id:number}>(`INSERT INTO parties(name,kind,is_active) VALUES($1,'doctor',true) RETURNING id`,[input.displayName])).rows[0]?.id ?? null;
+      }
+      return [assignedPartyId];
+    },
+    async client => (await client.query<UserRow>(
+      `INSERT INTO users (username,display_name,password_hash,role,party_id,specialty,branch,permissions,commission_config)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [input.username,input.displayName,input.passwordHash,input.role,assignedPartyId,input.specialty??null,input.branch??null,
+        input.permissions?JSON.stringify(input.permissions):null,input.commissionConfig?JSON.stringify(input.commissionConfig):null],
     )).rows,
+    undefined,
+    client => finishLegacyStaffWrite(client, authorization!, null),
   );
   return toUser(rows[0]);
 }
@@ -11218,6 +11209,7 @@ async function withDoctorCommissionChange<T>(
   partiesOf: (client: DbClient) => Promise<Array<number | null | undefined>>,
   mutate: (client: DbClient) => Promise<T>,
   partiesAfter?: (client: DbClient, result: T) => Promise<Array<number | null | undefined>>,
+  beforeCommit?: (client: DbClient) => Promise<void>,
 ): Promise<{ result: T; changes: CommissionChange[] }> {
   const outcome = await withTransaction(getPool(), async (client) => {
     const initial = [...new Set((await partiesOf(client)).filter((id): id is number => typeof id === "number" && id > 0))]
@@ -11240,6 +11232,7 @@ async function withDoctorCommissionChange<T>(
       const change = await recordCommissionChange(client, partyId, source, ctx);
       if (change) changes.push(change);
     }
+    if (beforeCommit) await beforeCommit(client);
     return { result, changes };
   });
   for (const change of outcome.changes) {
@@ -15286,9 +15279,11 @@ export async function listUsers(): Promise<StaffAccount[]> {
  */
 export async function linkUserDoctor(
   userId: number, partyId: number | null,
-  ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT,
+  ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT, authorization?: LegacyStaffWriteAuthorization,
 ): Promise<StaffAccount | null> {
+  await withTransaction(getPool(), client => assertLegacyStaffWrite(client, authorization, userId, "link"));
   await ensureSchema();
+  const auditContext={...ctx};
   if (partyId !== null) {
     const { rows: doctor } = await getPool().query<{ id: number; name: string }>(
       `SELECT id, name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active LIMIT 1`,
@@ -15299,8 +15294,10 @@ export async function linkUserDoctor(
   /* (P0-1) ربط/فكّ ربط حسابٍ يحمل إعدادًا متقدّمًا يغيّر سياسة الجهتين — من الآن:
      القديمة تفقده والجديدة تكسبه، ولا يمسّ ذلك ما قُبض قبل الربط. */
   const { result: rows } = await withDoctorCommissionChange(
-    ctx, "advanced",
+    auditContext, "advanced",
     async (client) => {
+      const actor=await assertLegacyStaffWrite(client,authorization,userId,"link");
+      auditContext.actor=actor.username;auditContext.actorRole=actor.role;
       const { rows: current } = await client.query<{ party_id: number | null }>(
         `SELECT party_id FROM users WHERE id = $1 FOR UPDATE`, [userId],
       );
@@ -15315,6 +15312,7 @@ export async function linkUserDoctor(
      RETURNING id, username, display_name, role, is_active, created_at, party_id`,
     [userId, partyId],
     )).rows,
+    undefined, client => finishLegacyStaffWrite(client, authorization!, userId),
   );
   if (!rows[0]) return null;
   let partyName: string | null = null;
@@ -15502,12 +15500,18 @@ export async function updateUser(id: number, input: {
   permissions?: DoctorPermissions; commissionConfig?: DoctorCommissionConfig;
   /** (P0-1) إزالة الإعداد المتقدّم: يعود الطبيب إلى نسبة جهته — من الآن. */
   clearCommissionConfig?: boolean;
-}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT): Promise<StaffAccount | null> {
+}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT, authorization?: LegacyStaffWriteAuthorization): Promise<StaffAccount | null> {
+  if(authorization?.selfPassword && (Object.keys(input).length!==1 || typeof input.passwordHash!=="string")) throw new Error("LEGACY_STAFF_SELF_PASSWORD_SCOPE");
+  if(input.permissions!==undefined)assertLegacyPermissionEnvelope(input.permissions);
+  await withTransaction(getPool(), client => assertLegacyStaffWrite(client,authorization,id,"update"));
   await ensureSchema();
+  const auditContext={...ctx};
   const touchesCommission = input.commissionConfig !== undefined || input.clearCommissionConfig === true;
   const { result: rows } = await withDoctorCommissionChange(
-    ctx, "advanced",
+    auditContext, "advanced",
     async (client) => {
+      const actor=await assertLegacyStaffWrite(client,authorization,id,"update");
+      auditContext.actor=actor.username;auditContext.actorRole=actor.role;
       if (!touchesCommission) return [];
       const { rows: owner } = await client.query<{ party_id: number | null }>(
         `SELECT party_id FROM users WHERE id = $1 FOR UPDATE`, [id],
@@ -15541,6 +15545,7 @@ export async function updateUser(id: number, input: {
       input.clearCommissionConfig === true,
     ],
     )).rows,
+    undefined, client => finishLegacyStaffWrite(client, authorization!, id),
   );
   if (!rows[0]) return null;
   let partyName: string | null = null;

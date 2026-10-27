@@ -97,8 +97,8 @@ it("partial identity schema refuses without provisioning or changing an establis
   expect(await authority(fixture.sqlTarget)).toEqual(before);
 });
 
-it("backup failure and mandatory reset-audit failure preserve the prior epoch and clinical rows", async () => {
-  await fixture.sqlTarget.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-RESET-IDENTITY','Synthetic reset rollback patient')");
+it("backup failure and mandatory reset-audit failure preserve the prior epoch and wipeable operational rows", async () => {
+  await fixture.sqlTarget.query("INSERT INTO visits(patient_name,status) VALUES('Synthetic unlinked reset rollback visit','waiting')");
   const before = await authority(fixture.sqlTarget);
   const refused = await db.resetClinicData({ actor: "SYN-OLD-ADMIN", actorRole: "admin" }, async () => ({ ok: false as const, failure: "synthetic-backup-failure" }));
   expect(refused).toEqual({ ok: false, failure: "synthetic-backup-failure" });
@@ -108,7 +108,7 @@ it("backup failure and mandatory reset-audit failure preserve the prior epoch an
     await expect(db.resetClinicData({ actor: "SYN-OLD-ADMIN", actorRole: "admin" }, async () => ({ ok: true as const, backupId: "synthetic-local-backup" }))).rejects.toThrow("synthetic audit refusal");
   } finally { await fixture.sqlTarget.query("DROP TRIGGER synthetic_identity_audit_refusal ON audit_log; DROP FUNCTION synthetic_identity_audit_refusal()"); }
   expect(await authority(fixture.sqlTarget)).toEqual(before);
-  expect((await fixture.sqlTarget.query("SELECT patient_number FROM patients")).rows).toEqual([{ patient_number: "SYN-RESET-IDENTITY" }]);
+  expect((await fixture.sqlTarget.query("SELECT patient_name FROM visits")).rows).toEqual([{ patient_name: "Synthetic unlinked reset rollback visit" }]);
 });
 
 it("successful empty-history reset rotates only inventory execution authority and preserves general session authentication", async () => {
@@ -122,8 +122,21 @@ it("successful empty-history reset rotates only inventory execution authority an
   expect(after.identity[0].execution_epoch_id).not.toBe(before.identity[0].execution_epoch_id);
   expect(after.subjects).toEqual(before.subjects); expect(after.epochs).toHaveLength(before.epochs.length + 1);
   expect((await fixture.sqlTarget.query("SELECT count(*)::int AS n FROM patients")).rows[0].n).toBe(0);
+  expect((await fixture.sqlTarget.query("SELECT count(*)::int AS n FROM visits")).rows[0].n).toBe(0);
   expect(await withTransaction(db.getPool(), c => revalidateSessionInTransaction(signed, c))).not.toBeNull();
   await expect(withTransaction(db.getPool(), c => authenticateSupplierSession(c, signed))).rejects.toMatchObject({ code: "supplier_reauthentication_required" });
   const fresh = { ...signed, authority: await readStaffIdentityClaims(501) };
   expect((await withTransaction(db.getPool(), c => authenticateSupplierSession(c, fresh))).authority).toEqual(fresh.authority);
+});
+
+it("patient-number history refuses reset before backup and preserves execution authority", async () => {
+  await fixture.sqlTarget.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-PROTECTED-IDENTITY','Synthetic protected patient')");
+  const before = await authority(fixture.sqlTarget);
+  const patients = (await fixture.sqlTarget.query("SELECT * FROM patients ORDER BY id")).rows;
+  const backup = vi.fn(async () => ({ ok: true as const, backupId: "synthetic-local-backup" }));
+  await expect(db.resetClinicData({ actor: "SYN-OLD-ADMIN", actorRole: "admin" }, backup))
+    .rejects.toMatchObject({ name: "ProtectedPatientNumberHistoryError" });
+  expect(backup).not.toHaveBeenCalled();
+  expect(await authority(fixture.sqlTarget)).toEqual(before);
+  expect((await fixture.sqlTarget.query("SELECT * FROM patients ORDER BY id")).rows).toEqual(patients);
 });
