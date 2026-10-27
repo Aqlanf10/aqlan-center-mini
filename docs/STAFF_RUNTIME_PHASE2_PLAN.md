@@ -1,4 +1,4 @@
-# Phase 2 proposal — not implementation or activation
+# Phase 2 local implementation — unregistered, not activation
 
 Base: frozen phase 1 `acf12d3589a845eff63c4139f0caa272b5b78596`.
 Separate worktree: `rebuild-staff-runtime-20261027`.
@@ -15,7 +15,7 @@ The v2 descriptor must be distinct and exact. Add immutable ready-owner subject 
 
 Positive synthetic PostgreSQL fixtures can explicitly construct the reviewed ready-state shape to test runtime admission. These fixtures prove no operator authority, bootstrap, recovery trust or real account activation. Existing frozen0076 bytes remain unchanged; tests must not disable guards or use transient prepared placeholders as authorization evidence.
 
-## Proposed token boundary
+## Implemented token boundary
 
 A separate verifier parses a bounded signed durable token only after HMAC verification and strict exact-field validation. Claims bind schema/policy version, realm, immutable subject, target generation, registry revision, control binding epoch, account authorization epoch, credential HMAC, permission revision and linked provider tuple/clinical epoch (or explicit null). Expiration must be finite and strictly future. Username is display/provenance, never ownership.
 
@@ -23,13 +23,13 @@ The verifier returns a private WeakMap-backed handle, not caller-constructible c
 
 Legacy token reads reject durable markers so a canonical owner cannot enter through legacy handling. Obsolete `authority` and `staffAuthority` claims are rejected, including mixed tokens. Ordinary marker-free legacy sessions retain current behavior. Existing obsolete v10 consumers must remain closed; compatibility failures are diagnosed, not papered over with global fallback or unsafe casts.
 
-## Proposed operation boundary
+## Implemented operation boundary
 
 `withStaffOperation(pool, verifiedSession, exactAction, callback)` owns the READ COMMITTED transaction via the existing helper. It admits a private handle before invoking the callback; `assertStaffOperation(client, handle, exactAction)` is required before protected SQL. The wrapper freshly asserts again immediately before returning to the helper's COMMIT and invalidates the handle in finally. There is no exported raw admission API.
 
 Handles bind the exact client, PostgreSQL top-level XID, action and original verified signed token. Every assertion reacquires the central authority fence and validates fresh authority. XID is explicitly not a subtransaction identifier. Normal callback savepoints occur after authority fences. Trusted callbacks must not issue top-level COMMIT/ROLLBACK/BEGIN: changed/ended XID is rejected, but a malicious earlier commit cannot be undone. Caller-owned transaction composition would require a separately reviewed precommit contract.
 
-Use explicit READ COMMITTED transactions. Lock order is authority fence → control/state → account/current subject/provider → future domain locks. Each assertion freshly checks v2 descriptor, complete immutable history, ready anchors, current target generation/binding, active canonical account, credential/account/provider/control revisions, policy/document validity and explicit capability. Owner authority derives only from exact protected owner binding; it never authorizes legacy entry. Display booleans and projections cannot be operation inputs.
+Use explicit READ COMMITTED transactions. Runtime uses a shared advisory fence on the exact phase1 exclusive lifecycle key. Lock order is authority fence → control/state → account/current subject/provider → future domain locks. Each assertion freshly checks v2 descriptor, complete immutable history, ready anchors, current target generation/binding, active canonical account, credential/account/provider/control revisions, policy/document validity and explicit capability. Owner authority derives only from exact protected owner binding; it never authorizes legacy entry. Display booleans and projections cannot be operation inputs.
 
 ## Required evidence
 
@@ -49,3 +49,6 @@ Removing obsolete claim issuance from legacy login/password renewal preserves th
 ## Current local evidence
 
 The synthetic runtime fixture explicitly constructs a hypothetical trusted-ready state using the frozen control transition shapes. It is not an operator trust or bootstrap test. Version-2 installation itself remains quarantined. Full readiness lifecycle, source restoration and any ready-state reset are unsupported.
+
+
+Signed username is compared to the freshly loaded label only for stale-session consistency. It never selects the principal or establishes historical ownership: selection is immutable subject/current binding. A renamed account can use a fresh signed session with the same subject. Future journal recovery must preserve original stored username as provenance, not rewrite it to the current label.

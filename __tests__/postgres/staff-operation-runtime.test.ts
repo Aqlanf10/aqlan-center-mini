@@ -24,6 +24,15 @@ async function claims(userId=2){
  return {userId:r.id,username:r.username,expiresAt:Date.now()+60_000,durableIdentity:{schemaVersion:2,policyVersion:1,realmId:r.realm_id,subjectId:r.subject_id,generationId:r.generation_id,registryRevision:r.registry_revision,controlEpoch:r.binding_epoch,accountEpoch:r.authorization_epoch,permissionRevision:r.permissions.revision,credentialVersion:sessionCredentialVersion(r.password_hash),provider:r.party_id===null?null:{partyId:r.party_id,clinicalEpoch:r.clinical_authority_epoch}}};
 }
 async function session(userId=2){const handle=readVerifiedDurableSession(sign(await claims(userId)));if(!handle)throw new Error("synthetic token fixture invalid");return handle;}
+async function waitForBlockedBy(holderPid:number){
+ const deadline=performance.now()+3000;
+ while(performance.now()<deadline){
+  const {rows}=await pool.query<{pid:number}>("SELECT pid FROM pg_stat_activity WHERE $1::integer=ANY(pg_blocking_pids(pid))",[holderPid]);
+  if(rows.length)return rows.map(r=>r.pid);
+  await new Promise(resolve=>setTimeout(resolve,10));
+ }
+ throw new Error("real PostgreSQL blocking barrier was not observed");
+}
 beforeAll(async()=>{
  const c=await pool.connect();try{
   await c.query(`CREATE SCHEMA ${schema};SET search_path TO ${schema},pg_catalog`);
@@ -100,24 +109,75 @@ it.each(["subjectId","generationId","controlEpoch","accountEpoch","registryRevis
  await expect(withStaffOperation(pool,verified!,"staff.view",async()=>{throw new Error("callback must not execute");},schema)).rejects.toThrow(/STAFF_OPERATION_/);
 });
 
-it("expiry while waiting for the central authority fence prevents callback entry",async()=>{
- const p=await claims();p.expiresAt=Date.now()+250;
- const verified=readVerifiedDurableSession(sign(p));expect(verified).not.toBeNull();
+it("expiry while actually blocked by central fence prevents callback entry",async()=>{
+ const p=await claims();const verified=readVerifiedDurableSession(sign(p));expect(verified).not.toBeNull();
  const holder=await pool.connect();await holder.query("BEGIN");
+ const holderPid=(await holder.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
  await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`aqlan.canonical.identity.substrate.v1:${schema}`]);
  let called=false;
  const pending=withStaffOperation(pool,verified!,"staff.view",async()=>{called=true;},schema).then(()=>null,error=>error);
  try{
-  // The central fence is held by a different real connection until after expiry.
-  await new Promise(resolve=>setTimeout(resolve,350));
+  expect((await waitForBlockedBy(holderPid)).length).toBeGreaterThan(0);
+  vi.spyOn(Date,"now").mockReturnValue(p.expiresAt+1);
   await holder.query("COMMIT");
   expect(await pending).toBeInstanceOf(Error);expect(called).toBe(false);
- }finally{await holder.query("ROLLBACK");holder.release();await pending;}
+ }finally{vi.restoreAllMocks();await holder.query("ROLLBACK");holder.release();await pending;}
 });
+
 it("schema/function drift during callback fails final admission and rolls back",async()=>{
  await expect(withStaffOperation(pool,await session(),"staff.view",async c=>{
   await c.query(`ALTER TABLE ${schema}.staff_identity_subjects DISABLE TRIGGER staff_identity_subjects_immutable`);
   await c.query(`INSERT INTO ${schema}.synthetic_runtime_effects VALUES('drift')`);
  },schema)).rejects.toThrow("SCHEMA_DRIFT");
  expect((await pool.query(`SELECT * FROM ${schema}.synthetic_runtime_effects`)).rows).toEqual([]);
+});
+
+it("signed stale username cannot supply an unchecked actor label",async()=>{
+ const p=await claims();const verified=readVerifiedDurableSession(sign({...p,username:"different-synthetic-label"}));expect(verified).not.toBeNull();
+ await expect(withStaffOperation(pool,verified!,"staff.view",async()=>{throw new Error("callback must not execute");},schema)).rejects.toThrow("USERNAME_STALE");
+});
+
+it("two runtime readers coexist while an exclusive lifecycle contender waits",async()=>{
+ let releaseReaders!:()=>void, bothEntered!:()=>void;
+ const hold=new Promise<void>(resolve=>{releaseReaders=resolve;});
+ const entered=new Promise<void>(resolve=>{bothEntered=resolve;});
+ const pids:number[]=[];
+ const verified=await session();
+ const readers=Promise.all([1,2].map(()=>withStaffOperation(pool,verified,"staff.view",async c=>{
+  pids.push((await c.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid);
+  if(pids.length===2)bothEntered();await hold;
+ },schema)));
+ const writer=await pool.connect();let pending:Promise<void>|undefined;let timer:ReturnType<typeof setTimeout>|undefined;
+ try{
+  await Promise.race([entered,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("runtime readers did not coexist")),3000);})]);
+  if(timer)clearTimeout(timer);
+  await writer.query("BEGIN");const pid=(await writer.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+  let acquired=false;
+  pending=writer.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`aqlan.canonical.identity.substrate.v1:${schema}`]).then(()=>{acquired=true;});
+  expect(await waitForBlockedBy(pids[0])).toContain(pid);expect(acquired).toBe(false);
+  releaseReaders();await readers;await pending;expect(acquired).toBe(true);await writer.query("COMMIT");
+ }finally{
+  if(timer)clearTimeout(timer);releaseReaders();await readers;await pending;await writer.query("ROLLBACK");writer.release();
+ }
+});
+it("fresh account revocation after a verified lock wait defeats the old token",async()=>{
+ const verified=await session();const holder=await pool.connect();await holder.query("BEGIN");
+ const pid=(await holder.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+ await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`aqlan.canonical.identity.substrate.v1:${schema}`]);
+ let called=false;
+ const pending=withStaffOperation(pool,verified,"staff.view",async()=>{called=true;},schema).then(()=>null,error=>error);
+ try{
+  await waitForBlockedBy(pid);
+  await holder.query(`UPDATE ${schema}.users SET password_hash='synthetic-rotated-after-wait' WHERE id=2`);
+  await holder.query("COMMIT");
+  expect(await pending).toMatchObject({message:"STAFF_OPERATION_CREDENTIAL_OR_ACCOUNT_STALE"});expect(called).toBe(false);
+ }finally{await holder.query("ROLLBACK");holder.release();await pending;}
+ await withStaffOperation(pool,await session(),"staff.view",async()=>{},schema);
+});
+it("rename revokes old display claims but a fresh signed session retains immutable subject",async()=>{
+ const previous=await claims();const old=readVerifiedDurableSession(sign(previous))!;
+ await pool.query(`UPDATE ${schema}.users SET username='synthetic-renamed' WHERE id=2`);
+ await expect(withStaffOperation(pool,old,"staff.view",async()=>{},schema)).rejects.toThrow("USERNAME_STALE");
+ const fresh=await claims();expect(fresh.durableIdentity.subjectId).toBe(previous.durableIdentity.subjectId);
+ await withStaffOperation(pool,readVerifiedDurableSession(sign(fresh))!,"staff.view",async()=>{},schema);
 });
