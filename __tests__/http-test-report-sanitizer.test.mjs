@@ -15,8 +15,47 @@ const temp = () => { const p = mkdtempSync(path.join(tmpdir(), 'http-sanitizer-'
 describe('HTTP diagnostic allowlist', () => {
   it('emits only source provenance, indices, statuses, bounded locations/counts and fixed kinds', () => {
     const output = sanitizeReport(report(), options);
-    expect(output).toEqual({ version: 1, availability: 'available', sourceSha: options.sourceSha, truncated: false, suiteCount: 1, suites: [{ path: source, status: 'failed', assertionCount: 1, assertions: [{ index: 0, status: 'failed', line: 12, column: 3, failureCount: 1, errorKinds: ['AssertionError'] }] }] });
+    expect(output).toEqual({ version: 1, availability: 'available', sourceSha: options.sourceSha, truncated: false, suiteCount: 1, suites: [{ path: source, status: 'failed', assertionCount: 1, assertions: [{ index: 0, status: 'failed', line: 12, column: 3, failureCount: 1, errorKinds: ['AssertionError'], failureFrames: [] }] }] });
     expect(JSON.stringify(output)).not.toContain(secret);
+  });
+  it('projects tracked failure stack frames without exposing secret-bearing stack context', () => {
+    const raw = report();
+    raw.testResults[0].assertionResults[0].failureMessages = [
+      `AssertionError: ${secret}\n    at ${secret} (/repo/${source}:42:7)\n    at /repo/${source}:12:3`,
+      `Error: ${secret}\n \u001b[31m❯ ${source}:43:8\u001b[39m`,
+      `Error: ${secret}\n at /repo/${source}:42:7`,
+    ];
+    const output = sanitizeReport(raw, options);
+    expect(output.suites[0].assertions[0]).toMatchObject({ line: 12, column: 3,
+      failureFrames: [{ path: source, line: 42, column: 7 }, { path: source, line: 43, column: 8 }] });
+    expect(JSON.stringify(output)).not.toContain(secret);
+    expect(JSON.stringify(output)).not.toContain('/repo/');
+  });
+  it('rejects untracked paths, URLs, traversal, code excerpts and non-location numbers in failures', () => {
+    const raw = report();
+    const locations = [
+      `/repo/__tests__/security-http/${secret}.test.ts:1:2`, `/repo/../repo/${source}:1:2`,
+      `/outside/${source}:1:2`, `https://secret.invalid/${source}:1:2`, `file:///repo/${source}:1:2`,
+      `/repo/${source}?token=${secret}:1:2`, `/repo/${source}:0:2`, `/repo/${source}:1:1000001`,
+      `/repo/${source}:1.5:2`, `/repo/${source}:1:2 ${secret}`, `/repo/lib/${secret}.ts:1:2`,
+    ];
+    raw.testResults[0].assertionResults[0].failureMessages = [
+      `AssertionError: ${secret}\n${locations.map(value => ` at ${value}`).join('\n')}\n${source}:9:10\n expected 987654321 actual 123456789`,
+    ];
+    const output = sanitizeReport(raw, options);
+    expect(output.suites[0].assertions[0].failureFrames).toEqual([]);
+    for (const forbidden of [secret, 'secret.invalid', '987654321', '123456789', '/outside/', '/repo/']) {
+      expect(JSON.stringify(output)).not.toContain(forbidden);
+    }
+  });
+  it('bounds frame count and stack scanning, and never projects passed assertion stacks', () => {
+    const raw = report(); const assertion = raw.testResults[0].assertionResults[0];
+    assertion.failureMessages = Array.from({ length: LIMITS.frames + 4 }, (_, i) => `Error: ${secret}\n at ${source}:${i + 1}:2`);
+    expect(sanitizeReport(raw, options).suites[0].assertions[0].failureFrames).toHaveLength(LIMITS.frames);
+    assertion.failureMessages = [`${secret.repeat(LIMITS.stackChars)}\n at ${source}:1:2`, `${'ignored\n'.repeat(LIMITS.stackLines)} at ${source}:1:2`];
+    expect(sanitizeReport(raw, options).suites[0].assertions[0].failureFrames).toEqual([]);
+    assertion.status = 'passed'; assertion.failureMessages = [`Error: ${secret}\n at ${source}:1:2`];
+    expect(sanitizeReport(raw, options).suites[0].assertions[0].failureFrames).toEqual([]);
   });
   it('rejects untracked, traversal, non-test and oversized paths without echoing them', () => {
     for (const name of [`/repo/${secret}.test.ts`, `/repo/../${source}`, '/etc/passwd', `${source}${secret}`, 'a'.repeat(1000)]) {
