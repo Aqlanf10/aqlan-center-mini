@@ -42,6 +42,41 @@ patient access or commission authority is created. A plain INSERT means duplicat
 location identifiers fail without overwriting or adopting existing locations.
 
 Policy revision, suppliers, stock opening, routes and all activation work remain
-outside this batch. Authorization policy version advances consistently while its
-document schema remains unchanged. Acceptance evidence must be recorded after
-independent real-PostgreSQL tests and the unchanged canonical item-create suite.
+outside this batch. Authorization policy version is 4; its document schema remains 1.
+The canonical item-create suite retains its mutation assertions; only protected
+owner read-preview expectations expand to the three supported actions.
+
+## Bounded acceptance — 2026-10-27
+
+All runs used frozen commit `835d082842d11b6f176c74b20a178eb1d36d0dba`,
+tree `2e64e6717ce76e0a901d12d9ed326c3a4d915fcb`, with a clean tracked tree
+before and after. Dependencies were an ordinary hardlink copy from the accepted
+item-create worktree after byte-identical package-lock verification (no install
+or symlink). Heavy jobs serialized through the shared acceptance lock. Node was
+22.23.3 with a 4096 MiB heap limit; both PostgreSQL runs used newly initialized,
+owned PostgreSQL 18.6 clusters, verified empty public schemas and clean shutdown.
+
+- Full `tsc --noEmit --incremental false`: exit 0, no diagnostics.
+- Focused central authorization/runtime units: 92/92 passed.
+- Independent canonical unit/location PostgreSQL suite: 92/92 passed in
+  `pg18-VQMyozDn`, system identifier `7701397020109226015`.
+- Supported regression PostgreSQL suites: 185/185 across nine files in
+  `pg18-cM6GIo5R`, system identifier `7701397121294536726`: canonical item-create
+  (51), canonical reference-read (16), command lifecycle (17), reference setup
+  (13), staff-operation runtime (22), procurement store (19), supplier finance
+  (18), receipt adapter (23), and authority maintenance (6).
+- Central owned-file lint and both domain files: exit 0 (domain run emitted only
+  the Node experimental Undici proxy-agent warning).
+
+Evidence is under `recovery-evidence-20261027/`: the two owned PG directories,
+`canonical-units-locations-types.log`,
+`canonical-units-locations-regressions.log`,
+`canonical-units-locations-domain-lint.log`,
+`units-locations-central-unit-retry.log`, and
+`units-locations-central-lint.log`.
+
+This is bounded source acceptance, not full inventory or deployment acceptance.
+Known obsolete-issuer `inventory-supplier-operational` and
+`inventory-authority-restore` suites remain unresolved outside this batch;
+no assertions were inverted or tests skipped to hide those lanes. No live grant,
+schema, issuer, route, activation or Production operation was performed.

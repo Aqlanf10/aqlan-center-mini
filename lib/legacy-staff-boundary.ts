@@ -6,27 +6,9 @@ import { parseDoctorPermissions } from "./doctor-permissions";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 
 type Query = Pick<DbClient,"query">;
-const relations=["staff_authority_control","staff_identity_generations","staff_identity_subjects","staff_identity_state","staff_identity_binding_events","staff_identity_current","staff_authority_identity","staff_execution_epochs","users_staff_subject_identity"];
-const functions=["staff_authority_control_guard","staff_account_authority_epoch_guard","staff_clinical_authority_epoch_guard","staff_identity_history_guard","staff_identity_state_guard","staff_identity_subject_guard","staff_identity_event_guard","staff_identity_current_guard","staff_subject_identity_immutable","staff_realm_identity_immutable","staff_execution_epoch_immutable"];
-const triggers=["staff_authority_control_guard_row","staff_authority_control_guard_truncate","staff_account_authority_epoch","staff_clinical_authority_epoch","users_subject_identity_immutable","staff_realm_identity_immutable","staff_execution_epoch_immutable",...['staff_identity_generations','staff_identity_subjects','staff_identity_binding_events'].flatMap(t=>[`${t}_immutable`,`${t}_no_truncate`]),...['staff_identity_state','staff_identity_subjects','staff_identity_binding_events','staff_identity_current'].map(t=>`${t}_guard`),"staff_identity_state_no_truncate","staff_identity_current_no_truncate"];
+import { readLegacyStaffSchema, staffLifecycleLockKey } from "./legacy-staff-schema.mjs";
+export { readLegacyStaffSchema } from "./legacy-staff-schema.mjs";
 function refuse(reason:string):never{throw new Error(`LEGACY_STAFF_${reason}`);}
-/** SELECT-only inspection. Any authority footprint means disruptive maintenance
- * hold, NOT a compatible mixed-authority rollout. Errors never mean absence. */
-export async function readLegacyStaffSchema(source:Query,schema="public"):Promise<"base"|"empty">{
- const s=staffIdentitySchemaName(schema);
- const {rows}=await source.query<{markers:string;users_kind:string|null;parties_kind:string|null}>(`SELECT (
- (SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=ANY($2::text[]))+
- (SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname=ANY($3::text[]))+
- (SELECT count(*) FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND t.tgname=ANY($4::text[]))+
- (SELECT count(*) FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND NOT a.attisdropped AND ((c.relname='users' AND a.attname=ANY(ARRAY['authorization_mode','authorization_epoch','staff_subject_id'])) OR (c.relname='parties' AND a.attname='clinical_authority_epoch')))
- )::text AS markers,
- (SELECT c.relkind::text FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname='users') AS users_kind,
- (SELECT c.relkind::text FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname='parties') AS parties_kind`,[s,relations,functions,triggers]);
- if(rows.length!==1 || rows[0].markers!=="0")refuse("AUTHORITY_SCHEMA_HELD");
- if(rows[0].users_kind===null && rows[0].parties_kind===null)return "empty";
- if(rows[0].users_kind!=="r" || rows[0].parties_kind!=="r")refuse("BASE_SCHEMA_UNREADABLE");
- return "base";
-}
 export function assertLegacyPermissionEnvelope(raw:unknown):void{
  if(classifyStaffPermissionEnvelope(raw).kind!=="legacy")refuse("PERMISSION_ENVELOPE_HELD");
 }
@@ -35,7 +17,7 @@ export function assertLegacyPermissionEnvelope(raw:unknown):void{
 export async function lockLegacyStaffBoundary(source:Query,schema="public"):Promise<void>{
  const s=staffIdentitySchemaName(schema);
  await source.query("SAVEPOINT legacy_staff_transaction");await source.query("RELEASE SAVEPOINT legacy_staff_transaction");
- await source.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",[`aqlan.canonical.identity.substrate.v1:${s}`]);
+ await source.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",[staffLifecycleLockKey(s)]);
  if(await readLegacyStaffSchema(source,s)!=="base")refuse("BASE_SCHEMA_UNREADABLE");
 }
 export interface LegacyStaffWriteAuthorization { readonly evidence:VerifiedLegacySession; readonly selfPassword?:boolean }

@@ -9,18 +9,10 @@ export type CapabilityParseResult =
   | { readonly ok: true; readonly value: StaffCapabilityDocument }
   | { readonly ok: false; readonly reason: string };
 
-/** Reject non-JSON records, inherited grants, accessors and hidden/symbol fields. */
-export function isPlainCapabilityRecord(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return false;
-  return Reflect.ownKeys(value).every((key) => {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    return typeof key === "string" && descriptor?.enumerable === true && "value" in descriptor;
-  });
-}
-
-export const STAFF_PERMISSION_ENVELOPE_FIELDS = Object.freeze(["schemaVersion", "revision", "patientScope", "appointmentScope", "grants"] as const);
+import { isPlainCapabilityRecord, inspectStaffPermissionEnvelope } from "./staff-permission-envelope-core.mjs";
+export { isPlainCapabilityRecord } from "./staff-permission-envelope-core.mjs";
+import { STAFF_PERMISSION_ENVELOPE_FIELDS } from "./staff-permission-markers.mjs";
+export { STAFF_PERMISSION_ENVELOPE_FIELDS } from "./staff-permission-markers.mjs";
 const fields = STAFF_PERMISSION_ENVELOPE_FIELDS;
 const validId = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0;
 const validScope = (value: unknown): value is StaffRecordScope =>
@@ -67,58 +59,12 @@ export type StaffPermissionEnvelope =
   | { readonly kind: "canonical"; readonly value: StaffCapabilityDocument }
   | { readonly kind: "invalid"; readonly reason: string };
 
-/** Copy JSON data without invoking accessors/toJSON or retaining mutable caller objects. */
-function copyLegacyJson(value: unknown, depth = 0): LegacyJsonValue {
-  if (depth > 32) throw new Error("Nested legacy document");
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (Array.isArray(value)) {
-    // JSON arrays must be dense data, not a container for hidden/accessor properties.
-    if (Object.getPrototypeOf(value) !== Array.prototype || Reflect.ownKeys(value).length !== value.length + 1) {
-      throw new Error("Invalid legacy array");
-    }
-    const copy: LegacyJsonValue[] = [];
-    for (let i = 0; i < value.length; i++) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
-      if (!descriptor?.enumerable || !("value" in descriptor)) throw new Error("Invalid legacy array item");
-      copy.push(copyLegacyJson(descriptor.value, depth + 1));
-    }
-    return Object.freeze(copy);
-  }
-  if (!isPlainCapabilityRecord(value)) throw new Error("Invalid legacy record");
-  const copy: Record<string, LegacyJsonValue> = Object.create(null);
-  for (const key of Object.keys(value)) {
-    if (key === "__proto__" || key === "prototype" || key === "constructor") throw new Error("Prototype key");
-    copy[key] = copyLegacyJson(Object.getOwnPropertyDescriptor(value, key)!.value, depth + 1);
-  }
-  return Object.freeze(copy);
-}
-
-/**
- * Inert, strict raw envelope classification, BEFORE any legacy role defaults.
- * SQL NULL, absent storage, the empty string and JSON null mean legacy defaults.
- * Other scalars/malformed JSON fail closed. Every reserved top-level marker selects
- * the existing canonical parser; partial, mixed and future documents cannot fall back.
- * Legacy flag semantics remain exclusively in parseDoctorPermissions/financeAccessFor.
- */
+/** Shared raw boundary; full canonical validation stays here. */
 export function classifyStaffPermissionEnvelope(raw: unknown): StaffPermissionEnvelope {
-  try {
-    if (raw === null || raw === undefined || raw === "") return Object.freeze({ kind: "legacy", value: null });
-    if (typeof raw === "string") {
-      if (raw.length > 16_384) return Object.freeze({ kind: "invalid", reason: "document-too-large" });
-      raw = JSON.parse(raw);
-      if (raw === null) return Object.freeze({ kind: "legacy", value: null });
-    }
-    if (!isPlainCapabilityRecord(raw)) return Object.freeze({ kind: "invalid", reason: "invalid-document" });
-    const record = raw;
-    if (STAFF_PERMISSION_ENVELOPE_FIELDS.some((key) => Object.hasOwn(record, key))) {
-      const parsed = parseStaffCapabilityDocument(raw);
-      return Object.freeze(parsed.ok
-        ? { kind: "canonical", value: parsed.value }
-        : { kind: "invalid", reason: parsed.reason });
-    }
-    const value = copyLegacyJson(raw) as LegacyPermissionRecord;
-    if (JSON.stringify(value).length > 16_384) return Object.freeze({ kind: "invalid", reason: "document-too-large" });
-    return Object.freeze({ kind: "legacy", value });
-  } catch { return Object.freeze({ kind: "invalid", reason: "invalid-document" }); }
+  const envelope = inspectStaffPermissionEnvelope(raw);
+  if (envelope.kind === "canonical-candidate") {
+    const parsed = parseStaffCapabilityDocument(envelope.value);
+    return Object.freeze(parsed.ok ? {kind:"canonical",value:parsed.value} : {kind:"invalid",reason:parsed.reason});
+  }
+  return envelope;
 }

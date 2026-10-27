@@ -7,7 +7,8 @@ validation, mode validation and schema validation occur before pool acquisition.
 Every mode requires a genuine verified durable session and exact central
 `inventory.items.create`, whose prerequisite is `inventory.references.view`.
 Non-owner admins need explicit grants just like other supported active roles.
-Protected-owner semantics are unchanged. Policy version is 3; document schema is 1.
+Protected-owner semantics are unchanged. The original item-only slice used policy version 3; the unit/location extension
+advances it to 4. Document schema remains 1.
 
 The original protocol envelope is copied and frozen before awaits. The operation
 key remains `reference:SHA256(JSON.stringify([realm, subject, nonce]))`; the digest
