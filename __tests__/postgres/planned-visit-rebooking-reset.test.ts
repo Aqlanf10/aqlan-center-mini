@@ -5,6 +5,7 @@ import { ProtectedPatientNumberHistoryError } from '../../lib/clinic-reset';
 import { PLANNED_REBOOK_GENERATION_SQL } from '../../lib/planned-visit-rebooking-contract';
 assertRealPostgresUrl();stubPostgresEnv();process.env.SESSION_SECRET='synthetic-rebooking-reset-test-secret';
 const db=await import('../../lib/db');
+const {readReturnBookingContext}=await import('../../lib/return-booking-context');
 const {rebookPlannedVisit}=await import('../../lib/planned-visit-rebooking');
 const observer=rawPool(assertRealPostgresUrl(),3);
 const q=async(sql:string,args:unknown[]=[]) => (await db.getPool().query(sql,args)).rows;
@@ -22,14 +23,18 @@ afterAll(async()=>{await db.resetPoolForTesting();await observer.end();});
 async function fixture(){
   const n=++serial;const [patient]=await q("INSERT INTO patients(patient_number,full_name) VALUES ($1,'Synthetic reset patient') RETURNING id",[`SYN-GEN-${n}`]);
   const [plan]=await q("INSERT INTO treatment_plans(patient_id,title,total_minor) VALUES ($1,'Synthetic retained plan',100) RETURNING id",[patient.id]);
-  const [item]=await q("INSERT INTO plan_items(plan_id,service_name,unit_price_minor) VALUES ($1,'Synthetic retained item',100) RETURNING id",[plan.id]);
+  const [doctor]=await q("INSERT INTO parties(kind,name) VALUES ('doctor','Synthetic responsible doctor') RETURNING id");
+  const [clinical]=await q("INSERT INTO clinical_cases(patient_id,specialty,title,responsible_party_id,created_by) VALUES ($1,'general','Synthetic current case',$2,'synthetic') RETURNING id",[patient.id,doctor.id]);
+  const [item]=await q("INSERT INTO plan_items(plan_id,case_id,service_name,unit_price_minor) VALUES ($1,$2,'Synthetic retained item',100) RETURNING id",[plan.id,clinical.id]);
   const [appointment]=await q("INSERT INTO appointments(patient_id,scheduled_date,scheduled_time,status,ended_at) VALUES ($1,CURRENT_DATE-1,'10:00','no_show',NOW()) RETURNING id",[patient.id]);
   const [planned]=await q("INSERT INTO planned_visits(patient_id,plan_id,title,status,appointment_id,sequence) VALUES ($1,$2,'Synthetic generation session','scheduled',$3,1) RETURNING id",[patient.id,plan.id,appointment.id]);
   await q('UPDATE appointments SET planned_visit_id=$2 WHERE id=$1',[appointment.id,planned.id]);
   await q('INSERT INTO treatment_sessions(plan_item_id,planned_visit_id,sequence) VALUES ($1,$2,1)',[item.id,planned.id]);
   const [view]=await db.listPatientPlannedVisits(patient.id);
   const [day]=await q("SELECT ((NOW() AT TIME ZONE $1)::date+100)::text AS value",[db.CLINIC_TIME_ZONE]);
-  return {patient:patient.id,planned:planned.id,old:appointment.id,input:{plannedVisitId:planned.id,expectedAppointmentId:appointment.id,expectedGeneration:view.rebookGeneration,date:day.value as string,time:'10:00',reason:'Synthetic reschedule reason',requestId:`synthetic-generation-attempt-${n}`}};
+  const context=await readReturnBookingContext(db.getPool(),patient.id,{kind:'planned_visit',id:planned.id});
+  expect(context.ok).toBe(true);if(!context.ok)throw new Error(context.message);
+  return {patient:patient.id,planned:planned.id,old:appointment.id,input:{returnBookingSource:context.source,returnBookingFingerprint:context.fingerprint,plannedVisitId:planned.id,expectedAppointmentId:appointment.id,expectedGeneration:view.rebookGeneration,date:day.value as string,time:'10:00',reason:'Synthetic reschedule reason',requestId:`synthetic-generation-attempt-${n}`}};
 }
 async function snapshot(){
   const result:Record<string,string>={};

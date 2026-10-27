@@ -40,17 +40,18 @@ beforeAll(async () => {
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
-async function orthoVisit(options: { legacy?: boolean } = {}) {
+async function orthoVisit(options: { legacy?: boolean; perSession?: boolean } = {}) {
   sequence += 1;
   const name = `مريض تقويم ${sequence}`;
   const patientId = (await q<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name) VALUES ($1, $2) RETURNING id`, [`OC-${sequence}`, name]))[0].id;
+  const historicalMode = options.perSession ? "per_session" : options.legacy ? "prepaid_included" : null;
   const caseId = (await q<{ id: number }>(
-    options.legacy
+    historicalMode
       ? `INSERT INTO ortho_cases (patient_id, created_by, baseline_kind, baseline_recorded_at, legacy_financial_mode, responsible_doctor_id)
-         VALUES ($1, 'migration', 'legacy', NOW(), 'prepaid_included', $2) RETURNING id`
+         VALUES ($1, 'migration', 'legacy', NOW(), $3, $2) RETURNING id`
       : `INSERT INTO ortho_cases (patient_id, created_by, responsible_doctor_id) VALUES ($1, 'doctor', $2) RETURNING id`,
-    [patientId, doctorId]))[0].id;
+    historicalMode ? [patientId, doctorId, historicalMode] : [patientId, doctorId]))[0].id;
   const visit = await addVisit({ patientName: name, patientPhone: null, note: null, patientId, doctorId });
   const saved = await recordAdjustment({
     caseId, visitId: null, doneOn: today, phase: null, upperWire: "016 NiTi", lowerWire: null,
@@ -63,12 +64,18 @@ async function orthoVisit(options: { legacy?: boolean } = {}) {
 const sign = (visitId: number, decision: { decision: "no_charge"; reason: string } | null = null) =>
   signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: doctorId, outsideContractDecision: decision });
 
-describe("(P1-C) outside-contract adjustment decision", () => {
-  it("no decision: the sign is not blocked; the adjustment is pending until decided once (no charge, audited)", async () => {
+describe("(P1-C) outside-contract and unresolved-coverage decisions", () => {
+  it("uses OUTSIDE_CONTRACT only with explicit recorded per-session agreement evidence", async () => {
+    const { visitId, adjustmentId } = await orthoVisit({ perSession: true });
+    expect(await sign(visitId)).toMatchObject({ reason: null, invoiceId: null, orthoBillingClass: "OUTSIDE_CONTRACT", orthoBillingDecision: null });
+    expect((await listPendingOrthoDecisions()).map(row => row.adjustmentId)).toContain(adjustmentId);
+  });
+
+  it("unclassified current agreement stays REVIEW_REQUIRED, with a pending one-time decision and no automatic charge", async () => {
     const { visitId, adjustmentId } = await orthoVisit();
     const signed = await sign(visitId);
-    expect(signed).toMatchObject({ reason: null, invoiceId: null, orthoBillingClass: "OUTSIDE_CONTRACT", orthoBillingDecision: null });
-    expect((await visitWalkout(visitId))?.orthoAdjustment).toMatchObject({ billingClass: "OUTSIDE_CONTRACT", pendingDecision: true });
+    expect(signed).toMatchObject({ reason: null, invoiceId: null, orthoBillingClass: "REVIEW_REQUIRED", orthoBillingDecision: null });
+    expect((await visitWalkout(visitId))?.orthoAdjustment).toMatchObject({ billingClass: "REVIEW_REQUIRED", pendingDecision: true });
     expect((await listPendingOrthoDecisions()).map((row) => row.adjustmentId)).toContain(adjustmentId);
 
     expect(await decideOrthoAdjustmentBilling({ adjustmentId, decision: "no_charge", reason: "x", invoiceNumber: null, actor: "dr", actorRole: "doctor" }))
@@ -93,7 +100,7 @@ describe("(P1-C) outside-contract adjustment decision", () => {
     const signed = await sign(visitId);
     expect(signed).toMatchObject({ reason: null, duesMinor: 10000, orthoBillingDecision: "billed" });
     expect(await q(`SELECT billing_class, billing_decision, billing_invoice_id FROM ortho_adjustments WHERE id = $1`, [adjustmentId]))
-      .toEqual([{ billing_class: "OUTSIDE_CONTRACT", billing_decision: "billed", billing_invoice_id: signed.invoiceId }]);
+      .toEqual([{ billing_class: "REVIEW_REQUIRED", billing_decision: "billed", billing_invoice_id: signed.invoiceId }]);
     expect((await visitWalkout(visitId))?.orthoAdjustment).toMatchObject({ billingClass: "NEW_BILLABLE", pendingDecision: false });
   });
 
