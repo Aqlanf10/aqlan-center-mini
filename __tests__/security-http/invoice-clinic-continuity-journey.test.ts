@@ -329,6 +329,26 @@ async function collectThroughUi(patientId: number, target: Invoice, loseResponse
     .toEqual([{ invoice_id: target.id, amount_minor: target.totalMinor - target.discountMinor, currency: "YER" }]);
   await close(context);
 }
+/** A case opened from an invoice has no responsible doctor until an administrator records one in the
+ * case-responsibility settings; return booking stays refused until then. Records it once through the
+ * real audited settings route (never inferred from the invoice provider or the patient's primary doctor). */
+async function ensureResponsibleDoctor(patientId: number, plannedVisitId: number) {
+  const contextPath = `/api/patients/${patientId}/return-booking-context?kind=planned_visit&sourceId=${plannedVisitId}`;
+  const missing = await authedGet(contextPath, h.sessions.reception);
+  if (missing.status === 200) return;
+  const refusal = await missing.json() as { code: string; contexts: { settingsTarget: { kind: "clinical" | "ortho"; id: number } | null }[] };
+  expect(missing.status).toBe(409);
+  expect(refusal.code).toBe("responsibility_missing");
+  expect(refusal.contexts).toHaveLength(1);
+  const target = refusal.contexts[0].settingsTarget!;
+  const settings = await read<{ doctorId: number | null; sourceFingerprint: string }>("admin",
+    `/api/patients/${patientId}/responsibility?kind=${target.kind}&sourceId=${target.id}`);
+  expect(settings.doctorId).toBeNull();
+  const changed = await mutate<{ doctorId: number }>("admin", "PATCH", `/api/patients/${patientId}/responsibility`, {
+    kind: target.kind, sourceId: target.id, expectedSourceFingerprint: settings.sourceFingerprint,
+    doctorId, reason: "تحديد الطبيب المسؤول لحالة اصطناعية قبل حجز المراجعة" });
+  expect(changed.doctorId).toBe(doctorId);
+}
 async function checkoutAndNext(patientId: number, visitId: number, nextId: number, expectedInvoices: number) {
   const before = await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId]);
   const checkout = await read<{ lines: { billingClass: string }[]; summary: { currency: string; currentBalanceMinor: number; dueNowMinor: number }[] }>(
@@ -343,11 +363,20 @@ async function checkoutAndNext(patientId: number, visitId: number, nextId: numbe
   const date = new Date(Date.now() + (28 + scheduleOffset++ * 7) * 86_400_000);
   while (date.getUTCDay() !== 0) date.setUTCDate(date.getUTCDate() + 1);
   const scheduledDate = date.toISOString().slice(0, 10);
-  const booking = await mutate<{ appointmentId: number }>("reception", "POST", `/api/planned-visits/${nextId}/schedule`,
-    { date: scheduledDate, time: "17:00" }, 201);
+  // The booking screen verifies the return context and its responsible doctor first; a booking
+  // without that fingerprint is refused (return_booking_context_required) and writes nothing.
   await mutate("reception", "POST", `/api/planned-visits/${nextId}/schedule`, { date: scheduledDate, time: "17:00" }, 409);
-  expect(await q(`SELECT id, patient_id, status, scheduled_date::text AS scheduled_date FROM appointments WHERE id = $1`, [booking.appointmentId]))
-    .toEqual([{ id: booking.appointmentId, patient_id: patientId, status: "booked", scheduled_date: scheduledDate }]);
+  expect(await q(`SELECT status, appointment_id FROM planned_visits WHERE id = $1`, [nextId])).toEqual([{ status: "planned", appointment_id: null }]);
+  await ensureResponsibleDoctor(patientId, nextId);
+  const returnContext = await read<{ ok: boolean; doctorId: number; fingerprint: string; source: { kind: string; id: number } }>(
+    "reception", `/api/patients/${patientId}/return-booking-context?kind=planned_visit&sourceId=${nextId}`);
+  expect(returnContext).toMatchObject({ ok: true, source: { kind: "planned_visit", id: nextId } });
+  expect(returnContext.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  const verified = { date: scheduledDate, time: "17:00", returnBookingSource: returnContext.source, returnBookingFingerprint: returnContext.fingerprint };
+  const booking = await mutate<{ appointmentId: number }>("reception", "POST", `/api/planned-visits/${nextId}/schedule`, verified, 201);
+  await mutate("reception", "POST", `/api/planned-visits/${nextId}/schedule`, verified, 409);
+  expect(await q(`SELECT id, patient_id, status, scheduled_date::text AS scheduled_date, doctor_id FROM appointments WHERE id = $1`, [booking.appointmentId]))
+    .toEqual([{ id: booking.appointmentId, patient_id: patientId, status: "booked", scheduled_date: scheduledDate, doctor_id: returnContext.doctorId }]);
   expect((await q(`SELECT status, appointment_id, visit_id FROM planned_visits WHERE id = $1`, [nextId]))[0])
     .toEqual({ status: "scheduled", appointment_id: booking.appointmentId, visit_id: null });
   const after = await read<{ nextAppointment: { date: string; time: string } }>("reception", `/api/visits/${visitId}/walkout`);
