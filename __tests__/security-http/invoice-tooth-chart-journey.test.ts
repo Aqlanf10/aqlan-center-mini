@@ -368,7 +368,15 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
       await dialog.getByTestId("tooth-surfaces-27").getByTestId("surface-D").click();
       await confirm(page);
       expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 26 (MO)، 27 (D)");
-      await page.getByTestId("invoice-clinical-preview-0").waitFor();
+      // The grouped entry's per-tooth details and a ready link proof are both collapsed by design when no
+      // decision is needed; wait for readiness, then open the group and the proof to review it.
+      const preview = page.getByTestId("invoice-clinical-preview-0");
+      await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]').waitFor({ state: "attached" });
+      const group = page.getByTestId("invoice-group-details-0");
+      if (await group.getAttribute("open") === null) await group.locator("> summary").click();
+      if (!await preview.isVisible()) await preview.locator("..").locator("summary").click();
+      await preview.waitFor();
+      expect(await preview.innerText()).toContain("بند خطة جديد");
       await save(page);
       expect(await planItems(patientId)).toEqual([{ tooth_code: 26, surfaces: "MO" }, { tooth_code: 27, surfaces: "D" }]);
       const rows = (await db.query(`SELECT ii.quantity, ii.unit_price_minor::text, ii.doctor_id,
