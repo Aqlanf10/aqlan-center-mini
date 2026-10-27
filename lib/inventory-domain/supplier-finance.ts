@@ -32,7 +32,10 @@ import {
   type InventoryPrincipalDependencies,
 } from "./principal";
 export type SupplierFinancePrincipal = InventoryPrincipal;
-export type SupplierFinanceDependencies = InventoryPrincipalDependencies;
+export type SupplierFinanceDependencies = InventoryPrincipalDependencies & { admitted?: boolean };
+export function supplierFinanceCommandScope(principal: InventoryPrincipal, name: "revise" | "post" | "cancel") {
+  return `supplier.invoice.${name}:${createHash("sha256").update(payloadIdentity({realmId:principal.realmId,subjectId:principal.subjectId})).digest("hex")}`;
+}
 export const supplierInvoiceDigest = (document: SupplierInvoiceRevision) =>
   createHash("sha256").update(payloadIdentity(document)).digest("hex");
 function reason(value: string) {
@@ -250,14 +253,7 @@ export function createSupplierInvoiceFinanceService(
   ) {
     requireInventoryIntegration();
     const principal = await resolveInventoryPrincipal(dependencies, actor);
-    const scope = `supplier.invoice.${name}:${createHash("sha256")
-      .update(
-        payloadIdentity({
-          realmId: principal.realmId,
-          subjectId: principal.subjectId,
-        }),
-      )
-      .digest("hex")}`;
+    const scope = supplierFinanceCommandScope(principal, name as "revise" | "post" | "cancel");
     return inventoryOperationInTransaction(
       client,
       actor,
@@ -278,6 +274,7 @@ export function createSupplierInvoiceFinanceService(
         );
         return work(principal);
       },
+      dependencies.admitted ? principal : undefined,
     );
   }
   return {

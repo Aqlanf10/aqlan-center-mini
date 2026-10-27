@@ -1,3 +1,4 @@
+import { PURCHASE_RESET_FENCE } from "../clinic-reset";
 import { requireInventoryIntegration } from "./rollout";
 import { readInventoryCommandBinding, authorizeInventoryCommandBinding } from "./command-fence";
 import type { InventoryPrincipal } from "./principal";
@@ -66,6 +67,7 @@ export function inventoryOperationDigest(key: string, payload: unknown): string 
   return createHash("sha256").update(payloadIdentity(payload)).digest("hex");
 }
 async function applyInventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, hash: string, management: boolean, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [PURCHASE_RESET_FENCE]);
   await requireInventoryActor(client, actor, management);
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
   const previous = await client.query<{ payload_hash: string; result: T }>("SELECT payload_hash,result FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
@@ -125,6 +127,7 @@ export async function withInventoryCommandLockInTransaction<T>(
   requireInventoryIntegration();
   const hash = inventoryOperationDigest(key, payload);
   await assertInventoryCallerTransaction(client);
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [PURCHASE_RESET_FENCE]);
   await requireInventoryActor(client, actor, management);
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
   return work(hash);

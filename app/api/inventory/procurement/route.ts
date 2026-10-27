@@ -1,3 +1,5 @@
+import { admitSupplierIntent, executeSupplierIntent, readSupplierFinance } from "@/lib/inventory-domain/supplier-transport";
+import type { SupplierIntent, SupplierAdmission } from "@/lib/inventory-supplier-protocol";
 import { inventoryIntegrationEnabled, INVENTORY_DISABLED_MESSAGE } from "@/lib/inventory-domain/rollout";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
@@ -72,6 +74,10 @@ const CONFLICT_CODES = new Set([
 ]);
 
 function failure(error: unknown) {
+  if(error instanceof InventoryDomainError && ["supplier_invoice_intent_pending","supplier_reauthentication_required","supplier_saved_authority_mismatch","invoice_payment_reversal_required","invoice_cancelled","invoice_already_posted","invoice_not_posted","invoice_source_mismatch","principal_realm_mismatch","command_retired","command_provenance_required","invoice_not_matched","rate_precision_unsupported","supplier_unavailable","valuation_mismatch"].includes(error.code)){
+    return NextResponse.json({code:error.code,message:error.code==="supplier_reauthentication_required"?"سجّل الدخول من جديد لتأكيد هوية العملية. تبقى العمليات المحفوظة دون تغيير.":error.code==="invoice_payment_reversal_required"?"للفاتورة دفعات قائمة. اعكسها من مسار الدفعات المخوّل قبل إلغاء الفاتورة.":"تعذّر تنفيذ العملية بحالتها الحالية. راجع الفاتورة والعملية المحفوظة قبل المتابعة."},{status:error.code==="supplier_reauthentication_required"?401:error.code==="supplier_saved_authority_mismatch"?403:409});
+  }
+
   const bounded = bodyErrorResponse(error);
   if (bounded) return bounded;
   if (error instanceof InventoryDomainError) {
@@ -132,7 +138,7 @@ function shape(document:unknown,command:string){const source=record(document);in
   if(command==="invoice.match"){record(line.price);list(line.receiptAllocations);}
 }return source;}
 const DOCTOR_OR_ADMIN_COMMANDS=new Set(["request.submit","custody.acknowledge","custody.consume","custody.return_to_store","custody.stocktake","custody.close_package","custody.object_settlement"]);
-export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{const url=new URL(request.url);if(url.searchParams.get("view")==="workbench")return NextResponse.json(await readProcurementWorkbench(session,Number(url.searchParams.get("requestOffset")??"0"),Number(url.searchParams.get("orderOffset")??"0")));if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
+export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{const url=new URL(request.url);if(url.searchParams.get("view")==="supplier-finance")return NextResponse.json(await readSupplierFinance(session,url.searchParams.get("orderId")??""),{headers:{"Cache-Control":"private, no-store"}});if(url.searchParams.get("view")==="workbench")return NextResponse.json(await readProcurementWorkbench(session,Number(url.searchParams.get("requestOffset")??"0"),Number(url.searchParams.get("orderOffset")??"0")));if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
 export async function POST(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{
   // Optional versioned browser recovery. These headers bind the saved command
   // to the authenticated session; they never grant identity or permissions.
@@ -147,6 +153,10 @@ export async function POST(request:Request){const session=await requireSession()
     }
   }
   const source=record(await readJsonBody(request,JSON_BODY_LIMIT_BYTES));const command=String(source.command??"");
+  if(command==="supplier.admit")return NextResponse.json(await admitSupplierIntent(session,record(source.intent) as unknown as SupplierIntent),{status:201});
+  if(command==="supplier.execute")return NextResponse.json(await executeSupplierIntent(session,record(source.admission) as unknown as SupplierAdmission));
+  if(command==="supplier.retire"){invariant(typeof source.reason==="string","reason_required","Retirement reason is required");return NextResponse.json(await executeSupplierIntent(session,record(source.admission) as unknown as SupplierAdmission,source.reason));}
+
   let recovery: InventoryRecoveryAcknowledgement | null = null;
   if (recovering) {
     const digest = request.headers.get("X-Inventory-Digest");

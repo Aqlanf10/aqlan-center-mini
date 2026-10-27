@@ -206,6 +206,36 @@ export function createInventoryCommandLifecycle(
   }
 
   return {
+    /** Authorized recovery only: absence is pending, never proof of failure. */
+    lookup<P>(
+      client: DbClient,
+      actor: InventoryActor,
+      key: string,
+      payload: P,
+    ) {
+      return locked(
+        client,
+        actor,
+        key,
+        payload,
+        false,
+        async ({ identity, previous, terminal }) => {
+          if (previous)
+            return {
+              status: "committed" as const,
+              identity,
+              result: { ...previous, replayed: true },
+            };
+          if (terminal)
+            return {
+              status: "retired" as const,
+              identity,
+              reason: terminal.reason,
+            };
+          return { status: "pending" as const, identity };
+        },
+      );
+    },
     admit<P>(client: DbClient, actor: InventoryActor, key: string, payload: P) {
       return locked(
         client,

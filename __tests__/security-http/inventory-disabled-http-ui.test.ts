@@ -3,6 +3,10 @@ import { chromium, type Browser } from "playwright";
 import { Client } from "pg";
 import { INVENTORY_PROCUREMENT_SQL } from "../../lib/inventory-domain/schema-proposal";
 import { INVENTORY_CUSTODY_SQL } from "../../lib/inventory-domain/custody-schema-proposal";
+import { STAFF_AUTHORITY_SQL } from "../../lib/staff-authority-schema-proposal";
+import { INVENTORY_SUPPLIER_FINANCE_SQL } from "../../lib/inventory-domain/supplier-finance-schema-proposal";
+import { INVENTORY_COMMAND_LIFECYCLE_SQL } from "../../lib/inventory-domain/command-lifecycle-schema-proposal";
+import { INVENTORY_SUPPLIER_TRANSPORT_SQL } from "../../lib/inventory-domain/supplier-transport-schema-proposal";
 import { authedGet, authedMutation, baseUrl, harness } from "./_server";
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
 beforeAll(async () => {
@@ -20,18 +24,22 @@ it("built main-schema application hides dormant links and rejects every new API 
   const before = await schema();
   // Read proposal names only: never execute either SQL string in this suite.
   const proposedTables = [...`${INVENTORY_PROCUREMENT_SQL}
-${INVENTORY_CUSTODY_SQL}`.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map(match => match[1]);
-  expect(proposedTables).toHaveLength(29);
+${INVENTORY_CUSTODY_SQL}
+${STAFF_AUTHORITY_SQL}
+${INVENTORY_SUPPLIER_FINANCE_SQL}
+${INVENTORY_COMMAND_LIFECYCLE_SQL}
+${INVENTORY_SUPPLIER_TRANSPORT_SQL}`.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map(match => match[1]);
+  expect(proposedTables).toHaveLength(39);
   for (const table of proposedTables) expect(before.map(row => row.tablename)).not.toContain(table);
   const count = async () => (await db.query("SELECT (SELECT count(*) FROM inventory_movements)::int AS movements, (SELECT count(*) FROM audit_log)::int AS audit")).rows[0];
   const beforeCounts = await count();
   for (const actor of [h.sessions.admin, h.sessions.doctorA, h.sessions.reception]) {
-    for (const view of ["", "?view=catalog", "?view=workbench", "?view=custody"]) {
+    for (const view of ["", "?view=catalog", "?view=workbench", "?view=custody", "?view=supplier-finance"]) {
       const response = await authedGet(`/api/inventory/procurement${view}`, actor);
       expect(response.status).toBe(503);
       expect((await response.json()).code).toBe("inventory_integration_disabled");
     }
-    for (const command of ["request.submit", "request.revise", "request.approve", "order.issue", "order.amend", "receipt.post", "quarantine.resolve", "invoice.match", "custody.dispatch", "custody.acknowledge", "legacy.reconcile", "custody.return_to_store", "custody.consume", "custody.stocktake", "custody.close_package", "custody.propose_settlement", "custody.object_settlement", "custody.approve_waste"]) {
+    for (const command of ["supplier.admit", "supplier.execute", "supplier.retire", "request.submit", "request.revise", "request.approve", "order.issue", "order.amend", "receipt.post", "quarantine.resolve", "invoice.match", "custody.dispatch", "custody.acknowledge", "legacy.reconcile", "custody.return_to_store", "custody.consume", "custody.stocktake", "custody.close_package", "custody.propose_settlement", "custody.object_settlement", "custody.approve_waste"]) {
       const response = await authedMutation("/api/inventory/procurement", actor, "POST", JSON.stringify({ command }));
       expect(response.status).toBe(503);
       expect((await response.json()).code).toBe("inventory_integration_disabled");

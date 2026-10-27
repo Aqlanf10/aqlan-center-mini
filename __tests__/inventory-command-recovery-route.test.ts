@@ -1,3 +1,4 @@
+vi.mock("../lib/inventory-domain/supplier-transport", () => ({ admitSupplierIntent: vi.fn(), executeSupplierIntent: vi.fn(), readSupplierFinance: vi.fn() }));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createInventoryRecoveryCommand, INVENTORY_RECOVERY_PROTOCOL } from "../lib/inventory-command-recovery";
 import { InventoryDomainError } from "../lib/inventory-domain/quantities";
