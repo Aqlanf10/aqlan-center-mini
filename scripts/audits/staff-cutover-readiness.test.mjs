@@ -69,14 +69,16 @@ test('all supported entry/source formats are inventoried; future formats are exp
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
 
+// Two cold whole-repository scans measured 7.65s together locally. Bound each
+// child to 8s/64KiB and only this integration case to 20s; no assertions skipped.
 test('CLI drift success and explicit NOT_READY failure are intentional, not exceptions',async()=>{
  const {spawnSync}=await import('node:child_process');
  const script=new URL('./staff-cutover-readiness.mjs',import.meta.url);
  const {fileURLToPath}=await import('node:url');
  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
-  const result=spawnSync(process.execPath,[fileURLToPath(script),...args],{encoding:'utf8',env:{PATH:process.env.PATH??'',LANG:'C.UTF-8',TZ:'UTC'}});
+  const result=spawnSync(process.execPath,[fileURLToPath(script),...args],{encoding:'utf8',timeout:8_000,maxBuffer:64*1024,env:{PATH:process.env.PATH??'',LANG:'C.UTF-8',TZ:'UTC'}});
   assert.equal(result.status,status,result.stderr);
   assert.equal(result.stderr,'');
   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
  }
-});
+},20_000);

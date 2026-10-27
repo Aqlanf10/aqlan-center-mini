@@ -75,3 +75,69 @@ The experiment now lives separately at `scripts/probes/canonical-readonly-protoc
 Observed mechanics: stable self virtual identity through SELECTs/savepoints without permanent XID assignment, changed identity after transaction boundaries, pre-BEGIN session fencing and an inside-RR stale-snapshot negative control, writer-commit visibility, and no published facts/leaked fence in the exercised abort/timeout/cancellation/connection-loss/false-or-wrong-unlock paths. This proves synthetic revision visibility, **not token denial or a canonical reader**. Optional explicit XID allocation remains documentation/source analysis, not exercised here.
 
 Still missing: private handles and actual authority/token/scope admission, expiry, uncertain lock acquisition, COMMIT/ROLLBACK failures, identity-change disposal, detached work and result bounds, complete writer participation, record predicates and built HTTP journeys. No application runtime was implemented; readiness remains **NOT_READY**.
+
+## Bounded staff-directory prerequisite (WORK, not activation)
+
+`lib/canonical-staff-directory.ts:readCanonicalStaffDirectory` is a fixed,
+server-internal `staff.view` reader. It accepts only a private verified durable
+session and a keyset page (`afterUserId`, `limit`, maximum 100). There is no
+route, issuer, client/pool/schema override, SQL callback, streaming or reusable
+read capability. A copied/JSON session cannot authorize it. The ordinary writer
+retains its owning READ COMMITTED/XID/fence/private-handle protocol; the common
+internal proof implementation shares its exact authority/history/owner/account/
+credential/provider/permission predicates through separate fixed locking and
+snapshot wrappers. Evidence returned by that helper is not operation admission.
+
+The reader leases from the application pool and refuses the shared PGlite
+connection. It first rolls back any abandoned transaction on that exclusively
+owned lease, then requires exact evidence of zero self-held granted advisory
+locks. Unknown prior locks are never unlocked: the lease is discarded. Any
+failure before cleanliness is proved likewise discards the lease. Its shared
+session lifecycle fence then precedes RR READ ONLY BEGIN.
+A private invocation-local self virtual-XID and exact modes are checked before
+admission, before the directory SELECT and before COMMIT. Each probe also
+requires `pg_is_in_recovery() = false`, refusing replicas or missing evidence. No permanent XID,
+row lock, schema installation, DDL, repair or audit write is requested. One
+monotonic 10-second budget includes acquisition, reads and cleanup; each wait
+is additionally capped at five seconds. SQL statement/lock deadlines are SET
+LOCAL only after BEGIN. Timeout or uncertain driver outcome destroys the
+lease; a late pool acquisition is also destroyed. No further SQL is queued on
+an uncertain in-flight connection. Confirmed transaction completion and exactly
+one successful fence unlock are required before publication. Errors are bounded
+codes, not raw driver messages or SQL parameters. Wall-clock expiry is checked
+throughout and at publication, additionally capped by the token's remaining
+lifetime at entry measured monotonically so a later backward clock jump cannot
+extend this invocation. This does not solve inter-host clock synchronization.
+
+Each page lists only currently bound canonical accounts, including inactive
+accounts and the protected owner as ordinary display rows. Target permission
+JSON is neither exposed nor used to hide malformed accounts from the directory;
+the actor's own permission document remains strictly validated. Exact fields:
+`id`, `username`, `role`, `isActive`, `clinicianPartyId`. Role is presentation,
+not ownership or editability. The clinician display link uses an active-doctor
+LEFT JOIN; absent/inactive/non-doctor links project null without hiding the
+account. No credential/hash/token, private subject, owner designation or grants
+are returned. Rows are strictly ordered; one internal sentinel determines the
+next keyset cursor. SQL guards large strings before transferring values; malformed
+or oversized selected values fail closed rather than being truncated. Maximum
+serialized page is 128 KiB. Separate pages are separate snapshots, not one
+coherent export, and no directory projection authorizes any subsequent edit.
+
+### Still blocked
+
+Exclusive leasing and session-compatible pooling remain deployment assumptions
+to verify despite the clean-lease and primary checks. Complete
+exclusive-first authority-writer participation is **not implemented**; this
+reader cannot promise global concurrent revocation safety while those writers
+are absent/unfenced. The final RR identity check is not fresh visibility of
+revocation. There is no owner preparation/seal service, supported issuer,
+canonical login/auth-me/shell/editor journey or activation path in this change.
+The whole-clinic and pre-auth initialization gates remain **NOT_READY**. No
+live database, credential, grants, marker installation or deployment is authorized
+by synthetic tests. Ordinary CI regression uses a fresh uniquely owned disposable
+database and never resets the supplied test database's public schema.
+
+The shared proof extraction also revalidates the private signed token immediately
+after the writer fence wait. An expired token now fails before authority queries
+(`SESSION_OR_ACTION_INVALID`) rather than at the final expiry check; this is a
+fail-closed restriction, not additional writer authority.
