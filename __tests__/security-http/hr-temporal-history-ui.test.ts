@@ -22,7 +22,7 @@ beforeAll(async () => {
   // Withhold only the receipt table in this owned fixture to retain the original
   // partial-schema refusal assertion; the real runtime already registered0056–0058.
   const id = await staff('اختبار بوابة الإدماج');
-  expect((await owned.db.query("SELECT version FROM schema_migrations ORDER BY version")).rows.map(row => row.version)).toEqual(['0051','0052','0056','0057','0058','0063','0064','0065','0066','0067','0068','0069']);
+  expect((await owned.db.query("SELECT version FROM schema_migrations ORDER BY version")).rows.map(row => row.version)).toEqual(['0051','0052','0056','0057','0058','0063','0064','0065','0066','0067','0068','0069','0078','0087']);
   await owned.db.query('ALTER TABLE hr_temporal_write_receipts RENAME TO synthetic_withheld_receipts');
   try { expect((await api('GET', `/api/hr/staff/${id}/history`))).toMatchObject({ status: 503, body: { code: 'integration_pending' } }); }
   finally { await owned.db.query('ALTER TABLE synthetic_withheld_receipts RENAME TO hr_temporal_write_receipts'); }

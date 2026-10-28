@@ -567,3 +567,39 @@ Durable proof for a collection attempt key. `POST /api/payments/attempts/retire`
 ### 0069_unpaid_currency_transitions.sql
 
 Currency correction of an **unpaid** invoice lineage in any of the six YER/SAR/USD directions, through the existing correction path and the existing 0063 transition document. A direction other than YER → SAR is accepted only while no receipt has ever referenced the lineage (row lock on the lineage invoices, then a receipt check), and never carries receipt events; a second currency change on a lineage stays refused. Target amounts are the replacement's explicit lines — never an exchange rate. Validation only, so a backup replay passes (proved by a SAR → USD restore round trip). This replaces the #392 candidate design, whose claim trigger issued the target invoice on INSERT and made any database holding one such correction unrestorable. Neither this listing nor CI authorizes a production deploy.
+
+### 0078_agreement_reconciliation.sql
+
+Registers the append-only classic-agreement reconciliation header, exact source
+invoice membership and permanent rejected-attempt identities. Adoption records
+agreed principal minus already billed principal (not minus payments); only a
+positive unbilled remainder creates a difference invoice. A zero remainder
+records adoption without a zero-value invoice. Existing invoices, payments,
+cash movements and historical commissions are not rewritten or backfilled.
+
+Numbered and checksum-checked runtime registration use identical SQL. The
+historical proposal comments in the SQL are retained to preserve the reviewed
+checksum; registration is now supplied by the migration registry. Intermediate
+reserved numbers are not introduced by this standalone change. Membership and
+immutable-history guards preserve source ownership and operation identities.
+Backup/restore and empty-reset ownership include all three tables; a reset must
+refuse when reconciliation or rejection history exists, rather than erase it.
+
+Require exact-head PostgreSQL, schema/ownership, populated SQL/full-archive
+restore, HTTP/browser retry and Staging acceptance evidence before release.
+Neither this listing nor passing unit tests alone authorizes Production rollout.
+
+### 0087_agreement_reminder_metadata.sql
+
+Additive replacement of the reconciliation terms guard permits only
+`plan_installments.last_reminder_at` to change on reconciled installments.
+Whole-row JSON equality excluding that field keeps all other current and future
+columns immutable; INSERT/DELETE and invoice-item guards remain unchanged.
+Published 0078 bytes and its registry checksum are preserved. Numbered and
+runtime 0087 SQL are identical and checksum checked. Reminder timestamps and
+mandatory audit rows commit together in one transaction, including bulk requests.
+
+An application rollback does not undo this migration: old 480 startup preserves
+the new guard, but its old preflight manifest reports 0087 as unknown. Do not
+delete registry history to hide that mismatch. Exact-head CI and Staging
+acceptance remain required before Production rollout.

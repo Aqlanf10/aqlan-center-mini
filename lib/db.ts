@@ -4,6 +4,8 @@ import { counterIdentifierBigintSql } from "./counter-identifier-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
 import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
+import { AGREEMENT_REMINDER_GUARD_SQL } from "./agreement-reminder-guard-schema";
+import { AGREEMENT_RECONCILIATION_SQL } from "./agreement-reconciliation-schema";
 import { AGREEMENT_DELTA_SQL } from "./agreement-delta-schema";
 import { COLLECTION_ATTEMPT_RETIREMENT_SQL } from "./collection-attempt-schema";
 import { UNPAID_CURRENCY_TRANSITION_SQL } from "./unpaid-currency-schema";
@@ -2099,6 +2101,8 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0066", name: "agreement_delta_amendments", filename: "0066_agreement_delta_amendments.sql", sql: AGREEMENT_DELTA_SQL, checksum: checksumOf(AGREEMENT_DELTA_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0068", name: "collection_attempt_retirements", filename: "0068_collection_attempt_retirements.sql", sql: COLLECTION_ATTEMPT_RETIREMENT_SQL, checksum: checksumOf(COLLECTION_ATTEMPT_RETIREMENT_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0069", name: "unpaid_currency_transitions", filename: "0069_unpaid_currency_transitions.sql", sql: UNPAID_CURRENCY_TRANSITION_SQL, checksum: checksumOf(UNPAID_CURRENCY_TRANSITION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -16120,6 +16124,9 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     dependsOn.get("debt_repayment_arrangements")!.add("patient_opening_balance_history");
   for (const dependency of ["plan_items", "plan_installments", "invoice_items", "patient_opening_balances"])
     dependsOn.get("approved_agreement_principals")?.add(dependency);
+  // Reconciliation guards freeze these sources after the event header is restored.
+  for (const dependency of ["plan_items", "plan_installments", "invoice_items"])
+    dependsOn.get("agreement_reconciliations")?.add(dependency);
   const ordered = insertionOrder(
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
@@ -20138,30 +20145,46 @@ export async function recordProposalContact(input: {
  * «قسطك مستحق» ثلاث مرات في ثلاثة أيام فيصمّ عن الرسائل كلها. الطابع على الخطة
  * وعلى الأقساط المستحقة والمتأخرة معًا: تذكيرٌ واحد يوثَّق مرة واحدة.
  */
-export async function recordPlanInstallmentReminder(
-  planId: number,
-  installmentNumber?: number,
-): Promise<{ lastReminderAt: string; found: boolean }> {
-  await ensureSchema();
-  const pool = getPool();
-  const now = new Date();
-  const planUpdate = await pool.query("UPDATE treatment_plans SET last_reminder_at = $1 WHERE id = $2", [now, planId]);
-  // (TD-06) خطةٌ غير موجودة (أو قسطٌ غير موجود فيها) ليست تذكيرًا مسجَّلًا — يعرف المستدعي فلا يُدقِّق وهمًا.
-  let found = (planUpdate.rowCount ?? 0) > 0;
-  if (installmentNumber !== undefined && Number.isInteger(installmentNumber)) {
-    const installmentUpdate = await pool.query(
-      "UPDATE plan_installments SET last_reminder_at = $1 WHERE plan_id = $2 AND number = $3",
-      [now, planId, installmentNumber],
-    );
-    found = found && (installmentUpdate.rowCount ?? 0) > 0;
-  } else {
-    // تحديث الأقساط المستحقة والمتأخرة في هذه الخطة — من وُجّه إليه التذكير.
-    await pool.query(
-      "UPDATE plan_installments SET last_reminder_at = $1 WHERE plan_id = $2 AND due_date <= CURRENT_DATE",
-      [now, planId],
-    );
+export async function recordPlanInstallmentReminders(input: {
+  planIds: number[];
+  installmentNumber?: number;
+  bulk: boolean;
+  actor: string;
+  actorRole: string | null;
+}): Promise<{ lastReminderAt: string; updatedCount: number }> {
+  const planIds = [...new Set(input.planIds)].sort((a, b) => a - b);
+  if (!planIds.length || planIds.length > 500 || planIds.some(id => !Number.isSafeInteger(id) || id <= 0 || id > 2147483647)
+    || (input.installmentNumber !== undefined && (!Number.isSafeInteger(input.installmentNumber) || input.installmentNumber <= 0 || input.installmentNumber > 2147483647 || planIds.length !== 1))) {
+    throw new Error("Invalid reminder targets");
   }
-  return { lastReminderAt: now.toISOString(), found };
+  await ensureSchema();
+  const now = new Date();
+  return withTransaction(getPool(), async client => {
+    // Lock in deterministic order. The batch, its timestamps and mandatory audit are atomic.
+    const { rows: plans } = await client.query<{ id: number }>(
+      "SELECT id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE", [planIds]);
+    let updatedCount = 0;
+    for (const plan of plans) {
+      if (input.installmentNumber !== undefined) {
+        const { rows } = await client.query(
+          "SELECT id FROM plan_installments WHERE plan_id=$1 AND number=$2 FOR UPDATE", [plan.id, input.installmentNumber]);
+        if (!rows.length) continue; // A missing installment must not stamp the plan.
+      }
+      await client.query("UPDATE treatment_plans SET last_reminder_at=$1 WHERE id=$2", [now, plan.id]);
+      if (input.installmentNumber !== undefined) {
+        await client.query("UPDATE plan_installments SET last_reminder_at=$1 WHERE plan_id=$2 AND number=$3", [now, plan.id, input.installmentNumber]);
+      } else {
+        await client.query("UPDATE plan_installments SET last_reminder_at=$1 WHERE plan_id=$2 AND due_date <= CURRENT_DATE", [now, plan.id]);
+      }
+      await insertAuditRow(client, {
+        action: "plan.installment_reminder", entity: "treatment_plans", entityId: plan.id,
+        details: input.bulk ? { جماعي: true } : input.installmentNumber !== undefined ? { القسط: input.installmentNumber } : {},
+        actor: input.actor, actorRole: input.actorRole,
+      });
+      updatedCount += 1;
+    }
+    return { lastReminderAt: now.toISOString(), updatedCount };
+  });
 }
 
 /**

@@ -57,6 +57,8 @@ export async function readPlanInvoiceFinancialPosition(client:DbClient,plan:Plan
 }
 async function resolvePlanInvoiceFinancialPosition(client:DbClient,plan:PlanFinancialIdentity,today:string,rows:PlanInvoiceCandidate[],readSchedules=()=>readDebtRepayments(client,plan.patientId,today)):Promise<PlanInvoiceFinancialPosition|{kind:"classic_installments"}|null>{
   if(!rows.length)return null;
+  const reconciled=await (await import("./agreement-reconciliation-db")).readReconciledPlanPosition(client,plan,today);
+  if(reconciled)return reconciled;
   if(rows.every(r=>r.classic && r.patient_id===plan.patientId && r.base_currency===plan.currency))return {kind:'classic_installments'};
   const blank:PlanProgress={totalMinor:0,paidMinor:0,remainingMinor:0,dueToDateMinor:0,overdueMinor:0,nextDueDate:null,nextDueAmountMinor:0,paidCount:0,count:0};
   const review=():PlanInvoiceFinancialPosition=>({kind:'review_required',invoiceIds:rows.map(r=>r.id),paidMinor:0,remainingMinor:0,progress:blank,schedules:[],message:'ربط الخطة بمصادر الدين يحتاج مراجعة؛ راجع حساب المريض دون إصدار قسط جديد.'});

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { financeAccessFor } from "../lib/finance-permissions";
 import { dailyClinicReportFixture } from "./fixtures/daily-clinic-report";
 import { apiRouteVerdict } from "../lib/http-permissions";
@@ -8,6 +8,11 @@ vi.mock("@/lib/daily-clinic-report", () => ({ loadDailyClinicReport: vi.fn(), ge
 import { GET } from "../app/api/reports/daily-clinic/route";
 import { requireSession } from "../lib/session";
 import { getDailyClinicReportToday, loadDailyClinicReport } from "../lib/daily-clinic-report";
+
+import { DailyClinicReportIntegrityError } from "../lib/daily-clinic-report-model";
+import { DailyClinicExpenseIntegrityError } from "../lib/daily-clinic-expense-report";
+import { FinancialCurrencyIntegrityError } from "../lib/money";
+import { ReclassificationProofError } from "../lib/invoice-currency-reclassification";
 
 const session = vi.mocked(requireSession);
 const load = vi.mocked(loadDailyClinicReport);
@@ -21,9 +26,12 @@ const role = (value: "admin" | "accountant" | "doctor" | "cashier" | "reception"
 
 beforeEach(() => {
   vi.resetAllMocks(); role("admin");
+  vi.spyOn(console, "error").mockImplementation(() => {});
   today.mockReturnValue("2026-09-30");
   load.mockResolvedValue(dailyClinicReportFixture("2026-09-30"));
 });
+
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe("daily clinic close: actual GET authorization and error boundary", () => {
   it("registers the exact read route in the proxy matrix for ADMIN only", () => {
@@ -51,6 +59,7 @@ describe("daily clinic close: actual GET authorization and error boundary", () =
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(report);
     expect(load).toHaveBeenCalledExactlyOnceWith("2026-09-30");
+    expect(console.error).not.toHaveBeenCalled();
     expect(response.headers.get("Cache-Control")).toContain("no-store");
     expect(response.headers.get("Cache-Control")).toContain("private");
     expect(response.headers.get("Vary")).toBe("Cookie, Authorization");
@@ -83,5 +92,27 @@ describe("daily clinic close: actual GET authorization and error boundary", () =
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ message: "تعذّر إعداد كشف إقفال اليوم. أعد المحاولة." });
     expect(response.headers.get("Cache-Control")).toContain("no-store");
+    expect(console.error).toHaveBeenCalledExactlyOnceWith("[daily-clinic-report]", "UNEXPECTED_FAILURE");
+  });
+  it.each([
+    [new DailyClinicReportIntegrityError("Invoice line plan currency conflict"), "INVOICE_LINE_PLAN_CURRENCY"],
+    [new DailyClinicReportIntegrityError("Invoice/plan currency conflict"), "INVOICE_PLAN_CURRENCY"],
+    [new DailyClinicReportIntegrityError("Unresolved or cross-patient agreement link"), "AGREEMENT_OWNERSHIP"],
+    [new DailyClinicReportIntegrityError("Cross-patient invoice line source"), "INVOICE_LINE_OWNERSHIP"],
+    [new DailyClinicReportIntegrityError("Historical document line count conflict"), "HISTORICAL_DOCUMENT_LINES"],
+    [new DailyClinicReportIntegrityError("Historical document clinical ownership conflict"), "HISTORICAL_DOCUMENT_OWNERSHIP"],
+    [new DailyClinicReportIntegrityError("Duplicate source: SYNTHETIC private identifier"), "REPORT_INTEGRITY"],
+    [new DailyClinicExpenseIntegrityError(), "EXPENSE_INTEGRITY"],
+    [new FinancialCurrencyIntegrityError("SYNTHETIC patient", "private-id", "private-value"), "FINANCIAL_CURRENCY_INTEGRITY"],
+    [new ReclassificationProofError(), "RECLASSIFICATION_PROOF"],
+    [Object.assign(new Error("SYNTHETIC SELECT private financial SQL"), { name: "SYNTHETIC private", detail: "SYNTHETIC private row" }), "UNEXPECTED_FAILURE"],
+    ["SYNTHETIC non-Error private value", "UNEXPECTED_FAILURE"],
+  ])("logs only its static diagnostic category, never error evidence (%#)", async (failure, code) => {
+    load.mockRejectedValue(failure);
+    const response = await GET(request());
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ message: "تعذّر إعداد كشف إقفال اليوم. أعد المحاولة." });
+    expect(console.error).toHaveBeenCalledExactlyOnceWith("[daily-clinic-report]", code);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("SYNTHETIC");
   });
 });

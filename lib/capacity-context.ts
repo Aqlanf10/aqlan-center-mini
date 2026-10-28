@@ -106,7 +106,7 @@ const toMinutes = (value: string): number => {
  * `sameDay` تأتي من داخل قفل اليوم الذرّي، فالحكم يرى ما رآه القفل — لا لقطةً
  * أقدم منه.
  */
-export async function evaluateCapacity(input: {
+export interface CapacityEvaluationInput {
   sameDay: Appointment[];
   date: string;
   time: string;
@@ -122,7 +122,10 @@ export async function evaluateCapacity(input: {
   excludeId?: number;
   /** اتصال المعاملة حين يُقيَّم داخل قفل اليوم — فلا اتصالَ ثانٍ ولا لقطةٌ أقدم. */
   client?: DbClient;
-}): Promise<CapacityVerdict> {
+}
+
+/** Freeze verified block windows once for the decision and its alternatives. */
+export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): Promise<(time: string) => CapacityVerdict> {
   const { service, context } = input;
   const blocks: ProviderBlockWindow[] = [];
   if (service?.requiresProvider && input.providerId) {
@@ -134,17 +137,17 @@ export async function evaluateCapacity(input: {
       blocks.push(...await loadProviderBlockWindows(input.providerId, input.date, input.client));
     } catch {
       const reason = "تعذّر التحقّق من توافر الطبيب — لم يُحجز حتى يُتأكَّد.";
-      return {
+      return () => ({
         state: "OVER_CAPACITY", occupiedChairs: 0, chairs: context.chairs,
         dayPercent: 0, outsideHours: false, message: reason, reasons: [reason],
-      };
+      });
     }
   }
 
-  return judgeFullCapacity({
+  return (time) => judgeFullCapacity({
     appointments: input.sameDay,
     date: input.date,
-    time: input.time,
+    time,
     durationMinutes: input.durationMinutes,
     bufferBeforeMinutes: input.bufferBeforeMinutes ?? service?.bufferBeforeMinutes ?? 0,
     bufferAfterMinutes: input.bufferAfterMinutes ?? service?.bufferAfterMinutes ?? 0,
@@ -161,6 +164,10 @@ export async function evaluateCapacity(input: {
     newPatientsBookedToday: input.newPatientsBookedToday ?? 0,
     excludeId: input.excludeId,
   });
+}
+
+export async function evaluateCapacity(input: CapacityEvaluationInput): Promise<CapacityVerdict> {
+  return (await prepareCapacityEvaluator(input))(input.time);
 }
 
 export { toMinutes as capacityTimeToMinutes };
