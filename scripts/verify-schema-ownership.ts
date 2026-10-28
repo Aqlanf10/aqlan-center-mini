@@ -441,7 +441,7 @@ export async function runSchemaOwnershipCharacterization(
     if (runtimeCatalog.registry.rows.length !== runtimeExtensions.length || runtimeExtensions.some(item =>
       !runtimeCatalog.registry.rows.some(row => row.version === item.version && row.name === item.name
         && row.checksum === item.checksum && row.adopted === false))) {
-      throw new Error('SCHEMA_OWNERSHIP_RUNTIME_REGISTRY_MISMATCH: expected exact 0051–0052, 0056–0058, 0063–0069 and 0078/0087 extension contracts.');
+      throw new Error('SCHEMA_OWNERSHIP_RUNTIME_REGISTRY_MISMATCH: expected exact 0051–0052, 0056–0058, 0063–0069 and 0078/0087/0089 extension contracts.');
     }
 
     const rawComparison = compareDetailedSchemaCatalogs(migrationCatalog, runtimeCatalog);
