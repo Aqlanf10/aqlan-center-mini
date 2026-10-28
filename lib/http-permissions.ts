@@ -169,7 +169,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ortho/[id]/strategy": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/assessment": { GET: CLINIC, POST: CLINICAL },
   "/api/patients/[id]/return-booking-context": { GET: ["admin", "reception", "doctor"] },
-  "/api/patients/[id]/responsibility": { GET: ["admin"], PATCH: ["admin"] },
+  // Decided by the actor's live grants (canViewResponsibilitySuggestion / canConfirmCaseResponsibility) plus patient access.
+  "/api/patients/[id]/responsibility": { GET: ["admin", "reception", "doctor"], PATCH: ["admin", "reception", "doctor"] },
   "/api/ortho/adjustments/[id]/billing-decision": { POST: CLINIC },
   "/api/ortho/baseline": { POST: CLINICAL },
   "/api/ortho/billing-decisions": { GET: CLINIC },
