@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useSession } from "@/components/SessionProvider";
 import {
   MINOR_UNITS,
   formatMoney,
@@ -125,6 +126,7 @@ export function SupplierFinancePanel({
     [reason, setReason] = useState(""),
     [editing, setEditing] = useState<string | null>(null),
     [notice, setNotice] = useState("");
+  const canonicalSession = useSession()?.canonical === true;
   const current = view?.orderId === orderId ? view.data : null;
   const commands = useSupplierCommand(current?.authority ?? null, () => {
     setNotice(
@@ -392,12 +394,15 @@ export function SupplierFinancePanel({
                         invoice.document.currency,
                       )}
                 </p>
-                <Link
-                  href={`/finance/parties/${invoice.document.supplierPartyId}`}
-                  className="inline-block text-sm font-semibold text-blue-800 underline"
-                >
-                  {t("كشف المورد والسداد", "Supplier ledger and payment")}
-                </Link>
+                {/* The supplier ledger page joins the canonical workspace in M2. */}
+                {canonicalSession ? null : (
+                  <Link
+                    href={`/finance/parties/${invoice.document.supplierPartyId}`}
+                    className="inline-block text-sm font-semibold text-blue-800 underline"
+                  >
+                    {t("كشف المورد والسداد", "Supplier ledger and payment")}
+                  </Link>
+                )}
               </div>
             ) : null}
             {invoice.blockedReason ? (

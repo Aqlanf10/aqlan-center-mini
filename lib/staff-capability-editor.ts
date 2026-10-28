@@ -45,7 +45,7 @@ function policyRefusal(reason: string): never {
 /** Runtime/admission refusals are mapped once, here, to Arabic HTTP answers. */
 export function staffAdmissionRefusal(error: unknown): StaffCapabilityEditError | null {
  if (error instanceof StaffCapabilityEditError) return error;
- if (!(error instanceof Error) || !/^STAFF_(OPERATION|RUNTIME|DIRECTORY)_[A-Z_]+$/.test(error.message)) return null;
+ if (!(error instanceof Error) || !/^STAFF_(OPERATION|RUNTIME|DIRECTORY|READ)_[A-Z_]+$/.test(error.message)) return null;
  const code = error.message;
  if (/CAPABILITY_DENIED$/.test(code)) return new StaffCapabilityEditError(403, code, "لا تملك الصلاحية اللازمة لهذه العملية.");
  if (/(SESSION|STALE|EXPIRED|SUBJECT|USERNAME|CREDENTIAL|PERMISSIONS|PROVIDER|ACCOUNT_INVALID)/.test(code)) return new StaffCapabilityEditError(401, code, "انتهت الجلسة أو تغيّرت صلاحياتك. سجّل الدخول من جديد.");

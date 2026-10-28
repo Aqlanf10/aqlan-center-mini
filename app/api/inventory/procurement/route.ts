@@ -51,6 +51,15 @@ import {
   type CustodyWasteApprovalInput,
 } from "@/lib/inventory-domain/custody-store";
 import type { RequestRevision, PurchaseOrder, ReceiptRevision, SupplierInvoiceRevision } from "@/lib/inventory-domain/procurement";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { revalidateVerifiedDurableSession, type VerifiedDurableSession } from "@/lib/staff-durable-session";
+import { staffAdmissionRefusal } from "@/lib/staff-capability-editor";
+import { getPool } from "@/lib/db";
+import { admitSupplierIntentCanonical, executeSupplierIntentCanonical, readSupplierFinanceCanonical } from "@/lib/inventory-domain/supplier-transport";
+import { readProcurementRequestsCanonical, readProcurementCatalogCanonical, readProcurementWorkbenchCanonical } from "@/lib/inventory-domain/procurement-store";
+import { readDoctorCustodyCanonical } from "@/lib/inventory-domain/custody-store";
+import { commandCanonicalInventoryItemCreate, commandCanonicalInventoryLocationCreate, commandCanonicalInventoryPolicyRevise, commandCanonicalInventoryUnitRevise, readCanonicalFirstUseReadiness, readCanonicalInventoryReferences } from "@/lib/inventory-domain/reference-setup";
+import { isCanonicalProcurementCommand, runCanonicalProcurementCommand, type CanonicalProcurementInput } from "@/lib/inventory-domain/canonical-procurement-transport";
 export const dynamic = "force-dynamic";
 
 const CONFLICT_CODES = new Set([
@@ -143,8 +152,8 @@ function shape(document:unknown,command:string){const source=record(document);in
   if(command==="invoice.match"){record(line.price);list(line.receiptAllocations);}
 }return source;}
 const DOCTOR_OR_ADMIN_COMMANDS=new Set(["request.submit","custody.acknowledge","custody.consume","custody.return_to_store","custody.stocktake","custody.close_package","custody.object_settlement"]);
-export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{const url=new URL(request.url);if(url.searchParams.get("view")==="reference-setup")return NextResponse.json(await referenceTransport.read(session,url.searchParams.get("query")??"",Number(url.searchParams.get("page")??"0")),{headers:{"Cache-Control":"private, no-store"}});if(url.searchParams.get("view")==="first-use-readiness")return NextResponse.json(await referenceTransport.readiness(session),{headers:{"Cache-Control":"private, no-store"}});if(url.searchParams.get("view")==="supplier-finance")return NextResponse.json(await readSupplierFinance(session,url.searchParams.get("orderId")??""),{headers:{"Cache-Control":"private, no-store"}});if(url.searchParams.get("view")==="workbench")return NextResponse.json(await readProcurementWorkbench(session,Number(url.searchParams.get("requestOffset")??"0"),Number(url.searchParams.get("orderOffset")??"0")));if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
-export async function POST(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{
+export async function GET(request:Request){const selected=await selectRequestStaffEnvelope();if(selected.kind==="canonical")return canonicalGet(request,selected.handle);if(selected.kind==="denied")return expired();const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{const url=new URL(request.url);if(url.searchParams.get("view")==="reference-setup")return NextResponse.json(await referenceTransport.read(session,url.searchParams.get("query")??"",Number(url.searchParams.get("page")??"0")),{headers:{"Cache-Control":"private, no-store"}});if(url.searchParams.get("view")==="first-use-readiness")return NextResponse.json(await referenceTransport.readiness(session),{headers:{"Cache-Control":"private, no-store"}});if(url.searchParams.get("view")==="supplier-finance")return NextResponse.json(await readSupplierFinance(session,url.searchParams.get("orderId")??""),{headers:{"Cache-Control":"private, no-store"}});if(url.searchParams.get("view")==="workbench")return NextResponse.json(await readProcurementWorkbench(session,Number(url.searchParams.get("requestOffset")??"0"),Number(url.searchParams.get("orderOffset")??"0")));if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
+export async function POST(request:Request){const selected=await selectRequestStaffEnvelope();if(selected.kind==="canonical")return canonicalPost(request,selected.handle);if(selected.kind==="denied")return expired();const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});if(!inventoryIntegrationEnabled())return disabled();try{
   // Optional versioned browser recovery. These headers bind the saved command
   // to the authenticated session; they never grant identity or permissions.
   const recoveryHeaders = ["X-Inventory-Recovery", "X-Inventory-Actor", "X-Inventory-Actor-Id", "X-Inventory-Digest"];
@@ -203,4 +212,104 @@ export async function POST(request:Request){const session=await requireSession()
 
 function disabled() {
   return NextResponse.json({ code: "inventory_integration_disabled", message: INVENTORY_DISABLED_MESSAGE }, { status: 503 });
+}
+
+/* ---------------------------------------------------------------------------
+ * Canonical identity (M3a). One envelope rule: a canonical cookie never falls back
+ * to the legacy session or role. Every read is one owning RR snapshot admitted by
+ * its exact read capability; every command is one admitted operation for the exact
+ * capability mapped in canonical-procurement-transport.ts. Same bodies, validation,
+ * idempotency and recovery protocol as the legacy path.
+ * ------------------------------------------------------------------------- */
+const NO_STORE = { "Cache-Control": "private, no-store" } as const;
+function expired(){return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});}
+function canonicalFailure(error:unknown){
+  const refusal=staffAdmissionRefusal(error);
+  if(refusal)return NextResponse.json({code:refusal.code,message:refusal.message},{status:refusal.status,headers:NO_STORE});
+  return failure(error);
+}
+const page=(value:string|null)=>Number(value??"0");
+async function canonicalGet(request:Request,handle:VerifiedDurableSession){
+  if(!inventoryIntegrationEnabled())return disabled();
+  try{
+    const url=new URL(request.url),view=url.searchParams.get("view");
+    const body=view==="reference-setup"?await readCanonicalInventoryReferences(getPool(),handle,url.searchParams.get("query")??"",page(url.searchParams.get("page")))
+      :view==="first-use-readiness"?await readCanonicalFirstUseReadiness(handle)
+      :view==="supplier-finance"?await readSupplierFinanceCanonical(handle,url.searchParams.get("orderId")??"")
+      :view==="workbench"?await readProcurementWorkbenchCanonical(handle,page(url.searchParams.get("requestOffset")),page(url.searchParams.get("orderOffset")))
+      :view==="custody"?await readDoctorCustodyCanonical(handle,page(url.searchParams.get("offset")))
+      :view==="catalog"?await readProcurementCatalogCanonical(handle)
+      :await readProcurementRequestsCanonical(handle,page(url.searchParams.get("offset")));
+    return NextResponse.json(body,{headers:NO_STORE});
+  }catch(error){return canonicalFailure(error);}
+}
+function canonicalInput(command:string,source:Record<string,unknown>):CanonicalProcurementInput{
+  switch(command){
+    case "request.submit":return {command,document:shape(source.document,command) as unknown as RequestRevision};
+    case "request.revise":{const revision=record(source.revision);record(revision.value);return {command,revision:revision as unknown as Parameters<typeof revisePurchaseRequest>[2]};}
+    case "request.approve":{const approval=record(source.approval);list(approval.decisions);invariant(typeof approval.requestId==="string"&&Number.isSafeInteger(approval.version),"invalid_approval","Approval targets an exact request/version");return {command,approval:approval as Parameters<typeof approvePurchaseRequest>[2]};}
+    case "order.issue":return {command,document:shape(source.document,command) as unknown as PurchaseOrder};
+    case "order.amend":{const amendment=record(source.amendment ?? source.document);shape(amendment.order,command);invariant(typeof amendment.reason==="string","reason_required","Amendment reason is required");return {command,amendment:{order:amendment.order as PurchaseOrder,reason:amendment.reason}};}
+    case "receipt.post":return {command,document:shape(source.document,command) as unknown as ReceiptRevision};
+    case "quarantine.resolve":return {command,resolution:record(source.resolution ?? source.document) as unknown as Parameters<typeof resolveQuarantineReceipt>[2]};
+    case "invoice.match":return {command,document:shape(source.document,command) as unknown as SupplierInvoiceRevision};
+    case "custody.dispatch":{const transfer=record(source.transfer);list(transfer.lines);return {command,transfer:transfer as unknown as CustodyDispatch};}
+    case "custody.acknowledge":{const acknowledgement=record(source.acknowledgement);list(acknowledgement.lines);return {command,acknowledgement:acknowledgement as unknown as CustodyAcknowledgement};}
+    case "custody.consume":{const usage=record(source.usage ?? source.document);return {command,usage:{...usage,kind:usage.kind==="approved_waste"?"approved_waste":"consumed"} as unknown as CustodyUsageInput};}
+    case "custody.return_to_store":{const usage=record(source.usage ?? source.document);return {command,usage:{...usage,kind:"returned_to_store"} as unknown as CustodyUsageInput};}
+    case "custody.stocktake":return {command,stocktake:record(source.stocktake ?? source.document) as unknown as CustodyStocktakeInput};
+    case "custody.close_package":return {command,closure:record(source.packageClosure ?? source.document) as unknown as CustodyPackageClosureInput};
+    case "custody.approve_waste":return {command,approval:record(source.wasteApproval ?? source.document) as unknown as CustodyWasteApprovalInput};
+    case "custody.propose_settlement":return {command,settlement:record(source.settlement ?? source.document) as unknown as CustodySettlementProposalInput};
+    case "custody.object_settlement":return {command,objection:record(source.objection ?? source.document) as unknown as CustodySettlementObjectionInput};
+    case "legacy.reconcile":return {command,reconciliation:record(source.reconciliation ?? source.document) as unknown as LegacyReconciliationInput};
+    default:throw new InventoryDomainError("invalid_command","Use a supported procurement transition");
+  }
+}
+async function canonicalReference(handle:VerifiedDurableSession,source:Record<string,unknown>,mode:"admit"|"execute"|"lookup"|"retire"){
+  const intent=record(source.intent) as unknown as ReferenceIntent;const input=record((intent as unknown as Record<string,unknown>).input);
+  const reason=typeof source.reason==="string"?source.reason:undefined;
+  switch(input.action){
+    case "item.create":return commandCanonicalInventoryItemCreate(getPool(),handle,intent,mode,reason);
+    case "unit.revise":return commandCanonicalInventoryUnitRevise(getPool(),handle,intent,mode,reason);
+    case "location.create":return commandCanonicalInventoryLocationCreate(getPool(),handle,intent,mode,reason);
+    case "policy.revise":return commandCanonicalInventoryPolicyRevise(getPool(),handle,intent,mode,reason);
+    default:throw new InventoryDomainError("invalid_document","Unknown setup command");
+  }
+}
+async function canonicalPost(request:Request,handle:VerifiedDurableSession){
+  if(!inventoryIntegrationEnabled())return disabled();
+  const claims=revalidateVerifiedDurableSession(handle);
+  if(!claims)return expired();
+  try{
+    // Same optional browser recovery protocol, bound to the signed canonical identity.
+    const recoveryHeaders = ["X-Inventory-Recovery", "X-Inventory-Actor", "X-Inventory-Actor-Id", "X-Inventory-Digest"];
+    const recovering = recoveryHeaders.some(name => request.headers.has(name));
+    if (recovering) {
+      let actor: string | null = null;
+      try { actor = decodeURIComponent(request.headers.get("X-Inventory-Actor") ?? ""); } catch { /* Refuse malformed binding. */ }
+      if (request.headers.get("X-Inventory-Recovery") !== INVENTORY_RECOVERY_PROTOCOL || actor !== claims.username
+        || request.headers.get("X-Inventory-Actor-Id") !== String(claims.userId)) {
+        return NextResponse.json({code:"inventory_recovery_actor_mismatch",message:"تغيّرت الجلسة. سجّل الدخول بالحساب الذي بدأ العملية."},{status:403,headers:NO_STORE});
+      }
+    }
+    const source=record(await readJsonBody(request,JSON_BODY_LIMIT_BYTES));const command=String(source.command??"");
+    if(command.startsWith("reference.")){const mode=command.slice("reference.".length);invariant(["admit","execute","lookup","retire"].includes(mode),"invalid_document","Unknown setup command");return NextResponse.json(await canonicalReference(handle,source,mode as "admit"|"execute"|"lookup"|"retire"),{headers:NO_STORE});}
+    if(command==="supplier.admit")return NextResponse.json(await admitSupplierIntentCanonical(handle,record(source.intent) as unknown as SupplierIntent),{status:201,headers:NO_STORE});
+    if(command==="supplier.execute")return NextResponse.json(await executeSupplierIntentCanonical(handle,record(source.admission) as unknown as SupplierAdmission),{headers:NO_STORE});
+    if(command==="supplier.retire"){invariant(typeof source.reason==="string","reason_required","Retirement reason is required");return NextResponse.json(await executeSupplierIntentCanonical(handle,record(source.admission) as unknown as SupplierAdmission,source.reason),{headers:NO_STORE});}
+    let recovery: InventoryRecoveryAcknowledgement | null = null;
+    if (recovering) {
+      const digest = request.headers.get("X-Inventory-Digest");
+      if (!isInventoryOperationKey(source.operationKey) || !isInventoryRecoveryDigest(digest)
+        || createHash("sha256").update(inventoryRecoveryIdentity(source)).digest("hex") !== digest) {
+        return NextResponse.json({code:"inventory_recovery_payload_mismatch",message:"لا تطابق العملية محتواها المحفوظ. أعد محاولة العملية الأصلية."},{status:409,headers:NO_STORE});
+      }
+      recovery = {protocol:INVENTORY_RECOVERY_PROTOCOL,status:"committed",actorUserId:claims.userId,key:source.operationKey,digest};
+    }
+    invariant(typeof source.operationKey==="string","invalid_operation_key","Operation key is required");
+    invariant(isCanonicalProcurementCommand(command),"invalid_command","Use a supported procurement transition");
+    const result=await runCanonicalProcurementCommand(handle,source.operationKey,canonicalInput(command,source));
+    return NextResponse.json(recovery?{...result,recovery}:result,{status:command==="request.approve"?200:201,headers:NO_STORE});
+  }catch(error){return canonicalFailure(error);}
 }

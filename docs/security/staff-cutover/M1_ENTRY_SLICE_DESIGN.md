@@ -36,11 +36,11 @@ The issuer is `lib/staff-durable-issuer.ts`. Its only importer is `app/api/auth/
 3. **Candidate lookup, non-initialising and minimal.**
    - Case-insensitive username, active, `authorization_mode='canonical'`, `LIMIT 2`.
    - An ambiguous match, an over-long input or an absent account gets one dummy scrypt derivation.
-   - `verifyPassword` runs outside any lock. The issuer captures `{id, username, password_hash, authorization_epoch}`.
+   - `verifyPassword` runs outside any lock. In one SELECT (one snapshot) the issuer captures the full anchor tuple the password work is bound to (OWNER_READINESS §5.2–3): `{id, username, password_hash, authorization_epoch}`, the **current subject incarnation** (`staff_identity_current.subject_id`), the **realm/control/generation** anchors (`realm_id`, `binding_epoch`, `generation_id`) and the **provider link with its clinical epoch** (`party_id`, `clinical_authority_epoch`, or their absence). An account without a current binding is treated as absent (dummy derivation).
 4. **Locked proof.**
    - READ COMMITTED, then XID capture, then the shared transaction fence, then `loadLockedIssuanceAuthority`.
    - That call proves control → identity state → history → users (FOR SHARE, sorted) → bindings → provider → strict permission document → resolved access.
-   - The captured candidate must equal the proved row exactly. If anything changed, the attempt fails as an ordinary bad credential and nothing derived from the old proof is used.
+   - The captured candidate must equal the proved tuple exactly, field by field: account, credential, account epoch, subject, realm, control epoch, generation and provider/clinical epoch. A numeric ID re-bound to another subject (ID reuse after a restore or rebind) or a re-incarnated provider is a different person and fails as an ordinary bad credential; nothing derived from the old proof is used. Race tests: password, permission and provider-epoch changes committed while issuance waits on the fence, plus a subject-drift case (the ready database itself refuses a direct rebind).
 5. **Claims derived only from the proved tuple.**
    - `expiresAt` uses `SESSION_DURATION_MS`.
    - Signing goes through the private `signDurableSessionClaims`, which accepts the exact key set only and is separate from `createSessionToken`.
@@ -56,7 +56,9 @@ The issuer is `lib/staff-durable-issuer.ts`. Its only importer is `app/api/auth/
    - The token is never placed in JSON.
    - Account counters are cleared best-effort; source counters are left alone.
 
-If signing, auditing, the final proof or COMMIT fails, the transaction rolls back and no token leaves the issuer.
+If signing, auditing or the final proof fails, the transaction is rolled back and no token leaves the issuer.
+
+A COMMIT failure is different: it does **not** prove that nothing committed (the connection may have dropped after the server committed). The issuer still returns no token and the route sets no cookie; the user simply signs in again. The shared transaction core (`lib/transactions.ts`) returns a connection to the pool only after a confirmed COMMIT or a confirmed ROLLBACK. A failed BEGIN, a failed ROLLBACK or a COMMIT followed by a failed cleanup destroys the connection (`release(true)`), so no later borrower inherits an open or unknown transaction. A successful cleanup ROLLBACK proves only that the connection is clean, never that the write did not happen. Tests: `__tests__/transactions.test.ts` (every failure path) and the deferred-trigger COMMIT failure in `__tests__/postgres/staff-durable-issuer.test.ts`.
 
 After a password match, every refusal (a malformed document, an inactive provider, a racing lifecycle change) answers exactly like a wrong password. Only the reason code is logged server-side.
 
@@ -123,7 +125,8 @@ The routes are registered under a new `canonical` access class:
 | Logout | **Decided for the first slice, pending confirmation.** Logout clears the cookie in the browser only. Account-wide revocation goes through an authorised epoch mutation (editor or credential change). Per-session server revocation needs a session-record schema and is **not** claimed. | Owner, to confirm whether per-session logout is required |
 | Required workflow list (which existing routes must pass marker-bearing journeys before cutover) | **Open.** The inventory lists 411 methods and 95 pages; an owner-confirmed list is still needed. | Owner |
 | Maintenance vs zero downtime | **Decided by the owner:** a drained maintenance window on a clinic holiday. Date to be scheduled; duration from the M5 rehearsal. | Done |
-| Frozen catalogue vs the real clinic schema | **Proposed fix, for review.** On a database bootstrapped by `ensureSchema`, the only substrate catalogue drift was the SERIAL default on `users.id`/`parties.id` (`nextval('…_id_seq'::regclass)`), which the earlier synthetic capture pinned as `null`; `initializeStaffIdentitySubstrate` therefore refused the real schema with `STAFF_IDENTITY_SCHEMA_DRIFT`. Revision: both catalogues now pin the clinic's SERIAL default; the probe normaliser treats the schema-qualified spelling of those two owned sequences as identical; every synthetic fixture creates `users`/`parties` with `SERIAL` ids like production. The built-app journey now installs on the unmodified real schema. No other catalogue entry changed. | Dot's review of the revision |
+| Frozen catalogue vs the real clinic schema | **Proposed fix, for review (revised after Dot R4).** On a database bootstrapped by `ensureSchema`, the only substrate catalogue drift was the SERIAL default on `users.id`/`parties.id`, which the earlier synthetic capture pinned as `null`. The probe no longer accepts that default by its text. It proves provenance by OIDs: the default depends on exactly one object, a sequence (`relkind S`) named `<table>_id_seq` in **the target schema**, owned (`pg_depend` deptype `a`) by **that very column**, and the expression is exactly `nextval` of it. Only then does the catalogue record `$OWNED_SERIAL`; anything else keeps its raw text as `$UNPROVEN:…` and fails the exact comparison. Negative tests: a same-name foreign sequence rendered unqualified through search-path substitution, detached ownership, ownership by another column, and a wrapped expression (`__tests__/postgres/staff-identity-substrate.test.ts`). | Dot's review |
+| **Deferred component: owner preparation and seal service** (Dot R3) | **Not built; tracked here as a release blocker.** Every ready state in this slice comes from the direct-SQL synthetic fixture (`__tests__/postgres/_canonical-ready-fixture.ts`, `security-http/canonical-entry-journey.test.ts`). That proves the issuer, admission, shell, directory and editor against a ready state; it does **not** prove how a real ready state is reached. The original M1 preparation/seal scope stays open. Before it may be declared complete, its acceptance must cover: owner approval with an **expiry**; generation/registry **CAS** on every step; **idempotent** retries keyed by an approval identifier; **unknown-commit** handling (a lost COMMIT acknowledgement is resolved by reading the committed state, never by re-running); refusal from any partial, quarantined or drifted state; and a built-app journey from prepare to the first canonical login. Live preparation and binding stay closed until then: there is no route, CLI or job that prepares or seals, and the probes refuse to adopt or repair. | Owner (§2 trust root) and Dot's review |
 | Restore of inventory authority (`inventory-authority-restore`) | **Open; needs a reviewed target-side protocol.** Source realm and execution history must not be imported (§2/§6). Target-local rebinding is required. | Dot's review |
 
 ## 7. Corrected milestone dependencies (after review 6458434508 and 6458475203)
@@ -141,3 +144,31 @@ The revised order:
 4. **M3b:** the full inventory and procurement completion, with all 69 scenarios.
 5. **M4:** schema registration.
 6. **M5:** Staging rehearsal and runbook for the holiday window.
+
+## 8. M3a status (after review 6475545205)
+
+**Done on this head, for review:**
+- **Canonical inventory commands.** `lib/inventory-domain/canonical-procurement-transport.ts` maps each of the 18 procurement and custody commands to exactly one catalogue capability (policy version 5, 20 new inventory capabilities). The command runs inside `withStaffOperation`. The store re-proves the authority before the reset fence, after it, and after the operation-key lock. The requester is always the admitted actor.
+- **Decisions from grants, not role labels.** These read current grants and the validated clinician link:
+  - financial visibility, all-requests oversight and custody oversight;
+  - recorded-approver validity (a waste approval is consumed only while its approver still holds `inventory.custody.approve-waste`);
+  - the audit detail level.
+- **Canonical reads.** `lib/canonical-read-snapshot.ts` is the owning RR READ ONLY reader of `CANONICAL_READ_SNAPSHOTS.md`, extracted unchanged from the staff directory; the directory now uses it (97 unit and 23 PostgreSQL tests unchanged). Reads covered: requests, catalogue, workbench, custody statement and first-use readiness. The reader gets a serialized, closed-after-use query facade. That facade refuses transaction control, row locks, `set_config`, `nextval` and advisory functions.
+- **Supplier finance is canonical only.** The intent triple is the canonical `{realm, subject, generation}`. The legacy-admin adapter refuses with `supplier_canonical_identity_required`; its parallel schema could never run under M1. The supplier-intent foreign key to the retired `staff_execution_epochs` is removed. Identity columns are opaque evidence (see the restore protocol).
+- **Reference setup.** The canonical approval-limit revision is added under `inventory.approval-policy.manage`.
+- **Route and screens.**
+  - The procurement route has a canonical branch with the one envelope-selection rule.
+  - Five inventory pages are registered in the canonical shell.
+  - A nested page never inherits its parent's grant.
+  - UI controls follow grants (`lib/inventory-ui-access.ts`).
+  - The custody screen gains the missing waste-approval form.
+- **Tests.**
+  - `postgres/inventory-canonical-procurement` (11).
+  - `postgres/inventory-supplier-operational`, migrated to the canonical runtime (26). Every positive supplier effect is kept.
+  - `security-http/inventory-supplier-operational-http-ui`, migrated to a canonical built-app journey on its own database and server.
+
+**Diagnosis of the red inventory HTTP step (CI 40678715299).** The obsolete supplier HTTP suite installed the retired parallel authority schema into the shared HTTP database. That schema is an authority footprint, so the shared server's entry correctly answered 503 (maintenance) to every later legacy login. `inventory-reference-closed` failed only because of that pollution. The migrated suite runs on its own database, which removes both failures without weakening an assertion.
+
+**Still open:**
+- `inventory-authority-restore` stays red on purpose. Its canonical replacement waits for review of `docs/inventory/CANONICAL-RESTORE-PROTOCOL-20261028.md`.
+- The supplier ledger page (`/finance/parties`) joins in M2, so its link is hidden in canonical sessions.

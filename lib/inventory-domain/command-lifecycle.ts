@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { insertAuditRow } from "../db";
 import { staffIdentitySchemaName } from "../staff-identity-substrate-schema.mjs";
-import { assertStaffOperation, staffOperationIdentity, type StaffOperationHandle } from "../staff-operation-runtime";
+import { assertStaffOperation, staffOperationCapabilities, staffOperationIdentity, type StaffOperationHandle } from "../staff-operation-runtime";
 import { PURCHASE_RESET_FENCE } from "../clinic-reset";
 import { REFERENCE_PROTOCOL, type ReferenceIntent, type ReferenceReply, type ReferenceResult } from "../inventory-reference-protocol";
 import { validateReferenceInput, referenceText } from "./reference-validation";
@@ -84,6 +84,7 @@ const canonicalCapabilities = Object.freeze({
   "item.create": "inventory.items.create",
   "unit.revise": "inventory.units.revise",
   "location.create": "inventory.locations.create",
+  "policy.revise": "inventory.approval-policy.manage",
 } as const);
 type CanonicalReferenceAction = keyof typeof canonicalCapabilities;
 interface CanonicalReferenceContext { handle: StaffOperationHandle; schema: string; action: CanonicalReferenceAction }
@@ -110,6 +111,8 @@ function createLifecycle(
   }
   async function audit(client: DbClient, actor: InventoryActor, entity: string, id: string, operation: string, details: Record<string, unknown>) {
     if (!canonical) return writeInventoryAudit(client, actor, entity, id, operation, details);
+    // Financial audit detail follows the actor's current cost grant, never a role label.
+    const includeFinancials = (await staffOperationCapabilities(client, canonical.handle, canonicalCapabilities[canonical.action], ["inventory.costs.view"], canonical.schema)).has("inventory.costs.view");
     // insertAuditRow gathers request metadata asynchronously. Reassert at the SQL
     // boundary, after that await, rather than only before constructing the audit.
     await insertAuditRow({query: async (sql, values) => {
@@ -117,7 +120,7 @@ function createLifecycle(
       return client.query(sql, values);
     }}, {action: "inventory.item", entity, entityId: id, entityLabel: id,
       actor: actor.username, actorRole: actor.role,
-      details: sanitizeInventoryAuditDetails({operation, ...details}, {includeFinancials: actor.role === "admin"})}, canonical.schema);
+      details: sanitizeInventoryAuditDetails({operation, ...details}, {includeFinancials})}, canonical.schema);
   }
   async function commandLock<T>(client: DbClient, actor: InventoryActor, key: string, payload: unknown, work: (hash: string) => Promise<T>): Promise<T> {
     if (!canonical) return withInventoryCommandLockInTransaction(client, actor, key, scope, payload, management, work);
@@ -444,6 +447,9 @@ export function snapshotCanonicalUnitReviseIntent(raw: ReferenceIntent): Referen
 export function snapshotCanonicalLocationCreateIntent(raw: ReferenceIntent): ReferenceIntent {
   return snapshotCanonicalReferenceIntent(raw, "location.create");
 }
+export function snapshotCanonicalPolicyReviseIntent(raw: ReferenceIntent): ReferenceIntent {
+  return snapshotCanonicalReferenceIntent(raw, "policy.revise");
+}
 export type CanonicalUnitReviseMode = CanonicalItemCreateMode;
 export type CanonicalLocationCreateMode = CanonicalItemCreateMode;
 export function validateCanonicalItemCreateMode(mode: CanonicalItemCreateMode, reason?: string): void {
@@ -517,6 +523,19 @@ async function runCanonicalReferenceLifecycle(
         await c.query(`INSERT INTO ${s}.inventory_item_unit_versions(item_id,version,entered_unit,base_unit,factor,entered_precision,base_precision) VALUES($1,$2,$3,$4,$5::numeric,$6,$7)`,
           [unit.itemId,unit.version,unit.enteredUnit,unit.baseUnit,unit.baseUnitsPerEnteredUnit,unit.enteredPrecision,unit.basePrecision]);
         result = {action: input.action, id: String(input.itemId), version: unit.version};
+      } else if (input.action === "policy.revise") {
+        // Same serialization as the legacy setup writer; self-approval stays disabled.
+        await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["inventory.reference.policy:" + INVENTORY_CLINIC_SCOPE]);
+        await assertStaffOperation(c, handle, capability, s);
+        const {rows: [latest]} = await c.query<{version: number}>(
+          `SELECT version FROM ${s}.inventory_approval_policies WHERE branch_key=$1 ORDER BY version DESC LIMIT 1`, [INVENTORY_CLINIC_SCOPE]);
+        invariant((latest?.version ?? 0) === input.expectedVersion, "stale_version", "Refresh the approval policy version");
+        const version = input.expectedVersion + 1;
+        await assertStaffOperation(c, handle, capability, s);
+        const {rows: [row]} = await c.query<{id: string}>(
+          `INSERT INTO ${s}.inventory_approval_policies(id,branch_key,version,currency,limit_minor,allow_self_approval,created_by) VALUES(gen_random_uuid(),$1,$2,'YER',$3,FALSE,$4) RETURNING id`,
+          [INVENTORY_CLINIC_SCOPE, version, input.limitMinor, actor.userId]);
+        result = {action: input.action, id: row.id, version};
       } else {
         invariant(input.action === "location.create", "operation_forbidden", "Unsupported canonical reference action");
         if (input.kind === "custody") {
@@ -529,12 +548,13 @@ async function runCanonicalReferenceLifecycle(
           [input.id,INVENTORY_CLINIC_SCOPE,input.label,input.kind,input.doctorPartyId]);
         result = {action: input.action, id: input.id, version: 1};
       }
+      const includeFinancials = (await staffOperationCapabilities(c, handle, capability, ["inventory.costs.view"], s)).has("inventory.costs.view");
       await insertAuditRow({query: async (sql, values) => {
         await assertStaffOperation(c, handle, capability, s);
         return c.query(sql, values);
       }}, {action: "inventory.item", entity: "inventory_reference", entityId: result.id, entityLabel: result.id,
         actor: actor.username, actorRole: actor.role,
-        details: sanitizeInventoryAuditDetails({operation: input.action, ...input, version: result.version}, {includeFinancials: actor.role === "admin"})}, s);
+        details: sanitizeInventoryAuditDetails({operation: input.action, ...input, version: result.version}, {includeFinancials})}, s);
       return result;
     });
   completed = true;
@@ -569,4 +589,10 @@ export async function runCanonicalInventoryLocationCreateLifecycle(
   mode: CanonicalLocationCreateMode, reason?: string, schema = "public",
 ): Promise<ReferenceReply> {
   return runCanonicalReferenceLifecycle("location.create", client, handle, raw, mode, reason, schema);
+}
+export async function runCanonicalInventoryPolicyReviseLifecycle(
+  client: DbClient, handle: StaffOperationHandle, raw: ReferenceIntent,
+  mode: CanonicalItemCreateMode, reason?: string, schema = "public",
+): Promise<ReferenceReply> {
+  return runCanonicalReferenceLifecycle("policy.revise", client, handle, raw, mode, reason, schema);
 }

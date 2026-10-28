@@ -6,7 +6,7 @@ import { inspectStaffRuntimeSchema } from "./staff-runtime-probe.mjs";
 import { revalidateVerifiedDurableSession, type DurableSessionClaims, type VerifiedDurableSession } from "./staff-durable-session";
 import { parseStaffCapabilityDocument } from "./staff-permission-envelope";
 import { hasStaffCapability, ownerContextFromTrustedBinding, resolveStaffCapabilities, staffAuthorizationFingerprint, type ResolvedStaffAccess } from "./staff-capabilities";
-import type { StaffCapabilityDocument } from "./staff-capability-catalogue";
+import type { StaffCapability, StaffCapabilityDocument } from "./staff-capability-catalogue";
 import type { StaffRuntimeAction } from "./staff-operation-runtime";
 function refuse(reason: string): never { throw new Error(`STAFF_OPERATION_${reason}`); }
 type RowLock = " FOR SHARE" | "";
@@ -111,6 +111,24 @@ export async function loadLockedStaffAuthority(client: DbClient, session: Verifi
  * directory owner must already hold its pre-BEGIN session fence and RR identity. */
 export async function loadStaffDirectorySnapshotAuthority(client: Pick<DbClient, "query">, session: VerifiedDurableSession) {
  return loadAuthority(client, session, "staff.view", "public", "");
+}
+/** Snapshot evidence for the generic owning RR reader (`lib/canonical-read-snapshot.ts`)
+ * only: the same predicates, no row locks, an exact registered read action. */
+export async function loadCanonicalSnapshotAuthority(client: Pick<DbClient, "query">, session: VerifiedDurableSession, action: StaffRuntimeAction) {
+ return loadAuthority(client, session, action, "public", "");
+}
+/** Recorded-approver evidence for a writer that already holds the shared lifecycle
+ * fence (for example a waste approval consumed later): does `userId` CURRENTLY prove
+ * as an active canonical account holding `capability`? Target-specific drift answers
+ * false (the record no longer carries authority); realm/control drift still refuses. */
+export async function lockedAccountHoldsCapability(client: DbClient, userId: number, capability: StaffCapability, schema: string): Promise<boolean> {
+ try {
+  const proof = await proveAccount(client, userId, schema, " FOR SHARE");
+  return hasStaffCapability(proof.access, capability);
+ } catch (error) {
+  if (error instanceof Error && /^STAFF_OPERATION_(ACCOUNT_INVALID|SUBJECT_STALE|PROVIDER_STALE|PERMISSIONS_STALE)$/.test(error.message)) return false;
+  throw error;
+ }
 }
 /** Issuer evidence only: the private durable issuer holds the shared lifecycle
  * fence and its own READ COMMITTED XID. It proves the password-selected account's

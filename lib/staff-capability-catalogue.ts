@@ -1,7 +1,7 @@
 /** Inert future policy catalogue. Nothing in this module grants access to live routes. */
 export const STAFF_CAPABILITY_SCHEMA_VERSION = 1 as const;
 /** Bump when authorization semantics change, even if the document schema does not. */
-export const STAFF_AUTHORIZATION_POLICY_VERSION = 4 as const;
+export const STAFF_AUTHORIZATION_POLICY_VERSION = 5 as const;
 
 export const STAFF_CAPABILITIES = Object.freeze([
   "patients.create", "patients.edit", "patients.delete", "patients.export",
@@ -18,6 +18,15 @@ export const STAFF_CAPABILITIES = Object.freeze([
   "finance.revenue.view", "finance.profits.view", "finance.suppliers.view", "finance.reconciliation.view",
   "finance.export", "reports.operational.view", "reports.financial.view", "reports.clinical.view", "reports.export",
   "inventory.references.view", "inventory.items.create", "inventory.units.revise", "inventory.locations.create",
+  // Inventory & procurement operations (M3a, docs/inventory/CENTRAL-PERMISSION-BINDINGS-20261027.md).
+  "inventory.approval-policy.manage",
+  "inventory.requests.view", "inventory.requests.create", "inventory.requests.approve",
+  "inventory.orders.view", "inventory.orders.manage", "inventory.receipts.post", "inventory.quarantine.resolve",
+  "inventory.supplier-invoices.record", "inventory.supplier-invoices.cancel",
+  "inventory.custody.view", "inventory.custody.dispatch", "inventory.custody.acknowledge", "inventory.custody.use",
+  "inventory.custody.stocktake", "inventory.custody.approve-waste",
+  "inventory.custody.settlement.propose", "inventory.custody.settlement.object",
+  "inventory.reconcile", "inventory.costs.view",
   "staff.view", "staff.profile.edit", "staff.accounts.create", "staff.accounts.disable", "staff.permissions.edit",
   "settings.view", "settings.operational.edit", "settings.finance.edit", "audit.view", "audit.export",
 ] as const);
@@ -52,6 +61,23 @@ export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapabi
   "inventory.items.create": Object.freeze(["inventory.references.view"] as const),
   "inventory.units.revise": Object.freeze(["inventory.references.view"] as const),
   "inventory.locations.create": Object.freeze(["inventory.references.view"] as const),
+  "inventory.approval-policy.manage": Object.freeze(["inventory.references.view"] as const),
+  "inventory.requests.create": Object.freeze(["inventory.requests.view", "inventory.references.view"] as const),
+  "inventory.requests.approve": Object.freeze(["inventory.requests.view"] as const),
+  "inventory.orders.manage": Object.freeze(["inventory.orders.view", "inventory.requests.view"] as const),
+  "inventory.receipts.post": Object.freeze(["inventory.orders.view"] as const),
+  "inventory.quarantine.resolve": Object.freeze(["inventory.orders.view"] as const),
+  "inventory.supplier-invoices.record": Object.freeze(["inventory.orders.view", "finance.suppliers.view"] as const),
+  "inventory.supplier-invoices.cancel": Object.freeze(["inventory.supplier-invoices.record"] as const),
+  "inventory.custody.dispatch": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.acknowledge": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.use": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.stocktake": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.approve-waste": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.settlement.propose": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.custody.settlement.object": Object.freeze(["inventory.custody.view"] as const),
+  "inventory.reconcile": Object.freeze(["inventory.references.view"] as const),
+  "inventory.costs.view": Object.freeze(["finance.cost-prices.view"] as const),
   "clinical.plans.edit": Object.freeze(["clinical.plans.view"] as const),
   "clinical.xrays.upload": Object.freeze(["clinical.xrays.view"] as const),
   "finance.invoices.cancel": Object.freeze(["finance.invoices.view"] as const),

@@ -1,3 +1,8 @@
+/** HELD RED ON PURPOSE (M1_ENTRY_SLICE_DESIGN.md §7, Dot reviews 6458434508 and 6475545205).
+ * This suite exercises the RETIRED parallel authority schema (same-realm epoch rotation,
+ * signed `authority` session, legacy supplier admin). It is neither patched with a cast
+ * nor re-signed with the old authority. Its canonical replacement is specified for review
+ * in docs/inventory/CANONICAL-RESTORE-PROTOCOL-20261028.md §3 and lands after approval. */
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";

@@ -2,6 +2,9 @@ import { PURCHASE_RESET_FENCE } from "../clinic-reset";
 import { requireInventoryIntegration } from "./rollout";
 import { readInventoryCommandBinding, authorizeInventoryCommandBinding } from "./command-fence";
 import type { InventoryPrincipal } from "./principal";
+import { assertCanonicalInventoryAuthority, canonicalAuthorityOfClient, canonicalInventoryClient, canonicalInventoryGrant, isCanonicalInventoryAuthority, type CanonicalInventoryAuthority } from "./canonical-operation";
+import { runCanonicalReadSnapshot } from "../canonical-read-snapshot";
+import type { VerifiedDurableSession } from "../staff-durable-session";
 import { createHash, randomUUID } from "node:crypto";
 import { ensureSchema, getPool, insertAuditRow, type DbClient } from "../db";
 import { withTransaction } from "../transactions";
@@ -35,7 +38,25 @@ import {
 /** Temporary single-clinic boundary. The project has no branch identity on this
  * pinned base. Never accept a client invented branch or broaden branch reads. */
 export const INVENTORY_CLINIC_SCOPE = "clinic";
+/** Serialized size bound for one canonical inventory read snapshot. */
+export const INVENTORY_READ_MAX_BYTES = 4 * 1024 * 1024;
 export interface InventoryActor { userId: number; username: string; role: string }
+/** Legacy marker-free deployments pass the existing role policy (`true` = management).
+ * Canonical deployments pass the opaque admitted authority token; its role label is
+ * presentation only and every decision below comes from exact current grants. */
+export type InventoryPolicy = boolean | CanonicalInventoryAuthority;
+/** Recorded on command bindings so a policy can never be swapped between admission and execution. */
+export function inventoryPolicyFlag(policy: InventoryPolicy): boolean {
+  return isCanonicalInventoryAuthority(policy) ? true : policy;
+}
+/** Financial values (costs, prices, valuations) in reads and audit details. */
+export function inventoryFinancialsVisible(actor: InventoryActor, policy?: InventoryPolicy): boolean {
+  return isCanonicalInventoryAuthority(policy) ? canonicalInventoryGrant(policy, "inventory.costs.view") : actor.role === "admin";
+}
+/** Oversight of all purchase requests (otherwise only the actor's own). */
+export function inventoryAllRequestsVisible(actor: InventoryActor, policy?: InventoryPolicy): boolean {
+  return isCanonicalInventoryAuthority(policy) ? canonicalInventoryGrant(policy, "inventory.requests.approve") || canonicalInventoryGrant(policy, "inventory.orders.manage") : actor.role === "admin";
+}
 
 function docId(value: string) { invariant(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value), "invalid_document_id", "Document ID must be a UUID"); }
 function scope(value: string) { invariant(value === INVENTORY_CLINIC_SCOPE, "branch_forbidden", "This actor is not authorized for that inventory scope"); }
@@ -45,19 +66,32 @@ async function ready() {
   const { rows } = await getPool().query<{ present: boolean }>("SELECT to_regclass('purchase_requests') IS NOT NULL AND to_regclass('inventory_operations') IS NOT NULL AS present");
   if (!rows[0]?.present) throw new InventoryDomainError("schema_not_ready", "Inventory procurement schema awaits coordinated migration");
 }
-export async function requireInventoryActor(client: DbClient, actor: InventoryActor, management: boolean) {
+/** Canonical snapshot readers check presence read-only; they never call ensureSchema. */
+async function assertProcurementSchema(client: Pick<DbClient, "query">) {
+  const { rows } = await client.query<{ present: boolean }>("SELECT to_regclass('purchase_requests') IS NOT NULL AND to_regclass('inventory_operations') IS NOT NULL AS present");
+  if (!rows[0]?.present) throw new InventoryDomainError("schema_not_ready", "Inventory procurement schema awaits coordinated migration");
+}
+export async function requireInventoryActor(client: DbClient, actor: InventoryActor, requested: InventoryPolicy) {
+  // A canonical transaction never applies a role policy, whatever the caller passed.
+  const policy: InventoryPolicy = isCanonicalInventoryAuthority(requested) ? requested : canonicalAuthorityOfClient(client) ?? requested;
+  if (isCanonicalInventoryAuthority(policy)) {
+    const state = await assertCanonicalInventoryAuthority(client, policy);
+    invariant(state.userId === actor.userId && state.username === actor.username, "actor_forbidden", "Authenticated actor is no longer active");
+    return { username: state.username, role: state.roleLabel, is_active: true, party_id: state.clinicianPartyId };
+  }
+  const management = policy;
   const { rows } = await client.query<{ username: string; role: string; is_active: boolean; party_id: number | null }>("SELECT username,role,is_active,party_id FROM users WHERE id=$1 FOR SHARE", [actor.userId]);
   const row = rows[0];
   invariant(row?.is_active && row.username === actor.username && row.role === actor.role, "actor_forbidden", "Authenticated actor is no longer active");
   invariant(management ? row.role === "admin" : ["admin", "reception", "doctor"].includes(row.role), "operation_forbidden", "Actor is not authorized for this operation");
   return row;
 }
-export async function writeInventoryAudit(client: DbClient, actor: InventoryActor, entity: string, id: string, operation: string, details: Record<string, unknown>) {
+export async function writeInventoryAudit(client: DbClient, actor: InventoryActor, entity: string, id: string, operation: string, details: Record<string, unknown>, policy?: InventoryPolicy) {
   // Reuses the existing throwing transactional audit writer. Specific new action
   // labels are a narrow root-owned audit enum proposal, not a second audit ledger.
   const sanitized = sanitizeInventoryAuditDetails(
     { operation, ...details },
-    { includeFinancials: actor.role === "admin" },
+    { includeFinancials: inventoryFinancialsVisible(actor, policy ?? canonicalAuthorityOfClient(client) ?? undefined) },
   );
   await insertAuditRow(client, { action: "inventory.item", entity, entityId: id, entityLabel: id,
     actor: actor.username, actorRole: actor.role, details: sanitized });
@@ -66,10 +100,15 @@ export function inventoryOperationDigest(key: string, payload: unknown): string 
   invariant(typeof key === "string" && /^[A-Za-z0-9_.:-]{8,120}$/.test(key), "invalid_operation_key", "A bounded idempotency key is required");
   return createHash("sha256").update(payloadIdentity(payload)).digest("hex");
 }
-async function applyInventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, hash: string, management: boolean, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
+async function applyInventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, hash: string, policy: InventoryPolicy, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
+  const management = inventoryPolicyFlag(policy);
+  // Canonical: fresh proof before the domain reset fence, after it and after the
+  // operation-key lock (central authority → reset fence → operation key → rows).
+  if (isCanonicalInventoryAuthority(policy)) await requireInventoryActor(client, actor, policy);
   await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [PURCHASE_RESET_FENCE]);
-  await requireInventoryActor(client, actor, management);
+  await requireInventoryActor(client, actor, policy);
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
+  if (isCanonicalInventoryAuthority(policy)) await requireInventoryActor(client, actor, policy);
   const previous = await client.query<{ payload_hash: string; result: T }>("SELECT payload_hash,result FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
   const binding = await readInventoryCommandBinding(client, actor, key, name, !!principal);
   if (binding) {
@@ -89,10 +128,23 @@ async function applyInventoryOperationInTransaction<T extends object>(client: Db
   await client.query("INSERT INTO inventory_operations(scope,actor_id,operation_key,payload_hash,result) VALUES($1,$2,$3,$4,$5::jsonb)", [name,actor.userId,key,hash,JSON.stringify(result)]);
   return { ...result, replayed: false };
 }
-export async function inventoryOperation<T extends object>(actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+export async function inventoryOperation<T extends object>(actor: InventoryActor, key: string, name: string, payload: unknown, policy: InventoryPolicy, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
   const hash = inventoryOperationDigest(key, payload);
+  // Canonical operations already own their admitted transaction; never open another.
+  if (isCanonicalInventoryAuthority(policy)) {
+    const client = canonicalInventoryClient(policy);
+    await assertInventoryCallerTransaction(client);
+    await assertInventorySchemaInTransaction(client);
+    return applyInventoryOperationInTransaction(client, actor, key, name, hash, policy, work);
+  }
   await ready();
-  return withTransaction(getPool(), client => applyInventoryOperationInTransaction(client, actor, key, name, hash, management, work));
+  return withTransaction(getPool(), client => applyInventoryOperationInTransaction(client, actor, key, name, hash, policy, work));
+}
+/** SELECT-only presence check inside the caller's transaction (no initialisation). */
+export async function assertInventorySchemaInTransaction(client: DbClient) {
+  requireInventoryIntegration();
+  const { rows } = await client.query<{ present: boolean }>("SELECT to_regclass('purchase_requests') IS NOT NULL AND to_regclass('inventory_operations') IS NOT NULL AS present");
+  if (!rows[0]?.present) throw new InventoryDomainError("schema_not_ready", "Inventory procurement schema awaits coordinated migration");
 }
 /** Caller owns the transaction and must roll it back on any failure. This core
  * never provisions schema, obtains a connection, commits, releases or retries.
@@ -101,11 +153,11 @@ export async function inventoryOperation<T extends object>(actor: InventoryActor
  * immediately released, without committing or rolling back caller work.
  * Missing proposal objects fail inside the caller transaction, never via fallback.
  */
-export async function inventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
+export async function inventoryOperationInTransaction<T extends object>(client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown, policy: InventoryPolicy, work: (client: DbClient) => Promise<T>, principal?: InventoryPrincipal): Promise<T & { replayed: boolean }> {
   requireInventoryIntegration();
   const hash = inventoryOperationDigest(key, payload);
   await assertInventoryCallerTransaction(client);
-  return applyInventoryOperationInTransaction(client, actor, key, name, hash, management, work, principal);
+  return applyInventoryOperationInTransaction(client, actor, key, name, hash, policy, work, principal);
 }
 async function assertInventoryCallerTransaction(client: DbClient) {
   try {
@@ -122,14 +174,16 @@ async function assertInventoryCallerTransaction(client: DbClient) {
  * This helper writes no operation result and never starts/commits a transaction. */
 export async function withInventoryCommandLockInTransaction<T>(
   client: DbClient, actor: InventoryActor, key: string, name: string, payload: unknown,
-  management: boolean, work: (hash: string) => Promise<T>,
+  policy: InventoryPolicy, work: (hash: string) => Promise<T>,
 ): Promise<T> {
   requireInventoryIntegration();
   const hash = inventoryOperationDigest(key, payload);
   await assertInventoryCallerTransaction(client);
+  if (isCanonicalInventoryAuthority(policy)) await requireInventoryActor(client, actor, policy);
   await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [PURCHASE_RESET_FENCE]);
-  await requireInventoryActor(client, actor, management);
+  await requireInventoryActor(client, actor, policy);
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
+  if (isCanonicalInventoryAuthority(policy)) await requireInventoryActor(client, actor, policy);
   return work(hash);
 }
 
@@ -149,10 +203,10 @@ async function verifyUnits(client: DbClient, lines: readonly { itemId: number; c
       "conversion_version_mismatch", "Use the registered immutable item/package conversion version");
   }
 }
-export async function submitPurchaseRequest(actor: InventoryActor, key: string, request: RequestRevision) {
+export async function submitPurchaseRequest(actor: InventoryActor, key: string, request: RequestRevision,authority?:CanonicalInventoryAuthority) {
   docId(request.id); scope(request.branchId); validateRequest(request);
   invariant(request.requestedBy === actor.userId && request.version === 1, "request_owner_mismatch", "A new request belongs to its authenticated creator at version one");
-  return inventoryOperation(actor,key,"request.submit",request,false, async client => {
+  return inventoryOperation(actor,key,"request.submit",request,authority??false, async client => {
     await verifyUnits(client,request.lines);
     await client.query("INSERT INTO purchase_requests(id,branch_key,current_version,status,requested_by) VALUES($1,$2,1,'submitted',$3)",[request.id,request.branchId,actor.userId]);
     await client.query("INSERT INTO purchase_request_revisions(request_id,version,document) VALUES($1,1,$2::jsonb)",[request.id,JSON.stringify(request)]);
@@ -176,11 +230,11 @@ async function lockedRequest(client: DbClient,id:string) {
  * and must be approved again. Once ordered, use a separately reviewed amendment
  * workflow instead of authorizing the same demand again through a revision.
  */
-export async function revisePurchaseRequest(actor:InventoryActor,key:string,input:{requestId:string;expectedVersion:number;value:RequestRevision["value"];reason:string}){
+export async function revisePurchaseRequest(actor:InventoryActor,key:string,input:{requestId:string;expectedVersion:number;value:RequestRevision["value"];reason:string},authority?:CanonicalInventoryAuthority){
   invariant(Number.isSafeInteger(input.expectedVersion)&&input.expectedVersion>0&&input.expectedVersion<100000,"stale_version","An exact current version is required");
   invariant(typeof input.reason==="string"&&input.reason.trim().length>0&&input.reason.length<=2000,"reason_required","A bounded revision reason is required");
   invariant(input.value!==null&&typeof input.value==="object","missing_valuation","Record an explicit monetary proposal");
-  return inventoryOperation(actor,key,"request.revise",input,true,async client=>{
+  return inventoryOperation(actor,key,"request.revise",input,authority??true,async client=>{
     const current=await lockedRequest(client,input.requestId);invariant(current.current_version===input.expectedVersion,"stale_version","The request changed; reload before revising");
     const issued=await client.query("SELECT id FROM purchase_order_source_allocations WHERE request_id=$1 LIMIT 1 FOR SHARE",[input.requestId]);invariant(!issued.rows.length,"invalid_transition","An ordered request requires a separately approved amendment; its demand cannot be reused through revision");
     const document:RequestRevision={...current.request,version:current.current_version+1,value:input.value};validateRequest(document);await verifyUnits(client,document.lines);
@@ -191,8 +245,8 @@ export async function revisePurchaseRequest(actor:InventoryActor,key:string,inpu
     return {id:input.requestId,version:document.version,status:"submitted" as const};
   });
 }
-export async function approvePurchaseRequest(actor:InventoryActor,key:string,input:{ requestId:string; version:number; decisions: Parameters<typeof approveRequest>[0]["decisions"]; valuation:ValuationSnapshot|null; selfApprovalReason?:string|null }) {
-  return inventoryOperation(actor,key,"request.approve",input,true,async client=>{
+export async function approvePurchaseRequest(actor:InventoryActor,key:string,input:{ requestId:string; version:number; decisions: Parameters<typeof approveRequest>[0]["decisions"]; valuation:ValuationSnapshot|null; selfApprovalReason?:string|null },authority?:CanonicalInventoryAuthority) {
+  return inventoryOperation(actor,key,"request.approve",input,authority??true,async client=>{
     const current=await lockedRequest(client,input.requestId);
     invariant(current.current_version === input.version,"stale_version","The request was revised; reload before approving");
     const policies=await client.query<{version:number;currency:"YER";limit_minor:string;allow_self_approval:boolean}>("SELECT version,currency,limit_minor::text,allow_self_approval FROM inventory_approval_policies WHERE branch_key=$1 ORDER BY version DESC LIMIT 1 FOR SHARE",[INVENTORY_CLINIC_SCOPE]);
@@ -207,9 +261,9 @@ export async function approvePurchaseRequest(actor:InventoryActor,key:string,inp
     return {id:input.requestId,version:input.version,status:decision.status};
   });
 }
-export async function issuePurchaseOrder(actor:InventoryActor,key:string,order:PurchaseOrder) {
+export async function issuePurchaseOrder(actor:InventoryActor,key:string,order:PurchaseOrder,authority?:CanonicalInventoryAuthority) {
   docId(order.id); scope(order.branchId);
-  return inventoryOperation(actor,key,"order.issue",order,true,async client=>{
+  return inventoryOperation(actor,key,"order.issue",order,authority??true,async client=>{
     const sources=[...new Set(order.lines.flatMap(line=>line.sources.map(source=>source.requestId)))].sort();
     const requests:{request:RequestRevision;approval:RequestApproval}[]=[];
     for(const id of sources){
@@ -312,10 +366,12 @@ export async function amendPurchaseOrder(
   actor: InventoryActor,
   key: string,
   input: { order: PurchaseOrder; reason: string },
+
+  authority?:CanonicalInventoryAuthority
 ) {
   docId(input.order.id);
   scope(input.order.branchId);
-  return inventoryOperation(actor, key, "order.amend", input, true, async (client) => {
+  return inventoryOperation(actor, key, "order.amend", input, authority??true, async (client) => {
     const currentOrder = await lockedOrder(client, input.order.id);
     const sources = [...new Set(input.order.lines.flatMap((line) => line.sources.map((source) => source.requestId)))].sort();
     const requests: { request: RequestRevision; approval: RequestApproval }[] = [];
@@ -404,9 +460,9 @@ export async function amendPurchaseOrder(
     };
   });
 }
-export async function postInspectedReceipt(actor: InventoryActor, key: string, receipt: ReceiptRevision) {
+export async function postInspectedReceipt(actor: InventoryActor, key: string, receipt: ReceiptRevision,authority?:CanonicalInventoryAuthority) {
   docId(receipt.id); scope(receipt.branchId);
-  return inventoryOperation(actor, key, "receipt.post", receipt, true, client => writeInspectedReceiptInTransaction(client, actor, receipt));
+  return inventoryOperation(actor, key, "receipt.post", receipt, authority??true, client => writeInspectedReceiptInTransaction(client, actor, receipt));
 }
 /** Lot-aware, stock-only receipt command for a caller-owned transaction. It uses
  * the same durable identity as the existing wrapper, never the legacy purchase
@@ -473,10 +529,12 @@ export async function resolveQuarantineReceipt(
     reason: string;
     resolutionDate?: string;
   },
+
+  authority?:CanonicalInventoryAuthority
 ) {
   docId(input.id);
   docId(input.orderId);
-  return inventoryOperation(actor, key, "quarantine.resolve", input, true, async (client) => {
+  return inventoryOperation(actor, key, "quarantine.resolve", input, authority??true, async (client) => {
     const order = await lockedOrder(client, input.orderId);
     const receiptLineRows = await client.query<{ document: InspectedReceiptLine; receipt_doc: ReceiptRevision }>(
       "SELECT grl.document, gr.document AS receipt_doc FROM goods_receipt_lines grl JOIN goods_receipts gr ON gr.id = grl.receipt_id WHERE grl.id=$1 AND grl.order_id=$2 FOR UPDATE",
@@ -571,9 +629,9 @@ export async function resolveQuarantineReceipt(
     };
   });
 }
-export async function recordSupplierInvoiceMatch(actor:InventoryActor,key:string,invoice:SupplierInvoiceRevision){
+export async function recordSupplierInvoiceMatch(actor:InventoryActor,key:string,invoice:SupplierInvoiceRevision,authority?:CanonicalInventoryAuthority){
   docId(invoice.id);scope(invoice.branchId);
-  return inventoryOperation(actor,key,"invoice.match",invoice,true,async client=>{
+  return inventoryOperation(actor,key,"invoice.match",invoice,authority??true,async client=>{
     const order=await lockedOrder(client,invoice.orderId);
     const receipts=await client.query<{document:InspectedReceiptLine;released_qty:string}>(`SELECT grl.document,
       COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.receipt_line_id=grl.id AND qd.action='release'),0)::text AS released_qty
@@ -595,25 +653,48 @@ export async function recordSupplierInvoiceMatch(actor:InventoryActor,key:string
 export async function readProcurementRequests(actor:InventoryActor,offset=0){
   await ready();return withTransaction(getPool(),async client=>{
     await requireInventoryActor(client,actor,false);
+    return readRequestsWith(client,{userId:actor.userId,all:actor.role === "admin",values:actor.role === "admin"},offset);
+  });
+}
+/** Canonical purchase-request list in one owning RR snapshot (`inventory.requests.view`).
+ * All requests: approvers and order managers; otherwise the actor's own. Values and
+ * approval ceilings: holders of approve, order management or cost visibility. */
+export async function readProcurementRequestsCanonical(session:VerifiedDurableSession,offset=0){
+  invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");requireInventoryIntegration();
+  return runCanonicalReadSnapshot(session,"inventory.requests.view",async(client,scope)=>{
+    await assertProcurementSchema(client);
+    const manager=scope.granted("inventory.requests.approve")||scope.granted("inventory.orders.manage");
+    return readRequestsWith(client,{userId:scope.userId,all:manager,values:manager||scope.granted("inventory.costs.view")},offset);
+  },{errorPrefix:"STAFF_READ",maxBytes:INVENTORY_READ_MAX_BYTES});
+}
+async function readRequestsWith(client:Pick<DbClient,"query">,viewer:{userId:number;all:boolean;values:boolean},offset:number){
     const rows=await client.query<{id:string;current_version:number;status:string;document:RequestRevision;decision:RequestApproval|null}>(`SELECT p.id,p.current_version,p.status,r.document,a.decision FROM purchase_requests p
       JOIN purchase_request_revisions r ON r.request_id=p.id AND r.version=p.current_version
       LEFT JOIN purchase_approval_events a ON a.request_id=p.id AND a.request_version=p.current_version
-      WHERE p.branch_key=$1 AND ($2 OR p.requested_by=$3) ORDER BY p.created_at DESC,p.id LIMIT 21 OFFSET $4`,[INVENTORY_CLINIC_SCOPE,actor.role === "admin",actor.userId,offset]);
+      WHERE p.branch_key=$1 AND ($2 OR p.requested_by=$3) ORDER BY p.created_at DESC,p.id LIMIT 21 OFFSET $4`,[INVENTORY_CLINIC_SCOPE,viewer.all,viewer.userId,offset]);
     const shown=rows.rows.slice(0,20),ids=[...new Set(shown.flatMap(row=>row.document.lines.map(line=>line.itemId)))];
     const names=await client.query<{id:number;name:string}>("SELECT id,name FROM inventory_items WHERE id=ANY($1::int[])",[ids]);
-    return {items:shown.map(row=>({id:row.id,version:row.current_version,status:row.status,document:actor.role === "admin"?row.document:{...row.document,value:null},decision:actor.role === "admin"?row.decision:row.decision?{...row.decision,valueCeiling:null}:null})),itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMore:rows.rows.length>20};
-  });
+    return {items:shown.map(row=>({id:row.id,version:row.current_version,status:row.status,document:viewer.values?row.document:{...row.document,value:null},decision:viewer.values?row.decision:row.decision?{...row.decision,valueCeiling:null}:null})),itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMore:rows.rows.length>20};
 }
 export async function readProcurementCatalog(actor:InventoryActor){
   await ready();return withTransaction(getPool(),async client=>{
     await requireInventoryActor(client,actor,false);
+    return readCatalogWith(client);
+  });
+}
+/** Canonical request catalogue (active items and their conversions) in one owning
+ * RR snapshot, admitted by `inventory.references.view`. No values. */
+export async function readProcurementCatalogCanonical(session:VerifiedDurableSession){
+  requireInventoryIntegration();
+  return runCanonicalReadSnapshot(session,"inventory.references.view",async client=>{await assertProcurementSchema(client);return readCatalogWith(client);},{errorPrefix:"STAFF_READ",maxBytes:INVENTORY_READ_MAX_BYTES});
+}
+async function readCatalogWith(client:Pick<DbClient,"query">){
     const rows=await client.query<{item_id:number;name:string;version:number;entered_unit:string;base_unit:string;factor:string;entered_precision:number;base_precision:number}>(`SELECT p.item_id,i.name,p.version,p.entered_unit,p.base_unit,p.factor::text,entered_precision,base_precision
       FROM inventory_item_unit_versions p JOIN inventory_items i ON i.id=p.item_id
       WHERE i.is_active AND i.unit=p.base_unit ORDER BY i.name,p.version DESC LIMIT 200`);
     return {items:rows.rows.map(row=>({itemId:row.item_id,name:row.name,conversion:unitConversionSnapshot({itemId:row.item_id,version:row.version,baseUnit:row.base_unit,enteredUnit:row.entered_unit,baseUnitsPerEnteredUnit:row.factor,enteredPrecision:row.entered_precision,basePrecision:row.base_precision})})),scope:INVENTORY_CLINIC_SCOPE};
-  });
 }
-/** Administrator-only source documents for the order/inspection workbench.
+/** Source documents for the order/inspection workbench (legacy: administrator only).
  * Each page is a fresh authorized snapshot; posting still re-locks and validates
  * all source quantities, budgets and party/location ownership in its transaction.
  */
@@ -622,6 +703,18 @@ export async function readProcurementWorkbench(actor:InventoryActor,requestOffse
   await ready();return withTransaction(getPool(),async client=>{
     await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
     await requireInventoryActor(client,actor,true);
+    return readWorkbenchWith(client,requestOffset,orderOffset);
+  });
+}
+/** Canonical workbench in one owning RR READ ONLY snapshot, admitted by
+ * `inventory.orders.view` (purchase orders, receipts and supplier invoices are priced
+ * documents; the grant label says so). Every write re-admits its own exact action. */
+export async function readProcurementWorkbenchCanonical(session:VerifiedDurableSession,requestOffset=0,orderOffset=0){
+  for(const offset of [requestOffset,orderOffset])invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");
+  requireInventoryIntegration();
+  return runCanonicalReadSnapshot(session,"inventory.orders.view",async client=>{await assertProcurementSchema(client);return readWorkbenchWith(client,requestOffset,orderOffset);},{errorPrefix:"STAFF_READ",maxBytes:INVENTORY_READ_MAX_BYTES});
+}
+async function readWorkbenchWith(client:Pick<DbClient,"query">,requestOffset:number,orderOffset:number){
     const requests=await client.query<{id:string;document:RequestRevision;decision:RequestApproval}>(`SELECT p.id,r.document,a.decision FROM purchase_requests p JOIN purchase_request_revisions r ON r.request_id=p.id AND r.version=p.current_version JOIN purchase_approval_events a ON a.request_id=p.id AND a.request_version=p.current_version WHERE p.branch_key=$1 AND p.status IN ('approved','partially_approved') ORDER BY p.created_at DESC,p.id LIMIT 21 OFFSET $2`,[INVENTORY_CLINIC_SCOPE,requestOffset]);
     const sources=await client.query<{request_id:string;request_line_id:string;qty:string;amount:string;currency:PurchaseOrder["currency"]}>("SELECT request_id,request_line_id,currency,SUM(base_qty)::text AS qty,SUM(amount_minor)::text AS amount FROM purchase_order_source_allocations WHERE request_id=ANY($1::uuid[]) GROUP BY request_id,request_line_id,currency",[requests.rows.slice(0,20).map(row=>row.id)]);
     invariant(sources.rows.every(row=>requests.rows.find(request=>request.id===row.request_id)?.decision.valueCeiling?.currency===row.currency),"currency_mismatch","Source allocations require their original approved currency");
@@ -650,12 +743,11 @@ export async function readProcurementWorkbench(actor:InventoryActor,requestOffse
     const itemIds=[...new Set([...requests.rows.slice(0,20).flatMap(row=>row.document.lines.map(line=>line.itemId)),...shownOrders.flatMap(row=>row.document.lines.map(line=>line.itemId))])];
     const names=await client.query<{id:number;name:string}>("SELECT id,name FROM inventory_items WHERE id=ANY($1::int[])",[itemIds]);
     return {scope:INVENTORY_CLINIC_SCOPE,requests:requests.rows.slice(0,20),sourceAllocations:sources.rows,suppliers:suppliers.rows,locations:locations.rows,orders:shownOrders,orderResults:effectiveOrderResults,receiptHeaders:receiptHeaders.rows,receipts:receipts.rows,quarantineDispositions,invoiceAllocations:allocations.rows,invoices:invoices.rows,itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMoreRequests:requests.rows.length>20,hasMoreOrders:orders.rows.length>20,requestOffset,orderOffset,financialPosting:"pending_shared_finance_review" as const};
-  });
 }
 
 /** One effective reservation projection for legacy matching and the prepared finance core.
  * Missing additive proposal preserves the existing dormant matching behavior. */
-export async function effectiveInvoiceSource(client:DbClient):Promise<"inventory_effective_supplier_invoices"|"supplier_invoices">{
+export async function effectiveInvoiceSource(client:Pick<DbClient,"query">):Promise<"inventory_effective_supplier_invoices"|"supplier_invoices">{
  const result=await client.query<{present:boolean}>("SELECT to_regclass('inventory_effective_supplier_invoices') IS NOT NULL AS present");
  return result.rows[0]?.present?"inventory_effective_supplier_invoices":"supplier_invoices";
 }

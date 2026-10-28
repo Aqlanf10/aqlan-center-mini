@@ -54,7 +54,7 @@ describe("private durable signer boundary", () => {
 describe("private durable signer shape", () => {
  const claims = () => ({
   userId: 2, username: "synthetic", expiresAt: Date.now() + 60_000,
-  durableIdentity: { schemaVersion: 2, policyVersion: 4, realmId: "11111111-1111-4111-8111-111111111111", subjectId: "22222222-2222-4222-8222-222222222222",
+  durableIdentity: { schemaVersion: 2, policyVersion: 5, realmId: "11111111-1111-4111-8111-111111111111", subjectId: "22222222-2222-4222-8222-222222222222",
    generationId: "33333333-3333-4333-8333-333333333333", registryRevision: "4", controlEpoch: "2", accountEpoch: "3", permissionRevision: 1,
    credentialVersion: "a".repeat(43), provider: null },
  });

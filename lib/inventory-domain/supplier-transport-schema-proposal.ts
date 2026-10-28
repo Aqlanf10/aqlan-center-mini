@@ -1,4 +1,4 @@
-/** Applied explicitly after authority, procurement, supplier finance and lifecycle proposals. */
+/** Applied explicitly after the procurement, supplier finance and lifecycle proposals. */
 export const INVENTORY_SUPPLIER_TRANSPORT_SQL = String.raw`
 CREATE TABLE IF NOT EXISTS inventory_supplier_intents (
  realm_id UUID NOT NULL, subject_id UUID NOT NULL, intent_nonce UUID NOT NULL,
@@ -17,14 +17,13 @@ CREATE TABLE IF NOT EXISTS inventory_supplier_intent_rejections (
  reason TEXT NOT NULL CHECK(length(btrim(reason)) BETWEEN 3 AND 2000),
  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(realm_id,subject_id,intent_nonce)
 );
-DO $epoch_fk$ BEGIN
- IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='inventory_supplier_intents_epoch_fk' AND conrelid='inventory_supplier_intents'::regclass) THEN
- ALTER TABLE inventory_supplier_intents ADD CONSTRAINT inventory_supplier_intents_epoch_fk FOREIGN KEY(execution_epoch_id) REFERENCES staff_execution_epochs(id) ON DELETE RESTRICT;
- END IF;
- IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='inventory_supplier_rejections_epoch_fk' AND conrelid='inventory_supplier_intent_rejections'::regclass) THEN
- ALTER TABLE inventory_supplier_intent_rejections ADD CONSTRAINT inventory_supplier_rejections_epoch_fk FOREIGN KEY(execution_epoch_id) REFERENCES staff_execution_epochs(id) ON DELETE RESTRICT;
- END IF;
-END $epoch_fk$;
+-- Identity columns are opaque, immutable evidence (M3a). Admission writes the CURRENT
+-- canonical realm, subject and identity generation proved by the runtime; execution,
+-- replay and retirement require that exact triple again. There is deliberately no
+-- foreign key to identity tables: a restored target owns a fresh realm, so source
+-- rows are foreign history that must stay inert (never re-bound, never executed,
+-- see docs/inventory/CANONICAL-RESTORE-PROTOCOL-20261028.md), not rejected rows.
+-- The former foreign key to the parallel staff_execution_epochs schema is retired.
 CREATE OR REPLACE FUNCTION inventory_supplier_nonce_exclusive() RETURNS TRIGGER LANGUAGE plpgsql AS $fn$
 BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended('["supplier.intent",' || to_json(NEW.realm_id::text)::text || ',' || to_json(NEW.subject_id::text)::text || ',' || to_json(NEW.intent_nonce::text)::text || ']',0));

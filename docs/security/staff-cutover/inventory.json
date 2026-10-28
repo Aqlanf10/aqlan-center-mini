@@ -4,14 +4,35 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "9d63d83b0bfccf0b383b59c92b6c7d1886d5ccdbfc177c7f2e2a9ffa98b286ea",
+  "sourceDigest": "fc194c5bbea2f092b6523a5f4e14bf200d16b475a4062a199082c37cef30fa80",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
     "inventory.references.view",
     "inventory.items.create",
     "inventory.units.revise",
-    "inventory.locations.create"
+    "inventory.locations.create",
+    "inventory.approval-policy.manage",
+    "inventory.requests.view",
+    "inventory.requests.create",
+    "inventory.requests.approve",
+    "inventory.orders.view",
+    "inventory.orders.manage",
+    "inventory.receipts.post",
+    "inventory.quarantine.resolve",
+    "inventory.supplier-invoices.record",
+    "inventory.supplier-invoices.cancel",
+    "inventory.custody.view",
+    "inventory.custody.dispatch",
+    "inventory.custody.acknowledge",
+    "inventory.custody.use",
+    "inventory.custody.stocktake",
+    "inventory.custody.approve-waste",
+    "inventory.custody.settlement.propose",
+    "inventory.custody.settlement.object",
+    "inventory.reconcile",
+    "inventory.costs.view",
+    "finance.suppliers.view"
   ],
   "summary": {
     "routeMethods": 414,
@@ -1563,11 +1584,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 146
+          "line": 155
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 156
         }
       ]
     },
@@ -7708,11 +7729,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 146
+          "line": 155
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 156
         }
       ]
     },
@@ -7736,11 +7757,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 146
+          "line": 155
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 156
         }
       ]
     },

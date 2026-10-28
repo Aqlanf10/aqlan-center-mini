@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ReportPrintHeader } from "@/components/ReportPrintHeader";
 import { useEffect,useState,type ReactNode,type FormEvent } from "react";
 import { useSession } from "@/components/SessionProvider";
+import { inventoryCan } from "@/lib/inventory-ui-access";
 import { CURRENCIES,MINOR_UNITS,formatMoney,parseAmount,toInputAmount,type Currency } from "@/lib/money";
 import { convertQuantity,quantityAtoms,quantityText,decimalRatio } from "@/lib/inventory-domain/quantities";
 import { matchSupplierInvoice,valuationSnapshot,type PurchaseOrder,type ReceiptRevision,type SupplierInvoiceRevision,type InvoiceReceiptAllocation } from "@/lib/inventory-domain/procurement";
@@ -100,7 +101,7 @@ const english:Record<string,string>={
 const field="block mt-1 w-full rounded border border-blue-100 p-2";
 function Field({label,children}:{label:string;children:ReactNode}){return <label className="block text-sm">{label}{children}</label>;}
 function money(value:string,currency:Currency){const parsed=parseAmount(value,currency);const exact=decimalRatio(value);if(exact.numerator*BigInt(MINOR_UNITS[currency])%exact.denominator!==0n)throw new Error("القيمة أدق من وحدة العملة؛ اكتب مبلغًا دقيقًا دون تقريب إلى صفر.");if(parsed===null||parsed<0)throw new Error("اكتب قيمة صحيحة بالعملة المحددة. الصفر سعر مجاني معلوم؛ الفراغ ليس صفرًا.");return parsed;}
-export function ProcurementOperations(){const session=useSession();return <Operations key={`${session?.username??"none"}:${session?.role??"none"}`} owner={session?.role==="admin"?session.username:null}/>;}
+export function ProcurementOperations(){const session=useSession();return <Operations key={`${session?.username??"none"}:${session?.role??"none"}`} owner={inventoryCan(session,"inventory.orders.view")?session!.username:null}/>;}
 function Operations({owner}:{owner:string|null}){
  const [locale,setLocale]=useState<Locale>("ar");const t=(text:string)=>locale==="en"?(english[text]??text):text;
  const [revision,setRevision]=useState(0),[requestOffset,setRequestOffset]=useState(0),[orderOffset,setOrderOffset]=useState(0),[selected,setSelected]=useState<string|null>(null);

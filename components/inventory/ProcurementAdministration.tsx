@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect,useState } from "react";
 import { useSession } from "@/components/SessionProvider";
+import { inventoryCan } from "@/lib/inventory-ui-access";
 import { ReportPrintHeader } from "@/components/ReportPrintHeader";
 import { convertQuantity } from "@/lib/inventory-domain/quantities";
 import { CURRENCIES,formatMoney,parseAmount,toInputAmount,type Currency } from "@/lib/money";
@@ -36,7 +37,7 @@ const english:Record<string,string>={
   "لم تُقبل العملية. راجع المدخلات والصلاحية.":"The operation was refused. Check inputs and permission.",
   "حدث خطأ غير متوقع في معالجة المخزون. يرجى المحاولة لاحقًا.":"An unexpected inventory processing error occurred. Please try again later.",
 };
-export function ProcurementAdministration(){const session=useSession();return <Administration key={`${session?.username??"none"}:${session?.role??"none"}`} owner={session?.role==="admin"?session.username:null}/>;}
+export function ProcurementAdministration(){const session=useSession();return <Administration key={`${session?.username??"none"}:${session?.role??"none"}`} owner={inventoryCan(session,"inventory.requests.approve")?session!.username:null}/>;}
 function Administration({owner}:{owner:string|null}){
  const [locale,setLocale]=useState<Locale>("ar");const t=(text:string)=>locale==="en"?(english[text]??text):text;
  const [offset,setOffset]=useState(0),[revision,setRevision]=useState(0),[selected,setSelected]=useState<string|null>(null);

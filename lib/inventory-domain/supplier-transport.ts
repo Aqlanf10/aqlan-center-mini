@@ -1,9 +1,20 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
-import { getPool, payableAmountSql, payableSettledTotalSql } from "../db";
+import { getPool, payableAmountSql, payableSettledTotalSql, type DbClient, type DbPool } from "../db";
 import type { SessionPayload } from "../auth";
-import { withTransaction } from "../transactions";
-import { validStaffIdentity } from "../staff-authenticated-identity";
+import { validStaffIdentity, type StaffIdentityClaims } from "../staff-authenticated-identity";
+import type { VerifiedDurableSession } from "../staff-durable-session";
+import type { InventoryRuntimeAction } from "../staff-operation-runtime";
+import type { InventoryActor } from "./procurement-store";
+import type { InventoryPrincipal } from "./principal";
+import {
+  canonicalInventoryActor,
+  canonicalInventoryAuthorityClaims,
+  canonicalInventoryClient,
+  canonicalInventoryPrincipal,
+  withCanonicalInventoryOperation,
+  type CanonicalInventoryAuthority,
+} from "./canonical-operation";
 import {
   SUPPLIER_PROTOCOL,
   type SupplierIntent,
@@ -14,7 +25,6 @@ import {
   type SupplierRejectedIntent,
 } from "../inventory-supplier-protocol";
 import { inventoryRecoveryIdentity } from "../inventory-command-recovery";
-import { authenticateSupplierSession } from "./authenticated-session";
 import {
   createSupplierInvoiceFinanceService,
   supplierFinanceCommandScope,
@@ -22,7 +32,7 @@ import {
 } from "./supplier-finance";
 import { createInventoryCommandLifecycle } from "./command-lifecycle";
 import { writeInventoryAudit } from "./procurement-store";
-import { invariant } from "./quantities";
+import { InventoryDomainError, invariant } from "./quantities";
 import type { SupplierInvoiceRevision, InvoiceMatchPlan } from "./procurement";
 const digest = (v: unknown) =>
   createHash("sha256").update(inventoryRecoveryIdentity(v)).digest("hex");
@@ -86,184 +96,283 @@ function sameAuthority(
     a.executionEpochId === b.executionEpochId
   );
 }
-export async function admitSupplierIntent(
-  signed: SessionPayload,
+/** Who acts and under which authority triple. Legacy: the obsolete signed
+ * `authority` session (marker-free deployments only). Canonical: the admitted
+ * operation's realm, subject and identity generation — never request JSON. */
+interface SupplierContext {
+  session: InventoryActor;
+  authority: StaffIdentityClaims;
+  principal: InventoryPrincipal;
+}
+function canonicalSupplierContext(authority: CanonicalInventoryAuthority): SupplierContext {
+  return {
+    session: canonicalInventoryActor(authority),
+    authority: canonicalInventoryAuthorityClaims(authority),
+    principal: canonicalInventoryPrincipal(authority),
+  };
+}
+/** Exact capability per supplier action: cancellation is separately governed. */
+function supplierCapability(action: SupplierIntent["action"]): InventoryRuntimeAction {
+  return action === "cancel" ? "inventory.supplier-invoices.cancel" : "inventory.supplier-invoices.record";
+}
+async function admitWith(
+  c: DbClient,
+  context: SupplierContext,
   input: SupplierIntent,
 ): Promise<SupplierAdmissionResult> {
-  input = snapshot(input);
-  intent(input);
-  return withTransaction(getPool(), async (c) => {
-    const context = await authenticateSupplierSession(c, signed);
     invariant(
-      input.authority.realmId === context.authority.realmId &&
-        input.authority.subjectId === context.authority.subjectId,
-      "supplier_saved_authority_mismatch",
-      "Saved intent belongs to a different authority epoch; retain it for reconciliation",
-    );
-    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-      JSON.stringify(["supplier.invoice.admission", input.input.invoiceId]),
-    ]);
-    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-      JSON.stringify([
-        "supplier.intent",
-        context.authority.realmId,
-        context.authority.subjectId,
-        input.nonce,
-      ]),
-    ]);
-    const previous = (
-      await c.query<{
-        request_digest: string;
-        envelope: SupplierEnvelope;
-        envelope_digest: string;
-      }>(
-        "SELECT request_digest,envelope,envelope_digest FROM inventory_supplier_intents WHERE realm_id=$1 AND subject_id=$2 AND intent_nonce=$3",
-        [input.authority.realmId, input.authority.subjectId, input.nonce],
-      )
-    ).rows[0];
-    if (previous) {
-      invariant(
-        previous.request_digest === digest(input),
-        "idempotency_conflict",
-        "Saved intent content changed",
-      );
-      return { envelope: previous.envelope, digest: previous.envelope_digest };
-    }
-    const rejected = (
-      await c.query<{
-        intent: SupplierIntent;
-        request_digest: string;
-        reason: string;
-      }>(
-        "SELECT intent,request_digest,reason FROM inventory_supplier_intent_rejections WHERE realm_id=$1 AND subject_id=$2 AND intent_nonce=$3",
-        [input.authority.realmId, input.authority.subjectId, input.nonce],
-      )
-    ).rows[0];
-    if (rejected) {
-      invariant(
-        rejected.request_digest === digest(input),
-        "idempotency_conflict",
-        "Rejected intent content changed",
-      );
-      return {
-        status: "rejected",
-        intent: rejected.intent,
-        digest: rejected.request_digest,
-        code: "supplier_invoice_intent_pending",
-        reason: rejected.reason,
-      };
-    }
-    invariant(
-      sameAuthority(input.authority, context.authority),
-      "supplier_saved_authority_mismatch",
-      "Earlier-epoch absent intent remains held; no new admission is permitted",
-    );
-    // An absent result is ambiguous until the exact original operation lock is held.
-    // This also fences other actors/epochs; independent invoices remain available.
-    const unresolved = await c.query<{
-      scope: string;
-      actor_id: number;
-      operation_key: string;
+    input.authority.realmId === context.authority.realmId &&
+      input.authority.subjectId === context.authority.subjectId,
+    "supplier_saved_authority_mismatch",
+    "Saved intent belongs to a different authority epoch; retain it for reconciliation",
+  );
+  await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    JSON.stringify(["supplier.invoice.admission", input.input.invoiceId]),
+  ]);
+  await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    JSON.stringify([
+      "supplier.intent",
+      context.authority.realmId,
+      context.authority.subjectId,
+      input.nonce,
+    ]),
+  ]);
+  const previous = (
+    await c.query<{
+      request_digest: string;
+      envelope: SupplierEnvelope;
+      envelope_digest: string;
     }>(
-      `SELECT i.scope,i.actor_id,i.operation_key FROM inventory_supplier_intents i
-       WHERE i.envelope->'input'->>'invoiceId'=$1
-       AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.scope=i.scope AND o.actor_id=i.actor_id AND o.operation_key=i.operation_key)
-       AND NOT EXISTS(SELECT 1 FROM inventory_command_retirements r WHERE r.scope=i.scope AND r.actor_id=i.actor_id AND r.operation_key=i.operation_key)
-       ORDER BY i.scope,i.actor_id,i.operation_key LIMIT 101`,
-      [input.input.invoiceId],
-    );
+      "SELECT request_digest,envelope,envelope_digest FROM inventory_supplier_intents WHERE realm_id=$1 AND subject_id=$2 AND intent_nonce=$3",
+      [input.authority.realmId, input.authority.subjectId, input.nonce],
+    )
+  ).rows[0];
+  if (previous) {
     invariant(
-      unresolved.rows.length <= 100,
-      "source_evidence_too_large",
-      "Too many unresolved source intents; review required",
+      previous.request_digest === digest(input),
+      "idempotency_conflict",
+      "Saved intent content changed",
     );
-    for (const other of unresolved.rows) {
-      await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-        JSON.stringify([other.scope, other.actor_id, other.operation_key]),
-      ]);
-      const terminal = (
-        await c.query<{ resolved: boolean }>(
-          `SELECT EXISTS(SELECT 1 FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3) OR EXISTS(SELECT 1 FROM inventory_command_retirements WHERE scope=$1 AND actor_id=$2 AND operation_key=$3) AS resolved`,
-          [other.scope, other.actor_id, other.operation_key],
-        )
-      ).rows[0];
-      if (!terminal?.resolved) {
-        const rejection: SupplierRejectedIntent = {
-          status: "rejected",
-          intent: input,
-          digest: digest(input),
-          code: "supplier_invoice_intent_pending",
-          reason:
-            "An earlier unresolved invoice intent requires recovery before a new intent",
-        };
-        await c.query(
-          "INSERT INTO inventory_supplier_intent_rejections(realm_id,subject_id,intent_nonce,execution_epoch_id,actor_id,intent,request_digest,reason) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8)",
-          [
-            input.authority.realmId,
-            input.authority.subjectId,
-            input.nonce,
-            input.authority.executionEpochId,
-            context.session.userId,
-            JSON.stringify(input),
-            rejection.digest,
-            rejection.reason,
-          ],
-        );
-        await writeInventoryAudit(
-          c,
-          context.session,
-          "supplier_intent",
+    return { envelope: previous.envelope, digest: previous.envelope_digest };
+  }
+  const rejected = (
+    await c.query<{
+      intent: SupplierIntent;
+      request_digest: string;
+      reason: string;
+    }>(
+      "SELECT intent,request_digest,reason FROM inventory_supplier_intent_rejections WHERE realm_id=$1 AND subject_id=$2 AND intent_nonce=$3",
+      [input.authority.realmId, input.authority.subjectId, input.nonce],
+    )
+  ).rows[0];
+  if (rejected) {
+    invariant(
+      rejected.request_digest === digest(input),
+      "idempotency_conflict",
+      "Rejected intent content changed",
+    );
+    return {
+      status: "rejected",
+      intent: rejected.intent,
+      digest: rejected.request_digest,
+      code: "supplier_invoice_intent_pending",
+      reason: rejected.reason,
+    };
+  }
+  invariant(
+    sameAuthority(input.authority, context.authority),
+    "supplier_saved_authority_mismatch",
+    "Earlier-epoch absent intent remains held; no new admission is permitted",
+  );
+  // An absent result is ambiguous until the exact original operation lock is held.
+  // This also fences other actors/epochs; independent invoices remain available.
+  const unresolved = await c.query<{
+    scope: string;
+    actor_id: number;
+    operation_key: string;
+  }>(
+    `SELECT i.scope,i.actor_id,i.operation_key FROM inventory_supplier_intents i
+     WHERE i.envelope->'input'->>'invoiceId'=$1
+     AND NOT EXISTS(SELECT 1 FROM inventory_operations o WHERE o.scope=i.scope AND o.actor_id=i.actor_id AND o.operation_key=i.operation_key)
+     AND NOT EXISTS(SELECT 1 FROM inventory_command_retirements r WHERE r.scope=i.scope AND r.actor_id=i.actor_id AND r.operation_key=i.operation_key)
+     ORDER BY i.scope,i.actor_id,i.operation_key LIMIT 101`,
+    [input.input.invoiceId],
+  );
+  invariant(
+    unresolved.rows.length <= 100,
+    "source_evidence_too_large",
+    "Too many unresolved source intents; review required",
+  );
+  for (const other of unresolved.rows) {
+    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      JSON.stringify([other.scope, other.actor_id, other.operation_key]),
+    ]);
+    const terminal = (
+      await c.query<{ resolved: boolean }>(
+        `SELECT EXISTS(SELECT 1 FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3) OR EXISTS(SELECT 1 FROM inventory_command_retirements WHERE scope=$1 AND actor_id=$2 AND operation_key=$3) AS resolved`,
+        [other.scope, other.actor_id, other.operation_key],
+      )
+    ).rows[0];
+    if (!terminal?.resolved) {
+      const rejection: SupplierRejectedIntent = {
+        status: "rejected",
+        intent: input,
+        digest: digest(input),
+        code: "supplier_invoice_intent_pending",
+        reason:
+          "An earlier unresolved invoice intent requires recovery before a new intent",
+      };
+      await c.query(
+        "INSERT INTO inventory_supplier_intent_rejections(realm_id,subject_id,intent_nonce,execution_epoch_id,actor_id,intent,request_digest,reason) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8)",
+        [
+          input.authority.realmId,
+          input.authority.subjectId,
           input.nonce,
-          "reject_admission",
-          {
-            invoiceId: input.input.invoiceId,
-            digest: rejection.digest,
-            code: rejection.code,
-          },
-        );
-        return rejection;
-      }
-    }
-    const operationKey = randomUUID(),
-      scope = supplierFinanceCommandScope(context.principal, input.action);
-    const lifecycle = createInventoryCommandLifecycle(
-      { scope, management: true },
-      { resolvePrincipal: async () => context.principal },
-    );
-    await lifecycle.admit(c, context.session, operationKey, {
-      principal: context.principal,
-      input: input.input,
-    });
-    const envelope: SupplierEnvelope = {
-        ...input,
-        operationKey,
-        actorUserId: context.session.userId,
-        username: context.session.username,
-      },
-      envelopeDigest = digest(envelope);
-    await c.query(
-      "INSERT INTO inventory_supplier_intents(realm_id,subject_id,intent_nonce,execution_epoch_id,actor_id,operation_key,scope,request_digest,envelope,envelope_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)",
-      [
-        input.authority.realmId,
-        input.authority.subjectId,
+          input.authority.executionEpochId,
+          context.session.userId,
+          JSON.stringify(input),
+          rejection.digest,
+          rejection.reason,
+        ],
+      );
+      await writeInventoryAudit(
+        c,
+        context.session,
+        "supplier_intent",
         input.nonce,
-        input.authority.executionEpochId,
-        context.session.userId,
-        operationKey,
-        scope,
-        digest(input),
-        JSON.stringify(envelope),
-        envelopeDigest,
-      ],
-    );
-    return { envelope, digest: envelopeDigest };
+        "reject_admission",
+        {
+          invoiceId: input.input.invoiceId,
+          digest: rejection.digest,
+          code: rejection.code,
+        },
+      );
+      return rejection;
+    }
+  }
+  const operationKey = randomUUID(),
+    scope = supplierFinanceCommandScope(context.principal, input.action);
+  const lifecycle = createInventoryCommandLifecycle(
+    { scope, management: true },
+    { resolvePrincipal: async () => context.principal },
+  );
+  await lifecycle.admit(c, context.session, operationKey, {
+    principal: context.principal,
+    input: input.input,
   });
+  const envelope: SupplierEnvelope = {
+      ...input,
+      operationKey,
+      actorUserId: context.session.userId,
+      username: context.session.username,
+    },
+    envelopeDigest = digest(envelope);
+  await c.query(
+    "INSERT INTO inventory_supplier_intents(realm_id,subject_id,intent_nonce,execution_epoch_id,actor_id,operation_key,scope,request_digest,envelope,envelope_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)",
+    [
+      input.authority.realmId,
+      input.authority.subjectId,
+      input.nonce,
+      input.authority.executionEpochId,
+      context.session.userId,
+      operationKey,
+      scope,
+      digest(input),
+      JSON.stringify(envelope),
+      envelopeDigest,
+    ],
+  );
+  return { envelope, digest: envelopeDigest };
 }
-export async function executeSupplierIntent(
-  signed: SessionPayload,
+/** Supplier invoice/payable commands exist only under canonical identity (M3a).
+ * The former legacy-admin adapter bound intents to a parallel identity schema
+ * (`staff_authority_identity`, `users.staff_subject_id`) whose mere presence now puts
+ * entry into maintenance; it could never run again and is retired, not emulated. */
+function canonicalIdentityRequired(): never {
+  throw new InventoryDomainError("supplier_canonical_identity_required", "Supplier finance requires canonical staff identity");
+}
+export async function admitSupplierIntent(_signed: SessionPayload, _input: SupplierIntent): Promise<SupplierAdmissionResult> {
+  return canonicalIdentityRequired();
+}
+async function executeWith(
+  c: DbClient,
+  context: SupplierContext,
   admission: SupplierAdmission,
   retireReason?: string,
 ): Promise<SupplierAcknowledgement> {
+  const e = admission.envelope;
+    invariant(
+    e.authority.realmId === context.authority.realmId &&
+      e.authority.subjectId === context.authority.subjectId &&
+      e.actorUserId === context.session.userId &&
+      e.username === context.session.username,
+    "supplier_saved_authority_mismatch",
+    "Saved operation belongs to a different authority; preserve it for reconciliation",
+  );
+  const saved = (
+    await c.query<{ envelope_digest: string; scope: string }>(
+      "SELECT envelope_digest,scope FROM inventory_supplier_intents WHERE realm_id=$1 AND subject_id=$2 AND intent_nonce=$3 AND operation_key=$4",
+      [e.authority.realmId, e.authority.subjectId, e.nonce, e.operationKey],
+    )
+  ).rows[0];
+  invariant(
+    saved && saved.envelope_digest === admission.digest,
+    "command_provenance_required",
+    "Server admission is required",
+  );
+  const previous = await createInventoryCommandLifecycle(
+    { scope: saved.scope, management: true },
+    { resolvePrincipal: async () => context.principal },
+  ).lookup(c, context.session, e.operationKey, {
+    principal: context.principal,
+    input: e.input,
+  });
+  if (previous.status !== "pending")
+    return {
+      ...admission,
+      status: previous.status,
+      ...(previous.status === "committed"
+        ? { result: previous.result }
+        : { reason: previous.reason }),
+    };
+  invariant(
+    e.authority.executionEpochId === context.authority.executionEpochId,
+    "supplier_saved_authority_mismatch",
+    "Earlier-epoch pending intent remains held; no new work or retirement is permitted",
+  );
+  if (retireReason !== undefined) {
+    const outcome = await createInventoryCommandLifecycle(
+      { scope: saved.scope, management: true },
+      { resolvePrincipal: async () => context.principal },
+    ).retire(
+      c,
+      context.session,
+      e.operationKey,
+      { principal: context.principal, input: e.input },
+      retireReason,
+    );
+    return {
+      ...admission,
+      status: outcome.status,
+      ...(outcome.status === "committed"
+        ? { result: outcome.result }
+        : { reason: outcome.reason }),
+    };
+  }
+  const service = createSupplierInvoiceFinanceService({
+    resolvePrincipal: async () => context.principal,
+    admitted: true,
+  });
+  const result =
+    e.action === "revise"
+      ? await service.revise(c, context.session, e.operationKey, {
+          ...e.input,
+          document: e.input.document!,
+        })
+      : await service[e.action](c, context.session, e.operationKey, e.input);
+  return { ...admission, status: "committed", result };
+}
+function verifyAdmissionEnvelope(admission: SupplierAdmission): SupplierAdmission {
   admission = snapshot(admission);
   intent(admission?.envelope);
   invariant(
@@ -272,168 +381,131 @@ export async function executeSupplierIntent(
     "idempotency_conflict",
     "Saved envelope digest changed",
   );
-  return withTransaction(getPool(), async (c) => {
-    const context = await authenticateSupplierSession(c, signed),
-      e = admission.envelope;
-    invariant(
-      e.authority.realmId === context.authority.realmId &&
-        e.authority.subjectId === context.authority.subjectId &&
-        e.actorUserId === context.session.userId &&
-        e.username === context.session.username,
-      "supplier_saved_authority_mismatch",
-      "Saved operation belongs to a different authority; preserve it for reconciliation",
-    );
-    const saved = (
-      await c.query<{ envelope_digest: string; scope: string }>(
-        "SELECT envelope_digest,scope FROM inventory_supplier_intents WHERE realm_id=$1 AND subject_id=$2 AND intent_nonce=$3 AND operation_key=$4",
-        [e.authority.realmId, e.authority.subjectId, e.nonce, e.operationKey],
-      )
-    ).rows[0];
-    invariant(
-      saved && saved.envelope_digest === admission.digest,
-      "command_provenance_required",
-      "Server admission is required",
-    );
-    const previous = await createInventoryCommandLifecycle(
-      { scope: saved.scope, management: true },
-      { resolvePrincipal: async () => context.principal },
-    ).lookup(c, context.session, e.operationKey, {
-      principal: context.principal,
-      input: e.input,
-    });
-    if (previous.status !== "pending")
-      return {
-        ...admission,
-        status: previous.status,
-        ...(previous.status === "committed"
-          ? { result: previous.result }
-          : { reason: previous.reason }),
-      };
-    invariant(
-      e.authority.executionEpochId === context.authority.executionEpochId,
-      "supplier_saved_authority_mismatch",
-      "Earlier-epoch pending intent remains held; no new work or retirement is permitted",
-    );
-    if (retireReason !== undefined) {
-      const outcome = await createInventoryCommandLifecycle(
-        { scope: saved.scope, management: true },
-        { resolvePrincipal: async () => context.principal },
-      ).retire(
-        c,
-        context.session,
-        e.operationKey,
-        { principal: context.principal, input: e.input },
-        retireReason,
-      );
-      return {
-        ...admission,
-        status: outcome.status,
-        ...(outcome.status === "committed"
-          ? { result: outcome.result }
-          : { reason: outcome.reason }),
-      };
-    }
-    const service = createSupplierInvoiceFinanceService({
-      resolvePrincipal: async () => context.principal,
-      admitted: true,
-    });
-    const result =
-      e.action === "revise"
-        ? await service.revise(c, context.session, e.operationKey, {
-            ...e.input,
-            document: e.input.document!,
-          })
-        : await service[e.action](c, context.session, e.operationKey, e.input);
-    return { ...admission, status: "committed", result };
-  });
+  return admission;
 }
-export async function readSupplierFinance(
-  signed: SessionPayload,
+export async function executeSupplierIntent(_signed: SessionPayload, _admission: SupplierAdmission, _retireReason?: string): Promise<SupplierAcknowledgement> {
+  return canonicalIdentityRequired();
+}
+async function readWith(
+  c: Pick<DbClient, "query">,
+  context: Pick<SupplierContext, "authority">,
   orderId: string,
 ) {
-  invariant(uuid(orderId), "invalid_document_id", "An exact order is required");
-  return withTransaction(getPool(), async (c) => {
-    await c.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
-    const context = await authenticateSupplierSession(c, signed);
     const numberCompletion =
-      (
-        await c.query<{ present: boolean }>(
-          "SELECT to_regclass('supplier_invoice_number_claims') IS NOT NULL AS present",
-        )
-      ).rows[0]?.present === true;
-    const rows = await c.query<{
-      id: string;
-      document: SupplierInvoiceRevision;
-      match_plan: InvoiceMatchPlan;
-      payable_id: number | null;
-      cancelled: boolean;
-      settled: string | null;
-      effective: string | null;
-      posted_realm: string | null;
-      number_claim_version: number | null;
-      original_number: string | null;
-      original_number_reason: string | null;
-    }>(
-      `SELECT i.id,i.document,i.match_plan,${numberCompletion ? "n.first_version" : "NULL::integer"} AS number_claim_version,original.document->>'invoiceNumber' AS original_number,original.document->>'missingNumberReason' AS original_number_reason,l.payable_id,s.realm_id AS posted_realm,c.invoice_id IS NOT NULL AS cancelled,CASE WHEN p.id IS NOT NULL THEN ${payableSettledTotalSql("p")}::text END AS settled,CASE WHEN p.id IS NOT NULL THEN ${payableAmountSql("p")}::text END AS effective FROM inventory_effective_supplier_invoices i JOIN supplier_invoices original ON original.id=i.id ${numberCompletion ? "LEFT JOIN supplier_invoice_number_claims n ON n.invoice_id=i.id" : ""} LEFT JOIN supplier_invoice_payable_links l ON l.invoice_id=i.id LEFT JOIN supplier_invoice_postings s ON s.invoice_id=i.id LEFT JOIN supplier_invoice_cancellations c ON c.invoice_id=i.id LEFT JOIN payables p ON p.id=l.payable_id WHERE i.order_id=$1 ORDER BY i.created_at,i.id LIMIT 101`,
-      [orderId],
-    );
-    invariant(
-      rows.rows.length <= 100,
-      "source_evidence_too_large",
-      "Page supplier invoices before continuing",
-    );
-    return {
-      authority: context.authority,
-      invoices: rows.rows.map((r) => {
-        const state = r.cancelled
-          ? "cancelled"
-          : r.payable_id
-            ? "posted"
-            : "unposted";
-        const realmValid =
-          r.payable_id === null || r.posted_realm === context.authority.realmId;
-        return {
-          invoiceId: r.id,
-          document: r.document,
-          version: r.document.version,
-          digest: supplierInvoiceDigest(r.document),
-          match: r.match_plan,
-          status: state,
-          payableId: r.payable_id,
-          settledMinor: r.settled === null ? null : Number(r.settled),
-          effectiveMinor: r.effective === null ? null : Number(r.effective),
-          native: r.match_plan.total,
-          frozenValuation: r.document.valuation,
-          canRevise: realmValid && state === "unposted",
-          numberCompletionEvidence:
-            r.original_number === null &&
-            r.number_claim_version !== null &&
-            r.number_claim_version > 1
-              ? {
-                  version: r.number_claim_version,
-                  originalMissingReason: r.original_number_reason,
-                }
-              : null,
-          canCompleteNumber:
-            numberCompletion &&
-            realmValid &&
-            state === "unposted" &&
-            r.document.invoiceNumber === null,
-          canPost:
-            realmValid &&
-            state === "unposted" &&
-            r.match_plan.status === "matched",
-          canCancel: realmValid && state === "posted" && r.settled === "0",
-          blockedReason: !realmValid
-            ? "supplier_saved_authority_mismatch"
-            : state === "posted" && r.settled !== "0"
-              ? "invoice_payment_reversal_required"
-              : null,
-        };
-      }),
-    };
-  });
+    (
+      await c.query<{ present: boolean }>(
+        "SELECT to_regclass('supplier_invoice_number_claims') IS NOT NULL AS present",
+      )
+    ).rows[0]?.present === true;
+  const rows = await c.query<{
+    id: string;
+    document: SupplierInvoiceRevision;
+    match_plan: InvoiceMatchPlan;
+    payable_id: number | null;
+    cancelled: boolean;
+    settled: string | null;
+    effective: string | null;
+    posted_realm: string | null;
+    number_claim_version: number | null;
+    original_number: string | null;
+    original_number_reason: string | null;
+  }>(
+    `SELECT i.id,i.document,i.match_plan,${numberCompletion ? "n.first_version" : "NULL::integer"} AS number_claim_version,original.document->>'invoiceNumber' AS original_number,original.document->>'missingNumberReason' AS original_number_reason,l.payable_id,s.realm_id AS posted_realm,c.invoice_id IS NOT NULL AS cancelled,CASE WHEN p.id IS NOT NULL THEN ${payableSettledTotalSql("p")}::text END AS settled,CASE WHEN p.id IS NOT NULL THEN ${payableAmountSql("p")}::text END AS effective FROM inventory_effective_supplier_invoices i JOIN supplier_invoices original ON original.id=i.id ${numberCompletion ? "LEFT JOIN supplier_invoice_number_claims n ON n.invoice_id=i.id" : ""} LEFT JOIN supplier_invoice_payable_links l ON l.invoice_id=i.id LEFT JOIN supplier_invoice_postings s ON s.invoice_id=i.id LEFT JOIN supplier_invoice_cancellations c ON c.invoice_id=i.id LEFT JOIN payables p ON p.id=l.payable_id WHERE i.order_id=$1 ORDER BY i.created_at,i.id LIMIT 101`,
+    [orderId],
+  );
+  invariant(
+    rows.rows.length <= 100,
+    "source_evidence_too_large",
+    "Page supplier invoices before continuing",
+  );
+  return {
+    authority: context.authority,
+    invoices: rows.rows.map((r) => {
+      const state = r.cancelled
+        ? "cancelled"
+        : r.payable_id
+          ? "posted"
+          : "unposted";
+      const realmValid =
+        r.payable_id === null || r.posted_realm === context.authority.realmId;
+      return {
+        invoiceId: r.id,
+        document: r.document,
+        version: r.document.version,
+        digest: supplierInvoiceDigest(r.document),
+        match: r.match_plan,
+        status: state,
+        payableId: r.payable_id,
+        settledMinor: r.settled === null ? null : Number(r.settled),
+        effectiveMinor: r.effective === null ? null : Number(r.effective),
+        native: r.match_plan.total,
+        frozenValuation: r.document.valuation,
+        canRevise: realmValid && state === "unposted",
+        numberCompletionEvidence:
+          r.original_number === null &&
+          r.number_claim_version !== null &&
+          r.number_claim_version > 1
+            ? {
+                version: r.number_claim_version,
+                originalMissingReason: r.original_number_reason,
+              }
+            : null,
+        canCompleteNumber:
+          numberCompletion &&
+          realmValid &&
+          state === "unposted" &&
+          r.document.invoiceNumber === null,
+        canPost:
+          realmValid &&
+          state === "unposted" &&
+          r.match_plan.status === "matched",
+        canCancel: realmValid && state === "posted" && r.settled === "0",
+        blockedReason: !realmValid
+          ? "supplier_saved_authority_mismatch"
+          : state === "posted" && r.settled !== "0"
+            ? "invoice_payment_reversal_required"
+            : null,
+      };
+    }),
+  };
+}
+export async function readSupplierFinance(_signed: SessionPayload, _orderId: string): Promise<never> {
+  return canonicalIdentityRequired();
 }
 export type SupplierFinanceView = Awaited<
-  ReturnType<typeof readSupplierFinance>
+  ReturnType<typeof readSupplierFinanceCanonical>
 >;
+
+/* Canonical entry points: exact capability admission through the canonical runtime
+ * (lib/inventory-domain/canonical-operation.ts). The body is the same reviewed code
+ * as the legacy path; only the context source differs. `pool` is a test seam. */
+export async function admitSupplierIntentCanonical(
+  session: VerifiedDurableSession,
+  input: SupplierIntent,
+  pool: DbPool = getPool(),
+): Promise<SupplierAdmissionResult> {
+  input = snapshot(input);
+  intent(input);
+  return withCanonicalInventoryOperation(pool, session, supplierCapability(input.action), (authority) =>
+    admitWith(canonicalInventoryClient(authority), canonicalSupplierContext(authority), input));
+}
+export async function executeSupplierIntentCanonical(
+  session: VerifiedDurableSession,
+  admission: SupplierAdmission,
+  retireReason?: string,
+  pool: DbPool = getPool(),
+): Promise<SupplierAcknowledgement> {
+  admission = verifyAdmissionEnvelope(admission);
+  return withCanonicalInventoryOperation(pool, session, supplierCapability(admission.envelope.action), (authority) =>
+    executeWith(canonicalInventoryClient(authority), canonicalSupplierContext(authority), admission, retireReason));
+}
+export async function readSupplierFinanceCanonical(
+  session: VerifiedDurableSession,
+  orderId: string,
+  pool: DbPool = getPool(),
+) {
+  invariant(uuid(orderId), "invalid_document_id", "An exact order is required");
+  // One SELECT statement: a consistent snapshot even under the runtime's READ COMMITTED.
+  return withCanonicalInventoryOperation(pool, session, "finance.suppliers.view", (authority) =>
+    readWith(canonicalInventoryClient(authority), canonicalSupplierContext(authority), orderId));
+}

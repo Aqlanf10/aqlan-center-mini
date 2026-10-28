@@ -4,10 +4,32 @@ import { withIsolation } from "./transactions";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { revalidateVerifiedDurableSession, type VerifiedDurableSession } from "./staff-durable-session";
 import { hasStaffCapability } from "./staff-capabilities";
+import type { StaffCapability } from "./staff-capability-catalogue";
 import { loadLockedStaffAuthority } from "./staff-authority-proof-internal";
 
-export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view" | "inventory.items.create" | "inventory.units.revise" | "inventory.locations.create";
-const actions = new Set<string>(["staff.view","staff.permissions.edit","inventory.references.view","inventory.items.create","inventory.units.revise","inventory.locations.create"]);
+/** Inventory/procurement operations admitted through the canonical inventory adapter
+ * (lib/inventory-domain/canonical-operation.ts). Each is an exact catalogue capability. */
+export const INVENTORY_RUNTIME_ACTIONS = Object.freeze([
+ "inventory.approval-policy.manage", "inventory.requests.view", "inventory.requests.create", "inventory.requests.approve",
+ "inventory.orders.view", "inventory.orders.manage", "inventory.receipts.post", "inventory.quarantine.resolve",
+ "inventory.supplier-invoices.record", "inventory.supplier-invoices.cancel",
+ "inventory.custody.view", "inventory.custody.dispatch", "inventory.custody.acknowledge", "inventory.custody.use",
+ "inventory.custody.stocktake", "inventory.custody.approve-waste", "inventory.custody.settlement.propose",
+ "inventory.custody.settlement.object", "inventory.reconcile", "inventory.costs.view", "finance.suppliers.view",
+] as const);
+export type InventoryRuntimeAction = typeof INVENTORY_RUNTIME_ACTIONS[number];
+export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view" | "inventory.items.create" | "inventory.units.revise" | "inventory.locations.create" | InventoryRuntimeAction;
+// A literal list (the readiness audit reads it as an AST constant); a unit test pins it
+// to exactly the six reference/staff actions plus INVENTORY_RUNTIME_ACTIONS.
+const actions = new Set<string>(["staff.view","staff.permissions.edit","inventory.references.view","inventory.items.create","inventory.units.revise","inventory.locations.create",
+ "inventory.approval-policy.manage","inventory.requests.view","inventory.requests.create","inventory.requests.approve",
+ "inventory.orders.view","inventory.orders.manage","inventory.receipts.post","inventory.quarantine.resolve",
+ "inventory.supplier-invoices.record","inventory.supplier-invoices.cancel",
+ "inventory.custody.view","inventory.custody.dispatch","inventory.custody.acknowledge","inventory.custody.use",
+ "inventory.custody.stocktake","inventory.custody.approve-waste","inventory.custody.settlement.propose",
+ "inventory.custody.settlement.object","inventory.reconcile","inventory.costs.view","finance.suppliers.view"]);
+/** Test hook: the exact admitted action list (copy). */
+export function staffRuntimeActions(): readonly string[] { return Object.freeze([...actions]); }
 declare const operationBrand: unique symbol;
 export interface StaffOperationHandle { readonly [operationBrand]: true }
 interface OperationState {
@@ -56,10 +78,22 @@ export async function assertStaffOperation(client:DbClient,handle:StaffOperation
 /** Bounded display preview, never operation admission. An exact reference-read
  * handle is freshly asserted (including schema) before exposing only implemented reference actions.
  * Each mutation still requires its own separate exact action handle. */
-export async function staffOperationReferenceCapabilities(client:DbClient,handle:StaffOperationHandle,schema:string):Promise<readonly ("inventory.items.create" | "inventory.units.revise" | "inventory.locations.create")[]>{
+export async function staffOperationReferenceCapabilities(client:DbClient,handle:StaffOperationHandle,schema:string):Promise<readonly ("inventory.items.create" | "inventory.units.revise" | "inventory.locations.create" | "inventory.approval-policy.manage")[]>{
  const exactSchema=staffIdentitySchemaName(schema);
  const current=await assertAndLoadStaffOperation(client,handle,"inventory.references.view",exactSchema);
- return Object.freeze((["inventory.items.create","inventory.units.revise","inventory.locations.create"] as const).filter(action=>hasStaffCapability(current.access,action)));
+ return Object.freeze((["inventory.items.create","inventory.units.revise","inventory.locations.create","inventory.approval-policy.manage"] as const).filter(action=>hasStaffCapability(current.access,action)));
+}
+/** Fresh exact-handle assertion, then which of `candidates` the actor currently holds.
+ * Used inside the same admitted transaction (the shared lifecycle fence blocks any
+ * authority writer until commit) for data-visibility decisions; never a reusable grant. */
+export async function staffOperationCapabilities<C extends StaffCapability>(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,candidates:readonly C[],schema?:string):Promise<ReadonlySet<C>>{
+ const current=await assertAndLoadStaffOperation(client,handle,action,schema);
+ return new Set(candidates.filter(capability=>hasStaffCapability(current.access,capability)));
+}
+/** Fresh exact-handle assertion, then the actor's current linked clinician party (or null). */
+export async function staffOperationClinician(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,schema?:string):Promise<number|null>{
+ const current=await assertAndLoadStaffOperation(client,handle,action,schema);
+ return current.access.clinicianPartyId;
 }
 /** Owns transaction/commit. Trusted callback MUST NOT issue top-level transaction
  * control. Changed/ended XID refuses, but a malicious early COMMIT cannot be undone.

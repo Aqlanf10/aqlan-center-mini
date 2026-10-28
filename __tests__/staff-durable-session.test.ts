@@ -27,7 +27,7 @@ it("verifies opaque signed durable handles without authorizing legacy entry",()=
 });
 it("rejects wrong versions, malformed revisions, mixed claims and expired signatures",()=>{
  const good=claims();
- for(const d of [{...good.durableIdentity,policyVersion:1},{...good.durableIdentity,policyVersion:2},{...good.durableIdentity,policyVersion:3},{...good.durableIdentity,schemaVersion:1},{...good.durableIdentity,accountEpoch:"0"},{...good.durableIdentity,provider:{partyId:1,clinicalEpoch:"0"}}])expect(readVerifiedDurableSession(signed({...good,durableIdentity:d}))).toBeNull();
+ for(const d of [{...good.durableIdentity,policyVersion:1},{...good.durableIdentity,policyVersion:2},{...good.durableIdentity,policyVersion:3},{...good.durableIdentity,policyVersion:4},{...good.durableIdentity,schemaVersion:1},{...good.durableIdentity,accountEpoch:"0"},{...good.durableIdentity,provider:{partyId:1,clinicalEpoch:"0"}}])expect(readVerifiedDurableSession(signed({...good,durableIdentity:d}))).toBeNull();
  expect(readVerifiedDurableSession(signed({...good,authority:{}}))).toBeNull();
  expect(readVerifiedDurableSession(signed({...good,expiresAt:Date.now()}))).toBeNull();
  expect(readVerifiedDurableSession(createSessionToken(legacy()))).toBeNull();

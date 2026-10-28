@@ -146,6 +146,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/inventory/[id]": { GET: CLINIC, PATCH: FRONT_DESK },
   "/api/inventory/[id]/movements": { POST: CLINIC },
   "/api/inventory/patient-cost": { GET: CLINIC },
+  // Legacy roles below; a canonical session is admitted inside the route by the exact
+  // capability of each read/command (M3a, lib/inventory-domain/canonical-procurement-transport.ts).
   "/api/inventory/procurement": { GET: CLINIC, POST: CLINIC },
   "/api/inventory/value": { GET: ADMIN },
   "/api/invoices": { GET: ["admin", "reception", "cashier", "accountant"], POST: FRONT_DESK },

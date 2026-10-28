@@ -19,7 +19,13 @@ test('baseline has no canonical route readiness; finite domain actions are not r
  assert.equal(report.summary.routeClassifications['canonical-ready'],0);
  assert.equal(report.summary.pageClassifications['canonical-ready'],0);
  assert.deepEqual(report.canonicalDirectReferences,[]);
- assert.deepEqual(report.runtimeActions,['staff.view','staff.permissions.edit','inventory.references.view','inventory.items.create','inventory.units.revise','inventory.locations.create']);
+ assert.deepEqual(report.runtimeActions,['staff.view','staff.permissions.edit','inventory.references.view','inventory.items.create','inventory.units.revise','inventory.locations.create',
+  'inventory.approval-policy.manage','inventory.requests.view','inventory.requests.create','inventory.requests.approve',
+  'inventory.orders.view','inventory.orders.manage','inventory.receipts.post','inventory.quarantine.resolve',
+  'inventory.supplier-invoices.record','inventory.supplier-invoices.cancel',
+  'inventory.custody.view','inventory.custody.dispatch','inventory.custody.acknowledge','inventory.custody.use',
+  'inventory.custody.stocktake','inventory.custody.approve-waste','inventory.custody.settlement.propose',
+  'inventory.custody.settlement.object','inventory.reconcile','inventory.costs.view','finance.suppliers.view']);
 });
 
 test('unknown HTTP classes never become separate/public even on staff auth transport',async()=>{

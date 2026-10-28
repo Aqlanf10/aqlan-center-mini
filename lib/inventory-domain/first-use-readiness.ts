@@ -46,6 +46,11 @@ export async function readFirstUseReadinessInTransaction(client: DbClient): Prom
     throw error;
   }
   await client.query("RELEASE SAVEPOINT inventory_readiness_transaction_check");
+  return readFirstUseReadinessFacts(client);
+}
+/** The same count-only facts for an owner that already proved its own REPEATABLE READ
+ * READ ONLY snapshot (the canonical owning reader); no savepoint probe, no locks. */
+export async function readFirstUseReadinessFacts(client: Pick<DbClient, "query">): Promise<InventoryFirstUseReadiness> {
   const { rows: [snapshot] } = await client.query<{ isolation: string; observed_at: string }>(
     `SELECT current_setting('transaction_isolation') AS isolation,
       to_char(transaction_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed_at`);

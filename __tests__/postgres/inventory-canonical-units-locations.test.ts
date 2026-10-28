@@ -244,7 +244,7 @@ for (const action of actions) describe(action, () => {
     });
 });
 it("reference preview reports only exact effective grants, never policy or DTO authority", async () => {
-    for(const [id,expected] of [[1,["item.create","unit.revise","location.create"]],[2,["unit.revise","location.create"]],[4,[]],[6,["item.create"]],[7,["unit.revise"]],[8,["location.create"]]] as const){
+    for(const [id,expected] of [[1,["item.create","unit.revise","location.create","policy.revise"]],[2,["unit.revise","location.create"]],[4,[]],[6,["item.create"]],[7,["unit.revise"]],[8,["location.create"]]] as const){
         const dto=await readCanonicalInventoryReferences(pool,await session(id),"",0,schema);expect(dto.allowedActions).toEqual(expected);
         for(const action of actions) await expect(facade(action)(pool,dto as never,await intent(action,id),"admit",undefined,schema)).rejects.toThrow(/SESSION/);
     }

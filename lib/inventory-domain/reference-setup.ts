@@ -24,6 +24,7 @@ import { createInventoryCommandLifecycle, runCanonicalInventoryItemCreateLifecyc
   snapshotCanonicalItemCreateIntent, validateCanonicalItemCreateMode,
   runCanonicalInventoryUnitReviseLifecycle, runCanonicalInventoryLocationCreateLifecycle,
   snapshotCanonicalUnitReviseIntent, snapshotCanonicalLocationCreateIntent,
+  runCanonicalInventoryPolicyReviseLifecycle, snapshotCanonicalPolicyReviseIntent,
   type CanonicalUnitReviseMode, type CanonicalLocationCreateMode,
   type CanonicalItemCreateMode } from "./command-lifecycle";
 import {
@@ -43,6 +44,8 @@ import {
   unitConversionSnapshot,
 } from "./quantities";
 import { requireInventoryIntegration } from "./rollout";
+import { readFirstUseReadinessFacts } from "./first-use-readiness";
+import { runCanonicalReadSnapshot } from "../canonical-read-snapshot";
 
 export interface ReferenceSetupContext {
   actor: InventoryActor;
@@ -260,11 +263,20 @@ export async function readCanonicalInventoryReferences(
     if (preview.includes("inventory.items.create")) allowedActions.push("item.create");
     if (preview.includes("inventory.units.revise")) allowedActions.push("unit.revise");
     if (preview.includes("inventory.locations.create")) allowedActions.push("location.create");
+    if (preview.includes("inventory.approval-policy.manage")) allowedActions.push("policy.revise");
     return readReferenceFacts(client, Object.freeze({realmId: identity.realmId, subjectId: identity.subjectId, generation: identity.generationId}), allowedActions, query, page, referenceSchema);
   }, schema);
 }
 
-/** Server-only command seam, deliberately absent from HTTP routes. Gate and copy
+/** Canonical count-only first-use readiness in one owning RR READ ONLY snapshot,
+ * admitted by `inventory.references.view`. Observation grants no later mutation. */
+export async function readCanonicalFirstUseReadiness(session: VerifiedDurableSession) {
+  requireInventoryIntegration();
+  return runCanonicalReadSnapshot(session, "inventory.references.view", client => readFirstUseReadinessFacts(client),
+    {errorPrefix: "STAFF_READ", maxBytes: 64 * 1024});
+}
+
+/** Server-only command seam (the canonical procurement route composes it per exact action). Gate and copy
  * before acquiring a pool connection; each admission/execution is its own commit.
  * Original authority/generation/envelope remain unmodified in all modes. */
 export async function commandCanonicalInventoryItemCreate(
@@ -303,6 +315,20 @@ export async function commandCanonicalInventoryLocationCreate(
   const referenceSchema = staffIdentitySchemaName(schema);
   return withStaffOperation(pool, session, "inventory.locations.create", (client, handle) =>
     runCanonicalInventoryLocationCreateLifecycle(client, handle, intent, mode, reason, referenceSchema), referenceSchema);
+}
+
+/** Exact-action approval-limit revision (`inventory.approval-policy.manage`). Self-approval
+ * remains disabled; the limit is a new immutable version (optimistic version + audit). */
+export async function commandCanonicalInventoryPolicyRevise(
+  pool: DbPool, session: VerifiedDurableSession, original: ReferenceIntent,
+  mode: CanonicalItemCreateMode, reason?: string, schema = "public",
+): Promise<ReferenceReply> {
+  requireInventoryIntegration();
+  const intent = snapshotCanonicalPolicyReviseIntent(original);
+  validateCanonicalItemCreateMode(mode, reason);
+  const referenceSchema = staffIdentitySchemaName(schema);
+  return withStaffOperation(pool, session, "inventory.approval-policy.manage", (client, handle) =>
+    runCanonicalInventoryPolicyReviseLifecycle(client, handle, intent, mode, reason, referenceSchema), referenceSchema);
 }
 
 // Private bounded SQL shared with the existing admin/journal-restricted setup reader.

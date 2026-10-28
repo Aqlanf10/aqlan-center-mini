@@ -5,7 +5,7 @@ import { useClinicName } from "./SettingsProvider";
 import { useSessionActions } from "./SessionProvider";
 import { Icon, Logo } from "./Icon";
 import { ROLE_LABEL, type Role } from "@/lib/roles";
-import { canonicalPagesFor, isCanonicalPage } from "@/lib/canonical-navigation";
+import { canonicalPageFor, canonicalPagesFor } from "@/lib/canonical-navigation";
 
 /**
  * قشرة جلسة الهوية الموحّدة.
@@ -22,7 +22,8 @@ export function CanonicalShell({ children }: { children: React.ReactNode }) {
   const { session, logout } = useSessionActions();
   if (!session) return null;
   const pages = canonicalPagesFor(session.capabilities, session.isOwner);
-  const ready = isCanonicalPage(pathname) && pages.some(page => pathname === page.href || pathname.startsWith(`${page.href}/`));
+  const current = canonicalPageFor(pathname);
+  const ready = current !== null && pages.includes(current);
   const roleLabel = ROLE_LABEL[session.role as Role] ?? session.role;
 
   async function signOut() {
@@ -46,7 +47,7 @@ export function CanonicalShell({ children }: { children: React.ReactNode }) {
             <Icon name="tooth" className="h-[18px] w-[18px] shrink-0" /> مساحة العمل
           </a>
           {pages.map(page => {
-            const active = pathname === page.href || pathname.startsWith(`${page.href}/`);
+            const active = current === page;
             return (
               <a key={page.href} href={page.href} aria-current={active ? "page" : undefined}
                 className={`flex min-h-11 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 text-sm font-semibold ${active ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-navy-50 hover:text-navy-900"}`}>

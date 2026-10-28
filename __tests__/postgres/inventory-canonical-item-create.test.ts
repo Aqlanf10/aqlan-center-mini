@@ -141,7 +141,7 @@ it.each([3, 4, 5, 6])("admin label, absent grant or missing prerequisite %s neve
 it("reader advertises create only for owner or exact effective grant; DTO is not authority", async () => {
     for (const id of [1, 2, 4]) {
         const dto = await readCanonicalInventoryReferences(pool, await session(id), "", 0, schema);
-        expect(dto.allowedActions).toEqual(id === 1 ? ["item.create", "unit.revise", "location.create"] : id === 4 ? [] : ["item.create"]);
+        expect(dto.allowedActions).toEqual(id === 1 ? ["item.create", "unit.revise", "location.create", "policy.revise"] : id === 4 ? [] : ["item.create"]);
         await expect(commandCanonicalInventoryItemCreate(pool, dto as never, await intent(id), "admit", undefined, schema)).rejects.toThrow(/SESSION/);
     }
 });
