@@ -2,8 +2,9 @@ import "server-only";
 import { performance } from "node:perf_hooks";
 import { getPool, usesSharedLocalDatabaseConnection, type DbClient } from "./db";
 import { revalidateVerifiedDurableSession, type VerifiedDurableSession } from "./staff-durable-session";
-import { loadCanonicalSnapshotAuthority } from "./staff-authority-proof-internal";
-import { hasStaffCapability } from "./staff-capabilities";
+import { loadCanonicalRecordSnapshotAuthority, loadCanonicalSnapshotAuthority } from "./staff-authority-proof-internal";
+import { appointmentCapabilityConstraint, hasStaffCapability, patientCapabilityConstraint, type StaffRecordConstraint } from "./staff-capabilities";
+import { canonicalRecordReadRule, isCanonicalRecordRead, type CanonicalRecordRead } from "./canonical-record-reads";
 import type { StaffCapability } from "./staff-capability-catalogue";
 import type { StaffRuntimeAction } from "./staff-operation-runtime";
 
@@ -19,7 +20,8 @@ import type { StaffRuntimeAction } from "./staff-operation-runtime";
  *  3. private virtual-XID/mode/primary identity probe before admission, before the
  *     domain read and before COMMIT (no permanent XID, no row locks, no DDL);
  *  4. the writer runtime's exact authority predicates in the same snapshot, for the
- *     exact registered read action;
+ *     exact registered read action, or for a registered record read
+ *     (`lib/canonical-record-reads.ts`: capabilities plus a non-`none` record scope);
  *  5. one registered server-internal domain reader that receives only a guarded,
  *     serialized `query` facade (closed once the reader returns) and the admitted
  *     scope (current grants and linked clinician) from that same proof;
@@ -54,6 +56,10 @@ export interface CanonicalSnapshotScope {
  readonly subjectId: string;
  readonly generationId: string;
  readonly clinicianPartyId: number | null;
+ /** Same-snapshot record constraints. A domain read that returns patient or
+  * appointment rows must filter by these; `none` never reaches a record read. */
+ readonly patientScope: StaffRecordConstraint;
+ readonly appointmentScope: StaffRecordConstraint;
  granted(capability: StaffCapability): boolean;
 }
 export interface CanonicalSnapshotOptions {
@@ -65,7 +71,7 @@ export interface CanonicalSnapshotOptions {
 
 export async function runCanonicalReadSnapshot<T>(
  session: VerifiedDurableSession,
- action: StaffRuntimeAction,
+ action: StaffRuntimeAction | CanonicalRecordRead,
  read: (query: CanonicalSnapshotQuery, scope: CanonicalSnapshotScope) => Promise<T>,
  options: CanonicalSnapshotOptions,
 ): Promise<T> {
@@ -159,7 +165,15 @@ export async function runCanonicalReadSnapshot<T>(
   await query("SET LOCAL lock_timeout = '5s'");
   await assertIdentity();
   // Same shared invariants as the writer, without its row locks/XID allocation.
-  const proof = await loadCanonicalSnapshotAuthority({query}, session, action);
+  const rule = isCanonicalRecordRead(action) ? canonicalRecordReadRule(action) : null;
+  const proof = rule
+   ? await loadCanonicalRecordSnapshotAuthority({query}, session, rule.need, rule.anyOf)
+   : await loadCanonicalSnapshotAuthority({query}, session, action as StaffRuntimeAction);
+  const patientScope = patientCapabilityConstraint(proof.access);
+  const appointmentScope = appointmentCapabilityConstraint(proof.access);
+  if (rule && (rule.record === "patient" ? patientScope : appointmentScope).kind === "none") {
+   throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+  }
   await assertIdentity();
   // Private, serialized facade for this one reader; closed before COMMIT.
   let open = true, inflight = 0;
@@ -183,6 +197,7 @@ export async function runCanonicalReadSnapshot<T>(
    userId: proof.identity.userId, username: proof.identity.username, role: proof.identity.role,
    realmId: proof.identity.realmId, subjectId: proof.identity.subjectId, generationId: proof.identity.generationId,
    clinicianPartyId: access.clinicianPartyId,
+   patientScope, appointmentScope,
    granted: (capability: StaffCapability) => open && hasStaffCapability(access, capability),
   });
   let value: T;

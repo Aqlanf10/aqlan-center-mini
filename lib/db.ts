@@ -3391,6 +3391,17 @@ export async function searchPatients(
   doctorPartyId?: number | null,
 ): Promise<PatientSummary[]> {
   await ensureSchema();
+  return searchPatientsWith(getPool(), term, limit, doctorPartyId);
+}
+
+/** Same search over a caller-owned query facade (no ensureSchema, no DDL): the
+ * canonical owning snapshot reader passes its closed facade here. */
+export async function searchPatientsWith(
+  q: Pick<DbClient, "query">,
+  term: string,
+  limit = 8,
+  doctorPartyId?: number | null,
+): Promise<PatientSummary[]> {
   const trimmed = term.trim();
   if (!trimmed) return [];
   /* (PAT-1) بحثٌ يتسامح مع الإملاء العربي وترتيب الكلمات وصيغ الجوال، ويشمل رقم الملف
@@ -3403,7 +3414,7 @@ export async function searchPatients(
   const doctorFilter = scoped
     ? ` AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${doctorParam}`)}`
     : "";
-  const { rows } = await getPool().query<PatientRow>(
+  const { rows } = await q.query<PatientRow>(
     `SELECT id, patient_number, full_name, phone, medical_alert FROM patients
       WHERE ${condition.sql}
       ${doctorFilter}
@@ -3442,7 +3453,7 @@ export interface PatientListRow extends PatientSummary {
  * (PAT-1) صفحة من قائمة المرضى بمرشّحٍ وترتيب على الخادم — المرشّح يعمل على كل المرضى.
  * الرصيد من `patientDebtReport` (المرجع نفسه لتقرير الديون) لا من SQL موازٍ.
  */
-export async function browsePatients(input: {
+export interface PatientBrowseInput {
   offset: number;
   limit: number;
   filter: PatientListFilter;
@@ -3451,9 +3462,21 @@ export async function browsePatients(input: {
   today: string;
   /** (PAT-3) مرضى علَمٍ بعينه — مع أي مرشّح. */
   flag?: string | null;
-}): Promise<{ rows: PatientListRow[]; total: number }> {
+}
+export async function browsePatients(input: PatientBrowseInput): Promise<{ rows: PatientListRow[]; total: number }> {
   await ensureSchema();
-  const pool = getPool();
+  return browsePatientsWith(getPool(), input, (ids) => computeDebtRows(ids));
+}
+
+/** Same page over a caller-owned query facade. `debts` supplies balances from the
+ * canonical engine: the legacy path opens its own RR snapshot (computeDebtRows); the
+ * canonical owning snapshot reader computes them inside its own snapshot. */
+export async function browsePatientsWith(
+  q: Pick<DbClient, "query">,
+  input: PatientBrowseInput,
+  debts: (patientIds: readonly number[] | null) => Promise<DebtRow[]>,
+): Promise<{ rows: PatientListRow[]; total: number }> {
+  const pool = q;
   const toBalances = (debts: DebtRow[]) => {
     const map = new Map<number, { currency: Currency; dueMinor: number }[]>();
     for (const debt of debts) {
@@ -3466,7 +3489,7 @@ export async function browsePatients(input: {
   };
   /* (PAT-1 review) المرشّح «عليهم مبالغ» وحده يحتاج كل المدينين — بلا قصّ؛ وغيره يحسب أرصدة
      صفحته فقط بعد استعلامها (لا يُقرأ كل المال لعرض ٢٥ مريضًا). */
-  const debtors = input.filter === "debt" ? toBalances(await computeDebtRows(null)) : null;
+  const debtors = input.filter === "debt" ? toBalances(await debts(null)) : null;
 
   const params: unknown[] = [input.today];
   const where: string[] = [];
@@ -3543,8 +3566,8 @@ export async function browsePatients(input: {
     params,
   );
   const total = rows[0]?.total ?? (input.offset > 0
-    ? (await browsePatients({ ...input, offset: 0, limit: 1 })).total : 0);
-  const balancesById = debtors ?? toBalances(await computeDebtRows(rows.map((row) => row.id)));
+    ? (await browsePatientsWith(q, { ...input, offset: 0, limit: 1 }, debts)).total : 0);
+  const balancesById = debtors ?? toBalances(await debts(rows.map((row) => row.id)));
   return {
     total,
     rows: rows.map((row) => ({
@@ -3626,6 +3649,14 @@ export async function duplicateCandidates(input: {
   fullName: string; phone: string | null; altPhone: string | null;
 }): Promise<CandidatePatient[]> {
   await ensureSchema();
+  return duplicateCandidatesWith(getPool(), input);
+}
+
+/** Same candidates over a caller-owned client (canonical create: inside its admitted
+ * transaction, after the shared patient-import lock). */
+export async function duplicateCandidatesWith(q: Pick<DbClient, "query">, input: {
+  fullName: string; phone: string | null; altPhone: string | null;
+}): Promise<CandidatePatient[]> {
   const phones = [
     ...phoneLookupForms(input.phone),
     ...phoneLookupForms(input.altPhone),
@@ -3642,7 +3673,7 @@ export async function duplicateCandidates(input: {
   // (LIKE ANY لا يقبل ESCAPE مخصّصًا — فالهروب بالشرطة المائلة الافتراضية.)
   const patterns = words.map((word) => `%${normalizeSearchText(word).replace(/[\\%_]/g, (char) => `\\${char}`)}%`);
 
-  const { rows } = await getPool().query<{
+  const { rows } = await q.query<{
     id: number; patient_number: string; full_name: string;
     phone: string | null; alt_phone: string | null; birth_year: number | null;
   }>(
@@ -3676,9 +3707,16 @@ const PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext
 
 export async function createPatient(input: PatientInput): Promise<Patient> {
   await ensureSchema();
-  const { rows } = await withTransaction(getPool(), async (client) => {
+  return withTransaction(getPool(), async (client) => {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
-    return client.query<PatientRow>(
+    return createPatientWith(client, input);
+  });
+}
+
+/** The patient INSERT on a caller-owned transaction. The caller must already hold
+ * PATIENT_CREATE_SHARED_LOCK_SQL in that transaction (import exclusion). */
+export async function createPatientWith(client: Pick<DbClient, "query">, input: PatientInput): Promise<Patient> {
+  const { rows } = await client.query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                            birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
@@ -3702,8 +3740,7 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
       input.referralSource ?? null,
       input.referredBy ?? null,
     ],
-    );
-  });
+  );
   return toPatient(rows[0]);
 }
 
@@ -14087,7 +14124,7 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
 }
 
 /** Caller owns the snapshot for debt inputs and reclassification evidence. */
-async function computeDebtRowsInSnapshot(scope: number[] | null, includeNonPositive: boolean, client: Pick<DbClient,"query">): Promise<DebtRow[]> {
+export async function computeDebtRowsInSnapshot(scope: number[] | null, includeNonPositive: boolean, client: Pick<DbClient,"query">): Promise<DebtRow[]> {
   // حملة واحدة لكل الجداول — نفس الجداول التي مسحها الاستعلام القديم، لكن
   // بعملة الفاتورة معها ليُحسب الرصيد بالمرجع الكانوني لا بـSQL مزدوج.
   const [patientsRes, invoicesRes, invoiceCurrenciesRes, paymentsRes, openingRes, planCurrenciesRes] =

@@ -25,7 +25,7 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 - **`self`** — acts only on the caller's own data.
 - **`entry`** — login, session and logout (done in M1).
 - **`excluded`** — AI/Dot, out of scope.
-- **`canonical-done`** — already migrated: the procurement route in M3a.
+- **`canonical-done`** — already migrated: the procurement route (M3a) and the M2 slices recorded in §5.
 
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
@@ -34,13 +34,13 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 200 |
+| existing | 198 |
 | proposed | 142 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 2 |
+| canonical-done | 4 |
 
 | Record scope | Routes |
 |---|---|
@@ -131,3 +131,64 @@ Each step has the same parts:
 - registration of the page in the canonical shell;
 - PostgreSQL tests (allowed action, adjacent action refused, revocation, scope);
 - a built-app journey on an owned database, with an empty DDL log.
+
+## 5. Implemented M2 slices
+
+### Shared mechanism: registered record reads
+`lib/canonical-record-reads.ts` holds a closed registry of record reads (keys start with `read:`, so they never collide with operation actions). Each entry has:
+- `record`: `patient` or `appointment`;
+- `need`: capabilities that are all required;
+- `anyOf`: capabilities of which one is required.
+
+The owning RR snapshot reader (`lib/canonical-read-snapshot.ts`) admits a record read in the same snapshot as the authority proof. It refuses with `STAFF_OPERATION_RECORD_SCOPE_DENIED` (HTTP 403) when the actor's scope for that record is `none`. That includes `own` without a validated, active clinician link. The constraint (`all`, or `own` with the clinician party) is passed to the domain read, which filters rows by it. A role label never widens a scope.
+
+### Slice 1 — `GET /api/patients` (search and browse)
+
+| Column group | Fields | Shown when the actor holds |
+|---|---|---|
+| identity | id, file number, name, phone | admitted (scope not `none`) |
+| care summary | medical alert, gender, age, last visit, next appointment, active orthodontics, flags | one of `clinical.plans.view`, `clinical.visits.document`, `clinical.xrays.view`, `appointments.create`, `appointments.edit` |
+| balances | amounts due per currency | `finance.patient-ledger.view` |
+
+**For review (owner, with Dot):** which capabilities admit the care summary.
+
+How the projection behaves:
+- **Hidden groups are omitted, not zeroed.** An empty balance list would read as "no debt".
+- **Selecting on a hidden group refuses** with `patient_filter_not_granted`. This covers the debt filter, the care filters, the last-visit sort and flag filters, so hidden fields cannot be learned through filtering.
+- **The patient photo is not published** until `/api/documents/[id]` is canonical.
+- **The screen** registers `/patients` as an exact page in the canonical shell. It is visible when the patient scope is not `none`. The list hides filters outside the projection. The profile link stays hidden until the profile routes are migrated. The create form follows slice 1b.
+
+Evidence: `__tests__/postgres/patients-canonical-directory.test.ts` (13 cases):
+- scope `all`, `own`, owner, `none`, unlinked `own`, admin label;
+- identity-only, ledger-only and full projections;
+- refused filters;
+- invalid input;
+- revocation: a stale session, and a scope or grant change applied at the next read.
+
+### Slice 1b — `POST /api/patients` (create)
+One admitted operation for the exact capability `patients.create`. It is listed in `CLINIC_RUNTIME_ACTIONS` and in the runtime's literal action set. The same transaction holds:
+1. the shared patient-import lock, so creation never interleaves with an import;
+2. duplicate detection on the current rows;
+3. the INSERT;
+4. the audit row. An audit failure rolls the patient back.
+
+Rules:
+- **Duplicate candidates are other patients' identities.** They are disclosed only to an actor whose current patient scope is `all`. Others get the bounded warning: how many, never who. They can still confirm the creation.
+- **The previous-balance step is refused** with `opening_balance_not_canonical` (409, Arabic), not dropped. It waits for `finance.opening-balances.manage` (proposed in §2).
+- **Screen:**
+  - the create button follows `patients.create`;
+  - the previous-balance and family-link steps are not offered;
+  - after saving, the list shows a status line instead of opening the profile, which is not canonical yet.
+
+Evidence:
+- PostgreSQL, 6 cases:
+  - adjacent grant and admin label refused, nothing written;
+  - created with its attributed audit row;
+  - disclosure by scope, plus confirmation;
+  - audit failure rolls the patient back;
+  - waits for a running import;
+  - revocation (stale session, then refused).
+- Built-app journey, 2 cases:
+  - HTTP refusals, the previous-balance refusal and validation;
+  - mobile browser creation with duplicate confirmation, and the audit trail.
+

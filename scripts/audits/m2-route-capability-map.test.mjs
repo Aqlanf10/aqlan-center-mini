@@ -21,9 +21,10 @@ test("existing entries use only catalogue capabilities; proposals are explicit",
   for (const entry of map) {
     const caps = [...entry.need, ...entry.anyOf];
     assert.ok(["existing", "proposed", "owner-only", "self", "entry", "excluded", "canonical-done"].includes(entry.status), key(entry));
-    if (entry.status === "existing") for (const c of caps) assert.ok(existing.has(c) || ownerOnly.has(c), `${key(entry)} uses unknown ${c}`);
+    // A migrated route keeps its admission rule, held to the same catalogue check.
+    if (entry.status === "existing" || entry.status === "canonical-done") for (const c of caps) assert.ok(existing.has(c) || ownerOnly.has(c), `${key(entry)} uses unknown ${c}`);
     if (entry.status === "proposed") assert.ok(caps.some(c => !existing.has(c)), `${key(entry)} is marked proposed but uses only existing capabilities`);
-    if (["self", "entry", "excluded", "canonical-done"].includes(entry.status)) assert.equal(entry.need.length + entry.anyOf.length, 0, key(entry));
+    if (["self", "entry", "excluded"].includes(entry.status)) assert.equal(entry.need.length + entry.anyOf.length, 0, key(entry));
     if (entry.scope !== null) assert.ok(["patient", "appointment"].includes(entry.scope), key(entry));
     // No entry may be admitted by a role label alone: every staff route names a capability,
     // a record scope or an explicit non-grant status.

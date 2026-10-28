@@ -47,7 +47,7 @@ export function staffAdmissionRefusal(error: unknown): StaffCapabilityEditError 
  if (error instanceof StaffCapabilityEditError) return error;
  if (!(error instanceof Error) || !/^STAFF_(OPERATION|RUNTIME|DIRECTORY|READ)_[A-Z_]+$/.test(error.message)) return null;
  const code = error.message;
- if (/CAPABILITY_DENIED$/.test(code)) return new StaffCapabilityEditError(403, code, "لا تملك الصلاحية اللازمة لهذه العملية.");
+ if (/(CAPABILITY|RECORD_SCOPE)_DENIED$/.test(code)) return new StaffCapabilityEditError(403, code, "لا تملك الصلاحية اللازمة لهذه العملية.");
  if (/(SESSION|STALE|EXPIRED|SUBJECT|USERNAME|CREDENTIAL|PERMISSIONS|PROVIDER|ACCOUNT_INVALID)/.test(code)) return new StaffCapabilityEditError(401, code, "انتهت الجلسة أو تغيّرت صلاحياتك. سجّل الدخول من جديد.");
  if (/TARGET_/.test(code)) return new StaffCapabilityEditError(404, code, "الموظف غير موجود أو غير نشط في الهوية الموحّدة.");
  return new StaffCapabilityEditError(503, code, "الهوية الموحّدة غير جاهزة الآن. أعد المحاولة لاحقًا.");

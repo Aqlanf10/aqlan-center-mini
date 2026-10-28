@@ -31,6 +31,9 @@ export interface CanonicalInventoryAccount {
   readonly username: string;
   readonly role: string;
   readonly grants?: Record<string, boolean>;
+  /** Record scopes of the capability document (default `none`). */
+  readonly patientScope?: "none" | "own" | "all";
+  readonly appointmentScope?: "none" | "own" | "all";
   /** Link to a synthetic active doctor party (created on demand). */
   readonly doctor?: boolean;
 }
@@ -42,7 +45,7 @@ export interface CanonicalInventoryDatabase<K extends string> {
   /** A fresh signed durable session from the account's CURRENT rows. */
   session(key: K, expiresInMs?: number): Promise<VerifiedDurableSession>;
   /** Replace the account's grants (new permission revision): an authority write. */
-  setGrants(key: K, grants: Record<string, boolean>): Promise<void>;
+  setGrants(key: K, grants: Record<string, boolean>, scopes?: { patientScope?: "none" | "own" | "all"; appointmentScope?: "none" | "own" | "all" }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -69,7 +72,7 @@ export async function openCanonicalInventoryDatabase<K extends string>(
     }
     ids[key] = (await pool.query<{ id: number }>(
       "INSERT INTO users(username,display_name,password_hash,role,is_active,party_id,permissions) VALUES($1,$1,'synthetic-canonical-hash',$2,TRUE,$3,$4) RETURNING id",
-      [account.username, account.role, party, JSON.stringify(capabilityDocument({ grants: account.grants ?? {} }))])).rows[0].id;
+      [account.username, account.role, party, JSON.stringify(capabilityDocument({ grants: account.grants ?? {}, patientScope: account.patientScope, appointmentScope: account.appointmentScope }))])).rows[0].id;
   }
   // Any pre-existing account receives an explicit empty canonical document.
   await pool.query("UPDATE users SET permissions=$1 WHERE id<>ALL($2::int[])", [JSON.stringify(capabilityDocument({})), Object.values(ids)]);
@@ -99,14 +102,14 @@ export async function openCanonicalInventoryDatabase<K extends string>(
       if (!handle) throw new Error("synthetic canonical token rejected by the durable parser");
       return handle;
     },
-    async setGrants(key, grants) {
+    async setGrants(key, grants, scopes = {}) {
       // Monotonic per account even after a test stored a malformed document.
       const { rows: [row] } = await pool.query<{ permissions: string }>("SELECT permissions FROM users WHERE id=$1", [ids[key]]);
       let stored = 0;
       try { const parsed = JSON.parse(row.permissions) as { revision?: unknown }; if (Number.isSafeInteger(parsed.revision)) stored = parsed.revision as number; } catch { /* malformed */ }
       const revision = Math.max(stored, revisions[key] ?? 1) + 1;
       revisions[key] = revision;
-      await pool.query("UPDATE users SET permissions=$1 WHERE id=$2", [JSON.stringify(capabilityDocument({ grants }, revision)), ids[key]]);
+      await pool.query("UPDATE users SET permissions=$1 WHERE id=$2", [JSON.stringify(capabilityDocument({ grants, ...scopes }, revision)), ids[key]]);
     },
     async close() { await db.resetPoolForTesting(); vi.unstubAllEnvs(); await owned.close(); },
   };

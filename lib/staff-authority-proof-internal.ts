@@ -117,6 +117,18 @@ export async function loadStaffDirectorySnapshotAuthority(client: Pick<DbClient,
 export async function loadCanonicalSnapshotAuthority(client: Pick<DbClient, "query">, session: VerifiedDurableSession, action: StaffRuntimeAction) {
  return loadAuthority(client, session, action, "public", "");
 }
+/** Snapshot evidence for a REGISTERED record read (`lib/canonical-record-reads.ts`)
+ * through the generic owning RR reader only: the same predicates and claim
+ * comparisons, no row locks; every `need` capability and (when listed) one `anyOf`
+ * capability. The record scope (patient/appointment) is enforced by the reader from
+ * the returned access, in the same snapshot. */
+export async function loadCanonicalRecordSnapshotAuthority(client: Pick<DbClient, "query">, session: VerifiedDurableSession, need: readonly StaffCapability[], anyOf: readonly StaffCapability[]) {
+ const proof = await proveSession(client, session, "public", "");
+ if(!need.every(capability=>hasStaffCapability(proof.access,capability)) || (anyOf.length>0 && !anyOf.some(capability=>hasStaffCapability(proof.access,capability))))refuse("CAPABILITY_DENIED");
+ const fingerprint=staffAuthorizationFingerprint(proof.access);
+ if(!fingerprint || !revalidateVerifiedDurableSession(session))refuse("SESSION_EXPIRED");
+ return {fingerprint,access:proof.access,identity:Object.freeze({realmId:proof.realmId,subjectId:proof.subjectId,generationId:proof.generationId,userId:proof.user.id,username:proof.user.username,role:proof.user.role})};
+}
 /** Recorded-approver evidence for a writer that already holds the shared lifecycle
  * fence (for example a waste approval consumed later): does `userId` CURRENTLY prove
  * as an active canonical account holding `capability`? Target-specific drift answers

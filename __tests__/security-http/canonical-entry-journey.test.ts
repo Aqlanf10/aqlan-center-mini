@@ -170,7 +170,7 @@ it("legacy and canonical envelopes never cross: legacy token refused on canonica
  expect(refused.status).toBe(403);
  expect((await refused.json()).message).toMatch(ARABIC);
  expect((await me(legacy)).status).toBe(401);
- const legacyRoute = await api("/api/patients", owner.cookie);
+ const legacyRoute = await api("/api/appointments", owner.cookie);
  expect([401, 403]).toContain(legacyRoute.status);
  // A canonical cookie never falls through to a (valid-looking) Bearer.
  const mixed = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: owner.cookie.replace(/.$/, "A"), Authorization: `Bearer ${legacy.split("=")[1]}` } });
@@ -195,7 +195,7 @@ it("browser journey: owner → shell → directory → grant; target's live sess
  await page.getByTestId("canonical-shell").waitFor();
  await expect.poll(() => page.getByTestId("canonical-display-name").textContent()).toBe(ACCOUNTS.owner.display);
  // An unmigrated screen shows the workspace notice, never its legacy UI.
- await page.goto(`${baseUrl}/patients`);
+ await page.goto(`${baseUrl}/appointments`);
  await page.getByTestId("canonical-workspace").waitFor();
  await expect.poll(() => page.getByRole("status").first().textContent()).toMatch(/لم تُنقل بعد/);
  await page.getByRole("link", { name: "صلاحيات الطاقم" }).first().click();

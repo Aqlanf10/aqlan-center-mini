@@ -21,7 +21,7 @@ export function CanonicalShell({ children }: { children: React.ReactNode }) {
   const clinicName = useClinicName();
   const { session, logout } = useSessionActions();
   if (!session) return null;
-  const pages = canonicalPagesFor(session.capabilities, session.isOwner);
+  const pages = canonicalPagesFor(session.capabilities, session.isOwner, { patientScope: session.patientScope, appointmentScope: session.appointmentScope });
   const current = canonicalPageFor(pathname);
   const ready = current !== null && pages.includes(current);
   const roleLabel = ROLE_LABEL[session.role as Role] ?? session.role;

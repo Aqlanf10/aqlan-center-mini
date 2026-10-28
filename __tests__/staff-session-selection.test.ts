@@ -51,13 +51,25 @@ describe("capability presentation", () => {
  it("navigation is a projection of current grants over accepted canonical pages only", () => {
   expect(canonicalPagesFor([], false)).toEqual([]);
   expect(canonicalPagesFor(["staff.view"], false).map(p => p.href)).toEqual(["/staff-access"]);
-  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/staff-access", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
+  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/patients", "/staff-access", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
   expect(canonicalPagesFor(["inventory.custody.view"], false).map(p => p.href)).toEqual(["/inventory/custody"]);
   expect(isCanonicalPage("/staff-access")).toBe(true);
-  expect(isCanonicalPage("/patients")).toBe(false);
+  expect(isCanonicalPage("/patients")).toBe(true);
+  // The patient list is exact: a profile is a separate page, not canonical yet.
+  expect(isCanonicalPage("/patients/12")).toBe(false);
+  expect(isCanonicalPage("/patients/12/ortho")).toBe(false);
   // Legacy-only inventory screens (overview, valuation review) are not canonical pages yet.
   expect(isCanonicalPage("/inventory")).toBe(false);
   expect(isCanonicalPage("/inventory/review")).toBe(false);
+ });
+ it("a record page follows the record scope, never a grant or role label", () => {
+  // Grants alone never show the patient list; a scope other than none does.
+  expect(canonicalPagesFor(["clinical.plans.view", "finance.patient-ledger.view"], false).map(p => p.href)).toEqual([]);
+  expect(canonicalPagesFor([], false, { patientScope: "none" }).map(p => p.href)).toEqual([]);
+  expect(canonicalPagesFor([], false, { patientScope: "own" }).map(p => p.href)).toEqual(["/patients"]);
+  expect(canonicalPagesFor(["staff.view"], false, { patientScope: "all" }).map(p => p.href)).toEqual(["/patients", "/staff-access"]);
+  // The appointment scope does not open the patient list.
+  expect(canonicalPagesFor([], false, { appointmentScope: "all" }).map(p => p.href)).toEqual([]);
  });
  it("a nested page never inherits its parent's grant", () => {
   expect(canonicalPageFor("/inventory/procurement/operations")?.anyOf).toEqual(["inventory.orders.view"]);

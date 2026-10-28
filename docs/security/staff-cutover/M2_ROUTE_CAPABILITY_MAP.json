@@ -2749,8 +2749,8 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 1: record read read:patients.directory (patient scope); projection by grant (identity / care summary / balances), see §5."
  },
  {
   "route": "/api/patients",
@@ -2765,8 +2765,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 1b: operation patients.create; duplicate identities disclosed only to patientScope all; audit atomic with the insert; previous balance refused until finance.opening-balances.manage (proposed)."
  },
  {
   "route": "/api/patients/[id]",

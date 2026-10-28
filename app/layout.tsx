@@ -84,6 +84,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         canonical: true,
         isOwner: canonicalView.isOwner,
         capabilities: [...canonicalView.capabilities],
+        patientScope: canonicalView.patientScope,
+        appointmentScope: canonicalView.appointmentScope,
       }
     : session
       ? {
