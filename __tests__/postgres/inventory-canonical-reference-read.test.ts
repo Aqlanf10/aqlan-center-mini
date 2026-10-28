@@ -41,7 +41,7 @@ beforeAll(async()=>{
  vi.stubEnv("INVENTORY_INTEGRATION_ENABLED","true");
  const c=await pool.connect();try{
   await c.query(`CREATE SCHEMA ${schema};SET search_path TO ${schema},pg_catalog`);
-  await c.query(`CREATE TABLE ${schema}.parties(id INTEGER PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);CREATE TABLE ${schema}.users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB);CREATE TABLE ${schema}.synthetic_runtime_effects(value TEXT)`);
+  await c.query(`CREATE TABLE ${schema}.parties(id SERIAL PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);CREATE TABLE ${schema}.users(id SERIAL PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB);CREATE TABLE ${schema}.synthetic_runtime_effects(value TEXT)`);
   await c.query(readFileSync(new URL("../fixtures/staff-identity/frozen-0076.sql",import.meta.url),"utf8"));await c.query(staffIdentitySubstrateSql(schema));
   await c.query(`INSERT INTO ${schema}.parties(id,kind,is_active) VALUES(20,'doctor',TRUE)`);
   for(const [id,role,party,grants] of [[1,"admin",null,{}],[2,"doctor",20,{"inventory.references.view":true}],[3,"admin",null,{}]] as const)

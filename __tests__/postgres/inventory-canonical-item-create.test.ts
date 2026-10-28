@@ -55,8 +55,8 @@ beforeAll(async () => {
     const c = await pool.connect();
     try {
         await c.query(`CREATE SCHEMA ${schema};SET search_path TO ${schema},pg_catalog`);
-        await c.query(`CREATE TABLE ${schema}.parties(id INTEGER PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);
-   CREATE TABLE ${schema}.users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB);
+        await c.query(`CREATE TABLE ${schema}.parties(id SERIAL PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);
+   CREATE TABLE ${schema}.users(id SERIAL PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB);
    CREATE TABLE ${schema}.inventory_items(id SERIAL PRIMARY KEY,name TEXT NOT NULL,category TEXT,unit TEXT,min_level NUMERIC,note TEXT,created_by TEXT,is_active BOOLEAN NOT NULL DEFAULT TRUE);
    CREATE TABLE ${schema}.inventory_movements(id INTEGER PRIMARY KEY);
    CREATE TABLE ${schema}.payables(id INTEGER PRIMARY KEY);

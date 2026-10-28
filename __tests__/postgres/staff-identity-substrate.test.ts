@@ -12,8 +12,8 @@ beforeAll(async()=>{
  await client.connect();
  await client.query(`CREATE SCHEMA ${schema}`);
  await client.query(`SET search_path TO ${schema},pg_catalog`);
- await client.query(`CREATE TABLE ${schema}.parties(id INTEGER PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);
- CREATE TABLE ${schema}.users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB)`);
+ await client.query(`CREATE TABLE ${schema}.parties(id SERIAL PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);
+ CREATE TABLE ${schema}.users(id SERIAL PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB)`);
  const frozen=readFileSync(new URL("../fixtures/staff-identity/frozen-0076.sql",import.meta.url),"utf8");
  expect(createHash("sha256").update(frozen).digest("hex")).toBe(FROZEN_0076_SHA256);
  await client.query(frozen);
@@ -137,8 +137,8 @@ it.each(["orphan-subject", "missing-current", "unaccounted-revision"])("persiste
  await client.query(`CREATE SCHEMA ${broken}`);
  try {
   await client.query(`SET search_path TO ${broken},pg_catalog`);
-  await client.query(`CREATE TABLE ${broken}.parties(id INTEGER PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);
-   CREATE TABLE ${broken}.users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB)`);
+  await client.query(`CREATE TABLE ${broken}.parties(id SERIAL PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);
+   CREATE TABLE ${broken}.users(id SERIAL PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB)`);
   await client.query(readFileSync(new URL("../fixtures/staff-identity/frozen-0076.sql",import.meta.url),"utf8"));
   await client.query(staffIdentitySubstrateSql(broken));
   await client.query(`INSERT INTO ${broken}.users(id) VALUES(1)`);

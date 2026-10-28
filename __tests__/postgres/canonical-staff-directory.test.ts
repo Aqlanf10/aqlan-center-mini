@@ -88,7 +88,7 @@ beforeAll(async () => {
  const client = await pool.connect();
  try {
   await client.query("SET search_path TO public,pg_catalog");
-  await client.query("CREATE TABLE public.parties(id INTEGER PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);CREATE TABLE public.users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB)");
+  await client.query("CREATE TABLE public.parties(id SERIAL PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);CREATE TABLE public.users(id SERIAL PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB)");
   await client.query(readFileSync(new URL("../fixtures/staff-identity/frozen-0076.sql", import.meta.url), "utf8"));
   await client.query(staffIdentitySubstrateSql("public"));
   await client.query("INSERT INTO public.parties(id,kind,is_active) VALUES(20,'doctor',TRUE),(21,'doctor',FALSE),(22,'supplier',TRUE)");

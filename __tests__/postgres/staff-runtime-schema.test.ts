@@ -13,7 +13,7 @@ const schema=`aqlan_identity_${randomBytes(8).toString("hex")}`;
 const client=new Client({connectionString:process.env.TEST_DATABASE_URL,ssl:false});
 beforeAll(async()=>{
  await client.connect();await client.query(`CREATE SCHEMA ${schema}; SET search_path TO ${schema},pg_catalog`);
- await client.query(`CREATE TABLE ${schema}.parties(id INTEGER PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN); CREATE TABLE ${schema}.users(id INTEGER PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB)`);
+ await client.query(`CREATE TABLE ${schema}.parties(id SERIAL PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN); CREATE TABLE ${schema}.users(id SERIAL PRIMARY KEY,username TEXT,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions JSONB)`);
  await client.query(readFileSync(new URL("../fixtures/staff-identity/frozen-0076.sql",import.meta.url),"utf8"));
  await client.query(staffIdentitySubstrateSql(schema));
  await client.query("BEGIN");await initializeStaffIdentitySubstrate(client,schema);await client.query("COMMIT");

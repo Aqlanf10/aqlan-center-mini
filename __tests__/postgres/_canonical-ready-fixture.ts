@@ -44,8 +44,8 @@ export async function installSyntheticCanonicalFixture(pool: Pool, schema: strin
  const c = await pool.connect();
  try {
   await c.query(`CREATE SCHEMA ${schema}; SET search_path TO ${schema},pg_catalog`);
-  await c.query(`CREATE TABLE ${schema}.parties(id INTEGER PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);
-   CREATE TABLE ${schema}.users(id INTEGER PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions TEXT);
+  await c.query(`CREATE TABLE ${schema}.parties(id SERIAL PRIMARY KEY,kind TEXT,name TEXT,is_active BOOLEAN);
+   CREATE TABLE ${schema}.users(id SERIAL PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT,password_hash TEXT,role TEXT,is_active BOOLEAN,party_id INTEGER,permissions TEXT);
    CREATE TABLE ${schema}.audit_log(id BIGSERIAL PRIMARY KEY,action TEXT NOT NULL,entity TEXT,entity_id TEXT,summary TEXT NOT NULL,details JSONB,actor TEXT NOT NULL,actor_role TEXT,source_ip TEXT,user_agent TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
    CREATE TABLE ${schema}.staff_login_limits(account_key TEXT PRIMARY KEY,window_started_at TIMESTAMPTZ NOT NULL,attempts INTEGER NOT NULL);
    CREATE TABLE ${schema}.login_limits(key TEXT PRIMARY KEY,window_start TIMESTAMPTZ NOT NULL,attempts INTEGER NOT NULL);

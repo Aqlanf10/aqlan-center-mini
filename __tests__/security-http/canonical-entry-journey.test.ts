@@ -84,12 +84,7 @@ beforeAll(async () => {
  // 3. Synthetic trusted-ready footprint in the public schema (fixture, not a preparation API).
  const c = await db.connect();
  try {
-  // KNOWN M4 BLOCKER (M1_ENTRY_SLICE_DESIGN.md §6): the frozen substrate/runtime catalogues were
-  // generated from synthetic tables, so they pin users.id/parties.id WITHOUT the clinic schema's
-  // SERIAL default. This synthetic database drops the two defaults to match the frozen contract;
-  // a real installation needs a reviewed catalogue revision instead. Canonical account creation
-  // does not exist yet, so nothing in this journey depends on the defaults.
-  await c.query("ALTER TABLE users ALTER COLUMN id DROP DEFAULT; ALTER TABLE parties ALTER COLUMN id DROP DEFAULT");
+  // The clinic schema keeps its SERIAL users.id/parties.id defaults (catalogue revision, M1 item 6).
   await c.query(readFileSync(join(process.cwd(), "__tests__/fixtures/staff-identity/frozen-0076.sql"), "utf8"));
   await c.query(staffIdentitySubstrateSql("public"));
   await c.query("BEGIN");
