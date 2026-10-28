@@ -78,3 +78,16 @@ The owner delegated expert design selection and requested professional cards. Th
 The four headline cards contain real distinct measures; waiting is visibly a subset of unfinished visits. Unknown sources use a dash plus an explicit error, not zero. On narrow screens cards recompose to two columns and evidence rows wrap with labels. Lower-priority finance, attendance, inventory and detailed cohort panels are loaded on request; they are not big empty cards. All original read, currency, permission and date meanings remain in `docs/LEADERSHIP_HUB_SOURCE_MAP.md`. Native date controls and local section/day state follow the existing executive contract; patient data is never stored in query filters or browser storage.
 
 The leadership financial surface uses four local read views: cash movement, invoices/expenses, debts and period operations. Native-currency amount cards are the sole default value presentation; category breakdowns and current non-period facts are progressive detail. Laboratory record cards and operational source panels share the same restrained panel, button, status and spacing family. Current party balances must never inherit the period-end receivables label. This is presentation over existing readers, not a second ledger or new workflow.
+
+## Saved repayment contract
+
+`DebtRepaymentAgreementPrint` owns the saved debt schedule print variant; the
+existing reader and allocation math remain authoritative. Its scoped
+`.repayment-contract` rules in `app/print/print.css` use the established navy and
+orange identity, green paid, amber partial, red overdue and quiet pending badges.
+Every color has a textual status, including partially-paid overdue and due-today
+cases. Status dates use the route's clinic day. The summary is lifetime source
+settlement; row allocations start at the current revision and must not be added
+to that summary. Proposed downpayments are not receipts. Print retains white
+backgrounds, repeating table headers and unsplit rows; mobile preview scrolls
+only the wide schedule table. No global print or financial behavior changes.

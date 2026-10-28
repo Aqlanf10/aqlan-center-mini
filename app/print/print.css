@@ -283,3 +283,35 @@ html[data-reprint="true"] .reprint-mark {
   .hr-staff-sheet { page: hr-staff; }
   .hr-tasks-sheet { page: hr-tasks; }
 }
+
+/* Saved repayment contract: identity accents, not a second financial ledger.
+ * Palette follows DESIGN.md / tailwind.config.ts; status always includes text. */
+.repayment-contract { box-sizing: border-box; max-width: 100%; color: #0d2137; }
+.repayment-contract h3 { font-size: 10pt; margin: 4mm 0 2mm; break-after: avoid; }
+.repayment-contract .doc-title { border-bottom: 2px solid #f5922e; padding-bottom: 3mm; }
+.repayment-contract .line { flex-wrap: wrap; overflow-wrap: anywhere; }
+.repayment-summary { border: 1px solid #1a3a5c; border-inline-start: 4px solid #f5922e; padding: 3mm; margin: 3mm 0; break-inside: avoid; }
+.repayment-summary .repayment-paid { color: #047857; }
+.repayment-summary .repayment-balance { border-top: 1px solid #cbd5e1; padding-top: 2mm; font-weight: 700; }
+.repayment-table { table-layout: fixed; }
+.repayment-table thead { display: table-header-group; }
+.repayment-table tr, .repayment-contract .sign-row { break-inside: avoid; page-break-inside: avoid; }
+.repayment-table th, .repayment-table td { overflow-wrap: anywhere; vertical-align: top; font-variant-numeric: tabular-nums; }
+.repayment-table tbody th { font-weight: 400; border-bottom: 1px solid #ccc; }
+.repayment-status { display: inline-block; border: 1px solid currentColor; border-radius: 3px; padding: 0.5mm 1mm; font-size: 8pt; line-height: 1.5; font-weight: 700; }
+.repayment-status-paid { color: #047857; background: #ecfdf5; }
+.repayment-status-partial { color: #78350f; background: #fff7ed; }
+.repayment-status-overdue { color: #991b1b; background: #fef2f2; }
+.repayment-status-pending { color: #475569; background: #f8fafc; }
+@media screen and (max-width: 600px) {
+  .repayment-contract { padding: 4mm; }
+  .repayment-table-wrap { overflow-x: auto; }
+  .repayment-table { min-width: 160mm; }
+}
+@media print {
+  .repayment-contract { width: auto; max-width: none; }
+  .repayment-table-wrap { overflow: visible; }
+  .repayment-table { min-width: 0; }
+  .repayment-status { background: transparent; }
+  .repayment-contract li { break-inside: avoid; }
+}

@@ -63,8 +63,12 @@ describe("receptionist monthly proposed-payment workspace", () => {
       }
       await editor.locator("summary").click();
       await editor.getByLabel("عدد الأشهر", { exact: true }).fill("0");
+      // Existing rows still balance, but edited generation controls must not be silently ignored.
+      expect(await save.isDisabled()).toBe(true);
+      expect(await editor.getByTestId("schedule-generation-pending").isVisible()).toBe(true);
       expect(await editor.getByRole("button", { name: "توليد جدول الأقساط", exact: true }).isDisabled()).toBe(true);
       await editor.getByLabel("عدد الأشهر", { exact: true }).fill("2");
+      expect(await save.isDisabled()).toBe(true);
       await editor.getByRole("button", { name: "توليد جدول الأقساط", exact: true }).click();
       expect(await editor.getByLabel("مبلغ السداد 2", { exact: true }).inputValue()).toBe("505.00");
       expect(await editor.getByLabel("تاريخ السداد 3", { exact: true }).inputValue()).toBe("2027-02-28");

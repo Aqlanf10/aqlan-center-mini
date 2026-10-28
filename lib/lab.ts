@@ -1,5 +1,6 @@
 import { addDays } from "./schedule";
 import type { Currency } from "./money";
+import { PERMANENT_UPPER, PERMANENT_LOWER, PRIMARY_UPPER, PRIMARY_LOWER } from "./dental";
 
 /**
  * أعمال المختبرات السنية (Dental Laboratory Management V2) — المنطق الخالص.
@@ -206,18 +207,34 @@ export const STUMP_SHADES_ND = ["ND1", "ND2", "ND3", "ND4", "ND5", "ND6", "ND7",
 
 /** أرقام الأسنان الدائمة واللبنية بنظام FDI العالمي (11-48, 51-85) */
 export const ADULT_FDI_TEETH = {
-  upperRight: [18, 17, 16, 15, 14, 13, 12, 11],
-  upperLeft: [21, 22, 23, 24, 25, 26, 27, 28],
-  lowerLeft: [31, 32, 33, 34, 35, 36, 37, 38],
-  lowerRight: [48, 47, 46, 45, 44, 43, 42, 41],
+  upperRight: PERMANENT_UPPER.slice(0, 8),
+  upperLeft: PERMANENT_UPPER.slice(8),
+  lowerLeft: PERMANENT_LOWER.slice(8),
+  lowerRight: PERMANENT_LOWER.slice(0, 8),
 };
 
 export const PRIMARY_FDI_TEETH = {
-  upperRight: [55, 54, 53, 52, 51],
-  upperLeft: [61, 62, 63, 64, 65],
-  lowerLeft: [71, 72, 73, 74, 75],
-  lowerRight: [85, 84, 83, 82, 81],
+  upperRight: PRIMARY_UPPER.slice(0, 5),
+  upperLeft: PRIMARY_UPPER.slice(5),
+  lowerLeft: PRIMARY_LOWER.slice(5),
+  lowerRight: PRIMARY_LOWER.slice(0, 5),
 };
+
+/**
+ * Inclusive bridge span in anatomical (patient-right → patient-left) order.
+ * FDI codes are identifiers, not consecutive positions: 11 and 21 are adjacent.
+ * Never bridge across jaws or between permanent and primary dentitions.
+ * A fresh array preserves the canonical chart and all persisted tooth IDs.
+ */
+export function getLabBridgeTeeth(start: number, end: number): number[] | null {
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+  const arch = [PERMANENT_UPPER, PERMANENT_LOWER, PRIMARY_UPPER, PRIMARY_LOWER]
+    .find((teeth) => teeth.includes(start) && teeth.includes(end));
+  if (!arch) return null;
+  const startIndex = arch.indexOf(start);
+  const endIndex = arch.indexOf(end);
+  return arch.slice(Math.min(startIndex, endIndex), Math.max(startIndex, endIndex) + 1);
+}
 
 /** أدوار السن في طلبات ووصفات المختبر (Prosthodontic Roles) */
 export type LabToothRole = "crown" | "abutment" | "pontic" | "veneer" | "inlay_onlay" | "implant_crown";

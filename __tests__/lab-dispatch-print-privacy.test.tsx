@@ -39,6 +39,8 @@ describe("actual lab document render privacy", () => {
     mocks.getLabOrderById.mockResolvedValue(source);
     const html = await renderPage();
     assertPrivateAbsent(html);
+    expect(html).toContain('data-dental-arch="18,17,16,15,14,13,12,11,21,22,23,24,25,26,27,28" dir="ltr"');
+    expect(html).toContain('data-dental-arch="48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38" dir="ltr"');
     for (const expected of ["RX-381", "SYNTHETIC_CATALOGUE_CROWN", "SYNTHETIC_LAB", "SYNTHETIC_DOCTOR", "SYNTHETIC_CLINIC", "A2", "ND2", "دعامة جسر", "دمية جسر", "مراجعة فنية مطلوبة", "الملاحظات الداخلية", "2000-02-05"]) expect(html).toContain(expected);
     expect(qr).toHaveBeenCalledTimes(1);
     expect(qr.mock.calls[0][0]).toBe('{"rx":"RX-381"}');
