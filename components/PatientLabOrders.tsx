@@ -1,5 +1,10 @@
 "use client";
 
+import { LabOrderClinicalEditor } from "./LabOrderClinicalEditor";
+import { LabOrderShadeEditor } from "./LabOrderShadeEditor";
+import { LabShadeSelector } from "./LabShadeSelector";
+import { parseLabShadeSpecification, type LabShadeSpecification } from "@/lib/lab-shades";
+
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -11,6 +16,7 @@ import {
   parseLabTeeth,
   LAB_PRIORITY_LABEL,
   WORK_TYPES,
+  labToothInputProblem,
 } from "@/lib/lab";
 import { LabDentalChart } from "./LabDentalChart";
 import { LabPrescriptionModal } from "./LabPrescriptionModal";
@@ -109,6 +115,12 @@ export function PatientLabOrders({
   const [customWork, setCustomWork] = useState("");
   const [toothNumbers, setToothNumbers] = useState("");
   const [shade, setShade] = useState("");
+  const [clinicalOrder, setClinicalOrder] = useState<LabOrder | null>(null);
+  const [shadeOrder, setShadeOrder] = useState<LabOrder | null>(null);
+  const [shadeSpecification, setShadeSpecification] = useState<LabShadeSpecification | null>(null);
+  const [doctorId, setDoctorId] = useState("");
+  const [doctors, setDoctors] = useState<Array<{ id: number; name: string }>>([]);
+  const effectiveDoctorId = session?.role === "doctor" ? "self" : doctorId;
   const [priority, setPriority] = useState<"normal" | "urgent" | "rush">("normal");
   const [details, setDetails] = useState("");
   const [showChart, setShowChart] = useState(false);
@@ -149,6 +161,11 @@ export function PatientLabOrders({
     setCustomWork("");
     setToothNumbers("");
     setShade("");
+    setShadeSpecification(null);
+    setDoctorId("");
+    setShadeOrder(null);
+    setClinicalOrder(null);
+    setDoctors([]);
     setPriority("normal");
     setDetails("");
     setShowChart(false);
@@ -198,6 +215,23 @@ export function PatientLabOrders({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!owner.active) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/parties?kind=doctor", { cache: "no-store", signal: controller.signal });
+        if (!response.ok || controller.signal.aborted || !owner.active) return;
+        const data: unknown = await response.json();
+        if (controller.signal.aborted || !owner.active || !Array.isArray(data)) return;
+        setDoctors(data.filter((entry): entry is { id: number; name: string; kind: string; isActive: boolean } =>
+          !!entry && typeof entry === "object" && Number.isSafeInteger(entry.id) && entry.id > 0
+          && typeof entry.name === "string" && entry.kind === "doctor" && entry.isActive === true));
+      } catch { /* A physician must be explicitly verified. */ }
+    })();
+    return () => controller.abort();
+  }, [owner]);
+
   // تحميل المختبرات المسجلة لربط التكلفة بجهتها
   useEffect(() => {
     if (!owner.active) return;
@@ -236,6 +270,11 @@ export function PatientLabOrders({
       return;
     }
 
+    if (!effectiveDoctorId) { setError("حدّد الطبيب المعالج قبل الإرسال."); return; }
+    const toothProblem = labToothInputProblem(toothNumbers, workType === "أخرى (مخصص)" ? customWork : workType);
+    if (toothProblem) { setError(toothProblem); return; }
+    const shadeResult = parseLabShadeSpecification(shadeSpecification, Object.keys(parseLabTeeth(toothNumbers)).map(Number));
+    if (!shadeResult.ok) { setError(shadeResult.error); return; }
     mutationPending.current = true;
     setBusy(true);
     setError(null);
@@ -248,10 +287,12 @@ export function PatientLabOrders({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId,
+          doctorId: session?.role === "doctor" ? undefined : Number(effectiveDoctorId),
           labName: labName.trim(),
           workType: finalWork,
           toothNumbers: toothNumbers.trim() || undefined,
           shade: shade.trim() || undefined,
+          shadeSpecification,
           priority,
           details: details.trim() || null,
           sentDate,
@@ -272,6 +313,7 @@ export function PatientLabOrders({
       setShowAdd(false);
       setToothNumbers("");
       setShade("");
+      setShadeSpecification(null);
       setDetails("");
       setCost("");
       setNote("");
@@ -390,6 +432,16 @@ export function PatientLabOrders({
           <h4 className="text-xs font-bold text-navy-900">إرسال عمل جديد إلى المختبر</h4>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs">
+              <span className="mb-1 block font-bold text-slate-600">الطبيب المعالج *</span>
+              <select aria-label="الطبيب المعالج" value={effectiveDoctorId} onChange={event => setDoctorId(event.target.value)}
+                disabled={session?.role === "doctor"} required className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+                <option value="">اختر الطبيب المعالج</option>
+                {session?.role === "doctor" && <option value="self">{session.displayName || session.username} — الطبيب المرتبط بالحساب</option>}
+                {doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+              </select>
+              <span className="mt-1 block text-slate-500">هذا الاختيار للإرسالية فقط ولا يغيّر الطبيب المسؤول عن الحالة.</span>
+            </label>
+            <label className="text-xs">
               <span className="mb-1 block font-bold text-slate-600">اسم المختبر *</span>
               <input
                 value={labName}
@@ -454,15 +506,11 @@ export function PatientLabOrders({
               />
             </label>
 
-            <label className="text-xs">
-              <span className="mb-1 block font-bold text-slate-600">اللون وتدرج الظل</span>
-              <input
-                value={shade}
-                onChange={(e) => setShade(e.target.value)}
-                placeholder="مثال: A2 أو A3.5 أو BL2"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
-              />
-            </label>
+            <div className="sm:col-span-2">
+              <LabShadeSelector value={shadeSpecification} onChange={setShadeSpecification}
+                selectedTeeth={Object.keys(parseLabTeeth(toothNumbers)).map(Number)}
+                globalShade={shade} onGlobalShadeChange={setShade} disabled={busy} />
+            </div>
 
             <label className="text-xs">
               <span className="mb-1 block font-bold text-slate-600">درجة الأهمية</span>
@@ -497,6 +545,7 @@ export function PatientLabOrders({
                 <div className="mt-2">
                   <LabDentalChart
                     value={toothNumbers}
+                    workType={workType === "أخرى (مخصص)" ? customWork : workType}
                     onChange={(val) => setToothNumbers(val)}
                     showSummary={true}
                   />
@@ -607,6 +656,9 @@ export function PatientLabOrders({
                       {order.details ? ` · التفاصيل: ${order.details}` : ""}
                     </p>
 
+                    {labToothInputProblem(order.toothNumbers, order.workType) && <p role="status" className="my-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+                      مراجعة بيانات الإرسالية: {labToothInputProblem(order.toothNumbers, order.workType)} لم تُغيّر الأدوار المحفوظة تلقائيًا.
+                    </p>}
                     {/* عرض شارات الأسنان والأدوار */}
                     {order.toothNumbers && (
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -656,6 +708,9 @@ export function PatientLabOrders({
                   </div>
 
                   <div className="flex items-center gap-1.5">
+                    {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button" onClick={() => setClinicalOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تصحيح الإرسالية</button>}
+                    {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button"
+                      onClick={() => setShadeOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تعديل ألوان الأسنان</button>}
                     <button
                       type="button"
                       onClick={() => setPrescriptionOrder(order)}
@@ -728,6 +783,14 @@ export function PatientLabOrders({
       )}
 
       {/* نافذة استمارة طلب المعمل */}
+      {clinicalOrder && orders.some(order => order.id === clinicalOrder.id) && (
+        <LabOrderClinicalEditor key={`${session?.username}:${session?.role}:${clinicalOrder.id}`} order={clinicalOrder}
+          onClose={() => setClinicalOrder(null)} onSaved={() => { setClinicalOrder(null); void load(); }} />
+      )}
+      {shadeOrder && orders.some(order => order.id === shadeOrder.id) && (
+        <LabOrderShadeEditor key={`${session?.username}:${session?.role}:${shadeOrder.id}`} order={shadeOrder}
+          onClose={() => setShadeOrder(null)} onSaved={() => { setShadeOrder(null); void load(); }} />
+      )}
       {prescriptionOrder && (
         <LabPrescriptionModal
           order={prescriptionOrder}

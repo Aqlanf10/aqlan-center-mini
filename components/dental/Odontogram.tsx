@@ -1,5 +1,7 @@
 "use client";
 
+import { DentalArchRow } from "./DentalArchRow";
+
 import {
   PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER, toothName, toUniversal,
   type ToothCondition, type ToothState,
@@ -56,8 +58,7 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
   size?: OdontogramSize;
 }) {
   return (
-    <div className="flex gap-0.5" dir="ltr">
-      {teeth.map((code) => {
+    <DentalArchRow teeth={teeth} renderTooth={(code) => {
         const state = chartKnown ? chart.get(code) : undefined;
         const condition = state?.current?.condition ?? "healthy";
         const planned = (state?.planned.length ?? 0) > 0;
@@ -100,8 +101,7 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
             </div>
           </button>
         );
-      })}
-    </div>
+      }} />
   );
 }
 

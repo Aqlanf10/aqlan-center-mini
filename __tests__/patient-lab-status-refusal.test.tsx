@@ -196,6 +196,7 @@ beforeEach(async () => {
   fetchMock.mockImplementation((url, init) => {
     if (init?.method) return write();
     if (url === "/api/lab?patientId=82001") return read();
+    if (url === "/api/parties?kind=doctor") return Promise.resolve(response(200, [{ id: 7001, name: "Synthetic doctor", kind: "doctor", isActive: true }]));
     if (url === "/api/laboratories") return Promise.resolve(response(200, { laboratories: [] }));
     throw new Error(`Unexpected synthetic request: ${url}`);
   });
@@ -421,6 +422,7 @@ it("declining cancellation leaves the status command available", async () => {
 it("shares the synchronous lock with creation without changing the creation payload", async () => {
   (find((node) => node.type === "button" && contents(node).trim() === "+ طلب معمل جديد").props.onClick as () => void)();
   (find((node) => node.type === "input" && node.props.list === "patient-labs-list").props.onChange as (event: unknown) => void)({ target: { value: "Synthetic lab" } });
+  (find((node) => node.type === "select" && node.props["aria-label"] === "الطبيب المعالج").props.onChange as (event: unknown) => void)({ target: { value: "7001" } });
   const submit = find((node) => node.type === "form").props.onSubmit as (event: unknown) => Promise<void>;
   const receive = handler(actions[0]);
   const pending = deferred<Response>();
@@ -432,7 +434,7 @@ it("shares the synchronous lock with creation without changing the creation payl
   expect(writes()[0][0]).toBe("/api/lab");
   expect(writes()[0][1]?.method).toBe("POST");
   expect(JSON.parse(String(writes()[0][1]?.body))).toEqual({
-    patientId: 82001, labName: "Synthetic lab", workType: "تاج زيركون كامل",
+    patientId: 82001, doctorId: 7001, shadeSpecification: null, labName: "Synthetic lab", workType: "تاج زيركون كامل",
     priority: "normal", details: null, sentDate: expect.any(String), dueDate: expect.any(String), note: null,
   });
   pending.resolve(response(403, { message: "Synthetic creation refusal" }));
@@ -444,6 +446,7 @@ it("shares the synchronous lock with creation without changing the creation payl
 it("blocks a same-tick create submission after a status command started", async () => {
   (find((node) => node.type === "button" && contents(node).trim() === "+ طلب معمل جديد").props.onClick as () => void)();
   (find((node) => node.type === "input" && node.props.list === "patient-labs-list").props.onChange as (event: unknown) => void)({ target: { value: "Synthetic lab" } });
+  (find((node) => node.type === "select" && node.props["aria-label"] === "الطبيب المعالج").props.onChange as (event: unknown) => void)({ target: { value: "7001" } });
   const submit = find((node) => node.type === "form").props.onSubmit as (event: unknown) => Promise<void>;
   const pending = deferred<Response>();
   write = () => pending.promise;

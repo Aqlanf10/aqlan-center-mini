@@ -78,7 +78,7 @@ export type AuditAction =
   | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
   | "inventory.item" | "inventory.move"
   | "lab.create" | "lab.update" | "lab.delete"
-  | "lab_order.cancel" | "lab_order.delete"
+  | "lab_order.cancel" | "lab_order.delete" | "lab_order.shade" | "lab_order.clinical" | "lab_order.accounting"
   | "lab_service.create" | "lab_service.update" | "lab_service.delete" | "lab_service.deactivate" | "lab_services.seed"
   | "lab_pricing.create" | "lab_pricing.update" | "lab_pricing.delete"
   | "lab.accounting.update"
@@ -290,6 +290,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "lab_pricing.create": "إضافة قاعدة تسعير مختبر",
   "lab_pricing.update": "تعديل قاعدة تسعير مختبر",
   "lab_pricing.delete": "حذف قاعدة تسعير مختبر",
+  "lab_order.accounting": "تصحيح الربط المالي لإرسالية المعمل",
+  "lab_order.clinical": "تصحيح بيانات إرسالية المعمل",
+  "lab_order.shade": "تعديل ألوان إرسالية المعمل",
   "lab.accounting.update": "تعديل الربط المحاسبي لمختبر",
   "portal.login": "دخول مريض إلى البوابة",
   "portal.confirm": "تأكيد حضور موعد (بوابة)",
