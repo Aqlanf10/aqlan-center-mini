@@ -1,0 +1,5707 @@
+[
+ {
+  "route": "/api/accounting",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "accountant"
+  ],
+  "need": [
+   "reports.financial.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/accounting",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.journal.post"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Manual journal entry; cash lines also require no open shift (unchanged rule)."
+ },
+ {
+  "route": "/api/ai/chat",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI/Dot is out of scope for this programme."
+ },
+ {
+  "route": "/api/ai/confirmation",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI/Dot is out of scope for this programme."
+ },
+ {
+  "route": "/api/appointments",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": "Rows filtered by appointmentScope (own = linked clinician)."
+ },
+ {
+  "route": "/api/appointments",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "appointments.create"
+  ],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/appointments/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "appointments.cancel"
+  ],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/appointments/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "appointments.edit"
+  ],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": "Capacity override additionally requires appointments.override-capacity."
+ },
+ {
+  "route": "/api/appointments/availability",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": "Rows filtered by appointmentScope (own = linked clinician)."
+ },
+ {
+  "route": "/api/appointments/mine",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": "Own clinician appointments; requires a validated clinician link."
+ },
+ {
+  "route": "/api/audit",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "audit.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/auth/login",
+  "method": "POST",
+  "legacyRoles": [
+   "public"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "entry",
+  "note": "Entry routes: canonical branch already selects the envelope (M1)."
+ },
+ {
+  "route": "/api/auth/logout",
+  "method": "POST",
+  "legacyRoles": [
+   "public"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "entry",
+  "note": "Entry routes: canonical branch already selects the envelope (M1)."
+ },
+ {
+  "route": "/api/auth/me",
+  "method": "GET",
+  "legacyRoles": [
+   "public"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "entry",
+  "note": "Entry routes: canonical branch already selects the envelope (M1)."
+ },
+ {
+  "route": "/api/auth/password",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant",
+   "cashier",
+   "accountant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "self",
+  "note": "Own credential change; every other credential reset is owner-only (staff.credentials.reset)."
+ },
+ {
+  "route": "/api/auth/setup",
+  "method": "POST",
+  "legacyRoles": [
+   "public"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "entry",
+  "note": "Entry routes: canonical branch already selects the envelope (M1)."
+ },
+ {
+  "route": "/api/backup",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/backup/documents",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/backup/full",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/booking-requests",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "appointments.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Online booking queue triage."
+ },
+ {
+  "route": "/api/booking-requests/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "appointments.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/cases/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/ceph-reference-sets",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.xrays.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/ceph/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ceph.analyze"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ceph/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.xrays.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/ceph/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ceph.analyze"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ceph/[id]/ai-analyze",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI analysis: AI/Dot out of scope."
+ },
+ {
+  "route": "/api/ceph/[id]/complete",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ceph.analyze"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ceph/[id]/duplicate",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ceph.analyze"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ceph/compare",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.xrays.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/ceph/superimpose",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.xrays.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/display/notice",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "settings.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/display/notice",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/documents/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "patients.documents.delete"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/documents/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.xrays.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/executive",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [
+   "reports.financial.view",
+   "finance.commissions.view-own"
+  ],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/executive/operations",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.profits.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/executive/pulse",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.profits.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/expense-attachments/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.expenses.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/expenses",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.expenses.void"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/expenses",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.expenses.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/expenses",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier"
+  ],
+  "need": [
+   "finance.expenses.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Paying from the treasury also requires an open cashier shift."
+ },
+ {
+  "route": "/api/expenses/[id]/attachments",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.expenses.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/expenses/[id]/attachments",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier"
+  ],
+  "need": [
+   "finance.expenses.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Paying from the treasury also requires an open cashier shift."
+ },
+ {
+  "route": "/api/expenses/quote",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier"
+  ],
+  "need": [
+   "finance.expenses.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Paying from the treasury also requires an open cashier shift."
+ },
+ {
+  "route": "/api/export",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.data.export"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/families",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/families",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "patients.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/families/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/families/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "patients.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/families/[id]/guarantor",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "patients.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/families/[id]/members",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "patients.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/families/[id]/members/[patientId]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "patients.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/commission-overrides",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.commissions.manage-rates"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/commission-overrides",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.commissions.manage-rates"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/commissions",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor",
+   "accountant"
+  ],
+  "need": [],
+  "anyOf": [
+   "finance.commissions.view-all",
+   "finance.commissions.view-own"
+  ],
+  "scope": null,
+  "status": "existing",
+  "note": "view-own restricts rows to the validated clinician link."
+ },
+ {
+  "route": "/api/finance/debts",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.patient-ledger.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/expense-categories",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.finance.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/expense-categories",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.expenses.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/expense-categories",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.finance.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/expense-categories",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.finance.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/fx",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "accountant"
+  ],
+  "need": [
+   "finance.reconciliation.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/fx",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.fx.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/lab-accounting",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "accountant"
+  ],
+  "need": [
+   "finance.reconciliation.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/lab-accounting",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.reconciliation.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/lab-reconciliation",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "accountant"
+  ],
+  "need": [
+   "finance.reconciliation.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/lab-reconciliation",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.reconciliation.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/reconciliation",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "accountant"
+  ],
+  "need": [
+   "finance.reconciliation.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/finance/report",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor",
+   "accountant"
+  ],
+  "need": [
+   "reports.financial.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/attendance",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "hr.attendance.record"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/attendance",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "hr.attendance.record"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/attendance/corrections",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.attendance.correct"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/attendance/corrections",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.attendance.correct"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/contracts",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/contracts",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/contracts/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/contracts/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/contracts/[id]",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/directory",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "hr.directory.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/identity-preview",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/identity-preview",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/leaves",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "hr.leaves.request"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Own requests; approving and balance edits need hr.leaves.approve."
+ },
+ {
+  "route": "/api/hr/leaves",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "hr.leaves.request"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Own requests; approving and balance edits need hr.leaves.approve."
+ },
+ {
+  "route": "/api/hr/leaves/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "hr.leaves.request"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Own requests; approving and balance edits need hr.leaves.approve."
+ },
+ {
+  "route": "/api/hr/leaves/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.leaves.approve"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/leaves/balances",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "hr.leaves.request"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Own requests; approving and balance edits need hr.leaves.approve."
+ },
+ {
+  "route": "/api/hr/leaves/balances",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.leaves.request"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Own requests; approving and balance edits need hr.leaves.approve."
+ },
+ {
+  "route": "/api/hr/payroll/disburse",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.payroll.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+ },
+ {
+  "route": "/api/hr/payroll/disburse",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.payroll.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+ },
+ {
+  "route": "/api/hr/payroll/history-preview",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.payroll.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+ },
+ {
+  "route": "/api/hr/payroll/periods",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.payroll.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+ },
+ {
+  "route": "/api/hr/payroll/periods",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.payroll.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+ },
+ {
+  "route": "/api/hr/payroll/runs",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.payroll.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+ },
+ {
+  "route": "/api/hr/payroll/runs",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.payroll.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+ },
+ {
+  "route": "/api/hr/reports",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.reports.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/schedules",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "hr.directory.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/schedules",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.schedules.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/schedules/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "hr.directory.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/schedules/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.schedules.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/settings",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.settings.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/settings",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.settings.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/settings/history",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.settings.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/staff",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/staff",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/staff/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/staff/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/staff/[id]/history",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/staff/[id]/history",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/staff/[id]/schedule-history",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/hr/staff/[id]/schedule-history",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "hr.staff.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/inventory",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "inventory.references.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/inventory",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "inventory.items.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Legacy foundation writer is guarded; canonical item writes go through reference setup."
+ },
+ {
+  "route": "/api/inventory/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "inventory.references.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/inventory/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "inventory.items.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Legacy foundation writer is guarded; canonical item writes go through reference setup."
+ },
+ {
+  "route": "/api/inventory/[id]/movements",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "inventory.reconcile"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Live legacy movement writer is guarded; canonical movements are procurement/custody commands."
+ },
+ {
+  "route": "/api/inventory/patient-cost",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "inventory.costs.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/inventory/procurement",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "canonical-done",
+  "note": "M3a: each view/command maps to its exact capability (canonical-procurement-transport.ts)."
+ },
+ {
+  "route": "/api/inventory/procurement",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "canonical-done",
+  "note": "M3a: each view/command maps to its exact capability (canonical-procurement-transport.ts)."
+ },
+ {
+  "route": "/api/inventory/value",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "inventory.costs.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.invoices.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.invoices.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.invoices.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.invoices.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices/[id]/add-service",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.invoices.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Admin-only today; appending to a posted invoice."
+ },
+ {
+  "route": "/api/invoices/[id]/add-service",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.invoices.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Admin-only today; appending to a posted invoice."
+ },
+ {
+  "route": "/api/invoices/[id]/add-service",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.invoices.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Admin-only today; appending to a posted invoice."
+ },
+ {
+  "route": "/api/invoices/[id]/archive",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.invoices.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices/[id]/archive",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.invoices.cancel"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices/[id]/correct",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.invoices.correct"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices/[id]/correct",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.invoices.correct"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices/archive",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.invoices.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/invoices/clinical-preview",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.invoices.create"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/lab",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.order"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinical.lab.cancel"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.order"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/backlog",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinical.lab.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/pricing",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/pricing",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.lab-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/pricing/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.lab-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/pricing/[id]",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.lab-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/services",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/services",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.lab-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/services/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.lab-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/services/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/services/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.lab-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/lab/work-intents/capability",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.order"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/laboratories",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/laboratories",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinical.laboratories.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/laboratories/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinical.laboratories.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/laboratories/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.lab.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/laboratories/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinical.laboratories.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/messages",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "messages.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Outbound patient messaging additionally needs messages.send-external."
+ },
+ {
+  "route": "/api/messages",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "messages.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Outbound patient messaging additionally needs messages.send-external."
+ },
+ {
+  "route": "/api/messages",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "messages.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Outbound patient messaging additionally needs messages.send-external."
+ },
+ {
+  "route": "/api/messages",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "messages.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Outbound patient messaging additionally needs messages.send-external."
+ },
+ {
+  "route": "/api/messages/outbound",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "messages.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Outbound patient messaging additionally needs messages.send-external."
+ },
+ {
+  "route": "/api/messages/outbound",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "messages.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Outbound patient messaging additionally needs messages.send-external."
+ },
+ {
+  "route": "/api/opening-balances",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.opening-balances.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/opening-balances",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "accountant"
+  ],
+  "need": [
+   "finance.reconciliation.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/opening-balances",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.opening-balances.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/opening-balances/access",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "self",
+  "note": "Projection of the caller's own opening-balance rights."
+ },
+ {
+  "route": "/api/ortho",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]/assessment",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]/assessment",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]/followup-coverage",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]/followup-coverage",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]/followup-coverage",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]/strategy",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/[id]/strategy",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/adjustments/[id]/billing-decision",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "finance.invoices.create"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/baseline",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/billing-decisions",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/ortho/followups",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/parties",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [],
+  "anyOf": [
+   "finance.suppliers.view",
+   "finance.payments.view",
+   "inventory.references.view"
+  ],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/parties",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.parties.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/parties/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.parties.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/party-openings",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.opening-balances.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/party-openings",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.opening-balances.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/party-openings",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.opening-balances.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "patients.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "patients.delete"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "patients.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/arrival-panel",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/cases",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/cases",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/ceph",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/ceph",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.xrays.upload"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/chart",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/chart",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/clinical-context",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/contact",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/contact",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "patients.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/debt-repayments",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.patient-ledger.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/debt-repayments",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.payments.collect"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Arrangement creation and collection both move money obligations; collection also requires an open cashier shift."
+ },
+ {
+  "route": "/api/patients/[id]/debt-repayments/[arrangementId]/collect",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.payments.collect"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Requires an open cashier shift (unchanged rule)."
+ },
+ {
+  "route": "/api/patients/[id]/diagnoses",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/diagnoses",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/documents",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.xrays.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/documents",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.xrays.upload"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/endo",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/endo",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Signed visit addenda additionally require clinical.visits.sign."
+ },
+ {
+  "route": "/api/patients/[id]/endo/[treatmentId]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Signed visit addenda additionally require clinical.visits.sign."
+ },
+ {
+  "route": "/api/patients/[id]/endo/[treatmentId]/crown",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Signed visit addenda additionally require clinical.visits.sign."
+ },
+ {
+  "route": "/api/patients/[id]/endo/[treatmentId]/visits",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Signed visit addenda additionally require clinical.visits.sign."
+ },
+ {
+  "route": "/api/patients/[id]/endo/[treatmentId]/visits/[endoVisitId]/addenda",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Signed visit addenda additionally require clinical.visits.sign."
+ },
+ {
+  "route": "/api/patients/[id]/family",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/historical-documents",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/historical-documents",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "patients.history.record"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/historical-documents/[documentId]/correct",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "patients.history.correct"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/historical-documents/preview",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "patients.history.record"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/intake-history",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/intake-history",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/ledger",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.patient-ledger.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-balance-arrangement",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.patient-ledger.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-balance-arrangement",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.legacy.record"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-balance-arrangement",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.legacy.record"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-onboarding",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-treatments",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-treatments",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.legacy.record"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-treatments/[agreementId]/void",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.legacy.void"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-treatments/[agreementId]/void",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.legacy.void"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/legacy-treatments/preview",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.legacy.record"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/materials",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/medical-history",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/medical-history",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/merge",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "patients.merge"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/number",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "patients.number.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/number",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "patients.number.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/photo",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "patients.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/plans",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/prescriptions",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.prescriptions.write"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": "Read of prescriptions limited to prescribers (current behaviour: admin, doctor)."
+ },
+ {
+  "route": "/api/patients/[id]/problems",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/problems",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/referrals",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/referrals",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.referrals.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/responsibility",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.patient-ledger.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/responsibility",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.patient-ledger.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/return-booking-context",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/statement",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.patient-ledger.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/timeline",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/treatment-financial-context",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.patient-ledger.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/vitals",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/vitals",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/[id]/workflow",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/patients/import",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.data.import"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Bulk import is owner-only (proposed owner operation)."
+ },
+ {
+  "route": "/api/patients/import/legacy",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.data.import"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Bulk import is owner-only (proposed owner operation)."
+ },
+ {
+  "route": "/api/payables",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "accountant"
+  ],
+  "need": [
+   "finance.suppliers.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/payables",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.payables.record"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/payments",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.payments.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/payments",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier"
+  ],
+  "need": [
+   "finance.payments.collect"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Requires an open cashier shift."
+ },
+ {
+  "route": "/api/payments/[id]/correct",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.payments.void"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Requires an open cashier shift."
+ },
+ {
+  "route": "/api/payments/attempts/retire",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier"
+  ],
+  "need": [
+   "finance.payments.collect"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plan-items/[id]/case",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plan-items/[id]/dependencies",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plan-items/[id]/dependencies",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plan-templates",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/planned-visits/[id]/rebook",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "appointments.create"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/planned-visits/[id]/schedule",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "appointments.create"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier",
+   "accountant"
+  ],
+  "need": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "finance.invoices.view"
+  ],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/agreement-amendment",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/agreement-amendment",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/agreement-amendment",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/consent",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/financial-approval",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.invoices.create"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Financial approval of a plan creates billable obligations."
+ },
+ {
+  "route": "/api/plans/[id]/items",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/items",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/items",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/reconcile",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/reconcile",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/[id]/reconcile",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.agreements.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/proposals",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/proposals",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "clinical.plans.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/plans/reminders",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "appointments.create"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/prescriptions",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.prescriptions.write"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/prescriptions/[id]/void",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.prescriptions.write"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/print-log",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "self",
+  "note": "Any admitted canonical session records its own print; no grant."
+ },
+ {
+  "route": "/api/problems/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/provider-blocks",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/provider-blocks",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "appointments.schedule.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/provider-blocks/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "appointments.schedule.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/recall",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/recall",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "appointments.create"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/referrals/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.referrals.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/referrals/[id]/transition",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinical.referrals.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/referrals/mine",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.referrals.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Own clinician referrals."
+ },
+ {
+  "route": "/api/report",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "reports.operational.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/reports",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "accountant"
+  ],
+  "need": [
+   "reports.financial.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/reports/daily-clinic",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "reports.operational.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/reports/saved",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "reports.operational.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Saved reports belong to their author."
+ },
+ {
+  "route": "/api/reports/saved",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "accountant"
+  ],
+  "need": [
+   "reports.operational.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Saved reports belong to their author."
+ },
+ {
+  "route": "/api/reports/saved",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "reports.operational.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Saved reports belong to their author."
+ },
+ {
+  "route": "/api/reports/saved",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "reports.operational.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Saved reports belong to their author."
+ },
+ {
+  "route": "/api/service-materials",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/service-materials",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "finance.cost-prices.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/service-materials",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/services",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "accountant"
+  ],
+  "need": [
+   "finance.service-prices.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/services",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.service-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/services/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.service-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/services/prices",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.service-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/services/provisional",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "finance.service-prices.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "settings.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [
+   "settings.operational.edit",
+   "settings.finance.edit"
+  ],
+  "scope": null,
+  "status": "existing",
+  "note": "Each key is classified operational or financial; the route refuses keys outside the caller's grants."
+ },
+ {
+  "route": "/api/settings",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [
+   "settings.operational.edit",
+   "settings.finance.edit"
+  ],
+  "scope": null,
+  "status": "existing",
+  "note": "Each key is classified operational or financial; the route refuses keys outside the caller's grants."
+ },
+ {
+  "route": "/api/settings/ai",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/ai",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/ai/providers",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/ai/providers",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/ai/providers/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/ai/providers/[id]",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/ai/providers/[id]/test",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/ai/providers/reorder",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/ai/test",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI provider configuration: AI/Dot out of scope; when built it is owner-only (settings.integrations.change)."
+ },
+ {
+  "route": "/api/settings/appointment-services",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "settings.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/appointment-services",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/appointment-services/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/backup",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/backup/archive/[backupId]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/backup/config",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/backup/config",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/backup/restore",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/backup/restore",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/backup/run",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/backup/run",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/display/announcements",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "settings.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/display/announcements",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/display/announcements/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/display/announcements/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/display/announcements/reorder",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/history",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "audit.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/material-rates",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "settings.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/material-rates",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/messaging",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.integrations.change"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/messaging",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.integrations.change"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/messaging/test",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.integrations.change"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/patient-numbering",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/patient-numbering",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/production-backup",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.backup.manage"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+ },
+ {
+  "route": "/api/settings/readiness",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "audit.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/reset",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.reset"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/settings/reset",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "clinic.reset"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": ""
+ },
+ {
+  "route": "/api/shifts",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "cashier",
+   "accountant"
+  ],
+  "need": [
+   "finance.shifts.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/shifts",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier"
+  ],
+  "need": [
+   "finance.shifts.operate"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/shifts",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "cashier"
+  ],
+  "need": [
+   "finance.shifts.operate"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/tasks",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "tasks.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+ },
+ {
+  "route": "/api/tasks",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "tasks.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+ },
+ {
+  "route": "/api/tasks/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "tasks.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+ },
+ {
+  "route": "/api/tasks/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "tasks.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+ },
+ {
+  "route": "/api/tasks/[id]/checklist",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "tasks.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+ },
+ {
+  "route": "/api/tasks/[id]/comments",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "tasks.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+ },
+ {
+  "route": "/api/tasks/[id]/links",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "tasks.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+ },
+ {
+  "route": "/api/tasks/[id]/links",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "tasks.use"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "proposed",
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+ },
+ {
+  "route": "/api/users",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "staff.view"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/users",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "staff.accounts.create"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/users/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "staff.profile.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Role, credential and clinician-link changes are owner-only (staff.role.change, staff.credentials.reset, staff.clinician-link.change); deactivation needs staff.accounts.disable."
+ },
+ {
+  "route": "/api/visits",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/visits",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "visits.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": "Arrival/check-in creates the visit record."
+ },
+ {
+  "route": "/api/visits/[id]",
+  "method": "DELETE",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "visits.delete"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "visits.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/billing-preview",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "finance.invoices.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/clinical",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/clinical",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor",
+   "assistant"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Signing additionally requires clinical.visits.sign."
+ },
+ {
+  "route": "/api/visits/[id]/financial-context",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [
+   "finance.invoices.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/lab-work-command",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/materials",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/next",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "appointments.create"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/reception-handoff",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "visits.manage"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "proposed",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/walkout",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "finance.invoices.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/visits/readiness",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/waiting-list",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/waiting-list",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "appointments.edit"
+  ],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/waiting-list/[id]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": ""
+ },
+ {
+  "route": "/api/waiting-list/[id]",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [
+   "appointments.edit"
+  ],
+  "anyOf": [],
+  "scope": "appointment",
+  "status": "existing",
+  "note": ""
+ }
+]
