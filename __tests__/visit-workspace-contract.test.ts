@@ -19,7 +19,7 @@ const baseline = [
     "label": "send",
     "start": "  const send = useCallback(",
     "end": "  /** التوقيع",
-    "sha": "c2e47037edac7e0e9b4fdf374b05a76830803bfb85fc7e1774b7e6e9c8cbb019"
+    "sha": "42f400b505a7819daee0f87940273e85b234972b049b2c58cd9824ea94f6b3f4"
   },
   {
     "label": "sign",
@@ -61,6 +61,17 @@ describe("actual visit workspace retains its authoritative contracts", () => {
     const from = source.indexOf(start); expect(from).toBeGreaterThan(-1);
     const to = source.indexOf(end, from); expect(to).toBeGreaterThan(from);
     expect(createHash("sha256").update(source.slice(from, to)).digest("hex")).toBe(sha);
+  });
+  it("changes only the owner-guarded save failure presentation from the prior reviewed send boundary", () => {
+    const send = section(source, "  const send = useCallback(", "  /** التوقيع");
+    const localized = "if (currentOwner()) setError(clinicalSaveFailureMessage(reason));";
+    const previous = 'if (currentOwner()) setError(reason instanceof Error ? reason.message : "تعذّر الاتصال بالخادم.");';
+    expect(send.split(localized)).toHaveLength(2);
+    // Independently extracted from 6c2f5a8, matching the already recorded pin.
+    // Exact substitution must recover every other byte: no normalization or
+    // omitted guard, mutation, payload, response, reload or finally boundary.
+    expect(fingerprint(send.replace(localized, previous)))
+      .toBe("c2e47037edac7e0e9b4fdf374b05a76830803bfb85fc7e1774b7e6e9c8cbb019");
   });
   it("retains the original validated sign acceptance and documentary reset byte-for-byte", () => {
     const sign = section(source, "  const sign = useCallback(", "  /** (VISIT-2) فتح ملف");

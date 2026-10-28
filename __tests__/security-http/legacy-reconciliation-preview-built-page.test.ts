@@ -159,6 +159,11 @@ async function fixture(width: number) {
       // (INV-LEGACY) The historical-agreement panel is another independent Account sibling read.
       if (target === prefix + "/legacy-treatments") { await json(route, { agreements: [], access: { add: false, edit: false, void: false } }); return; }
       // Exact independent Account siblings. Unknown reads and every write still abort.
+      // The archive sibling reads even without management access. Keep readiness
+      // pending: no archive ownership, ready state, or permission is invented.
+      if (target === `/api/invoices/archive?patientId=${id}`) {
+        await json(route, { readiness: "migration_pending", invoices: [], archivedInvoices: [] }); return;
+      }
       if (target === prefix + "/historical-documents") { await json(route, { documents: [] }); return; }
       if (target === prefix + "/debt-repayments") { await json(route, { patientId: id, arrangements: [], targets: [] }); return; }
       if (target === prefix + "/documents") { await json(route, { documents: [], storageReady: false, storageMessage: null }); return; }

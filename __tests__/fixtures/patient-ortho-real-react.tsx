@@ -1,3 +1,4 @@
+import { patientOrthoBookingContext } from "./patient-ortho-booking-context";
 import { StrictMode, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -65,7 +66,11 @@ window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response>
   const path = `${url.pathname}${url.search}`;
   const parentRead = method === "GET" && (url.pathname === "/api/ortho" || /^\/api\/patients\/93910[12]$/.test(url.pathname));
   if (url.origin === location.origin && method === "GET" && path === "/api/parties?kind=doctor") {
-    return Promise.resolve({ ok: true, status: 200, json: async () => [{ id: 935101, name: "Synthetic responsible doctor" }] } as Response);
+    return Promise.resolve({ ok: true, status: 200, json: async () => [{ id: 935101, name: "Synthetic responsible doctor", isActive: true }] } as Response);
+  }
+  const bookingContext = patientOrthoBookingContext(url, method, location.origin);
+  if (bookingContext) {
+    return Promise.resolve({ ok: true, status: 200, json: async () => bookingContext } as Response);
   }
   const permit = permits.find((one) => one.method === method && one.path === path && one.remaining > 0);
   if (url.origin !== location.origin || (!parentRead && !permit)) {
@@ -168,6 +173,7 @@ function Controls() {
       <button id="patient-a" onClick={() => setPatientId(patientA)}>Patient A</button>
       <button id="patient-b" onClick={() => setPatientId(patientB)}>Patient B</button>
       <button id="session-a" onClick={() => setSession(A)}>Principal A</button>
+      <button id="session-admin" onClick={() => setSession(OTHER_ROLE)}>Administrator</button>
       <button id="session-b" onClick={() => setSession(B)}>Principal B</button>
       <button id="session-null" onClick={() => setSession(null)}>Logout</button>
       <button id="display-name" onClick={() => setSession({ ...A, displayName: "Renamed presentation only" })}>Display name</button>
