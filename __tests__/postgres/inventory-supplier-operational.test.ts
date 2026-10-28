@@ -3,6 +3,7 @@ vi.mock("server-only", () => ({}));
 import { randomUUID } from "node:crypto";
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
+import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
 import { withTransaction } from "../../lib/transactions";
 import { INVENTORY_PROCUREMENT_SQL } from "../../lib/inventory-domain/schema-proposal";
 import { INVENTORY_SUPPLIER_FINANCE_SQL } from "../../lib/inventory-domain/supplier-finance-schema-proposal";
@@ -72,7 +73,16 @@ import {
   type SupplierAction,
 } from "../../lib/inventory-supplier-protocol";
 let signed: SessionPayload;
+// This suite installs the obsolete parallel authority proposal (STAFF_AUTHORITY_SQL).
+// It runs on its own owned database so that footprint never reaches the shared test
+// database, where it would hold every later suite's ensureSchema (canonical footprint
+// ⇒ no request-time DDL). It stays red until M3a moves supplier admission to the
+// canonical runtime (M1_ENTRY_SLICE_DESIGN.md §7).
+let owned: Awaited<ReturnType<typeof openBackupTimestampFixture>> | undefined;
 beforeAll(async () => {
+  owned = await openBackupTimestampFixture({ ...process.env });
+  vi.stubEnv("DATABASE_URL", owned.source.options.connectionString!);
+  await db.resetPoolForTesting();
   vi.stubEnv(
     "SESSION_SECRET",
     "synthetic-inventory-operational-test-secret-2026",
@@ -141,8 +151,9 @@ beforeAll(async () => {
   });
 });
 afterAll(async () => {
-  vi.unstubAllEnvs();
   await db.resetPoolForTesting();
+  vi.unstubAllEnvs();
+  await owned?.close();
 });
 async function fixture(
   currency: Currency = "SAR",
