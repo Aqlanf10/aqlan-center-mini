@@ -61,6 +61,9 @@ export type AuditAction =
   | "clinic_settings.secret.replace" | "clinic_settings.secret.remove"
   | "user.create" | "user.update" | "user.disable"
   | "doctor.permissions.update" | "user.finance-permissions.update" | "doctor.commission.update"
+  /* الهوية الموحّدة (canonical): دخولٌ أصدرته جهة الإصدار الخاصة، وتعديل وثيقة صلاحيات
+     موظف بمراجعة رقمية (revision) تحت سياج الكتابة الحصري. */
+  | "auth.canonical_login" | "staff.capabilities.update"
   /* (COMM-DETAIL-1) نسبة خاصة بحالة/خطة لطبيب — تعيين أو إلغاء بصفٍّ جديد مسبَّب. */
   | "commission.case_override.set" | "commission.case_override.void"
   | "backup.download" | "export.download"
@@ -254,6 +257,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "doctor.permissions.update": "تعديل صلاحيات الطبيب",
   "user.finance-permissions.update": "تعديل صلاحيات مالية لمستخدم",
   "doctor.commission.update": "تعديل نسبة/طريقة احتساب الطبيب",
+  "auth.canonical_login": "تسجيل دخول موظف (الهوية الموحّدة)",
+  "staff.capabilities.update": "تعديل صلاحيات موظف",
   "commission.case_override.set": "تعيين نسبة عمولة خاصة بحالة",
   "commission.case_override.void": "إلغاء نسبة عمولة خاصة بحالة",
   "backup.download": "تنزيل نسخة احتياطية",
@@ -422,6 +427,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "clinic_settings.update", "clinic_settings.reset",
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",
   "user.disable", "doctor.permissions.update", "user.finance-permissions.update", "doctor.commission.update",
+  "staff.capabilities.update",
   "commission.case_override.set", "commission.case_override.void",
   "backup.download", "export.download", "document.reprint",
   "visit.addendum", "visit.clearance_bypass", "ai.settings.update", "ai.provider.save", "ai.provider.delete",

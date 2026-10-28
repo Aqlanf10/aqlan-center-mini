@@ -95,6 +95,25 @@ export function createSessionToken(payload: SessionPayload): string {
   return `${body}.${sign(body)}`;
 }
 
+const durableClaimKeys = ["durableIdentity", "expiresAt", "userId", "username"] as const;
+const durableIdentityKeys = ["accountEpoch", "controlEpoch", "credentialVersion", "generationId", "permissionRevision", "policyVersion", "provider", "realmId", "registryRevision", "schemaVersion", "subjectId"] as const;
+const exactKeys = (value: unknown, keys: readonly string[]) => !!value && typeof value === "object" && !Array.isArray(value)
+  && Object.getPrototypeOf(value) === Object.prototype && Object.keys(value).sort().join(",") === keys.join(",");
+/**
+ * PRIVATE durable signer. Only `lib/staff-durable-issuer.ts` may import it; an AST
+ * allowlist test enforces that. It reuses the existing signing configuration without
+ * exposing it and refuses anything but the exact durable shape (no legacy role,
+ * no extra field). The issuer derives every value from a locked, freshly proved
+ * account tuple and then round-trips the token through the strict durable parser.
+ */
+export function signDurableSessionClaims(claims: unknown): string {
+  if (!exactKeys(claims, durableClaimKeys) || !exactKeys((claims as { durableIdentity: unknown }).durableIdentity, durableIdentityKeys)) {
+    throw new Error("DURABLE_SESSION_SHAPE_INVALID");
+  }
+  const body = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  return `${body}.${sign(body)}`;
+}
+
 /** Signature envelope only, NOT authentication. Canonical and legacy payloads
  * have separate strict consumers; no caller-provided identity is trusted here. */
 export function readSignedSessionEnvelope(token: string | undefined): unknown | null {

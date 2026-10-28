@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "660c9f4b665d9c117495e13cc18570b2a630941bdcd5349556e9348d884b9a09",
+  "sourceDigest": "8c55e9743f48e9c6f9a841c0c9db0d5ae6740d438d9214d01ea38aa764e5dc1e",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -14,17 +14,17 @@
     "inventory.locations.create"
   ],
   "summary": {
-    "routeMethods": 411,
+    "routeMethods": 414,
     "routeClassifications": {
       "public-separate-portal": 24,
       "staff-legacy-held": 383,
       "canonical-ready": 0,
-      "unknown": 4
+      "unknown": 7
     },
-    "pages": 95,
+    "pages": 96,
     "pageClassifications": {
       "public-separate-portal": 4,
-      "staff-legacy-held": 66,
+      "staff-legacy-held": 67,
       "canonical-ready": 0,
       "unknown": 25
     },
@@ -271,6 +271,8 @@
     "app/api/settings/reset/route.ts",
     "app/api/settings/route.ts",
     "app/api/shifts/route.ts",
+    "app/api/staff-access/[id]/route.ts",
+    "app/api/staff-access/route.ts",
     "app/api/tasks/[id]/checklist/route.ts",
     "app/api/tasks/[id]/comments/route.ts",
     "app/api/tasks/[id]/links/route.ts",
@@ -391,6 +393,7 @@
     "app/settings/service-materials/page.tsx",
     "app/settings/users/page.tsx",
     "app/setup/page.tsx",
+    "app/staff-access/page.tsx",
     "app/visits/[id]/clinical/page.tsx",
     "app/visits/[id]/page.tsx",
     "app/waiting-list/page.tsx"
@@ -572,11 +575,11 @@
       "evidence": [
         {
           "symbol": "findUserByUsername",
-          "line": 3
+          "line": 2
         },
         {
           "symbol": "findUserByUsername",
-          "line": 105
+          "line": 157
         }
       ]
     },
@@ -589,7 +592,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 30
         },
         {
           "symbol": "findUserByUsername",
@@ -597,7 +600,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 13
+          "line": 35
         }
       ]
     },
@@ -4089,7 +4092,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 64
+        },
+        {
+          "symbol": "requireSession",
+          "line": 70
         },
         {
           "symbol": "findUserByUsername",
@@ -4097,7 +4104,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 70
+          "line": 76
         }
       ]
     },
@@ -4462,7 +4469,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 64
+        },
+        {
+          "symbol": "requireSession",
+          "line": 70
         },
         {
           "symbol": "findUserByUsername",
@@ -4470,7 +4481,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 70
+          "line": 76
         }
       ]
     },
@@ -4852,11 +4863,11 @@
       "directHelperEvidence": [
         {
           "symbol": "findUserByUsername",
-          "line": 3
+          "line": 2
         },
         {
           "symbol": "findUserByUsername",
-          "line": 105
+          "line": 157
         }
       ]
     },
@@ -4887,7 +4898,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 30
         },
         {
           "symbol": "findUserByUsername",
@@ -4895,7 +4906,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 13
+          "line": 35
         }
       ]
     },
@@ -14211,6 +14222,39 @@
       ]
     },
     {
+      "route": "/api/staff-access",
+      "method": "GET",
+      "file": "app/api/staff-access/route.ts",
+      "httpAccess": "canonical",
+      "classification": "unknown",
+      "workflow": "administration",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Unrecognized HTTP access class; review required",
+      "directHelperEvidence": []
+    },
+    {
+      "route": "/api/staff-access/[id]",
+      "method": "GET",
+      "file": "app/api/staff-access/[id]/route.ts",
+      "httpAccess": "canonical",
+      "classification": "unknown",
+      "workflow": "administration",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Unrecognized HTTP access class; review required",
+      "directHelperEvidence": []
+    },
+    {
+      "route": "/api/staff-access/[id]",
+      "method": "PATCH",
+      "file": "app/api/staff-access/[id]/route.ts",
+      "httpAccess": "canonical",
+      "classification": "unknown",
+      "workflow": "administration",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Unrecognized HTTP access class; review required",
+      "directHelperEvidence": []
+    },
+    {
       "route": "/api/tasks",
       "method": "GET",
       "file": "app/api/tasks/route.ts",
@@ -16086,6 +16130,14 @@
       "classification": "staff-legacy-held",
       "workflow": "entry",
       "reason": "Proxy public page; root layout still has legacy session dependencies, marker-bearing regression unproved",
+      "directHelperEvidence": []
+    },
+    {
+      "route": "/staff-access",
+      "file": "app/staff-access/page.tsx",
+      "classification": "staff-legacy-held",
+      "workflow": "administration",
+      "reason": "Staff or print surface; proxy/root layout and data authorization require migration",
       "directHelperEvidence": []
     },
     {

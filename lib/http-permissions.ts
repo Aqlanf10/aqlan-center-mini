@@ -18,6 +18,8 @@ import type { Role } from "./roles";
  *  - `SHARED_MEDIA`: وسائط الرسائل — مفتوحة بالبادئة، والمسار يفحص جلسة الطاقم أو البوابة.
  *  - `WEBHOOK`: يطرقه مزوّد خارجي — مفتوح بالبادئة، وحارسه التوقيع أو مفتاح الاستقبال.
  *  - `INTERNAL`: مهام مجدولة بتوكن Bearer سرّي — يمرّ من باب الجلسة ويفحص السرّ.
+ *  - `CANONICAL`: مسار الهوية الموحّدة وحدها — يمرّ من باب الجلسة، والمسار يقبل الجلسة
+ *    الموحّدة بإثبات قاعدة البيانات الحالي وقدرته الدقيقة؛ أي جلسة قديمة بأي دور مرفوضة.
  *
  * الرسائل العربية الدقيقة للرفض تبقى في المسارات نفسها (يعتمد عليها المستخدم والاختبارات)؛
  * هذه المصفوفة لا تغيّر سلوك أي مسار — تسجّله وتجعله قابلًا للتحقق.
@@ -28,7 +30,7 @@ import type { Role } from "./roles";
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export const HTTP_METHODS: readonly HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
-export type HttpAccessClass = "public" | "portal" | "shared-media" | "webhook" | "internal";
+export type HttpAccessClass = "public" | "portal" | "shared-media" | "webhook" | "internal" | "canonical";
 export type HttpAccess = HttpAccessClass | readonly Role[];
 
 const PUBLIC: HttpAccess = "public";
@@ -36,6 +38,7 @@ const PORTAL: HttpAccess = "portal";
 const SHARED_MEDIA: HttpAccess = "shared-media";
 const WEBHOOK: HttpAccess = "webhook";
 const INTERNAL: HttpAccess = "internal";
+const CANONICAL: HttpAccess = "canonical";
 
 /** المدير وحده. */
 const ADMIN: readonly Role[] = ["admin"];
@@ -47,6 +50,9 @@ const FRONT_DESK: readonly Role[] = ["admin", "reception"];
 const CLINICAL: readonly Role[] = ["admin", "doctor"];
 
 export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<HttpMethod, HttpAccess>>>>> = {
+  /* الهوية الموحّدة: دليل الطاقم (staff.view) ومحرّر الصلاحيات (staff.permissions.edit). */
+  "/api/staff-access": { GET: CANONICAL },
+  "/api/staff-access/[id]": { GET: CANONICAL, PATCH: CANONICAL },
   "/api/lab/work-intents/capability": { GET: CLINICAL },
   "/api/visits/[id]/lab-work-command": { GET: CLINICAL },
   "/api/ortho/[id]/followup-coverage": { GET: ADMIN, POST: ADMIN, PUT: ADMIN },
@@ -399,6 +405,8 @@ export function apiRouteVerdict(pathname: string, method: string): ApiRouteVerdi
 
 /** الأدوار التي يرفضها المسار دائمًا لهذا الفعل — لاختبار المصفوفة على HTTP. */
 export function rolesAlwaysDenied(access: HttpAccess, roles: readonly Role[]): Role[] {
+  // مسار الهوية الموحّدة يرفض كل جلسة قديمة بأي دور.
+  if (access === "canonical") return [...roles];
   if (isAccessClass(access)) return [];
   return roles.filter((role) => !access.includes(role));
 }

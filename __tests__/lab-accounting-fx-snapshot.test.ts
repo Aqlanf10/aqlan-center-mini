@@ -36,7 +36,8 @@ beforeEach(async () => {
   vi.stubEnv("SKIP_SEED", "true");
   boundary.end.mockResolvedValue(undefined);
   await resetPoolForTesting();
-  boundary.poolQuery.mockResolvedValue({ rows: [] });
+  // ensureSchema first reads the staff-authority catalogue footprint: answer as a marker-free schema.
+  boundary.poolQuery.mockImplementation(async (sql: string) => ({ rows: sql.includes("AS markers") ? [{ markers: "0", users_kind: null, parties_kind: null }] : [] }));
   boundary.query.mockImplementation(async(sql:string)=>({rows:sql.includes("AS present")?[{present:false}]:[]}));
   boundary.connect.mockResolvedValue({ query: boundary.query, release: boundary.release });
   await ensureSchema();

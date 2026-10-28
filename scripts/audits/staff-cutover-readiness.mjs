@@ -38,7 +38,7 @@ function constants(file) {
   throw Error(`unsupported inventory constant: ${n.getText().slice(0,100)}`);
  }
  for(const s of parse(file).statements)if(ts.isVariableStatement(s))for(const d of s.declarationList.declarations) {
-  if(['PUBLIC','PORTAL','SHARED_MEDIA','WEBHOOK','INTERNAL','ADMIN','CLINIC','FRONT_DESK','CLINICAL','HTTP_PERMISSIONS','PUBLIC_PATHS','PUBLIC_API','PUBLIC_API_PREFIXES','actions'].includes(d.name.text))result[d.name.text]=value(d.initializer);
+  if(['PUBLIC','PORTAL','SHARED_MEDIA','WEBHOOK','INTERNAL','CANONICAL','ADMIN','CLINIC','FRONT_DESK','CLINICAL','HTTP_PERMISSIONS','PUBLIC_PATHS','PUBLIC_API','PUBLIC_API_PREFIXES','actions'].includes(d.name.text))result[d.name.text]=value(d.initializer);
  }
  return result;
 }
@@ -60,7 +60,7 @@ function methods(file) {
 function family(route) {
  if(/\/(ai|dot)(\/|$)/.test(route))return 'excluded-ai-dot';
  if(/^\/(api\/)?auth(\/|$)|^\/(login|setup)$/.test(route))return 'entry';
- if(/\/(users|settings\/readiness)(\/|$)/.test(route))return 'administration';
+ if(/\/(users|staff-access|settings\/readiness)(\/|$)/.test(route))return 'administration';
  if(/\/(backup|production-backup)(\/|$)/.test(route))return 'backup';
  if(/\/(hr|tasks)(\/|$)/.test(route))return 'hr-tasks';
  if(/\/(inventory)(\/|$)/.test(route))return 'inventory';

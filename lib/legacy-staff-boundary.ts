@@ -1,4 +1,3 @@
-import "server-only";
 import type { DbClient } from "./db";
 import { revalidateLegacySessionEvidence, sessionCredentialVersion, sessionPermissionVersion, type VerifiedLegacySession } from "./auth";
 import { classifyStaffPermissionEnvelope } from "./staff-permission-envelope";

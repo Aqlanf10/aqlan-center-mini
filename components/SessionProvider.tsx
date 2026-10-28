@@ -22,6 +22,10 @@ export interface SessionInfo {
   role: Role | string;
   displayName?: string;
   permissions?: DoctorPermissions | null;
+  /** جلسة الهوية الموحّدة: القائمة إسقاطٌ لقدراتها الحالية، والخادم يقرّر كل عملية. */
+  canonical?: boolean;
+  isOwner?: boolean;
+  capabilities?: string[];
 }
 
 export const PRESET_USERS: Record<string, SessionInfo> = {
@@ -123,13 +127,21 @@ export function SessionProvider({ value, children }: {
             displayName?: string;
             role?: string;
             permissions?: DoctorPermissions | null;
+            canonical?: boolean;
+            isOwner?: boolean;
+            capabilities?: unknown;
           };
           if (me?.username && me?.role) {
             setSessionState({
               username: me.username,
               displayName: me.displayName,
               role: me.role,
-              permissions: me.permissions ?? null,
+              permissions: me.canonical ? null : me.permissions ?? null,
+              ...(me.canonical === true ? {
+                canonical: true,
+                isOwner: me.isOwner === true,
+                capabilities: Array.isArray(me.capabilities) ? me.capabilities.filter((c): c is string => typeof c === "string") : [],
+              } : {}),
             });
           } else {
             setSessionState(null);

@@ -1,3 +1,4 @@
+vi.mock("@/lib/staff-entry-mode", () => ({ currentStaffEntryMode: async () => "legacy" as const }));
 vi.mock("@/lib/staff-authenticated-identity", () => ({ readStaffIdentityClaims: vi.fn().mockResolvedValue(undefined) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   createSessionToken: vi.fn(),
 }));
 
-vi.mock("@/lib/loginLimit", () => ({ consumeLoginAttemptFor: mocks.consumeLoginAttemptFor, accountLimitKey: () => null }));
+vi.mock("@/lib/loginLimit", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/loginLimit")>(), consumeLoginAttemptFor: mocks.consumeLoginAttemptFor, accountLimitKey: () => null }));
 vi.mock("@/lib/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/db")>();
   return { ...actual, consumeStaffLoginAttempt: mocks.consumeStaffLoginAttempt, findUserByUsername: mocks.findUserByUsername };

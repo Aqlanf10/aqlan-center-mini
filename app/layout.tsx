@@ -6,6 +6,7 @@ import { publicSubset } from "@/lib/settings";
 import { SettingsProvider } from "@/components/SettingsProvider";
 import { SessionProvider } from "@/components/SessionProvider";
 import { requireSession } from "@/lib/session";
+import { admitCanonicalStaffSession, selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { AppShell } from "@/components/AppShell";
 import { PwaRegister } from "@/components/PwaRegister";
 
@@ -59,32 +60,46 @@ export const viewport: Viewport = {
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [settings, session] = await Promise.all([
+  /* قاعدة اختيار واحدة: كوكي موحّدة تُقبل بإثبات القاعدة الحالي ولا تمر أبدًا بالمسار
+     القديم؛ غيرها يبقى على requireSession كما كان. */
+  const selected = await selectRequestStaffEnvelope().catch(() => ({ kind: "none" as const }));
+  const canonical = selected.kind === "canonical" || selected.kind === "denied";
+  const [settings, session, canonicalView] = await Promise.all([
     getSettingsSafe(),
     // الجلسة قد تكون غائبة — صفحة الدخول والشاشات العامة تُصيَّر بلا واحدة.
-    requireSession().catch(() => null),
+    canonical ? Promise.resolve(null) : requireSession().catch(() => null),
+    selected.kind === "canonical" ? admitCanonicalStaffSession(selected.handle).catch(() => null) : Promise.resolve(null),
   ]);
 
   let user = null;
   if (session) {
     user = await findUserByUsername(session.username).catch(() => null);
   }
+  const sessionValue = canonicalView
+    ? {
+        username: canonicalView.username,
+        role: canonicalView.roleLabel,
+        displayName: canonicalView.displayName,
+        permissions: null,
+        canonical: true,
+        isOwner: canonicalView.isOwner,
+        capabilities: [...canonicalView.capabilities],
+      }
+    : session
+      ? {
+          username: session.username,
+          role: session.role,
+          displayName: user?.displayName || session.username,
+          permissions: user?.permissions || null,
+        }
+      : null;
 
   return (
     <html lang="ar" dir="rtl" className={arabic.variable}>
       <body className="min-h-full bg-canvas font-sans text-navy-900 antialiased">
         <SettingsProvider value={publicSubset(settings)}>
           <SessionProvider
-            value={
-              session
-                ? {
-                    username: session.username,
-                    role: session.role,
-                    displayName: user?.displayName || session.username,
-                    permissions: user?.permissions || null,
-                  }
-                : null
-            }
+            value={sessionValue}
           >
             <AppShell clinicTimeZone={CLINIC_TIME_ZONE}>{children}</AppShell>
           </SessionProvider>

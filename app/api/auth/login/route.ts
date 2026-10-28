@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { createHash } from "node:crypto";
 import { clearAccountLoginAttempts, consumeStaffLoginAttempt, findUserByUsername } from "@/lib/db";
-import { accountLimitKey, consumeLoginAttemptFor } from "@/lib/loginLimit";
+import { accountLimitKey, consumeLoginAttemptFor, legacyStaffAccountKey } from "@/lib/loginLimit";
+import { currentStaffEntryMode } from "@/lib/staff-entry-mode";
+import { issueDurableStaffSession } from "@/lib/staff-durable-issuer";
 import { firstHeaderEntry, isHostTrusted } from "@/lib/net";
 import { normalizeOrigin } from "@/lib/origin-policy";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
@@ -48,6 +49,50 @@ function getRedirectUrl(path: string, request: Request): string {
   return new URL(path, request.url).toString();
 }
 
+function sessionCookieOptions(request: Request, maxAgeSeconds: number) {
+  /* (P2/S4) SameSite=Lax و(P2-FINAL-1) Secure من staffSessionCookieSecure — الشرح عند
+     ضبط الكوكي في مسار الدخول أدناه؛ المساران يضبطان الكوكي بالخيارات نفسها. */
+  return {
+    httpOnly: true,
+    secure: staffSessionCookieSecure(request.headers.get("host")),
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: maxAgeSeconds,
+  };
+}
+
+const INVALID_CREDENTIALS = "اسم المستخدم أو كلمة المرور غير صحيحة.";
+const RATE_LIMITED = "محاولات دخول كثيرة. أعد المحاولة بعد ربع ساعة.";
+const CANONICAL_UNAVAILABLE = "تسجيل الدخول غير متاح الآن: النظام في وضع الصيانة. أعد المحاولة لاحقًا.";
+
+/**
+ * الدخول الموحّد (canonical): جهة الإصدار الخاصة تملك المعاملة كلها، والتوكن لا يصل
+ * إلى هنا إلا بعد التزامها. الكوكي HttpOnly/Lax بعمرٍ محدود، والجسم بلا توكن، والرد
+ * بلا تخزين. الرفض بعد مطابقة كلمة المرور يُجاب كأنها خاطئة (لا كشف).
+ */
+async function canonicalLogin(request: Request, username: string, password: string, isHtmlRequest: boolean) {
+  const outcome = await issueDurableStaffSession({ username, password, headers: request.headers });
+  if (outcome.kind === "rate_limited") {
+    return NextResponse.json({ message: RATE_LIMITED }, {
+      status: 429, headers: { "Retry-After": String(outcome.retryAfterSeconds), "Cache-Control": "no-store" },
+    });
+  }
+  if (outcome.kind === "invalid_credentials") {
+    if (isHtmlRequest) return NextResponse.redirect(getRedirectUrl("/login?error=invalid_credentials", request), 303);
+    return NextResponse.json({ message: INVALID_CREDENTIALS }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
+  if (outcome.kind === "unavailable") {
+    if (isHtmlRequest) return NextResponse.redirect(getRedirectUrl("/login?error=unavailable", request), 303);
+    return NextResponse.json({ message: CANONICAL_UNAVAILABLE }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+  const response = isHtmlRequest
+    ? NextResponse.redirect(getRedirectUrl("/", request), 303)
+    : NextResponse.json({ username: outcome.display.username, displayName: outcome.display.displayName, role: outcome.display.role, canonical: true });
+  response.headers.set("Cache-Control", "no-store");
+  response.cookies.set(SESSION_COOKIE, outcome.token, sessionCookieOptions(request, outcome.maxAgeSeconds));
+  return response;
+}
+
 export async function POST(request: Request) {
   let username = "";
   let password = "";
@@ -86,19 +131,26 @@ export async function POST(request: Request) {
   }
 
   try {
+    /* وضع الدخول لهذا النشر (قراءة كتالوج بلا تهيئة): قاعدةٌ تحمل أثر الهوية الموحّدة
+       لا يدخلها إلا المُصدِر الموحّد — لا رجوع إلى المسار القديم لأي سبب. */
+    if (await currentStaffEntryMode() === "canonical") {
+      return await canonicalLogin(request, username, password, isHtmlRequest);
+    }
+    /* المسار القديم: المحاولات تُعدّ في الحدّين، والدخول الناجح لا يُدقَّق (قرار مفتوح
+       للمالك). الدخول الموحّد أعلاه يُدقَّق ذرّيًا داخل معاملة الإصدار. */
     /* الحدّ الجديد (من مستودع الوكيل الآخر): مفتاح HMAC لل حساب — يعمل بين النسخ
        ومع إعادة التشغيل — وحدُّ المصدر خلف وسيطٍ موثّق فقط. والحدّ القديم
        يبقى تحته: من تجاوز واحدين لا يعبر. */
     const sharedLimit = await consumeLoginAttemptFor("staff", username, request.headers);
     if (!sharedLimit.allowed) {
-      return NextResponse.json({ message: "محاولات دخول كثيرة. أعد المحاولة بعد ربع ساعة." }, {
+      return NextResponse.json({ message: RATE_LIMITED }, {
         status: 429, headers: { "Retry-After": String(sharedLimit.retryAfterSeconds) },
       });
     }
-    const legacyAccountKey = createHash("sha256").update(username.toLowerCase()).digest("hex");
+    const legacyAccountKey = legacyStaffAccountKey(username);
     const limit = await consumeStaffLoginAttempt(legacyAccountKey);
     if (!limit.allowed) {
-      return NextResponse.json({ message: "محاولات دخول كثيرة. أعد المحاولة بعد ربع ساعة." }, {
+      return NextResponse.json({ message: RATE_LIMITED }, {
         status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) },
       });
     }
@@ -109,7 +161,7 @@ export async function POST(request: Request) {
         return NextResponse.redirect(getRedirectUrl("/login?error=invalid_credentials", request), 303);
       }
       return NextResponse.json(
-        { message: "اسم المستخدم أو كلمة المرور غير صحيحة." },
+        { message: INVALID_CREDENTIALS },
         { status: 401 },
       );
     }
@@ -121,7 +173,7 @@ export async function POST(request: Request) {
         return NextResponse.redirect(getRedirectUrl("/login?error=invalid_credentials", request), 303);
       }
       return NextResponse.json(
-        { message: "اسم المستخدم أو كلمة المرور غير صحيحة." },
+        { message: INVALID_CREDENTIALS },
         { status: 401 },
       );
     }
@@ -176,13 +228,7 @@ export async function POST(request: Request) {
      * Secure=true دائمًا — x-forwarded-proto:http أو أي ترويسة يكتبها
      * العميل لا تستطيع إطفاءها، والتساهل المحلي dev/test-only فوق مضيف
      * محلي حقيقي لا من ترويسة مُعاد توجيهها. */
-    response.cookies.set(SESSION_COOKIE, token, {
-      httpOnly: true,      // لا تستطيع أي نصوص في الصفحة قراءتها
-      secure: staffSessionCookieSecure(request.headers.get("host")), // (P2-FINAL-1)
-      sameSite: "lax",     // (P2/S4) — لا None ولا Partitioned في الإنتاج
-      path: "/",
-      maxAge: Math.floor(SESSION_DURATION_MS / 1000),
-    });
+    response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(request, Math.floor(SESSION_DURATION_MS / 1000)));
     return response;
   } catch (error) {
     const missingSecret = error instanceof Error && error.message.includes("SESSION_SECRET");

@@ -11,7 +11,6 @@
  * محاولات الدخول) أو فعلٌ لا يكتب شيئًا.
  */
 export const AUDIT_EXEMPT: Readonly<Record<string, string>> = {
-  "POST /api/auth/login": "الدخول: محاولاته تُعدّ في staff_login_limits (حدّ المحاولات)؛ الدخول الناجح لا يُدقَّق — قرار مفتوح للمالك.",
   "POST /api/auth/logout": "الخروج يمحو كوكي الجلسة فقط — لا يكتب في القاعدة.",
   "POST /api/auth/setup": "تهيئة أول مدير على قاعدة فارغة بمفتاح SETUP_TOKEN — قبل وجود أي فاعل؛ الحساب نفسه سجلّها.",
   "POST /api/portal/logout": "خروج بوابة المريض يمحو الكوكي فقط.",

@@ -1,4 +1,6 @@
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
+import { clearAccountLoginLimits, consumeSharedLoginLimits, consumeStaffAccountLimit } from "./login-limit-storage";
+import { readStaffEntryMode } from "./legacy-staff-schema.mjs";
 import { readLegacyStaffSchema, assertLegacyPermissionEnvelope, lockLegacyStaffBoundary, assertLegacyStaffWrite, finishLegacyStaffWrite, type LegacyStaffWriteAuthorization } from "./legacy-staff-boundary";
 import { CommissionLabLineageError } from "./commission-lab-lineage";
 import { LabFinancialBoundaryError, savedLabPayableSnapshot } from "./lab-financial-boundary";
@@ -411,6 +413,10 @@ export async function resetPoolForTesting(): Promise<void> {
 export function ensureSchema(): Promise<void> {
   if (schemaReady) return schemaReady;
   schemaReady = (async () => {
+    /* قاعدةٌ تحمل أثر الهوية الموحّدة لا تُهيَّأ من طلب أبدًا (OWNER_READINESS §5،
+       M1_ENTRY_SLICE_DESIGN §2): مخططها يُنصَّب بالمُثبّت المراجَع وحده، فلا DDL ولا
+       هجرات ولا بذر هنا. الجدول الناقص بعدها خطأٌ يُغلق الباب، لا إنشاءٌ صامت. */
+    if (await readStaffEntryMode(getPool()) === "canonical") return;
     await getPool().query(`
       CREATE TABLE IF NOT EXISTS staff_login_limits (
         account_key TEXT PRIMARY KEY,
@@ -15145,18 +15151,7 @@ export interface StaffAccount {
 /** حد مشترك بين عمليات الخادم، قبل حساب تجزئة كلمة المرور. */
 export async function consumeStaffLoginAttempt(accountKey: string): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ attempts: number; retry_seconds: number }>(
-    `INSERT INTO staff_login_limits(account_key, window_started_at, attempts)
-     VALUES ($1, NOW(), 1)
-     ON CONFLICT(account_key) DO UPDATE SET
-       attempts = CASE WHEN staff_login_limits.window_started_at <= NOW() - INTERVAL '15 minutes'
-         THEN 1 ELSE LEAST(staff_login_limits.attempts + 1, 6) END,
-       window_started_at = CASE WHEN staff_login_limits.window_started_at <= NOW() - INTERVAL '15 minutes'
-         THEN NOW() ELSE staff_login_limits.window_started_at END
-     RETURNING attempts, GREATEST(1, CEIL(EXTRACT(EPOCH FROM (window_started_at + INTERVAL '15 minutes' - NOW()))))::int AS retry_seconds`,
-    [accountKey],
-  );
-  return { allowed: rows[0].attempts <= 5, retryAfterSeconds: rows[0].retry_seconds };
+  return consumeStaffAccountLimit(getPool(), accountKey);
 }
 
 /**
@@ -15174,10 +15169,7 @@ export async function consumeStaffLoginAttempt(accountKey: string): Promise<{ al
  */
 export async function clearAccountLoginAttempts(legacyAccountKey: string, sharedAccountKeys: string[]): Promise<void> {
   await ensureSchema();
-  await getPool().query(`DELETE FROM staff_login_limits WHERE account_key = $1`, [legacyAccountKey]);
-  if (sharedAccountKeys.length > 0) {
-    await getPool().query(`DELETE FROM login_limits WHERE key = ANY($1::text[])`, [sharedAccountKeys]);
-  }
+  await clearAccountLoginLimits(getPool(), legacyAccountKey, sharedAccountKeys);
 }
 
 export async function consumeLoginAttempt(
@@ -15186,38 +15178,7 @@ export async function consumeLoginAttempt(
 ): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
   if (limits.length === 0) return { allowed: true, retryAfterSeconds: 0 };
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    let allowed = true;
-    let retryAfter = 1;
-    for (const limit of [...limits].sort((a, b) => a.key.localeCompare(b.key))) {
-      const { rows } = await client.query<{ attempts: number; retry: number }>(
-        `INSERT INTO login_limits (key, window_start, attempts)
-         VALUES ($1, NOW(), 1)
-         ON CONFLICT (key) DO UPDATE SET
-           attempts = CASE WHEN login_limits.window_start <= NOW() - ($3::text::interval)
-             THEN 1 ELSE LEAST(login_limits.attempts + 1, $2 + 1) END,
-           window_start = CASE WHEN login_limits.window_start <= NOW() - ($3::text::interval)
-             THEN NOW() ELSE login_limits.window_start END
-         RETURNING attempts, GREATEST(1, CEIL(EXTRACT(EPOCH FROM
-           (window_start + ($3::text::interval) - NOW()))))::int AS retry`,
-        [limit.key, limit.maximum, `${windowMinutes} minutes`],
-      );
-      if (rows[0].attempts > limit.maximum) {
-        allowed = false;
-        retryAfter = Math.max(retryAfter, rows[0].retry);
-      }
-    }
-    await client.query(`DELETE FROM login_limits WHERE window_start < NOW() - INTERVAL '1 day'`);
-    await client.query("COMMIT");
-    return { allowed, retryAfterSeconds: retryAfter };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+  return consumeSharedLoginLimits(getPool(), limits, windowMinutes);
 }
 
 /**

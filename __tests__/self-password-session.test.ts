@@ -1,3 +1,4 @@
+vi.mock("@/lib/staff-entry-mode", () => ({ currentStaffEntryMode: async () => "legacy" as const }));
 import { createHmac } from "node:crypto";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 

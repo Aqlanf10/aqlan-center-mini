@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { consumeLoginAttempt } from "./db";
 import { clientIpFromForwardedFor } from "./net";
 
@@ -38,16 +38,18 @@ export function accountLimitKey(scope: "staff" | "portal", identifier: string): 
   return createHmac("sha256", secret).update(`${scope}:account:${identifier.trim().toLowerCase()}`).digest("hex");
 }
 
-export async function consumeLoginAttemptFor(
+/**
+ * مفاتيح الحدّ المشترك لمحاولة واحدة — الحساب دائمًا، والمصدر خلف الوسيط الموثوق.
+ * null بلا سرّ: يبقى الحدّ القديم وحده يعمل بجدوله (لا يُفتح الباب).
+ * المصدر الوحيد للمفاتيح: الدخول القديم والموحّد يستهلكان المفاتيح نفسها.
+ */
+export function loginLimitKeys(
   scope: "staff" | "portal",
   identifier: string,
   headers: Headers,
-): Promise<LoginAttemptResult> {
+): { key: string; maximum: number }[] | null {
   const secret = process.env.SESSION_SECRET;
-  if (!secret || secret.length < 32) {
-    // بلا سرٍّ لا بصمة HMAC: نترك الحدّ القديم يعمل بجدوله لا نفتح الباب.
-    return { allowed: true, retryAfterSeconds: 0 };
-  }
+  if (!secret || secret.length < 32) return null;
   const hmac = (value: string) =>
     createHmac("sha256", secret).update(value).digest("hex");
 
@@ -62,6 +64,21 @@ export async function consumeLoginAttemptFor(
       limits.push({ key: hmac(`${scope}:source:${address}`), maximum: SOURCE_ATTEMPTS });
     }
   }
+  return limits;
+}
 
+/** مفتاح الحدّ القديم لحساب الطاقم (sha256 للاسم بأحرف صغيرة) — كما كان في مسار الدخول. */
+export function legacyStaffAccountKey(username: string): string {
+  return createHash("sha256").update(username.toLowerCase()).digest("hex");
+}
+
+export async function consumeLoginAttemptFor(
+  scope: "staff" | "portal",
+  identifier: string,
+  headers: Headers,
+): Promise<LoginAttemptResult> {
+  const limits = loginLimitKeys(scope, identifier, headers);
+  // بلا سرٍّ لا بصمة HMAC: نترك الحدّ القديم يعمل بجدوله لا نفتح الباب.
+  if (!limits) return { allowed: true, retryAfterSeconds: 0 };
   return consumeLoginAttempt(limits, WINDOW_MINUTES);
 }
