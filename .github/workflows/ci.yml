@@ -349,6 +349,20 @@ jobs:
           INVENTORY_SCHEMA_TEST: "1"
         run: npm run test:security-http
 
+      # Two pristine unauthenticated login views only, before any credentials.
+      # Never upload cookies, browser storage, traces, videos, or broad directories.
+      - name: Upload official-identity login screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-reference-ui
+          path: |
+            .settings-ui-artifacts/login-reference/login-1280.png
+            .settings-ui-artifacts/login-reference/login-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Five exact real-app synthetic invoice views and bounded geometry only.
       # No browser state, cookies, traces, databases, or broad directory upload.
       - name: Upload grouped invoice entry evidence
