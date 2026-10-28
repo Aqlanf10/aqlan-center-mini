@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ADULT_FDI_TEETH,
-  PRIMARY_FDI_TEETH,
   LAB_TOOTH_ROLE_META,
   type LabToothMap,
   type LabToothRole,
@@ -11,9 +10,12 @@ import {
   parseLabTeeth,
   serializeLabTeeth,
   summarizeLabTeeth,
+  getLabBridgeTeeth,
 } from "@/lib/lab";
 import { toUniversal, toothName } from "@/lib/dental";
 import { Icon } from "./Icon";
+import { DentalArchRow } from "./dental/DentalArchRow";
+import { PERMANENT_UPPER, PERMANENT_LOWER, PRIMARY_UPPER, PRIMARY_LOWER, isValidTooth } from "@/lib/dental";
 
 export interface LabDentalChartProps {
   value?: string | LabToothMap;
@@ -45,10 +47,13 @@ export function LabDentalChart({
 
   const [toothMap, setToothMap] = useState<LabToothMap>(initialMap);
   const [activeTool, setActiveTool] = useState<LabToothRole | "eraser">("crown");
-  const [viewMode, setViewMode] = useState<DentitionViewMode>("adult");
+  const [viewMode, setViewMode] = useState<DentitionViewMode>(() => Object.keys(initialMap).some(code => Number(code) >= 51) ? "both" : "adult");
   const [showUniversal, setShowUniversal] = useState(false);
   const [hoveredTooth, setHoveredTooth] = useState<number | null>(null);
   const [quickMenuTooth, setQuickMenuTooth] = useState<number | null>(null);
+
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
+  const invalidSavedCodes = Object.keys(toothMap).map(Number).filter(code => !isValidTooth(code));
 
   // Bridge wizard state (quick bridge creation)
   const [bridgeWizard, setBridgeWizard] = useState<{
@@ -61,6 +66,9 @@ export function LabDentalChart({
     if (value !== undefined) {
       const parsed = typeof value === "string" ? parseLabTeeth(value) : value;
       setToothMap(parsed);
+      if (Object.keys(parsed).some(code => Number(code) >= 51 && isValidTooth(Number(code)))) {
+        setViewMode(current => current === "adult" ? "both" : current);
+      }
     }
   }, [value]);
 
@@ -87,6 +95,7 @@ export function LabDentalChart({
       if (bridgeWizard.active) {
         if (!bridgeWizard.startTooth) {
           // Select start abutment
+          setBridgeError(null);
           setBridgeWizard({ active: true, startTooth: code });
           const next = { ...toothMap, [code]: "abutment" as LabToothRole };
           updateMap(next);
@@ -95,30 +104,21 @@ export function LabDentalChart({
           const start = bridgeWizard.startTooth;
           const end = code;
           if (start === end) {
+            setBridgeError(null);
             setBridgeWizard({ active: false, startTooth: null });
             return;
           }
 
-          // Same arch verification
-          const isUpperStart = (start >= 11 && start <= 28) || (start >= 51 && start <= 65);
-          const isUpperEnd = (end >= 11 && end <= 28) || (end >= 51 && end <= 65);
-
-          const next = { ...toothMap };
-          next[start] = "abutment";
-          next[end] = "abutment";
-
-          if (isUpperStart === isUpperEnd) {
-            // Fill intermediate teeth as pontics if same arch
-            const min = Math.min(start, end);
-            const max = Math.max(start, end);
-            for (let c = min + 1; c < max; c++) {
-              // verify valid tooth code
-              if ((c >= 11 && c <= 28) || (c >= 31 && c <= 48) || (c >= 51 && c <= 65) || (c >= 71 && c <= 85)) {
-                next[c] = "pontic";
-              }
-            }
+          const bridgeTeeth = getLabBridgeTeeth(start, end);
+          if (!bridgeTeeth) {
+            setBridgeError("اختر سن النهاية من الفك نفسه ونوع الأسنان نفسه (دائمة أو لبنية). لم تُضف أسنان للجسر.");
+            return;
           }
+          setBridgeError(null);
+          const next = { ...toothMap };
+          for (const tooth of bridgeTeeth) next[tooth] = tooth === start || tooth === end ? "abutment" : "pontic";
           updateMap(next);
+          setBridgeError(null);
           setBridgeWizard({ active: false, startTooth: null });
         }
         return;
@@ -284,6 +284,7 @@ export function LabDentalChart({
                     type="button"
                     onClick={() => {
                       setActiveTool(roleKey);
+                      setBridgeError(null);
                       setBridgeWizard({ active: false, startTooth: null });
                     }}
                     className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition shadow-2xs ${
@@ -303,6 +304,7 @@ export function LabDentalChart({
                 type="button"
                 onClick={() => {
                   setActiveTool("eraser");
+                  setBridgeError(null);
                   setBridgeWizard({ active: false, startTooth: null });
                 }}
                 className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition shadow-2xs ${
@@ -323,8 +325,10 @@ export function LabDentalChart({
                 type="button"
                 onClick={() => {
                   if (bridgeWizard.active) {
+                    setBridgeError(null);
                     setBridgeWizard({ active: false, startTooth: null });
                   } else {
+                    setBridgeError(null);
                     setBridgeWizard({ active: true, startTooth: null });
                     setActiveTool("abutment");
                   }
@@ -392,10 +396,14 @@ export function LabDentalChart({
         </div>
       )}
 
+      {bridgeError && <p role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{bridgeError}</p>}
+      {invalidSavedCodes.length > 0 && <p role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+        أرقام أسنان محفوظة غير معيارية: {invalidSavedCodes.join("، ")}. يلزم مراجعتها؛ لم تُعدّل أو تُحوّل تلقائيًا إلى أسنان أخرى.
+      </p>}
       {/* Main FDI Dental Chart Canvas / Arch Visualizer */}
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50/50 via-white to-slate-50/50 p-4 shadow-inner">
         {/* Orientation Labels */}
-        <div className="mb-2 flex items-center justify-between text-[10px] font-extrabold text-slate-400 px-2">
+        <div dir="ltr" className="mb-2 flex items-center justify-between text-[10px] font-extrabold text-slate-400 px-2">
           <span>الجانب الأيمن للمريض</span>
           <span className="flex items-center gap-1 rounded-md bg-slate-200/70 px-2 py-0.5 text-slate-700">
             <span>خط المنتصف</span>
@@ -404,232 +412,26 @@ export function LabDentalChart({
         </div>
 
         <div className="mx-auto flex flex-col items-center gap-3 w-fit min-w-[620px] py-1">
-          {/* Upper Jaw Label */}
-          <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-navy-900 bg-navy-50/70 border border-navy-100/80 px-3 py-0.5 rounded-full shadow-2xs">
-            <span>🔺 الفك العلوي</span>
-          </div>
-
-          {/* Adult Permanent Upper Arch (18-11 | 21-28) */}
-          {(viewMode === "adult" || viewMode === "both") && (
-            <div className="relative flex items-center gap-2">
-              {/* Quadrant 1 (Upper Right 18-11) */}
-              <div className="flex gap-1" dir="ltr">
-                {ADULT_FDI_TEETH.upperRight.map((code) => (
-                  <ToothCell
-                    key={code}
-                    code={code}
-                    role={toothMap[code]}
-                    isUpper={true}
-                    showUniversal={showUniversal}
-                    isHovered={hoveredTooth === code}
-                    onHover={setHoveredTooth}
-                    onClick={() => handleToothClick(code)}
-                    onContextMenu={(e) => {
+          {[
+            { teeth: PERMANENT_UPPER, primary: false, upper: true, label: "الفك العلوي — أسنان دائمة" },
+            { teeth: PRIMARY_UPPER, primary: true, upper: true, label: "الفك العلوي — أسنان لبنية" },
+            { teeth: PRIMARY_LOWER, primary: true, upper: false, label: "الفك السفلي — أسنان لبنية" },
+            { teeth: PERMANENT_LOWER, primary: false, upper: false, label: "الفك السفلي — أسنان دائمة" },
+          ].filter(arch => viewMode === "both" || (arch.primary ? viewMode === "primary" : viewMode === "adult")).map(arch => (
+            <section key={arch.label}>
+              <div className="mb-2 text-center text-[11px] font-bold text-navy-900">{arch.label}</div>
+              <DentalArchRow teeth={arch.teeth} label={arch.label} className="flex gap-1" renderTooth={(code, index) => (
+                <div className={index === arch.teeth.length / 2 ? "border-l-2 border-dashed border-navy-300 pl-2 ml-1" : undefined}>
+                  <ToothCell code={code} role={toothMap[code]} isUpper={arch.upper} isPrimary={arch.primary}
+                    showUniversal={showUniversal} isHovered={hoveredTooth === code} onHover={setHoveredTooth}
+                    onClick={() => handleToothClick(code)} onContextMenu={(e) => {
                       e.preventDefault();
-                      setQuickMenuTooth(quickMenuTooth === code ? null : code);
-                    }}
-                    readOnly={readOnly}
-                    isBridgeStart={bridgeWizard.startTooth === code}
-                  />
-                ))}
-              </div>
-
-              {/* Midline Visual Divider */}
-              <div className="h-14 w-0.5 border-r-2 border-dashed border-navy-300" title="خط المنتصف" />
-
-              {/* Quadrant 2 (Upper Left 21-28) */}
-              <div className="flex gap-1" dir="ltr">
-                {ADULT_FDI_TEETH.upperLeft.map((code) => (
-                  <ToothCell
-                    key={code}
-                    code={code}
-                    role={toothMap[code]}
-                    isUpper={true}
-                    showUniversal={showUniversal}
-                    isHovered={hoveredTooth === code}
-                    onHover={setHoveredTooth}
-                    onClick={() => handleToothClick(code)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setQuickMenuTooth(quickMenuTooth === code ? null : code);
-                    }}
-                    readOnly={readOnly}
-                    isBridgeStart={bridgeWizard.startTooth === code}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Primary Upper Arch (55-51 | 61-65) */}
-          {(viewMode === "primary" || viewMode === "both") && (
-            <div className="rounded-xl border border-dashed border-purple-200 bg-purple-50/30 p-1.5 flex flex-col items-center">
-              <span className="text-[9px] font-extrabold text-purple-800 mb-1">الأسنان اللبنية العلوية (55-65)</span>
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1" dir="ltr">
-                  {PRIMARY_FDI_TEETH.upperRight.map((code) => (
-                    <ToothCell
-                      key={code}
-                      code={code}
-                      role={toothMap[code]}
-                      isUpper={true}
-                      isPrimary={true}
-                      showUniversal={showUniversal}
-                      isHovered={hoveredTooth === code}
-                      onHover={setHoveredTooth}
-                      onClick={() => handleToothClick(code)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setQuickMenuTooth(quickMenuTooth === code ? null : code);
-                      }}
-                      readOnly={readOnly}
-                      isBridgeStart={bridgeWizard.startTooth === code}
-                    />
-                  ))}
+                      if (!readOnly) setQuickMenuTooth(quickMenuTooth === code ? null : code);
+                    }} readOnly={readOnly} isBridgeStart={bridgeWizard.startTooth === code} />
                 </div>
-                <div className="h-10 w-0.5 border-r-2 border-dashed border-purple-300" />
-                <div className="flex gap-1" dir="ltr">
-                  {PRIMARY_FDI_TEETH.upperLeft.map((code) => (
-                    <ToothCell
-                      key={code}
-                      code={code}
-                      role={toothMap[code]}
-                      isUpper={true}
-                      isPrimary={true}
-                      showUniversal={showUniversal}
-                      isHovered={hoveredTooth === code}
-                      onHover={setHoveredTooth}
-                      onClick={() => handleToothClick(code)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setQuickMenuTooth(quickMenuTooth === code ? null : code);
-                      }}
-                      readOnly={readOnly}
-                      isBridgeStart={bridgeWizard.startTooth === code}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Arch Separator / Occlusal Plane */}
-          <div className="my-1 flex items-center justify-center w-full">
-            <div className="h-px bg-slate-200 flex-1" />
-            <span className="px-3 text-[10px] font-extrabold text-slate-400 bg-white border border-slate-200 rounded-full py-0.5 shadow-2xs">
-              مستوى الإطباق
-            </span>
-            <div className="h-px bg-slate-200 flex-1" />
-          </div>
-
-          {/* Primary Lower Arch (85-81 | 71-75) */}
-          {(viewMode === "primary" || viewMode === "both") && (
-            <div className="rounded-xl border border-dashed border-purple-200 bg-purple-50/30 p-1.5 flex flex-col items-center">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1" dir="ltr">
-                  {PRIMARY_FDI_TEETH.lowerRight.map((code) => (
-                    <ToothCell
-                      key={code}
-                      code={code}
-                      role={toothMap[code]}
-                      isUpper={false}
-                      isPrimary={true}
-                      showUniversal={showUniversal}
-                      isHovered={hoveredTooth === code}
-                      onHover={setHoveredTooth}
-                      onClick={() => handleToothClick(code)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setQuickMenuTooth(quickMenuTooth === code ? null : code);
-                      }}
-                      readOnly={readOnly}
-                      isBridgeStart={bridgeWizard.startTooth === code}
-                    />
-                  ))}
-                </div>
-                <div className="h-10 w-0.5 border-r-2 border-dashed border-purple-300" />
-                <div className="flex gap-1" dir="ltr">
-                  {PRIMARY_FDI_TEETH.lowerLeft.map((code) => (
-                    <ToothCell
-                      key={code}
-                      code={code}
-                      role={toothMap[code]}
-                      isUpper={false}
-                      isPrimary={true}
-                      showUniversal={showUniversal}
-                      isHovered={hoveredTooth === code}
-                      onHover={setHoveredTooth}
-                      onClick={() => handleToothClick(code)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setQuickMenuTooth(quickMenuTooth === code ? null : code);
-                      }}
-                      readOnly={readOnly}
-                      isBridgeStart={bridgeWizard.startTooth === code}
-                    />
-                  ))}
-                </div>
-              </div>
-              <span className="text-[9px] font-extrabold text-purple-800 mt-1">الأسنان اللبنية السفلية (85-75)</span>
-            </div>
-          )}
-
-          {/* Adult Permanent Lower Arch (48-41 | 31-38) */}
-          {(viewMode === "adult" || viewMode === "both") && (
-            <div className="relative flex items-center gap-2">
-              {/* Quadrant 4 (Lower Right 48-41) */}
-              <div className="flex gap-1" dir="ltr">
-                {ADULT_FDI_TEETH.lowerRight.map((code) => (
-                  <ToothCell
-                    key={code}
-                    code={code}
-                    role={toothMap[code]}
-                    isUpper={false}
-                    showUniversal={showUniversal}
-                    isHovered={hoveredTooth === code}
-                    onHover={setHoveredTooth}
-                    onClick={() => handleToothClick(code)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setQuickMenuTooth(quickMenuTooth === code ? null : code);
-                    }}
-                    readOnly={readOnly}
-                    isBridgeStart={bridgeWizard.startTooth === code}
-                  />
-                ))}
-              </div>
-
-              {/* Midline Visual Divider */}
-              <div className="h-14 w-0.5 border-r-2 border-dashed border-navy-300" title="خط المنتصف" />
-
-              {/* Quadrant 3 (Lower Left 31-38) */}
-              <div className="flex gap-1" dir="ltr">
-                {ADULT_FDI_TEETH.lowerLeft.map((code) => (
-                  <ToothCell
-                    key={code}
-                    code={code}
-                    role={toothMap[code]}
-                    isUpper={false}
-                    showUniversal={showUniversal}
-                    isHovered={hoveredTooth === code}
-                    onHover={setHoveredTooth}
-                    onClick={() => handleToothClick(code)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setQuickMenuTooth(quickMenuTooth === code ? null : code);
-                    }}
-                    readOnly={readOnly}
-                    isBridgeStart={bridgeWizard.startTooth === code}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Lower Jaw Label */}
-          <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-navy-900 bg-navy-50/70 border border-navy-100/80 px-3 py-0.5 rounded-full shadow-2xs">
-            <span>🔻 الفك السفلي</span>
-          </div>
+              )} />
+            </section>
+          ))}
         </div>
       </div>
 
@@ -833,6 +635,8 @@ function ToothCell({
       onMouseEnter={() => onHover(code)}
       onMouseLeave={() => onHover(null)}
       disabled={readOnly}
+      aria-pressed={isSelected}
+      data-tooth-code={code}
       title={`${toothName(code)} (FDI: ${code}, Univ: #${toUniversal(code)})${
         meta ? ` · ${meta.label}` : ""
       }`}
