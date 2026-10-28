@@ -29,6 +29,43 @@ it("exact catalog matches frozen reviewed contract without provisioning",async()
 import { initializeStaffIdentitySubstrate, readStaffIdentitySubstrate, bindStaffAccountIncarnation, retireStaffAccountIncarnation, advanceStaffIdentityTargetGeneration, assertStaffIdentitySourceRestoreAllowed } from "../../lib/staff-identity-substrate.mjs";
 const expectation=(h:{generationId:string;registryRevision:string})=>({generationId:h.generationId,registryRevision:h.registryRevision});
 async function tx<T>(work:()=>Promise<T>){await client.query("BEGIN");try{const result=await work();await client.query("COMMIT");return result;}catch(e){await client.query("ROLLBACK");throw e;}}
+it("SERIAL id defaults are accepted by owned-sequence provenance, not by their text (Dot R4)",async()=>{
+ const idDefault=async()=>(await readStaffIdentitySubstrateCatalogue(client,schema)).columns.filter(c=>c.attname==="id"&&["users","parties"].includes(String(c.relname))).map(c=>String(c.default_value));
+ // Positive: owned sequences in this schema, rendered unqualified (on search_path) or qualified (off it).
+ expect(await idDefault()).toEqual(["$OWNED_SERIAL","$OWNED_SERIAL"]);
+ await client.query("SET search_path TO pg_catalog");
+ try { expect(await idDefault()).toEqual(["$OWNED_SERIAL","$OWNED_SERIAL"]); await inspectStaffIdentitySubstrate(client,schema); }
+ finally { await client.query(`SET search_path TO ${schema},pg_catalog`); }
+ const foreign=`aqlan_foreign_${randomBytes(6).toString("hex")}`;
+ await client.query(`CREATE SCHEMA ${foreign}; CREATE SEQUENCE ${foreign}.users_id_seq`);
+ const restore=`ALTER TABLE ${schema}.users ALTER COLUMN id SET DEFAULT nextval('${schema}.users_id_seq'::regclass)`;
+ try {
+  // 1. Same-name foreign sequence, made to render unqualified through search_path substitution.
+  await client.query(`ALTER TABLE ${schema}.users ALTER COLUMN id SET DEFAULT nextval('${foreign}.users_id_seq'::regclass)`);
+  await client.query(`SET search_path TO ${foreign},${schema},pg_catalog`);
+  try {
+   expect((await idDefault()).find((v:string)=>v.startsWith("$UNPROVEN:"))).toBe("$UNPROVEN:nextval('users_id_seq'::regclass)");
+   await expect(inspectStaffIdentitySubstrate(client,schema)).rejects.toThrow("STAFF_IDENTITY_SCHEMA_DRIFT");
+  } finally { await client.query(`SET search_path TO ${schema},pg_catalog`); }
+  await client.query(restore);
+  expect(await idDefault()).toEqual(["$OWNED_SERIAL","$OWNED_SERIAL"]);
+  // 2. Detached ownership: the right sequence, but no longer owned by users.id.
+  await client.query(`ALTER SEQUENCE ${schema}.users_id_seq OWNED BY NONE`);
+  await expect(inspectStaffIdentitySubstrate(client,schema)).rejects.toThrow("STAFF_IDENTITY_SCHEMA_DRIFT");
+  // 3. Owned by another column (parties.id), not this one.
+  await client.query(`ALTER SEQUENCE ${schema}.users_id_seq OWNED BY ${schema}.parties.id`);
+  await expect(inspectStaffIdentitySubstrate(client,schema)).rejects.toThrow("STAFF_IDENTITY_SCHEMA_DRIFT");
+  await client.query(`ALTER SEQUENCE ${schema}.users_id_seq OWNED BY ${schema}.users.id`);
+  // 4. A default depending on more than the sequence (expression wrapping) is not a SERIAL.
+  await client.query(`ALTER TABLE ${schema}.users ALTER COLUMN id SET DEFAULT (nextval('${schema}.users_id_seq'::regclass)+0)`);
+  await expect(inspectStaffIdentitySubstrate(client,schema)).rejects.toThrow("STAFF_IDENTITY_SCHEMA_DRIFT");
+ } finally {
+  await client.query(restore);
+  await client.query(`ALTER SEQUENCE ${schema}.users_id_seq OWNED BY ${schema}.users.id`);
+  await client.query(`DROP SCHEMA ${foreign} CASCADE`);
+ }
+ expect(await inspectStaffIdentitySubstrate(client,schema)).toMatchObject({version:1,schema});
+});
 it("initializes only empty storage in quarantine without owner/grants or account modification",async()=>{
  await client.query(`INSERT INTO ${schema}.users(id,username,role,is_active) VALUES(1,'synthetic','admin',TRUE)`);
  const before=(await client.query(`SELECT * FROM ${schema}.users ORDER BY id`)).rows;

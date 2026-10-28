@@ -124,6 +124,48 @@ it("a permission revision committed while issuance waits denies the stale candid
  if (fresh.kind === "issued") expect(revalidateVerifiedDurableSession(readVerifiedDurableSession(fresh.token)!)!.durableIdentity.permissionRevision).toBe(2);
 });
 
+it("a provider clinical-epoch change committed while issuance waits denies the password-bound candidate", async () => {
+ const epoch = async () => (await pool.query<{ e: string }>(`SELECT clinical_authority_epoch::text AS e FROM ${schema}.parties WHERE id=20`)).rows[0].e;
+ const before = await epoch();
+ const holder = await pool.connect();
+ await holder.query("BEGIN");
+ const holderPid = (await holder.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+ await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`aqlan.canonical.identity.substrate.v1:${schema}`]);
+ const pending = issue("synthetic-doctor", "doctor-pass-2");
+ try {
+  expect((await waitForBlockedBy(pool, holderPid, 10_000)).length).toBeGreaterThan(0);
+  // Deactivate and reactivate: the same active doctor, but a new clinical incarnation.
+  await holder.query(`UPDATE ${schema}.parties SET is_active=FALSE WHERE id=20`);
+  await holder.query(`UPDATE ${schema}.parties SET is_active=TRUE WHERE id=20`);
+  await holder.query("COMMIT");
+  expect(await pending).toEqual({ kind: "invalid_credentials" });
+ } finally { await holder.query("ROLLBACK").catch(() => {}); holder.release(); await pending.catch(() => {}); }
+ expect(await epoch()).not.toBe(before);
+ const fresh = await issue("synthetic-doctor", "doctor-pass-2");
+ expect(fresh.kind).toBe("issued");
+ if (fresh.kind === "issued") expect(revalidateVerifiedDurableSession(readVerifiedDurableSession(fresh.token)!)!.durableIdentity.provider).toEqual({ partyId: 20, clinicalEpoch: await epoch() });
+});
+
+it("password work is bound to the subject incarnation: a re-bound numeric ID never inherits it", async () => {
+ // Ready identity history is immutable: the database itself refuses a rebind.
+ await expect(pool.query(`UPDATE ${schema}.staff_identity_current SET subject_id=gen_random_uuid() WHERE user_id=3`)).rejects.toThrow();
+ // If the candidate's subject differed from the locked proof (ID reuse across a
+ // restore or rebind), issuance refuses after the password match without revealing it.
+ const subject = (await pool.query<{ s: string }>(`SELECT subject_id::text AS s FROM ${schema}.staff_identity_current WHERE user_id=3`)).rows[0].s;
+ const drifted = new Proxy(pool, { get(target, key, receiver) {
+  if (key !== "query") return Reflect.get(target, key, receiver);
+  return async (...args: Parameters<typeof pool.query>) => {
+   const result = await (target.query as (...a: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>)(...args);
+   if (typeof args[0] === "string" && args[0].includes("LOWER(u.username)=LOWER($1)")) {
+    for (const row of result.rows) if (row.subject_id === subject) row.subject_id = "00000000-0000-4000-8000-000000000000";
+   }
+   return result;
+  };
+ } });
+ expect(await issueDurableStaffSessionIn(drifted, schema, { username: "synthetic-reception", password: "reception-pass-3", headers: headers() })).toEqual({ kind: "invalid_credentials" });
+ expect((await issue("synthetic-reception", "reception-pass-3")).kind).toBe("issued");
+});
+
 it("malformed permission document or inactive provider denies after a password match without revealing it", async () => {
  await pool.query(`UPDATE ${schema}.users SET permissions='{"schemaVersion":1,"revision":3,"grants":{}}' WHERE id=2`);
  expect(await issue("synthetic-doctor", "doctor-pass-2")).toEqual({ kind: "invalid_credentials" });
@@ -141,6 +183,22 @@ it("audit failure rolls back issuance and yields no token", async () => {
   await expect(issue("synthetic-reception", "reception-pass-3")).rejects.toThrow();
  } finally { await pool.query(`ALTER TABLE ${schema}.audit_log DROP CONSTRAINT synthetic_audit_block`); }
  expect(await auditCount()).toBe(before);
+});
+
+it("a COMMIT failure yields no token, persists nothing and never recycles an uncertain connection", async () => {
+ // A deferred constraint trigger fails exactly at COMMIT, after every proof passed.
+ const before = await auditCount();
+ await pool.query(`CREATE FUNCTION ${schema}.synthetic_commit_block() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'synthetic commit failure'; END$$`);
+ await pool.query(`CREATE CONSTRAINT TRIGGER synthetic_commit_block AFTER INSERT ON ${schema}.audit_log DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.action='auth.canonical_login') EXECUTE FUNCTION ${schema}.synthetic_commit_block()`);
+ try {
+  await expect(issue("synthetic-reception", "reception-pass-3")).rejects.toThrow("synthetic commit failure");
+ } finally {
+  await pool.query(`DROP TRIGGER synthetic_commit_block ON ${schema}.audit_log`);
+  await pool.query(`DROP FUNCTION ${schema}.synthetic_commit_block()`);
+ }
+ expect(await auditCount()).toBe(before);
+ // The pool is still healthy for the next issuance (no leaked aborted transaction).
+ expect((await issue("synthetic-reception", "reception-pass-3")).kind).toBe("issued");
 });
 
 it("the protected owner row cannot be disabled or demoted underneath issuance", async () => {

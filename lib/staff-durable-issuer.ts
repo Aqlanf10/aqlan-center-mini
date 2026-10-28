@@ -56,14 +56,35 @@ async function issuanceReady(pool: DbPool, s: string): Promise<boolean> {
   return rows.length === 1 && rows[0].state === "active" && rows[0].status === "ready" && rows[0].aligned === true;
  } catch { return false; }
 }
-interface Candidate { readonly id: number; readonly username: string; readonly passwordHash: string; readonly accountEpoch: string }
+/** Everything the password work is bound to (OWNER_READINESS §5.2–3): the numeric
+ * account AND its current subject incarnation, the realm/control/generation anchors
+ * and the provider link with its clinical epoch. Read in ONE statement (one snapshot);
+ * the locked proof must reproduce every field or issuance is refused. */
+interface Candidate {
+ readonly id: number; readonly username: string; readonly passwordHash: string; readonly accountEpoch: string;
+ readonly subjectId: string;
+ readonly realmId: string; readonly controlEpoch: string; readonly generationId: string;
+ readonly providerPartyId: number | null; readonly providerEpoch: string | null;
+}
 async function candidate(pool: DbPool, s: string, username: string): Promise<Candidate | null> {
- const { rows } = await pool.query<{ id: number; username: string; password_hash: string; authorization_epoch: string }>(
-  `SELECT id, username, password_hash, authorization_epoch::text FROM ${s}.users
-   WHERE LOWER(username)=LOWER($1) AND is_active AND authorization_mode='canonical' ORDER BY id LIMIT 2`, [username]);
+ const { rows } = await pool.query<{ id: number; username: string; password_hash: string; authorization_epoch: string; subject_id: string | null;
+  realm_id: string | null; binding_epoch: string | null; generation_id: string | null; party_id: number | null; clinical_epoch: string | null }>(
+  `SELECT u.id, u.username, u.password_hash, u.authorization_epoch::text, b.subject_id::text,
+    c.realm_id::text, c.binding_epoch::text, h.generation_id::text, u.party_id, p.clinical_authority_epoch::text AS clinical_epoch
+   FROM ${s}.users u
+   LEFT JOIN ${s}.staff_identity_current b ON b.user_id=u.id
+   CROSS JOIN ${s}.staff_authority_control c CROSS JOIN ${s}.staff_identity_state h
+   LEFT JOIN ${s}.parties p ON p.id=u.party_id
+   WHERE LOWER(u.username)=LOWER($1) AND u.is_active AND u.authorization_mode='canonical' AND c.singleton AND h.singleton
+   ORDER BY u.id LIMIT 2`, [username]);
  // Ambiguous case-insensitive matches never select an account by row order.
- if (rows.length !== 1 || typeof rows[0].password_hash !== "string" || !Number.isSafeInteger(rows[0].id)) return null;
- return Object.freeze({ id: rows[0].id, username: rows[0].username, passwordHash: rows[0].password_hash, accountEpoch: rows[0].authorization_epoch });
+ if (rows.length !== 1) return null;
+ const r = rows[0];
+ if (typeof r.password_hash !== "string" || !Number.isSafeInteger(r.id) || typeof r.subject_id !== "string"
+  || typeof r.realm_id !== "string" || typeof r.binding_epoch !== "string" || typeof r.generation_id !== "string") return null;
+ return Object.freeze({ id: r.id, username: r.username, passwordHash: r.password_hash, accountEpoch: r.authorization_epoch,
+  subjectId: r.subject_id, realmId: r.realm_id, controlEpoch: r.binding_epoch, generationId: r.generation_id,
+  providerPartyId: r.party_id, providerEpoch: r.party_id === null ? null : r.clinical_epoch });
 }
 async function transactionId(client: DbClient): Promise<string> {
  await client.query("SAVEPOINT staff_issuer_transaction_check");
@@ -93,7 +114,13 @@ function sameTuple(a: ProvedAccountAuthority, b: ProvedAccountAuthority): boolea
 }
 function matchesCandidate(proof: ProvedAccountAuthority, captured: Candidate): boolean {
  return proof.user.id === captured.id && proof.user.username === captured.username
-  && proof.user.passwordHash === captured.passwordHash && proof.user.authorizationEpoch === captured.accountEpoch;
+  && proof.user.passwordHash === captured.passwordHash && proof.user.authorizationEpoch === captured.accountEpoch
+  // Same subject incarnation: a numeric ID re-bound to a new subject is another person.
+  && proof.subjectId === captured.subjectId
+  && proof.realmId === captured.realmId && proof.controlEpoch === captured.controlEpoch && proof.generationId === captured.generationId
+  && (proof.provider === null
+   ? captured.providerPartyId === null
+   : proof.provider.partyId === captured.providerPartyId && proof.provider.clinicalEpoch === captured.providerEpoch);
 }
 
 /** Test seam: an explicit pool and validated synthetic schema, exactly like the
