@@ -466,7 +466,10 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
         expect(await view(f.page).getByLabel(`أولوية ${SERVICE}`, { exact: true }).count()).toBe(0);
         if (role === "reception") {
           expect(await view(f.page).locator("input,textarea,select").count()).toBe(0);
-          expect((await view(f.page).getByRole("button").allTextContents()).map(text => text.trim())).toEqual(["فاتورة / اتفاق علاج", "بنود خطة هذه الحالة", OPEN, OPEN, "بنود خطة هذه الحالة", "بنود خطة هذه الحالة"]);
+          // Reception's default view grant adds the read-only, collapsed case-responsibility panel per live case
+          // (owner decision on #484); it fetches nothing until opened and holds no input.
+          const RESPONSIBLE = "الطبيب المسؤول عن الحالة";
+          expect((await view(f.page).getByRole("button").allTextContents()).map(text => text.trim())).toEqual(["فاتورة / اتفاق علاج", "بنود خطة هذه الحالة", OPEN, RESPONSIBLE, OPEN, "بنود خطة هذه الحالة", RESPONSIBLE, "بنود خطة هذه الحالة", RESPONSIBLE]);
         } else {
           expect(await view(f.page).getByRole("button", { name: "+ حالة جديدة", exact: true }).count()).toBe(1);
           expect(await view(f.page).getByRole("button", { name: "فاتورة / اتفاق علاج", exact: true }).count()).toBe(0);
