@@ -9239,8 +9239,11 @@ function shiftExpectation(row: ShiftRow): Pick<CashierShift, "expected" | "expec
 
 export async function getOpenShift(): Promise<CashierShift | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(
-    `${SHIFT_SELECT} WHERE s.status = 'open' LIMIT 1`,
+  return getOpenShiftWith(getPool());
+}
+export async function getOpenShiftWith(q: Pick<DbClient, "query">, lock = false): Promise<CashierShift | null> {
+  const { rows } = await q.query<ShiftRow>(
+    `${SHIFT_SELECT} WHERE s.status = 'open' LIMIT 1${lock ? " FOR UPDATE OF s" : ""}`,
   );
   return rows[0] ? toShift(rows[0]) : null;
 }
@@ -9256,33 +9259,41 @@ export async function openShift(input: {
   openedBy: string; opening: Record<Currency, number>;
 }): Promise<CashierShift | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(
+  return openShiftWith(getPool(), input);
+}
+/** The guarded open on the caller's runner (the unique open-shift index backs it). */
+export async function openShiftWith(q: Pick<DbClient, "query">, input: {
+  openedBy: string; opening: Record<Currency, number>;
+}): Promise<CashierShift | null> {
+  const { rows } = await q.query<ShiftRow>(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
      SELECT $1, $2, $3, $4
       WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')
      RETURNING id`,
     [input.openedBy, input.opening.YER, input.opening.SAR, input.opening.USD],
   );
-  return rows[0] ? getShift(rows[0].id) : null;
+  return rows[0] ? getShiftWith(q, rows[0].id) : null;
 }
 
 export async function getShift(id: number): Promise<CashierShift | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(`${SHIFT_SELECT} WHERE s.id = $1`, [id]);
+  return getShiftWith(getPool(), id);
+}
+export async function getShiftWith(q: Pick<DbClient, "query">, id: number): Promise<CashierShift | null> {
+  const { rows } = await q.query<ShiftRow>(`${SHIFT_SELECT} WHERE s.id = $1`, [id]);
   return rows[0] ? toShift(rows[0]) : null;
 }
 
 /** (P1-3) تفصيل الدرج لوردية: الافتتاحي، النقد الداخل والمردود، غير النقدي، المصروف، والمتوقَّع. */
-export async function shiftDrawerBreakdown(shift: CashierShift, client?: DbClient): Promise<DrawerBreakdown> {
+export async function shiftDrawerBreakdown(shift: CashierShift, client?: Pick<DbClient, "query">): Promise<DrawerBreakdown> {
   const runner = client ?? getPool();
-  const [{ rows: payments }, { rows: expenses }] = await Promise.all([
-    runner.query<{ kind: string; currency: string; amount_minor: string; method: string | null }>(
-      `SELECT kind, currency, amount_minor, method FROM payments WHERE shift_id = $1`, [shift.id],
-    ),
-    runner.query<{ currency: string; amount_minor: string }>(
-      `SELECT currency, amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
-    ),
-  ]);
+  // In order: a transaction's client runs one statement at a time.
+  const { rows: payments } = await runner.query<{ kind: string; currency: string; amount_minor: string; method: string | null }>(
+    `SELECT kind, currency, amount_minor, method FROM payments WHERE shift_id = $1`, [shift.id],
+  );
+  const { rows: expenses } = await runner.query<{ currency: string; amount_minor: string }>(
+    `SELECT currency, amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
+  );
   return drawerBreakdown(
     shift.opening,
     payments.map((row) => ({
@@ -9321,37 +9332,9 @@ export async function closeShift(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: locked } = await client.query<ShiftRow>(
-      `${SHIFT_SELECT} WHERE s.id = $1 AND s.status = 'open' FOR UPDATE OF s`, [input.id],
-    );
-    if (!locked[0]) {
-      await client.query("ROLLBACK");
-      return { shift: null, reason: "not_open", breakdown: null, difference: null };
-    }
-    const breakdown = await shiftDrawerBreakdown(toShift(locked[0]), client);
-    const difference = drawerDifference(breakdown.expected, input.counted);
-    const reason = input.differenceReason?.trim() || null;
-    if (hasDifference(difference) && !reason) {
-      await client.query("ROLLBACK");
-      return { shift: null, reason: "difference_reason_required", breakdown, difference };
-    }
-    await client.query(
-      `UPDATE cashier_shifts SET
-         status = 'closed', closed_by = $2, closed_at = NOW(),
-         counted_yer = $3, counted_sar = $4, counted_usd = $5, note = $6::text,
-         expected_yer = $7, expected_sar = $8, expected_usd = $9,
-         difference_yer = $10, difference_sar = $11, difference_usd = $12,
-         difference_reason = $13::text
-       WHERE id = $1`,
-      [
-        input.id, input.closedBy, input.counted.YER, input.counted.SAR, input.counted.USD, input.note,
-        breakdown.expected.YER, breakdown.expected.SAR, breakdown.expected.USD,
-        difference.YER, difference.SAR, difference.USD,
-        hasDifference(difference) ? reason : null,
-      ],
-    );
-    await client.query("COMMIT");
-    return { shift: await getShift(input.id), reason: null, breakdown, difference };
+    const result = await closeShiftWith(client, input);
+    await client.query(result.reason ? "ROLLBACK" : "COMMIT");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -9360,9 +9343,47 @@ export async function closeShift(input: {
   }
 }
 
+/** The blind count close inside the caller's transaction: the open shift row locked,
+ * the expected drawer computed under that lock, a difference needs its reason. On a
+ * refusal nothing was written (the caller may roll back or simply commit nothing). */
+export async function closeShiftWith(client: Pick<DbClient, "query">, input: {
+  id: number; closedBy: string; counted: Record<Currency, number>; note: string | null;
+  differenceReason?: string | null;
+}): Promise<CloseShiftResult> {
+  const { rows: locked } = await client.query<ShiftRow>(
+    `${SHIFT_SELECT} WHERE s.id = $1 AND s.status = 'open' FOR UPDATE OF s`, [input.id],
+  );
+  if (!locked[0]) return { shift: null, reason: "not_open", breakdown: null, difference: null };
+  const breakdown = await shiftDrawerBreakdown(toShift(locked[0]), client);
+  const difference = drawerDifference(breakdown.expected, input.counted);
+  const reason = input.differenceReason?.trim() || null;
+  if (hasDifference(difference) && !reason) {
+    return { shift: null, reason: "difference_reason_required", breakdown, difference };
+  }
+  await client.query(
+    `UPDATE cashier_shifts SET
+       status = 'closed', closed_by = $2, closed_at = NOW(),
+       counted_yer = $3, counted_sar = $4, counted_usd = $5, note = $6::text,
+       expected_yer = $7, expected_sar = $8, expected_usd = $9,
+       difference_yer = $10, difference_sar = $11, difference_usd = $12,
+       difference_reason = $13::text
+     WHERE id = $1`,
+    [
+      input.id, input.closedBy, input.counted.YER, input.counted.SAR, input.counted.USD, input.note,
+      breakdown.expected.YER, breakdown.expected.SAR, breakdown.expected.USD,
+      difference.YER, difference.SAR, difference.USD,
+      hasDifference(difference) ? reason : null,
+    ],
+  );
+  return { shift: await getShiftWith(client, input.id), reason: null, breakdown, difference };
+}
+
 export async function listShifts(limit = 30): Promise<CashierShift[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(
+  return listShiftsWith(getPool(), limit);
+}
+export async function listShiftsWith(q: Pick<DbClient, "query">, limit = 30): Promise<CashierShift[]> {
+  const { rows } = await q.query<ShiftRow>(
     `${SHIFT_SELECT} ORDER BY s.opened_at DESC LIMIT $1`, [limit],
   );
   return rows.map(toShift);
@@ -9898,7 +9919,10 @@ export async function getPaymentByIdempotencyKey(key:string):Promise<Payment|nul
 
 export async function listShiftPayments(shiftId: number): Promise<Payment[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(
+  return listShiftPaymentsWith(getPool(), shiftId);
+}
+export async function listShiftPaymentsWith(q: Pick<DbClient, "query">, shiftId: number): Promise<Payment[]> {
+  const { rows } = await q.query<PaymentRow>(
     `${PAYMENT_SELECT} WHERE y.shift_id = $1 ORDER BY y.created_at DESC`, [shiftId],
   );
   return rows.map(toPayment);
@@ -12659,7 +12683,10 @@ export async function getExpenseAttachment(id: number): Promise<{ attachment: Ex
 
 export async function listShiftExpenses(shiftId: number): Promise<Expense[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ExpenseRow>(
+  return listShiftExpensesWith(getPool(), shiftId);
+}
+export async function listShiftExpensesWith(q: Pick<DbClient, "query">, shiftId: number): Promise<Expense[]> {
+  const { rows } = await q.query<ExpenseRow>(
     `${EXPENSE_SELECT} WHERE e.shift_id = $1 ORDER BY e.created_at DESC`, [shiftId],
   );
   return rows.map(toExpense);
