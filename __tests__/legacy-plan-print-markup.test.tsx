@@ -43,6 +43,6 @@ describe("historical plan print parity", () => {
     expect(source).toContain("if (!session || !canHandleMoney(session.role)) notFound()");
     expect(source.indexOf("if (plan.items.some(hasLegacyHistory))")).toBeLessThan(source.indexOf("const agreement = buildInstallmentPlanAgreement"));
     expect(source).toContain('title="اتفاقية خطة العلاج وجدول الأقساط"');
-    expect(source).toContain("إقرار وموافقة المريض (أو ولي أمره)");
+    expect(source).toContain("<AgreementTermsAndSignatures terms={agreement.terms} note={agreement.note}");
   });
 });

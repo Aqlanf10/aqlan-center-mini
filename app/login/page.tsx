@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Icon";
+import { LoginPhoto } from "@/components/LoginPhoto";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSessionActions } from "@/components/SessionProvider";
 import {
@@ -277,9 +278,7 @@ export default function LoginPage() {
 
             {/* الوسط: صورة الدكتور (إن وجدت) + اسم المركز واللقب العلمي */}
             <div className="relative z-10 my-4 flex flex-col items-center text-center lg:my-8">
-              <div className="mb-5 hidden rounded-full border-2 border-brand-orange bg-white/5 p-6 lg:block">
-                <Logo variant="white" className="h-20 w-20" />
-              </div>
+              <LoginPhoto />
 
               <h1 className="text-lg sm:text-xl lg:text-2xl font-extrabold leading-relaxed text-white">
                 {clinicName}

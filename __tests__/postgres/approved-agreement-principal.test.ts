@@ -54,6 +54,29 @@ describe("approved complete principal",()=>{
   await collectApprovedAgreement(collection(f,10000));
   expect(await approvedAgreementPosition(f.planId,"2026-10-18")).toMatchObject({paidMinor:60000,remainingMinor:90000,dueNowMinor:15000});
  });
+ it("rejects a new principal for a live historical agreement and preserves its opening-only debt",async()=>{
+  const {parseLegacyTreatmentRequest}=await import("../../lib/legacy-treatment");
+  const {createLegacyTreatment}=await import("../../lib/legacy-treatment-db");
+  const {DEFAULT_SPECIALTY_TEMPLATES}=await import("../../lib/specialty-templates");
+  const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic historical principal guard') RETURNING id",[`APP-HIST-${++serial}`])).rows[0].id;
+  const serviceId=(await q("INSERT INTO services(name,price_minor,is_active,price_configured,category) VALUES('Synthetic historic orthodontics',420000,TRUE,TRUE,'ortho') RETURNING id")).rows[0].id;
+  const parsed=parseLegacyTreatmentRequest({serviceId,scope:"both",currency:"SAR",agreedAmount:"4200",previouslyPaidAmount:"1700",historicalAsOf:"2026-08-01",idempotencyKey:`historic-principal-${serial}`},"2026-10-01");
+  if(!parsed.ok)throw new Error(parsed.message);
+  const result=await createLegacyTreatment({patientId,request:parsed.value,actor:session.username,actorRole:"admin",canEditOpening:true,templates:DEFAULT_SPECIALTY_TEMPLATES});
+  if(!result.ok)throw new Error(result.reason);
+  const f={patientId,planId:result.agreement.planId,total:420000,currency:"SAR" as const};
+  expect(await db.recordPlanConsent({planId:f.planId,actor:session.username,note:"Synthetic current consent"})).toMatchObject({ok:true});
+  const before=(await q("SELECT * FROM legacy_treatment_agreements WHERE id=$1",[result.agreement.id])).rows;
+  const openingBefore=(await q("SELECT * FROM patient_opening_balances WHERE patient_id=$1",[patientId])).rows;
+  expect(result.agreement).toMatchObject({status:"live",agreedMinor:420000,previouslyPaidMinor:170000,remainingMinor:250000,openingEffect:"created"});
+  await expect(approveAgreement(approval(f))).rejects.toThrow(/أصل سابق/);
+  expect((await q("SELECT * FROM legacy_treatment_agreements WHERE id=$1",[result.agreement.id])).rows).toEqual(before);
+  expect((await q("SELECT * FROM patient_opening_balances WHERE patient_id=$1",[patientId])).rows).toEqual(openingBefore);
+  expect((await db.patientLedger(patientId)).invoices).toHaveLength(0);
+  expect((await db.patientLedger(patientId)).payments).toHaveLength(0);
+  expect((await q("SELECT plan_id FROM approved_agreement_principals WHERE plan_id=$1",[f.planId])).rows).toHaveLength(0);
+  expect((await db.computeDebtRows([patientId])).find(row=>row.currency==="SAR")?.dueMinor).toBe(250000);
+ });
  it("keeps multiple plans separate and rejects over-collection",async()=>{
   const a=await fixture("SAR",30000),b=await fixture("SAR",150000,true,a.patientId);await approveAgreement(approval(a));await approveAgreement(approval(b));
   await collectApprovedAgreement(collection(a,14000));expect((await approvedAgreementPosition(b.planId,"2026-10-18"))?.remainingMinor).toBe(150000);

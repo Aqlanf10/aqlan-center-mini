@@ -54,6 +54,7 @@ async function snapshot(orderId: number) {
     orders: await q("SELECT * FROM lab_orders WHERE id=$1", [orderId]),
     payables: await q("SELECT * FROM payables WHERE lab_order_id=$1 ORDER BY id", [orderId]),
     tracking: await q("SELECT * FROM lab_order_tracking WHERE lab_order_id=$1 ORDER BY id", [orderId]),
+    audit: await q("SELECT * FROM audit_log WHERE entity='lab_order' AND entity_id=$1 AND action='lab_order.accounting' ORDER BY id", [orderId]),
   };
 }
 
@@ -135,14 +136,14 @@ describe("persisted lab accounting FX snapshot", () => {
     await expect(db.updateLabOrderAccounting(order.id, input)).rejects.toThrow(error);
     expect(await snapshot(order.id)).toEqual(before);
   });
-  it.each([true, false])("rolls back both snapshots and tracking after a late failure, existing payable=%s", async withCost => {
+  it.each([[true, "lab_order_tracking"], [false, "lab_order_tracking"], [true, "audit_log"], [false, "audit_log"]] as const)("rolls back snapshots and evidence after late failure, existing payable=%s at %s", async (withCost, failTable) => {
     const order = await fixture(withCost), before = await snapshot(order.id);
     const pool = db.getPool(), connect = pool.connect.bind(pool);
     const fault = new Error("Synthetic late accounting tracking failure");
     const spy = vi.spyOn(pool, "connect").mockImplementation(async () => {
       const client = await connect(), query = client.query.bind(client);
       client.query = async (sql, values) => {
-        if (/INSERT INTO lab_order_tracking/.test(sql)) throw fault;
+        if (new RegExp(`INSERT INTO ${failTable}`).test(sql)) throw fault;
         return query(sql, values);
       };
       return { query: client.query, release: () => { client.query = query; client.release(); } };
@@ -153,4 +154,85 @@ describe("persisted lab accounting FX snapshot", () => {
     } finally { spy.mockRestore(); }
     expect(await snapshot(order.id)).toEqual(before);
   });
+});
+
+describe("lab accounting settlement and period fences", () => {
+  it.each(["direct", "allocated"] as const)("preserves all rows after %s partial settlement", async kind => {
+    const order = await fixture();
+    const shiftId = await id("INSERT INTO cashier_shifts(opened_by,status) VALUES($1,'closed') RETURNING id", [run]);
+    const expenseId = await id(`INSERT INTO expenses(voucher_number,category,party_id,shift_id,amount_minor,currency,
+      exchange_rate,base_amount_minor,base_currency,payable_id,payable_currency,payable_amount_minor,
+      payable_exchange_rate,payable_settled_minor,created_by)
+      VALUES($1,'lab',$2,$3,100,'USD',531.125,531,'YER',$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [`${run}-paid-${sequence}`, order.partyId, shiftId, kind === "direct" ? order.payableId : null,
+        kind === "direct" ? "USD" : null, kind === "direct" ? 2500 : null,
+        kind === "direct" ? 531.125 : null, kind === "direct" ? 100 : null, run]);
+    if (kind === "allocated") await q(`INSERT INTO expense_payable_allocations
+      (expense_id,payable_id,paid_minor,payable_currency,payable_exchange_rate,settled_minor)
+      VALUES($1,$2,100,'USD',531.125,100)`, [expenseId, order.payableId]);
+    const before = await snapshot(order.id);
+    for (const input of [{ costMinor: 3000 }, { costCurrency: "SAR" as const }, { isPosted: false }, { expenseAccountCode: "5102" }]) {
+      await expect(db.updateLabOrderAccounting(order.id, input)).rejects.toThrow("lab_order_accounting_settled");
+      expect(await snapshot(order.id)).toEqual(before);
+    }
+  });
+  it("does not wait on a concurrent payment's payable lock", async () => {
+    const order = await fixture(), before = await snapshot(order.id);
+    const holder = await db.getPool().connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT id FROM payables WHERE id=$1 FOR UPDATE", [order.payableId]);
+      await expect(db.updateLabOrderAccounting(order.id, { costMinor: 3000 })).rejects.toThrow("lab_order_accounting_busy");
+    } finally { await holder.query("ROLLBACK"); holder.release(); }
+    expect(await snapshot(order.id)).toEqual(before);
+  });
+  it("fences a concurrent close-setting write even when the setting was absent", async () => {
+    const order = await fixture(), before = await snapshot(order.id);
+    const holder = await db.getPool().connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query(`INSERT INTO settings(key,value) VALUES('finance.locked_before','2099-01-01')
+        ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`);
+      await expect(db.updateLabOrderAccounting(order.id, { costMinor: 3000 })).rejects.toThrow("lab_order_accounting_busy");
+    } finally { await holder.query("ROLLBACK"); holder.release(); }
+    expect(await snapshot(order.id)).toEqual(before);
+  });
+  it("blocks a closed-period change but keeps a paid exact no-op byte-for-byte", async () => {
+    const order = await fixture();
+    const previous = await q<{ value: string }>("SELECT value FROM settings WHERE key='finance.locked_before'");
+    try {
+      await q(`INSERT INTO settings(key,value) VALUES('finance.locked_before','2099-01-01')
+        ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`);
+      const before = await snapshot(order.id);
+      await expect(db.updateLabOrderAccounting(order.id, { costMinor: 3000 })).rejects.toThrow("lab_order_accounting_period_locked");
+      expect(await snapshot(order.id)).toEqual(before);
+      await q("UPDATE lab_orders SET financial_status='paid' WHERE id=$1", [order.id]);
+      const paid = await snapshot(order.id);
+      await db.updateLabOrderAccounting(order.id, {});
+      expect(await snapshot(order.id)).toEqual(paid);
+    } finally {
+      if (previous.length) await q("UPDATE settings SET value=$1 WHERE key='finance.locked_before'", [previous[0].value]);
+      else await q("DELETE FROM settings WHERE key='finance.locked_before'");
+    }
+  });
+});
+
+
+it.each(["structural", "legacy"] as const)("blocks reversed %s batch tracking without a payable allocation", async link => {
+  const order = await fixture();
+  const shiftId = await id("INSERT INTO cashier_shifts(opened_by,status) VALUES($1,'closed') RETURNING id", [run]);
+  const voucher = `${run}-legacy-${sequence}`;
+  const expenseId = await id(`INSERT INTO expenses(voucher_number,category,party_id,shift_id,amount_minor,currency,
+    exchange_rate,base_amount_minor,base_currency,created_by)
+    VALUES($1,'lab',$2,$3,100,'USD',531.125,531,'YER',$4) RETURNING id`, [voucher, order.partyId, shiftId, run]);
+  await q(`INSERT INTO lab_order_tracking(lab_order_id,action,notes,actor,expense_id)
+    VALUES($1,'financial_settlement',$2,$3,$4)`,
+    [order.id, `تمت التسوية المالية المجمعة بسند صرف رقم ${voucher} بمبلغ 100 USD`, run, link === "structural" ? expenseId : null]);
+  await q(`INSERT INTO lab_order_tracking(lab_order_id,action,notes,actor)
+    VALUES($1,'financial_settlement_reversed','Synthetic historical reversal',$2)`, [order.id, run]);
+  // Historical reversal reopens the marker without erasing original batch history.
+  await q("UPDATE lab_orders SET financial_status='payable_created' WHERE id=$1", [order.id]);
+  const before = await snapshot(order.id);
+  await expect(db.updateLabOrderAccounting(order.id, { costMinor: 3000 })).rejects.toThrow("lab_order_accounting_settled");
+  expect(await snapshot(order.id)).toEqual(before);
 });

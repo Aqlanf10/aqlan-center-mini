@@ -346,7 +346,11 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </span>
               </div>
 
-              {canSeeFinancial ? <ApprovedAgreementPanel planId={plan.id} totalMinor={plan.totalMinor} currency={plan.baseCurrency}
+              {canSeeFinancial && hasHistory && !plan.approvedAgreement ? <section role="status" data-testid="historical-plan-principal" className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm">
+                <p className="font-bold">{coverageVerified ? "مصدر العلاج اتفاق تاريخي قائم" : "يلزم مراجعة المصدر التاريخي"}</p>
+                <p>لا تعتمد قيمة الخطة كالتزام جديد. راجع الاتفاق التاريخي ورصيد الحساب من الحساب؛ تعديل المصدر السابق له مساره المستقل.</p>
+                <a className="mt-2 inline-block underline" href={`/patients/${patientId}?tab=account`}>مراجعة الاتفاق التاريخي في الحساب</a>
+              </section> : canSeeFinancial ? <ApprovedAgreementPanel planId={plan.id} totalMinor={plan.totalMinor} currency={plan.baseCurrency}
                 position={plan.approvedAgreement??null} canApprove={currentConsent&&plan.status==="active"&&["admin","reception"].includes(session?.role??"")} isAdmin={session?.role==="admin"} onChanged={load}/> : null}
               {canSeeFinancial && session?.role === "admin" && plan.status !== "cancelled"
                 && !plan.approvedAgreement && !plan.totalFromItems && (plan.hasInstallments || plan.installments.length > 0)

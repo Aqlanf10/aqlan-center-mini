@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { LoginPhotoEditor } from "@/components/settings/LoginPhotoEditor";
+import { LOGIN_PHOTO_KEYS } from "@/lib/login-photo";
 import { ClinicHoursEditor } from "@/components/settings/ClinicHoursEditor";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 import { InstallApp } from "@/components/InstallApp";
@@ -382,12 +384,24 @@ export default function SettingsPage() {
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">لا توجد إعدادات مطابقة. لا نعرض فئات أو مفاتيح بلا مستهلك فعلي.</div>
             ) : (
               <div className="grid gap-3 xl:grid-cols-2">
+                {searchResults.some((definition) => LOGIN_PHOTO_KEYS.some(key => key === definition.key)) ? (
+                  <LoginPhotoEditor values={snapshot.values} versions={snapshot.versions}
+                    editable={Boolean(role && canManageCategory(role, "branding"))}
+                    onSaved={(payload) => {
+                      setSnapshot(current => current ? {
+                        ...current,
+                        values: { ...current.values, ...Object.fromEntries(LOGIN_PHOTO_KEYS.map(k => [k, String(payload[k])])) },
+                        versions: { ...current.versions, ...payload.__versions as Record<string, string | null> },
+                      } : current);
+                      router.refresh();
+                    }} />
+                ) : null}
                 {searchResults.some((definition) => CLINIC_HOURS_KEYS.some((key) => key === definition.key)) ? (
                   <ClinicHoursEditor values={snapshot.values} versions={snapshot.versions}
                     editable={Boolean(role && canManageCategory(role, "hours"))}
                     onSaved={(payload) => { setSnapshot(parseSettingsPayload(payload)); router.refresh(); }} />
                 ) : null}
-                {searchResults.filter((definition) => !CLINIC_HOURS_KEYS.some((key) => key === definition.key)).map((definition) => {
+                {searchResults.filter((definition) => !LOGIN_PHOTO_KEYS.some(key => key === definition.key) && !CLINIC_HOURS_KEYS.some((key) => key === definition.key)).map((definition) => {
                   const value = snapshot.values[definition.key] ?? definition.defaultValue;
                   const editable = Boolean(role && canManageCategory(role, definition.category) && !definition.systemLocked);
                   const isDefault = definition.sensitivity === "secret" ? false : isDefaultSettingValue(definition, value);

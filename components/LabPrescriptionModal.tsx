@@ -10,6 +10,7 @@ import {
   LAB_TOOTH_ROLE_META,
   toLabDispatchExternal,
   labDispatchQrPayload,
+  labDispatchShadeLines,
   formatLabPrescriptionText,
 } from "@/lib/lab";
 import { LabDentalChart } from "./LabDentalChart";
@@ -38,7 +39,9 @@ export function LabPrescriptionModal({
   const settingsPhone = useSetting("clinic.phone");
   const resolvedName = clinicName ?? settingsName;
   const resolvedPhone = clinicPhone ?? settingsPhone;
-  const order = toLabDispatchExternal(internalOrder);
+  const identityMode = useSetting("lab.patient_identity_mode");
+  const dispatchSettings = { "lab.patient_identity_mode": identityMode };
+  const order = toLabDispatchExternal(internalOrder, dispatchSettings);
   const [paperSize, setPaperSize] = useState<PaperSize>("a4");
   const [qrCode, setQrCode] = useState<{ reference: string; url: string } | null>(null);
   const qrCodeDataUrl = qrCode?.reference === order.reference ? qrCode.url : "";
@@ -69,7 +72,7 @@ export function LabPrescriptionModal({
   }, [qrPayload, reference]);
 
   const handleCopyWhatsApp = () => {
-    const text = formatLabPrescriptionText(internalOrder, resolvedName, resolvedPhone);
+    const text = formatLabPrescriptionText(internalOrder, resolvedName, resolvedPhone, dispatchSettings);
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 3000);
@@ -103,7 +106,7 @@ export function LabPrescriptionModal({
                   استمارة طلب العمل المخبري
                 </h3>
                 <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800 border border-emerald-200">
-                  🔒 إرسالية بمرجع الطلب دون هوية المريض
+                  {order.patientName ? "إرسالية باسم المريض وفق إعدادات العيادة" : "🔒 إرسالية بمرجع الطلب دون هوية المريض"}
                 </span>
               </div>
               <p className="text-xs text-slate-500">
@@ -229,7 +232,8 @@ export function LabPrescriptionModal({
             </ul>
           </div>
 
-          {/* Lab and clinician business contacts; never patient identity. */}
+          {order.patientName ? <p className="rounded-xl border p-3">اسم المريض: <strong>{order.patientName}</strong></p> : null}
+          {/* Lab and clinician business contacts. */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 rounded-2xl bg-slate-50/80 p-3 text-xs border border-slate-200">
             <div>
               <span className="block text-[10px] font-bold text-slate-400">المختبر السني</span>
@@ -241,7 +245,7 @@ export function LabPrescriptionModal({
 
             <div>
               <span className="block text-[10px] font-bold text-slate-400">الطبيب المعالج</span>
-              <span className="font-bold text-slate-800 text-xs">{order.doctorName || "عيادة المركز"}</span>
+              <span className="font-bold text-slate-800 text-xs">{order.doctorName || "غير محدد"}</span>
             </div>
 
             <div>
@@ -292,6 +296,11 @@ export function LabPrescriptionModal({
 
             </div>
           </div>
+
+          {order.shadeSpecification?.teeth.length ? <section aria-label="ألوان مناطق الأسنان" className="rounded-xl border p-3 space-y-2">
+            <h4 className="font-bold">ألوان مناطق الأسنان — حسب الدليل الفعلي</h4>
+            {labDispatchShadeLines(order).map((line, index) => <p key={index}>{line}</p>)}
+          </section> : null}
 
           {/* FDI Dental Chart (Visual Clinical Tooth Roles) */}
           <div className="space-y-2">

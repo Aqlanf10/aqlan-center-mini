@@ -1,5 +1,10 @@
 "use client";
 
+import { LabOrderClinicalEditor } from "@/components/LabOrderClinicalEditor";
+import { LabOrderShadeEditor } from "@/components/LabOrderShadeEditor";
+import { LabShadeSelector } from "@/components/LabShadeSelector";
+import { parseLabShadeSpecification, type LabShadeSpecification } from "@/lib/lab-shades";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
@@ -11,6 +16,7 @@ import {
   LAB_FILTER_LABEL,
   LAB_STATUS_LABEL,
   WORK_TYPES,
+  labToothInputProblem,
   daysLate,
   filterOrders,
   labFollowUpText,
@@ -76,6 +82,7 @@ export default function LabPage() {
   // (TD-05) الأساس دستوري من الكود.
   const baseSettingValue: string = CLINIC_BASE_CURRENCY;
   const clinicPhone = useSetting("clinic.phone");
+  const patientIdentityMode = useSetting("lab.patient_identity_mode");
   const labDays = Number(useSetting("lab.default_days")) || 7;
   const [feed, setFeed] = useState<LabFeed>({ orders: [], labs: [] });
   const [filter, setFilter] = useState<LabFilter>("late");
@@ -106,6 +113,12 @@ export default function LabPage() {
   const [details, setDetails] = useState("");
   const [toothNumbers, setToothNumbers] = useState("");
   const [shade, setShade] = useState("");
+  const [clinicalOrder, setClinicalOrder] = useState<LabOrder | null>(null);
+  const [shadeOrder, setShadeOrder] = useState<LabOrder | null>(null);
+  const [shadeSpecification, setShadeSpecification] = useState<LabShadeSpecification | null>(null);
+  const [doctorId, setDoctorId] = useState("");
+  const [doctors, setDoctors] = useState<Array<{ id: number; name: string }>>([]);
+  const effectiveDoctorId = session?.role === "doctor" ? "self" : doctorId;
   const [priority, setPriority] = useState<"normal" | "urgent" | "rush">("normal");
   const [impressionType, setImpressionType] = useState<"physical" | "digital_scan" | "other">("physical");
   const [sentDate, setSentDate] = useState(today);
@@ -154,6 +167,23 @@ export default function LabPage() {
   useEffect(() => {
     void load(true);
   }, [load]);
+
+  useEffect(() => {
+
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/parties?kind=doctor", { cache: "no-store", signal: controller.signal });
+        if (!response.ok || controller.signal.aborted) return;
+        const data: unknown = await response.json();
+        if (controller.signal.aborted || !Array.isArray(data)) return;
+        setDoctors(data.filter((entry): entry is { id: number; name: string; kind: string; isActive: boolean } =>
+          !!entry && typeof entry === "object" && Number.isSafeInteger(entry.id) && entry.id > 0
+          && typeof entry.name === "string" && entry.kind === "doctor" && entry.isActive === true));
+      } catch { /* No fallback to an unverified physician. */ }
+    })();
+    return () => controller.abort();
+  }, [session?.username, session?.role]);
 
   // Load registered labs, services catalog & expense categories
   useEffect(() => {
@@ -311,18 +341,25 @@ export default function LabPage() {
         setError("يرجى تحديد اسم المختبر.");
         return;
       }
+      if (!effectiveDoctorId) { setError("حدّد الطبيب المعالج قبل الإرسال."); return; }
+      const toothProblem = labToothInputProblem(toothNumbers, workType, selectedService?.code);
+      if (toothProblem) { setError(toothProblem); return; }
+      const shadeResult = parseLabShadeSpecification(shadeSpecification, Object.keys(parseLabTeeth(toothNumbers)).map(Number));
+      if (!shadeResult.ok) { setError(shadeResult.error); return; }
       const ok = await act(() =>
         fetch("/api/lab", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             patientId: patient.id,
+            doctorId: session?.role === "doctor" ? undefined : Number(effectiveDoctorId),
             labName,
             labPhone: labPhone || undefined,
             workType,
             details: details || undefined,
             toothNumbers: toothNumbers || undefined,
             shade: shade || undefined,
+            shadeSpecification,
             priority,
             impressionType,
             sentDate,
@@ -343,6 +380,7 @@ export default function LabPage() {
         setDetails("");
         setToothNumbers("");
         setShade("");
+        setShadeSpecification(null);
         setCost("");
         setCostEdited(false);
         setPartyId("");
@@ -361,7 +399,11 @@ export default function LabPage() {
       hasManualCost,
       patient,
       toothNumbers,
+      effectiveDoctorId,
+      session?.role,
+      selectedService,
       shade,
+      shadeSpecification,
       priority,
       impressionType,
       details,
@@ -570,6 +612,17 @@ export default function LabPage() {
 
           {/* اختيار المختبر والخدمة */}
           <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-600" htmlFor="lab-order-doctor">الطبيب المعالج *</label>
+              <select id="lab-order-doctor" value={effectiveDoctorId} onChange={event => setDoctorId(event.target.value)}
+                disabled={session?.role === "doctor"} required
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+                <option value="">اختر الطبيب المعالج</option>
+                {session?.role === "doctor" && <option value="self">{session.displayName || session.username} — الطبيب المرتبط بالحساب</option>}
+                {doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">اختر طبيب هذا العمل؛ لا يُغيّر هذا الاختيار الطبيب المسؤول عن حالة المريض.</p>
+            </div>
             {/* المختبر */}
             <div>
               <label className="mb-1 block text-[11px] font-bold text-slate-600">المختبر / المعمل *</label>
@@ -681,6 +734,8 @@ export default function LabPage() {
               <div className="mt-2">
                 <LabDentalChart
                   value={toothNumbers}
+                  workType={workType}
+                  serviceCode={selectedService?.code}
                   onChange={(serialized) => setToothNumbers(serialized)}
                   showSummary={true}
                 />
@@ -702,14 +757,10 @@ export default function LabPage() {
               />
             </div>
 
-            <div>
-              <label className="mb-1 block text-[11px] font-bold text-slate-500">اللون وتدرج الظل</label>
-              <input
-                value={shade}
-                onChange={(e) => setShade(e.target.value)}
-                placeholder="مثال: A2 أو A3.5 أو BL2"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
-              />
+            <div className="sm:col-span-2">
+              <LabShadeSelector value={shadeSpecification} onChange={setShadeSpecification}
+                selectedTeeth={Object.keys(parseLabTeeth(toothNumbers)).map(Number)}
+                globalShade={shade} onGlobalShadeChange={setShade} disabled={busy} />
             </div>
 
             <div>
@@ -982,7 +1033,7 @@ export default function LabPage() {
 
             // نصوص رسائل واتساب
             const patientMsg = patientReadyText(order, clinicName, clinicPhone);
-            const labMsg = labFollowUpText(order, today, clinicName);
+            const labMsg = labFollowUpText(order, today, clinicName, { "lab.patient_identity_mode": patientIdentityMode });
 
             return (
               <li
@@ -1098,6 +1149,9 @@ export default function LabPage() {
                       </div>
                     )}
 
+                    {labToothInputProblem(order.toothNumbers, order.workType) && <p role="status" className="my-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+                      مراجعة بيانات الإرسالية: {labToothInputProblem(order.toothNumbers, order.workType)} لم تُغيّر الأدوار المحفوظة تلقائيًا.
+                    </p>}
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
                       {order.status === "needed" ? (
                         <span>أُنشئ من توقيع الزيارة — أكمل بيانات المختبر ثم أرسله</span>
@@ -1159,6 +1213,9 @@ export default function LabPage() {
                       </span>
                     </button>
 
+                    {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button" onClick={() => setClinicalOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تصحيح الإرسالية</button>}
+                    {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button"
+                      onClick={() => setShadeOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تعديل ألوان الأسنان</button>}
                     <button
                       type="button"
                       onClick={() => setPrescriptionOrder(order)}
@@ -1325,6 +1382,14 @@ export default function LabPage() {
       )}
 
       {/* نافذة استمارة طلب المختبر الرسمية مع مخطط الأسنان السريري */}
+      {clinicalOrder && feed.orders.some(order => order.id === clinicalOrder.id) && (
+        <LabOrderClinicalEditor key={`${session?.username}:${session?.role}:${clinicalOrder.id}`} order={clinicalOrder}
+          onClose={() => setClinicalOrder(null)} onSaved={() => { setClinicalOrder(null); void load(); }} />
+      )}
+      {shadeOrder && feed.orders.some(order => order.id === shadeOrder.id) && (
+        <LabOrderShadeEditor key={`${session?.username}:${session?.role}:${shadeOrder.id}`} order={shadeOrder}
+          onClose={() => setShadeOrder(null)} onSaved={() => { setShadeOrder(null); void load(); }} />
+      )}
       {prescriptionOrder && (
         <LabPrescriptionModal
           order={prescriptionOrder}

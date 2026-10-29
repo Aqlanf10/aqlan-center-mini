@@ -22,13 +22,13 @@ function completionShell(): string {
 
 const results = ["success", "failure", "skipped", "cancelled"] as const;
 const combinations = results.flatMap(quality =>
-  results.flatMap(postgres => results.map(http => ({ quality, postgres, http }))),
+  results.flatMap(postgres => results.flatMap(http => results.map(print => ({ quality, postgres, http, print })))),
 );
 
 describe("required CI completion executes fail-closed shell", () => {
   it.each(combinations)(
-    "quality=$quality postgres=$postgres http=$http",
-    ({ quality, postgres, http }) => {
+    "quality=$quality postgres=$postgres http=$http print=$print",
+    ({ quality, postgres, http, print }) => {
       const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", completionShell()], {
         encoding: "utf8",
         timeout: 5_000,
@@ -38,17 +38,18 @@ describe("required CI completion executes fail-closed shell", () => {
           QUALITY_RESULT: quality,
           POSTGRES_RESULT: postgres,
           HTTP_RESULT: http,
+          PRINT_RESULT: print,
         },
       });
       expect(result.error).toBeUndefined();
       expect(result.signal).toBeNull();
-      const success = quality === "success" && postgres === "success" && http === "success";
+      const success = quality === "success" && postgres === "success" && http === "success" && print === "success";
       expect(result.status, result.stderr).toBe(success ? 0 : 1);
       if (success) {
         expect(result.stdout).toBe("");
       } else {
         expect(result.stdout).toContain(
-          `::error::Required CI incomplete: quality=${quality}, postgres_integration=${postgres}, security_http=${http}`,
+          `::error::Required CI incomplete: quality=${quality}, postgres_integration=${postgres}, security_http=${http}, contract_print_visual=${print}`,
         );
       }
     },
