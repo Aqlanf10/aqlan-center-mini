@@ -1,6 +1,8 @@
 import { IdentityPreviewError } from "@/lib/hr-identity-preview";
 import { HrWorkforceMutationError } from "@/lib/hr-contracts-attendance";
 import { NextResponse } from "next/server";
+import { clinicDateString } from "@/lib/schedule";
+import { resolveClinicZone } from "@/lib/clinicZone";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
@@ -11,6 +13,7 @@ import {
 } from "@/lib/hr-contracts-attendance";
 
 export const dynamic = "force-dynamic";
+const currentClinicYear = () => Number(clinicDateString(new Date(), resolveClinicZone(process.env.CLINIC_TIME_ZONE)).slice(0, 4));
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -22,7 +25,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const staffId = url.searchParams.get("staffId");
   const yearStr = url.searchParams.get("year");
-  const year = yearStr ? parseInt(yearStr, 10) : new Date().getFullYear();
+  const year = yearStr ? parseInt(yearStr, 10) : currentClinicYear();
 
   if (!staffId) {
     return NextResponse.json({ message: "يرجى تحديد الموظف لجلب أرصدة إجازاته." }, { status: 400 });
@@ -68,7 +71,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const year = payload.year || new Date().getFullYear();
+  const year = payload.year || currentClinicYear();
 
   try {
     const updated = await adjustLeaveBalance(
