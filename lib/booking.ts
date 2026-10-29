@@ -17,7 +17,14 @@ import { addDays } from "./schedule";
 export type PreferredPeriod = "morning" | "evening" | "any";
 export type BookingRequestStatus = "new" | "confirmed" | "rejected";
 
+export interface BookingPreferences {
+  serviceId?: number;
+  doctorId?: number;
+  time?: string;
+}
+
 export interface BookingRequestInput {
+  preferences?: BookingPreferences;
   fullName: string;
   phone: string;
   reason: string | null;
@@ -62,6 +69,7 @@ export function validateBookingRequest(raw: {
   reason?: unknown;
   preferredDate?: unknown;
   preferredPeriod?: unknown;
+  preferences?: unknown;
 }, today: string, maxDaysAhead: number = MAX_DAYS_AHEAD): Validation {
   /* مدًى فاسد يعود إلى الافتراضي: صفرٌ أو سالب يمنع كل حجزٍ قادم، ومريضٌ لا يستطيع
      الحجز لا يشتكي للبرنامج بل للعيادة. */
@@ -104,7 +112,19 @@ export function validateBookingRequest(raw: {
   const preferredPeriod: PreferredPeriod =
     rawPeriod === "morning" || rawPeriod === "evening" ? rawPeriod : "any";
 
-  return { ok: true, value: { fullName, phone, reason, preferredDate, preferredPeriod } };
+  const preferences: BookingPreferences = {};
+  if (raw.preferences != null) {
+    if (typeof raw.preferences !== "object" || Array.isArray(raw.preferences)) return { ok: false, message: "اختيارات الموعد غير صالحة." };
+    const selection = raw.preferences as Record<string, unknown>;
+    for (const key of ["serviceId", "doctorId"] as const) {
+      if (!Number.isSafeInteger(selection[key]) || Number(selection[key]) <= 0) return { ok: false, message: "اختر الخدمة والطبيب." };
+      preferences[key] = Number(selection[key]);
+    }
+    if (typeof selection.time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(selection.time)) return { ok: false, message: "اختر الوقت." };
+    preferences.time = selection.time;
+  }
+  return { ok: true, value: { fullName, phone, reason, preferredDate, preferredPeriod,
+    ...(raw.preferences != null ? { preferences } : {}) } };
 }
 
 /**

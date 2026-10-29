@@ -20,6 +20,7 @@ describe("patient appointment history index provenance", () => {
       "0078_agreement_reconciliation.sql",
       "0087_agreement_reminder_metadata.sql",
       "0089_lab_shade_specification.sql",
+      "0090_booking_request_preferences.sql",
     ]);
   });
 

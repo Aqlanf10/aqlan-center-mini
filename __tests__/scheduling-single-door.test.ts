@@ -100,8 +100,8 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
       const fn = [...before.matchAll(/^export (?:async )?function ([A-Za-z0-9_]+)/gm)].pop()?.[1] ?? "?";
       writers.push(fn);
     }
+    expect(calls(db.slice(db.indexOf("export async function confirmBookingRequest"), db.indexOf("export interface PatientFile")), "insertAppointmentOnClient")).toBe(true);
     expect(writers.sort()).toEqual([
-      "confirmBookingRequest",     // يُحكم عليه في مسار طلبات الحجز تحت القفل
       "createAppointment",        // خام — للسكربتات فقط (حارس أعلاه)
       "createNextSession",        // يُحكم عليه في مسار الزيارة التالية تحت القفل
       "insertAppointmentOnClient", // قلب bookAppointment

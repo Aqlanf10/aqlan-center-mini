@@ -5,9 +5,9 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 133,
-    "columns": 1693,
-    "constraints": 1956,
-    "indexes": 413,
+    "columns": 1696,
+    "constraints": 1957,
+    "indexes": 414,
     "triggers": 100
   },
   "tables": {
@@ -1835,6 +1835,10 @@
           "type": "text",
           "nullable": false
         },
+        "preferences": {
+          "type": "jsonb",
+          "nullable": false
+        },
         "preferred_date": {
           "type": "date",
           "nullable": true
@@ -1844,6 +1848,14 @@
           "nullable": false
         },
         "reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": true
+        },
+        "request_key": {
           "type": "text",
           "nullable": true
         },
@@ -1883,6 +1895,12 @@
         "booking_requests_pkey": {
           "columns": [
             "id"
+          ],
+          "unique": true
+        },
+        "booking_requests_request_key_idx": {
+          "columns": [
+            "request_key"
           ],
           "unique": true
         },

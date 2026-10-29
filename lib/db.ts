@@ -1,3 +1,4 @@
+import { BOOKING_REQUEST_PREFERENCES_SQL } from "./booking-request-schema";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
@@ -2108,6 +2109,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0090", name: "booking_request_preferences", filename: "0090_booking_request_preferences.sql", sql: BOOKING_REQUEST_PREFERENCES_SQL, checksum: checksumOf(BOOKING_REQUEST_PREFERENCES_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -4151,9 +4153,9 @@ export async function findAppointmentForWaiting(
   return rows[0] ? toAppointment(rows[0]) : null;
 }
 
-export async function getAppointment(id: number): Promise<Appointment | null> {
+export async function getAppointment(id: number, client?: DbClient): Promise<Appointment | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<AppointmentRow>(
+  const { rows } = await (client ?? getPool()).query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.id = $1`,
     [id],
   );
@@ -5005,6 +5007,8 @@ export async function listOrthoActivePatientIds(): Promise<number[]> {
 import type { BookingRequest, BookingRequestInput, BookingRequestStatus, PreferredPeriod } from "./booking";
 
 interface BookingRequestRow {
+  preferences: import("./booking").BookingPreferences;
+  request_hash?: string | null;
   id: number;
   full_name: string;
   phone: string;
@@ -5024,6 +5028,7 @@ function toBookingRequest(row: BookingRequestRow): BookingRequest {
     fullName: row.full_name,
     phone: row.phone,
     reason: row.reason,
+    preferences: row.preferences ?? {},
     // من مكوّنات التاريخ المحلية لا بـ toISOString — نفس فخ اليوم السابق.
     preferredDate: date
       ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
@@ -5062,14 +5067,64 @@ export async function countRecentRequests(phone: string, sourceHash: string | nu
 export async function createBookingRequest(
   input: BookingRequestInput,
   sourceHash: string | null,
+  requestKey: string | null = null,
+  beforeCreate?: () => Promise<void>,
 ): Promise<BookingRequest> {
   await ensureSchema();
-  const { rows } = await getPool().query<BookingRequestRow>(
-    `INSERT INTO booking_requests (full_name, phone, reason, preferred_date, preferred_period, source_hash)
-     VALUES ($1, $2, $3::text, $4::date, $5, $6::text) RETURNING *`,
-    [input.fullName, input.phone, input.reason, input.preferredDate, input.preferredPeriod, sourceHash],
-  );
-  return toBookingRequest(rows[0]);
+  const hash = createHash("sha256").update(JSON.stringify({
+    fullName: input.fullName, phone: input.phone, reason: input.reason,
+    preferredDate: input.preferredDate, preferredPeriod: input.preferredPeriod,
+    preferences: input.preferences ?? {},
+  })).digest("hex");
+  // Availability is advisory for a request and may use other pool queries. Run it
+  // before taking a connection/lock, so queued retries cannot exhaust the pool.
+  // A persisted replay bypasses changed availability; the transaction rechecks the key.
+  if (beforeCreate) {
+    const prior = requestKey ? (await getPool().query<BookingRequestRow>(
+      "SELECT * FROM booking_requests WHERE request_key=$1", [requestKey])).rows[0] : undefined;
+    if (prior) {
+      if (prior.request_hash !== hash) throw new Error("BOOKING_KEY_CONFLICT");
+      return toBookingRequest(prior);
+    }
+    await beforeCreate();
+  }
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    // Deterministic lock order; key replay precedes quotas, including after confirmation.
+    for (const lock of [requestKey && `key:${requestKey}`, `phone:${input.phone}`, sourceHash && `source:${sourceHash}`].filter(Boolean)) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 84001))", [lock]);
+    }
+    if (requestKey) {
+      const prior = (await client.query<BookingRequestRow>("SELECT * FROM booking_requests WHERE request_key=$1", [requestKey])).rows[0];
+      if (prior) {
+        if (prior.request_hash !== hash) throw new Error("BOOKING_KEY_CONFLICT");
+        await client.query("COMMIT");
+        return toBookingRequest(prior);
+      }
+    }
+    const counts = (await client.query<{ phone: number; source: number }>(
+      `SELECT count(*) FILTER (WHERE phone=$1)::int AS phone,
+       count(*) FILTER (WHERE $2::text IS NOT NULL AND source_hash=$2)::int AS source
+       FROM booking_requests WHERE created_at > NOW()-INTERVAL '24 hours'`, [input.phone, sourceHash])).rows[0];
+    if (counts.phone >= 3) throw new Error("BOOKING_PHONE_LIMIT");
+    if (counts.source >= 60) throw new Error("BOOKING_SOURCE_LIMIT");
+    const { rows } = await client.query<BookingRequestRow>(
+      `INSERT INTO booking_requests (full_name, phone, reason, preferred_date, preferred_period, source_hash, request_key, request_hash, preferences)
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9::jsonb) RETURNING *`,
+      [input.fullName, input.phone, input.reason, input.preferredDate, input.preferredPeriod, sourceHash, requestKey, hash, JSON.stringify(input.preferences ?? {})]);
+    await client.query("COMMIT");
+    return toBookingRequest(rows[0]);
+  } catch (error) { await client.query("ROLLBACK"); throw error; }
+  finally { client.release(); }
+}
+
+/** Staff-only caller owns authorization and the transaction when locking. */
+export async function getBookingRequest(id: number, client?: DbClient): Promise<BookingRequest | null> {
+  await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<BookingRequestRow>(
+    `SELECT * FROM booking_requests WHERE id=$1${client ? " FOR UPDATE" : ""}`, [id]);
+  return rows[0] ? toBookingRequest(rows[0]) : null;
 }
 
 export async function listBookingRequests(status: BookingRequestStatus): Promise<BookingRequest[]> {
@@ -5106,15 +5161,30 @@ export async function rejectBookingRequest(id: number): Promise<BookingRequest |
  * (P2-3) المريض القائم الذي سيُنسب إليه طلب الحجز عند تأكيده — بالقاعدة نفسها
  * (رقم الهاتف بصيغه) — ليُفحص تداخل مواعيده قبل الحجز. `null` = مريضٌ جديد.
  */
-export async function existingPatientForBookingRequest(id: number, client?: DbClient): Promise<number | null> {
+/** Minimal staff review choices; a phone match is not identity proof. */
+export async function bookingRequestPatientChoices(id: number) {
+  await ensureSchema();
+  const request = await getBookingRequest(id);
+  if (!request) return [];
+  return (await getPool().query<{ id: number; fullName: string; patientNumber: string }>(
+    `SELECT id,full_name AS "fullName",patient_number AS "patientNumber" FROM patients
+     WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 50`, [phoneLookupForms(request.phone)])).rows;
+}
+
+export async function existingPatientForBookingRequest(id: number, client?: DbClient, selectedPatientId?: number | null): Promise<number | null> {
   await ensureSchema();
   const runner = client ?? getPool();
   const { rows } = await runner.query<{ phone: string }>(`SELECT phone FROM booking_requests WHERE id = $1`, [id]);
   if (!rows[0]) return null;
   const { rows: existing } = await runner.query<{ id: number }>(
-    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
+    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id`,
     [phoneLookupForms(rows[0].phone)],
   );
+  if (selectedPatientId != null) {
+    if (!existing.some(row => row.id === selectedPatientId)) throw new Error("BOOKING_PATIENT_MISMATCH");
+    return selectedPatientId;
+  }
+  if (existing.length > 1) throw new Error("BOOKING_PATIENT_AMBIGUOUS");
   return existing[0]?.id ?? null;
 }
 
@@ -5124,6 +5194,14 @@ export async function confirmBookingRequest(
     date: string;
     time: string;
     durationMinutes: number;
+    patientId?: number | null;
+    doctorId?: number | null;
+    serviceId?: number | null;
+    appointmentType?: string | null;
+    bufferBeforeMinutes?: number;
+    bufferAfterMinutes?: number;
+    chairNo?: number | null;
+    occupiesChair?: boolean;
   },
   runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number } | null> {
@@ -5152,11 +5230,10 @@ export async function confirmBookingRequest(
   if (!requests[0]) return null;
   const request = requests[0];
 
-  const { rows: existing } = await client.query<{ id: number }>(
-    `SELECT id FROM patients WHERE phone = ANY($1::text[]) ORDER BY id LIMIT 1`,
-    [phoneLookupForms(request.phone)],
-  );
-  let patientId = existing[0]?.id;
+  // Shared-phone ambiguity is a staff decision, never an ORDER BY/LIMIT heuristic.
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 84002))", [request.phone]);
+  let patientId = await existingPatientForBookingRequest(input.id, client, input.patientId);
+  const isNewPatient = patientId === null;
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows: created } = await client.query<{ id: number }>(
@@ -5170,18 +5247,16 @@ export async function confirmBookingRequest(
     patientId = created[0].id;
   }
 
-  const { rows: appointments } = await client.query<{ id: number }>(
-    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [patientId, input.date, input.time, input.durationMinutes, request.reason],
-  );
+  const appointment = await insertAppointmentOnClient(client, { ...input, patientId,
+    note: request.reason, isNewPatient });
+  if (!appointment) throw new Error("BOOKING_INSERT_FAILED");
 
   await client.query(
     `UPDATE booking_requests SET status = 'confirmed', handled_at = NOW(), appointment_id = $2
       WHERE id = $1`,
-    [input.id, appointments[0].id],
+    [input.id, appointment.id],
   );
-  return { appointmentId: appointments[0].id, patientId };
+  return { appointmentId: appointment.id, patientId };
 }
 
 // ─── ملف المريض ──────────────────────────────────────────────────────────────

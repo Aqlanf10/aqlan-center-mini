@@ -97,12 +97,11 @@ describe("ورديات المركز والفترة المغلقة بينها", (
     expect(usable.map((shift) => shift.start)).toEqual([540, 960]);
   });
 
-  it("وبلا ورديةٍ صالحة يُسمح بكل وقت — إعدادٌ ناقص لا يوقف يوم عمل", () => {
-    /* الانفتاح عند العطب مقصود: لو أُغلق الحجز كلُّه لأنّ أحدهم أخطأ في حقل وقت،
-       لتوقّف الاستقبال عن العمل بسبب حرفٍ في الإعدادات. فالمحرّك يصمت ولا يمنع. */
+  it("بلا وردية صالحة لا يعد أي وقت ضمن الدوام", () => {
+    // Missing/invalid hours must not turn a closed center into 24-hour availability.
     const midnightWindow = { start: 3 * 60, end: 4 * 60 };
-    expect(withinAnyShift(midnightWindow, [])).toBe(true);
-    expect(withinAnyShift(midnightWindow, [{ start: "22:00", end: "16:00" }])).toBe(true);
+    expect(withinAnyShift(midnightWindow, [])).toBe(false);
+    expect(withinAnyShift(midnightWindow, [{ start: "22:00", end: "16:00" }])).toBe(false);
   });
 
   it("موعدٌ كاملٌ داخل وردية الصباح ليس خارج الدوام", () => {
@@ -563,13 +562,12 @@ describe("العطب في المدخلات — انفتاحٌ محسوب لا ش
     }
   });
 
-  it("وبلا ورديةٍ واحدة صالحة لا طاقةَ تُقاس فتبقى النسبة صفرًا ويمرّ الحجز", () => {
-    /* انفتاحٌ مقصود لا حسابٌ صحيح: «صفر بالمئة» هنا تعني «لا أعرف» لا «اليوم
-       فارغ». وقيمتُه أنّ مركزًا لم تُضبط ورديّاته بعد يظلّ قادرًا على الحجز. */
+  it("بلا وردية صالحة لا طاقة تقاس ويصنّف الوقت خارج الدوام", () => {
+    // Zero measured capacity does not authorize a booking; admission rejects outsideHours.
     const verdict = judge({ shifts: [], chairs: 1, durationMinutes: 480 });
     expect(verdict.dayPercent).toBe(0);
-    expect(verdict.outsideHours).toBe(false);
-    expect(verdict.state).toBe("AVAILABLE");
+    expect(verdict.outsideHours).toBe(true);
+    expect(verdict.state).toBe("NEAR_CAPACITY");
   });
 
   it("والملغى ومن لم يحضر لا يشغلان كرسيًّا ولا يُحسبان في حمل اليوم", () => {
