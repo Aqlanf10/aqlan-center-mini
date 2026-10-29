@@ -6,7 +6,7 @@ Status: **inventory and plan**. It lists what exists on WORK, what is canonical,
 
 | Area | Today (page / API) | Canonical status | Who may change it | Missing |
 |---|---|---|---|---|
-| Staff accounts (create, disable, profile) | `/settings/users`, `/api/users`, `/api/users/[id]` (legacy) | not canonical | `staff.accounts.create`, `staff.accounts.disable`, `staff.profile.edit`; role, credential and clinician link are owner-only | canonical account writes in the staff editor's atomic transaction |
+| Staff accounts (create, disable, profile) | `/settings/users`, `/api/users`, `/api/users/[id]` (legacy) | not canonical | `staff.accounts.create`, `staff.accounts.disable`, `staff.profile.edit`; role, credential and clinician link are owner-only | proposal `CANONICAL_ACCOUNT_WRITES.md`: updates of existing accounts need no schema change; creating an account in a ready identity needs a reviewed schema/lifecycle change (M4) |
 | Permissions (capabilities) | `/staff-access`, `/api/staff-access/[id]` | **canonical**: atomic CAS save, delegation limits, audit, protected owner | `staff.permissions.edit` within the editor's own authority | — |
 | Starting templates | editor «قالب بداية» (`lib/staff-starting-templates.ts`) | **done**: fills the form only, owner saves per account | as above | assistant template (needs a "today's visits" scope decision) |
 | Modules (visible / hidden) | editor module fieldsets (`lib/staff-modules.ts`) | **done**: hiding revokes the module's capabilities in one save; server-enforced | as above | — |
@@ -37,5 +37,5 @@ Every tab is a projection of the account's current grants. The server re-proves 
 ## 3. Order
 1. **Done:** the canonical settings read and the batch write for `/api/settings`, all key classes (M2 slice 7; PG `settings-canonical`, journey `canonical-settings-journey`).
 2. **Done (first form):** the settings screen under the canonical shell (`/settings`, `settings.view`). The staff tab links to `/staff-access`. Tabs for the remaining areas are added as each one becomes canonical.
-3. Account writes in the staff editor.
+3. Account writes in the staff editor: proposal for review (`CANONICAL_ACCOUNT_WRITES.md`); updates first, creation with M4.
 4. Catalogue routes (services, prices, lab), then the owner-only tab with M4.
