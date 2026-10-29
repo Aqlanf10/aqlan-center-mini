@@ -5926,8 +5926,17 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 11: record read read:visits.today in one owning snapshot; rows by the current patient scope (own = visits assigned to the clinician or of its patients); the reception hand-off view refuses (409 view_not_canonical) until migrated.",
+  "projection": {
+   "legacy": "every admitted role reads every visit of the day, notes included.",
+   "groups": {
+    "identity": "name, phone, status, chair, times, appointment and doctor links — every actor admitted to the queue",
+    "operational": "the arrival note (a planned visit's note carries its clinical title) — a clinical grant or patients.operational-summary.view"
+   },
+   "rows": "own scope: visits whose doctor is the actor's clinician party, or whose patient is in the clinician's patient list; all: every visit",
+   "fields": "canManage = visits.manage (display only; every write re-proves it)"
+  }
  },
  {
   "route": "/api/visits",
@@ -5942,8 +5951,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Arrival/check-in creates the visit record."
+  "status": "canonical-done",
+  "note": "M2 slice 11: operation visits.manage; a file inside the actor's current scope (outside = missing, 404) or a walk-in without a file; own scope opens visits on its own clinician party only; planned-visit start checks its patient before any write and moves the booked appointment to arrived in the same transaction; audit atomic. Arrival/check-in creates the visit record."
  },
  {
   "route": "/api/visits/[id]",

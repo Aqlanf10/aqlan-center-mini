@@ -51,10 +51,12 @@ describe("capability presentation", () => {
  it("navigation is a projection of current grants over accepted canonical pages only", () => {
   expect(canonicalPagesFor([], false)).toEqual([]);
   expect(canonicalPagesFor(["staff.view"], false).map(p => p.href)).toEqual(["/staff-access"]);
-  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/patients", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
+  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/patients", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
   expect(canonicalPagesFor(["inventory.custody.view"], false).map(p => p.href)).toEqual(["/inventory/custody"]);
   expect(isCanonicalPage("/staff-access")).toBe(true);
   expect(isCanonicalPage("/patients")).toBe(true);
+  expect(isCanonicalPage("/visits")).toBe(true);
+  expect(isCanonicalPage("/visits/12")).toBe(false);
   // The patient list is exact; one patient's file is a separate, pattern-matched page.
   expect(isCanonicalPage("/patients/12")).toBe(true);
   expect(canonicalPageFor("/patients/12")?.href).toBe("/patients/[id]");
@@ -69,13 +71,13 @@ describe("capability presentation", () => {
   // Grants alone never show the patient list; a scope other than none does.
   expect(canonicalPagesFor(["clinical.plans.view", "finance.patient-ledger.view"], false).map(p => p.href)).toEqual([]);
   expect(canonicalPagesFor([], false, { patientScope: "none" }).map(p => p.href)).toEqual([]);
-  expect(canonicalPagesFor([], false, { patientScope: "own" }).map(p => p.href)).toEqual(["/patients"]);
+  expect(canonicalPagesFor([], false, { patientScope: "own" }).map(p => p.href)).toEqual(["/visits", "/patients"]);
   // A parameterised page is never a menu entry, but follows the same scope rule.
   const file = canonicalPageFor("/patients/7")!;
   expect(canonicalPageAllowed(file, [], false, { patientScope: "own" })).toBe(true);
   expect(canonicalPageAllowed(file, ["clinical.plans.view"], false, { patientScope: "none" })).toBe(false);
   expect(canonicalPageAllowed(file, [], true)).toBe(true);
-  expect(canonicalPagesFor(["staff.view"], false, { patientScope: "all" }).map(p => p.href)).toEqual(["/patients", "/staff-access"]);
+  expect(canonicalPagesFor(["staff.view"], false, { patientScope: "all" }).map(p => p.href)).toEqual(["/visits", "/patients", "/staff-access"]);
   // The appointment scope does not open the patient list.
   expect(canonicalPagesFor([], false, { appointmentScope: "all" }).map(p => p.href)).toEqual([]);
  });

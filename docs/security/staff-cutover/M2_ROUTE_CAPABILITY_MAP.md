@@ -34,12 +34,12 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 324 |
+| existing | 322 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 20 |
+| canonical-done | 22 |
 
 | Record scope | Routes |
 |---|---|
@@ -281,6 +281,21 @@ One admitted `patients.edit` transaction each (`lib/canonical-patient-writes.ts`
 - **Consent:** channel, state, source and note are validated; the consent row and its audit row commit together; `recordedBy` is the canonical actor.
 - **Screen:** the canonical profile offers «تعديل البيانات» (changed fields only; care fields only when the care group is projected) and «تسجيل الموافقة» when the session holds `patients.edit`.
 - **Tests:** PG `patients-canonical-writes` (11): field groups, scope (outside equals missing), admission refusals, revocation, concurrency, audit rollback, consent. Built journey `canonical-patient-writes-journey`.
+
+### Slice 11 — Today queue (`GET /api/visits`) and arrival (`POST /api/visits`)
+The crowding screen first. Read: the record read `read:visits.today`, one owning snapshot (`listTodayVisitsWith`). Write: one admitted `visits.manage` transaction (`lib/canonical-visits.ts`); `visits.manage` joins `CLINIC_RUNTIME_ACTIONS`.
+
+| Group | Contents | Shown when |
+|---|---|---|
+| identity | name, phone, status, chair, arrival/call/seat/finish times, appointment and doctor links | every actor admitted to the queue |
+| operational | the arrival note (a planned visit's note carries its clinical title) | a clinical grant or `patients.operational-summary.view` |
+
+- **Rows follow the current patient scope.** `all`: every visit of the clinic day. `own`: visits assigned to the actor's clinician party and visits of its patients (the patient list's condition). A role label never widens it.
+- **Arrival:** a file must be inside the actor's scope (outside answers exactly like a missing file, 404); a walk-in without a file needs no record. An `own`-scope actor opens visits on its own clinician party only (default when none is sent; another doctor is refused, 403 `visit_doctor_not_allowed`). An `all`-scope actor may name an active doctor only. One active visit per patient per day (409 `visit_already_active`, naming the visit). The audit row commits with the visit.
+- **Planned-visit start:** locks the planned row, checks its patient against the scope before any write, then starts the visit and moves the booked appointment to arrived in the same transaction. The legacy refusals are unchanged (`startVisitFromPlannedVisitWith`, shared with the legacy route).
+- **Not yet canonical:** the reception hand-off view (`?view=reception-handoff`, 409 `view_not_canonical`); call, seat, finish and the other queue actions (`PATCH /api/visits/[id]`, next slice).
+- **Screen:** `/visits` («قائمة اليوم») is registered for an account with a patient scope: summary, waiting list by longest wait (thresholds from settings), chairs, and the arrival form with a file search when `visits.manage` is held. It polls every 20 seconds and calls only `/api/visits` and `/api/patients`.
+- **Tests:** PG `visits-canonical-queue` (11); legacy PG files using the refactored writers (54 files, 703 tests); built journey `canonical-today-queue-journey` (3).
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.

@@ -20,7 +20,7 @@ export const INVENTORY_RUNTIME_ACTIONS = Object.freeze([
 export type InventoryRuntimeAction = typeof INVENTORY_RUNTIME_ACTIONS[number];
 /** Clinic operations migrated in M2 (docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md §5).
  * Each is an exact catalogue capability admitted by `withStaffOperation`. */
-export const CLINIC_RUNTIME_ACTIONS = Object.freeze(["patients.create", "patients.edit", "settings.view"] as const);
+export const CLINIC_RUNTIME_ACTIONS = Object.freeze(["patients.create", "patients.edit", "settings.view", "visits.manage"] as const);
 export type ClinicRuntimeAction = typeof CLINIC_RUNTIME_ACTIONS[number];
 export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view" | "inventory.items.create" | "inventory.units.revise" | "inventory.locations.create" | InventoryRuntimeAction | ClinicRuntimeAction;
 // A literal list (the readiness audit reads it as an AST constant); a unit test pins it
@@ -32,7 +32,7 @@ const actions = new Set<string>(["staff.view","staff.permissions.edit","inventor
  "inventory.custody.view","inventory.custody.dispatch","inventory.custody.acknowledge","inventory.custody.use",
  "inventory.custody.stocktake","inventory.custody.approve-waste","inventory.custody.settlement.propose",
  "inventory.custody.settlement.object","inventory.reconcile","inventory.costs.view","finance.suppliers.view",
- "patients.create","patients.edit","settings.view"]);
+ "patients.create","patients.edit","settings.view","visits.manage"]);
 /** Test hook: the exact admitted action list (copy). */
 export function staffRuntimeActions(): readonly string[] { return Object.freeze([...actions]); }
 declare const operationBrand: unique symbol;

@@ -1,0 +1,192 @@
+"use client";
+
+import { useCallback, useEffect, useId, useState } from "react";
+import { chairRows, daySummary, waitingRows, type Visit, type WaitLevel } from "@/lib/flow";
+import { useChairCount, useNumberSetting } from "@/components/SettingsProvider";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+
+/**
+ * قائمة اليوم لجلسة الهوية الموحّدة (M2 slice 11).
+ *
+ * قراءة واحدة: GET /api/visits يعيد زيارات اليوم ضمن نطاق مرضاك فقط، وملاحظة الوصول
+ * لمن يملك الملخص التشغيلي. التسجيل يظهر لمن يملك visits.manage، والخادم يتحقق منه مجددًا.
+ * لا تُستدعى مسارات قديمة (جاهزية الكرسي، التسليم، المواعيد) حتى تُنقل.
+ */
+interface QueueView { visits: (Visit & { note?: string | null })[]; projection: { note: boolean }; canManage: boolean }
+interface PatientMatch { id: number; patientNumber: string; fullName: string; phone: string | null }
+
+const LEVEL_CLASS: Record<WaitLevel, string> = {
+  calm: "border-slate-200 bg-white",
+  warning: "border-amber-300 bg-amber-50",
+  critical: "border-red-300 bg-red-50",
+};
+const POLL_MS = 20_000;
+/** ساعة الوصول بتوقيت العيادة لا بساعة الجهاز. */
+const arrivalTime = (iso: string) => new Date(iso).toLocaleTimeString("ar-YE", { timeZone: CLINIC_ZONE_FALLBACK, hour: "2-digit", minute: "2-digit", hour12: true });
+
+export function CanonicalTodayQueue() {
+  const [view, setView] = useState<QueueView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => new Date());
+  const chairCount = useChairCount();
+  const thresholds = { warningMinutes: useNumberSetting("ops.wait_warning_minutes"), criticalMinutes: useNumberSetting("ops.wait_critical_minutes") };
+
+  // Every reload (poll, refresh button, after an arrival) bumps the version.
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => setVersion(current => current + 1), []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/visits", { cache: "no-store" });
+        const payload = await response.json().catch(() => null);
+        if (cancelled) return;
+        if (!response.ok) { setError(payload?.message ?? "تعذّر تحميل قائمة اليوم."); return; }
+        setView(payload as QueueView);
+        setError(null);
+        setNow(new Date());
+      } catch { if (!cancelled) setError("تعذّر الاتصال بالخادم. القائمة المعروضة قد لا تكون محدّثة."); }
+    })();
+    return () => { cancelled = true; };
+  }, [version]);
+  useEffect(() => {
+    const timer = window.setInterval(reload, POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [reload]);
+
+  const visits = view?.visits ?? [];
+  const summary = daySummary(chairCount, visits, now);
+  const waiting = waitingRows(visits, now, thresholds);
+  const chairs = chairRows(chairCount, visits, now);
+  return (
+    <section aria-labelledby="today-queue-title" className="mx-auto max-w-4xl space-y-4" data-testid="canonical-today-queue">
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <h1 id="today-queue-title" className="text-lg font-black text-navy-900">قائمة اليوم</h1>
+        <button type="button" onClick={reload} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">تحديث</button>
+      </header>
+      {error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+      {view ? (
+        <>
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="queue-summary">
+            {([["ينتظرون", summary.waiting], ["على الكرسي", summary.inChair], ["أطول انتظار", `${summary.longestWaitMinutes} د`], ["كراسي فارغة", summary.freeChairs]] as const).map(([label, value]) => (
+              <div key={label} className="rounded-2xl border border-slate-200 bg-white p-3">
+                <dt className="text-xs font-semibold text-slate-600">{label}</dt>
+                <dd className="text-xl font-black text-navy-900">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {view.canManage ? <ArrivalForm onArrived={reload} /> : null}
+          <section aria-labelledby="waiting-title" className="space-y-2">
+            <h2 id="waiting-title" className="text-sm font-bold text-navy-900">المنتظرون ({waiting.length})</h2>
+            {waiting.length === 0 ? <p className="text-sm text-slate-600">لا أحد ينتظر الآن.</p> : (
+              <ul className="space-y-2" data-testid="waiting-list">
+                {waiting.map(row => (
+                  <li key={row.visit.id} className={`rounded-2xl border p-3 ${LEVEL_CLASS[row.level]}`}>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-sm font-bold text-navy-900">{row.visit.patientName}</span>
+                      <span className="text-xs font-semibold text-slate-700">ينتظر منذ {row.waitedMinutes} د — وصل {arrivalTime(row.visit.arrivedAt)}</span>
+                    </div>
+                    {view.projection.note && row.visit.note ? <p className="mt-1 text-xs text-slate-700">{row.visit.note}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section aria-labelledby="chairs-title" className="space-y-2">
+            <h2 id="chairs-title" className="text-sm font-bold text-navy-900">الكراسي</h2>
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {chairs.map(row => (
+                <li key={row.chair} className="rounded-2xl border border-slate-200 bg-white p-3 text-sm">
+                  <span className="font-bold text-navy-900">كرسي {row.chair}: </span>
+                  {row.occupant ? `${row.occupant.patientName} — منذ ${row.busyMinutes} د`
+                    : row.calledFor ? `نُودي على ${row.calledFor.patientName}` : "فارغ"}
+                </li>
+              ))}
+            </ul>
+          </section>
+          <p className="text-xs text-slate-600">النداء والإجلاس والإنهاء تُنقل إلى الهوية الموحّدة في الشريحة التالية؛ القائمة تتحدّث كل عشرين ثانية.</p>
+        </>
+      ) : error ? null : <p role="status" className="text-sm text-slate-600">جارٍ تحميل قائمة اليوم…</p>}
+    </section>
+  );
+}
+
+/** تسجيل الوصول: ملفٌّ من البحث (ضمن نطاقك) أو اسمٌ حر لمريضٍ بلا ملف. */
+function ArrivalForm({ onArrived }: { onArrived: () => void }) {
+  const uid = useId();
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [note, setNote] = useState("");
+  const [matches, setMatches] = useState<PatientMatch[]>([]);
+  const [picked, setPicked] = useState<PatientMatch | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    const term = name.trim();
+    if (picked || term.length < 2) { setMatches([]); return; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch(`/api/patients?q=${encodeURIComponent(term)}`, { cache: "no-store", signal: controller.signal })
+        .then(response => response.ok ? response.json() : [])
+        .then((rows: PatientMatch[]) => setMatches(Array.isArray(rows) ? rows.slice(0, 5) : []))
+        .catch(() => undefined);
+    }, 250);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [name, picked]);
+
+  async function arrive() {
+    setBusy(true); setMessage(null);
+    try {
+      const body = picked
+        ? { patientId: picked.id, patientName: picked.fullName, patientPhone: picked.phone ?? "", note }
+        : { patientName: name, patientPhone: phone, note };
+      const response = await fetch("/api/visits", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { setMessage({ ok: false, text: payload?.message ?? "تعذّر تسجيل المريض." }); return; }
+      setMessage({ ok: true, text: `سُجّل وصول ${payload?.patientName ?? "المريض"}.` });
+      setName(""); setPhone(""); setNote(""); setPicked(null);
+      onArrived();
+    } catch { setMessage({ ok: false, text: "تعذّر الاتصال بالخادم. لم يُعتبر الوصول مسجّلًا." }); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <section aria-labelledby={`${uid}-title`} className="rounded-2xl border border-navy-200 bg-white p-4" data-testid="arrival-form">
+      <h2 id={`${uid}-title`} className="mb-2 text-sm font-bold text-navy-900">تسجيل وصول</h2>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <label htmlFor={`${uid}-name`} className="text-xs font-bold text-navy-900">اسم المريض
+          <input id={`${uid}-name`} value={picked ? picked.fullName : name} disabled={busy}
+            onChange={event => { setPicked(null); setName(event.target.value); }}
+            className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm" />
+        </label>
+        {picked ? null : (
+          <label htmlFor={`${uid}-phone`} className="text-xs font-bold text-navy-900">الجوال
+            <input id={`${uid}-phone`} dir="ltr" value={phone} disabled={busy} onChange={event => setPhone(event.target.value)}
+              className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm" />
+          </label>
+        )}
+        <label htmlFor={`${uid}-note`} className="text-xs font-bold text-navy-900">ملاحظة
+          <input id={`${uid}-note`} value={note} disabled={busy} onChange={event => setNote(event.target.value)}
+            className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm" />
+        </label>
+      </div>
+      {matches.length > 0 ? (
+        <ul aria-label="ملفات مطابقة" className="mt-2 space-y-1">
+          {matches.map(match => (
+            <li key={match.id}>
+              <button type="button" onClick={() => { setPicked(match); setMatches([]); }}
+                className="min-h-11 w-full rounded-xl border border-slate-200 px-3 text-start text-sm hover:border-navy-300">
+                {match.fullName} <span className="text-xs text-slate-600">({match.patientNumber})</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {picked ? <p className="mt-2 text-xs text-slate-700">مرتبط بملف {picked.patientNumber}. <button type="button" className="font-bold underline" onClick={() => setPicked(null)}>إلغاء الربط</button></p> : null}
+      <button type="button" onClick={() => void arrive()} disabled={busy || !(picked || name.trim())}
+        className="mt-3 min-h-11 rounded-xl bg-navy-900 px-4 text-sm font-bold text-white disabled:opacity-50">وصل</button>
+      {message ? <p role={message.ok ? "status" : "alert"} className={`mt-2 text-sm ${message.ok ? "text-emerald-700" : "text-red-700"}`}>{message.text}</p> : null}
+    </section>
+  );
+}

@@ -27,6 +27,8 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   /** Clinical sub-reads of one patient (medical history, vitals, problems): a clinical
    * grant (the care group of lib/canonical-patient-reads.ts) inside the patient scope. */
   "read:patients.clinical": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze(["clinical.plans.view", "clinical.visits.document", "clinical.xrays.view"] as const) }),
+  /** GET /api/visits: today's queue, rows inside the actor's patient scope (M2 slice 11). */
+  "read:visits.today": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { CanonicalPatientReadRefusal } from "./canonical-patient-reads";
 import { CanonicalPatientWriteRefusal } from "./canonical-patient-writes";
+import { CanonicalVisitRefusal } from "./canonical-visits";
 import { staffAdmissionRefusal } from "./staff-capability-editor";
 import { selectRequestStaffEnvelope } from "./staff-session-admission";
 import type { VerifiedDurableSession } from "./staff-durable-session";
@@ -34,6 +35,15 @@ export function canonicalPatientReadFailure(error: unknown, fallback: string): N
 export function canonicalPatientWriteFailure(error: unknown, fallback: string): NextResponse {
   if (error instanceof CanonicalPatientWriteRefusal) {
     return NextResponse.json({ code: error.code, message: error.message, ...(error.field ? { field: error.field } : {}) }, { status: error.status, headers: NO_STORE });
+  }
+  return canonicalPatientReadFailure(error, fallback);
+}
+
+/** Canonical visit routes (M2 slice 11): the refusal carries the existing visit when one
+ * is already active, so the screen opens it instead of a duplicate. */
+export function canonicalVisitFailure(error: unknown, fallback: string): NextResponse {
+  if (error instanceof CanonicalVisitRefusal) {
+    return NextResponse.json({ code: error.code, message: error.message, ...(error.visitId ? { visitId: error.visitId } : {}) }, { status: error.status, headers: NO_STORE });
   }
   return canonicalPatientReadFailure(error, fallback);
 }

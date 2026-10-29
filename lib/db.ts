@@ -2491,6 +2491,21 @@ export async function listTodayVisits(): Promise<Visit[]> {
   return rows.map(toVisit);
 }
 
+/** Today's visits in the owning snapshot (canonical queue, M2 slice 11). A clinician
+ * scope (`doctorPartyId`) keeps the visits assigned to that clinician and those of its
+ * patients (the same condition as the patient list); null lists every visit. */
+export async function listTodayVisitsWith(q: Pick<DbClient, "query">, doctorPartyId: number | null): Promise<Visit[]> {
+  if (doctorPartyId === null) return (await q.query<VisitRow>(TODAY_VISITS_SQL, [CLINIC_TIME_ZONE])).rows.map(toVisit);
+  const { rows } = await q.query<VisitRow>(
+    `SELECT v.* FROM visits v
+      WHERE ${onClinicDaySql("v.arrived_at", "$1", clinicTodaySql("$1"))}
+        AND (v.doctor_id = $2 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = v.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")}))
+      ORDER BY v.arrived_at ASC`,
+    [CLINIC_TIME_ZONE, doctorPartyId],
+  );
+  return rows.map(toVisit);
+}
+
 /* توقيت العيادة من مصدره الواحد — والمنطقة المجهولة تُردّ إلى الافتراضي لا تُمرَّر
    إلى Intl فتُسقط كل حسابٍ لليوم في كل شاشة. */
 export const CLINIC_TIME_ZONE = resolveClinicZone(process.env.CLINIC_TIME_ZONE);
@@ -2567,6 +2582,26 @@ async function activeVisitToday(
   return rows[0] ?? null;
 }
 
+/** The arrival INSERT inside the caller's transaction (legacy addVisit and the canonical
+ * arrival, M2 slice 11). The caller owns BEGIN/COMMIT. */
+export async function addVisitWith(client: DbClient, input: {
+  patientName: string; patientPhone: string | null; note: string | null; patientId?: number | null; doctorId?: number | null;
+}): Promise<Visit> {
+  /* (LIVE-4) مريضٌ بملفٍّ لا يُفتح له صفٌّ ثانٍ وهو في الطابور؛ المشي بلا ملفٍّ لا يُعرف
+     صاحبه فلا يُحجب. */
+  if (input.patientId) {
+    await lockPatientDay(client, input.patientId);
+    const active = await activeVisitToday(client, input.patientId);
+    if (active) throw new ActiveVisitExists(active.id, active.status);
+  }
+  const { rows } = await client.query<VisitRow>(
+    `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id)
+     VALUES ($1, $2, $3, $4::int, $5::int) RETURNING *`,
+    [input.patientName, input.patientPhone, input.note, input.patientId ?? null, input.doctorId ?? null],
+  );
+  return toVisit(rows[0]);
+}
+
 export async function addVisit(input: {
   patientName: string;
   patientPhone: string | null;
@@ -2580,20 +2615,9 @@ export async function addVisit(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    /* (LIVE-4) مريضٌ بملفٍّ لا يُفتح له صفٌّ ثانٍ وهو في الطابور؛ المشي بلا ملفٍّ لا يُعرف
-       صاحبه فلا يُحجب. */
-    if (input.patientId) {
-      await lockPatientDay(client, input.patientId);
-      const active = await activeVisitToday(client, input.patientId);
-      if (active) throw new ActiveVisitExists(active.id, active.status);
-    }
-    const { rows } = await client.query<VisitRow>(
-      `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id)
-       VALUES ($1, $2, $3, $4::int, $5::int) RETURNING *`,
-      [input.patientName, input.patientPhone, input.note, input.patientId ?? null, input.doctorId ?? null],
-    );
+    const visit = await addVisitWith(client, input);
     await client.query("COMMIT");
-    return toVisit(rows[0]);
+    return visit;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -22062,116 +22086,133 @@ class PlannedVisitRejected extends Error {
  * الطبيب في «مخطَّط لليوم» ماذا سيعمل قبل أن يفتح الزيارة. والزيارة المخطَّطة
  * تصير «زيارة قائمة» لا «منجَزة»: المنجز ما وُقِّع، لا ما بدأ.
  */
+/** A planned-visit start whose appointment arrival failed after the visit was written. */
+export class PlannedVisitStartConflict extends Error {
+  constructor() { super("planned visit start conflict"); this.name = "PlannedVisitStartConflict"; }
+}
+type PlannedVisitStart = Visit | null | { alreadyActive: true; visitId: number } | { appointmentConflict: true };
+
 export async function startVisitFromPlannedVisit(input: {
   plannedVisitId: number;
   actor: string;
   actorRole?: string;
-}): Promise<Visit | null | { alreadyActive: true; visitId: number } | { appointmentConflict: true }> {
+}): Promise<PlannedVisitStart> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-
-    // Appointment first, matching arrival/cancellation. Never acquire it while holding the plan.
-    const { rows: appointments } = await client.query<{ id: number; status: AppointmentStatus; patient_id: number; referral_id: number | null }>(
-      `SELECT a.id, a.status, a.patient_id, a.referral_id FROM appointments a
-        WHERE a.planned_visit_id = $1 OR a.id = (SELECT appointment_id FROM planned_visits WHERE id = $1)
-        ORDER BY a.id FOR UPDATE`, [input.plannedVisitId]);
-
-    const { rows: plannedRows } = await client.query<{
-      id: number; patient_id: number; full_name: string; phone: string | null;
-      title: string; doctor_id: number | null; status: string; visit_id: number | null; appointment_id: number | null;
-    }>(
-      `SELECT v.id, v.patient_id, p.full_name, p.phone, v.title, v.doctor_id, v.status, v.visit_id, v.appointment_id
-         FROM planned_visits v JOIN patients p ON p.id = v.patient_id
-        WHERE v.id = $1 FOR UPDATE OF v`,
-      [input.plannedVisitId],
-    );
-    const planned = plannedRows[0];
-    if (!planned) { await client.query("ROLLBACK"); return null; }
-
-    // Recheck without taking new appointment locks: a concurrent scheduling/retarget
-    // operation may have committed while we waited for the plan. Retry via the API.
-    const { rows: currentLinks } = await client.query<{ id: number }>(
-      `SELECT id FROM appointments WHERE planned_visit_id = $1 OR id = $2 ORDER BY id`,
-      [input.plannedVisitId, planned.appointment_id]);
-    const appointment = appointments[0];
-    if (appointments.length > 1 || currentLinks.length !== appointments.length
-      || currentLinks.some((row, index) => row.id !== appointments[index]?.id)
-      || (appointment && (appointment.patient_id !== planned.patient_id
-        || !["booked", "arrived"].includes(appointment.status)))) {
-      await client.query("ROLLBACK");
-      return { appointmentConflict: true };
-    }
-    if (appointment) {
-      const { rows: linkedVisits } = await client.query<{
-        id: number; status: string; signed_at: Date | null; finished_at: Date | null;
-      }>(
-        `SELECT id, status, signed_at, finished_at FROM visits
-          WHERE appointment_id = $1 OR planned_visit_id = $2 OR id = $3 ORDER BY id`,
-        [appointment.id, input.plannedVisitId, planned.visit_id]);
-      if (linkedVisits.some(visit => visit.signed_at || visit.finished_at || visit.status === "done")) {
-        await client.query("ROLLBACK");
-        return { appointmentConflict: true };
-      }
-      const active = linkedVisits.find(visit => ["waiting", "called", "in_chair"].includes(visit.status));
-      if (active) {
-        await client.query("ROLLBACK");
-        return { alreadyActive: true, visitId: active.id };
-      }
-    }
-
-    // زيارةٌ قائمة لهذه الزيارة المخطَّطة: لا ثانية — المريض على الكرسي مرةً واحدة.
-    if (planned.visit_id) {
-      const { rows: active } = await client.query<{ id: number; signed_at: Date | null }>(
-        `SELECT id, signed_at FROM visits WHERE id = $1`,
-        [planned.visit_id],
-      );
-      if (active[0] && !active[0].signed_at) {
-        await client.query("ROLLBACK");
-        return { alreadyActive: true, visitId: active[0].id };
-      }
-    }
-    if (planned.status === "completed" || planned.status === "cancelled") {
-      await client.query("ROLLBACK");
-      return null;
-    }
-
-    const { rows: created } = await client.query<VisitRow>(
-      `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id, planned_visit_id, appointment_id)
-       VALUES ($1, $2, $3, $4, $5::int, $6, $7) RETURNING *`,
-      [planned.full_name, planned.phone, `مخطَّط: ${planned.title}`,
-       planned.patient_id, planned.doctor_id, input.plannedVisitId, appointment?.id ?? null],
-    );
-
-    await client.query(
-      `UPDATE planned_visits SET status = 'in_progress', visit_id = $2 WHERE id = $1`,
-      [input.plannedVisitId, created[0].id],
-    );
-
-    if (appointment?.status === "booked") {
-      const arrival = await transitionAppointmentInTransaction(client, appointment.id, "arrived", {
-        actor: input.actor, actorRole: input.actorRole,
-      });
-      if (!arrival.ok) {
-        await client.query("ROLLBACK");
-        return { appointmentConflict: true };
-      }
-    } else if (appointment) {
-      // An earlier arrival may have had no visit. Attach its case without repeating the transition.
-      await referralOnAppointmentArrived(client, {
-        referralId: appointment.referral_id, visitId: created[0].id,
-        who: { actor: input.actor, actorRole: input.actorRole },
-      });
-    }
-    await client.query("COMMIT");
-    return toVisit(created[0]);
+    const started = await startVisitFromPlannedVisitWith(client, input);
+    // Only a started visit commits; every refusal happens before any write.
+    await client.query(started && "id" in started ? "COMMIT" : "ROLLBACK");
+    return started;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
+    if (error instanceof PlannedVisitStartConflict) return { appointmentConflict: true };
     throw error;
   } finally {
     client.release();
   }
+}
+
+/**
+ * The planned-visit start inside the caller's transaction (legacy and canonical, M2
+ * slice 11). Refusals return before any write; a failure after the writes throws
+ * PlannedVisitStartConflict so the caller rolls back. `admit` runs once the planned
+ * row is locked, with its patient (the canonical record-scope check).
+ */
+export async function startVisitFromPlannedVisitWith(client: DbClient, input: {
+  plannedVisitId: number;
+  actor: string;
+  actorRole?: string;
+  admit?: (patientId: number) => Promise<void>;
+}): Promise<PlannedVisitStart> {
+  // Appointment first, matching arrival/cancellation. Never acquire it while holding the plan.
+  const { rows: appointments } = await client.query<{ id: number; status: AppointmentStatus; patient_id: number; referral_id: number | null }>(
+    `SELECT a.id, a.status, a.patient_id, a.referral_id FROM appointments a
+      WHERE a.planned_visit_id = $1 OR a.id = (SELECT appointment_id FROM planned_visits WHERE id = $1)
+      ORDER BY a.id FOR UPDATE`, [input.plannedVisitId]);
+
+  const { rows: plannedRows } = await client.query<{
+    id: number; patient_id: number; full_name: string; phone: string | null;
+    title: string; doctor_id: number | null; status: string; visit_id: number | null; appointment_id: number | null;
+  }>(
+    `SELECT v.id, v.patient_id, p.full_name, p.phone, v.title, v.doctor_id, v.status, v.visit_id, v.appointment_id
+       FROM planned_visits v JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1 FOR UPDATE OF v`,
+    [input.plannedVisitId],
+  );
+  const planned = plannedRows[0];
+  if (!planned) return null;
+  await input.admit?.(planned.patient_id);
+
+  // Recheck without taking new appointment locks: a concurrent scheduling/retarget
+  // operation may have committed while we waited for the plan. Retry via the API.
+  const { rows: currentLinks } = await client.query<{ id: number }>(
+    `SELECT id FROM appointments WHERE planned_visit_id = $1 OR id = $2 ORDER BY id`,
+    [input.plannedVisitId, planned.appointment_id]);
+  const appointment = appointments[0];
+  if (appointments.length > 1 || currentLinks.length !== appointments.length
+    || currentLinks.some((row, index) => row.id !== appointments[index]?.id)
+    || (appointment && (appointment.patient_id !== planned.patient_id
+      || !["booked", "arrived"].includes(appointment.status)))) {
+    return { appointmentConflict: true };
+  }
+  if (appointment) {
+    const { rows: linkedVisits } = await client.query<{
+      id: number; status: string; signed_at: Date | null; finished_at: Date | null;
+    }>(
+      `SELECT id, status, signed_at, finished_at FROM visits
+        WHERE appointment_id = $1 OR planned_visit_id = $2 OR id = $3 ORDER BY id`,
+      [appointment.id, input.plannedVisitId, planned.visit_id]);
+    if (linkedVisits.some(visit => visit.signed_at || visit.finished_at || visit.status === "done")) {
+      return { appointmentConflict: true };
+    }
+    const active = linkedVisits.find(visit => ["waiting", "called", "in_chair"].includes(visit.status));
+    if (active) {
+      return { alreadyActive: true, visitId: active.id };
+    }
+  }
+
+  // زيارةٌ قائمة لهذه الزيارة المخطَّطة: لا ثانية — المريض على الكرسي مرةً واحدة.
+  if (planned.visit_id) {
+    const { rows: active } = await client.query<{ id: number; signed_at: Date | null }>(
+      `SELECT id, signed_at FROM visits WHERE id = $1`,
+      [planned.visit_id],
+    );
+    if (active[0] && !active[0].signed_at) {
+      return { alreadyActive: true, visitId: active[0].id };
+    }
+  }
+  if (planned.status === "completed" || planned.status === "cancelled") {
+    return null;
+  }
+
+  const { rows: created } = await client.query<VisitRow>(
+    `INSERT INTO visits (patient_name, patient_phone, note, patient_id, doctor_id, planned_visit_id, appointment_id)
+     VALUES ($1, $2, $3, $4, $5::int, $6, $7) RETURNING *`,
+    [planned.full_name, planned.phone, `مخطَّط: ${planned.title}`,
+     planned.patient_id, planned.doctor_id, input.plannedVisitId, appointment?.id ?? null],
+  );
+
+  await client.query(
+    `UPDATE planned_visits SET status = 'in_progress', visit_id = $2 WHERE id = $1`,
+    [input.plannedVisitId, created[0].id],
+  );
+
+  if (appointment?.status === "booked") {
+    const arrival = await transitionAppointmentInTransaction(client, appointment.id, "arrived", {
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    // The visit and plan rows are already written: the caller rolls back.
+    if (!arrival.ok) throw new PlannedVisitStartConflict();
+  } else if (appointment) {
+    // An earlier arrival may have had no visit. Attach its case without repeating the transition.
+    await referralOnAppointmentArrived(client, {
+      referralId: appointment.referral_id, visitId: created[0].id,
+      who: { actor: input.actor, actorRole: input.actorRole },
+    });
+  }
+  return toVisit(created[0]);
 }
 
 /**
