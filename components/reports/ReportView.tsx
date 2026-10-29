@@ -242,7 +242,10 @@ export function ReportView({
         </footer>
       ) : null}
 
-      <div className="hidden print:block"><ReportPrintFooter /></div>
+      <footer className="report-print-footer hidden print:block">
+        <span className="print-report-meta">أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by}</span>
+        <ReportPrintFooter />
+      </footer>
       <p className="text-[10px] text-slate-400 print:hidden">
         أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by} · العملة الأساسية: {result.baseCurrency}
       </p>

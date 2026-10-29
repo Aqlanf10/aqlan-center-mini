@@ -44,4 +44,8 @@
 
 /* Keep the laboratory label, identifier and phone in a single inline field.
  * Flex label/value spreading fragments the native PDF reading order. */
-.sheet .labIdentity { display: block; }
+/* Preserve the original field typography as well as its inline grouping.
+ * Reducing its mixed Arabic/Latin label and identifier changes PDF word runs. */
+.sheet .labIdentity { display: block; line-height: 1.35; }
+.sheet .labIdentity > span:first-child { font-weight: bold; }
+.sheet .labIdentity > strong { font-size: 10.5pt; }

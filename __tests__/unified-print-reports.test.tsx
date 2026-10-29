@@ -76,13 +76,16 @@ describe("shared report print presentation preserves source evidence", () => {
     }
   });
 
-  it("keeps report-center attribution once in print metadata and the contact footer after the table", () => {
+  it("keeps report-center attribution in its semantic print footer after the table", () => {
     const result: ReportResult = { report: "daily", title: "تقرير اصطناعي", from: "2031-01-01", to: "2031-01-01", periodLabel: "فترة اصطناعية", filtersLabel: "مرشح اصطناعي", baseCurrency: "YER", kpis: [], columns: [{ key: "reference", label: "المرجع", type: "text" }], rows: [{ reference: "SYNTHETIC-REPORT-LAST-ROW" }] };
     const html = renderToStaticMarkup(<SettingsProvider value={identity}><ReportView result={result} clinicName={identity["clinic.name"]}
       generated={{ at: "2031-01-01T08:00:00Z", by: "مستخدم اصطناعي", clinicTimeZone: "Asia/Aden" }} printHref="/print/report?report=daily" view={EMPTY_REPORT_VIEW}
       onViewChange={() => {}} onPatientClick={() => {}} /></SettingsProvider>);
     expect(html).toContain('print-document-on-print');
     expect(html.indexOf('print-report-footer')).toBeGreaterThan(html.indexOf('SYNTHETIC-REPORT-LAST-ROW'));
+    expect(html).toContain('<footer class="report-print-footer hidden print:block">');
+    expect(html.indexOf('report-print-footer')).toBeGreaterThan(html.indexOf('SYNTHETIC-REPORT-LAST-ROW'));
+    expect(html.slice(html.indexOf('report-print-footer'))).toContain("بواسطة مستخدم اصطناعي");
     expect(html).not.toContain('position: fixed');
     expect(html).toContain(result.filtersLabel);
   });

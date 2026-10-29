@@ -578,7 +578,7 @@ export default function ReportPage() {
           ) : null}
         </div>
       ) : null}
-      {feed ? <div className="hidden print:block"><ReportPrintFooter /></div> : null}
+      {feed ? <footer className="hidden print:block"><ReportPrintFooter /></footer> : null}
     </main>
   );
 }

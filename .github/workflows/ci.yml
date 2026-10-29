@@ -1325,6 +1325,7 @@ jobs:
             .settings-ui-artifacts/official-contract-print/*.json
             .settings-ui-artifacts/unified-print/*.pdf
             .settings-ui-artifacts/unified-print/*.png
+            .settings-ui-artifacts/unified-print/*.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

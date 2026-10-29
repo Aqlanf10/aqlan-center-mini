@@ -12,7 +12,6 @@ import {
   type ReportOptions, type PeriodPreset, type DebtMode, type CompareMode,
 } from "@/lib/reports-types";
 import { DEBT_MODES } from "@/lib/reports-types";
-import { formatReportGeneratedAt } from "@/lib/report-generated-time";
 
 /**
  * أدوات عرض التقارير المشتركة — كل تقرير يُصيَّر بنفس اللبنات: بطاقات أرقام،
@@ -400,7 +399,7 @@ export function BarsChart({ bars, base }: { bars: { label: string; minor: number
 
 // ─── إطار الطباعة ────────────────────────────────────────────────────────────
 
-export function PrintFrame({ result, clinicName, generated }: {
+export function PrintFrame({ result, clinicName }: {
   result: ReportResult;
   clinicName: string;
   generated: { at: string; by: string; clinicTimeZone?: unknown };
@@ -414,7 +413,6 @@ export function PrintFrame({ result, clinicName, generated }: {
           <div className="line"><span>المرشّحات</span><span>{result.filtersLabel}</span></div>
         ) : null}
         <div className="line"><span>العملة الأساسية</span><span>{result.baseCurrency}</span></div>
-        <div className="line"><span>أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by}</span></div>
       </PrintMetadata>
       <style>{`
         @media print {

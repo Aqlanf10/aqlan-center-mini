@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { chromium } from "playwright";
@@ -36,9 +36,14 @@ beforeAll(async () => {
     .process(readFileSync(resolve("app/globals.css"), "utf8"), { from: resolve("app/globals.css") })).css;
 });
 function labCss() {
-  let css = readFileSync(resolve("app/print/lab/[id]/lab-dispatch.module.css"), "utf8");
-  for (const name of Object.keys(labStyles)) css = css.replace(new RegExp(`\\.${name}(?![\\w-])`, "g"), `.${labStyles[name]}`);
-  return css;
+  const css = postcss.parse(readFileSync(resolve("app/print/lab/[id]/lab-dispatch.module.css"), "utf8"));
+  // Vitest's CSS-module proxy resolves property access but has no enumerable
+  // keys. Remap the actual selectors, or the SSR fixture silently omits every
+  // scoped route rule even though its rendered class names are hashed.
+  css.walkRules(rule => {
+    rule.selector = rule.selector.replace(/\.([_a-zA-Z][\w-]*)/g, (_, name: string) => `.${labStyles[name]}`);
+  });
+  return css.toString();
 }
 describe("native compact print regression witnesses", () => {
   it.each(["receipt", "lab"] as const)("preserves %s paper and field integrity", async kind => {
@@ -46,13 +51,20 @@ describe("native compact print regression witnesses", () => {
     const body = renderToStaticMarkup(<><PrintDocumentWatermark /><div className="print-root">{node}</div></>);
     const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
     const css = globalCss + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + (kind === "lab" ? labCss() : "");
+    if (kind === "lab") expect(css).toContain(`.${labStyles.sheet} .${labStyles.labIdentity} { display: block; line-height: 1.35; }`);
+    const output = resolve(".settings-ui-artifacts/unified-print");
+    mkdirSync(output, { recursive: true });
+    const html = `<!doctype html><html lang="ar" dir="rtl"><style>${css}</style><body>${body.replaceAll('src="/logo.png"', `src="${logo}"`)}</body></html>`;
+    writeFileSync(resolve(output, `${kind}-compact-source.json`), JSON.stringify({ syntheticOnly: true, cssModuleKeys: Object.keys(labStyles), sheetClass: labStyles.sheet, labIdentityClass: labStyles.labIdentity, html }, null, 2));
     const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
     try {
       const page = await browser.newPage();
       await page.route("**/*", route => route.abort());
-      await page.setContent(`<!doctype html><html lang="ar" dir="rtl"><style>${css}</style><body>${body.replaceAll('src="/logo.png"', `src="${logo}"`)}</body></html>`);
+      await page.setContent(html);
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode().catch(() => undefined))); });
-      const pdf = await page.pdf({ format: kind === "receipt" ? "A6" : "A4", printBackground: true, displayHeaderFooter: false });
+      await page.emulateMedia({ media: "print" });
+      await page.screenshot({ path: resolve(output, `${kind}-compact.png`), fullPage: true });
+      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), format: kind === "receipt" ? "A6" : "A4", printBackground: true, displayHeaderFooter: false });
       const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
       const pages = await page.evaluate(raw => {
         const doc = new DOMParser().parseFromString(raw, "application/xml");
@@ -63,7 +75,11 @@ describe("native compact print regression witnesses", () => {
           blocks: [...node.getElementsByTagName("block")].map(block => ({ ...box(block), lines: [...block.getElementsByTagName("line")].map(line => [...line.getElementsByTagName("word")].map(word => ({ ...box(word), text: word.textContent ?? "" }))) })),
         }));
       }, xml);
+      writeFileSync(resolve(output, `${kind}-compact-geometry.json`), JSON.stringify({ syntheticOnly: true, pages }, null, 2));
       if (kind === "lab") {
+        const layout = await page.locator(`.${labStyles.labIdentity}`).evaluate(node => ({ display: getComputedStyle(node).display, parentDisplay: getComputedStyle(node.parentElement!).display, labelWeight: getComputedStyle(node.querySelector("span")!).fontWeight, identifierSize: getComputedStyle(node.querySelector("strong")!).fontSize }));
+        writeFileSync(resolve(output, "lab-compact-layout.json"), JSON.stringify({ syntheticOnly: true, layout }, null, 2));
+        expect(layout).toEqual({ display: "block", parentDisplay: "grid", labelWeight: "700", identifierSize: "14px" });
         expect(pages.length).toBeGreaterThan(0);
         assertLabDispatchPdfFields(pages, { service: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", lab: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456" });
       } else {

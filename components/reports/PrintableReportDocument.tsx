@@ -155,6 +155,10 @@ export function PrintableReportDocument({
     : null;
   const detailColumns = applied?.columns ?? result.columns;
   const landscape = Math.max(detailColumns?.length ?? 0, result.monthly?.columns.length ?? 0) >= 8;
+  // Collections already has a native compact landscape composition. Keep its
+  // original inline metadata grouping/metrics; the generic boxed flex fields
+  // wrap the generation/byline fragments and push the closing onto a new page.
+  const Metadata = result.report === "collections" ? "div" : PrintMetadata;
 
   return (
     <>
@@ -162,12 +166,12 @@ export function PrintableReportDocument({
       <div className={`sheet sheet-report ${landscape ? "sheet-report-landscape" : ""}`} data-report={result.report}>
         <PrintHeader settings={settings} title={result.title} />
 
-        <PrintMetadata>
+        <Metadata className={result.report === "collections" ? "report-meta" : undefined}>
           <div><strong>الفترة:</strong> {result.periodLabel}</div>
           <div><strong>الفلاتر:</strong> {result.filtersLabel || "بدون فلاتر إضافية"}</div>
           <div><strong>أُنشئ:</strong> {generatedAt} · <strong>بواسطة:</strong> {generatedBy}</div>
           <div><strong>العملة الأساسية:</strong> {result.baseCurrency}</div>
-        </PrintMetadata>
+        </Metadata>
 
         {result.subtitle ? <p className="report-subtitle">{result.subtitle}</p> : null}
 
