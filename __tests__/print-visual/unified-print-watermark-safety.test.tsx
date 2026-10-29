@@ -67,7 +67,7 @@ describe("hosted watermark isolation and protected-pixel behavior", () => {
     const qr = await QRCode.toDataURL("SYNTHETIC-QR-NO-PATIENT-DATA", { width: 100, margin: 4 });
     const signature = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="130" height="30"><path d="M5 22Q25 3 45 20T85 18T125 10" fill="none" stroke="black" stroke-width="2"/></svg>').toString("base64")}`;
     const markup = renderToStaticMarkup(<><PrintDocumentWatermark /><PrintHeader settings={SETTING_DEFAULTS} title="اختبار صناعي لحماية مناطق المستند" />
-      <div className="print-watermark-protected" id="protected-pixels" style={{ position: "fixed", left: "50%", top: "50%", transform: "translate(-50%, -50%)", width: 150, padding: 8 }}>
+      <div className="print-watermark-protected" id="protected-pixels" style={{ position: "fixed", left: 322, top: 470, width: 150, padding: 8 }}>
         <img src={qr} alt="Synthetic QR" width={100} height={100} /><svg width="130" height="25"><rect width="65" height="25" fill="#0284c7" /><rect x="65" width="65" height="25" fill="#b91c1c" /></svg><img data-signature-img src={signature} alt="Synthetic signature" width={130} height={30} />
       </div></>);
     const browser = await chromium.launch();
@@ -77,12 +77,19 @@ describe("hosted watermark isolation and protected-pixel behavior", () => {
       mkdirSync(output, { recursive: true });
       const protectedRegion = page.locator("#protected-pixels");
       const box = await protectedRegion.boundingBox(); expect(box).not.toBeNull();
-      const painted = await protectedRegion.evaluate(node => ({ background: getComputedStyle(node).backgroundColor, zIndex: getComputedStyle(node).zIndex }));
-      expect(painted).toEqual({ background: "rgb(255, 255, 255)", zIndex: "20" });
-      // Locator screenshots round fractional CSS edges outward. Such edge pixels
-      // partly belong to the surrounding watermark, not to the opaque region.
-      // Compare every fully covered pixel on one stable integer-aligned crop.
+      const painted = await protectedRegion.evaluate(node => ({ background: getComputedStyle(node).backgroundColor, zIndex: getComputedStyle(node).zIndex, transform: getComputedStyle(node).transform, deviceScale: window.devicePixelRatio }));
+      expect(painted).toEqual({ background: "rgb(255, 255, 255)", zIndex: "20", transform: "none", deviceScale: 1 });
+      expect(box!.x).toBe(322); expect(box!.y).toBe(470);
+      const logoBox = await page.locator("body > .print-document-watermark").boundingBox(); expect(logoBox).not.toBeNull();
+      const logoCenter = { x: logoBox!.x + logoBox!.width / 2, y: logoBox!.y + logoBox!.height / 2 };
+      expect(box!.x).toBeLessThan(logoCenter.x); expect(box!.x + box!.width).toBeGreaterThan(logoCenter.x);
+      expect(box!.y).toBeLessThan(logoCenter.y); expect(box!.y + box!.height).toBeGreaterThan(logoCenter.y);
+      // Place the adversarial box on device-pixel coordinates without transform
+      // rasterization. The diagnostic hosted fixture differed only on the translated
+      // outer top paint edge; all QR/signature/clinical pixels already matched.
+      // Keep the entire protected rectangle, with no tolerance or edge removal.
       const clip = { x: Math.ceil(box!.x), y: Math.ceil(box!.y), width: Math.floor(box!.x + box!.width) - Math.ceil(box!.x), height: Math.floor(box!.y + box!.height) - Math.ceil(box!.y) };
+      expect(clip).toEqual(box);
       expect(clip.width).toBeGreaterThan(140); expect(clip.height).toBeGreaterThan(100);
       const protectedWithLogo = await page.screenshot({ clip, path: resolve(output, "protected-with-logo.png") });
       const pageWithLogo = await page.screenshot({ path: resolve(output, "protected-page-with-logo.png") });
