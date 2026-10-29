@@ -1,6 +1,6 @@
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { clearAccountLoginLimits, consumeSharedLoginLimits, consumeStaffAccountLimit } from "./login-limit-storage";
-import { readStaffEntryMode } from "./legacy-staff-schema.mjs";
+import { STAFF_AUTHORITY_COLUMNS, STAFF_AUTHORITY_RELATIONS, readStaffEntryMode } from "./legacy-staff-schema.mjs";
 import { readLegacyStaffSchema, assertLegacyPermissionEnvelope, lockLegacyStaffBoundary, assertLegacyStaffWrite, finishLegacyStaffWrite, type LegacyStaffWriteAuthorization } from "./legacy-staff-boundary";
 import { CommissionLabLineageError } from "./commission-lab-lineage";
 import { LabFinancialBoundaryError, savedLabPayableSnapshot } from "./lab-financial-boundary";
@@ -16503,6 +16503,12 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   for (const table of ordered) {
     // Capability belongs to the target migration, never to restored application data.
     if (table === "lab_work_intent_schema") continue;
+    // Restore protocol B1: identity is not data. The target owns its realm, generations,
+    // subjects and control; the manifest carries only a provenance line.
+    if (STAFF_AUTHORITY_RELATIONS.includes(table)) {
+      yield `\n-- ${table}: target-owned authority, never backed up as data (restore protocol B1)\n`;
+      continue;
+    }
     if (table === "supplier_invoice_number_claims") {
       yield `\n-- supplier_invoice_number_claims: verified exact reconstruction from immutable invoice sources\n`;
       continue;
@@ -16517,8 +16523,11 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     // A restored admission belongs to the restore transaction; carrying a source
     // cluster XID can collide with a later destination transaction and falsely
     // classify a durable admission as uncommitted. Payload/actor/key stay exact.
-    const restoredColumns = table === "inventory_command_bindings"
-      ? columnRows.filter((row) => row.column_name !== "created_xid") : columnRows;
+    // B2: the identity columns 0076 adds to users/parties are target-owned too.
+    const authorityColumns: readonly string[] = table === "users" ? STAFF_AUTHORITY_COLUMNS.users : table === "parties" ? STAFF_AUTHORITY_COLUMNS.parties : [];
+    const restoredColumns = (table === "inventory_command_bindings"
+      ? columnRows.filter((row) => row.column_name !== "created_xid") : columnRows)
+      .filter((row) => !authorityColumns.includes(row.column_name));
     const columns = restoredColumns.map((row) => row.column_name);
     if (columns.length === 0) continue;
     /* (P1.14) التسلسل واعٍ بأنواع الأعمدة: jsonb يُكتب JSON، وARRAY literal

@@ -1,6 +1,6 @@
 # Target-side restore protocol for canonical inventory history — PROPOSAL for review
 
-Status: **proposal, not implemented. Revision 2 (Dot review 6479317375 items 1, 2 and 4).** Written for Dot's review (6458434508: "restore must not import the source realm or execution history; it needs a reviewed target-side protocol"; 6475545205 item 5: "review the target-side recovery protocol before M3a implementation").
+Status: **revision 3: B1, B2 and R1 implemented in isolation (synthetic proof only; see §5); R2 specified with one open dependency (D1); R4, R5 and the full round trip pending.** Revision 2 answered Dot review 6479317375 items 1, 2 and 4; revision 3 answers the focused review 6486144288. Written for Dot's review (6458434508: "restore must not import the source realm or execution history; it needs a reviewed target-side protocol"; 6475545205 item 5: "review the target-side recovery protocol before M3a implementation").
 
 Read it with:
 - [CANONICAL-RECOVERY-REQUIREMENTS-20261027.md](CANONICAL-RECOVERY-REQUIREMENTS-20261027.md), the requirements this proposal answers;
@@ -109,3 +109,57 @@ Once this protocol is approved:
 - that file is replaced by the canonical round trip in §3;
 - B1/B2 and R5 are implemented;
 - `finalizeRestoredStaffIdentityInTransaction` gains its canonical branch (refuse source identity rows; keep the target in maintenance).
+
+## 5. Revision 3 (Dot review 6486144288)
+
+Approved direction is for isolated implementation and proof only: no live restoration, preparation, seal or activation.
+
+### 5.1 Constraint 1: previously-ready targets are refused
+- A canonical-source restore (the manifest carries `identityProvenance`, B1) installs the hold first. The hold transaction refuses any target that has an authority footprint (ready, quarantined, prepared or retired schema): `restore_target_has_identity`. It also refuses a target with any base table: `restore_target_not_empty`. `allowNonEmptyTarget` does not apply to a canonical source.
+- Test: a READY canonical database with an operation admitted under a durable session. The restore's hold transaction waits for that operation (observed with `pg_blocking_pids`), then refuses. Nothing is written. The same session is shown valid both before and after the attempt, so the test does not rely on a session that was already invalid.
+
+### 5.2 Constraint 2: total lock order and admission drain (R2)
+Lock order on the target, consistent with OWNER_READINESS_AND_ISSUANCE §4 (`lifecycle fence → control → identity → users → bindings → providers → … → domain`):
+1. **Hold transaction:** lifecycle fence EXCLUSIVE; then the footprint and empty-target checks; then the hold relation, guard and row; COMMIT. No other lock precedes the fence.
+2. **Migration:** the registered migration runner, in its own transactions, after the hold commit. It takes no lifecycle fence, and nothing holds the fence while it runs.
+3. **Replay transaction:** lifecycle fence EXCLUSIVE first; then the deferred constraints, the data, the B1 check (no source authority relation) and the B2 rewrite (every imported permission document becomes `pending`); COMMIT.
+
+Admission drain. Work that could already have been admitted on the target falls into four groups:
+- **Fenced work** (canonical issuer, canonical operations, owning readers, legacy staff writers) holds the shared lifecycle fence until it commits. The hold's exclusive acquisition waits for all of it, and then refuses the target because of its footprint or contents (5.1).
+- **Legacy domain work** (ordinary legacy routes) is admitted by `requireSession`, which revalidates the account against the target's `users` rows. A target accepted by the hold transaction has no base table, so no such request can have been admitted against it. After the hold commits, every legacy revalidation goes through `readLegacyStaffSchema`, which refuses on the footprint.
+- **Canonical entry** after the hold needs a ready identity, which the target cannot have before its own seal.
+- **D1, open dependency (needs your decision):** `ensureSchema` checks the footprint and then runs its bootstrap DDL and seed without the fence. An application instance pointed at the empty target could pass the check before the hold commits and run its DDL after it. That is a time-of-check to time-of-use gap. Two options:
+  - (a) `ensureSchema` takes the shared lifecycle fence and rechecks the footprint in the same transaction as its DDL. This changes legacy startup, so it needs its own review.
+  - (b) the restore creates its own target database and grants the application role no CONNECT on it until the seal.
+  Until D1 is decided, the operational precondition stands: no application instance is configured for a restore target before cutover, which is the existing staged-restore model.
+
+### 5.3 Constraint 3: imported permission documents are not grants
+In the replay transaction every imported capability document is rewritten to `confirmation: "pending"` (capability document schema 2, owner decision of Dot 6494187100). A pending document grants nothing and gives no record scope after any seal, however well-formed it is. Only the protected owner, through the editor's audited save, confirms an account; a delegate cannot. The synthetic seal test proves that an imported receptionist document grants nothing after the seal.
+
+### 5.4 Constraint 4: `inventory.supplier-intent.recover`
+It is **not** in the catalogue or in `OWNER_ONLY_OPERATIONS`. The owner-only list holds the five existing operations plus the four approved clinic operations, nine in total (unit-tested). R5 may proceed only as design, refusal tests and an isolated synthetic proof. O1–O7 are not policy approval.
+
+### 5.5 Constraint 5: the hold's release trusts no settable marker
+- The guard function runs with `search_path = pg_catalog`.
+- DELETE is allowed only if `<the hold table's own schema>.staff_identity_state` exists and is `ready`. It is looked up by the trigger's schema, never by the caller's search path.
+- UPDATE and TRUNCATE always refuse.
+- No session or transaction setting is read.
+- **Tests:** a non-owner role holding every table privilege sets several plausible markers. It is refused on DELETE, UPDATE, TRUNCATE, DISABLE TRIGGER, DROP TABLE and `session_replication_role`. A look-alike `ready` table in a schema of its own, reached through `search_path`, is ignored. The table owner itself cannot delete the hold before the seal either.
+- **Deployment gate (M5):** the restore operator role owns the hold. The application and replay roles must not own it. Owner or superuser SQL is outside any application proof.
+- **Synthetic seal:** the seal remains a test fixture, not an application path. The fixture creates a new target realm (it differs from the source realm in the provenance), binds every account to a fresh subject, seals ready and releases the hold in the same transaction.
+
+### 5.6 Matrix status at this revision
+| # | Status |
+|---|---|
+| H1 | done for the non-empty and identity-bearing refusals (no schema, no data). A hold-commit failure path is covered by the same transaction: any failure before COMMIT replays nothing. |
+| H2 | partial: entry selects canonical while held (no ready identity). Built-app login journey pending. |
+| H3 | done at the library boundary (`readLegacyStaffSchema` refuses while held); built-app legacy cookie journey pending. |
+| H4 | done for previously-ready targets (5.1); source cookie journey pending. |
+| H5 | done for a new connection and a second restore attempt. |
+| H6 | done (5.5). |
+| H7 | done with the synthetic seal fixture (owner admitted, imported delegate grants inert). |
+| P1 | partial: business rows and the B1/B2 exclusions; exact whole-database equality with inventory and supplier history pending. |
+| P2 | pending (canonical reads of restored inventory history). |
+| R4, O1–O7 | pending; O1–O7 as design and refusal tests only (5.4). |
+
+`inventory-authority-restore` (retired parallel schema) stays red until P1, P2 and R4 replace it.

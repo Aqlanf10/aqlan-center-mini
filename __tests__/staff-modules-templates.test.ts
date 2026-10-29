@@ -56,3 +56,15 @@ describe("starting templates (owner decision 3)", () => {
     expect(doctor.grants).toContain("clinical.visits.sign"); // the template itself is untouched
   });
 });
+
+describe("owner-only operations (Dot 6484846432 decision 2, review 6486144288 item 4)", () => {
+  it("are exactly the five existing operations plus the four approved clinic operations; supplier recovery is not approved", () => {
+    expect([...OWNER_ONLY_OPERATIONS].sort()).toEqual([
+      "clinic.backup.manage", "clinic.data.export", "clinic.data.import", "clinic.reset",
+      "settings.integrations.change", "settings.security.change",
+      "staff.clinician-link.change", "staff.credentials.reset", "staff.role.change",
+    ]);
+    expect(OWNER_ONLY_OPERATIONS as readonly string[]).not.toContain("inventory.supplier-intent.recover");
+    expect(STAFF_CAPABILITIES as readonly string[]).not.toContain("inventory.supplier-intent.recover");
+  });
+});

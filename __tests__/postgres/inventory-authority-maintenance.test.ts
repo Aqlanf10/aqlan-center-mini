@@ -83,7 +83,12 @@ it("identity-dependent history without source identity rolls back the whole rest
   const result = await stagedRestore({ archivePath: invalidArchive, targetUrl: fixture.archiveTarget.options.connectionString!,
     stagingDir: join(directory, "invalid-documents"), allowNonEmptyTarget: true });
   expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
-  expect(result.errors.join(" ")).toContain("bound_history_without_staff_authority");
+  // Restore protocol revision 3 (B1/R1): this source carries authority relations, so its
+  // manifest has identity provenance and the restore refuses at the hold, before any
+  // schema or data, because the target already holds identity. That precedes (and is
+  // stricter than) the finalize refusal this case used to reach after replay.
+  expect(result.restoreHold).toBe(false);
+  expect(result.errors.join(" ")).toMatch(/هوية موحّدة/);
   for (const table of ["users", "staff_authority_identity", "staff_execution_epochs", "inventory_command_bindings", "audit_log"])
     expect((await fixture.archiveTarget.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);
 }, 120_000);
