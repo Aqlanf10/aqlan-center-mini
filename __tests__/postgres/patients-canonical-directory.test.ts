@@ -298,3 +298,47 @@ describe("one patient's file (read:patients.record)", () => {
   });
 });
 
+
+describe("clinical sub-reads and the timeline (slice 3)", () => {
+  let zeta = 0;
+  beforeAll(async () => {
+    zeta = (await fx.pool.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id) VALUES('SYN-PA-6','SYN File Zeta','0533333333',$1) RETURNING id", [fx.parties.doctorA!])).rows[0].id;
+    await fx.pool.query(`INSERT INTO patient_medical_history(patient_id,allergies,asa_class,recorded_by) VALUES($1,'[{"substance":"Synthetic penicillin","reaction":null,"severity":"severe"}]'::jsonb,'II','synthetic')`, [zeta]);
+    await fx.pool.query("INSERT INTO patient_vitals(patient_id,bp_systolic,bp_diastolic,pulse,recorded_by) VALUES($1,120,80,72,'synthetic')", [zeta]);
+    await fx.pool.query("INSERT INTO patient_problems(patient_id,label,noted_by) VALUES($1,'Synthetic crowding','synthetic')", [zeta]);
+    await fx.pool.query("INSERT INTO lab_orders(patient_id,lab_name,work_type,due_date) VALUES($1,'Synthetic lab','Synthetic retainer','2026-11-10')", [zeta]);
+    await fx.pool.query("INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency,status,created_by) VALUES('SYN-PA-ZETA',$1,7000,0,'YER','open','synthetic')", [zeta]);
+    await fx.pool.query("INSERT INTO appointments(patient_id,doctor_id,scheduled_date,scheduled_time) VALUES($1,$2,'2026-10-01','09:00')", [zeta, fx.parties.doctorA!]);
+  });
+  const kinds = async (k: Key) => [...new Set((await reads.readCanonicalTimeline(await fx.session(k), zeta, 60)).events.map(event => event.kind))].sort();
+
+  it("a clinical grant inside the scope reads medical history (with derived alerts), vitals and problems", async () => {
+    const history = await reads.readCanonicalMedicalHistory(await fx.session("doctorA"), zeta);
+    expect(history.alerts.map(alert => alert.label)).toEqual(["حساسية Synthetic penicillin (شديدة)"]);
+    expect(history.vitals[0]).toMatchObject({ bpSystolic: 120, bpDiastolic: 80, pulse: 72 });
+    expect(history.review).toMatchObject({ due: false });
+    expect((await reads.readCanonicalVitals(await fx.session("doctorA"), zeta)).vitals).toHaveLength(1);
+    expect((await reads.readCanonicalProblems(await fx.session("doctorA"), zeta)).map(problem => problem.label)).toEqual(["Synthetic crowding"]);
+  });
+
+  it("no clinical grant refuses at admission, before the patient is looked up", async () => {
+    for (const read of [reads.readCanonicalMedicalHistory, reads.readCanonicalVitals, reads.readCanonicalProblems]) {
+      await expect(read(await fx.session("reception"), zeta)).rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
+      await expect(read(await fx.session("reception"), 999_999)).rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
+    }
+  });
+
+  it("a clinical grant outside the scope reads like a missing patient", async () => {
+    await expect(reads.readCanonicalMedicalHistory(await fx.session("doctorB"), zeta)).rejects.toMatchObject({ code: "patient_not_found" });
+  });
+
+  it("timeline events of hidden groups are omitted entirely, never masked", async () => {
+    expect(await kinds("owner")).toEqual(["appointment", "invoice", "lab"]);
+    expect(await kinds("reception")).toEqual(["appointment", "invoice"]); // schedule + balances, no clinical
+    expect(await kinds("clinicalAll")).toEqual(["lab"]); // care only
+    expect(await kinds("finance")).toEqual(["invoice"]); // balances only
+    expect(await kinds("identity")).toEqual([]);
+    const ownerInvoice = (await reads.readCanonicalTimeline(await fx.session("owner"), zeta, 60)).events.find(event => event.kind === "invoice")!;
+    expect(ownerInvoice.amountMinor).toBe(7000);
+  });
+});

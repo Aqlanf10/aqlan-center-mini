@@ -238,13 +238,41 @@ it("browser: the doctor opens a patient's file from the list; only the canonical
   await profile.getByText("⚠ حساسية بنسلين تجريبية").waitFor();
   await profile.getByRole("heading", { name: "الزيارات الأخيرة" }).waitFor();
   expect(await profile.getByRole("heading", { name: /المواعيد/ }).count()).toBe(0);
-  expect(new Set(apiCalls.filter(path => !/^\/api\/auth\/me$/.test(path)).map(path => path.replace(/\/\d+$/, "/:id")))).toEqual(new Set(["/api/patients", "/api/patients/:id"]));
+  await profile.getByRole("heading", { name: "التاريخ الطبي والعلامات الحيوية" }).waitFor();
+  await profile.getByRole("heading", { name: "قائمة المشاكل" }).waitFor();
+  await profile.getByText("لا أحداث ضمن ما تملك عرضه.").or(profile.locator("ol li").first()).waitFor();
+  expect(new Set(apiCalls.filter(path => !/^\/api\/auth\/me$/.test(path)).map(path => path.replace(/\/\d+(\/|$)/, "/:id$1"))))
+    .toEqual(new Set(["/api/patients", "/api/patients/:id", "/api/patients/:id/medical-history", "/api/patients/:id/problems", "/api/patients/:id/timeline"]));
   expect(failures).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   // A file outside the scope shows the bounded Arabic refusal, not the legacy file.
   const { rows: [other] } = await journey.db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number='SYN-J-2'");
   await page.goto(`${journey.baseUrl}/patients/${other.id}`);
   await page.getByRole("alert").filter({ hasText: "لا يوجد مريض بهذا الرقم ضمن مرضاك" }).waitFor();
+  await context.close();
+  expect(await journey.ddlLog()).toEqual([]);
+});
+
+it("browser: without a clinical grant the file never calls clinical reads; the timeline shows only allowed groups", async () => {
+  const { rows: [own] } = await journey.db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number='SYN-J-1'");
+  const context = await journey.browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "ar" });
+  const page = await context.newPage();
+  await journey.browserLogin(page, "reception");
+  const apiCalls: string[] = [];
+  page.on("request", request => { const path = new URL(request.url()).pathname; if (path.startsWith("/api/")) apiCalls.push(path); });
+  await page.goto(`${journey.baseUrl}/patients/${own.id}`);
+  const profile = page.getByTestId("canonical-patient-profile");
+  await profile.getByRole("heading", { name: "الخط الزمني" }).waitFor();
+  await profile.getByText("لا أحداث ضمن ما تملك عرضه.").waitFor();
+  expect(await profile.getByRole("heading", { name: "التاريخ الطبي والعلامات الحيوية" }).count()).toBe(0);
+  expect(apiCalls.some(path => /medical-history|problems|vitals/.test(path))).toBe(false);
+  // Direct calls are refused server-side, whatever the screen shows.
+  const reception = await journey.login("reception");
+  for (const section of ["medical-history", "vitals", "problems"]) {
+    const response = await journey.api(`/api/patients/${own.id}/${section}`, reception.cookie);
+    expect(response.status).toBe(403);
+    expect((await response.json()).message).toMatch(ARABIC);
+  }
   await context.close();
   expect(await journey.ddlLog()).toEqual([]);
 });

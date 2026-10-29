@@ -1,3 +1,5 @@
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalMedicalHistory } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -21,6 +23,9 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
  * وآخر العلامات الحيوية. للطبيب (مرضاه) والاستقبال والمدير — لا للأدوار المالية.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 3): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await context.params).id, readCanonicalMedicalHistory, "تعذّر تحميل التاريخ الطبي.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);

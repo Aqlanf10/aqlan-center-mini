@@ -34,13 +34,13 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 197 |
+| existing | 193 |
 | proposed | 142 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 5 |
+| canonical-done | 9 |
 
 | Record scope | Routes |
 |---|---|
@@ -209,6 +209,16 @@ Evidence:
 - **Evidence:**
   - PostgreSQL, 5 cases: own clinician file with own appointments only; outside equals missing; appointment grants never reveal clinical fields; no appointment scope; scope `none`, a stale session, and the owner.
   - Built-app journeys: HTTP, plus a mobile browser opening the file from the list. Only `/api/patients` and `/api/patients/:id` are called; an out-of-scope file shows the Arabic refusal.
+
+### Slice 3 — clinical sub-reads and the timeline
+- **`medical-history`, `vitals`, `problems` (GET)** use `read:patients.clinical`: a clinical grant plus the patient inside the scope. An actor without a clinical grant is refused at admission (403) before the patient is looked up, so existence never leaks either way.
+- **`timeline` (GET)** uses `read:patients.record`. Events are filtered by group:
+  - clinical events: care group;
+  - appointment events: schedule group;
+  - invoice and payment events: balances group.
+
+  A hidden group's events are omitted entirely. The legacy path masks amounts but shows the events; the canonical path does not reveal that they exist.
+- **Screen:** the canonical profile shows medical alerts and review state, latest vitals, the problem list and the timeline, each only when its group is projected.
 
 ## 6. Dot review 6480538845: what the map now records
 

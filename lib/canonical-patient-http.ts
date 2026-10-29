@@ -2,6 +2,8 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { CanonicalPatientReadRefusal } from "./canonical-patient-reads";
 import { staffAdmissionRefusal } from "./staff-capability-editor";
+import { selectRequestStaffEnvelope } from "./staff-session-admission";
+import type { VerifiedDurableSession } from "./staff-durable-session";
 
 /**
  * One HTTP mapping for canonical patient routes (M2): bounded codes, Arabic messages,
@@ -24,4 +26,29 @@ export function canonicalPatientReadFailure(error: unknown, fallback: string): N
     return NextResponse.json({ code: refusal.code, message }, { status: refusal.status, headers: NO_STORE });
   }
   return NextResponse.json({ message: fallback }, { status: 500, headers: NO_STORE });
+}
+
+const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جديد.";
+/**
+ * The canonical branch of a per-patient GET route, in one place: the request's
+ * envelope is selected once; a canonical cookie never falls back to the legacy
+ * session; the id is validated; the read runs in its owning snapshot; failures map
+ * through canonicalPatientReadFailure. Returns null for a legacy (or absent) envelope,
+ * so the caller continues with its unchanged legacy path.
+ */
+export async function canonicalPatientGet<T>(
+  rawId: string,
+  read: (handle: VerifiedDurableSession, patientId: number) => Promise<T>,
+  fallback: string,
+): Promise<NextResponse | null> {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: SESSION_ENDED }, { status: 401, headers: NO_STORE });
+  if (selected.kind !== "canonical") return null;
+  const id = Number(rawId);
+  if (!Number.isSafeInteger(id) || id <= 0) return NextResponse.json({ code: "invalid_patient_query", message: "رقم المريض غير صالح." }, { status: 400, headers: NO_STORE });
+  try {
+    return NextResponse.json(await read(selected.handle, id), { headers: NO_STORE });
+  } catch (error) {
+    return canonicalPatientReadFailure(error, fallback);
+  }
 }

@@ -3723,10 +3723,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 3: read:patients.clinical.",
+  "projection": {
+   "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients; reception and admin all).",
+   "groups": {
+    "clinical": "the whole response — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical)"
+   },
+   "rows": "patient outside the scope reads like a missing one (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/medical-history",
@@ -3842,10 +3853,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 3: read:patients.clinical.",
+  "projection": {
+   "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients; reception and admin all).",
+   "groups": {
+    "clinical": "the whole response — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical)"
+   },
+   "rows": "patient outside the scope reads like a missing one (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/problems",
@@ -3961,8 +3983,17 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 3: read:patients.record; events filtered by group.",
+  "projection": {
+   "legacy": "canHandleMoney(role) unmasks invoice/payment amounts; others see the events with amounts masked.",
+   "groups": {
+    "care": "visit, plan, lab, document, ortho, diagnosis, referral events — clinical grant",
+    "schedule": "appointment events — appointmentScope all",
+    "balances": "invoice and payment events with amounts — finance.patient-ledger.view"
+   },
+   "counts": "events of a hidden group are omitted entirely, never masked: neither amounts nor their existence leak"
+  }
  },
  {
   "route": "/api/patients/[id]/treatment-financial-context",
@@ -3990,10 +4021,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 3: read:patients.clinical.",
+  "projection": {
+   "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients; reception and admin all).",
+   "groups": {
+    "clinical": "the whole response — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical)"
+   },
+   "rows": "patient outside the scope reads like a missing one (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/vitals",

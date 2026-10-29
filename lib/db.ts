@@ -7931,6 +7931,11 @@ export async function getSettings(): Promise<SettingsMap> {
  * Read settings on the caller's transaction client without consulting or publishing
  * process cache. The caller initializes schema first and owns the transaction.
  */
+/** Settings over a caller-owned query facade (no cache, no ensureSchema). */
+export async function getSettingsWith(q: Pick<DbClient, "query">): Promise<SettingsMap> {
+  return readSettings(q);
+}
+
 export async function getSettingsInTransaction(
   client: DbClient,
   options: { requireStoredExchangeRates?: boolean } = {},
@@ -22438,7 +22443,15 @@ export async function patientTimeline(
   limit = 60,
 ): Promise<TimelineEvent[]> {
   await ensureSchema();
-  const pool = getPool();
+  return patientTimelineWith(getPool(), patientId, limit);
+}
+
+/** Same timeline over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function patientTimelineWith(
+  pool: Pick<DbClient, "query">,
+  patientId: number,
+  limit = 60,
+): Promise<TimelineEvent[]> {
   const cap = Math.max(10, Math.min(200, Math.round(limit)));
 
   const [visits, plans, invoices, payments, labOrders, documents, orthoAdjustments, diagnoses, appointments] =
@@ -27824,7 +27837,10 @@ export async function saveMedicalHistory(patientId: number, input: MedicalHistor
 /** آخر نسخ التاريخ الطبي (الأحدث أولًا). */
 export async function listMedicalHistory(patientId: number, limit = 20): Promise<MedicalHistoryRecord[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<MedicalHistoryRow>(
+  return listMedicalHistoryWith(getPool(), patientId, limit);
+}
+export async function listMedicalHistoryWith(q: Pick<DbClient, "query">, patientId: number, limit = 20): Promise<MedicalHistoryRecord[]> {
+  const { rows } = await q.query<MedicalHistoryRow>(
     `SELECT * FROM patient_medical_history WHERE patient_id = $1 ORDER BY id DESC LIMIT $2`,
     [patientId, Math.min(Math.max(limit, 1), 100)],
   );
@@ -27896,7 +27912,10 @@ export async function recordVitals(
 
 export async function listVitals(patientId: number, limit = 10): Promise<VitalsRecord[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<VitalsRow>(
+  return listVitalsWith(getPool(), patientId, limit);
+}
+export async function listVitalsWith(q: Pick<DbClient, "query">, patientId: number, limit = 10): Promise<VitalsRecord[]> {
+  const { rows } = await q.query<VitalsRow>(
     `SELECT * FROM patient_vitals WHERE patient_id = $1 ORDER BY recorded_at DESC, id DESC LIMIT $2`,
     [patientId, Math.min(Math.max(limit, 1), 100)],
   );
@@ -28202,7 +28221,10 @@ const PROBLEM_SELECT = `
 
 export async function listPatientProblems(patientId: number): Promise<PatientProblem[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ProblemRow>(
+  return listPatientProblemsWith(getPool(), patientId);
+}
+export async function listPatientProblemsWith(q: Pick<DbClient, "query">, patientId: number): Promise<PatientProblem[]> {
+  const { rows } = await q.query<ProblemRow>(
     `${PROBLEM_SELECT} WHERE p.patient_id = $1
       ORDER BY CASE p.status WHEN 'active' THEN 0 WHEN 'inactive' THEN 1 ELSE 2 END, p.noted_at DESC, p.id DESC`,
     [patientId],

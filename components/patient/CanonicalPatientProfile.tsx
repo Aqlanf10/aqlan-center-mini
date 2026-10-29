@@ -6,6 +6,8 @@ import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
 import type { Visit, VisitStatus } from "@/lib/flow";
 import { clinicDateString, type Appointment } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { PROBLEM_STATUS_LABEL, type ProblemStatus } from "@/lib/cases";
+import { TIMELINE_KIND_LABEL, type TimelineKind } from "@/lib/workflow";
 
 /**
  * ملف المريض في جلسة الهوية الموحّدة (M2).
@@ -139,6 +141,9 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         </section>
       ) : null}
 
+      {projection.care ? <ClinicalPanels patientId={patientId} /> : null}
+      <TimelinePanel patientId={patientId} />
+
       <p className="text-xs text-slate-600">بقية أقسام الملف (التقويم والخطط والحساب والمستندات وغيرها) تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
       <a href="/patients" className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-navy-800">العودة إلى المرضى</a>
     </main>
@@ -153,3 +158,104 @@ function Detail({ label, value, ltr }: { label: string; value: string | null; lt
     </div>
   );
 }
+
+/** قراءةٌ واحدة لقسمٍ من الملف عبر مساره الموحّد؛ الخطأ يُعرض نصًّا عربيًّا محدودًا. */
+function usePatientSection<T>(url: string | null): { data: T | null; error: string | null } {
+  const [state, setState] = useState<{ data: T | null; error: string | null }>({ data: null, error: null });
+  useEffect(() => {
+    if (!url) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        const payload = await response.json().catch(() => null);
+        if (cancelled) return;
+        setState(response.ok ? { data: payload as T, error: null } : { data: null, error: payload?.message ?? "تعذّر التحميل." });
+      } catch {
+        if (!cancelled) setState({ data: null, error: "تعذّر الاتصال بالخادم." });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [url]);
+  return state;
+}
+
+interface MedicalHistoryView {
+  alerts: { label: string; severity: string }[];
+  review: { due: boolean; months: number };
+  latest: { recordedAt: string } | null;
+  vitals: { id: number; recordedAt: string; bpSystolic: number | null; bpDiastolic: number | null; pulse: number | null; spo2: number | null; glucose: number | null; temperature: number | null }[];
+}
+interface ProblemView { id: number; label: string; site: string | null; status: ProblemStatus; caseTitle: string | null }
+
+/** الأقسام السريرية: لمن أسقط له الخادم المجموعة العلاجية فقط (المسار يفرضها أيضًا). */
+function ClinicalPanels({ patientId }: { patientId: string }) {
+  const id = encodeURIComponent(patientId);
+  const history = usePatientSection<MedicalHistoryView>(`/api/patients/${id}/medical-history`);
+  const problems = usePatientSection<ProblemView[]>(`/api/patients/${id}/problems`);
+  const latestVitals = history.data?.vitals[0] ?? null;
+  return (
+    <>
+      <section aria-labelledby="canonical-patient-history" className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h2 id="canonical-patient-history" className="mb-2 text-sm font-bold text-navy-900">التاريخ الطبي والعلامات الحيوية</h2>
+        {history.error ? <p role="alert" className="text-sm text-red-700">{history.error}</p> : !history.data ? <p className="text-sm text-slate-500">جارٍ التحميل…</p> : (
+          <div className="space-y-2 text-sm">
+            {history.data.alerts.length ? (
+              <ul className="flex flex-wrap gap-1.5">
+                {history.data.alerts.map(alert => <li key={alert.label} className="rounded-lg border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-bold text-red-700">⚠ {alert.label}</li>)}
+              </ul>
+            ) : <p className="text-slate-600">لا تنبيهات من آخر تاريخ طبي.</p>}
+            {!history.data.latest ? <p className="font-semibold text-amber-800">لم يُسجَّل تاريخ طبي بعد.</p>
+              : history.data.review.due ? <p className="font-semibold text-amber-800">التاريخ الطبي يحتاج مراجعة (أقدم من {history.data.review.months} أشهر).</p> : null}
+            {latestVitals ? (
+              <p className="text-slate-700 ltr-nums" data-testid="canonical-latest-vitals">
+                آخر قياس: {latestVitals.bpSystolic != null && latestVitals.bpDiastolic != null ? `الضغط ${latestVitals.bpSystolic}/${latestVitals.bpDiastolic}` : ""}
+                {latestVitals.pulse != null ? ` • النبض ${latestVitals.pulse}` : ""}{latestVitals.spo2 != null ? ` • الأكسجين ${latestVitals.spo2}%` : ""}
+                {latestVitals.glucose != null ? ` • السكر ${latestVitals.glucose}` : ""}
+              </p>
+            ) : <p className="text-slate-600">لا علامات حيوية مسجّلة.</p>}
+          </div>
+        )}
+      </section>
+      <section aria-labelledby="canonical-patient-problems" className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h2 id="canonical-patient-problems" className="mb-2 text-sm font-bold text-navy-900">قائمة المشاكل</h2>
+        {problems.error ? <p role="alert" className="text-sm text-red-700">{problems.error}</p> : !problems.data ? <p className="text-sm text-slate-500">جارٍ التحميل…</p>
+          : problems.data.length === 0 ? <p className="text-sm text-slate-500">لا مشاكل مسجّلة.</p> : (
+            <ul className="divide-y divide-slate-100 text-sm">
+              {problems.data.map(problem => (
+                <li key={problem.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                  <span className="font-semibold text-slate-800 [overflow-wrap:anywhere]">{problem.label}{problem.site ? ` — ${problem.site}` : ""}</span>
+                  <span className="rounded-lg bg-slate-50 px-2 py-0.5 text-xs font-bold text-slate-600">{PROBLEM_STATUS_LABEL[problem.status] ?? problem.status}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+      </section>
+    </>
+  );
+}
+
+interface TimelineView { events: { key: string; kind: TimelineKind; at: string; title: string; detail: string | null }[] }
+
+/** الخط الزمني: الخادم يحذف أحداث المجموعات غير المسقطة كليًّا (لا إخفاء مبالغ فقط). */
+function TimelinePanel({ patientId }: { patientId: string }) {
+  const timeline = usePatientSection<TimelineView>(`/api/patients/${encodeURIComponent(patientId)}/timeline?limit=30`);
+  return (
+    <section aria-labelledby="canonical-patient-timeline" className="rounded-2xl border border-slate-200 bg-white p-4">
+      <h2 id="canonical-patient-timeline" className="mb-2 text-sm font-bold text-navy-900">الخط الزمني</h2>
+      {timeline.error ? <p role="alert" className="text-sm text-red-700">{timeline.error}</p> : !timeline.data ? <p className="text-sm text-slate-500">جارٍ التحميل…</p>
+        : timeline.data.events.length === 0 ? <p className="text-sm text-slate-500">لا أحداث ضمن ما تملك عرضه.</p> : (
+          <ol className="space-y-2 text-sm">
+            {timeline.data.events.map(event => (
+              <li key={event.key} className="rounded-xl border border-slate-100 px-3 py-2">
+                <span className="text-xs font-bold text-slate-500">{TIMELINE_KIND_LABEL[event.kind] ?? event.kind} • {new Date(event.at).toLocaleDateString("ar-YE-u-nu-latn")}</span>
+                <span className="block font-semibold text-slate-800 [overflow-wrap:anywhere]">{event.title}</span>
+                {event.detail ? <span className="block text-xs text-slate-600 [overflow-wrap:anywhere]">{event.detail}</span> : null}
+              </li>
+            ))}
+          </ol>
+        )}
+    </section>
+  );
+}
+

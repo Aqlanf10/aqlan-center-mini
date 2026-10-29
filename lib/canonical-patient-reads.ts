@@ -1,8 +1,12 @@
 import "server-only";
 import {
-  browsePatientsWith, computeDebtRowsInSnapshot, getPatientWith, listPatientAppointmentsWith, listPatientVisitsWith,
-  patientInDoctorScopeWith, searchPatientsWith, type PatientListRow,
+  browsePatientsWith, computeDebtRowsInSnapshot, getPatientWith, getSettingsWith, listMedicalHistoryWith, listPatientAppointmentsWith,
+  listPatientProblemsWith, listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
+  CLINIC_TIME_ZONE, type PatientListRow,
 } from "./db";
+import { deriveAlerts, reviewDue } from "./medical-history";
+import { clinicDateString } from "./schedule";
+import type { TimelineEvent } from "./workflow";
 import type { CanonicalSnapshotQuery } from "./canonical-read-snapshot";
 import type { CanonicalRecordRead } from "./canonical-record-reads";
 import type { Patient } from "./patient";
@@ -185,6 +189,49 @@ export async function readCanonicalPatientFile(session: VerifiedDurableSession, 
       }),
       projection: { ...projection, appointments: appointmentScope.kind },
     };
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * Clinical sub-reads and the timeline (M2 slice 3).
+ * ------------------------------------------------------------------------- */
+/** Medical history: latest version, version list, derived alerts, review due, vitals. */
+export async function readCanonicalMedicalHistory(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => {
+    const versions = await listMedicalHistoryWith(query, patientId);
+    const vitals = await listVitalsWith(query, patientId);
+    const settings = await getSettingsWith(query);
+    const latest = versions[0] ?? null;
+    const months = Number(settings["clinical.medical_history_review_months"]) || 6;
+    return {
+      latest,
+      versions: versions.map(version => ({ id: version.id, recordedAt: version.recordedAt, recordedBy: version.recordedBy })),
+      alerts: latest ? deriveAlerts(latest) : [],
+      review: reviewDue(latest?.recordedAt ?? null, months, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
+      vitals,
+    };
+  });
+}
+export async function readCanonicalVitals(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => ({ vitals: await listVitalsWith(query, patientId, 30) }));
+}
+export async function readCanonicalProblems(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => listPatientProblemsWith(query, patientId));
+}
+
+/** Timeline event groups (Dot 6480538845 item 3): a hidden group's events are omitted
+ * entirely, never masked, so neither amounts nor the existence of hidden events leak. */
+const FINANCIAL_EVENTS = new Set<TimelineEvent["kind"]>(["invoice", "payment"]);
+const SCHEDULE_EVENTS = new Set<TimelineEvent["kind"]>(["appointment"]);
+export async function readCanonicalTimeline(session: VerifiedDurableSession, patientId: number, limit: number) {
+  const bounded = Number.isFinite(limit) ? Math.max(10, Math.min(200, Math.round(limit))) : 60;
+  return readCanonicalPatientRecord(session, "read:patients.record", patientId, async (query, scope) => {
+    const projection = patientDirectoryProjection(scope);
+    const events = (await patientTimelineWith(query, patientId, bounded)).filter(event =>
+      FINANCIAL_EVENTS.has(event.kind) ? projection.balances
+        : SCHEDULE_EVENTS.has(event.kind) ? projection.schedule
+          : projection.care);
+    return { events, canSeeFinancial: projection.balances, projection };
   });
 }
 

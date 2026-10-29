@@ -1,3 +1,5 @@
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalProblems } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
 import { createPatientProblem, listPatientProblems } from "@/lib/db";
 import { checkProblemDraft } from "@/lib/cases";
@@ -7,6 +9,9 @@ export const dynamic = "force-dynamic";
 
 /** (CASE-MODEL-1) قائمة مشاكل المريض. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 3): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await params).id, readCanonicalProblems, "تعذّر تحميل قائمة المشاكل.");
+  if (canonical) return canonical;
   const patientId = idOf((await params).id);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, false);
