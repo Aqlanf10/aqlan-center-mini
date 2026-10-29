@@ -83,19 +83,8 @@ export function readPatientNumber(session: SessionPayload, patientId: number) {
 export async function changePatientNumber(session: SessionPayload, patientId: number, input: {
   patientNumber: unknown; expectedVersion: unknown; expectedPatientNumber: unknown; reason: unknown;
 }): Promise<PatientNumberSnapshot> {
-  validId(patientId);
-  const number = parsePatientNumber(input.patientNumber), version = parseNumberingVersion(input.expectedVersion), reason = numberingReason(input.reason);
-  if (!number || !version || !reason || typeof input.expectedPatientNumber !== "string") throw new PatientNumberingError("invalid", "أدخل رقم ملف صحيحًا وسبب التعديل وأعد تحميل الرقم الحالي.");
-  return transaction(session, async client => {
-    const before = await snapshot(client, patientId, true);
-    await authorize(client, session); // expiry while waiting on the exact patient row
-    if (before.version !== version || before.patientNumber !== input.expectedPatientNumber) throw new PatientNumberingError("stale", "تغيّر رقم الملف منذ فتحه؛ حدّث الصفحة قبل المحاولة.");
-    if (before.patientNumber === number) throw new PatientNumberingError("invalid", "رقم الملف الجديد مطابق للحالي.");
-    await client.query("UPDATE patients SET patient_number=$2 WHERE id=$1", [patientId, number]);
-    const after = await snapshot(client, patientId);
-    await insertAuditRow(client, {action: "patient.number.change", entity: "patient", entityId: patientId,
-      actor: session.username, actorRole: session.role, details: {before, after, reason,
-        internalPatientIdUnchanged: true, oldNumberRetired: true}});
-    return after;
-  });
+  // Owner-approved release scope: new allocations only. Keep the service boundary
+  // closed as well as the HTTP/UI boundary; no schema initialization or DB write.
+  void session; void patientId; void input;
+  throw new PatientNumberingError("forbidden", "تعديل أرقام الملفات الحالية مؤجل؛ الترقيم الجديد يخص المرضى الجدد فقط.");
 }

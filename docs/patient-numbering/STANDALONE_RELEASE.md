@@ -22,19 +22,20 @@ No migration renumbering, baseline manifest rewrite, or historical renumbering.
 
 - New allocation is **at least7000**, displayed `P-07000`; existing sequence,
   current numbers, or retired numbers can require a higher actual next number.
-- Existing paper aliases are changed individually through the admin-only patient
-  identity editor. Input `123` becomes `P-00123`; historical values below7000 are
-  allowed. The future floor does not constrain manual archive corrections.
-- Exact current alias, version, and reason are required. Stale and duplicate
-  changes are refused; audit failure rolls the alias/version/history back.
+- Existing patient numbers remain unchanged. The patient-number editor is removed,
+  and both its old HTTP mutation endpoint and application service refuse edits.
+  Manual paper-file correction, undo, reassignment and automatic renumbering are
+  deferred; there is no second paper-number field in this release.
 - Internal patient IDs, receipts, invoices, contracts and linked financial/clinical
-  rows remain unchanged. Saved documents remain unchanged; live reprints show the
-  current alias. Changed numeric login aliases stop working; existing signed tokens
-  with a different exact alias are invalidated. Case/whitespace-only legacy
-  spellings can still match normalized login input. Inform the patient.
-- Old aliases are permanently reserved, including after patient deletion/merge.
-  They cannot be reassigned or swapped automatically. Resolve paper conflicts by
-  explicit review, never deletion or automatic canonicalization.
+  rows remain unchanged. Imports and ordinary demographic updates do not replace
+  existing patient numbers. All new-patient creation paths use the same allocator.
+- The future-only minimum can advance monotonically; it never changes old files.
+  Existing current/retired numbers and sequence high-water prevent known collisions;
+  unregistered external paper files are not discoverable by this allocator.
+- Published0080 history guards remain immutable. Retired aliases stay reserved,
+  including after deletion/merge. No historical guard is relaxed or reused.
+- Independent patient portal account redesign is a separate deferred task, not
+  part of this new-only numbering release. No credential or permission activation.
 - Reset refuses before backup/mutation if current patients or retired aliases
   exist. It retains numbering policy and never restarts the patient sequence.
 
@@ -107,21 +108,22 @@ No usable live backup or rollback artifact is claimed by this source document.
    must exceed current/retired maxima and never fall below7000. Do not use a
    restore as a mechanism to reuse identifiers or lower policy/sequence state.
 4. Pin a previously verified **numbering-compatible** rollback image or prefer a
-   forward fix retaining0080 and its allocator/import/edit/restore guards. A
+   forward fix retaining0080 and its allocator/import/history/restore guards and deferred-edit boundary. A
    pre-numbering main/Stage artifact is not a compatible rollback just because
    its health endpoint passes. Verify rollback compatibility on the post0080
    synthetic schema, including any separately reviewed historical residue.
 5. Before Stage owner trial, require full CI on the exact integrated candidate,
    independent review, resolved target-schema/readiness blockers, protected
    backup proof and a pinned compatible recovery artifact. Stage trial must test
-   new allocations, a reviewed synthetic legacy correction, stale/duplicate
-   refusal, old-alias reservation and unchanged linked identities. Production
+   new allocations, explicit existing-number edit refusal, concurrent/duplicate
+   protection, old-alias reservation and unchanged linked identities. Production
    promotion remains separate and follows successful owner Stage acceptance.
 
 ## Verification boundaries
 
-Focused synthetic PostgreSQL18.6 tests cover allocation/import/edit concurrency,
-CAS, authorization expiry, immutable history, audit rollback, unchanged linked
+Focused synthetic PostgreSQL18.6 tests cover allocation/import concurrency,
+future-floor CAS and authorization expiry, existing-edit refusal, immutable
+history, policy audit rollback, unchanged linked
 financial rows/balances, current0087 late upgrade with registry gaps, restart,
 checksum refusal, and official SQL/full-archive/staged restore.
 

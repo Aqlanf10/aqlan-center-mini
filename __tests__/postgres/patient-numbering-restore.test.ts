@@ -27,8 +27,9 @@ beforeAll(async()=>{
  const user=(await db.getPool().query("INSERT INTO users(username,display_name,password_hash,role,is_active) VALUES('numbering-restore','Synthetic restore',$1,'admin',true) RETURNING id",[hash])).rows[0];
  session={userId:user.id,username:"numbering-restore",role:"admin",credentialVersion:auth.sessionCredentialVersion(hash),expiresAt:Date.now()+3600000};
  const p=await db.createPatient({fullName:"Synthetic retained identity",phone:null,altPhone:null,gender:"unknown",birthYear:null,address:null,medicalAlert:null,note:null});
- const before=await numbering.readPatientNumber(session,p.id);
- await numbering.changePatientNumber(session,p.id,{patientNumber:"123",expectedVersion:before.version,expectedPatientNumber:before.patientNumber,reason:"Synthetic historical paper correction"});
+ // Synthetic historical0080 fixture only; application editing is now deferred.
+ // Preserve recovery coverage for evidence that can exist in historical backups.
+ await db.getPool().query("UPDATE patients SET patient_number='P-00123' WHERE id=$1",[p.id]);
  await db.getPool().query("INSERT INTO invoices(invoice_number,patient_id,total_minor) VALUES('SYN-NUMBER-RESTORE',$1,100)",[p.id]);
  const preview=await numbering.readNumberingPreview(session);
  await numbering.changeNumberingFloor(session,{minimumNext:"8000",expectedVersion:preview.version,expectedNextNumber:preview.nextNumber,reason:"Synthetic future numbering"});

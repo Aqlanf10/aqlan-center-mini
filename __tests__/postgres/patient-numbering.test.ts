@@ -61,48 +61,114 @@ it("guards raw current-identity truncation and concurrent historical ownership i
  }finally{await client.query("ROLLBACK");client.release();}
  expect((await q("SELECT count(*)::int AS n FROM retired_patient_numbers")).rows[0].n).toBe(0);
 });
-it("retains internal identity, linked clinical/financial rows and a complete old/new audit",async()=>{
+it("defers manual edits and preserves existing identity, portal access, history, audit and linked rows",async()=>{
  const p=(await q("INSERT INTO patients(patient_number,full_name,phone) VALUES('P-00042','Synthetic historical','967777000111') RETURNING id")).rows[0];
  await q("INSERT INTO visits(patient_id,patient_name) VALUES($1,'Synthetic historical')",[p.id]);
  await q("INSERT INTO invoices(invoice_number,patient_id,total_minor) VALUES('SYN-NUMBER-INV',$1,100)",[p.id]);
- const before=(await q("SELECT (SELECT jsonb_agg(to_jsonb(v)) FROM visits v WHERE patient_id=$1) AS visits,(SELECT jsonb_agg(to_jsonb(i)) FROM invoices i WHERE patient_id=$1) AS invoices",[p.id])).rows;
- const snapshot=await numbers.readPatientNumber(session,p.id);
- const after=await edit(p.id,snapshot,"123");expect(after).toEqual({patientId:p.id,patientNumber:"P-00123",version:"2"});
- expect((await q("SELECT (SELECT jsonb_agg(to_jsonb(v)) FROM visits v WHERE patient_id=$1) AS visits,(SELECT jsonb_agg(to_jsonb(i)) FROM invoices i WHERE patient_id=$1) AS invoices",[p.id])).rows).toEqual(before);
- expect((await q("SELECT details FROM audit_log WHERE action='patient.number.change' AND entity_id=$1",[String(p.id)])).rows[0].details).toMatchObject({before:snapshot,after,reason:"Synthetic paper file correction",oldNumberRetired:true});
- expect(await db.portalLogin("777000111","P-00042")).toBeNull();
- expect(await db.portalLogin("777000111","P-00123")).toMatchObject({patient:{id:p.id,patientNumber:"P-00123"}});
- await expect(edit(p.id,snapshot,"124")).rejects.toMatchObject({code:"stale"});
- await expect(edit(p.id,after,"42")).rejects.toMatchObject({code:"duplicate"});
+ const witnesses=async()=>({
+  patient:(await q("SELECT to_jsonb(p) AS row FROM patients p WHERE id=$1",[p.id])).rows,
+  visits:(await q("SELECT to_jsonb(v) AS row FROM visits v WHERE patient_id=$1 ORDER BY id",[p.id])).rows,
+  invoices:(await q("SELECT to_jsonb(i) AS row FROM invoices i WHERE patient_id=$1 ORDER BY id",[p.id])).rows,
+  history:(await q("SELECT * FROM retired_patient_numbers ORDER BY patient_number")).rows,
+  audit:(await q("SELECT to_jsonb(a) AS row FROM audit_log a ORDER BY id")).rows,
+  sequence:(await q("SELECT last_value::text,is_called FROM patient_number_seq")).rows,
+ });
+ const before=await witnesses(), snapshot=await numbers.readPatientNumber(session,p.id);
+ for(const target of ["123","880","42"]) await expect(edit(p.id,snapshot,target)).rejects.toMatchObject({code:"forbidden"});
+ expect(await witnesses()).toEqual(before);
+ expect(await numbers.readPatientNumber(session,p.id)).toEqual(snapshot);
+ expect(await db.portalLogin("777000111","P-00042")).toMatchObject({patient:{id:p.id,patientNumber:"P-00042"}});
+ expect(await db.portalLogin("777000111","P-00123")).toBeNull();
 });
-it("blocks current aliases, leading-zero aliases and permanently retired aliases",async()=>{
- const p=await patient(), current=await numbers.readPatientNumber(session,p.id);
- await expect(edit(p.id,current,"123")).rejects.toMatchObject({code:"duplicate"});
- await expect(q("INSERT INTO patients(patient_number,full_name) VALUES('P-123','Synthetic alias')")).rejects.toMatchObject({code:"23505"});
- await expect(q("INSERT INTO patients(patient_number,full_name) VALUES('P-00000042','Synthetic retired alias')")).rejects.toMatchObject({code:"23505"});
+it("characterizes immutable0080 raw SQL history guards without enabling an application edit workflow",async()=>{
+ // This is a synthetic migration-contract witness, not an application/manual correction path.
+ const p=(await q("INSERT INTO patients(patient_number,full_name) VALUES('P-00083','Synthetic legacy guard') RETURNING id")).rows[0];
+ await q("UPDATE patients SET patient_number='P-00123' WHERE id=$1",[p.id]);
+ expect((await q("SELECT patient_number,patient_number_version::text FROM patients WHERE id=$1",[p.id])).rows).toEqual([{patient_number:"P-00123",patient_number_version:"2"}]);
+ expect((await q("SELECT patient_id::text FROM retired_patient_numbers WHERE patient_number='P-00083'")).rows).toEqual([{patient_id:String(p.id)}]);
+ await expect(q("UPDATE patients SET patient_number='P-00083' WHERE id=$1",[p.id])).rejects.toMatchObject({code:"23505"});
+ await expect(q("INSERT INTO patients(patient_number,full_name) VALUES('P-123','Synthetic current alias')")).rejects.toMatchObject({code:"23505"});
+ await expect(q("INSERT INTO patients(patient_number,full_name) VALUES('P-00000083','Synthetic retired alias')")).rejects.toMatchObject({code:"23505"});
 });
-it("rolls back the number, version and reservation when audit insertion fails",async()=>{
+it("rejects edits before audit work even when the numbering audit writer would fail",async()=>{
  const p=await patient(), before=await numbers.readPatientNumber(session,p.id);
+ const auditBefore=(await q("SELECT to_jsonb(a) AS row FROM audit_log a ORDER BY id")).rows;
  await q("CREATE FUNCTION synthetic_numbering_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='patient.number.change' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER synthetic_numbering_audit_failure BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION synthetic_numbering_audit_failure()");
- try{await expect(edit(p.id,before,"456")).rejects.toThrow("synthetic audit failure");}
+ try{await expect(edit(p.id,before,"456")).rejects.toMatchObject({code:"forbidden"});}
  finally{await q("DROP TRIGGER synthetic_numbering_audit_failure ON audit_log; DROP FUNCTION synthetic_numbering_audit_failure()");}
  expect(await numbers.readPatientNumber(session,p.id)).toEqual(before);
  expect((await q("SELECT * FROM retired_patient_numbers WHERE patient_number=$1",[before.patientNumber])).rows).toEqual([]);
+ expect((await q("SELECT to_jsonb(a) AS row FROM audit_log a ORDER BY id")).rows).toEqual(auditBefore);
 });
-it("serializes two manual edits with the same version: exactly one succeeds",async()=>{
+it("refuses both concurrent manual edits without changing the version or reservation",async()=>{
  const p=await patient(), before=await numbers.readPatientNumber(session,p.id);
  const results=await Promise.allSettled([edit(p.id,before,"501"),edit(p.id,before,"502")]);
- expect(results.filter(x=>x.status==="fulfilled")).toHaveLength(1);
- expect(results.filter(x=>x.status==="rejected").map(x=>(x as PromiseRejectedResult).reason.code)).toEqual(["stale"]);
- expect((await numbers.readPatientNumber(session,p.id)).version).toBe("2");
+ expect(results.every(result=>result.status==="rejected")).toBe(true);
+ expect(results.map(result=>(result as PromiseRejectedResult).reason.code)).toEqual(["forbidden","forbidden"]);
+ expect(await numbers.readPatientNumber(session,p.id)).toEqual(before);
+ expect((await q("SELECT * FROM retired_patient_numbers WHERE patient_number=$1",[before.patientNumber])).rows).toEqual([]);
 });
-it("concurrent import, create and manual edits cannot collide",async()=>{
- const p=await patient(), before=await numbers.readPatientNumber(session,p.id);
- const csv="الاسم,الهاتف\nمريض استيراد الترقيم,771554001\nمريض استيراد الترقيم الثاني,771554002\n";
- const results=await Promise.all([edit(p.id,before,"25000"),...Array.from({length:8},()=>patient()),db.commitPatientImport({rows:parseCsv(csv),fileSha256:createHash("sha256").update(csv).digest("hex"),fileName:"synthetic.csv",today:"2026-10-26",includePossibleDuplicates:false,actor:session.username,actorRole:session.role})]);
- expect(results.at(-1)).toMatchObject({ok:true});
+it("allocates uniquely above a pre-existing high number across concurrent direct, import, visit and booking creation",async()=>{
+ // A populated predecessor may already exceed7000 even while its sequence is lower.
+ const high=(await q("INSERT INTO patients(patient_number,full_name) VALUES('P-25000','Synthetic pre-existing high number') RETURNING id")).rows[0];
+ const prior=(await q("SELECT id,patient_number,patient_number_version::text FROM patients ORDER BY id")).rows;
+ const history=(await q("SELECT * FROM retired_patient_numbers ORDER BY patient_number")).rows;
+ const visit=await db.addVisit({patientName:"Synthetic numbering walk-in",patientPhone:"771554003",note:null});
+ const request=await db.createBookingRequest({fullName:"Synthetic numbering booking",phone:"967771554004",reason:null,preferredDate:"2030-01-02",preferredPeriod:"any"},null);
+ const csv="الاسم,الهاتف\nعبدالله منصور الحضرمي,771554001\nسارة خالد الزبيدي,771554002\n";
+ const [direct,imported,fromVisit,fromBooking]=await Promise.all([
+  Promise.all(Array.from({length:8},()=>patient())),
+  db.commitPatientImport({rows:parseCsv(csv),fileSha256:createHash("sha256").update(csv).digest("hex"),fileName:"synthetic.csv",today:"2026-10-26",includePossibleDuplicates:false,actor:session.username,actorRole:session.role}),
+  db.createNextSession({visitId:visit.id,date:"2030-01-02",time:"09:00",durationMinutes:30,phone:null,note:null}),
+  db.confirmBookingRequest({id:request.id,date:"2030-01-02",time:"10:00",durationMinutes:30}),
+ ]);
+ expect(imported).toMatchObject({ok:true});
+ expect(fromVisit).not.toBeNull();expect(fromBooking).not.toBeNull();
+ if(!fromVisit||!fromBooking||!imported.ok)throw new Error("Synthetic creation path failed");
+ expect(imported.created).toHaveLength(2);
+ const created=(await q("SELECT id,patient_number FROM patients WHERE id <> ALL($1::int[]) ORDER BY id",[prior.map(row=>row.id)])).rows;
+ expect(created).toHaveLength(12);
+ expect(new Set(created.map(row=>row.patient_number)).size).toBe(12);
+ for(const row of created)expect(BigInt(String(row.patient_number).slice(2))).toBeGreaterThan(25000n);
+ for(const id of [...direct.map(row=>row.id),fromVisit.patientId,fromBooking.patientId])expect(created.some(row=>row.id===id)).toBe(true);
+ expect((await q("SELECT patient_id FROM visits WHERE id=$1",[visit.id])).rows).toEqual([{patient_id:fromVisit.patientId}]);
+ expect((await q("SELECT patient_id FROM appointments WHERE id=$1",[fromBooking.appointmentId])).rows).toEqual([{patient_id:fromBooking.patientId}]);
+ expect((await q("SELECT id,patient_number,patient_number_version::text FROM patients WHERE id=ANY($1::int[]) ORDER BY id",[prior.map(row=>row.id)])).rows).toEqual(prior);
+ expect((await q("SELECT * FROM retired_patient_numbers ORDER BY patient_number")).rows).toEqual(history);
+ expect((await db.getPatient(high.id))?.patientNumber).toBe("P-25000");
  expect((await q("SELECT aqlan_patient_number_numeric(patient_number) FROM patients WHERE aqlan_patient_number_numeric(patient_number)>0 GROUP BY 1 HAVING count(*)>1")).rows).toEqual([]);
- const next=await numbers.readNumberingPreview(session);expect(BigInt(next.nextNumber!.slice(2))).toBeGreaterThan(25000n);
+ const next=await numbers.readNumberingPreview(session);
+ expect(BigInt(next.nextNumber!.slice(2))).toBeGreaterThan(created.reduce((max,row)=>BigInt(String(row.patient_number).slice(2))>max?BigInt(String(row.patient_number).slice(2)):max,25000n));
+});
+it("visit and booking conversion reuse an existing low-number patient without renumbering or allocating",async()=>{
+ const existing=(await q("SELECT id,patient_number,patient_number_version::text FROM patients WHERE patient_number='P-00042'")).rows[0];
+ const sequence=(await q("SELECT last_value::text,is_called FROM patient_number_seq")).rows;
+ const count=(await q("SELECT count(*)::int AS n FROM patients")).rows;
+ const visit=await db.addVisit({patientName:"Synthetic existing walk-in",patientPhone:"777000111",note:null});
+ const request=await db.createBookingRequest({fullName:"Synthetic existing booking",phone:"967777000111",reason:null,preferredDate:"2030-01-03",preferredPeriod:"any"},null);
+ const fromVisit=await db.createNextSession({visitId:visit.id,date:"2030-01-03",time:"09:00",durationMinutes:30,phone:null,note:null});
+ const fromBooking=await db.confirmBookingRequest({id:request.id,date:"2030-01-03",time:"10:00",durationMinutes:30});
+ expect(fromVisit).toMatchObject({patientId:existing.id});
+ expect(fromBooking).toMatchObject({patientId:existing.id});
+ expect((await q("SELECT id,patient_number,patient_number_version::text FROM patients WHERE id=$1",[existing.id])).rows).toEqual([existing]);
+ expect((await q("SELECT last_value::text,is_called FROM patient_number_seq")).rows).toEqual(sequence);
+ expect((await q("SELECT count(*)::int AS n FROM patients")).rows).toEqual(count);
+});
+it("demographic update ignores attempted number and version injection",async()=>{
+ const p=await patient(),before=await numbers.readPatientNumber(session,p.id);
+ const input={note:"Synthetic permitted demographic update",patientNumber:"150",patient_number:"P-00150",patient_number_version:999};
+ expect(await db.updatePatient(p.id,input)).toMatchObject({id:p.id,patientNumber:before.patientNumber,note:input.note});
+ expect(await numbers.readPatientNumber(session,p.id)).toEqual(before);
+ expect((await q("SELECT * FROM retired_patient_numbers WHERE patient_number=$1",[before.patientNumber])).rows).toEqual([]);
+});
+it("duplicate merge retains the target file number and retires rather than transfers the source number",async()=>{
+ const source=await patient(),target=await patient();
+ const targetBefore=await numbers.readPatientNumber(session,target.id);
+ const merged=await db.mergeDuplicatePatient(source.id,target.id,{actor:session.username,actorRole:session.role,reason:"Synthetic duplicate only"});
+ expect(merged).toMatchObject({ok:true,target:{id:target.id,patientNumber:target.patientNumber}});
+ expect(await numbers.readPatientNumber(session,target.id)).toEqual(targetBefore);
+ expect(await db.getPatient(source.id)).toBeNull();
+ expect((await q("SELECT patient_id::text FROM retired_patient_numbers WHERE patient_number=$1",[source.patientNumber])).rows).toEqual([{patient_id:String(source.id)}]);
 });
 it("honors the shared import lock for the central allocator",async()=>{
  const client=await db.getPool().connect();let task:ReturnType<typeof patient>|undefined;
@@ -140,14 +206,14 @@ it("refuses revoked/expired/nonadmin sessions before any numbering mutation",asy
  try{await expect(edit(p.id,before,"999")).rejects.toMatchObject({code:"forbidden"});}finally{await q("UPDATE users SET is_active=true WHERE id=$1",[session.userId]);}
  expect(await numbers.readPatientNumber(session,p.id)).toEqual(before);
 });
-it("rechecks session expiry after waiting for the exact patient row",async()=>{
+it("refuses a deferred edit without waiting for a locked patient row",async()=>{
  const p=await patient(), before=await numbers.readPatientNumber(session,p.id), client=await db.getPool().connect();
  let work:Promise<unknown>|undefined;
  try{await client.query("BEGIN");await client.query("SELECT id FROM patients WHERE id=$1 FOR UPDATE",[p.id]);
- const short={...session,expiresAt:Date.now()+150};
- work=numbers.changePatientNumber(short,p.id,{patientNumber:"998",expectedVersion:before.version,expectedPatientNumber:before.patientNumber,reason:"Synthetic expiring session"});
- const outcome=work.then(()=>({code:"unexpected-success"}),error=>error);
- await new Promise(resolve=>setTimeout(resolve,220));await client.query("COMMIT");expect(await outcome).toMatchObject({code:"forbidden"});
+ work=numbers.changePatientNumber(session,p.id,{patientNumber:"998",expectedVersion:before.version,expectedPatientNumber:before.patientNumber,reason:"Synthetic blocked edit"});
+ // Await refusal while the row lock is still held: the closed service must not query/wait on it.
+ await expect(work).rejects.toMatchObject({code:"forbidden"});
+ await client.query("COMMIT");
  }finally{await client.query("ROLLBACK");client.release();if(work)await work.catch(()=>{});}
  expect(await numbers.readPatientNumber(session,p.id)).toEqual(before);
 });
@@ -176,7 +242,7 @@ it("records indexed maximum-query evidence on a bounded 1000-row synthetic fixtu
  expect(JSON.stringify(plan.Plan)).toContain("patient_number_numeric_idx");
  expect((await numbers.readNumberingPreview(session)).nextNumber).toBe("P-51001");
 });
-it("manual paper correction preserves approved contract, receipt identities and computed balances",async()=>{
+it("refused manual correction preserves approved contract, receipt identities and computed balances",async()=>{
  const {approveAgreement,collectApprovedAgreement,approvedAgreementPosition}=await import("../../lib/approved-agreements");
  const p=await patient();
  await db.openShift({openedBy:session.username,opening:{YER:0,SAR:0,USD:0}});
@@ -205,12 +271,13 @@ it("manual paper correction preserves approved contract, receipt identities and 
  const balancesBefore=await amounts();
  expect(balancesBefore).toEqual(expect.arrayContaining([expect.objectContaining({currency:"YER",billedMinor:1000,collectedMinor:200,dueMinor:800})]));
  const before=await numbers.readPatientNumber(session,p.id);
- expect(await edit(p.id,before,"6123")).toEqual({patientId:p.id,patientNumber:"P-06123",version:"2"});
+ await expect(edit(p.id,before,"6123")).rejects.toMatchObject({code:"forbidden"});
+ expect(await numbers.readPatientNumber(session,p.id)).toEqual(before);
  expect(await financialRows()).toEqual(rowsBefore);
  expect(await db.patientReceiptRemainders(p.id)).toEqual(remaindersBefore);
  expect(await approvedAgreementPosition(plan.planId,"2026-10-29")).toEqual(positionBefore);
  expect(await amounts()).toEqual(balancesBefore);
- expect((await db.getPatient(p.id))?.patientNumber).toBe("P-06123");
+ expect((await db.getPatient(p.id))?.patientNumber).toBe(before.patientNumber);
 });
 it("uses indexed max projections and preserves full-width exhaustion without wraparound",async()=>{
  const indexes=(await q("SELECT indexname FROM pg_indexes WHERE tablename IN ('patients','retired_patient_numbers')")).rows.map(r=>r.indexname);

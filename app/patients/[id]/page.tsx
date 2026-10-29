@@ -21,7 +21,6 @@ import {
 } from "@/lib/patient";
 
 import { toWhatsAppNumber } from "@/lib/reminders";
-import { PatientNumberEditor } from "@/components/patient/PatientNumberEditor";
 import { PatientLedger } from "@/components/PatientLedger";
 import { LegacyHistory } from "@/components/LegacyHistory";
 import { ClinicalVisit } from "@/components/ClinicalVisit";
@@ -1038,7 +1037,6 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : null}
 
       {/* Separate identity command; owner-keyed to discard stale patient/session requests. */}
-      {admin ? <div className="mb-4"><PatientNumberEditor key={alertScope} patientId={patient.id} onChanged={() => void load()} /></div> : null}
 
       {editing ? (
         <PatientEditor
