@@ -30,9 +30,13 @@ it("saves service and chair snapshots on conversion", async () => {
   const saved = await db.createBookingRequest(request("967777840003"), null);
   const service = (await db.listAppointmentServices())[0];
   const result = await db.confirmBookingRequest({ id: saved.id, date: "2027-03-03", time: "11:00", durationMinutes: 40,
-    serviceId: service.id, bufferBeforeMinutes: 5, bufferAfterMinutes: 10, chairNo: 2, occupiesChair: true });
+    serviceId: service.id, bufferBeforeMinutes: 5, bufferAfterMinutes: 10, chairNo: 2, occupiesChair: true,
+    actor: "synthetic-reception", actorRole: "reception" });
   const appointment = await db.getAppointment(result!.appointmentId);
   expect(appointment).toMatchObject({ serviceId: service.id, bufferBeforeMinutes: 5, bufferAfterMinutes: 10, chairNo: 2, durationMinutes: 40 });
+  const audit = (await db.getPool().query("SELECT actor,details FROM audit_log WHERE action='appointment.create' AND entity_id=$1", [String(result!.appointmentId)])).rows;
+  expect(audit).toHaveLength(1);
+  expect(audit[0]).toMatchObject({ actor: "synthetic-reception", details: { bookingRequestId: saved.id, channel: "portal", time: "11:00" } });
 });
 
 it("inherits the approved responsible doctor for every specialty and rejects ambiguous/stale choices", async () => {

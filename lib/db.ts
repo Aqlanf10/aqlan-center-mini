@@ -5202,6 +5202,8 @@ export async function confirmBookingRequest(
     bufferAfterMinutes?: number;
     chairNo?: number | null;
     occupiesChair?: boolean;
+    actor?: string;
+    actorRole?: string;
   },
   runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number } | null> {
@@ -5256,6 +5258,10 @@ export async function confirmBookingRequest(
       WHERE id = $1`,
     [input.id, appointment.id],
   );
+  await insertAuditRow(client, { action: "appointment.create", entity: "appointment", entityId: appointment.id,
+    actor: input.actor ?? "بوابة الحجز", actorRole: input.actorRole ?? null,
+    details: { channel: "portal", bookingRequestId: input.id, patientId, doctorId: input.doctorId ?? null,
+      serviceId: input.serviceId ?? null, date: input.date, time: input.time } });
   return { appointmentId: appointment.id, patientId };
 }
 

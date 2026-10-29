@@ -109,9 +109,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         patientId = await existingPatientForBookingRequest(id, client, positiveId(source.patientId));
         doctorId = await bookingRequestDoctor(client, { patientId, caseId: positiveId(source.caseId), doctorId,
           followUp: service.legacyType === "follow_up" || source.appointmentType === "follow_up" });
-        if (!doctorId || !await lockBookableAppointmentDoctor(client, doctorId)) throw new Error("BOOKING_DOCTOR_INVALID");
+        if (!doctorId) throw new Error("BOOKING_DOCTOR_INVALID");
         await assertBookingRequestDuty(client, { doctorId, date, time, durationMinutes,
           before: service.bufferBeforeMinutes, after: service.bufferAfterMinutes });
+        if (!await lockBookableAppointmentDoctor(client, doctorId)) throw new Error("BOOKING_DOCTOR_INVALID");
         const judged = await judgeBookingInDay({ sameDay, client, date, time, durationMinutes,
           service: { ...service, requiresProvider: true, allowsConcurrentProviderWork: false },
           context: capacityContext, providerId: doctorId, chairNo, patientId, isNewPatient: patientId === null,
@@ -124,6 +125,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       commit: async client => {
         if (state.replay) return { appointmentId: state.replay.id, patientId: state.replay.patientId };
         return confirmBookingRequest({ id, date, time, durationMinutes, patientId, doctorId,
+          actor: session.username, actorRole: session.role,
           serviceId: service!.id, appointmentType: service!.legacyType, chairNo,
           bufferBeforeMinutes: service!.bufferBeforeMinutes, bufferAfterMinutes: service!.bufferAfterMinutes,
           occupiesChair: service!.requiresChair }, client);
