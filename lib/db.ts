@@ -1,3 +1,7 @@
+import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
+import { parseLabTeeth } from "./lab";
+import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
+import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { PATIENT_NUMBERING_SQL } from "./patient-numbering-schema";
@@ -2105,6 +2109,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0080", name: "patient_numbering", filename: "0080_patient_numbering.sql", sql: PATIENT_NUMBERING_SQL, checksum: checksumOf(PATIENT_NUMBERING_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -5880,6 +5885,7 @@ interface LabOrderRow {
   tooth_numbers: string | null;
   shade: string | null;
   stump_shade: string | null;
+  shade_specification?: unknown;
   priority: string | null;
   impression_type: string | null;
   sent_date: Date;
@@ -5920,6 +5926,9 @@ function dateText(date: Date): string {
 }
 
 function toLabOrder(row: LabOrderRow): LabOrder {
+  const selectedTeeth = Object.keys(parseLabTeeth(row.tooth_numbers)).map(Number);
+  if (!selectedTeeth.length && row.tooth_code) selectedTeeth.push(row.tooth_code);
+  const shades = readLabShadeSpecification(row.shade_specification, selectedTeeth);
   return {
     id: row.id,
     patientId: row.patient_id,
@@ -5936,6 +5945,8 @@ function toLabOrder(row: LabOrderRow): LabOrder {
     toothNumbers: row.tooth_numbers ?? null,
     shade: row.shade ?? null,
     stumpShade: row.stump_shade ?? null,
+    shadeSpecification: shades.value,
+    shadeSpecificationWarning: shades.reviewWarning,
     priority: row.priority === "urgent" || row.priority === "rush" ? row.priority : "normal",
     impressionType: (['"physical"', 'digital_scan', 'alginate', 'silicone', 'other'].includes(String(row.impression_type))
       ? row.impression_type
@@ -5984,7 +5995,7 @@ const LAB_SELECT = `
          l.lab_name, l.lab_phone, l.party_id,
          l.lab_service_id, ls.name AS lab_service_name,
          l.work_type, l.details,
-         l.tooth_numbers, l.shade, l.stump_shade, l.priority, l.impression_type,
+         l.tooth_numbers, l.shade, l.stump_shade, l.shade_specification, l.priority, l.impression_type,
          l.sent_date, l.due_date, l.status, l.received_at, l.delivered_at,
          d.id AS doctor_id, d.name AS doctor_name,
          l.visit_id, l.tooth_code, l.source,
@@ -6571,6 +6582,7 @@ export async function createLabOrder(input: {
   toothNumbers?: string | null;
   shade?: string | null;
   stumpShade?: string | null;
+  shadeSpecification?: LabShadeSpecification | null;
   priority?: "normal" | "urgent" | "rush";
   impressionType?: "physical" | "digital_scan" | "alginate" | "silicone" | "other";
   technicianName?: string | null;
@@ -6581,6 +6593,8 @@ export async function createLabOrder(input: {
   payableAccountCode?: string | null;
   isPosted?: boolean;
 }): Promise<LabOrder | null> {
+  const parsedShade = parseLabShadeSpecification(input.shadeSpecification ?? null, Object.keys(parseLabTeeth(input.toothNumbers)).map(Number));
+  if (!parsedShade.ok) throw new Error(parsedShade.error);
   await ensureSchema();
   const client = await getPool().connect();
   try {
@@ -6681,14 +6695,14 @@ export async function createLabOrder(input: {
                                priority, impression_type, technician_name,
                                base_amount_minor, exchange_rate, financial_status,
                                expense_category_id, expense_account_code, payable_account_code,
-                               is_posted, posted_at)
+                               is_posted, posted_at, shade_specification)
        VALUES ($1, $2, $3::text, $4, $5::text, $6::date, $7::date, $15, $8::text, $9::int, $10::bigint, $11::text,
                $12::int, $13::int, $14,
                $16::int, $17::int, $18::text, $19::text, $20::text,
                $21::text, $22::text, $23::text,
                $24::bigint, $25::numeric,
                CASE WHEN $29 = FALSE THEN 'pending_post' ELSE 'pending_delivery' END,
-               $26::int, $27::text, $28::text, $29, CASE WHEN $29 THEN NOW() ELSE NULL END)
+               $26::int, $27::text, $28::text, $29, CASE WHEN $29 THEN NOW() ELSE NULL END, $30::jsonb)
        ON CONFLICT DO NOTHING
        RETURNING id`,
       [
@@ -6703,6 +6717,7 @@ export async function createLabOrder(input: {
         input.technicianName ?? null,
         baseAmount, resolvedExchangeRate,
         expenseCatId, expenseAccCode, payableAccCode, isPosted,
+        parsedShade.value === null ? null : JSON.stringify(parsedShade.value),
       ],
     );
     if (!rows[0]) {
@@ -6776,6 +6791,89 @@ export async function createLabOrder(input: {
  * (وصل وركّب) وعن حالته المالية (التزام وُلد وسُدّد). تحديث الربط ينشئ الالتزام
  * إن غاب ويحدّثه إن وُجد في معاملة واحدة، ويكتب أثره في سجل التتبع.
  */
+/** Shade edits are clinical-only, audited atomically, and compare against the exact observed specification. */
+export async function updateLabOrderShades(id: number, input: {
+  shadeSpecification: LabShadeSpecification | null;
+  expectedShadeSpecification: LabShadeSpecification | null;
+  session: import("./auth").SessionPayload;
+}): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid"> {
+  if (!["admin", "doctor", "reception"].includes(input.session.role)) return "forbidden";
+  await ensureSchema();
+  return withTransaction(getPool(), async client => {
+    const { rows } = await client.query<{ patient_id: number; tooth_numbers: string | null; tooth_code: number | null }>(
+      "SELECT patient_id,tooth_numbers,tooth_code FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
+    if (!rows[0]) return "not_found";
+    const allowed = await (await import("./patient-access")).canAccessPatient(input.session, rows[0].patient_id, undefined, client, "nowait");
+    if (!allowed) return "forbidden";
+    const selected = Object.keys(parseLabTeeth(rows[0].tooth_numbers)).map(Number);
+    if (!selected.length && rows[0].tooth_code) selected.push(rows[0].tooth_code);
+    const parsed = parseLabShadeSpecification(input.shadeSpecification, selected);
+    const expected = parseLabShadeSpecification(input.expectedShadeSpecification);
+    if (!parsed.ok || !expected.ok) return "invalid";
+    const { rowCount } = await client.query(
+      "UPDATE lab_orders SET shade_specification=$3::jsonb WHERE id=$1 AND shade_specification IS NOT DISTINCT FROM $2::jsonb",
+      [id, expected.value === null ? null : JSON.stringify(expected.value), parsed.value === null ? null : JSON.stringify(parsed.value)]);
+    if (!rowCount) return "conflict";
+    await insertAuditRow(client, { action: "lab_order.shade", entity: "lab_orders", entityId: id,
+      details: { previous: expected.value, current: parsed.value }, actor: input.session.username, actorRole: input.session.role });
+    return "updated";
+  });
+}
+
+/** Explicit correction only; never recomputes or relinks a historical payable. */
+export async function updateLabOrderClinical(id: number, input: {
+  clinical: LabClinicalSnapshot; expectedClinical: LabClinicalSnapshot;
+  session: import("./auth").SessionPayload;
+}): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid" | "financial_lab_locked" | "financial_doctor_locked"> {
+  if (!["admin", "doctor", "reception"].includes(input.session.role)) return "forbidden";
+  await ensureSchema();
+  return withTransaction(getPool(), async client => {
+    const { rows } = await client.query<{
+      patient_id: number; doctor_id: number | null; work_type: string; tooth_numbers: string | null;
+      shade: string | null; shade_specification: unknown; party_id: number | null; lab_name: string;
+      lab_phone: string | null; cost_minor: string | null; payable_id: number | null;
+    }>("SELECT patient_id,doctor_id,work_type,tooth_numbers,shade,shade_specification,party_id,lab_name,lab_phone,cost_minor,payable_id FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
+    const row = rows[0];
+    if (!row) return "not_found";
+    const allowed = await (await import("./patient-access")).canAccessPatient(input.session, row.patient_id, undefined, client, "nowait");
+    if (!allowed) return "forbidden";
+    const storedShades = parseLabShadeSpecification(row.shade_specification);
+    if (!storedShades.ok) return "invalid";
+    const previous: LabClinicalSnapshot = { doctorId: row.doctor_id, workType: row.work_type,
+      toothNumbers: row.tooth_numbers, shade: row.shade, shadeSpecification: storedShades.value,
+      partyId: row.party_id, labName: row.lab_name, labPhone: row.lab_phone };
+    if (!sameLabClinicalSnapshot(previous, input.expectedClinical)) return "conflict";
+    const next = input.clinical;
+    if (labClinicalEditProblem(next, previous)) return "invalid";
+    if (input.session.role === "doctor" && next.doctorId !== previous.doctorId && next.doctorId !== input.session.partyId) return "forbidden";
+    if (next.doctorId !== null && next.doctorId !== previous.doctorId) {
+      const doctor = await client.query("SELECT id FROM parties WHERE id=$1 AND kind='doctor' AND is_active=TRUE FOR SHARE", [next.doctorId]);
+      if (!doctor.rowCount) return "invalid";
+    }
+    const labChanged = next.partyId !== previous.partyId || next.labName !== previous.labName || next.labPhone !== previous.labPhone;
+    const linked = await client.query("SELECT id FROM payables WHERE lab_order_id=$1 LIMIT 1", [id]);
+    const history = await client.query("SELECT id FROM lab_order_tracking WHERE lab_order_id=$1 AND action IN ('financial_settlement','financial_settlement_reversed') LIMIT 1", [id]);
+    if (next.doctorId !== previous.doctorId) {
+      const invoice = await client.query("SELECT v.invoice_id FROM lab_orders l JOIN visits v ON v.id=l.visit_id WHERE l.id=$1 AND v.invoice_id IS NOT NULL", [id]);
+      if (row.cost_minor !== null || row.payable_id !== null || linked.rowCount || history.rowCount || invoice.rowCount) return "financial_doctor_locked";
+    }
+    if (labChanged) {
+      if (row.cost_minor !== null || row.payable_id !== null || linked.rowCount || history.rowCount) return "financial_lab_locked";
+      if (!next.partyId) return "invalid";
+      const lab = await client.query<{ name: string; phone: string | null }>("SELECT name,phone FROM parties WHERE id=$1 AND kind='lab' AND is_active=TRUE FOR SHARE", [next.partyId]);
+      if (!lab.rows[0] || next.labName !== lab.rows[0].name || next.labPhone !== lab.rows[0].phone) return "invalid";
+    }
+    if (sameLabClinicalSnapshot(previous, next)) return "updated";
+    await client.query(`UPDATE lab_orders SET doctor_id=$2,work_type=$3,tooth_numbers=$4,shade=$5,
+      shade_specification=$6::jsonb,party_id=$7,lab_name=$8,lab_phone=$9 WHERE id=$1`,
+      [id,next.doctorId,next.workType,next.toothNumbers,next.shade,
+        next.shadeSpecification === null ? null : JSON.stringify(next.shadeSpecification),next.partyId,next.labName,next.labPhone]);
+    await insertAuditRow(client, { action: "lab_order.clinical", entity: "lab_orders", entityId: id,
+      details: { previous, current: next, financialSnapshotUnchanged: true }, actor: input.session.username, actorRole: input.session.role });
+    return "updated";
+  });
+}
+
 export async function updateLabOrderAccounting(
   orderId: number,
   input: {
@@ -6809,9 +6907,14 @@ export async function updateLabOrderAccounting(
       exchange_rate: string | number | null;
       payable_id: number | null;
       is_posted: boolean | null;
+      financial_status: string;
+      expense_category_id: number | null;
+      expense_account_code: string | null;
+      payable_account_code: string | null;
     }>(
       `SELECT id, party_id, lab_name, work_type, details, tooth_numbers, due_date, sent_date,
-              cost_minor, cost_currency, base_amount_minor, exchange_rate, payable_id, is_posted
+              cost_minor, cost_currency, base_amount_minor, exchange_rate, payable_id, is_posted,
+              financial_status, expense_category_id, expense_account_code, payable_account_code
          FROM lab_orders WHERE id = $1 FOR UPDATE`,
       [orderId],
     );
@@ -6825,9 +6928,10 @@ export async function updateLabOrderAccounting(
     const isPosted = input.isPosted !== undefined ? Boolean(input.isPosted) : (order.is_posted !== false);
 
     // بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة — سلسلة أولوية واحدة.
-    const expenseCatId = input.expenseCategoryId !== undefined ? input.expenseCategoryId : null;
+    const expenseCatId = input.expenseCategoryId !== undefined ? input.expenseCategoryId : (order.expense_category_id ?? null);
     let expenseAccCode = input.expenseAccountCode?.trim() || null;
-    if (expenseCatId && !expenseAccCode) {
+    if (expenseCatId && !expenseAccCode && input.expenseCategoryId !== undefined
+      && input.expenseCategoryId !== order.expense_category_id) {
       const catRes = await client.query<{ account_code: string }>(
         `SELECT account_code FROM expense_categories WHERE id = $1`, [expenseCatId],
       );
@@ -6835,8 +6939,8 @@ export async function updateLabOrderAccounting(
         expenseAccCode = catRes.rows[0].account_code;
       }
     }
-    if (!expenseAccCode) expenseAccCode = "5101";
-    const payableAccCode = input.payableAccountCode?.trim() || "2101";
+    if (!expenseAccCode) expenseAccCode = order.expense_account_code || "5101";
+    const payableAccCode = input.payableAccountCode?.trim() || order.payable_account_code || "2101";
 
     // تحديث التكلفة اختياري: تغيّر التكلفة يستبدل المكافئ الأساسي بسعر المرسَل.
     const resolvedCost = input.costMinor !== undefined
@@ -6851,6 +6955,9 @@ export async function updateLabOrderAccounting(
     const hasMoneyUpdate = input.costMinor !== undefined
       || input.costCurrency != null || input.exchangeRate != null;
     const hasPositiveMoneyUpdate = hasMoneyUpdate && resolvedCost != null && resolvedCost > 0;
+    if (hasMoneyUpdate && !hasPositiveMoneyUpdate) {
+      throw new Error("lab_order_accounting_price_invalid");
+    }
     if (hasPositiveMoneyUpdate) {
       if (!Number.isSafeInteger(resolvedCost) || !isCurrency(resolvedCurrency)) {
         throw new Error("lab_order_accounting_price_invalid");
@@ -6871,6 +6978,80 @@ export async function updateLabOrderAccounting(
       throw new Error("lab_order_accounting_price_invalid");
     }
 
+    // Accounting categories/accounts and posting affect historical reporting too:
+    // they are financial changes, not harmless display metadata. An exact no-op
+    // is allowed even on paid/closed orders, without rewriting status or audit.
+    const moneyChanged = hasMoneyUpdate && (
+      resolvedCost !== (order.cost_minor == null ? null : Number(order.cost_minor))
+      || resolvedCurrency !== (order.cost_currency || "YER")
+      || resolvedRate !== Number(order.exchange_rate ?? 1)
+      || baseAmount !== (order.base_amount_minor == null ? null : Number(order.base_amount_minor)));
+    const accountingChanged = expenseCatId !== (order.expense_category_id ?? null)
+      || expenseAccCode !== (order.expense_account_code || "5101")
+      || payableAccCode !== (order.payable_account_code || "2101")
+      || isPosted !== (order.is_posted !== false);
+    const needsPayable = !order.payable_id && order.party_id && resolvedCost != null && resolvedCost > 0;
+    if (!moneyChanged && !accountingChanged && !needsPayable) {
+      await client.query("COMMIT");
+      const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
+      return full[0] ? toLabOrder(full[0]) : null;
+    }
+
+    // Payment writers lock the payable before inserting their settlement. NOWAIT
+    // avoids a cycle with writers that subsequently update the lab-order row.
+    // Include the reverse link so a stale/missing payable_id cannot bypass guards.
+    let linked: { id: number; party_id: number; lab_order_id: number | null; source_type: string; created_date: string }[];
+    try {
+      linked = (await client.query<{ id: number; party_id: number; lab_order_id: number | null; source_type: string; created_date: string }>(
+        `SELECT id, party_id, lab_order_id, source_type, (created_at AT TIME ZONE $3)::date::text AS created_date
+           FROM payables WHERE id = $1 OR lab_order_id = $2 ORDER BY id FOR UPDATE NOWAIT`,
+        [order.payable_id, orderId, CLINIC_TIME_ZONE],
+      )).rows;
+      // Fence absent as well as existing cutoff settings against concurrent upsert.
+      await client.query("LOCK TABLE settings IN SHARE MODE NOWAIT");
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "55P03") {
+        throw new Error("lab_order_accounting_busy");
+      }
+      throw error;
+    }
+    if (linked.length > 1 || linked.some(row => row.party_id !== order.party_id
+      || row.lab_order_id !== orderId || row.source_type !== "operational")
+      || (order.payable_id != null && linked[0]?.id !== order.payable_id)) {
+      throw new Error("lab_order_accounting_link_invalid");
+    }
+    // Fresh READ COMMITTED statement AFTER the locks: never use a snapshot
+    // taken before a competing settlement committed. Any history (including a
+    // reversal) requires the dedicated correction workflow, not an in-place edit.
+    // Older batch settlements may only have tracking expense_id or voucher text;
+    // the order-scoped event itself is evidence even after paid was reopened.
+    const { rows: settlementRows } = await client.query<{ has_settlement: boolean }>(
+      `SELECT (EXISTS (SELECT 1 FROM expenses WHERE payable_id = ANY($1::int[]))
+        OR EXISTS (SELECT 1 FROM expense_payable_allocations WHERE payable_id = ANY($1::int[]))
+        OR EXISTS (SELECT 1 FROM lab_order_tracking WHERE lab_order_id = $2
+          AND action IN ('financial_settlement', 'financial_settlement_reversed'))) AS has_settlement`,
+      [linked.map(row => row.id), orderId],
+    );
+    if (order.financial_status === "paid" || settlementRows[0]?.has_settlement) {
+      throw new Error("lab_order_accounting_settled");
+    }
+    const { rows: cutoffRows } = await client.query<{ value: string }>(
+      "SELECT value FROM settings WHERE key = 'finance.locked_before'",
+    );
+    const lockedBefore = cutoffRows[0]?.value?.trim() || "";
+    if (lockedBefore) {
+      // Lab cost is also attributed to the linked visit invoice for commission.
+      // A later dispatch must not revalue an invoice from an already closed month.
+      const { rows: invoiceDates } = await client.query<{ invoice_date: string }>(
+        `SELECT (i.created_at AT TIME ZONE $2)::date::text AS invoice_date
+           FROM lab_orders l JOIN visits v ON v.id = l.visit_id AND v.patient_id = l.patient_id
+           JOIN invoices i ON i.id = v.invoice_id AND i.patient_id = l.patient_id WHERE l.id = $1`,
+        [orderId, CLINIC_TIME_ZONE],
+      );
+      if ([dateText(order.sent_date), ...linked.map(row => row.created_date), ...invoiceDates.map(row => row.invoice_date)]
+        .some(date => date < lockedBefore)) throw new Error("lab_order_accounting_period_locked");
+    }
+
     await client.query(
       `UPDATE lab_orders
           SET expense_category_id = $1,
@@ -6879,6 +7060,7 @@ export async function updateLabOrderAccounting(
               is_posted = $4,
               posted_at = CASE WHEN $4 = TRUE THEN COALESCE(posted_at, NOW()) ELSE NULL END,
               financial_status = CASE
+                WHEN financial_status = 'paid' THEN financial_status
                 WHEN $4 = FALSE THEN 'pending_post'
                 WHEN payable_id IS NOT NULL THEN 'payable_created'
                 WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN 'payable_created'
@@ -6956,6 +7138,19 @@ export async function updateLabOrderAccounting(
       input.actorRole || "accountant",
       client,
     );
+
+    await insertAuditRow(client, {
+      action: "lab_order.accounting", entity: "lab_order", entityId: orderId,
+      actor: input.actor || "system", actorRole: input.actorRole ?? null,
+      details: {
+        previous: { costMinor: order.cost_minor, currency: order.cost_currency, exchangeRate: order.exchange_rate,
+          baseAmountMinor: order.base_amount_minor, expenseCategoryId: order.expense_category_id,
+          expenseAccountCode: order.expense_account_code, payableAccountCode: order.payable_account_code, isPosted: order.is_posted },
+        current: { costMinor: resolvedCost, currency: resolvedCurrency, exchangeRate: resolvedRate,
+          baseAmountMinor: baseAmount, expenseCategoryId: expenseCatId, expenseAccountCode: expenseAccCode,
+          payableAccountCode: payableAccCode, isPosted },
+      },
+    });
 
     await client.query("COMMIT");
     const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
@@ -7179,6 +7374,7 @@ export async function createLabOrderRemake(
   await ensureSchema();
   const original = await getLabOrderById(originalId);
   if (!original) return null;
+  if (original.shadeSpecificationWarning) throw new Error("Review malformed lab shades before remake");
 
   const client = await getPool().connect();
   try {
@@ -7210,14 +7406,14 @@ export async function createLabOrderRemake(
          shade, stump_shade, priority, impression_type, sent_date, due_date,
          note, doctor_id, visit_id, party_id, lab_service_id,
          cost_minor, cost_currency, base_amount_minor, exchange_rate,
-         financial_status, status, remake_original_id, remake_reason, source
+         financial_status, status, remake_original_id, remake_reason, source, shade_specification
        )
        VALUES (
          $1, $2, $3, $4, $5, $6,
          $7, $8, 'urgent', $9, $10::date, $11::date,
          $12, $13, $14, $15, $16,
          0, $17, 0, 1,
-         'exempt', 'sent', $18, $19, 'manual'
+         'exempt', 'sent', $18, $19, 'manual', $20::jsonb
        )
        RETURNING id`,
       [
@@ -7240,6 +7436,7 @@ export async function createLabOrderRemake(
         original.costCurrency || "YER",
         originalId,
         input.remakeReason,
+        original.shadeSpecification == null ? null : JSON.stringify(original.shadeSpecification),
       ],
     );
 

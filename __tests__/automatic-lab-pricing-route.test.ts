@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const boundary = vi.hoisted(() => ({
-  createLabOrder: vi.fn(), getSettings: vi.fn(), listParties: vi.fn(), recordAudit: vi.fn(), requireSession: vi.fn(),
+  createLabOrder: vi.fn(), getSettings: vi.fn(), listParties: vi.fn(), recordAudit: vi.fn(), requireSession: vi.fn(), listLabServices: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
 vi.mock("@/lib/db", () => ({ ...boundary, findUserByUsername: vi.fn(), labCounts: vi.fn(),
-  listLabNames: vi.fn(), listLabOrders: vi.fn(), listLabServices: vi.fn() }));
+  listLabNames: vi.fn(), listLabOrders: vi.fn() }));
 import { POST } from "../app/api/lab/route";
 import { LabOrderPricingConflict } from "../lib/lab-order-pricing";
 import { withDefaults } from "../lib/settings";
 
-const draft = { patientId: 101, visitId: 201, toothCode: 16, partyId: 301,
+const draft = { doctorId: 601, patientId: 101, visitId: 201, toothCode: 16, partyId: 301,
   labServiceId: 401, labName: "Synthetic FX lab", workType: "Synthetic crown",
   sentDate: "2026-10-03", dueDate: "2026-10-10", toothNumbers: "16,17,18" };
 const created = { id: 501, patientId: 101, patientName: "Synthetic FX patient", labName: draft.labName,
@@ -21,7 +21,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   boundary.requireSession.mockResolvedValue({ username: "synthetic-fx-admin", role: "admin" });
   boundary.getSettings.mockResolvedValue(withDefaults({ "finance.rate.USD": "531.125", "finance.rate.SAR": "141.25" }));
-  boundary.listParties.mockResolvedValue([{ id: 301 }]);
+  boundary.listParties.mockImplementation(async kind => kind === "doctor" ? [{ id: 601, kind: "doctor", isActive: true }] : [{ id: 301 }]);
+  boundary.listLabServices.mockResolvedValue([{ id: 401, name: "Synthetic crown", code: "CRN_TEST", isActive: true }]);
   boundary.createLabOrder.mockResolvedValue(created);
 });
 
@@ -70,6 +71,42 @@ describe("actual lab POST automatic pricing error boundary (synthetic writer stu
   it("retains unauthenticated admission", async () => {
     boundary.requireSession.mockResolvedValue(null);
     expect((await POST(request())).status).toBe(401);
+    expect(boundary.createLabOrder).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("lab prescription creation admission", () => {
+  it("requires explicit doctor attribution for a sent prescription", async () => {
+    expect((await POST(request({ doctorId: null }))).status).toBe(400);
+    expect(boundary.createLabOrder).not.toHaveBeenCalled();
+  });
+  it("rejects inactive or non-doctor parties", async () => {
+    boundary.listParties.mockResolvedValue([{ id: 601, kind: "lab", isActive: true }]);
+    expect((await POST(request())).status).toBe(409);
+    expect(boundary.createLabOrder).not.toHaveBeenCalled();
+  });
+  it("binds doctor attribution to the logged-in doctor", async () => {
+    boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor", partyId: 601 });
+    expect((await POST(request({ doctorId: 602 }))).status).toBe(403);
+    expect((await POST(request({ doctorId: null }))).status).toBe(201);
+    expect(boundary.createLabOrder).toHaveBeenCalledWith(expect.objectContaining({ doctorId: 601 }));
+  });
+  it("rejects crown roles for dentures instead of silently remapping", async () => {
+    expect((await POST(request({ workType: "Partial cast denture", toothNumbers: "16 (crown)" }))).status).toBe(400);
+    expect(boundary.createLabOrder).not.toHaveBeenCalled();
+  });
+  it("also checks the canonical selected service for denture roles", async () => {
+    boundary.listLabServices.mockResolvedValue([{ id: 401, name: "Partial cast denture", code: "DNT_CAST", isActive: true }]);
+    expect((await POST(request({ toothNumbers: "16 (crown)" }))).status).toBe(400);
+    expect(boundary.createLabOrder).not.toHaveBeenCalled();
+  });
+  it("persists validated multi-zone shades without converting the legacy global code", async () => {
+    const shadeSpecification = { version: 1, teeth: [{ toothCode: 16, cervical: { guide: "vita_classical", code: "A2" }, body: { guide: "vita_3d_master", code: "0M1" }, incisal: null }] };
+    expect((await POST(request({ shade: "BL2", shadeSpecification }))).status).toBe(201);
+    expect(boundary.createLabOrder).toHaveBeenCalledWith(expect.objectContaining({ shade: "BL2", shadeSpecification }));
+    boundary.createLabOrder.mockClear();
+    expect((await POST(request({ shadeSpecification: { ...shadeSpecification, teeth: [{ ...shadeSpecification.teeth[0], toothCode: 21 }] } }))).status).toBe(400);
     expect(boundary.createLabOrder).not.toHaveBeenCalled();
   });
 });

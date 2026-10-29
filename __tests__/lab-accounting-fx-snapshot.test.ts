@@ -45,6 +45,8 @@ beforeEach(async () => {
   boundary.query.mockImplementation(async (sql: string) => {
     if (failure?.test(sql)) throw fault;
     if (/FROM lab_orders WHERE id = \$1 FOR UPDATE/.test(sql)) return { rows: order ? [order] : [] };
+    if (/FROM payables.*FOR UPDATE NOWAIT/s.test(sql)) return { rows: order?.payable_id
+      ? [{ id: 23, party_id: 7, lab_order_id: 11, source_type: "operational", created_date: "2026-10-05" }] : [] };
     if (/INSERT INTO payables/.test(sql)) return { rows: [{ id: 29 }] };
     return { rows: [] };
   });
@@ -135,7 +137,7 @@ describe("actual lab accounting writer money snapshot bindings", () => {
     ]);
     expect(boundary.release).toHaveBeenCalledTimes(1);
   });
-  it.each([/UPDATE payables\s+SET expense_category_id/, /INSERT INTO lab_order_tracking/])(
+  it.each([/UPDATE payables\s+SET expense_category_id/, /INSERT INTO lab_order_tracking/, /INSERT INTO audit_log/])(
     "rolls back and releases on a late failure at %s", async failAt => {
       failure = failAt;
       await expect(updateLabOrderAccounting(11, { costMinor: 7500, exchangeRate: 540 })).rejects.toBe(fault);

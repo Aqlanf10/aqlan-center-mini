@@ -10,6 +10,7 @@ import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { clinicDateString } from "@/lib/schedule";
 import { buildInstallmentPlanAgreement } from "@/lib/plans";
+import { AgreementFinancialSummary, AgreementInstallmentTable, AgreementTermsAndSignatures } from "@/components/InstallmentAgreementPresentation";
 import { DebtRepaymentAgreementPrint } from "@/components/DebtRepaymentAgreementPrint";
 
 export const dynamic = "force-dynamic";
@@ -120,20 +121,12 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
 
         <div className="rule" />
 
-        <div data-testid="current-plan-financial-summary" style={{ margin: "4mm 0", background: "#f8fafc", padding: "3mm", borderRadius: "2mm", border: "1px solid #e2e8f0" }}>
-          <div className="line line-strong" style={{ fontSize: "14pt" }}>
-            <span>{currentFinancial ? "إجمالي الاتفاق المالي الحالي" : "إجمالي تكلفة الخطة المتفق عليها"}</span>
-            <span className="num">{formatMoney(currentFinancial?.totalMinor ?? agreement.totalMinor, base)}</span>
-          </div>
-          <div className="line" style={{ color: "#059669", fontWeight: 700 }}>
-            <span>المسدد حتى تاريخه</span>
-            <span className="num">{formatMoney(currentFinancial?.paidMinor ?? plan.progress.paidMinor, base)}</span>
-          </div>
-          <div className="line" style={{ color: "#b91c1c", fontWeight: 700 }}>
-            <span>المتبقي من قيمة الخطة</span>
-            <span className="num">{formatMoney(currentFinancial?.remainingMinor ?? plan.progress.remainingMinor, base)}</span>
-          </div>
-        </div>
+        <AgreementFinancialSummary testId="current-plan-financial-summary"
+          totalLabel={currentFinancial ? "إجمالي الاتفاق المالي الحالي" : "إجمالي تكلفة الخطة المتفق عليها"}
+          remainingLabel="المتبقي من قيمة الخطة"
+          totalMinor={currentFinancial?.totalMinor ?? agreement.totalMinor}
+          paidMinor={currentFinancial?.paidMinor ?? plan.progress.paidMinor}
+          remainingMinor={currentFinancial?.remainingMinor ?? plan.progress.remainingMinor} currency={base} />
 
         {amended && currentFinancial?.originalTotalMinor !== undefined ? <p data-testid="original-plan-agreement">قيمة الاتفاق الأصلي قبل التعديلات: {formatMoney(currentFinancial.originalTotalMinor, base)}. الجدول والبنود الأصلية محفوظة كتاريخ؛ فرق التعديل موثق بفواتير مستقلة ولا يغيّر الجدول الأصلي.</p> : null}
         {approvedSummary}
@@ -146,57 +139,12 @@ export default async function PlanAgreementPage({ params, searchParams }: { para
             {plan.approvedAgreement ? "كامل الالتزام مستحق؛ لا يوجد جدول أقساط مؤجلة." : "خطة بنود وإجراءات (تُفوتر وتسدد حسب الجلسات المنجزة)."}
           </p>
         ) : (
-          <table className="items" style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "center", width: "15%" }}>القسط</th>
-                <th style={{ textAlign: "right", width: "35%" }}>تاريخ الاستحقاق</th>
-                <th className="num" style={{ width: "30%" }}>المبلغ المستحق</th>
-                <th style={{ textAlign: "center", width: "20%" }}>الحالة</th>
-              </tr>
-            </thead>
-            <tbody>
-              {agreement.installments.map((inst) => (
-                <tr key={inst.number} style={{ background: inst.paid ? "#f0fdf4" : "transparent" }}>
-                  <td style={{ textAlign: "center", fontWeight: 700 }}>{inst.number}</td>
-                  <td style={{ textAlign: "right" }}>{friendlyDateLong(inst.dueDate)}</td>
-                  <td className="num">{formatMoney(inst.amountMinor, base)}</td>
-                  <td style={{ textAlign: "center", fontSize: "9pt", fontWeight: 700, color: inst.paid ? "#15803d" : "#b45309" }}>
-                    {inst.paid ? "مسدد ✓" : "مستحق"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <AgreementInstallmentTable currency={base} rows={agreement.installments.map(inst => ({
+            key: inst.number, number: inst.number, dueDate: inst.dueDate, amountMinor: inst.amountMinor, paid: inst.paid,
+          }))} />
         )}
 
-        <div className="rule-light" style={{ margin: "4mm 0" }} />
-
-        <h3 style={{ fontSize: "10pt", fontWeight: 700, margin: "2mm 0" }}>الشروط والالتزامات السريرية:</h3>
-        <ol style={{ paddingRight: "5mm", margin: "2mm 0", fontSize: "8.5pt", lineHeight: "1.6", color: "#334155" }}>
-          {agreement.terms.map((term, i) => (
-            <li key={i} style={{ marginBottom: "1.5mm" }}>{term}</li>
-          ))}
-        </ol>
-
-        {agreement.note ? (
-          <p className="footer-note" style={{ fontSize: "8.5pt", margin: "2mm 0" }}>
-            <strong>ملاحظات سريرية خاصة:</strong> {agreement.note}
-          </p>
-        ) : null}
-
-        <div className="sign-row" style={{ marginTop: "8mm", display: "flex", justifyContent: "space-between" }}>
-          <div style={{ textAlign: "center", width: "40%" }}>
-            <p style={{ fontWeight: 700, fontSize: "10pt" }}>الطبيب المعالج / إدارة المركز</p>
-            <div style={{ height: "15mm", borderBottom: "1px dashed #94a3b8" }} />
-            <p style={{ fontSize: "8pt", color: "#64748b", marginTop: "1mm" }}>الختم والتوقيع</p>
-          </div>
-          <div style={{ textAlign: "center", width: "40%" }}>
-            <p style={{ fontWeight: 700, fontSize: "10pt" }}>إقرار وموافقة المريض (أو ولي أمره)</p>
-            <div style={{ height: "15mm", borderBottom: "1px dashed #94a3b8" }} />
-            <p style={{ fontSize: "8pt", color: "#64748b", marginTop: "1mm" }}>التوقيع والاسم الثلاثي</p>
-          </div>
-        </div>
+        <AgreementTermsAndSignatures terms={agreement.terms} note={agreement.note} />
       </div>
     </>
   );

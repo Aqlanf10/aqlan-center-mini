@@ -623,3 +623,20 @@ An application rollback does not undo this migration: old 480 startup preserves
 the new guard, but its old preflight manifest reports 0087 as unknown. Do not
 delete registry history to hide that mismatch. Exact-head CI and Staging
 acceptance remain required before Production rollout.
+
+
+### 0089_lab_shade_specification.sql
+
+Adds nullable, versioned `lab_orders.shade_specification` JSONB for explicit
+per-tooth cervical, body and incisal/occlusal shade selections. The immutable
+validator and CHECK constraint accept only valid FDI identities and the reviewed
+VITA classical / 3D-MASTER guide-code pairs, reject duplicate teeth and unknown
+keys, and preserve SQL NULL for orders without structured shade instructions.
+
+Existing global shade strings and tooth roles are not rewritten, inferred or
+backfilled. Numbered and checksum-checked runtime SQL use identical bytes.
+Migration 0088 remains separately reserved; this change does not fill that gap.
+Application shade edits commit their audit record in the same transaction and
+use the previously observed specification to reject stale writes. Rollback of
+application code must not delete the new column or migration registry history.
+Exact-head CI and Staging verification remain required before Production rollout.

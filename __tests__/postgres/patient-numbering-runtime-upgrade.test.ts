@@ -19,12 +19,13 @@ const { loadMigrationFiles } = await import("../../lib/migration-files");
 const { inspectSchemaReadOnly } = await import("../../lib/schema-preflight");
 afterAll(async () => { await db.resetPoolForTesting(); });
 
-it("upgrades the main0087 runtime registry with gaps by only adding0080; restart preserves identity and all prior registry records", async () => {
+it("upgrades the main0087/0089 runtime registry with gaps by only adding0080; restart preserves identity and all prior registry records", async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await db.ensureSchema();
   const q = (sql: string) => db.getPool().query(sql);
   const registryBefore = (await q("SELECT * FROM schema_migrations ORDER BY version")).rows;
   expect(registryBefore.some(row => row.version === "0087")).toBe(true);
+  expect(registryBefore.some(row => row.version === "0089")).toBe(true);
   expect(registryBefore.some(row => row.version === "0080")).toBe(false);
   await q("INSERT INTO patients(patient_number,full_name) VALUES('P-00012','Synthetic pre-numbering paper file')");
   const before = (await q("SELECT id,patient_number,full_name FROM patients ORDER BY id")).rows;
@@ -55,4 +56,23 @@ it("upgrades the main0087 runtime registry with gaps by only adding0080; restart
   expect((await q("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryAfter);
   expect((await q("SELECT id,patient_number,full_name FROM patients ORDER BY id")).rows).toEqual(before);
   expect((await q("SELECT aqlan_allocate_patient_number() AS number")).rows).toEqual([{ number: "P-07000" }]);
+  // A rolled-back application can leave historical registrations. This synthetic
+  // marker is not the cancelled portal SQL and is never treated as an allowlist.
+  // Read-only readiness must disclose it without changing any durable evidence.
+  await db.getPool().query(
+    "INSERT INTO schema_migrations(version,name,checksum,adopted) VALUES($1,$2,$3,false)",
+    ["0090", "synthetic_unknown_history", "a".repeat(64)],
+  );
+  const historyBefore = (await q("SELECT * FROM schema_migrations ORDER BY version")).rows;
+  const patientsBeforeReadiness = (await q("SELECT * FROM patients ORDER BY id")).rows;
+  const sequenceBeforeReadiness = (await q("SELECT * FROM patient_number_seq")).rows;
+  const historyReport = await preflight();
+  expect(historyReport.patientNumberingReadiness).toEqual({ ready: true, ambiguousAliasGroups: 0 });
+  expect(historyReport.registry.unknownVersions).toEqual(["0090"]);
+  expect(historyReport.registry.matchesFiles).toBe(false);
+  expect(historyReport.schemaEquivalence).toBe("NOT_ASSESSED");
+  expect((await q("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(historyBefore);
+  expect((await q("SELECT * FROM patients ORDER BY id")).rows).toEqual(patientsBeforeReadiness);
+  expect((await q("SELECT * FROM patient_number_seq")).rows).toEqual(sequenceBeforeReadiness);
+  expect((await q("SELECT * FROM retired_patient_numbers")).rows).toEqual([]);
 });

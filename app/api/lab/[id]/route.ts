@@ -1,3 +1,5 @@
+import { labClinicalEditProblem, parseLabClinicalSnapshot } from "@/lib/lab-clinical-edit";
+import { parseLabShadeSpecification } from "@/lib/lab-shades";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -10,6 +12,8 @@ import {
   setLabOrderDueDate,
   setLabOrderStatus,
   updateLabOrderAccounting,
+  updateLabOrderShades,
+  updateLabOrderClinical,
 } from "@/lib/db";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -45,6 +49,36 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const source = (body ?? {}) as Record<string, unknown>;
 
   try {
+    if (source.action === "update_clinical") {
+      if (!["admin", "doctor", "reception"].includes(session.role)) return NextResponse.json({ message: "غير مصرح بتصحيح الإرسالية." }, { status: 403 });
+      const clinical = parseLabClinicalSnapshot(source.clinical);
+      const expectedClinical = parseLabClinicalSnapshot(source.expectedClinical);
+      if (!clinical || !expectedClinical) return NextResponse.json({ message: "بيانات الإرسالية أو نسختها السابقة غير صالحة." }, { status: 400 });
+      const problem = labClinicalEditProblem(clinical, expectedClinical);
+      if (problem) return NextResponse.json({ message: problem }, { status: 400 });
+      const result = await updateLabOrderClinical(id, { clinical, expectedClinical, session });
+      if (result === "forbidden") return NextResponse.json({ message: "غير مصرح لهذا المريض أو الطبيب." }, { status: 403 });
+      if (result === "not_found") return NextResponse.json({ message: "الإرسالية غير موجودة." }, { status: 404 });
+      if (result === "invalid") return NextResponse.json({ message: "بيانات الطبيب أو المعمل أو الأسنان غير صالحة؛ أعد مراجعتها." }, { status: 400 });
+      if (result === "financial_doctor_locked") return NextResponse.json({ message: "تغيير الطبيب قد يعيد توزيع العمولة التاريخية؛ لهذه الإرسالية أثر مالي أو فاتورة مرتبطة ويحتاج تصحيح الطبيب مراجعة مالية مستقلة." }, { status: 409 });
+      if (result === "financial_lab_locked") return NextResponse.json({ message: "للإرسالية تكلفة أو التزام مالي؛ تغيير المعمل يحتاج مراجعة الربط المالي أولًا ولا يُنفّذ من التصحيح السريري." }, { status: 409 });
+      if (result === "conflict") return NextResponse.json({ message: "تغيّرت الإرسالية منذ فتحها؛ أغلق النافذة وأعد تحميلها قبل التصحيح." }, { status: 409 });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (source.action === "update_shade") {
+      if (!["admin", "doctor", "reception"].includes(session.role)) return NextResponse.json({ message: "غير مصرح بتعديل ألوان المعمل." }, { status: 403 });
+      const next = parseLabShadeSpecification(source.shadeSpecification);
+      const expected = parseLabShadeSpecification(source.expectedShadeSpecification);
+      if (!next.ok || !expected.ok) return NextResponse.json({ message: "مواصفات الألوان أو نسختها السابقة غير صالحة." }, { status: 400 });
+      const result = await updateLabOrderShades(id, { shadeSpecification: next.value, expectedShadeSpecification: expected.value, session });
+      if (result === "forbidden") return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+      if (result === "not_found") return NextResponse.json({ message: "الإرسالية غير موجودة." }, { status: 404 });
+      if (result === "invalid") return NextResponse.json({ message: "الألوان تخص أسنانًا غير موجودة في الإرسالية؛ راجع الاختيار." }, { status: 400 });
+      if (result === "conflict") return NextResponse.json({ message: "تغيّرت الألوان منذ فتح الإرسالية؛ أعد تحميلها قبل التعديل." }, { status: 409 });
+      return NextResponse.json({ ok: true, shadeSpecification: next.value });
+    }
+
     /* سجل أحداث الطلب (المختبرات V2) — قبل أي تغيير أو بدونه عند الطلب المجرد. */
     if (source.action === "events") {
       const events = await labOrderEvents(id);
@@ -192,7 +226,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       });
     }
     return NextResponse.json(updated);
-  } catch {
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (code === "lab_order_accounting_price_invalid") return NextResponse.json({ code, message: "التكلفة المعدّلة يجب أن تكون مبلغًا موجبًا؛ لا يمكن مسح الالتزام المالي من هذا الإجراء." }, { status: 400 });
+    const accountingConflicts: Record<string, string> = {
+      lab_order_accounting_settled: "للإرسالية أثر سداد؛ لا يمكن تغيير بياناتها المالية. راجع التسوية المحاسبية دون تعديل المدفوعات السابقة.",
+      lab_order_accounting_period_locked: "الفترة المالية للإرسالية مقفلة؛ لا يمكن تعديل بياناتها المالية.",
+      lab_order_accounting_busy: "تُحدّث بيانات الإرسالية أو سدادها الآن؛ أعد تحميلها ثم حاول مجددًا.",
+      lab_order_accounting_link_invalid: "ربط الالتزام المالي للإرسالية غير متسق؛ راجعه قبل التعديل.",
+    };
+    if (accountingConflicts[code]) return NextResponse.json({ code, message: accountingConflicts[code] }, { status: 409 });
     return NextResponse.json({ message: "تعذّر تنفيذ الإجراء. أعد المحاولة." }, { status: 500 });
   }
 }
