@@ -13,7 +13,7 @@ const savedUrl=process.env.DATABASE_URL;
 const prefix=`legacy_bnd_${randomBytes(6).toString("hex")}`;
 let actorId:number, targetId:number;
 const username=`${prefix}_admin`;
-const canonical=JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}});
+const canonical=JSON.stringify({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants:{}});
 const config:DoctorCommissionConfig={calculationMode:"percentage",defaultPercent:30,categoryRates:{},fixedAmountPerVisitMinor:0,deductLabCost:true,deductMaterialCost:false,basis:"collected_cash",effectiveDate:"",rateHistory:[]};
 function auth(){const p=readSessionToken(createSessionToken({userId:actorId,username,role:"admin",expiresAt:Date.now()+60_000,credentialVersion:sessionCredentialVersion("synthetic-hash")}))!;return {evidence:legacySessionEvidence(p)!};}
 async function counts(){return (await db.getPool().query("SELECT (SELECT count(*)::text FROM users) AS users,(SELECT count(*)::text FROM parties) AS parties,(SELECT count(*)::text FROM doctor_commission_history) AS history,(SELECT count(*)::text FROM audit_log) AS audit")).rows[0];}

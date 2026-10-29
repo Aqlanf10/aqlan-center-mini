@@ -290,11 +290,20 @@ Every canonical patient reader, run as the owner (every source read), must take 
    - Templates use catalogue names only, are closed under prerequisites and hold no owner-only operation (unit tests).
    - No assistant template: the legacy "today's visits" scope has no canonical record scope yet (owner decision pending).
    - Built journey: applying a template changes nothing on the server until saved.
+3b. **Initial owner confirmation** (Dot 6494187100 item 2). The capability document is schema version 2 and carries `confirmation`:
+   - `pending`: the document grants nothing and both record scopes are `none`, however well-formed its grants are. Every document that has not been confirmed by the owner (imported, converted, prepared from a template) is pending. Version 1 documents are refused (fail closed).
+   - `owner`: the owner has confirmed the account. Only the owner moves an account from pending to owner; the owner's save, after the change preview, is the confirmation. Every save results in `owner`; nobody saves an account back to pending.
+   - A delegated editor can neither edit nor confirm a pending account (`initial-owner-confirmation-required`, 403), including revocation-only saves. Its later maintenance of a confirmed account stays within the authority the owner gave it.
+   - The confirmation is part of the revocation fingerprint, so a confirmation ends the account's existing sessions. The audit row records `confirmation: [before, after]` and `confirmedByThisSave`.
+   - Applying a template never confirms anything; the account stays pending until the owner saves it.
+   - The editor shows an atomic change preview before every save: capabilities added and removed, scope changes, modules hidden or shown, and the confirmation.
+   - Tests: unit (parser, effectiveness, delegate refusal); PG `staff-capability-editor` (pending, delegate refusal, owner confirmation, later delegated maintenance); built journey `canonical-confirmation-journey`.
 4. **Modules** (`lib/staff-modules.ts`): 14 modules; every capability belongs to exactly one (unit test).
    - Hiding a module revokes all of its capabilities in one atomic save. The server then refuses its routes from the account's current grants (built journey).
    - Revocation during a session: the old session is refused (stale permission revision), and a new session has no grant.
    - Revocation during a pending request is serialized: the admitted write holds its proof rows `FOR SHARE`, so the revocation waits for it; afterwards the old session is refused (PG test in `settings-canonical`).
    - The protected owner is never a target of these grants: the owner cannot be locked out.
+   - Restricted doctors and doctor-managers (Dot 6494187100 item 3): hiding a restricted doctor's clinical module refuses its clinical API on the server, ends its live session and keeps its `own` scopes; a doctor-manager grants only what it holds and never an `own` scope it cannot vouch for; revoking its staff module refuses the API and the direct page. Revocation racing a doctor-manager's pending save is decided by the exclusive fence queue: the first writer completes, the second is either applied after it or refused, never mixed (PG). A doctor or admin title alone grants nothing.
 5. **Unified settings:** the inventory is in `UNIFIED_SETTINGS_INVENTORY.md`. Step 1 is done: the canonical `/api/settings` read and batch write (§5, slice 7) and the canonical settings screen. Next: account writes in the staff editor, the catalogue routes, then the owner-only tab with M4.
 
 ## 6. Dot review 6480538845: what the map now records

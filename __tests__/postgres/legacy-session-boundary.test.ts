@@ -25,7 +25,7 @@ it("ordinary unchanged-base login produces a genuinely usable legacy session",as
 });
 it("marker-free old token, login and password renewal all refuse raw canonical conversion",async()=>{
  const before=(await db.getPool().query("SELECT password_hash FROM users WHERE id=$1",[id])).rows[0].password_hash;
- await db.getPool().query("UPDATE users SET permissions=$1 WHERE id=$2",[JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}}),id]);
+ await db.getPool().query("UPDATE users SET permissions=$1 WHERE id=$2",[JSON.stringify({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants:{}}),id]);
  try{
   expect(await requireSession()).toBeNull();
   const denied=await login(request("login",{username,password:originalPassword}));expect(denied.status).toBeGreaterThanOrEqual(400);expect(denied.cookies.get(SESSION_COOKIE)).toBeUndefined();

@@ -178,7 +178,7 @@ describe("canonical database-reader executor contract", () => {
     expect(f.heldQuery).toHaveBeenLastCalledWith("ROLLBACK");
     expect(f.held.release).toHaveBeenCalledOnce(); expect(f.mapUser).not.toHaveBeenCalled();
   });
-  it.each(["not json", { schemaVersion: 1 }, { schemaVersion: 1, revision: 1, patientScope: "none", appointmentScope: "none", grants: {} }])(
+  it.each(["not json", { schemaVersion: 1 }, { schemaVersion: 2, confirmation: "owner", revision: 1, patientScope: "none", appointmentScope: "none", grants: {} }])(
     "rejects held or malformed raw permissions before mapping (%j)", async permissions => {
       const f = ownerFunctions(); f.row.permissions = permissions;
       await expect(f.owners.findUserByUsername("Synthetic")).rejects.toThrow("PERMISSION_ENVELOPE_HELD");

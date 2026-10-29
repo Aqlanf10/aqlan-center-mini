@@ -34,6 +34,8 @@ export interface CanonicalInventoryAccount {
   /** Record scopes of the capability document (default `none`). */
   readonly patientScope?: "none" | "own" | "all";
   readonly appointmentScope?: "none" | "own" | "all";
+  /** Default `owner`; `pending` = not yet confirmed by the owner (grants nothing). */
+  readonly confirmation?: "owner" | "pending";
   /** Link to a synthetic active doctor party (created on demand). */
   readonly doctor?: boolean;
 }
@@ -45,7 +47,7 @@ export interface CanonicalInventoryDatabase<K extends string> {
   /** A fresh signed durable session from the account's CURRENT rows. */
   session(key: K, expiresInMs?: number): Promise<VerifiedDurableSession>;
   /** Replace the account's grants (new permission revision): an authority write. */
-  setGrants(key: K, grants: Record<string, boolean>, scopes?: { patientScope?: "none" | "own" | "all"; appointmentScope?: "none" | "own" | "all" }): Promise<void>;
+  setGrants(key: K, grants: Record<string, boolean>, scopes?: { patientScope?: "none" | "own" | "all"; appointmentScope?: "none" | "own" | "all"; confirmation?: "owner" | "pending" }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -72,7 +74,7 @@ export async function openCanonicalInventoryDatabase<K extends string>(
     }
     ids[key] = (await pool.query<{ id: number }>(
       "INSERT INTO users(username,display_name,password_hash,role,is_active,party_id,permissions) VALUES($1,$1,'synthetic-canonical-hash',$2,TRUE,$3,$4) RETURNING id",
-      [account.username, account.role, party, JSON.stringify(capabilityDocument({ grants: account.grants ?? {}, patientScope: account.patientScope, appointmentScope: account.appointmentScope }))])).rows[0].id;
+      [account.username, account.role, party, JSON.stringify(capabilityDocument({ grants: account.grants ?? {}, patientScope: account.patientScope, appointmentScope: account.appointmentScope, confirmation: account.confirmation }))])).rows[0].id;
   }
   // Any pre-existing account receives an explicit empty canonical document.
   await pool.query("UPDATE users SET permissions=$1 WHERE id<>ALL($2::int[])", [JSON.stringify(capabilityDocument({})), Object.values(ids)]);

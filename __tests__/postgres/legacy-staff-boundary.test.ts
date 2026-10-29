@@ -7,7 +7,7 @@ import { readLegacyStaffSchema, assertLegacyStaffWrite, finishLegacyStaffWrite }
 assertRealPostgresUrl();
 const schema=`aqlan_identity_${randomBytes(8).toString("hex")}`;
 const pool=new Pool({connectionString:process.env.TEST_DATABASE_URL,ssl:false,max:5});
-const canonical=JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}});
+const canonical=JSON.stringify({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants:{}});
 function authorization(){const parsed=readSessionToken(createSessionToken({userId:1,username:"synthetic-admin",role:"admin",expiresAt:Date.now()+60_000,credentialVersion:sessionCredentialVersion("synthetic-hash")}))!;return {evidence:legacySessionEvidence(parsed)!};}
 async function tx<T>(work:(c:PoolClient)=>Promise<T>){const c=await pool.connect();try{await c.query("BEGIN");const value=await work(c);await c.query("COMMIT");return value;}catch(e){await c.query("ROLLBACK");throw e;}finally{c.release();}}
 beforeAll(async()=>{

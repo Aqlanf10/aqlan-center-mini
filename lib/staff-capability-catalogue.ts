@@ -1,5 +1,6 @@
 /** Inert future policy catalogue. Nothing in this module grants access to live routes. */
-export const STAFF_CAPABILITY_SCHEMA_VERSION = 1 as const;
+/** 2: the document carries `confirmation` (owner decision on initial grants, Dot 6494187100). */
+export const STAFF_CAPABILITY_SCHEMA_VERSION = 2 as const;
 /** Bump when authorization semantics change, even if the document schema does not. */
 export const STAFF_AUTHORIZATION_POLICY_VERSION = 6 as const;
 
@@ -57,10 +58,18 @@ export type OwnerOnlyOperation = typeof OWNER_ONLY_OPERATIONS[number];
 export const STAFF_RECORD_SCOPES = Object.freeze(["none", "own", "all"] as const);
 export type StaffRecordScope = typeof STAFF_RECORD_SCOPES[number];
 
+/** Initial grants of every account are confirmed by the protected owner. A `pending`
+ * document (imported, converted or prepared from a template) grants nothing and gives
+ * no record scope until the owner saves it; a delegated editor can neither confirm nor
+ * edit a pending account. */
+export const STAFF_CAPABILITY_CONFIRMATIONS = Object.freeze(["pending", "owner"] as const);
+export type StaffCapabilityConfirmation = typeof STAFF_CAPABILITY_CONFIRMATIONS[number];
+
 export interface StaffCapabilityDocument {
   readonly schemaVersion: typeof STAFF_CAPABILITY_SCHEMA_VERSION;
   /** Monotonic server-managed revision; schemaVersion is not a revocation counter. */
   readonly revision: number;
+  readonly confirmation: StaffCapabilityConfirmation;
   readonly patientScope: StaffRecordScope;
   readonly appointmentScope: StaffRecordScope;
   readonly grants: Readonly<Partial<Record<StaffCapability, boolean>>>;

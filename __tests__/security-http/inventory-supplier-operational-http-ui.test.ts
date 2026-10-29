@@ -58,7 +58,7 @@ const ACCOUNTS = {
     grants: { "inventory.references.view": true, "inventory.custody.view": true, "inventory.custody.dispatch": true } },
 } as const;
 type Who = keyof typeof ACCOUNTS;
-const doc = (grants: Record<string, boolean>, revision = 1) => JSON.stringify({ schemaVersion: 1, revision, patientScope: "none", appointmentScope: "none", grants });
+const doc = (grants: Record<string, boolean>, revision = 1) => JSON.stringify({ schemaVersion: 2, confirmation: "owner", revision, patientScope: "none", appointmentScope: "none", grants });
 
 let owned: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let db: Pool;

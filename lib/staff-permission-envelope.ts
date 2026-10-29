@@ -1,6 +1,6 @@
 /** Browser-safe document boundary. No role defaults, owner binding or authorization evaluation. */
 import {
-  STAFF_CAPABILITIES, STAFF_CAPABILITY_PREREQUISITES, STAFF_CAPABILITY_SCHEMA_VERSION,
+  STAFF_CAPABILITIES, STAFF_CAPABILITY_CONFIRMATIONS, STAFF_CAPABILITY_PREREQUISITES, STAFF_CAPABILITY_SCHEMA_VERSION,
   STAFF_RECORD_SCOPES, isStaffCapability, type StaffCapability, type StaffCapabilityDocument,
   type StaffRecordScope,
 } from "./staff-capability-catalogue";
@@ -32,6 +32,7 @@ export function parseStaffCapabilityDocument(raw: unknown): CapabilityParseResul
     }
     if (raw.schemaVersion !== STAFF_CAPABILITY_SCHEMA_VERSION) return { ok: false, reason: "unsupported-schema" };
     if (!validId(raw.revision)) return { ok: false, reason: "invalid-revision" };
+    if (typeof raw.confirmation !== "string" || !(STAFF_CAPABILITY_CONFIRMATIONS as readonly string[]).includes(raw.confirmation)) return { ok: false, reason: "invalid-confirmation" };
     if (!validScope(raw.patientScope) || !validScope(raw.appointmentScope)) return { ok: false, reason: "invalid-scope" };
     if (!isPlainCapabilityRecord(raw.grants)) return { ok: false, reason: "invalid-grants" };
     const grants: Partial<Record<StaffCapability, true>> = {};
@@ -46,6 +47,7 @@ export function parseStaffCapabilityDocument(raw: unknown): CapabilityParseResul
     }
     return { ok: true, value: Object.freeze({
       schemaVersion: STAFF_CAPABILITY_SCHEMA_VERSION, revision: raw.revision,
+      confirmation: raw.confirmation as StaffCapabilityDocument["confirmation"],
       patientScope: raw.patientScope, appointmentScope: raw.appointmentScope,
       grants: Object.freeze(grants),
     }) };

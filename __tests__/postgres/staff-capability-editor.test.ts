@@ -1,6 +1,6 @@
 /** Synthetic trusted-ready evidence ONLY for the canonical permission editor and
  * session admission. No owner provenance, activation or live grant is implied. */
-import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl } from "./_setup";
 import { readVerifiedDurableSession, type VerifiedDurableSession } from "../../lib/staff-durable-session";
 import { issueDurableStaffSessionIn } from "../../lib/staff-durable-issuer";
@@ -17,6 +17,13 @@ const accounts: SyntheticAccount[] = [
  { id: 3, username: "synthetic-doctor", role: "doctor", password: "doctor-pass", partyId: 20, grants: { "staff.view": true } },
  { id: 4, username: "synthetic-peer", role: "reception", password: "peer-pass", grants: { "staff.view": true, "staff.permissions.edit": true } },
  { id: 5, username: "synthetic-assistant", role: "assistant", password: "assistant-pass", grants: {} },
+ // Owner decision on initial grants (Dot 6494187100 items 2–3).
+ { id: 6, username: "synthetic-pending", role: "reception", password: "pending-pass", confirmation: "pending", patientScope: "all", grants: { "staff.view": true } },
+ { id: 7, username: "synthetic-doctor-manager", role: "doctor", password: "docmanager-pass", partyId: 21, patientScope: "own", appointmentScope: "own",
+   grants: { "staff.view": true, "staff.permissions.edit": true, "clinical.plans.view": true } },
+ { id: 8, username: "synthetic-restricted-doctor", role: "doctor", password: "restricted-pass", partyId: 22, patientScope: "own", appointmentScope: "own",
+   grants: { "clinical.plans.view": true, "clinical.visits.document": true } },
+ { id: 9, username: "synthetic-doctor-title", role: "doctor", password: "title-pass", partyId: 23, grants: {} },
 ];
 const schema = syntheticSchemaName();
 const pool = syntheticPool(schema, 10);
@@ -35,7 +42,7 @@ async function refusal(promise: Promise<unknown>) {
  throw new Error("expected refusal");
 }
 
-beforeAll(async () => { await installSyntheticCanonicalFixture(pool, schema, { ownerId: 1, accounts, doctorParties: [20] }); });
+beforeAll(async () => { await installSyntheticCanonicalFixture(pool, schema, { ownerId: 1, accounts, doctorParties: [20, 21, 22, 23] }); });
 beforeEach(async () => { vi.restoreAllMocks(); await pool.query(`DELETE FROM ${schema}.login_limits; DELETE FROM ${schema}.staff_login_limits`); });
 afterAll(async () => { vi.restoreAllMocks(); await dropSyntheticSchema(pool, schema); await pool.end(); });
 
@@ -166,4 +173,115 @@ it("a stale or copied durable session is never admitted", async () => {
  expect(await admit(readVerifiedDurableSession(syntheticSign({ ...claims, durableIdentity: { ...claims.durableIdentity, permissionRevision: 999 } }))!)).toBeNull();
  expect(await admit(readVerifiedDurableSession(syntheticSign({ ...claims, username: "someone-else" }))!)).toBeNull();
  expect(await admit({} as VerifiedDurableSession)).toBeNull();
+});
+
+describe("initial owner confirmation (Dot 6494187100 item 2)", () => {
+ it("a pending account's grants and scopes are not effective, whatever the document holds", async () => {
+  expect(await admit(await login("synthetic-pending", "pending-pass"))).toMatchObject({ capabilities: [], patientScope: "none", appointmentScope: "none" });
+  await expect(withStaffOperation(pool, await login("synthetic-pending", "pending-pass"), "staff.view", async () => "read", schema)).rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
+ });
+ it("a delegated manager can neither edit nor confirm a pending account; the screen says why", async () => {
+  const manager = await login("synthetic-manager", "manager-pass");
+  expect(await readStaffCapabilityTargetIn(pool, schema, manager, 6)).toMatchObject({ confirmation: "pending", editable: false, delegable: [] });
+  const before = await audits(), r = await revision(6);
+  const refused = await refusal(edit(manager, { targetUserId: 6, expectedRevision: r, patientScope: "none", appointmentScope: "none", grants: { "staff.view": true } }));
+  expect(refused).toMatchObject({ status: 403, code: "initial-owner-confirmation-required" });
+  expect((refused as Error).message).toMatch(/[؀-ۿ]/);
+  // Revocation-only saves are the owner's too.
+  expect(await refusal(edit(manager, { targetUserId: 6, expectedRevision: r, patientScope: "none", appointmentScope: "none", grants: {} }))).toMatchObject({ code: "initial-owner-confirmation-required" });
+  expect([await revision(6), await audits()]).toEqual([r, before]);
+ });
+ it("the owner's save is the confirmation: audited, the old session falls, the grants become effective", async () => {
+  const owner = await login("synthetic-owner", "owner-pass");
+  const pendingSession = await login("synthetic-pending", "pending-pass");
+  expect(await readStaffCapabilityTargetIn(pool, schema, owner, 6)).toMatchObject({ confirmation: "pending", editable: true });
+  const r = await revision(6);
+  expect(await edit(owner, { targetUserId: 6, expectedRevision: r, patientScope: "all", appointmentScope: "none", grants: { "staff.view": true } }))
+   .toMatchObject({ confirmation: "owner", revision: r + 1, grants: ["staff.view"] });
+  const { rows: [audit] } = await pool.query(`SELECT actor, details FROM ${schema}.audit_log WHERE action='staff.capabilities.update' ORDER BY id DESC LIMIT 1`);
+  expect(audit).toMatchObject({ actor: "synthetic-owner", details: { confirmation: ["pending", "owner"], confirmedByThisSave: true } });
+  expect(await admit(pendingSession)).toBeNull();
+  expect(await admit(await login("synthetic-pending", "pending-pass"))).toMatchObject({ capabilities: ["staff.view"], patientScope: "all" });
+  // Later delegated maintenance of the now confirmed account works within the delegate's authority.
+  const manager = await login("synthetic-manager", "manager-pass");
+  expect(await edit(manager, { targetUserId: 6, expectedRevision: r + 1, patientScope: "all", appointmentScope: "all", grants: { "staff.view": true, "appointments.create": true } }))
+   .toMatchObject({ confirmation: "owner", grants: ["appointments.create", "staff.view"] });
+ });
+});
+
+describe("restricted doctors and doctor-managers (Dot 6494187100 item 3)", () => {
+ it("a doctor-manager maintains only within its own authority: no grant it lacks, no 'own' scope it cannot vouch for", async () => {
+  const docManager = await login("synthetic-doctor-manager", "docmanager-pass");
+  const r = await revision(8);
+  expect(await refusal(edit(docManager, { targetUserId: 8, expectedRevision: r, patientScope: "own", appointmentScope: "own", grants: { "clinical.plans.view": true } })))
+   .toMatchObject({ code: "outside-delegable-authority" });
+  expect(await refusal(edit(docManager, { targetUserId: 8, expectedRevision: r, patientScope: "none", appointmentScope: "none", grants: { "clinical.plans.view": true, "clinical.visits.sign": true, "clinical.visits.document": true } })))
+   .toMatchObject({ code: "outside-delegable-authority" });
+  expect(await revision(8)).toBe(r);
+ });
+ it("a doctor title, or an admin title, alone grants nothing", async () => {
+  const titled = await login("synthetic-doctor-title", "title-pass");
+  expect(await admit(titled)).toMatchObject({ capabilities: [], patientScope: "none", clinicianPartyId: 23 });
+  await expect(readStaffCapabilityTargetIn(pool, schema, titled, 8)).rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
+ });
+ it("hiding the clinical module of a restricted doctor: the live session falls, the fresh one has no clinical grant and keeps its scopes", async () => {
+  const owner = await login("synthetic-owner", "owner-pass");
+  const doctor = await login("synthetic-restricted-doctor", "restricted-pass");
+  expect(await admit(doctor)).toMatchObject({ capabilities: ["clinical.plans.view", "clinical.visits.document"], patientScope: "own" });
+  const r = await revision(8);
+  await edit(owner, { targetUserId: 8, expectedRevision: r, patientScope: "own", appointmentScope: "own", grants: {} });
+  expect(await admit(doctor)).toBeNull();
+  await expect(withStaffOperation(pool, doctor, "staff.view", async () => "x", schema)).rejects.toThrow(/^STAFF_OPERATION_/);
+  expect(await admit(await login("synthetic-restricted-doctor", "restricted-pass"))).toMatchObject({ capabilities: [], patientScope: "own", appointmentScope: "own" });
+  // Restore for the following tests.
+  await edit(owner, { targetUserId: 8, expectedRevision: r + 1, patientScope: "own", appointmentScope: "own", grants: { "clinical.plans.view": true, "clinical.visits.document": true } });
+ });
+ async function queued<T>(order: (() => Promise<T>)[]) {
+  // Hold the exclusive lifecycle fence, queue the writers in a known order, then release.
+  const holder = await pool.connect();
+  await holder.query("BEGIN");
+  const holderPid = (await holder.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+  await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [fence()]);
+  const results: Promise<T>[] = [];
+  try {
+   for (const [index, start] of order.entries()) {
+    const promise = start(); promise.catch(() => undefined); results.push(promise);
+    const deadline = performance.now() + 10_000;
+    while ((await waitForBlockedBy(pool, holderPid, 10_000)).length < index + 1) {
+     if (performance.now() > deadline) throw new Error("writer did not queue");
+     await new Promise(resolve => setTimeout(resolve, 10));
+    }
+   }
+  } finally { await holder.query("COMMIT"); holder.release(); }
+  return Promise.allSettled(results);
+ }
+ it("revocation during a doctor-manager's pending save: whichever reaches the fence first decides, never a mix", async () => {
+  const owner = await login("synthetic-owner", "owner-pass");
+  // 1. The manager's save is queued first: it completes under its authority, then the revocation lands.
+  let docManager = await login("synthetic-doctor-manager", "docmanager-pass");
+  let r9 = await revision(9), r7 = await revision(7);
+  const first = await queued<unknown>([
+   () => edit(docManager, { targetUserId: 9, expectedRevision: r9, patientScope: "none", appointmentScope: "none", grants: { "clinical.plans.view": true } }),
+   () => edit(owner, { targetUserId: 7, expectedRevision: r7, patientScope: "own", appointmentScope: "own", grants: { "staff.view": true, "clinical.plans.view": true } }),
+  ]);
+  expect(first.map(outcome => outcome.status)).toEqual(["fulfilled", "fulfilled"]);
+  expect(await revision(9)).toBe(r9 + 1);
+  expect(await admit(docManager)).toBeNull();
+  await expect(edit(await login("synthetic-doctor-manager", "docmanager-pass"), { targetUserId: 9, expectedRevision: r9 + 1, patientScope: "none", appointmentScope: "none", grants: {} }))
+   .rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
+  // 2. Grant back, then queue the revocation first: the manager's pending save is refused and writes nothing.
+  r7 = await revision(7);
+  await edit(owner, { targetUserId: 7, expectedRevision: r7, patientScope: "own", appointmentScope: "own", grants: { "staff.view": true, "staff.permissions.edit": true, "clinical.plans.view": true } });
+  docManager = await login("synthetic-doctor-manager", "docmanager-pass");
+  r9 = await revision(9); r7 = await revision(7);
+  const before = await audits();
+  const second = await queued<unknown>([
+   () => edit(owner, { targetUserId: 7, expectedRevision: r7, patientScope: "own", appointmentScope: "own", grants: { "staff.view": true, "clinical.plans.view": true } }),
+   () => edit(docManager, { targetUserId: 9, expectedRevision: r9, patientScope: "none", appointmentScope: "none", grants: {} }),
+  ]);
+  expect(second[0].status).toBe("fulfilled");
+  expect(second[1]).toMatchObject({ status: "rejected", reason: { message: expect.stringMatching(/^STAFF_OPERATION_(CREDENTIAL_OR_ACCOUNT_STALE|PERMISSIONS_STALE|CAPABILITY_DENIED)$/) } });
+  expect(await revision(9)).toBe(r9);
+  expect(await audits()).toBe(before + 1);
+ });
 });

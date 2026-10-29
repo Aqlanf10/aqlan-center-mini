@@ -9,7 +9,7 @@ import { STAFF_CAPABILITIES, OWNER_ONLY_OPERATIONS, type StaffCapabilityDocument
 import { reviewLegacyStaffCapabilities } from "../lib/staff-capabilities-legacy";
 
 const document = (overrides: Partial<StaffCapabilityDocument> = {}): StaffCapabilityDocument => ({
-  schemaVersion: 1, revision: 1, patientScope: "none", appointmentScope: "none", grants: {}, ...overrides,
+  schemaVersion: 2, confirmation: "owner", revision: 1, patientScope: "none", appointmentScope: "none", grants: {}, ...overrides,
 });
 const subject = (overrides: Partial<StaffSubject> = {}): StaffSubject => ({
   userId: 10, role: "admin", isActive: true, clinicianPartyId: null, ...overrides,
@@ -31,7 +31,8 @@ describe("strict, inert scoped staff capability documents", () => {
 
   it.each([
     null, undefined, false, 1, [], "{", "null", "[]", {},
-    { ...document(), schemaVersion: 0 }, { ...document(), schemaVersion: 2 }, { ...document(), schemaVersion: "1" },
+    { ...document(), schemaVersion: 0 }, { ...document(), schemaVersion: 1 }, { ...document(), schemaVersion: "2" },
+    { ...document(), confirmation: "confirmed" }, { ...document(), confirmation: null },
     { ...document(), revision: 0 }, { ...document(), revision: -1 }, { ...document(), revision: 1.5 },
     { ...document(), revision: Number.MAX_SAFE_INTEGER + 1 }, { ...document(), revision: "1" },
     { ...document(), patientScope: "everyone" }, { ...document(), appointmentScope: "today" },
@@ -50,7 +51,7 @@ describe("strict, inert scoped staff capability documents", () => {
   });
 
   it("rejects missing fields, inherited grants, accessors, hidden and symbol keys", () => {
-    for (const key of ["schemaVersion", "revision", "patientScope", "appointmentScope", "grants"]) {
+    for (const key of ["schemaVersion", "revision", "confirmation", "patientScope", "appointmentScope", "grants"]) {
       const raw = { ...document() } as Record<string, unknown>;
       delete raw[key];
       expect(parseStaffCapabilityDocument(raw).ok).toBe(false);
@@ -61,7 +62,7 @@ describe("strict, inert scoped staff capability documents", () => {
       expect(parseStaffCapabilityDocument({ ...document(), grants }).ok).toBe(false);
     }
     expect(parseStaffCapabilityDocument(" ".repeat(16_385)).ok).toBe(false);
-    expect(parseStaffCapabilityDocument(JSON.parse('{"schemaVersion":1,"revision":1,"patientScope":"none","appointmentScope":"none","grants":{"__proto__":true}}')).ok).toBe(false);
+    expect(parseStaffCapabilityDocument(JSON.parse('{"schemaVersion":2,"confirmation":"owner","revision":1,"patientScope":"none","appointmentScope":"none","grants":{"__proto__":true}}')).ok).toBe(false);
   });
 
   it("detaches and freezes parsed grants; explicit false and absence both deny", () => {
@@ -138,7 +139,7 @@ describe("trusted owner identity and clinician separation", () => {
     expect(canPerformOwnerOperation(access, "staff.role.change")).toBe(true);
     expect(canPerformOwnerOperation(access, "owner.transfer")).toBe(false);
     expect(hasStaffCapability(access, "staff.permissions.edit")).toBe(true);
-    expect(resolve({ ...document(), schemaVersion: 2 }, subject({ userId: 99 }), owner).status).toBe("denied");
+    expect(resolve({ ...document(), schemaVersion: 1 }, subject({ userId: 99 }), owner).status).toBe("denied");
     expect(resolve(document(), subject({ userId: 99, role: "owner" }), owner).status).toBe("denied");
     expect(resolve(document(), subject({ userId: 99, isActive: false }), owner).status).toBe("denied");
   });
@@ -193,6 +194,24 @@ describe("safe scoped delegation and maintenance preflight", () => {
     expect(validate(document({ revision: 2, grants: { "staff.view": true, "staff.permissions.edit": true } }))).toEqual({ ok: false, reason: "outside-delegable-authority" });
     expect(validate(document({ revision: 2 }), manager, target, 0)).toEqual({ ok: false, reason: "stale-revision" });
     for (const revision of [1, 3]) expect(validate(document({ revision })).ok).toBe(false);
+  });
+  it("initial grants are the owner's: a pending document grants nothing, a delegate can neither edit nor confirm it", () => {
+    const pending = resolve(document({ confirmation: "pending", patientScope: "all", appointmentScope: "all", grants: { "finance.payments.view": true } }), subject({ userId: 21 }), ownerContext);
+    expect(pending.status).toBe("allowed");
+    expect(hasStaffCapability(pending, "finance.payments.view")).toBe(false);
+    expect(patientCapabilityConstraint(pending)).toEqual({ kind: "none" });
+    expect(validate(document({ revision: 2, grants: { "finance.payments.view": true } }), manager, pending)).toEqual({ ok: false, reason: "initial-owner-confirmation-required" });
+    // A revocation-only save by a delegate is refused too: only the owner decides a pending account.
+    expect(validate(document({ revision: 2 }), manager, pending)).toEqual({ ok: false, reason: "initial-owner-confirmation-required" });
+    expect(validate(document({ revision: 2, grants: { "finance.payments.view": true } }), owner, pending)).toEqual({ ok: true });
+    // Every save produces a confirmed document; nobody saves one back to pending.
+    expect(validate(document({ revision: 2, confirmation: "pending" }), owner, pending)).toEqual({ ok: false, reason: "invalid-confirmation" });
+    expect(validate(document({ revision: 2, confirmation: "pending" }))).toEqual({ ok: false, reason: "invalid-confirmation" });
+    // Later delegated maintenance of a confirmed account stays within the delegate's own authority.
+    expect(validate(document({ revision: 2, grants: { "finance.payments.view": true } }))).toEqual({ ok: true });
+    expect(validate(document({ revision: 2, grants: { "finance.payments.collect": true } }))).toEqual({ ok: false, reason: "outside-delegable-authority" });
+    // Confirmation is part of the revocation material.
+    expect(staffAuthorizationFingerprint(pending)).not.toBe(staffAuthorizationFingerprint(resolve(document({ patientScope: "all", appointmentScope: "all", grants: { "finance.payments.view": true } }), subject({ userId: 21 }), ownerContext)));
   });
   it("denies self-escalation, owner edits, higher-authority targets and mixed owner contexts", () => {
     expect(validate(document({ revision: 2 }), manager, manager)).toEqual({ ok: false, reason: "self-permission-change" });
@@ -261,7 +280,7 @@ describe("future revocation fingerprint", () => {
   const fp = (profile: unknown = document(), identity = subject(), owner: TrustedOwnerContext | null = null) => staffAuthorizationFingerprint(resolve(profile, identity, owner));
   it("is canonical across JSON key order/explicit false, but changes for every authority dimension", () => {
     expect(fp(document({ grants: { "audit.view": false, "staff.view": true } })))
-      .toBe(fp(JSON.stringify({ grants: { "staff.view": true }, appointmentScope: "none", patientScope: "none", revision: 1, schemaVersion: 1 })));
+      .toBe(fp(JSON.stringify({ grants: { "staff.view": true }, appointmentScope: "none", patientScope: "none", revision: 1, confirmation: "owner", schemaVersion: 2 })));
     const original = fp();
     expect(original).toMatch(/^staff-v1:[a-f0-9]{64}$/);
     for (const updated of [document({ revision: 2 }), document({ patientScope: "all" }), document({ appointmentScope: "all" }), document({ grants: { "audit.view": true } })]) {

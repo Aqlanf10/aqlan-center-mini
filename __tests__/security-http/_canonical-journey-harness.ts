@@ -32,6 +32,8 @@ export interface JourneyAccount {
   readonly grants?: Readonly<Record<string, boolean>>;
   readonly patientScope?: RecordScope;
   readonly appointmentScope?: RecordScope;
+  /** Default `owner` (confirmed); `pending` grants nothing until the owner saves it. */
+  readonly confirmation?: "owner" | "pending";
   /** Link to a synthetic active doctor party. */
   readonly doctor?: boolean;
 }
@@ -50,7 +52,7 @@ export interface CanonicalJourney<K extends string> {
 }
 
 const capabilityDocument = (account: JourneyAccount) => JSON.stringify({
-  schemaVersion: 1, revision: 1, patientScope: account.patientScope ?? "none", appointmentScope: account.appointmentScope ?? "none", grants: account.grants ?? {},
+  schemaVersion: 2, confirmation: account.confirmation ?? "owner", revision: 1, patientScope: account.patientScope ?? "none", appointmentScope: account.appointmentScope ?? "none", grants: account.grants ?? {},
 });
 
 async function run(command: string[], env: NodeJS.ProcessEnv) {

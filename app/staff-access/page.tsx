@@ -18,7 +18,7 @@ import { STAFF_STARTING_TEMPLATES, applyStartingTemplate } from "@/lib/staff-sta
 interface DirectoryRow { id: number; username: string; role: string; isActive: boolean; clinicianPartyId: number | null }
 interface TargetView {
   userId: number; username: string; displayName: string; roleLabel: string; isOwner: boolean; isSelf: boolean;
-  revision: number; patientScope: StaffRecordScope; appointmentScope: StaffRecordScope;
+  revision: number; confirmation: "owner" | "pending"; patientScope: StaffRecordScope; appointmentScope: StaffRecordScope;
   grants: StaffCapability[]; delegable: StaffCapability[]; editable: boolean;
   scopeOptions: { patient: StaffRecordScope[]; appointment: StaffRecordScope[] };
 }
@@ -108,6 +108,7 @@ function CapabilityEditor({ userId }: { userId: number }) {
   const [error, setError] = useState("");
   const [template, setTemplate] = useState("");
   const [notice, setNotice] = useState("");
+  const [preview, setPreview] = useState(false);
   const live = useRef(true);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
 
@@ -132,7 +133,7 @@ function CapabilityEditor({ userId }: { userId: number }) {
 
   function adopt(next: TargetView) {
     setView(next); setGrants(new Set(next.grants)); setPatientScope(next.patientScope); setAppointmentScope(next.appointmentScope);
-    setNotice("");
+    setNotice(""); setPreview(false);
   }
   const load = useCallback(async () => {
     setBusy(true); setError("");
@@ -149,7 +150,7 @@ function CapabilityEditor({ userId }: { userId: number }) {
 
   async function save() {
     if (!view || busy) return;
-    setBusy(true); setError(""); setMessage("");
+    setBusy(true); setError(""); setMessage(""); setPreview(false);
     try {
       const response = await fetch(`/api/staff-access/${userId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -163,16 +164,24 @@ function CapabilityEditor({ userId }: { userId: number }) {
         if (response.status === 409) void load();
         return;
       }
+      const confirmed = view.confirmation === "pending";
       adopt(body);
-      setMessage(`حُفظت الصلاحيات (المراجعة ${body.revision}). جلسات الموظف القائمة سقطت، ويدخل من جديد بصلاحياته الحالية.`);
+      setMessage(`${confirmed ? "أُكّدت صلاحيات الحساب الأولية وحُفظت" : "حُفظت الصلاحيات"} (المراجعة ${body.revision}). جلسات الموظف القائمة سقطت، ويدخل من جديد بصلاحياته الحالية.`);
     } catch { if (live.current) setError("تعذّر التحقق من الحفظ. حدّث البيانات قبل إعادة المحاولة."); }
     finally { if (live.current) setBusy(false); }
   }
 
   if (!view) return busy ? <p role="status" className="text-sm text-slate-600">جارٍ التحميل…</p> : <p role="alert" className="text-sm text-danger-800">{error}</p>;
   const delegable = new Set(view.delegable);
-  const changed = view.patientScope !== patientScope || view.appointmentScope !== appointmentScope
+  const pending = view.confirmation === "pending";
+  // A pending account may be confirmed as it is: the owner's save is the confirmation.
+  const changed = pending || view.patientScope !== patientScope || view.appointmentScope !== appointmentScope
     || view.grants.length !== grants.size || view.grants.some(capability => !grants.has(capability));
+  const before = new Set(view.grants);
+  const added = STAFF_CAPABILITIES.filter(capability => grants.has(capability) && !before.has(capability));
+  const removed = STAFF_CAPABILITIES.filter(capability => before.has(capability) && !grants.has(capability));
+  const hidden = STAFF_MODULES.filter(module => staffModuleVisible(module, before) && !staffModuleVisible(module, grants));
+  const shown = STAFF_MODULES.filter(module => !staffModuleVisible(module, before) && staffModuleVisible(module, grants));
   return (
     <div className="space-y-3" data-testid="capability-editor">
       <div>
@@ -181,7 +190,9 @@ function CapabilityEditor({ userId }: { userId: number }) {
       </div>
       {view.isOwner ? <p role="note" className="rounded-xl bg-sky-50 p-2 text-xs text-sky-900">المالك المحمي يملك كل الصلاحيات، ولا تُعدَّل صلاحياته من هنا.</p>
         : view.isSelf ? <p role="note" className="rounded-xl bg-sky-50 p-2 text-xs text-sky-900">لا يمكنك تعديل صلاحياتك بنفسك.</p>
+        : pending && !view.editable ? <p role="note" data-testid="confirmation-pending" className="rounded-xl bg-amber-50 p-2 text-xs text-amber-900">صلاحيات هذا الحساب الأولية بانتظار تأكيد المالك، ولا تسري قبله. لا يعدّلها غير المالك حتى يؤكدها.</p>
         : !view.editable ? <p role="note" className="rounded-xl bg-amber-50 p-2 text-xs text-amber-900">صلاحيات هذا الموظف تتجاوز ما يمكنك منحه، فلا تستطيع تعديلها.</p> : null}
+      {pending && view.editable ? <p role="note" data-testid="confirmation-pending" className="rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">صلاحيات هذا الحساب الأولية بانتظار تأكيدك، ولا يسري منها شيء قبل التأكيد. راجعها ثم احفظ: حفظك هو التأكيد.</p> : null}
       <div className="grid gap-2 sm:grid-cols-2">
         {([["patient", "نطاق المرضى", patientScope, setPatientScope], ["appointment", "نطاق المواعيد", appointmentScope, setAppointmentScope]] as const).map(([key, label, value, set]) => (
           <div key={key}>
@@ -244,10 +255,29 @@ function CapabilityEditor({ userId }: { userId: number }) {
       })}
       {error ? <p role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-2 text-sm text-danger-800">{error}</p> : null}
       {message ? <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-900">{message}</p> : null}
-      {view.editable ? (
+      {view.editable && preview ? (
+        <section aria-label="معاينة التغيير" data-testid="change-preview" className="space-y-1 rounded-xl border border-navy-200 bg-navy-50 p-3 text-sm text-navy-900">
+          <h3 className="font-black">معاينة التغيير قبل الحفظ (يُطبَّق كاملًا أو لا شيء)</h3>
+          {pending ? <p data-testid="preview-confirmation">تأكيد صلاحيات الحساب الأولية: نعم</p> : null}
+          <p data-testid="preview-added">صلاحيات تُضاف: {added.length ? added.map(capability => STAFF_CAPABILITY_LABELS[capability]).join("، ") : "لا شيء"}</p>
+          <p data-testid="preview-removed">صلاحيات تُسحب: {removed.length ? removed.map(capability => STAFF_CAPABILITY_LABELS[capability]).join("، ") : "لا شيء"}</p>
+          {view.patientScope !== patientScope ? <p data-testid="preview-patient-scope">نطاق المرضى: {STAFF_SCOPE_LABELS[view.patientScope]} ← {STAFF_SCOPE_LABELS[patientScope]}</p> : null}
+          {view.appointmentScope !== appointmentScope ? <p data-testid="preview-appointment-scope">نطاق المواعيد: {STAFF_SCOPE_LABELS[view.appointmentScope]} ← {STAFF_SCOPE_LABELS[appointmentScope]}</p> : null}
+          {hidden.length ? <p data-testid="preview-hidden">وحدات تُخفى: {hidden.map(module => module.label).join("، ")}</p> : null}
+          {shown.length ? <p data-testid="preview-shown">وحدات تظهر: {shown.map(module => module.label).join("، ")}</p> : null}
+          <p className="text-xs text-slate-600">بعد الحفظ تسقط جلسات الموظف القائمة، ويُسجَّل التغيير في سجل التدقيق.</p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button type="button" onClick={() => void save()} disabled={busy}
+              className="min-h-11 rounded-xl bg-navy-900 px-4 text-sm font-bold text-white disabled:opacity-50">{pending ? "تأكيد الصلاحيات وحفظها" : "تأكيد الحفظ"}</button>
+            <button type="button" onClick={() => setPreview(false)} disabled={busy}
+              className="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-navy-900">رجوع للتعديل</button>
+          </div>
+        </section>
+      ) : null}
+      {view.editable && !preview ? (
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void save()} disabled={busy || !changed}
-            className="min-h-11 rounded-xl bg-navy-900 px-4 text-sm font-bold text-white disabled:opacity-50">حفظ الصلاحيات</button>
+          <button type="button" onClick={() => setPreview(true)} disabled={busy || !changed}
+            className="min-h-11 rounded-xl bg-navy-900 px-4 text-sm font-bold text-white disabled:opacity-50">{pending ? "مراجعة الصلاحيات وتأكيدها" : "حفظ الصلاحيات"}</button>
           <button type="button" onClick={() => adopt(view)} disabled={busy || !changed}
             className="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-navy-900 disabled:opacity-50">تراجع</button>
         </div>

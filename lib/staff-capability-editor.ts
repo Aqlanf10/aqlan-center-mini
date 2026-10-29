@@ -34,6 +34,8 @@ const REASONS: Record<string, [number, string]> = {
  "missing-prerequisite": [422, "بعض الصلاحيات تحتاج صلاحية أساسية معها (مثل العرض قبل التعديل)."],
  "unknown-or-invalid-grant": [422, "قائمة الصلاحيات تحتوي عنصرًا غير معروف."],
  "invalid-scope": [422, "نطاق المرضى أو المواعيد غير صالح."],
+ "initial-owner-confirmation-required": [403, "صلاحيات هذا الحساب الأولية بانتظار تأكيد المالك؛ لا يعدّلها غيره قبل التأكيد."],
+ "invalid-confirmation": [422, "حالة تأكيد الصلاحيات غير صالحة."],
  "owner-context-missing": [409, "تعذّر التحقق من المالك المحمي. حدّث البيانات."],
  "owner-context-mismatch": [409, "تعذّر التحقق من المالك المحمي. حدّث البيانات."],
  "invalid-access": [409, "تعذّر التحقق من الحسابين. حدّث البيانات."],
@@ -69,6 +71,8 @@ export interface StaffCapabilityTargetView {
  readonly isOwner: boolean;
  readonly isSelf: boolean;
  readonly revision: number;
+ /** `pending`: imported or prepared grants not yet confirmed by the owner (they grant nothing). */
+ readonly confirmation: StaffCapabilityDocument["confirmation"];
  readonly patientScope: StaffRecordScope;
  readonly appointmentScope: StaffRecordScope;
  readonly grants: readonly StaffCapability[];
@@ -91,13 +95,13 @@ function targetView(actor: ProvedAccountAuthority, target: ProvedAccountAuthorit
  const isSelf = actor.user.id === target.user.id;
  // Editability is the real policy applied to a no-op revision, not a UI guess.
  const editable = validateStaffCapabilityChange({ actor: actor.access, target: target.access, expectedRevision: target.document.revision,
-  nextDocument: { ...target.document, grants: { ...target.document.grants }, revision: target.document.revision + 1 } }).ok;
+  nextDocument: { ...target.document, confirmation: "owner", grants: { ...target.document.grants }, revision: target.document.revision + 1 } }).ok;
  const scopes = (actorScope: StaffRecordScope): readonly StaffRecordScope[] => !editable ? [] : actor.access.isOwner || actorScope === "all" ? ["none", "own", "all"] : ["none"];
  const delegable = !editable ? [] : STAFF_CAPABILITIES.filter(capability => capability !== "staff.permissions.edit"
   && (actor.access.isOwner || (capability === "finance.commissions.view-own" ? hasStaffCapability(actor.access, "finance.commissions.view-all") : hasStaffCapability(actor.access, capability))));
  return Object.freeze({
   userId: target.user.id, username: target.user.username, displayName: target.user.displayName || target.user.username,
-  roleLabel: target.user.role, isOwner: target.access.isOwner, isSelf, revision: target.document.revision,
+  roleLabel: target.user.role, isOwner: target.access.isOwner, isSelf, revision: target.document.revision, confirmation: target.document.confirmation,
   patientScope: target.document.patientScope, appointmentScope: target.document.appointmentScope,
   grants: Object.freeze(grantsOf(target.document)), delegable: Object.freeze(actor.access.isOwner && editable ? [...delegable, "staff.permissions.edit" as const] : delegable), editable,
   scopeOptions: Object.freeze({ patient: Object.freeze(scopes(actor.document.patientScope)), appointment: Object.freeze(scopes(actor.document.appointmentScope)) }),
@@ -136,7 +140,7 @@ export async function updateStaffCapabilitiesIn(pool: DbPool, schema: string, se
   const target = await targetProof(client, input.targetUserId, s);
   await client.query(`SELECT id FROM ${s}.users WHERE id=$1 FOR UPDATE`, [target.user.id]);
   const nextDocument = {
-   schemaVersion: STAFF_CAPABILITY_SCHEMA_VERSION, revision: input.expectedRevision + 1,
+   schemaVersion: STAFF_CAPABILITY_SCHEMA_VERSION, revision: input.expectedRevision + 1, confirmation: "owner" as const,
    patientScope: input.patientScope, appointmentScope: input.appointmentScope, grants: { ...input.grants },
   };
   const decision = validateStaffCapabilityChange({ actor: actor.access, target: target.access, expectedRevision: input.expectedRevision, nextDocument });
@@ -154,6 +158,7 @@ export async function updateStaffCapabilitiesIn(pool: DbPool, schema: string, se
    details: { previousRevision: input.expectedRevision, revision: nextDocument.revision,
     added: after.filter(capability => !before.has(capability)), removed: [...before].filter(capability => !after.includes(capability)),
     patientScope: [target.document.patientScope, nextDocument.patientScope], appointmentScope: [target.document.appointmentScope, nextDocument.appointmentScope],
+    confirmation: [target.document.confirmation, nextDocument.confirmation], confirmedByThisSave: target.document.confirmation !== "owner",
     actorUserId: actor.user.id },
   }, s);
   // Fresh precommit proof: actor still holds the exact grant; target proves at the new revision.

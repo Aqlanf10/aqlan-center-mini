@@ -19,7 +19,7 @@ const bridge = vi.hoisted(() => ({ pool: undefined as unknown as DbPool }));
 vi.mock("../../lib/db", () => ({ getPool: () => bridge.pool, usesSharedLocalDatabaseConnection: () => false }));
 const FENCE = "aqlan.canonical.identity.substrate.v1:public";
 const secret = "synthetic-directory-pg-secret-no-production-credential";
-const doc = (grants: Record<string, boolean> = {}) => ({ schemaVersion: 1, revision: 1, patientScope: "none", appointmentScope: "none", grants });
+const doc = (grants: Record<string, boolean> = {}) => ({ schemaVersion: 2, confirmation: "owner", revision: 1, patientScope: "none", appointmentScope: "none", grants });
 let fixture: Awaited<ReturnType<typeof openLegacyStaffFixture>> | undefined;
 let pool: Pool;
 let sqlLog: string[] = [], xidObservations: (string | null)[] = [];

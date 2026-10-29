@@ -22,6 +22,8 @@ export interface SyntheticAccount {
  readonly grants?: Record<string, boolean>;
  readonly patientScope?: "none" | "own" | "all";
  readonly appointmentScope?: "none" | "own" | "all";
+ /** Default `owner` (already confirmed by the owner); `pending` grants nothing. */
+ readonly confirmation?: "owner" | "pending";
  readonly active?: boolean;
 }
 export interface SyntheticReadyOptions {
@@ -37,8 +39,8 @@ export const syntheticSchemaName = () => `aqlan_identity_${randomBytes(8).toStri
 export function syntheticPool(schema: string, max = 8) {
  return new Pool({ connectionString: process.env.TEST_DATABASE_URL, ssl: false, max, options: `-c search_path=${schema},pg_catalog` });
 }
-export const capabilityDocument = (account: Pick<SyntheticAccount, "grants" | "patientScope" | "appointmentScope">, revision = 1) => ({
- schemaVersion: 1, revision, patientScope: account.patientScope ?? "none", appointmentScope: account.appointmentScope ?? "none", grants: account.grants ?? {},
+export const capabilityDocument = (account: Pick<SyntheticAccount, "grants" | "patientScope" | "appointmentScope" | "confirmation">, revision = 1) => ({
+ schemaVersion: 2, confirmation: account.confirmation ?? "owner", revision, patientScope: account.patientScope ?? "none", appointmentScope: account.appointmentScope ?? "none", grants: account.grants ?? {},
 });
 export async function installSyntheticCanonicalFixture(pool: Pool, schema: string, options: SyntheticReadyOptions): Promise<void> {
  const c = await pool.connect();

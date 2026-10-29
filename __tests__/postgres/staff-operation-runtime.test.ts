@@ -15,7 +15,7 @@ import { withStaffOperation, assertStaffOperation, type StaffOperationHandle } f
 assertRealPostgresUrl();
 const schema=`aqlan_identity_${randomBytes(8).toString("hex")}`;
 const pool=new Pool({connectionString:process.env.TEST_DATABASE_URL,ssl:false,max:5,options:`-c search_path=${schema},pg_catalog`});
-const doc=(grants:Record<string,boolean>)=>({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants});
+const doc=(grants:Record<string,boolean>)=>({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants});
 function sign(payload:unknown){const body=Buffer.from(JSON.stringify(payload)).toString("base64url");return `${body}.${createHmac("sha256",process.env.SESSION_SECRET!).update(body).digest("base64url")}`;}
 async function claims(userId=2){
  const {rows:[r]}=await pool.query(`SELECT u.id,u.username,u.password_hash,u.authorization_epoch::text,u.permissions,u.party_id,p.clinical_authority_epoch::text,

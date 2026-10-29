@@ -32,7 +32,7 @@ const ACCOUNTS = {
  manager: { username: "canon-manager", password: "Canon#Manager1", role: "reception", display: "مدير الصلاحيات التجريبي" },
  target: { username: "canon-target", password: "Canon#Target1", role: "reception", display: "موظف استقبال تجريبي" },
 } as const;
-const doc = (grants: Record<string, boolean>, scope: "none" | "all" = "none") => JSON.stringify({ schemaVersion: 1, revision: 1, patientScope: scope, appointmentScope: scope, grants });
+const doc = (grants: Record<string, boolean>, scope: "none" | "all" = "none") => JSON.stringify({ schemaVersion: 2, confirmation: "owner", revision: 1, patientScope: scope, appointmentScope: scope, grants });
 
 let owned: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let db: Pool;
@@ -210,6 +210,7 @@ it("browser journey: owner → shell → directory → grant; target's live sess
  await editor.getByText(ACCOUNTS.target.display).waitFor();
  await editor.getByLabel("عرض دليل الطاقم").check();
  await editor.getByRole("button", { name: "حفظ الصلاحيات" }).click();
+ await editor.getByTestId("change-preview").getByRole("button", { name: "تأكيد الحفظ" }).click();
  await expect.poll(() => editor.getByRole("status").textContent()).toMatch(/المراجعة 2/);
  expect(legacyCalls).toEqual([]);
  await ownerContext.close();
@@ -286,6 +287,7 @@ it("owner decisions 3 and 4: a starting template only fills the form; hiding a m
  expect(await editor.getByLabel("تحصيل دفعة").isChecked()).toBe(true);
  expect(await permissionsOf(ids.target)).toBe(before);
  await editor.getByRole("button", { name: "حفظ الصلاحيات" }).click();
+ await editor.getByTestId("change-preview").getByRole("button", { name: "تأكيد الحفظ" }).click();
  await expect.poll(() => editor.getByRole("status").textContent()).toMatch(/حُفظت الصلاحيات/);
  const saved = JSON.parse(await permissionsOf(ids.target));
  expect(saved).toMatchObject({ patientScope: "all", appointmentScope: "none", grants: { "finance.payments.collect": true, "finance.shifts.operate": true } });
@@ -301,6 +303,7 @@ it("owner decisions 3 and 4: a starting template only fills the form; hiding a m
  await staffModule.getByRole("button", { name: "إخفاء الوحدة" }).click();
  await expect.poll(() => staffModule.getByText("مخفاة").count()).toBe(1);
  await editor.getByRole("button", { name: "حفظ الصلاحيات" }).click();
+ await editor.getByTestId("change-preview").getByRole("button", { name: "تأكيد الحفظ" }).click();
  await expect.poll(() => editor.getByRole("status").textContent()).toMatch(/حُفظت الصلاحيات/);
  await context.close();
  // The live session is refused at once; a fresh login is refused by the server, not just hidden.

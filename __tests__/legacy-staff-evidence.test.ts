@@ -37,5 +37,5 @@ it("evidence rechecks expiry and never authorizes from a changed public payload"
 it("legacy envelope guard rejects canonical and malformed payloads before permissive mapping",()=>{
  expect(()=>assertLegacyPermissionEnvelope(null)).not.toThrow();
  expect(()=>assertLegacyPermissionEnvelope({financeAccess:{collectPayments:true}})).not.toThrow();
- for(const raw of ["not json",{schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}},{schemaVersion:1}])expect(()=>assertLegacyPermissionEnvelope(raw)).toThrow("PERMISSION_ENVELOPE_HELD");
+ for(const raw of ["not json",{schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants:{}},{schemaVersion:1}])expect(()=>assertLegacyPermissionEnvelope(raw)).toThrow("PERMISSION_ENVELOPE_HELD");
 });

@@ -173,7 +173,7 @@ it("subject binding: the database refuses a rebind, and an injected candidate/pr
 it("malformed permission document or inactive provider denies after a password match without revealing it", async () => {
  await pool.query(`UPDATE ${schema}.users SET permissions='{"schemaVersion":1,"revision":3,"grants":{}}' WHERE id=2`);
  expect(await issue("synthetic-doctor", "doctor-pass-2")).toEqual({ kind: "invalid_credentials" });
- await pool.query(`UPDATE ${schema}.users SET permissions=$1 WHERE id=2`, [JSON.stringify({ schemaVersion: 1, revision: 4, patientScope: "none", appointmentScope: "none", grants: { "staff.view": true } })]);
+ await pool.query(`UPDATE ${schema}.users SET permissions=$1 WHERE id=2`, [JSON.stringify({ schemaVersion: 2, confirmation: "owner", revision: 4, patientScope: "none", appointmentScope: "none", grants: { "staff.view": true } })]);
  await pool.query(`UPDATE ${schema}.parties SET is_active=FALSE WHERE id=20`);
  expect(await issue("synthetic-doctor", "doctor-pass-2")).toEqual({ kind: "invalid_credentials" });
  await pool.query(`UPDATE ${schema}.parties SET is_active=TRUE WHERE id=20`);

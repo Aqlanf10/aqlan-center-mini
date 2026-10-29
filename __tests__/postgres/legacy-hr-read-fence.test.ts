@@ -14,7 +14,7 @@ beforeAll(async()=>{
 afterAll(async()=>{await fixture?.close();});
 it("marker-free old admin session cannot preview a raw canonical account",async()=>{
  const session=readSessionToken(createSessionToken({userId:1,username:"synthetic-admin",role:"admin",expiresAt:Date.now()+60_000,credentialVersion:sessionCredentialVersion("synthetic-hash")}))!;
- await pool.query("UPDATE users SET permissions=$1 WHERE id=1",[JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}})]);
+ await pool.query("UPDATE users SET permissions=$1 WHERE id=1",[JSON.stringify({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants:{}})]);
  try{await expect(readHrIdentityPreview(pool,session)).rejects.toThrow("PERMISSION_ENVELOPE_HELD");}
  finally{await pool.query("UPDATE users SET permissions=NULL WHERE id=1");}
 });

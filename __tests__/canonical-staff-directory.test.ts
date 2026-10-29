@@ -16,7 +16,7 @@ const realm = "11111111-1111-4111-8111-111111111111";
 const generation = "22222222-2222-4222-8222-222222222222";
 const ownerSubject = "33333333-3333-4333-8333-333333333333";
 const actorSubject = "44444444-4444-4444-8444-444444444444";
-const document = (grants: Record<string, boolean> = { "staff.view": true }) => ({ schemaVersion: 1, revision: 1, patientScope: "none", appointmentScope: "none", grants });
+const document = (grants: Record<string, boolean> = { "staff.view": true }) => ({ schemaVersion: 2, confirmation: "owner", revision: 1, patientScope: "none", appointmentScope: "none", grants });
 const claims = () => ({ userId: 2, username: "synthetic-actor", expiresAt: Date.now() + 60_000, durableIdentity: { schemaVersion: 2, policyVersion: STAFF_AUTHORIZATION_POLICY_VERSION, realmId: realm, subjectId: actorSubject, generationId: generation, registryRevision: "3", controlEpoch: "2", accountEpoch: "1", permissionRevision: 1, credentialVersion: sessionCredentialVersion("synthetic-hash"), provider: null as null | { partyId: number; clinicalEpoch: string } } });
 function session(payload = claims()) {
  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");

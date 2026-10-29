@@ -2,11 +2,11 @@ import {expect,it,vi} from "vitest";
 import {STAFF_AUTHORIZATION_POLICY_VERSION,STAFF_CAPABILITY_SCHEMA_VERSION,type StaffCapabilityDocument} from "../lib/staff-capability-catalogue";
 import {hasStaffCapability,ownerContextFromTrustedBinding,resolveStaffCapabilities,parseStaffCapabilityDocument} from "../lib/staff-capabilities";
 import {staffOperationReferenceCapabilities,staffOperationIdentity,assertStaffOperation} from "../lib/staff-operation-runtime";
-const document=(grants:StaffCapabilityDocument["grants"]={}):StaffCapabilityDocument=>({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants});
+const document=(grants:StaffCapabilityDocument["grants"]={}):StaffCapabilityDocument=>({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants});
 const subject={userId:17,role:"doctor",isActive:true,clinicianPartyId:null};
 const resolve=(grants:StaffCapabilityDocument["grants"])=>resolveStaffCapabilities({subject,permissionDocument:document(grants)});
 it("changes policy semantics without changing schema1 documents or inferring creation",()=>{
- expect(STAFF_AUTHORIZATION_POLICY_VERSION).toBe(6);expect(STAFF_CAPABILITY_SCHEMA_VERSION).toBe(1);
+ expect(STAFF_AUTHORIZATION_POLICY_VERSION).toBe(6);expect(STAFF_CAPABILITY_SCHEMA_VERSION).toBe(2);
  const old=document({"inventory.references.view":true});expect(parseStaffCapabilityDocument(old)).toMatchObject({ok:true,value:old});
  const access=resolveStaffCapabilities({subject,permissionDocument:old});expect(hasStaffCapability(access,"inventory.references.view")).toBe(true);expect(hasStaffCapability(access,"inventory.items.create")).toBe(false);
  expect(old.grants).toEqual({"inventory.references.view":true});

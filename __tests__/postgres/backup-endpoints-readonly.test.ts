@@ -293,7 +293,7 @@ describe("دخول نقاط النسخ لا يصدر إلا SELECT — إثبا�
 
 it("marker-free legacy cookie cannot authorize a raw canonical account on bare base", async () => {
   const previous=(await client.query("SELECT permissions FROM users WHERE username='backupadmin'")).rows[0].permissions;
-  await client.query("UPDATE users SET permissions=$1 WHERE username='backupadmin'",[JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}})]);
+  await client.query("UPDATE users SET permissions=$1 WHERE username='backupadmin'",[JSON.stringify({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants:{}})]);
   try{
     const before=mark();const response=await backupStatusRoute.GET!() as Response;
     expect(response.status).toBe(503);expectSliceReadOnly(before);

@@ -49,7 +49,7 @@ it.each([
  ["invoice archive",()=>readInvoiceArchive(invoiceId,session)],
  ["historical document",()=>previewHistoricalDocument(1,{},session)],
 ] as const)("%s refuses raw canonical account before financial facts",async(_name,read)=>{
- await db.getPool().query("UPDATE users SET permissions=$1 WHERE id=$2",[JSON.stringify({schemaVersion:1,revision:1,patientScope:"none",appointmentScope:"none",grants:{}}),session.userId]);
+ await db.getPool().query("UPDATE users SET permissions=$1 WHERE id=$2",[JSON.stringify({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants:{}}),session.userId]);
  try{await expect(read()).rejects.toThrow("PERMISSION_ENVELOPE_HELD");}finally{await db.getPool().query("UPDATE users SET permissions=NULL WHERE id=$1",[session.userId]);}
 });
 it("snapshot begins after observed installer contention and refuses its committed marker",async()=>{
