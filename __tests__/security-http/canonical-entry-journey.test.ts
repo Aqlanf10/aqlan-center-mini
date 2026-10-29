@@ -172,8 +172,12 @@ it("legacy and canonical envelopes never cross: legacy token refused on canonica
  expect((await me(legacy)).status).toBe(401);
  const legacyRoute = await api("/api/appointments", owner.cookie);
  expect([401, 403]).toContain(legacyRoute.status);
- // A canonical cookie never falls through to a (valid-looking) Bearer.
- const mixed = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: owner.cookie.replace(/.$/, "A"), Authorization: `Bearer ${legacy.split("=")[1]}` } });
+ // A canonical cookie never falls through to a (valid-looking) Bearer. The tamper
+ // always changes a full 6-bit signature character (replacing the final character
+ // with a fixed letter left the cookie valid whenever it already was that letter).
+ const tampered = owner.cookie.replace(/(.)(....)$/, (_, c: string, tail: string) => `${c === "A" ? "B" : "A"}${tail}`);
+ expect(tampered).not.toBe(owner.cookie);
+ const mixed = await fetch(`${baseUrl}/api/auth/me`, { headers: { cookie: tampered, Authorization: `Bearer ${legacy.split("=")[1]}` } });
  expect(mixed.status).toBe(401);
  expect(await ddlLog()).toEqual([]);
 });
