@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
@@ -173,6 +174,7 @@ for (const width of [390, 1440]) describe(`public Arabic request at ${width}px`,
 
 it("reflects configured weekday changes immediately without a Friday hardcode", async () => {
   const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+  const previous = (await db.query("SELECT value FROM settings WHERE key='clinic.working_days'")).rows[0]?.value;
   try {
     await db.query(`INSERT INTO settings(key,value) VALUES('clinic.working_days',$1)
       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, [[0,1,2,3,4,5,6].filter(day => day !== weekday).join(",")]);
@@ -182,7 +184,10 @@ it("reflects configured weekday changes immediately without a Friday hardcode", 
     const fridayOnly = await (await fetch(`${baseUrl}/api/book`)).json();
     expect(fridayOnly.days.length).toBeGreaterThan(0);
     expect(fridayOnly.days.every((day: string) => new Date(`${day}T12:00:00Z`).getUTCDay() === 5)).toBe(true);
-  } finally { await db.query("UPDATE settings SET value='0,1,2,3,4,5,6' WHERE key='clinic.working_days'"); }
+  } finally {
+    if (previous === undefined) await db.query("DELETE FROM settings WHERE key='clinic.working_days'");
+    else await db.query("UPDATE settings SET value=$1 WHERE key='clinic.working_days'", [previous]);
+  }
 });
 
 it("revokes a copied patient cookie on logout and keeps a fresh login independent", async () => {
@@ -196,7 +201,8 @@ it("revokes a copied patient cookie on logout and keeps a fresh login independen
   expect((await authedGet("/api/portal/me", session)).status).toBe(401);
   const fresh = await loginPortal(patient.phone, patient.patientNumber);
   expect((await authedGet("/api/portal/me", fresh)).status).toBe(200);
-  const audit = (await db.query("SELECT entity_id,details FROM audit_log WHERE action='portal.session_revoked'")).rows;
+  const fingerprint = createHash("sha256").update(session.cookie.slice(session.cookie.indexOf("=") + 1)).digest("hex");
+  const audit = (await db.query("SELECT entity_id,details FROM audit_log WHERE action='portal.session_revoked' AND entity_id=$1", [fingerprint])).rows;
   expect(audit).toHaveLength(1);
   expect(audit[0].entity_id).toMatch(/^[a-f0-9]{64}$/);
   expect(JSON.stringify(audit)).not.toContain(session.cookie.split("=")[1]);

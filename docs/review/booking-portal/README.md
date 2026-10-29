@@ -36,7 +36,7 @@ Created a fresh local Docker container `booking-portal-pg18`, labelled `purpose=
 
 ## Release gate
 
-Draft PR: [#492](https://github.com/Aqlanf10/aqlan-center-mini/pull/492). Not ready for release. Complete hosted CI, review and a Staging review are required. Railway metadata identifies `staging-web` in the project's `staging` environment, with two pre-existing staged changes. This branch has not been deployed there; synthetic data provenance and coordination of those changes remain pending. PRs #490/#491 and the active identity branch are outside this branch.
+Draft PR: [#492](https://github.com/Aqlanf10/aqlan-center-mini/pull/492). Not ready for release. Complete hosted CI, review and a Staging review are required. Railway metadata identifies `staging-web` in the project's `staging` environment, with two pre-existing staged changes. This branch has not been deployed there. The parent agent owns Staging coordination and verification of synthetic data isolation after the current release; no Railway changes are authorized here. PRs #490/#491 and the active identity branch are outside this branch.
 
 ## Implemented behavior
 
@@ -52,6 +52,8 @@ Draft PR: [#492](https://github.com/Aqlanf10/aqlan-center-mini/pull/492). Not re
 ## Database and concurrency review
 
 `0090_booking_request_preferences.sql` adds three columns and one partial unique index only. Its runtime SQL is byte-identical and checksum registered. The schema contract and reviewed migration inventories include exactly this addition; no guard was disabled. No historical keys are guessed and no financial records or links are rewritten.
+
+Version/name: `0090` / `booking_request_preferences`. SHA-256: `608eeee37b44a59cb4d26e915bd0b2610cf619103905be1fca0c2abe77c52e25`. Added fields on `booking_requests`: nullable `request_key TEXT`, nullable `request_hash TEXT`, and `preferences JSONB NOT NULL DEFAULT '{}'::jsonb`. The partial unique index is `booking_requests_request_key_idx` (`request_key IS NOT NULL`). Coordinate the number with other migration branches before merge.
 
 The source-only preflight disclosure catalog is regenerated on the isolated PostgreSQL 18 fixture. Its exact delta is three booking-request column identities, the `booking_requests_preferences_not_null` constraint identity and its column/definition text hashes. No existing identity is removed and no internal-trigger disclosure is added. The separate schema-fingerprint tests retain their private-template canary and fail-closed checks.
 
@@ -74,6 +76,7 @@ Primary fresh container: `5ea60cd9d73a81555cc0fc10f8e17ee2085918df7649ff617ca617
 | Schema ownership | Passed; zero unexpected/known drift, with 16 previously tracked convergence gaps still open. This is not a claim that runtime and numbered schemas are entirely equal. |
 | Operational verification | All 20 journeys passed, including patient portal isolation, schema reconstruction and actual backup/restore of synthetic linked records. |
 | Final focused PostgreSQL | 24 passed: five portal regressions (including atomic confirmation audit) and 19 inventory procurement checks on a separate fresh local container. |
+| Baseline built HTTP comparison | Two existing failures reproduced on unmodified `b5540169`: legacy financial preview waits for a ledger read, and receipt PDF signature glyph geometry fails. Three other checks in those two files passed. This does not establish the result of hosted CI. See [baseline comparison](evidence/baseline-http-comparison.txt). |
 | Full unit / PostgreSQL / HTTP / hosted CI | Complete suite status and final head results are maintained in [PR #492](https://github.com/Aqlanf10/aqlan-center-mini/pull/492). Focused passes above are not a substitute for them. The local full unit run had 12,596 passes, one corrected stale audit exemption, and a 5-second runtime tracing timeout under concurrent load. The first full PostgreSQL run exposed a procurement test failure that did not reproduce in isolation on either baseline or branch. |
 
 Synthetic screenshots: [mobile review](evidence/public-review-390.png), [desktop review](evidence/public-review-1440.png), [lost-response retry](evidence/public-response-loss-390.png), [unavailable state](evidence/public-unavailable-390.png), [reception review](evidence/reception-review-390.png), [reception confirmed](evidence/reception-confirmed-1440.png).

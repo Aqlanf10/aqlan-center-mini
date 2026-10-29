@@ -1,0 +1,55 @@
+Baseline built HTTP comparison
+Source: detached b55401693700d83c063872f957758f249dd1deed
+Built locally with Node 22.23.4. Chromium 151.0.7922.173.
+Fresh synthetic PostgreSQL 18 container booking-baseline-pg18, loopback 54330.
+Harness-owned aqlan_sec_http, loopback server 3220; dropped on completion.
+No booking portal implementation changes in this checkout.
+
+ FAIL  __tests__/security-http/legacy-reconciliation-preview-built-page.test.ts > read-only legacy comparison on the actual built Account page > keeps arithmetic, provenance and draft lifetimes separate at 390px
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ waitRead __tests__/security-http/legacy-reconciliation-preview-built-page.test.ts:210:45
+    208|   };
+    209|   const waitRead = async (id: number) => {
+    210|     await expect.poll(() => pending.length).toBe(1); expect(pending[0]…
+       |                                             ^
+    211|     expect(await panel(page).count()).toBe(0);
+    212|   };
+ ❯ Object.go __tests__/security-http/legacy-reconciliation-preview-built-page.test.ts:243:49
+ ❯ __tests__/security-http/legacy-reconciliation-preview-built-page.test.ts:561:7
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ waitRead __tests__/security-http/legacy-reconciliation-preview-built-page.test.ts:210:5
+ ❯ Object.go __tests__/security-http/legacy-reconciliation-preview-built-page.test.ts:243:43
+ ❯ __tests__/security-http/legacy-reconciliation-preview-built-page.test.ts:561:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+Error: PDF signature receipt fragments violate exact glyph geometry
+ ❯ assertReceiptPrintPdfSignature __tests__/helpers/print-pdf-glyphs.ts:120:11
+    118|     || Math.abs(right.yMin - left.yMin) > 2 || gap < 0 || gap > 0.5
+    119|     || merged.text !== expectedLabel) {
+    120|     throw new Error("PDF signature receipt fragments violate exact gly…
+       |           ^
+    121|   }
+    122|   // Neither input words nor their geometry change. The unchanged shar…
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:338:9
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:247:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 3 passed (5)
+   Start at  16:54:12
+   Duration  59.35s (transform 447ms, setup 0ms, import 2.02s, tests 48.79s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

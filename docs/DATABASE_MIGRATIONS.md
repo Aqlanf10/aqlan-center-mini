@@ -624,6 +624,10 @@ Exact-head CI and Staging verification remain required before Production rollout
 
 ### 0090_booking_request_preferences.sql
 
+Migration identity: version `0090`, name `booking_request_preferences`, SHA-256
+`608eeee37b44a59cb4d26e915bd0b2610cf619103905be1fca0c2abe77c52e25`.
+Coordinate this version with other open migration branches before merging.
+
 Adds nullable `request_key`/`request_hash`, a non-null JSONB `preferences` column
 with an empty-object default, and a partial unique request-key index to
 `booking_requests`. These fields preserve public service/doctor/time preferences
