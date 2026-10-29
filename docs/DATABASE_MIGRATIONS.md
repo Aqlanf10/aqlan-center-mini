@@ -589,6 +589,26 @@ Require exact-head PostgreSQL, schema/ownership, populated SQL/full-archive
 restore, HTTP/browser retry and Staging acceptance evidence before release.
 Neither this listing nor passing unit tests alone authorizes Production rollout.
 
+### 0080_patient_numbering.sql
+
+Standalone extraction of the published patient-file numbering contract. New
+files allocate P-07000 or above the sequence/current/retired high-water. Existing
+numbers are never mass rewritten. Explicit admin edits require current alias,
+version and reason, retain stable patient IDs and reserve immutable old aliases.
+Clinical/financial links remain unchanged; audit and alias changes are atomic.
+
+Published0080 runtime/file SQL bytes and checksum remain unchanged. An existing
+0087 runtime registry can acquire0080 late without adopting other registry gaps;
+synthetic upgrade/restart/checksum-refusal tests cover that exact path.
+
+Predeployment `--patient-numbering-readiness` is a mandatory count-only read-only
+gate: ambiguous historical aliases block release and require separate reviewed
+correction, never automatic cleanup. Current patients or historical aliases block
+factory reset; the patient-number sequence is never restarted. Official backups
+preserve alias history and sequence high-water. Local verification is not a
+Production readiness claim. Do not down-migrate or assume an old allocator build
+is a safe rollback after activation; use a verified numbering-compatible artifact.
+
 ### 0087_agreement_reminder_metadata.sql
 
 Additive replacement of the reconciliation terms guard permits only

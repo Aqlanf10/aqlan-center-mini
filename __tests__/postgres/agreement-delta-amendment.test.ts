@@ -294,7 +294,8 @@ it("protects recorded amendment history from a factory reset and from TRUNCATE; 
    const { rows: [{ n }] } = await q(`SELECT COUNT(*)::int AS n FROM ${table}`);
    if (n > 0) await expect(q(`TRUNCATE ${table} CASCADE`)).rejects.toThrow("immutable");
  }
- await expect(q("TRUNCATE patients CASCADE")).rejects.toThrow("immutable");
+ // Either protected table can reject the cascade first; both must leave every row intact.
+ await expect(q("TRUNCATE patients CASCADE")).rejects.toThrow(/immutable|current patient identifiers cannot be truncated/);
  expect(await snapshot()).toEqual(before);
 });
 
