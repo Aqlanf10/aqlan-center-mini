@@ -7812,9 +7812,20 @@ import { FOLLOW_UP_LOOKBACK_DAYS, daysBetween, type OpenPastAppointment, type Re
  * موعد فائت بلا مكالمة هو المريض الذي يفهم أن العيادة لم تلاحظ غيابه. والمدى محدود
  * بشهر: الاتصال بمن تغيّب قبل ثلاثة أشهر ليس متابعة غياب — إنه استدعاء، وله قائمته.
  */
+/** Patients inside a clinician's scope for the recall lists (M2 slice 24): the patient
+ * list's own condition, as a filter on the row's patient (`p`); `$n` is the party. */
+function recallScopeFilter(param: number): string {
+  return `AND EXISTS (SELECT 1 FROM patients WHERE patients.id = p.id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${param}`)})`;
+}
+
 export async function listMissedAppointments(): Promise<RecallRow[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listMissedAppointmentsWith(getPool(), null);
+}
+
+/** The missed list on the caller's client; `doctorPartyId` keeps the clinician's patients only. */
+export async function listMissedAppointmentsWith(q: Pick<DbClient, "query">, doctorPartyId: number | null): Promise<RecallRow[]> {
+  const { rows } = await q.query<{
     id: number; patient_id: number; full_name: string; phone: string | null;
     scheduled_date: Date; note: string | null;
   }>(
@@ -7823,9 +7834,10 @@ export async function listMissedAppointments(): Promise<RecallRow[]> {
       WHERE a.status = 'no_show'
         AND a.follow_up_at IS NULL
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
+        ${doctorPartyId === null ? "" : recallScopeFilter(3)}
       ORDER BY a.scheduled_date ASC
       LIMIT 100`,
-    [CLINIC_TIME_ZONE, await followUpLookbackDays()],
+    [CLINIC_TIME_ZONE, await followUpLookbackDays(q), ...(doctorPartyId === null ? [] : [doctorPartyId])],
   );
   return rows.map((row) => ({
     kind: "missed" as const,
@@ -7844,8 +7856,8 @@ export async function listMissedAppointments(): Promise<RecallRow[]> {
  * تقرؤه القائمتان معًا (المعلّقة والمتغيّبون) من هذه الدالّة الواحدة، فيستحيل أن
  * يختلف حدّاهما ويضيع مريضٌ بينهما — وهي العلّة التي أثبتتها رحلة المواعيد.
  */
-async function followUpLookbackDays(): Promise<number> {
-  const settings = await getSettings();
+async function followUpLookbackDays(q?: Pick<DbClient, "query">): Promise<number> {
+  const settings = q ? await getSettingsWith(q) : await getSettings();
   const value = Number(settings["ops.follow_up_lookback_days"]);
   return Number.isInteger(value) && value > 0 ? value : FOLLOW_UP_LOOKBACK_DAYS;
 }
@@ -7864,7 +7876,12 @@ async function followUpLookbackDays(): Promise<number> {
  */
 export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listOpenPastAppointmentsWith(getPool(), null);
+}
+
+/** The open-past list on the caller's client; `doctorPartyId` keeps the clinician's patients only. */
+export async function listOpenPastAppointmentsWith(q: Pick<DbClient, "query">, doctorPartyId: number | null): Promise<OpenPastAppointment[]> {
+  const { rows } = await q.query<{
     id: number; patient_id: number; full_name: string; phone: string | null;
     scheduled_date: Date; scheduled_time: string; note: string | null;
     doctor_name: string | null; today: string;
@@ -7881,9 +7898,10 @@ export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]>
            هذا اليومَ الثلاثين وذاك استثناه، لصار موعدٌ عمره ثلاثون يومًا يظهر
            هنا، وحين يُقال «لم يحضر» يخرج من هنا ولا يدخل هناك — فيختفي المريض. */
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
+        ${doctorPartyId === null ? "" : recallScopeFilter(3)}
       ORDER BY a.scheduled_date ASC, a.scheduled_time ASC
       LIMIT 200`,
-    [CLINIC_TIME_ZONE, await followUpLookbackDays()],
+    [CLINIC_TIME_ZONE, await followUpLookbackDays(q), ...(doctorPartyId === null ? [] : [doctorPartyId])],
   );
   return rows.map((row) => {
     const date = row.scheduled_date;
@@ -7953,8 +7971,13 @@ export async function closeBookedAppointment(
  */
 export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
   await ensureSchema();
+  return listLapsedPatientsWith(getPool(), weeks, null);
+}
+
+/** The lapsed list on the caller's client; `doctorPartyId` keeps the clinician's patients only. */
+export async function listLapsedPatientsWith(q: Pick<DbClient, "query">, weeks: number, doctorPartyId: number | null): Promise<RecallRow[]> {
   const days = Math.max(1, Math.round(weeks * 7));
-  const { rows } = await getPool().query<{
+  const { rows } = await q.query<{
     id: number; full_name: string; phone: string | null; last_activity: Date; note: string | null;
   }>(
     `WITH activity AS (
@@ -7971,6 +7994,7 @@ export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
                    AND f.scheduled_date >= CURRENT_DATE
                    AND f.status IN ('booked', 'arrived')
               )
+          ${doctorPartyId === null ? "" : recallScopeFilter(2)}
      )
      SELECT id, full_name, phone, note, last_activity
        FROM activity
@@ -7978,7 +8002,7 @@ export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
         AND (recalled_at IS NULL OR recalled_at < NOW() - INTERVAL '30 days')
       ORDER BY last_activity ASC
       LIMIT 100`,
-    [days],
+    [days, ...(doctorPartyId === null ? [] : [doctorPartyId])],
   );
   return rows.map((row) => ({
     kind: "lapsed" as const,
@@ -8000,7 +8024,11 @@ export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
  */
 export async function markAppointmentFollowedUp(id: number): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
+  return markAppointmentFollowedUpWith(getPool(), id);
+}
+
+export async function markAppointmentFollowedUpWith(q: Pick<DbClient, "query">, id: number): Promise<boolean> {
+  const { rowCount } = await q.query(
     `UPDATE appointments SET follow_up_at = COALESCE(follow_up_at, NOW())
       WHERE id = $1 AND status = 'no_show'`,
     [id],
@@ -8014,7 +8042,11 @@ export async function markAppointmentFollowedUp(id: number): Promise<boolean> {
  */
 export async function markPatientRecalled(id: number): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
+  return markPatientRecalledWith(getPool(), id);
+}
+
+export async function markPatientRecalledWith(q: Pick<DbClient, "query">, id: number): Promise<boolean> {
+  const { rowCount } = await q.query(
     `UPDATE patients SET recalled_at = NOW() WHERE id = $1`, [id],
   );
   return (rowCount ?? 0) > 0;

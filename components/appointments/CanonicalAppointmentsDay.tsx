@@ -294,7 +294,14 @@ function BookingForm({ date, canOverride, onBooked }: { date: string; canOverrid
   const uid = useId();
   const [term, setTerm] = useState("");
   const [matches, setMatches] = useState<PatientMatch[]>([]);
-  const [patient, setPatient] = useState<PatientMatch | null>(null);
+  /* «احجز له» from the recall list (slice 24) opens this form with the patient chosen;
+     the name is display only — the server re-proves the patient and its scope. */
+  const [patient, setPatient] = useState<PatientMatch | null>(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    const id = Number(params.get("bookPatient"));
+    return Number.isSafeInteger(id) && id > 0 ? { id, fullName: (params.get("bookName") ?? "").slice(0, 120) || `#${id}`, patientNumber: String(id) } : null;
+  });
   const [time, setTime] = useState("09:00");
   const [duration, setDuration] = useState("30");
   const [note, setNote] = useState("");

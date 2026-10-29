@@ -33,6 +33,7 @@ export const CANONICAL_PAGES: readonly CanonicalPage[] = Object.freeze([
  { href: "/appointments", label: "المواعيد", anyOf: [], record: "appointment", exact: true, description: "مواعيد اليوم ضمن نطاق مواعيدك، وجاهزية أعمال المختبر، وجدولك الشخصي." },
  { href: "/requests", label: "طلبات الحجز", anyOf: ["appointments.create"], record: "appointment", wholeScope: true, exact: true, description: "طلبات الحجز الإلكتروني: تأكيدها عبر محرّك السعة أو رفضها، الأقدم أولًا." },
  { href: "/waiting-list", label: "قائمة الانتظار", anyOf: [], record: "appointment", exact: true, description: "من لم يجد موعدًا: المكالمات وتفضيلات الموعد والإغلاق ضمن مواعيد نطاقك." },
+ { href: "/recall", label: "المتابعة", anyOf: [], record: "patient", exact: true, description: "مواعيد مضت بلا إغلاق، ومن لم يحضر، ومن انقطع عن المتابعة — ضمن نطاق مرضاك." },
  { href: "/patients", label: "المرضى", anyOf: [], record: "patient", exact: true, description: "البحث عن المرضى وتصفّح قائمتهم ضمن نطاق مرضاك المسموح." },
  { href: "/patients/[id]", label: "ملف المريض", anyOf: [], record: "patient", pattern: /^\/patients\/[1-9][0-9]{0,9}$/, description: "ملف مريضٍ ضمن نطاق مرضاك." },
  { href: "/staff-access", label: "صلاحيات الطاقم", anyOf: ["staff.view"], description: "دليل الطاقم وتعديل صلاحيات كل موظف بمراجعة وتدقيق." },

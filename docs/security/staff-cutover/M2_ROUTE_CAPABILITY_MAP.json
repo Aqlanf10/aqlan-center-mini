@@ -4807,8 +4807,9 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 24: record read read:recall (patient scope; own = the patient list's condition applied in SQL before the limits) in one owning snapshot; canRecord = appointments.create (display only).",
+  "projection": {"legacy": "every admitted role read every patient's open past bookings, missed appointments and lapsed patients.", "groups": {"identity": "name, phone, dates, note and doctor of the rows inside the patient scope"}, "rows": "patient scope all: every row; own: the clinician's patients only; none: refused"}
  },
  {
   "route": "/api/recall",
@@ -4822,8 +4823,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 24: one admitted appointments.create transaction; the row (appointment or patient) locked, its patient inside the patient scope (outside = missing 404); the first follow-up time kept; recall.contact audit atomic."
  },
  {
   "route": "/api/referrals/[id]",

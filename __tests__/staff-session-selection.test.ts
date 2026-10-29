@@ -51,7 +51,7 @@ describe("capability presentation", () => {
  it("navigation is a projection of current grants over accepted canonical pages only", () => {
   expect(canonicalPagesFor([], false)).toEqual([]);
   expect(canonicalPagesFor(["staff.view"], false).map(p => p.href)).toEqual(["/staff-access"]);
-  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/appointments", "/requests", "/waiting-list", "/patients", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
+  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/appointments", "/requests", "/waiting-list", "/recall", "/patients", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
   expect(canonicalPagesFor(["inventory.custody.view"], false).map(p => p.href)).toEqual(["/inventory/custody"]);
   expect(isCanonicalPage("/staff-access")).toBe(true);
   expect(isCanonicalPage("/patients")).toBe(true);
@@ -71,7 +71,7 @@ describe("capability presentation", () => {
   // Grants alone never show the patient list; a scope other than none does.
   expect(canonicalPagesFor(["clinical.plans.view", "finance.patient-ledger.view"], false).map(p => p.href)).toEqual([]);
   expect(canonicalPagesFor([], false, { patientScope: "none" }).map(p => p.href)).toEqual([]);
-  expect(canonicalPagesFor([], false, { patientScope: "own" }).map(p => p.href)).toEqual(["/visits", "/patients"]);
+  expect(canonicalPagesFor([], false, { patientScope: "own" }).map(p => p.href)).toEqual(["/visits", "/recall", "/patients"]);
   // The online booking queue needs appointments.create AND the whole appointment scope.
   expect(canonicalPagesFor(["appointments.create"], false, { appointmentScope: "own" }).map(p => p.href)).toEqual(["/appointments", "/waiting-list"]);
   expect(canonicalPagesFor(["appointments.create"], false, { appointmentScope: "all" }).map(p => p.href)).toEqual(["/appointments", "/requests", "/waiting-list"]);
@@ -81,7 +81,7 @@ describe("capability presentation", () => {
   expect(canonicalPageAllowed(file, [], false, { patientScope: "own" })).toBe(true);
   expect(canonicalPageAllowed(file, ["clinical.plans.view"], false, { patientScope: "none" })).toBe(false);
   expect(canonicalPageAllowed(file, [], true)).toBe(true);
-  expect(canonicalPagesFor(["staff.view"], false, { patientScope: "all" }).map(p => p.href)).toEqual(["/visits", "/patients", "/staff-access"]);
+  expect(canonicalPagesFor(["staff.view"], false, { patientScope: "all" }).map(p => p.href)).toEqual(["/visits", "/recall", "/patients", "/staff-access"]);
   // The appointment scope opens the appointments and the waiting list, never the patient list.
   expect(canonicalPagesFor([], false, { appointmentScope: "all" }).map(p => p.href)).toEqual(["/appointments", "/waiting-list"]);
  });
