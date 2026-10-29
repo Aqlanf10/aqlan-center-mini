@@ -9,11 +9,11 @@
  * للمحرّك. ولا يبني أيُّ مسارٍ حكمَه بنفسه.
  */
 import {
-  CLINIC_TIME_ZONE, getSettings, listAppointmentServices, listProviderBlocks,
+  CLINIC_TIME_ZONE, getSettings, getSettingsWith, listAppointmentServices, listProviderBlocks,
   resolveServiceByLegacyType, type DbClient,
 } from "./db";
 import { clinicDayStart } from "./clinicZone";
-import { chairCount } from "./settings";
+import { chairCount, type SettingsMap } from "./settings";
 import { judgeFullCapacity, type CapacityVerdict, type ProviderBlockWindow, type Shift } from "./capacity";
 import type { AppointmentService } from "./appointment-services";
 import type { Appointment } from "./schedule";
@@ -28,7 +28,15 @@ export interface CapacityContext {
 
 /** يقرأ سياسة السعة من الإعدادات — مصدرٌ واحد لساعات المركز وطاقته. */
 export async function loadCapacityContext(): Promise<CapacityContext> {
-  const settings = await getSettings();
+  return capacityContextFrom(await getSettings());
+}
+
+/** The same context read on the caller's client (canonical snapshots, M2 slice 19). */
+export async function loadCapacityContextWith(q: Pick<DbClient, "query">): Promise<CapacityContext> {
+  return capacityContextFrom(await getSettingsWith(q));
+}
+
+function capacityContextFrom(settings: SettingsMap): CapacityContext {
   const shifts: Shift[] = [
     { start: settings["clinic.day_start"], end: settings["clinic.day_end"] },
   ];

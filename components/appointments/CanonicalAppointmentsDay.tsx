@@ -30,6 +30,7 @@ export function CanonicalAppointmentsDay() {
   const [view, setView] = useState<DayView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
+  const [freed, setFreed] = useState<Freed | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -71,6 +72,7 @@ export function CanonicalAppointmentsDay() {
         </div>
       </header>
       {error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+      {freed ? <FreedSlotNotice freed={freed} /> : null}
       {canBook ? <BookingForm date={date} canOverride={canOverride} onBooked={() => setVersion(current => current + 1)} /> : null}
       {view ? (
         <>
@@ -94,7 +96,7 @@ export function CanonicalAppointmentsDay() {
                     </ul>
                   ) : null}
                   {appointment.status === "booked" && (moves.arrive || moves.close || moves.reschedule)
-                    ? <AppointmentActions appointment={appointment} moves={moves} onMoved={() => setVersion(current => current + 1)} />
+                    ? <AppointmentActions appointment={appointment} moves={moves} onMoved={waiting => { setFreed(waiting); setVersion(current => current + 1); }} />
                     : null}
                 </li>
               ))}
@@ -102,21 +104,69 @@ export function CanonicalAppointmentsDay() {
           )}
         </>
       ) : error ? null : <p role="status" className="text-sm text-slate-600">جارٍ تحميل المواعيد…</p>}
-      <p className="text-xs text-slate-600">حذف الموعد وحجز العودة يُنقلان إلى الهوية الموحّدة تباعًا.</p>
+      <p className="text-xs text-slate-600">حجز العودة من سياق الحالة يُنقل إلى الهوية الموحّدة تباعًا.</p>
     </section>
   );
 }
 
 /** إجراءات موعدٍ محجوز: كل ردٍّ مرفوض يُعرض نصُّه، ولا يُعتبر الإجراء تامًّا قبل ردٍّ ناجح. */
-type Moves = { arrive: boolean; close: boolean; reschedule: boolean; override: boolean };
+/** Who fits the freed slot: names and reasons from the canonical waiting-list match
+ * (GET /api/waiting-list?date=&time=), inside the actor's scope, only on request. */
+function FreedSlotNotice({ freed }: { freed: Freed }) {
+  const [candidates, setCandidates] = useState<{ id: number; patientName: string; matchReason: string }[] | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  async function show() {
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/waiting-list?date=${encodeURIComponent(freed.slot.date)}&time=${encodeURIComponent(freed.slot.time)}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { setMessage(payload?.message ?? "تعذّر تحميل المرشّحين."); return; }
+      setCandidates(Array.isArray(payload?.candidates) ? payload.candidates : []);
+    } catch { setMessage("تعذّر الاتصال بالخادم."); }
+  }
+  return (
+    <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900" data-testid="freed-slot">
+      <p>شغر مكان {freed.slot.date} الساعة <span dir="ltr">{freed.slot.time}</span> — في قائمة الانتظار {freed.count} يصلحون له.</p>
+      <div className="mt-2 flex max-w-full flex-wrap gap-2">
+        <button type="button" onClick={() => void show()} className="min-h-11 rounded-xl border border-emerald-300 bg-white px-3 text-xs font-bold">اعرض المرشّحين</button>
+        <a href="/waiting-list" className="inline-flex min-h-11 items-center text-xs font-bold underline">افتح قائمة الانتظار</a>
+      </div>
+      {candidates ? (
+        <ul className="mt-2 space-y-1 text-xs" aria-label="المرشّحون للمكان الشاغر">
+          {candidates.length === 0 ? <li>لم يعد أحدٌ يصلح لهذا المكان.</li> : candidates.map(candidate => (
+            <li key={candidate.id}><span className="font-bold">{candidate.patientName}</span> — {candidate.matchReason}</li>
+          ))}
+        </ul>
+      ) : null}
+      {message ? <p role="alert" className="mt-1 text-xs text-red-700">{message}</p> : null}
+    </div>
+  );
+}
 
-function AppointmentActions({ appointment, moves, onMoved }: { appointment: Appointment; moves: Moves; onMoved: () => void }) {
+type Moves = { arrive: boolean; close: boolean; reschedule: boolean; override: boolean };
+/** The freed slot after a cancel or no-show: how many waiting entries in your scope fit. */
+interface Freed { count: number; slot: { date: string; time: string } }
+
+function AppointmentActions({ appointment, moves, onMoved }: { appointment: Appointment; moves: Moves; onMoved: (waiting: Freed | null) => void }) {
   const uid = useId();
   const [cancelling, setCancelling] = useState(false);
   const [moving, setMoving] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  async function remove() {
+    setBusy(true); setMessage(null);
+    try {
+      const response = await fetch(`/api/appointments/${appointment.id}`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: reason.trim() || null }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { setMessage(payload?.message ?? "تعذّر حذف الموعد."); return; }
+      setCancelling(false); setReason("");
+      onMoved(null);
+    } catch { setMessage("تعذّر الاتصال بالخادم. حدّث القائمة قبل إعادة المحاولة."); }
+    finally { setBusy(false); }
+  }
   async function move(action: "arrive" | "cancel" | "no_show") {
     setBusy(true); setMessage(null);
     try {
@@ -127,7 +177,7 @@ function AppointmentActions({ appointment, moves, onMoved }: { appointment: Appo
       const payload = await response.json().catch(() => null);
       if (!response.ok) { setMessage(payload?.message ?? "تعذّر تنفيذ الإجراء."); return; }
       setCancelling(false); setReason("");
-      onMoved();
+      onMoved(payload?.waiting && typeof payload.waiting.count === "number" ? payload.waiting as Freed : null);
     } catch { setMessage("تعذّر الاتصال بالخادم. حدّث القائمة قبل إعادة المحاولة."); }
     finally { setBusy(false); }
   }
@@ -140,13 +190,14 @@ function AppointmentActions({ appointment, moves, onMoved }: { appointment: Appo
         {moves.close ? <button type="button" disabled={busy} aria-expanded={cancelling} onClick={() => { setCancelling(current => !current); setMoving(false); }} className={`${button} border-red-200 text-red-800`}>إلغاء الموعد</button> : null}
         {moves.reschedule ? <button type="button" disabled={busy} aria-expanded={moving} onClick={() => { setMoving(current => !current); setCancelling(false); }} className={`${button} border-navy-200 text-navy-800`}>نقل الموعد</button> : null}
       </div>
-      {moving ? <RescheduleForm appointment={appointment} canOverride={moves.override} onMoved={() => { setMoving(false); onMoved(); }} /> : null}
+      {moving ? <RescheduleForm appointment={appointment} canOverride={moves.override} onMoved={() => { setMoving(false); onMoved(null); }} /> : null}
       {cancelling ? (
         <div className="flex max-w-full flex-wrap items-end gap-2">
           <label htmlFor={`${uid}-reason`} className="text-xs font-bold text-navy-900">سبب الإلغاء
             <input id={`${uid}-reason`} value={reason} disabled={busy} onChange={event => setReason(event.target.value)} className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm" />
           </label>
           <button type="button" disabled={busy} onClick={() => void move("cancel")} className={`${button} border-red-300 bg-red-50 text-red-800`}>تأكيد الإلغاء</button>
+          <button type="button" disabled={busy} onClick={() => void remove()} className={`${button} border-slate-300 text-slate-700`} title="لموعدٍ أُدخل خطأً: يُحذف ويبقى أثره في التدقيق">حذف نهائي (إدخال خاطئ)</button>
         </div>
       ) : null}
       {message ? <p role="alert" className="text-xs text-red-700">{message}</p> : null}

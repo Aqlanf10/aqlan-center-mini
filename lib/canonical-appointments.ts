@@ -1,6 +1,7 @@
 import "server-only";
-import { CLINIC_TIME_ZONE, arriveAppointmentWith, getAppointmentWith, getPool, insertAuditRow, labWorkForPatientsWith, listAppointmentsByDateWith, patientInDoctorScopeWith, transitionAppointmentInTransaction } from "./db";
+import { CLINIC_TIME_ZONE, arriveAppointmentWith, deleteAppointmentWith, getAppointmentWith, getPool, insertAuditRow, labWorkForPatientsWith, listAppointmentsByDateWith, patientInDoctorScopeWith, transitionAppointmentInTransaction } from "./db";
 import { reasonAcceptable, requiresReason } from "./appointment-lifecycle";
+import { readCanonicalFreedSlotCandidates } from "./canonical-waiting-list";
 import { STALE_MANUAL_REMINDER_MESSAGE, readManualReminderSnapshot, recordManualAppointmentReminder } from "./manual-appointment-reminder";
 import { bookAppointment, rescheduleAppointment, type BookAppointmentInput, type BookingConflict, type RescheduleInput } from "./book-appointment";
 import type { ReturnBookingSource } from "./return-booking-context";
@@ -208,8 +209,9 @@ export async function commandCanonicalBooking(session: VerifiedDurableSession, i
  * The domain writers run on the same transaction (arriveAppointmentWith,
  * transitionAppointmentInTransaction, the reminder writer) and keep their rules and
  * status log; an audit row with the canonical actor commits with every move. Any
- * refusal rolls back. Rescheduling is its own command below (slice 18); the freed-slot
- * waiting-list suggestion is not canonical yet, and the response carries `waiting: null`.
+ * refusal rolls back. Rescheduling is its own command below (slice 18). After a cancel,
+ * no-show or past no-show commits, `waiting` carries how many entries inside the actor's
+ * scope fit the freed slot (slice 19), best effort, as the legacy route does.
  * ------------------------------------------------------------------------- */
 const APPOINTMENT_MOVES = ["arrive", "reminded", "cancel", "no_show", "close_done", "close_no_show"] as const;
 type AppointmentMove = typeof APPOINTMENT_MOVES[number];
@@ -232,15 +234,31 @@ const MOVE_STATUS: Partial<Record<AppointmentMove, string>> = {
   arrive: "arrived", cancel: "cancelled", no_show: "no_show", close_done: "done", close_no_show: "no_show",
 };
 
-export async function commandCanonicalAppointmentMove(session: VerifiedDurableSession, id: number, move: CanonicalAppointmentMoveInput, pool = getPool()): Promise<{ ok: true; waiting: null }> {
+export interface FreedSlotSummary { readonly count: number; readonly slot: { readonly date: string; readonly time: string } }
+
+/** Who waits for the slot just freed: a count and the slot only (names come from the
+ * waiting-list route under its own guard). Best effort after the commit, like the
+ * legacy route: a failure never fails the move that already happened. */
+export async function canonicalFreedSlotSummary(session: VerifiedDurableSession, request: { appointmentId: number; date: string; time: string }): Promise<FreedSlotSummary | null> {
+  try {
+    const match = await readCanonicalFreedSlotCandidates(session, request);
+    return match && match.candidates.length > 0 ? { count: match.candidates.length, slot: { date: match.slot.date, time: match.slot.time } } : null;
+  } catch {
+    return null;
+  }
+}
+
+const FREES_SLOT: ReadonlySet<AppointmentMove> = new Set(["cancel", "no_show", "close_no_show"]);
+
+export async function commandCanonicalAppointmentMove(session: VerifiedDurableSession, id: number, move: CanonicalAppointmentMoveInput, pool = getPool()): Promise<{ ok: true; waiting: FreedSlotSummary | null }> {
   if (!Number.isSafeInteger(id) || id <= 0) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "رقم الموعد غير صالح.");
-  return withStaffOperation(pool, session, "appointments.edit", async (client, handle) => {
+  const moved = await withStaffOperation(pool, session, "appointments.edit", async (client, handle) => {
     const need = MOVE_NEEDS[move.action];
     if (need && !(await staffOperationCapabilities(client, handle, "appointments.edit", [need])).has(need)) throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
     const scope = await staffOperationAppointmentScope(client, handle, "appointments.edit");
     if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
-    const { rows: [appointment] } = await client.query<{ patient_id: number; doctor_id: number | null; status: string }>(
-      "SELECT patient_id, doctor_id, status FROM appointments WHERE id = $1 FOR UPDATE", [id]);
+    const { rows: [appointment] } = await client.query<{ patient_id: number; doctor_id: number | null; status: string; date: string; time: string }>(
+      "SELECT patient_id, doctor_id, status, to_char(scheduled_date, 'YYYY-MM-DD') AS date, to_char(scheduled_time, 'HH24:MI') AS time FROM appointments WHERE id = $1 FOR UPDATE", [id]);
     if (!appointment || (scope.kind === "own" && appointment.doctor_id !== scope.clinicianPartyId)) {
       throw new CanonicalAppointmentRefusal("appointment_not_found", 404, "لا يوجد موعد بهذا الرقم ضمن مواعيدك.");
     }
@@ -280,8 +298,9 @@ export async function commandCanonicalAppointmentMove(session: VerifiedDurableSe
       details: { الإجراء: move.action, من: appointment.status, إلى: MOVE_STATUS[move.action] ?? appointment.status, السبب: move.reason ?? "" },
       actor: identity.username, actorRole: identity.role,
     });
-    return { ok: true, waiting: null };
+    return { date: appointment.date, time: appointment.time };
   });
+  return { ok: true, waiting: FREES_SLOT.has(move.action) ? await canonicalFreedSlotSummary(session, { appointmentId: id, ...moved }) : null };
 }
 
 /* ---------------------------------------------------------------------------
@@ -357,5 +376,35 @@ export async function commandCanonicalReschedule(session: VerifiedDurableSession
       throw new CanonicalAppointmentRefusal("booking_doctor_not_allowed", 403, "نقل مسؤولية الموعد إلى طبيبٍ آخر لمن يملك نطاق المواعيد كاملًا.");
     }
     return result;
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * M2 slice 19: deleting an appointment (DELETE /api/appointments/[id]).
+ *
+ * One admitted `appointments.cancel` transaction (the map's requirement; the legacy
+ * route kept it to the admin role, the canonical path to the grant and the scope). The
+ * row is locked, then checked against the CURRENT appointment scope (outside = missing,
+ * 404); an arrived appointment is refused (409) — it became a visit; the same writer
+ * releases a booked referral and unlinks a visit; the audit row (the deleted row's
+ * snapshot and the reason) commits with the deletion.
+ * ------------------------------------------------------------------------- */
+export async function commandCanonicalAppointmentDelete(session: VerifiedDurableSession, id: number, reason: string | null, pool = getPool()): Promise<{ message: string }> {
+  if (!Number.isSafeInteger(id) || id <= 0) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "رقم الموعد غير صالح.");
+  return withStaffOperation(pool, session, "appointments.cancel", async (client, handle) => {
+    const scope = await staffOperationAppointmentScope(client, handle, "appointments.cancel");
+    if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+    const { rows: [row] } = await client.query<{ doctor_id: number | null }>("SELECT doctor_id FROM appointments WHERE id = $1 FOR UPDATE", [id]);
+    if (!row || (scope.kind === "own" && row.doctor_id !== scope.clinicianPartyId)) {
+      throw new CanonicalAppointmentRefusal("appointment_not_found", 404, "لا يوجد موعد بهذا الرقم ضمن مواعيدك.");
+    }
+    const identity = await staffOperationIdentity(client, handle, "appointments.cancel");
+    const result = await deleteAppointmentWith(client, id, { actor: identity.username, actorRole: identity.role, reason });
+    if (!result.ok) {
+      if (result.reason === "arrived") throw new CanonicalAppointmentRefusal("appointment_move_conflict", 409, "صاحب الموعد وصل وتحوّل زيارةً — لا يُحذف، أُنهِ الزيارة أو ألغِ الموعد.");
+      throw new CanonicalAppointmentRefusal("appointment_not_found", 404, "لا يوجد موعد بهذا الرقم ضمن مواعيدك.");
+    }
+    await insertAuditRow(client, result.audit);
+    return { message: "حُذف الموعد وسُجِّل في التدقيق." };
   });
 }

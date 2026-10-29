@@ -60,9 +60,16 @@ it("HTTP: rows by appointment scope; writes need appointments.edit and an entry 
   const book = await patch(reception.cookie, entryOther, { action: "book", date: "2026-11-02", time: "10:00" });
   expect(book.status).toBe(409);
   expect(await book.json()).toMatchObject({ code: "waiting_action_not_canonical" });
+  // The free-slot match is canonical since slice 19: candidates from the entries inside
+  // the scope, the doctor's own entries only for an own-scope account.
   const slot = await journey.api("/api/waiting-list?date=2026-11-02&time=10:00", reception.cookie);
-  expect(slot.status).toBe(409);
-  expect((await slot.json()).message).toMatch(ARABIC);
+  expect(slot.status).toBe(200);
+  const matched = await slot.json();
+  expect(matched.slot).toMatchObject({ date: "2026-11-02", time: "10:00" });
+  expect(matched.examined).toBe(matched.entries.length);
+  const ownSlot = await (await journey.api("/api/waiting-list?date=2026-11-02&time=10:00", doctor.cookie)).json();
+  expect(ownSlot.examined).toBe(1);
+  expect(ownSlot.candidates.every((candidate: { id: number }) => candidate.id === entryMine)).toBe(true);
   expect(await journey.ddlLog()).toEqual([]);
 });
 

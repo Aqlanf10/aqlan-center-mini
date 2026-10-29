@@ -105,8 +105,8 @@
   ],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 19: operation appointments.cancel (joins CLINIC_RUNTIME_ACTIONS); the row locked then checked against the appointment scope (outside = missing 404); an arrived appointment refuses 409; deleteAppointmentWith releases a booked referral and unlinks a visit; the appointment.delete audit row (row snapshot and reason) atomic. The legacy route stays admin-only."
  },
  {
   "route": "/api/appointments/[id]",
@@ -6258,7 +6258,7 @@
   "anyOf": [],
   "scope": "appointment",
   "status": "canonical-done",
-  "note": "M2 slice 14: record read read:waiting-list (appointment scope) in one owning snapshot; hold days and contact history from the same snapshot; the free-slot matching mode refuses (409 waiting_action_not_canonical) until the appointment engine is canonical.",
+  "note": "M2 slice 14: record read read:waiting-list (appointment scope) in one owning snapshot; hold days and contact history from the same snapshot; the free-slot matching mode (M2 slice 19) ranks the open entries inside the scope with the shared ranking in its own read:waiting-list snapshot; the slot's facts come only from appointments inside the scope.",
   "projection": {
    "legacy": "doctor isolation via canViewAllPatients and patient ownership; every other admitted role reads every entry.",
    "groups": {

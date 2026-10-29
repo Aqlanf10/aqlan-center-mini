@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "62d1a225e165055066be06ca12cdaa56ac7b0c9bdabaa56028780020e66653d0",
+  "sourceDigest": "cddea9d0f2322c7f1dbcd22a66a87ddedf804497eccf46a26c25cddb9441ce21",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -38,7 +38,8 @@
     "settings.view",
     "visits.manage",
     "appointments.edit",
-    "appointments.create"
+    "appointments.create",
+    "appointments.cancel"
   ],
   "summary": {
     "routeMethods": 414,
@@ -507,7 +508,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 210
+          "line": 231
         },
         {
           "symbol": "findUserByUsername",
@@ -4078,11 +4079,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 55
+          "line": 64
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 156
         }
       ]
     },
@@ -4751,7 +4752,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 210
+          "line": 231
         },
         {
           "symbol": "findUserByUsername",
@@ -4791,7 +4792,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 210
+          "line": 231
         },
         {
           "symbol": "findUserByUsername",
@@ -14997,11 +14998,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 55
+          "line": 64
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 156
         }
       ]
     },
@@ -15025,11 +15026,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 55
+          "line": 64
         },
         {
           "symbol": "requireSession",
-          "line": 147
+          "line": 156
         }
       ]
     },

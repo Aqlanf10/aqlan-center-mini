@@ -16,7 +16,7 @@ import {
 import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
-import { commandCanonicalWaitingAdd, parseCanonicalWaitingAdd, readCanonicalWaitingList } from "@/lib/canonical-waiting-list";
+import { commandCanonicalWaitingAdd, parseCanonicalWaitingAdd, readCanonicalFreedSlotCandidates, readCanonicalWaitingList } from "@/lib/canonical-waiting-list";
 
 export const dynamic = "force-dynamic";
 
@@ -38,16 +38,25 @@ export async function GET(request: Request) {
   const selected = await selectRequestStaffEnvelope();
   if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
   if (selected.kind === "canonical") {
-    // Canonical identity (M2 slice 14): entries inside the appointment scope. The free-slot
-    // matching mode goes through the appointment engine and is not canonical yet.
+    // Canonical identity (M2 slice 14): entries inside the appointment scope; the free-slot
+    // matching mode (slice 19) ranks the entries inside the scope in its own snapshot.
     const params = new URL(request.url).searchParams;
-    if (["date", "time", "serviceId", "doctorId", "appointmentId", "durationMinutes"].some(key => params.has(key))) {
-      return NextResponse.json({ code: "waiting_action_not_canonical", message: "ترشيح المكان الشاغر لم يُنقل بعد إلى الهوية الموحّدة." }, { status: 409, headers: NO_STORE });
-    }
     try {
-      return NextResponse.json(await readCanonicalWaitingList(selected.handle, {
+      const list = await readCanonicalWaitingList(selected.handle, {
         includeResolved: params.get("includeResolved") === "1", withHistory: params.get("withHistory") === "1",
-      }), { headers: NO_STORE });
+      });
+      const date = params.get("date") ?? "", time = params.get("time") ?? "";
+      if (!DATE_PATTERN.test(date) || !TIME_PATTERN.test(time)) return NextResponse.json(list, { headers: NO_STORE });
+      const positive = (key: string) => { const value = Number(params.get(key)); return Number.isInteger(value) && value > 0 ? value : null; };
+      const match = await readCanonicalFreedSlotCandidates(selected.handle, {
+        date, time, durationMinutes: positive("durationMinutes"), serviceId: positive("serviceId"),
+        doctorId: positive("doctorId"), appointmentId: positive("appointmentId"),
+      });
+      if (!match) return NextResponse.json(list, { headers: NO_STORE });
+      return NextResponse.json({
+        ...list, slot: match.slot, examined: match.examined,
+        candidates: match.candidates.map(candidate => ({ ...candidate.entry, matchFacts: candidate.facts, matchReason: candidate.reason })),
+      }, { headers: NO_STORE });
     } catch (error) {
       return canonicalWaitingFailure(error, "تعذّر تحميل قائمة الانتظار.");
     }

@@ -1,11 +1,12 @@
 import "server-only";
 import {
-  CLINIC_TIME_ZONE, addWaitingEntryWith, getPool, getSettingsWith, getWaitingEntryWith, insertAuditRow, listWaitingContactEventsForWith,
+  CLINIC_TIME_ZONE, addWaitingEntryWith, getAppointmentWith, getPool, listAppointmentsByDateWith, getSettingsWith, getWaitingEntryWith, insertAuditRow, listWaitingContactEventsForWith,
   listWaitingContactEventsWith, listWaitingEntriesWith, markWaitingOfferedWith, patientInDoctorScopeWith,
   recordWaitingContactWith, resolveWaitingEntryWith, updateWaitingPreferencesWith, type DbClient,
 } from "./db";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
-import { markStale } from "./waiting-list-match";
+import { markStale, rankFreedSlot, resolveFreedSlotFrom, type FreedSlotRequest, type WaitingCandidatesResult } from "./waiting-list-match";
+import { loadCapacityContextWith } from "./capacity-context";
 import { clinicDateString } from "./schedule";
 import {
   CONTACT_CHANNELS, CONTACT_OUTCOMES, PERIODS, SHIFTS, URGENCIES, normalizeWeekdays,
@@ -33,8 +34,9 @@ import { staffOperationAppointmentScope, staffOperationIdentity, withStaffOperat
  * own patients (the patient list's condition), assigned to its own clinician party
  * (the default), so the entry stays inside its scope; any named doctor must be active
  * and any service must exist.
- * Not canonical yet (409): the free-slot matching mode of the list and `book` (both go
- * through the appointment engine, migrated with the appointment routes).
+ * Free-slot matching (slice 19): the same ranking, in the same snapshot, over the entries
+ * inside the scope; the slot's facts come only from appointments inside the scope.
+ * Not canonical yet (409): `book` (it goes through the appointment engine).
  */
 export const WAITING_LIST_MAX_BYTES = 1024 * 1024;
 
@@ -84,6 +86,31 @@ export async function readCanonicalWaitingEntry(session: VerifiedDurableSession,
     const entry = await getWaitingEntryWith(query, id);
     if (!entry || scopeEntries(scope.appointmentScope, [entry]).length === 0) throw new CanonicalWaitingRefusal("waiting_not_found", 404, NOT_FOUND);
     return { entry, events: await listWaitingContactEventsWith(query, id) };
+  }, { errorPrefix: "STAFF_READ", maxBytes: WAITING_LIST_MAX_BYTES });
+}
+
+/**
+ * M2 slice 19: candidates for a freed slot, in one `read:waiting-list` snapshot. The
+ * slot's service, doctor and duration are completed only from appointments inside the
+ * actor's appointment scope (an appointment outside it is treated as absent, never
+ * read); candidates are the open entries inside the scope, ranked and explained by the
+ * shared pure ranking. Null when the slot is invalid.
+ */
+export async function readCanonicalFreedSlotCandidates(session: VerifiedDurableSession, request: FreedSlotRequest): Promise<WaitingCandidatesResult | null> {
+  return runCanonicalReadSnapshot(session, "read:waiting-list", async (query, scope) => {
+    const clinician = clinicianOf(scope.appointmentScope);
+    const slot = await resolveFreedSlotFrom(request, {
+      async appointment(id) {
+        const found = await getAppointmentWith(query, id);
+        return found && (clinician === null || found.doctorId === clinician) ? found : null;
+      },
+      day: date => listAppointmentsByDateWith(query, date, clinician),
+    });
+    if (!slot) return null;
+    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    const entries = markStale(scopeEntries(scope.appointmentScope, await listWaitingEntriesWith(query, {})), today, await holdDaysWith(query));
+    const history = entries.length ? await listWaitingContactEventsForWith(query, entries.map(entry => entry.id)) : new Map<number, ContactEvent[]>();
+    return rankFreedSlot(slot, entries, (await loadCapacityContextWith(query)).shifts, today, entry => history.get(entry.id) ?? []);
   }, { errorPrefix: "STAFF_READ", maxBytes: WAITING_LIST_MAX_BYTES });
 }
 

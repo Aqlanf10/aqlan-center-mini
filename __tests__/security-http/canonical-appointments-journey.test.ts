@@ -1,6 +1,7 @@
 /**
- * M2 slices 15–18 — canonical appointment day list, personal schedule, booking,
- * appointment moves and rescheduling, built application, owned database and server.
+ * M2 slices 15–19 — canonical appointment day list, personal schedule, booking,
+ * appointment moves, rescheduling, deletion and the freed-slot match, built
+ * application, owned database and server.
  *
  * UI → HTTP → DB with password logins: the appointment scope decides rows, lab readiness
  * follows the operational summary, the doctor's own schedule card reads only its own
@@ -35,6 +36,11 @@ beforeAll(async () => {
       const arriving = await patient("SYN-APJ-4", "مريض وصول تجريبي", null);
       const leaving = await patient("SYN-APJ-5", "مريضة إلغاء تجريبية", null);
       await db.query("INSERT INTO appointments(patient_id,scheduled_date,scheduled_time) VALUES($1,$3::date,'11:00'),($2,$3::date,'12:00')", [arriving, leaving, today]);
+      const later = await patient("SYN-APJ-6", "مريض موعد الغد", null);
+      const mistaken = await patient("SYN-APJ-7", "موعد أُدخل خطأً", null);
+      await db.query("INSERT INTO appointments(patient_id,scheduled_date,scheduled_time) VALUES($1,$3::date + 1,'10:00'),($2,$3::date + 1,'11:00')", [later, mistaken, today]);
+      const waiter = await patient("SYN-APJ-8", "مريضة تنتظر مكانًا", null);
+      await db.query("INSERT INTO waiting_list(patient_id,urgency,preferred_period,created_by) VALUES($1,'soon','any','synthetic')", [waiter]);
       await db.query("INSERT INTO lab_orders (patient_id, lab_name, work_type, status, due_date) VALUES ($1,'مختبر تجريبي','تاج تجريبي','sent',$2::date)", [mine, today]);
       await db.query("INSERT INTO patients(patient_number,full_name,phone) VALUES('SYN-APJ-3','مراجعة جديدة للحجز','0500000099')");
       for (const [key, value] of [["clinic.chairs", "1"], ["clinic.day_start", "00:00"], ["clinic.day_end", "23:59"]]) {
@@ -208,5 +214,51 @@ it("browser: the desk reschedules from the day view; a full chair shows its reas
   await context.close();
   const { rows } = await journey.db.query("SELECT actor, details->>'السبب' AS reason FROM audit_log WHERE action = 'appointment.reschedule'");
   expect(rows).toEqual([{ actor: "canon-ap-desk", reason: "طلب المريض" }]);
+  expect(await journey.ddlLog()).toEqual([]);
+});
+
+it("HTTP: deleting needs appointments.cancel and an appointment inside the scope", async () => {
+  const { rows: [mistaken] } = await journey.db.query<{ id: number }>("SELECT a.id FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE p.patient_number='SYN-APJ-7'");
+  const reception = await journey.login("reception");
+  const denied = await journey.api(`/api/appointments/${mistaken.id}`, reception.cookie, { method: "DELETE", body: JSON.stringify({ reason: "x" }) });
+  expect(denied.status).toBe(403);
+  expect((await denied.json()).message).toMatch(ARABIC);
+  const doctor = await journey.login("doctor");
+  const outside = await journey.api(`/api/appointments/${mistaken.id}`, doctor.cookie, { method: "DELETE" });
+  const missing = await journey.api("/api/appointments/999999", doctor.cookie, { method: "DELETE" });
+  expect([outside.status, missing.status]).toEqual([404, 404]);
+  expect((await outside.json()).message).toBe((await missing.json()).message);
+  expect((await journey.db.query("SELECT count(*)::int AS n FROM appointments WHERE id=$1", [mistaken.id])).rows[0].n).toBe(1);
+  expect(await journey.ddlLog()).toEqual([]);
+});
+
+it("browser: a cancel shows who waits for the freed slot; a mistaken entry is deleted and audited", async () => {
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar" });
+  const page = await context.newPage();
+  const apiCalls: string[] = [];
+  page.on("request", request => { const path = new URL(request.url()).pathname; if (path.startsWith("/api/")) apiCalls.push(path); });
+  await journey.browserLogin(page, "desk");
+  apiCalls.length = 0;
+  await page.goto(`${journey.baseUrl}/appointments`);
+  await page.getByRole("button", { name: "اليوم التالي" }).click();
+  const list = page.getByTestId("appointments-day-list");
+  const later = list.locator("li[data-appointment]").filter({ hasText: "مريض موعد الغد" });
+  await later.getByRole("button", { name: "إلغاء الموعد" }).click();
+  await later.getByLabel("سبب الإلغاء").fill("اعتذار المريض");
+  await later.getByRole("button", { name: "تأكيد الإلغاء" }).click();
+  const freed = page.getByTestId("freed-slot");
+  await freed.getByText(/يصلحون له/).waitFor();
+  await freed.getByRole("button", { name: "اعرض المرشّحين" }).click();
+  await freed.getByText("مريضة تنتظر مكانًا").waitFor();
+  const mistaken = list.locator("li[data-appointment]").filter({ hasText: "موعد أُدخل خطأً" });
+  await mistaken.getByRole("button", { name: "إلغاء الموعد" }).click();
+  await mistaken.getByLabel("سبب الإلغاء").fill("أُدخل مرتين");
+  await mistaken.getByRole("button", { name: /حذف نهائي/ }).click();
+  await list.getByText("موعد أُدخل خطأً").waitFor({ state: "detached" });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && !["/api/appointments", "/api/waiting-list"].includes(path) && !/^\/api\/appointments\/\d+$/.test(path))).toEqual([]);
+  await context.close();
+  const { rows } = await journey.db.query("SELECT actor, details->>'reason' AS reason FROM audit_log WHERE action = 'appointment.delete'");
+  expect(rows).toEqual([{ actor: "canon-ap-desk", reason: "أُدخل مرتين" }]);
   expect(await journey.ddlLog()).toEqual([]);
 });

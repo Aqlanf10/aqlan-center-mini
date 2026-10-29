@@ -12,7 +12,7 @@ import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
-import { CanonicalAppointmentRefusal, CanonicalBookingConflict, commandCanonicalAppointmentMove, commandCanonicalReschedule, parseCanonicalAppointmentMove, parseCanonicalReschedule } from "@/lib/canonical-appointments";
+import { CanonicalAppointmentRefusal, CanonicalBookingConflict, commandCanonicalAppointmentDelete, commandCanonicalAppointmentMove, commandCanonicalReschedule, parseCanonicalAppointmentMove, parseCanonicalReschedule } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -207,6 +207,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
 /* حذف موعد نهائيًا — المدير وحده، وللموعد الذي لم يتحول زيارةً بعد. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slice 19: a canonical envelope deletes under `appointments.cancel` and the
+     appointment scope, with the audit row atomic; it never falls back. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: canonicalId } = await context.params;
+    let canonicalReason: string | null = null;
+    try {
+      const body = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
+      if (typeof body?.reason === "string" && body.reason.trim()) canonicalReason = body.reason.trim().slice(0, 300);
+    } catch (error) {
+      // The reason is optional: an empty or unreadable body means no reason; only an
+      // oversized body refuses (413).
+      const bounded = bodyErrorResponse(error); if (bounded?.status === 413) return bounded;
+    }
+    try {
+      return NextResponse.json(await commandCanonicalAppointmentDelete(selected.handle, Number(canonicalId), canonicalReason), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر حذف الموعد. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

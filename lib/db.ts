@@ -4394,51 +4394,61 @@ export async function deleteAppointment(
 ): Promise<{ ok: boolean; reason?: "not_found" | "arrived" }> {
   await ensureSchema();
   const client = await getPool().connect();
-  let snapshot: Record<string, unknown> | null = null;
+  let result: Awaited<ReturnType<typeof deleteAppointmentWith>>;
   try {
     await client.query("BEGIN");
-    const { rows: rowsA } = await client.query<{
-      id: number; patient_id: number; scheduled_date: string; scheduled_time: string;
-      status: string; arrived_at: Date | null; note: string | null;
-    }>(
-      `SELECT id, patient_id, scheduled_date::text, scheduled_time::text, status, arrived_at, note
-         FROM appointments WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    if (!rowsA[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
-    }
-    const current = rowsA[0];
-    snapshot = { ...current, reason: context.reason ?? null };
-    if (current.arrived_at) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "arrived" };
-    }
-    /* (REF-2) حذف موعد إحالةٍ محجوزة يعيدها لانتظار الحجز (كالإلغاء). */
-    await referralOnAppointmentReleased(client, {
-      appointmentId: id, outcome: "cancelled", who: { actor: context.actor, actorRole: context.actorRole ?? null },
-    });
-    /* زيارة القادم من الموعد إن وُجدت تفقد إشارتها إليه ثم يُحذف الموعد. */
-    await client.query(`UPDATE visits SET appointment_id = NULL WHERE appointment_id = $1`, [id]);
-    await client.query(`DELETE FROM appointments WHERE id = $1`, [id]);
-    await client.query("COMMIT");
+    result = await deleteAppointmentWith(client, id, context);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
-  await recordAudit({
-    action: "appointment.delete",
-    entity: "appointment",
-    entityId: id,
-    entityLabel: `#${id}`,
-    details: snapshot,
-    actor: context.actor,
-    actorRole: context.actorRole ?? null,
-  });
+  if (!result.ok) return { ok: false, reason: result.reason };
+  await recordAudit(result.audit);
   return { ok: true };
+}
+
+/** The deletion inside the caller's transaction (legacy and canonical, M2 slice 19):
+ * the row is locked, an arrived appointment is refused, a booked referral is released,
+ * a visit loses its link, the row is deleted. The audit row is returned for the caller
+ * to write — after the commit (legacy) or in the same transaction (canonical). */
+export async function deleteAppointmentWith(
+  client: DbClient,
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: true; audit: AuditInput } | { ok: false; reason: "not_found" | "arrived" }> {
+  const { rows: rowsA } = await client.query<{
+    id: number; patient_id: number; scheduled_date: string; scheduled_time: string;
+    status: string; arrived_at: Date | null; note: string | null;
+  }>(
+    `SELECT id, patient_id, scheduled_date::text, scheduled_time::text, status, arrived_at, note
+       FROM appointments WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  if (!rowsA[0]) return { ok: false, reason: "not_found" };
+  const current = rowsA[0];
+  if (current.arrived_at) return { ok: false, reason: "arrived" };
+  /* (REF-2) حذف موعد إحالةٍ محجوزة يعيدها لانتظار الحجز (كالإلغاء). */
+  await referralOnAppointmentReleased(client, {
+    appointmentId: id, outcome: "cancelled", who: { actor: context.actor, actorRole: context.actorRole ?? null },
+  });
+  /* زيارة القادم من الموعد إن وُجدت تفقد إشارتها إليه ثم يُحذف الموعد. */
+  await client.query(`UPDATE visits SET appointment_id = NULL WHERE appointment_id = $1`, [id]);
+  await client.query(`DELETE FROM appointments WHERE id = $1`, [id]);
+  return {
+    ok: true,
+    audit: {
+      action: "appointment.delete",
+      entity: "appointment",
+      entityId: id,
+      entityLabel: `#${id}`,
+      details: { ...current, reason: context.reason ?? null },
+      actor: context.actor,
+      actorRole: context.actorRole ?? null,
+    },
+  };
 }
 
 /**
