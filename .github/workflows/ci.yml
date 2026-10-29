@@ -1286,11 +1286,52 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Actual shared contract components, synthetic fixtures only. No app session,
+  # database, customer PDF or external network is used by the renderer.
+  contract_print_visual:
+    permissions:
+      contents: read
+    name: Synthetic contract print and watermark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install hosted Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Install PDF inspection tools
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
+      - name: Render and verify synthetic short and multipage contracts
+        run: npm run test:contract-print
+      # Only this deterministic synthetic renderer's PDF/PNG/geometry outputs.
+      # Never upload browser state, traces, cookies, private references or DBs.
+      - name: Upload synthetic contract print evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-installment-contract-print
+          path: |
+            .settings-ui-artifacts/official-contract-print/*.pdf
+            .settings-ui-artifacts/official-contract-print/*.png
+            .settings-ui-artifacts/official-contract-print/*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   # A failed, skipped or cancelled required job never produces a green gate.
   required_completion:
     name: Required CI gates (fail closed)
     if: always()
-    needs: [quality, postgres_integration, security_http]
+    needs: [quality, postgres_integration, security_http, contract_print_visual]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1299,8 +1340,9 @@ jobs:
           QUALITY_RESULT: ${{ needs.quality.result }}
           POSTGRES_RESULT: ${{ needs.postgres_integration.result }}
           HTTP_RESULT: ${{ needs.security_http.result }}
+          PRINT_RESULT: ${{ needs.contract_print_visual.result }}
         run: |
-          if [ "$QUALITY_RESULT" != "success" ] || [ "$POSTGRES_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ]; then
-            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, postgres_integration=$POSTGRES_RESULT, security_http=$HTTP_RESULT"
+          if [ "$QUALITY_RESULT" != "success" ] || [ "$POSTGRES_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ] || [ "$PRINT_RESULT" != "success" ]; then
+            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, postgres_integration=$POSTGRES_RESULT, security_http=$HTTP_RESULT, contract_print_visual=$PRINT_RESULT"
             exit 1
           fi
