@@ -94,7 +94,9 @@ export default function BookPage() {
         headers: { "Content-Type": "application/json", "Idempotency-Key": attempt.current.key }, body });
       const payload = await response.json().catch(() => null);
       if (!response.ok || payload?.received !== true) {
-        setUncertain(response.status >= 500 || response.ok);
+        // A rejected retry (including 429) says nothing about an earlier lost
+        // response. Keep that attempt locked until its receipt is confirmed.
+        setUncertain(previous => previous || response.status >= 500 || response.ok);
         setError(payload?.message ?? "تعذّر التحقق من وصول الطلب. أعد الإرسال للتحقق بالمحاولة نفسها.");
         return;
       }

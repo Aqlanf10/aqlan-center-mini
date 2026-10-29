@@ -1,0 +1,35 @@
+Lost response followed by HTTP 429: browser regression before fix
+Built application source: 418260fb14338bf1e5f577b8d47b8e3bf01d486a
+Only the new test assertions were added to that detached checkout.
+Node 22.23.4; Chromium 151.0.7922.173; fresh synthetic PostgreSQL 18.
+Separate loopback server 3220, harness-owned aqlan_sec_http on port 54330.
+Selected the two public browser journeys; the other 13 tests were filtered out.
+First request is persisted through the real HTTP route before its response is lost.
+
+ FAIL  __tests__/security-http/booking-portal-journey.test.ts > public Arabic request at 390px > reviews and goes back, survives a lost response and double submission without duplication
+ FAIL  __tests__/security-http/booking-portal-journey.test.ts > public Arabic request at 1440px > reviews and goes back, survives a lost response and double submission without duplication
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ __tests__/security-http/booking-portal-journey.test.ts:166:90
+    164|       await page.getByRole("alert").filter({ hasText: "طلبات كثيرة. أع…
+    165|       // A rejected retry cannot establish that the first, lost respon…
+    166|       expect(await page.getByRole("button", { name: "رجوع", exact: tru…
+       |                                                                                          ^
+    167|       await page.getByRole("button", { name: "إعادة الإرسال للتحقق", e…
+    168|       await expect.poll(() => page.getByRole("heading", { name: "وصلنا…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 13 skipped (15)
+   Start at  17:23:26
+   Duration  21.96s (transform 95ms, setup 0ms, import 993ms, tests 10.44s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

@@ -153,6 +153,7 @@ for (const width of [390, 1440]) describe(`public Arabic request at ${width}px`,
         if (route.request().method() !== "POST") { await route.continue(); return; }
         sent++; keys.push(route.request().headers()["idempotency-key"]);
         if (sent === 1) { await route.fetch(); await new Promise(resolve => setTimeout(resolve, 500)); await route.abort("connectionreset"); }
+        else if (sent === 2) await route.fulfill({ status: 429, json: { message: "طلبات كثيرة. أعد المحاولة بعد قليل." } });
         else await route.continue();
       });
       await page.getByRole("button", { name: "أرسل طلب الموعد", exact: true }).evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
@@ -160,8 +161,12 @@ for (const width of [390, 1440]) describe(`public Arabic request at ${width}px`,
       expect(sent).toBe(1);
       await page.screenshot({ path: join(evidence, `public-response-loss-${width}.png`), fullPage: true });
       await page.getByRole("button", { name: "إعادة الإرسال للتحقق", exact: true }).click();
+      await page.getByRole("alert").filter({ hasText: "طلبات كثيرة. أعد المحاولة بعد قليل." }).waitFor();
+      // A rejected retry cannot establish that the first, lost response did not commit.
+      expect(await page.getByRole("button", { name: "رجوع", exact: true }).isDisabled()).toBe(true);
+      await page.getByRole("button", { name: "إعادة الإرسال للتحقق", exact: true }).click();
       await expect.poll(() => page.getByRole("heading", { name: "وصلنا طلبكم", exact: true }).count()).toBe(1);
-      expect(keys).toHaveLength(2); expect(keys[0]).toBe(keys[1]);
+      expect(keys).toHaveLength(3); expect(new Set(keys).size).toBe(1);
       expect((await db.query("SELECT count(*)::int n FROM booking_requests WHERE phone=$1", [`967${phone}`])).rows[0].n).toBe(1);
       await page.screenshot({ path: join(evidence, `public-received-${width}.png`), fullPage: true });
     } catch (error) {
