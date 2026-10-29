@@ -22690,7 +22690,7 @@ export async function patientTimelineWith(
   }
 
   /* (REF-2) خطوات الإحالات الداخلية: طُلبت، قُبلت، حُجزت، وصل، بدأ العلاج، اكتملت، عادت. */
-  events.push(...await referralTimelineEvents(patientId, cap));
+  events.push(...await referralTimelineEventsWith(pool, patientId, cap));
 
   return sortTimeline(events).slice(0, cap);
 }
@@ -29692,7 +29692,10 @@ async function referralBlockersByCase(
 
 /** أحداث الإحالات الداخلية في خط المريض الزمني — من سطور التدقيق التي كُتبت مع كل خطوة. */
 async function referralTimelineEvents(patientId: number, cap: number): Promise<TimelineEvent[]> {
-  const { rows } = await getPool().query<{
+  return referralTimelineEventsWith(getPool(), patientId, cap);
+}
+async function referralTimelineEventsWith(q: Pick<DbClient, "query">, patientId: number, cap: number): Promise<TimelineEvent[]> {
+  const { rows } = await q.query<{
     id: string; action: string; created_at: Date; referral_id: number; to_name: string; reason: string;
     procedure_performed: string | null; note: string | null;
   }>(

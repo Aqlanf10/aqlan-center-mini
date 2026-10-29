@@ -423,3 +423,34 @@ describe("arrival panel (slice 5)", () => {
   });
 });
 
+
+describe("every canonical read stays inside its one owning snapshot", () => {
+  it("each reader takes exactly one pool lease and never queries the pool directly", async () => {
+    const { rows: [any] } = await fx.pool.query<{ id: number }>("SELECT id FROM patients WHERE patient_number='SYN-PA-8'");
+    const pool = db.getPool();
+    const readers: [string, (session: Awaited<ReturnType<typeof fx.session>>) => Promise<unknown>][] = [
+      ["search", s => reads.readCanonicalPatientSearch(s, { kind: "search", term: "SYN" })],
+      ["browse", s => reads.readCanonicalPatientBrowse(s, { kind: "browse", page: 0, filter: "all", sort: "name", flag: null, today: TODAY })],
+      ["browse debt", s => reads.readCanonicalPatientBrowse(s, { kind: "browse", page: 0, filter: "debt", sort: "name", flag: null, today: TODAY })],
+      ["file", s => reads.readCanonicalPatientFile(s, any.id)],
+      ["medical history", s => reads.readCanonicalMedicalHistory(s, any.id)],
+      ["vitals", s => reads.readCanonicalVitals(s, any.id)],
+      ["problems", s => reads.readCanonicalProblems(s, any.id)],
+      ["timeline", s => reads.readCanonicalTimeline(s, any.id, 60)],
+      ["diagnoses", s => reads.readCanonicalDiagnoses(s, any.id, null)],
+      ["intake history", s => reads.readCanonicalIntakeHistory(s, any.id)],
+      ["referrals", s => reads.readCanonicalReferrals(s, any.id)],
+      ["contact", s => reads.readCanonicalContactConsents(s, any.id)],
+      ["arrival panel", s => reads.readCanonicalArrivalPanel(s, any.id)],
+    ];
+    for (const [name, read] of readers) {
+      const session = await fx.session("owner");
+      const connect = vi.spyOn(pool, "connect");
+      const query = vi.spyOn(pool, "query");
+      try {
+        await read(session);
+        expect({ name, connects: connect.mock.calls.length, directQueries: query.mock.calls.length }).toEqual({ name, connects: 1, directQueries: 0 });
+      } finally { connect.mockRestore(); query.mockRestore(); }
+    }
+  });
+});
