@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { classifyOrthoAdjustment } from "../lib/billing-classification";
 import { describe, expect, it } from "vitest";
 import { projectTreatmentFinancialReferences, type TreatmentFinancialSnapshot } from "../lib/treatment-financial-context";
 import { invoiceRequestFingerprint } from "../lib/invoice-clinical-linkage";
@@ -30,6 +32,24 @@ describe("read-only treatment financial references", () => {
       invoiceIds: [], clinicalPlanValue: { amountMinor: 300000, isDebt: false } });
     expect(result.accountPositions.YER.dueMinor).toBe(0);
     expect(result.references[0].packageCoverage.state).toBe("unspecified");
+  });
+  it("qualifies the full-package caveat without overriding specific adjustment coverage", () => {
+    const data = snapshot();
+    data.items[0] = { ...data.items[0], hasLegacyLineage: true, legacyCoverageState: "verified", origin: "legacy" };
+    data.legacyAgreements.push({ id: 20, patientId: 10, planItemId: 2, clinicalCaseId: 5, currency: "YER",
+      agreedMinor: 300000, previouslyPaidMinor: 120000, remainingAtRegistrationMinor: 180000,
+      historicalAsOf: "2026-10-01", openingHistoryId: 21, openingEffect: "created", status: "live" });
+    const reference = projectTreatmentFinancialReferences(data).references[0];
+    expect(reference.unresolvedReasons).toContain("package_coverage_unspecified");
+    expect(reference.packageCoverage.state).toBe("unspecified");
+    const input = { legacy: true, financialMode: null, openingCurrencies: [], fundedPlan: false } as const;
+    expect(classifyOrthoAdjustment({ ...input, legacyAgreement: true })).toBe("LEGACY_INCLUDED");
+    expect(classifyOrthoAdjustment({ ...input, legacyAgreement: false })).toBe("OUTSIDE_CONTRACT");
+    // Copy contract only: UI lifecycle/classifier rendering is separately exercised
+    // by legacy-onboarding-checklist-refresh.test.tsx, including unresolved reads.
+    const component = readFileSync(new URL("../components/TreatmentFinancialContext.tsx", import.meta.url), "utf8");
+    expect(component).toContain('package_coverage_unspecified: "هذا المرجع يوضح مصدر التمويل، ولا يحدد تغطية جميع إجراءات التقويم. راجع حالة التقويم لمعرفة شمول الشدّات، وتحقق من تغطية المثبتات والأعمال الإضافية بشكل مستقل."');
+    expect(component).not.toContain("المشمول والإضافي في باقة التقويم غير محددين بهذا المرجع");
   });
   it("separates discounted document net, line gross, direct receipts and canonical account due", () => {
     const result = projectTreatmentFinancialReferences(invoiced());

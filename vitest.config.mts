@@ -21,6 +21,8 @@ export default defineConfig({
       // (P2/S14) اختبارات الأمن HTTP بإعدادها المستقل — تشغّلها
       // npm run test:security-http على تطبيق مبنيّ وقاعدة حقيقية.
       "__tests__/security-http/**",
+      // Hosted Chromium/PDF smoke has its own required CI job/config.
+      "__tests__/print-visual/**",
     ],
     pool: "forks",
     fileParallelism: false,

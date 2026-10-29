@@ -105,6 +105,7 @@ export const REQUIRED_CI_GATES: readonly string[] = [
   "npm run build",
   "npm run build:preflight",
   "npm run test:security-http",
+  "npm run test:contract-print",
 ];
 
 export interface ContractViolation {
