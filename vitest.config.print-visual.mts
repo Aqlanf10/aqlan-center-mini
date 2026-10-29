@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL(".", import.meta.url)) } },
   test: {
-    include: ["__tests__/print-visual/official-installment-contract.test.tsx", "__tests__/print-visual/unified-print-document.test.tsx", "__tests__/print-visual/unified-print-watermark-safety.test.tsx"],
+    include: ["__tests__/print-visual/compact-print-regressions.test.tsx", "__tests__/print-visual/official-installment-contract.test.tsx", "__tests__/print-visual/unified-print-document.test.tsx", "__tests__/print-visual/unified-print-watermark-safety.test.tsx"],
     pool: "forks",
     fileParallelism: false,
     maxConcurrency: 1,

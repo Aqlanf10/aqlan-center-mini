@@ -96,7 +96,7 @@ export default async function LabOrderPrintPage({
             <PrintMetadata>
               <div className="line"><span>مرجع الطلب:</span><strong dir="ltr">{order.reference}</strong></div>
               {order.patientName ? <div className="line"><span>اسم المريض: </span><strong>{order.patientName}</strong></div> : null}
-              <div className="line"><span>المختبر: </span><strong>{order.labName}{order.labPhone ? <span dir="ltr" style={{ marginRight: "2mm", fontSize: "8pt" }}>({order.labPhone})</span> : null}</strong></div>
+              <div className={styles.labIdentity}><span>المختبر: </span><strong>{order.labName}</strong>{order.labPhone ? <span dir="ltr" style={{ marginRight: "2mm", fontSize: "8pt" }}>({order.labPhone})</span> : null}</div>
               <div className="line"><span>الطبيب المعالج: </span><strong>{order.doctorName || "غير محدد"}</strong></div>
               <div className="line"><span>تاريخ الإرسال: </span><strong dir="ltr" className={styles.date}>{order.sentDate}</strong></div>
               <div className="line"><span>التسليم المطلوب: </span><strong dir="ltr" className={styles.date} style={{ color: "#b91c1c" }}>{order.dueDate}</strong></div>

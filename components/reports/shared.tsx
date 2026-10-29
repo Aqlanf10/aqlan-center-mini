@@ -258,8 +258,8 @@ export function DataTable({
         ) : null}
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs print:overflow-visible print:border-0 print:shadow-none">
-        <PrintTableFrame printOnly><table className="w-full min-w-max text-right text-xs print:min-w-0">
+      <PrintTableFrame printOnly screenFrame className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs print:overflow-visible print:border-0 print:shadow-none">
+        <table className="w-full min-w-max text-right text-xs print:min-w-0">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/60 print:bg-white">
               {columns.map((column) => (
@@ -321,8 +321,8 @@ export function DataTable({
               </tr>
             </tfoot>
           ) : null}
-        </table></PrintTableFrame>
-      </div>
+        </table>
+      </PrintTableFrame>
     </div>
   );
 }

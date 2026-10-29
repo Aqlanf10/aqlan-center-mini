@@ -48,6 +48,9 @@
 
 @media screen {
   .print-table-frame-on-print, .print-metadata-on-print { display: contents; }
+  /* Reuse the existing keyboard-accessible scroll owner, rather than inserting
+     a boxless parent between it and its table. */
+  .print-table-frame-on-print.print-table-screen-frame { display: block; }
   .print-table-frame-on-print > .print-table-watermark { display: none; }
 }
 @media print {

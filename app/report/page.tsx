@@ -180,17 +180,6 @@ export default function ReportPage() {
 
   return (
     <main data-testid="daily-report" className={`${styles.report} print-document-on-print mx-auto max-w-4xl p-4 pb-24`}>
-      {/* ترويسة الورقة الوحيدة: هوية المركز والعنوان وتاريخ التقرير — مرةً
-          واحدة لا مرتين. التاريخ لا يظهر عليها إلا لتقريرٍ صحيحٍ وصل فعلًا،
-          فلا ورقةً تحمل تاريخًا قديمًا تحت يومٍ جديد. */}
-      <div data-testid="report-paper-header" className="mb-3 hidden print:block" dir="rtl">
-        <ReportPrintHeader title="تقرير الأداء اليومي" clinicName={clinicName} />
-        {feed ? <PrintMetadata>
-          <div className="line"><span>تاريخ التقرير</span><strong data-testid="print-report-date">{friendlyDateNamed(feed.date)}</strong></div>
-          <div className="line"><span>عدد الكراسي الفعالة</span><strong>{feed.chairs}</strong></div>
-        </PrintMetadata> : null}
-      </div>
-
       {/* ترويسة الشاشة تختبئ من الورقة — العنوان عليها مرةً في ترويسة الطباعة. */}
       <div className="print:hidden">
         <PageHeader
@@ -202,6 +191,17 @@ export default function ReportPage() {
               ولا زرًّا تفاعليًّا على الورقة. */}
           {feed ? <ReportPrintButton /> : null}
         </PageHeader>
+      </div>
+
+      {/* ترويسة الورقة الوحيدة: هوية المركز والعنوان وتاريخ التقرير — مرةً
+          واحدة لا مرتين. التاريخ لا يظهر عليها إلا لتقريرٍ صحيحٍ وصل فعلًا،
+          فلا ورقةً تحمل تاريخًا قديمًا تحت يومٍ جديد. */}
+      <div data-testid="report-paper-header" className="mb-3 hidden print:block" dir="rtl">
+        <ReportPrintHeader title="تقرير الأداء اليومي" clinicName={clinicName} />
+        {feed ? <PrintMetadata>
+          <div className="line"><span>تاريخ التقرير</span><strong data-testid="print-report-date">{friendlyDateNamed(feed.date)}</strong></div>
+          <div className="line"><span>عدد الكراسي الفعالة</span><strong>{feed.chairs}</strong></div>
+        </PrintMetadata> : null}
       </div>
 
       {/* شريط اختيار التاريخ — حقلٌ مسمّى، وبجانبه التاريخ المختار بنصٍّ عربيٍّ

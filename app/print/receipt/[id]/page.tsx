@@ -1,4 +1,3 @@
-import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, getPayment, getSettingsSafe, printCount } from "@/lib/db";
 import { CURRENCY_LABEL, formatMoney, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -51,14 +50,16 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
       <div className="sheet sheet-a6">
         <PrintHeader settings={settings} title={receiptDocumentTitle(payment.kind, provenance)} compact />
 
-        <PrintMetadata><div className="line">
+        {/* Native A6 keeps its compact identity flow; the shared boxed grid
+            adds enough vertical padding to split receipts with provenance. */}
+        <div className="line">
           <span>رقم السند</span>
           <span className="num" dir="ltr">{payment.receiptNumber}</span>
         </div>
         <div className="line">
           <span>التاريخ</span>
           <time dateTime={payment.createdAt}><bdi>{createdText}</bdi></time>
-        </div></PrintMetadata>
+        </div>
         <div className="rule-light" />
 
         <div className="line">

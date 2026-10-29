@@ -32,6 +32,10 @@ describe("shared report print presentation preserves source evidence", () => {
     expect(html).toContain(identity["clinic.lead_doctor_credentials"]);
     expect(html).toContain('print-metadata-on-print');
     expect(html.match(/<table(?:\s|>)/g)?.length).toBe(html.match(/class="print-table-watermark"/g)?.length);
+    // The print adapter must be the existing focusable scroll region, not an
+    // extra display:contents node between the region and its financial table.
+    expect(html).toMatch(/<div[^>]*tabindex="0"[^>]*role="region"[^>]*class="[^"]*print-table-screen-frame/);
+    expect(html).not.toMatch(/role="region"[^>]*><div class="print-table-frame/);
     expect(html.match(/data-patient-key=/g)).toHaveLength(report.attendees.length);
     for (const row of report.attendees) {
       expect(html).toContain(`data-patient-key="${row.key}"`);
@@ -64,6 +68,7 @@ describe("shared report print presentation preserves source evidence", () => {
     expect({ columns, rows }).toEqual(before);
     expect(html.match(/<th\s/g)).toHaveLength(columns.length);
     expect(html.match(/class="print-table-watermark"/g)).toHaveLength(1);
+    expect(html).toMatch(/class="print-table-frame print-table-frame-on-print print-table-screen-frame overflow-x-auto /);
     expect(html.match(/<tfoot>/g)).toHaveLength(1);
     for (const row of rows) expect(html).toContain(String(row.name));
     for (const [amount, currency] of [[7654321, "YER"], [23456, "SAR"], [-1234, "USD"]] as const) {
