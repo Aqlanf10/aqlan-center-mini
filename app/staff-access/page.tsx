@@ -4,7 +4,9 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
 import { ROLE_LABEL, type Role } from "@/lib/roles";
 import { STAFF_CAPABILITIES, type StaffCapability, type StaffRecordScope } from "@/lib/staff-capability-catalogue";
-import { STAFF_CAPABILITY_GROUPS, STAFF_CAPABILITY_LABELS, STAFF_SCOPE_LABELS, staffCapabilityGroup, toggleStaffCapability } from "@/lib/staff-capability-labels";
+import { STAFF_CAPABILITY_LABELS, STAFF_SCOPE_LABELS, toggleStaffCapability } from "@/lib/staff-capability-labels";
+import { STAFF_MODULES, staffModuleVisible } from "@/lib/staff-modules";
+import { STAFF_STARTING_TEMPLATES, applyStartingTemplate } from "@/lib/staff-starting-templates";
 
 /**
  * صلاحيات الطاقم — الهوية الموحّدة.
@@ -104,11 +106,33 @@ function CapabilityEditor({ userId }: { userId: number }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [template, setTemplate] = useState("");
+  const [notice, setNotice] = useState("");
   const live = useRef(true);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
 
+  /* قالب البداية اقتراحٌ يملأ النموذج فقط؛ لا يُحفظ شيء حتى «حفظ الصلاحيات»، وما لا
+     تملك منحه لا يُطبَّق ويُذكر صراحةً. */
+  function applyTemplate() {
+    const chosen = STAFF_STARTING_TEMPLATES.find(candidate => candidate.key === template);
+    if (!chosen || !view) return;
+    const result = applyStartingTemplate(chosen, new Set(view.delegable), view.scopeOptions);
+    setGrants(result.grants); setPatientScope(result.patientScope); setAppointmentScope(result.appointmentScope);
+    setMessage("");
+    setNotice(`طُبّق قالب «${chosen.label}» على النموذج ولم يُحفظ بعد. راجع الصلاحيات ثم احفظ.`
+      + (result.dropped.length ? ` لم يُطبَّق ما لا تملك منحه: ${result.dropped.map(capability => STAFF_CAPABILITY_LABELS[capability]).join("، ")}.` : "")
+      + (result.scopeLimited ? " وقُيّد النطاق بما يسمح لك به." : ""));
+  }
+  /* إخفاء وحدة = سحب كل صلاحياتها من النموذج؛ الحفظ الذري نفسه يطبّقه، والخادم يمنع الوحدة. */
+  function hideModule(capabilities: readonly StaffCapability[]) {
+    let next = new Set(grants);
+    for (const capability of capabilities) if (next.has(capability)) next = toggleStaffCapability(next, capability, false);
+    setGrants(next);
+  }
+
   function adopt(next: TargetView) {
     setView(next); setGrants(new Set(next.grants)); setPatientScope(next.patientScope); setAppointmentScope(next.appointmentScope);
+    setNotice("");
   }
   const load = useCallback(async () => {
     setBusy(true); setError("");
@@ -172,12 +196,36 @@ function CapabilityEditor({ userId }: { userId: number }) {
           </div>
         ))}
       </div>
-      {STAFF_CAPABILITY_GROUPS.map(group => {
-        const items = STAFF_CAPABILITIES.filter(capability => staffCapabilityGroup(capability) === group.key);
+      {view.editable ? (
+        <div className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 p-2" data-testid="starting-template">
+          <div className="min-w-[12rem] flex-1">
+            <label htmlFor={`${uid}-template`} className="block text-xs font-bold text-navy-900">قالب بداية (اقتراح يُراجع ثم يُحفظ)</label>
+            <select id={`${uid}-template`} value={template} onChange={event => setTemplate(event.target.value)} disabled={busy}
+              className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-2 text-sm">
+              <option value="">اختر نوع العمل…</option>
+              {STAFF_STARTING_TEMPLATES.map(candidate => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}
+            </select>
+          </div>
+          <button type="button" onClick={applyTemplate} disabled={busy || !template}
+            className="min-h-11 rounded-xl border border-navy-300 px-4 text-sm font-bold text-navy-900 disabled:opacity-50">تطبيق على النموذج</button>
+          {template ? <p className="w-full text-xs text-slate-600">{STAFF_STARTING_TEMPLATES.find(candidate => candidate.key === template)?.description}</p> : null}
+        </div>
+      ) : null}
+      {notice ? <p role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">{notice}</p> : null}
+      {STAFF_MODULES.map(module => {
+        const items = module.capabilities;
         if (!items.length) return null;
+        const visible = staffModuleVisible(module, grants);
         return (
-          <fieldset key={group.key} className="rounded-xl border border-slate-200 p-2">
-            <legend className="px-1 text-xs font-black text-navy-900">{group.label}</legend>
+          <fieldset key={module.key} className="rounded-xl border border-slate-200 p-2" data-testid={`module-${module.key}`}>
+            <legend className="flex items-center gap-2 px-1 text-xs font-black text-navy-900">
+              {module.label}
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${visible ? "bg-emerald-50 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>{visible ? "ظاهرة" : "مخفاة"}</span>
+              {view.editable && visible ? (
+                <button type="button" onClick={() => hideModule(items)} disabled={busy}
+                  className="min-h-8 rounded-lg border border-slate-300 px-2 text-[11px] font-bold text-slate-700">إخفاء الوحدة</button>
+              ) : null}
+            </legend>
             <div className="grid gap-1 sm:grid-cols-2">
               {items.map(capability => {
                 const on = grants.has(capability);

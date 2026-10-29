@@ -1,7 +1,7 @@
 /** Inert future policy catalogue. Nothing in this module grants access to live routes. */
 export const STAFF_CAPABILITY_SCHEMA_VERSION = 1 as const;
 /** Bump when authorization semantics change, even if the document schema does not. */
-export const STAFF_AUTHORIZATION_POLICY_VERSION = 5 as const;
+export const STAFF_AUTHORIZATION_POLICY_VERSION = 6 as const;
 
 export const STAFF_CAPABILITIES = Object.freeze([
   "patients.create", "patients.edit", "patients.delete", "patients.export",
@@ -29,6 +29,18 @@ export const STAFF_CAPABILITIES = Object.freeze([
   "inventory.reconcile", "inventory.costs.view",
   "staff.view", "staff.profile.edit", "staff.accounts.create", "staff.accounts.disable", "staff.permissions.edit",
   "settings.view", "settings.operational.edit", "settings.finance.edit", "audit.view", "audit.export",
+  // Clinic operations approved by the owner (Dot 6484846432): the M2 map's 41 names and
+  // the reception operational summary. Catalogue presence grants nothing.
+  "appointments.schedule.manage", "visits.manage", "visits.delete", "clinical.ortho.view", "clinical.ortho.edit",
+  "clinical.ceph.analyze", "clinical.prescriptions.write", "clinical.referrals.manage", "clinical.lab.view",
+  "clinical.lab.order", "clinical.lab.cancel", "clinical.laboratories.manage", "finance.lab-prices.edit",
+  "patients.merge", "patients.number.manage", "patients.documents.delete", "patients.history.record",
+  "patients.history.correct", "finance.patient-ledger.manage", "finance.legacy.record", "finance.legacy.void",
+  "finance.agreements.manage", "finance.invoices.correct", "finance.payables.record", "finance.parties.manage",
+  "finance.opening-balances.manage", "finance.fx.manage", "finance.journal.post", "finance.reconciliation.manage",
+  "hr.directory.view", "hr.attendance.record", "hr.attendance.correct", "hr.staff.manage", "hr.leaves.request",
+  "hr.leaves.approve", "hr.schedules.manage", "hr.payroll.manage", "hr.reports.view", "hr.settings.edit",
+  "tasks.use", "messages.use", "patients.operational-summary.view",
 ] as const);
 export type StaffCapability = typeof STAFF_CAPABILITIES[number];
 
@@ -36,6 +48,9 @@ export type StaffCapability = typeof STAFF_CAPABILITIES[number];
 export const OWNER_ONLY_OPERATIONS = Object.freeze([
   "staff.credentials.reset", "staff.clinician-link.change", "staff.role.change",
   "settings.security.change", "settings.integrations.change",
+  // Owner decision (Dot 6484846432): whole-clinic import/export, backup and reset.
+  // A limited, delegable report export stays reports.export / finance.export.
+  "clinic.data.import", "clinic.data.export", "clinic.backup.manage", "clinic.reset",
 ] as const);
 export type OwnerOnlyOperation = typeof OWNER_ONLY_OPERATIONS[number];
 
@@ -95,4 +110,27 @@ export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapabi
   "settings.operational.edit": Object.freeze(["settings.view"] as const),
   "settings.finance.edit": Object.freeze(["settings.view"] as const),
   "audit.export": Object.freeze(["audit.view"] as const),
+  "visits.delete": Object.freeze(["visits.manage"] as const),
+  "clinical.ortho.edit": Object.freeze(["clinical.ortho.view"] as const),
+  "clinical.ceph.analyze": Object.freeze(["clinical.xrays.view"] as const),
+  "clinical.lab.order": Object.freeze(["clinical.lab.view"] as const),
+  "clinical.lab.cancel": Object.freeze(["clinical.lab.view"] as const),
+  "clinical.laboratories.manage": Object.freeze(["clinical.lab.view"] as const),
+  "finance.lab-prices.edit": Object.freeze(["clinical.lab.view"] as const),
+  "patients.merge": Object.freeze(["patients.edit"] as const),
+  "patients.number.manage": Object.freeze(["patients.edit"] as const),
+  "patients.history.correct": Object.freeze(["patients.history.record"] as const),
+  "finance.patient-ledger.manage": Object.freeze(["finance.patient-ledger.view"] as const),
+  "finance.legacy.void": Object.freeze(["finance.legacy.record"] as const),
+  "finance.agreements.manage": Object.freeze(["finance.patient-ledger.view"] as const),
+  "finance.invoices.correct": Object.freeze(["finance.invoices.view"] as const),
+  "finance.reconciliation.manage": Object.freeze(["finance.reconciliation.view"] as const),
+  "finance.opening-balances.manage": Object.freeze(["finance.patient-ledger.view"] as const),
+  "hr.attendance.correct": Object.freeze(["hr.attendance.record"] as const),
+  "hr.leaves.approve": Object.freeze(["hr.leaves.request"] as const),
+  "hr.staff.manage": Object.freeze(["hr.directory.view"] as const),
+  "hr.schedules.manage": Object.freeze(["hr.directory.view"] as const),
+  "hr.payroll.manage": Object.freeze(["hr.directory.view"] as const),
+  "hr.reports.view": Object.freeze(["hr.directory.view"] as const),
+  "hr.settings.edit": Object.freeze(["hr.directory.view"] as const),
 });

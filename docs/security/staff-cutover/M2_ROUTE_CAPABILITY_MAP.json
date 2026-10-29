@@ -25,7 +25,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Manual journal entry; cash lines also require no open shift (unchanged rule)."
  },
  {
@@ -415,7 +415,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -447,7 +447,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -477,7 +477,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -493,7 +493,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -569,7 +569,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1023,7 +1023,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1053,7 +1053,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1084,7 +1084,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1131,7 +1131,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1146,7 +1146,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1160,7 +1160,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1174,7 +1174,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "",
   "branches": {
    "discriminator": "action",
@@ -1197,7 +1197,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1211,7 +1211,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1225,7 +1225,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1239,7 +1239,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "",
   "branches": {
    "discriminator": "action",
@@ -1262,7 +1262,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1277,7 +1277,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1291,7 +1291,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1305,7 +1305,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1321,7 +1321,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Own requests; approving and balance edits need hr.leaves.approve."
  },
  {
@@ -1337,7 +1337,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Own requests; approving and balance edits need hr.leaves.approve."
  },
  {
@@ -1353,7 +1353,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Own requests; approving and balance edits need hr.leaves.approve."
  },
  {
@@ -1367,7 +1367,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1383,7 +1383,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Own requests; approving and balance edits need hr.leaves.approve."
  },
  {
@@ -1397,7 +1397,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Own requests; approving and balance edits need hr.leaves.approve."
  },
  {
@@ -1411,7 +1411,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Disbursement also requires an open cashier shift and the treasury rule."
  },
  {
@@ -1425,7 +1425,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Disbursement also requires an open cashier shift and the treasury rule.",
   "branches": {
    "discriminator": "action",
@@ -1448,7 +1448,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Disbursement also requires an open cashier shift and the treasury rule."
  },
  {
@@ -1462,7 +1462,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Disbursement also requires an open cashier shift and the treasury rule."
  },
  {
@@ -1476,7 +1476,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Disbursement also requires an open cashier shift and the treasury rule.",
   "branches": {
    "discriminator": "action",
@@ -1499,7 +1499,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Disbursement also requires an open cashier shift and the treasury rule."
  },
  {
@@ -1513,7 +1513,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Disbursement also requires an open cashier shift and the treasury rule.",
   "branches": {
    "discriminator": "action",
@@ -1540,7 +1540,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1555,7 +1555,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1569,7 +1569,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1584,7 +1584,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1598,7 +1598,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1612,7 +1612,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1626,7 +1626,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1640,7 +1640,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1654,7 +1654,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1668,7 +1668,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1682,7 +1682,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1696,7 +1696,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "",
   "branches": {
    "discriminator": "action",
@@ -1727,7 +1727,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1741,7 +1741,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1755,7 +1755,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -1769,7 +1769,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2056,7 +2056,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2070,7 +2070,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2132,7 +2132,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2148,7 +2148,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2162,7 +2162,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2178,7 +2178,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": "",
   "branches": {
    "discriminator": "action",
@@ -2234,7 +2234,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2250,7 +2250,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2264,7 +2264,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2278,7 +2278,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2292,7 +2292,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2308,7 +2308,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2322,7 +2322,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "",
   "branches": {
    "discriminator": "action",
@@ -2345,7 +2345,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2361,7 +2361,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2375,7 +2375,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2390,7 +2390,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2406,7 +2406,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2420,7 +2420,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2434,7 +2434,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2450,7 +2450,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2464,7 +2464,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2480,7 +2480,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Outbound patient messaging additionally needs messages.send-external."
  },
  {
@@ -2496,7 +2496,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Outbound patient messaging additionally needs messages.send-external."
  },
  {
@@ -2512,7 +2512,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Outbound patient messaging additionally needs messages.send-external."
  },
  {
@@ -2528,7 +2528,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Outbound patient messaging additionally needs messages.send-external."
  },
  {
@@ -2543,7 +2543,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Outbound patient messaging additionally needs messages.send-external."
  },
  {
@@ -2558,7 +2558,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Outbound patient messaging additionally needs messages.send-external."
  },
  {
@@ -2572,7 +2572,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2602,7 +2602,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2632,7 +2632,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2648,7 +2648,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2664,7 +2664,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2680,7 +2680,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2696,7 +2696,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2712,7 +2712,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2727,7 +2727,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2741,7 +2741,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2755,7 +2755,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2769,7 +2769,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2785,7 +2785,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2800,7 +2800,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2846,7 +2846,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2862,7 +2862,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2878,7 +2878,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2912,7 +2912,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2926,7 +2926,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2940,7 +2940,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -2954,7 +2954,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "",
   "branches": {
    "discriminator": "action",
@@ -2981,7 +2981,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3501,7 +3501,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3515,7 +3515,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3530,7 +3530,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3636,7 +3636,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3651,7 +3651,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3694,7 +3694,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3708,7 +3708,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3722,7 +3722,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3737,7 +3737,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3806,7 +3806,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3820,7 +3820,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3834,7 +3834,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3881,7 +3881,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": "Read of prescriptions limited to prescribers (current behaviour: admin, doctor)."
  },
  {
@@ -3961,7 +3961,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3975,7 +3975,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -3989,7 +3989,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4212,7 +4212,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4464,7 +4464,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4478,7 +4478,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4492,7 +4492,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4584,7 +4584,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4598,7 +4598,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4612,7 +4612,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4673,7 +4673,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4688,7 +4688,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4748,7 +4748,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4762,7 +4762,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4807,7 +4807,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4823,7 +4823,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -4838,7 +4838,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Own clinician referrals."
  },
  {
@@ -5083,8 +5083,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Owner decision 5: snapshot read admitted by settings.view; same payload (secret values never returned) plus __canWrite from the same snapshot."
  },
  {
   "route": "/api/settings",
@@ -5100,8 +5100,8 @@
    "settings.finance.edit"
   ],
   "scope": null,
-  "status": "existing",
-  "note": "Per-key policy: lib/settings-capabilities.ts (every key classified once: operational, finance, or owner-only authority/integration/backup). A batch needs every key's requirement; one refused or unknown key refuses the whole batch with no partial write; CAS and audit stay in the same transaction.",
+  "status": "canonical-done",
+  "note": "Per-key policy: lib/settings-capabilities.ts (every key classified once: operational, finance, or owner-only authority/integration/backup). A batch needs every key's requirement; one refused or unknown key refuses the whole batch with no partial write; CAS and audit stay in the same transaction. Owner decision 5 (canonical): one admitted transaction per batch (lib/canonical-settings.ts); delegable and owner-only requirements proved through the same handle; audit rows in the same transaction.",
   "keyPolicy": "lib/settings-capabilities.ts"
  },
  {
@@ -5118,8 +5118,8 @@
    "settings.finance.edit"
   ],
   "scope": null,
-  "status": "existing",
-  "note": "Per-key policy: lib/settings-capabilities.ts (every key classified once: operational, finance, or owner-only authority/integration/backup). A batch needs every key's requirement; one refused or unknown key refuses the whole batch with no partial write; CAS and audit stay in the same transaction.",
+  "status": "canonical-done",
+  "note": "Per-key policy: lib/settings-capabilities.ts (every key classified once: operational, finance, or owner-only authority/integration/backup). A batch needs every key's requirement; one refused or unknown key refuses the whole batch with no partial write; CAS and audit stay in the same transaction. Owner decision 5 (canonical): one admitted transaction per batch (lib/canonical-settings.ts); delegable and owner-only requirements proved through the same handle; audit rows in the same transaction.",
   "keyPolicy": "lib/settings-capabilities.ts"
  },
  {
@@ -5697,7 +5697,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
  },
  {
@@ -5713,7 +5713,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
  },
  {
@@ -5729,7 +5729,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
  },
  {
@@ -5745,7 +5745,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
  },
  {
@@ -5761,7 +5761,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Assignee/creator scope; managing others' tasks needs tasks.manage.",
   "branches": {
    "discriminator": "op",
@@ -5794,7 +5794,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
  },
  {
@@ -5810,7 +5810,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
  },
  {
@@ -5826,7 +5826,7 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "proposed",
+  "status": "existing",
   "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
  },
  {
@@ -5933,7 +5933,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": "Arrival/check-in creates the visit record."
  },
  {
@@ -5947,7 +5947,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {
@@ -5963,7 +5963,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": "",
   "branches": {
    "discriminator": "action",
@@ -6168,7 +6168,7 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "proposed",
+  "status": "existing",
   "note": ""
  },
  {

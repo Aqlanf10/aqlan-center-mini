@@ -32,6 +32,7 @@ const ACCOUNTS = {
   finance: { username: "SYN-P-FINANCE", role: "accountant", patientScope: "all", grants: { "finance.patient-ledger.view": true } },
   creatorAll: { username: "SYN-P-CREATOR-ALL", role: "reception", patientScope: "all", grants: { "patients.create": true } },
   creatorOwn: { username: "SYN-P-CREATOR-OWN", role: "doctor", doctor: true, patientScope: "own", grants: { "patients.create": true } },
+  opsReception: { username: "SYN-P-OPS-RECEPTION", role: "reception", patientScope: "all", appointmentScope: "all", grants: { "patients.operational-summary.view": true } },
   collector: { username: "SYN-P-COLLECTOR", role: "cashier", patientScope: "all", grants: { "finance.patient-ledger.view": true, "finance.payments.view": true, "finance.payments.collect": true } },
   doctorC: { username: "SYN-P-DOCTOR-C", role: "doctor", doctor: true, patientScope: "own", appointmentScope: "own", grants: { "clinical.plans.view": true } },
 } as const;
@@ -68,7 +69,7 @@ describe("patient scope filters rows", () => {
     for (const row of found.rows) expect(row).not.toHaveProperty("medicalAlert");
     const page = await browse("reception");
     expect(page.total).toBe(3);
-    expect(page.projection).toEqual({ care: false, schedule: true, balances: true });
+    expect(page.projection).toEqual({ care: false, operational: false, schedule: true, balances: true });
     const byName = Object.fromEntries(page.rows.map(row => [row.fullName, row]));
     expect(byName["SYN Patient Alpha"]).toHaveProperty("nextAppointment");
     for (const field of ["medicalAlert", "activeOrtho", "flags", "photoDocumentId"]) expect(byName["SYN Patient Alpha"]).not.toHaveProperty(field);
@@ -77,7 +78,7 @@ describe("patient scope filters rows", () => {
 
   it("a clinical grant gives the clinical summary, without schedule or money", async () => {
     const page = await browse("clinicalAll");
-    expect(page.projection).toEqual({ care: true, schedule: false, balances: false });
+    expect(page.projection).toEqual({ care: true, operational: true, schedule: false, balances: false });
     const alpha = page.rows.find(row => row.fullName === "SYN Patient Alpha")!;
     expect(alpha.medicalAlert).toContain("Synthetic penicillin allergy");
     for (const field of ["lastVisitAt", "nextAppointment", "balances"]) expect(alpha).not.toHaveProperty(field);
@@ -96,7 +97,7 @@ describe("patient scope filters rows", () => {
   it("the protected owner lists every patient with every column group", async () => {
     const page = await browse("owner");
     expect(page.total).toBe(3);
-    expect(page.projection).toEqual({ care: true, schedule: true, balances: true });
+    expect(page.projection).toEqual({ care: true, operational: true, schedule: true, balances: true });
     expect(page.rows.find(row => row.fullName === "SYN Patient Alpha")!.medicalAlert).toContain("Synthetic penicillin allergy");
   });
 
@@ -117,7 +118,7 @@ describe("patient scope filters rows", () => {
 describe("grant projection", () => {
   it("identity only: no clinical or money field is published", async () => {
     const page = await browse("identity");
-    expect(page.projection).toEqual({ care: false, schedule: false, balances: false });
+    expect(page.projection).toEqual({ care: false, operational: false, schedule: false, balances: false });
     for (const row of page.rows) expect(Object.keys(row).sort()).toEqual(["age", "fullName", "gender", "id", "patientNumber", "phone"]);
     for (const row of (await search("identity")).rows) expect(Object.keys(row).sort()).toEqual(["fullName", "id", "patientNumber", "phone"]);
   });
@@ -139,7 +140,7 @@ describe("grant projection", () => {
 
   it("patient ledger view: balances and the debt filter, never the medical alert", async () => {
     const page = await browse("finance", { filter: "debt" });
-    expect(page.projection).toEqual({ care: false, schedule: false, balances: true });
+    expect(page.projection).toEqual({ care: false, operational: false, schedule: false, balances: true });
     expect(page.rows.map(row => [row.fullName, row.balances])).toEqual([["SYN Patient Gamma", [{ currency: "YER", dueMinor: 5000 }]]]);
     for (const row of (await browse("finance")).rows) expect(row).not.toHaveProperty("medicalAlert");
   });
@@ -163,7 +164,7 @@ describe("revocation", () => {
   it("losing the clinical grant removes the clinical summary at the next read", async () => {
     await fx.setGrants("clinicalAll", {}, { patientScope: "all" });
     const page = await browse("clinicalAll");
-    expect(page.projection).toEqual({ care: false, schedule: false, balances: false });
+    expect(page.projection).toEqual({ care: false, operational: false, schedule: false, balances: false });
     for (const row of page.rows) expect(row).not.toHaveProperty("medicalAlert");
   });
 });
@@ -491,6 +492,72 @@ describe("patient workflow summary (slice 6)", () => {
     const owner = await workflow("owner");
     for (const key of ["nextAppointment", "lastVisit", "activePlans", "financial", "alerts"]) expect(owner).toHaveProperty(key);
     expect(owner.canSeeFinancial).toBe(true);
+  });
+});
+
+describe("reception operational summary (owner decision 1, Dot 6484846432)", () => {
+  const ALERT_TEXT_FRAGMENTS = ["penicillin", "latex", "Synthetic penicillin allergy", "Synthetic latex allergy", "حساسية"];
+  const idOf = async (number: string) => (await fx.pool.query<{ id: number }>("SELECT id FROM patients WHERE patient_number=$1", [number])).rows[0].id;
+  const noAlertText = (value: unknown) => { const json = JSON.stringify(value); for (const fragment of ALERT_TEXT_FRAGMENTS) expect(json).not.toContain(fragment); };
+
+  it("list and search: alert existence, active orthodontics and flags only — never the alert text", async () => {
+    const page = await reads.readCanonicalPatientBrowse(await fx.session("opsReception"), { kind: "browse", page: 0, filter: "all", sort: "name", flag: null, today: TODAY });
+    expect(page.projection).toMatchObject({ care: false, operational: true });
+    const alpha = page.rows.find(row => row.fullName === "SYN Patient Alpha")!;
+    expect(alpha).toMatchObject({ hasMedicalAlert: true });
+    expect(alpha).toHaveProperty("activeOrtho");
+    expect(alpha).toHaveProperty("flags");
+    expect(alpha).not.toHaveProperty("medicalAlert");
+    noAlertText(page);
+    const found = await reads.readCanonicalPatientSearch(await fx.session("opsReception"), { kind: "search", term: "SYN Patient" });
+    expect(found.rows.find(row => row.fullName === "SYN Patient Alpha")).toMatchObject({ hasMedicalAlert: true });
+    noAlertText(found);
+  });
+
+  it("search never matches on the alert text, for anyone", async () => {
+    for (const k of ["opsReception", "owner"] as const) {
+      expect((await reads.readCanonicalPatientSearch(await fx.session(k), { kind: "search", term: "penicillin" })).rows).toEqual([]);
+    }
+  });
+
+  it("existence filters are allowed and reveal nothing beyond existence; derived history alerts count too", async () => {
+    const alerted = await reads.readCanonicalPatientBrowse(await fx.session("opsReception"), { kind: "browse", page: 0, filter: "alert", sort: "name", flag: null, today: TODAY });
+    expect(alerted.rows.map(row => row.fullName)).toEqual(expect.arrayContaining(["SYN Patient Alpha", "SYN File Zeta"]));
+    for (const row of alerted.rows) expect(row).toMatchObject({ hasMedicalAlert: true });
+    noAlertText(alerted);
+    // Zeta's alert comes only from its medical history: the file says so too, without text.
+    const zeta = await reads.readCanonicalPatientFile(await fx.session("opsReception"), await idOf("SYN-PA-6"));
+    expect(zeta.patient).toMatchObject({ hasMedicalAlert: true });
+  });
+
+  it("file, workflow, arrival panel and timeline: no diagnoses, notes, history, plans or clinical events", async () => {
+    const epsilon = await idOf("SYN-PA-5");
+    const file = await reads.readCanonicalPatientFile(await fx.session("opsReception"), epsilon);
+    expect(file.patient).toMatchObject({ hasMedicalAlert: true, flags: ["VIP"] });
+    for (const key of ["medicalAlert", "note", "referralSource", "referredBy"]) expect(file.patient).not.toHaveProperty(key);
+    expect(file).not.toHaveProperty("visits");
+    noAlertText(file);
+    const workflow = await reads.readCanonicalPatientWorkflow(await fx.session("opsReception"), epsilon);
+    expect(workflow.patient).toMatchObject({ hasMedicalAlert: true });
+    for (const key of ["lastVisit", "activePlans", "plannedVisits", "counts", "assessmentCases", "legacyCases"]) expect(workflow).not.toHaveProperty(key);
+    noAlertText(workflow);
+    const arrival = await reads.readCanonicalArrivalPanel(await fx.session("opsReception"), epsilon);
+    expect(arrival).toMatchObject({ hasMedicalAlert: true });
+    expect(arrival).toHaveProperty("activeOrtho");
+    expect(arrival).not.toHaveProperty("cases");
+    expect(arrival).not.toHaveProperty("ortho");
+    const timeline = await reads.readCanonicalTimeline(await fx.session("opsReception"), await idOf("SYN-PA-6"), 60);
+    expect(timeline.events.every(event => ["appointment"].includes(event.kind))).toBe(true);
+    await expect(reads.readCanonicalMedicalHistory(await fx.session("opsReception"), epsilon)).rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
+  });
+
+  it("revoking the summary grant removes it at the next read", async () => {
+    await fx.setGrants("opsReception", {}, { patientScope: "all", appointmentScope: "all" });
+    const page = await reads.readCanonicalPatientBrowse(await fx.session("opsReception"), { kind: "browse", page: 0, filter: "all", sort: "name", flag: null, today: TODAY });
+    expect(page.projection.operational).toBe(false);
+    for (const row of page.rows) for (const key of ["hasMedicalAlert", "activeOrtho", "flags"]) expect(row).not.toHaveProperty(key);
+    await expect(reads.readCanonicalPatientBrowse(await fx.session("opsReception"), { kind: "browse", page: 0, filter: "alert", sort: "name", flag: null, today: TODAY }))
+      .rejects.toMatchObject({ code: "patient_filter_not_granted" });
   });
 });
 

@@ -1,6 +1,6 @@
 # M2 — route → capability map, for review
 
-Status: **proposal**. This is the first M2 deliverable required by `M1_ENTRY_SLICE_DESIGN.md` §6 ("M2 proposes a per-route capability map for review"). Nothing here grants anything or activates a route.
+Status: **names approved by the owner (Dot 6484846432); routes migrate slice by slice.** This is the first M2 deliverable required by `M1_ENTRY_SLICE_DESIGN.md` §6 ("M2 proposes a per-route capability map for review"). Nothing here grants anything or activates a route.
 
 The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILITY_MAP.json). Its test, `scripts/audits/m2-route-capability-map.test.mjs`, proves three things:
 1. Every staff route that `inventory.json` holds for canonical admission has exactly one entry.
@@ -34,8 +34,7 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 187 |
-| proposed | 142 |
+| existing | 329 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
@@ -47,7 +46,9 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 | patient | 149 |
 | appointment | 11 |
 
-## 2. Proposed capability names (decision needed: owner, with Dot's review)
+## 2. Approved capability names (owner decision, Dot 6484846432)
+
+In the catalogue since policy version 6, with Arabic labels and prerequisites in `lib/staff-capability-catalogue.ts` and `lib/staff-capability-labels.ts`. Catalogue presence grants nothing.
 
 | Group | Proposed capability | Arabic label | Today (legacy roles) |
 |---|---|---|---|
@@ -92,8 +93,9 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 | HR | `hr.settings.edit` | إعدادات الموارد البشرية | admin |
 | Work | `tasks.use` | المهام (المسندة والمنشأة) | admin, reception, doctor |
 | Work | `messages.use` | الرسائل الداخلية والخارجية | admin, reception, doctor |
+| Patients | `patients.operational-summary.view` | ملخص المريض التشغيلي (للحجز والتنسيق) | owner decision 1: reception summary |
 
-**Proposed owner-only operations** (never delegable):
+**Owner-only operations** (never delegable; approved, in `OWNER_ONLY_OPERATIONS`):
 - `clinic.data.import`
 - `clinic.data.export`
 - `clinic.backup.manage`
@@ -253,8 +255,47 @@ Admitted by `read:patients.record`. `patientWorkflowWith` reads every source thr
 - **Authority setting:** `workflow.doctor_financial_view` does not widen canonical visibility; grants decide.
 - **Rebooking:** not offered until its own route is canonical.
 
+### Slice 7 — clinic settings (`/api/settings` GET, PATCH, POST reset; owner decision 5)
+- **Read:** one owning snapshot admitted by `settings.view`. The same payload as legacy (a secret's value is never returned), plus `__canWrite`: the keys this account may change, from the same snapshot.
+- **Write:** one admitted transaction per batch (`lib/canonical-settings.ts`):
+  - admission by `settings.view`, the catalogue prerequisite of every settings write;
+  - then every key's requirement is proved through the same handle before anything is written: `settings.operational.edit`, `settings.finance.edit`, or the owner-only `settings.security.change`, `settings.integrations.change`, `clinic.backup.manage`;
+  - a refused key refuses the whole batch and names the key (`setting_not_granted`, 403);
+  - the expected-version CAS (`setting_conflict`, 409), the in-transaction prefix rule, the writes, and one audit row per changed key with the canonical actor all commit together. An audit failure leaves no setting change (PG test).
+- **Screen:** `/settings` is registered for `settings.view`. Each key is editable only if `__canWrite` lists it; owner-only keys show «للمالك فقط» to delegates; areas not yet canonical (history, users, backup run, announcements, specialised screens) are not linked.
+- **Tests:** PG `settings-canonical` (14), built journey `canonical-settings-journey` (HTTP and browser).
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
+
+## 7. Owner decisions (Dot 6484846432) and their translation
+
+1. **Reception operational summary.**
+   - **Capability:** `patients.operational-summary.view`, an independent, revocable grant. It neither needs nor grants clinical capabilities.
+   - **Shows only:**
+     - whether an orthodontic case is active;
+     - whether a medical alert exists (`hasMedicalAlert`, never its text);
+     - the coordination flags.
+   - **Applied in:** the list, the file, the workflow summary and the arrival panel.
+   - **Leak tests:**
+     - search never matches the alert text (search fields: name, file number, phones, guardian, national ID);
+     - the alert and orthodontic filters select on existence only;
+     - no clinical timeline events;
+     - the bounded `?projection=` and export modes are not canonical yet.
+   - **Interpretation to confirm:** "the alert needed for booking" is taken as the alert's existence. A short coordination text would need its own field, not the medical text.
+2. **The 41 names and the four owner-only operations** are in the catalogue (policy version 6). The limited delegable exports are `reports.export` and `finance.export`; the full clinic export is the owner-only `clinic.data.export`. No proposal beyond these, such as `supplier-intent.recover`, is included.
+3. **Starting templates per type of work** (`lib/staff-starting-templates.ts`): reception, cashier, accountant, doctor (own/own), lab coordinator, inventory keeper.
+   - A template only fills the editor form, limited to what the editor may delegate; the dropped items are listed. Nothing is saved until the normal atomic, audited save of that one account.
+   - There is no automatic legacy-role conversion and no template is applied by a role label.
+   - Templates use catalogue names only, are closed under prerequisites and hold no owner-only operation (unit tests).
+   - No assistant template: the legacy "today's visits" scope has no canonical record scope yet (owner decision pending).
+   - Built journey: applying a template changes nothing on the server until saved.
+4. **Modules** (`lib/staff-modules.ts`): 14 modules; every capability belongs to exactly one (unit test).
+   - Hiding a module revokes all of its capabilities in one atomic save. The server then refuses its routes from the account's current grants (built journey).
+   - Revocation during a session: the old session is refused (stale permission revision), and a new session has no grant.
+   - Revocation during a pending request is serialized: the admitted write holds its proof rows `FOR SHARE`, so the revocation waits for it; afterwards the old session is refused (PG test in `settings-canonical`).
+   - The protected owner is never a target of these grants: the owner cannot be locked out.
+5. **Unified settings:** the inventory is in `UNIFIED_SETTINGS_INVENTORY.md`. Step 1 is done: the canonical `/api/settings` read and batch write (§5, slice 7) and the canonical settings screen. Next: account writes in the staff editor, the catalogue routes, then the owner-only tab with M4.
 
 ## 6. Dot review 6480538845: what the map now records
 

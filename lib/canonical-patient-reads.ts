@@ -4,7 +4,7 @@ import {
   listPatientProblemsWith, listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
   listPatientDiagnosesWith, listIntakeFormsWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
   CLINIC_TIME_ZONE, listPatientCasesWith, listPatientPlansWith, openOrthoCaseForWith, type DbClient, type PatientListRow,
-  listPatientCaseRowsWith, listPatientPlannedVisitsWith, patientLedgerInSnapshot, patientWorkflowWith,
+  listPatientCaseRowsWith, listPatientPlannedVisitsWith, patientLedgerInSnapshot, patientWorkflowWith, patientHasMedicalAlertWith, patientsWithMedicalAlertWith,
 } from "./db";
 import { deriveAlerts, reviewDue } from "./medical-history";
 import { parseConsentMode } from "./patient-identity";
@@ -38,6 +38,10 @@ import type { StaffCapability } from "./staff-capability-catalogue";
  *    `all` appointment scope;
  *  - care (clinical: medical alert, active orthodontics, flags): a clinical grant
  *    (PATIENT_CARE_CAPABILITIES). Appointment grants never reveal clinical fields;
+ *  - operational (owner decision, Dot 6484846432): `patients.operational-summary.view`
+ *    shows only what booking and coordination need — whether an orthodontic case is
+ *    active, whether a medical alert exists (never its text), and the coordination flags.
+ *    No diagnoses, notes, history or plan details. Implied by the care group;
  *  - balances: `finance.patient-ledger.view`.
  * The protected owner holds every group. Hidden groups are omitted, never replaced by
  * neutral values (an empty balance list would wrongly read as "no debt"); filters and
@@ -59,13 +63,15 @@ export class CanonicalPatientReadRefusal extends Error {
   }
 }
 
-export interface PatientDirectoryProjection { readonly care: boolean; readonly schedule: boolean; readonly balances: boolean }
+export interface PatientDirectoryProjection { readonly care: boolean; readonly operational: boolean; readonly schedule: boolean; readonly balances: boolean }
 export interface CanonicalPatientIdentity { id: number; patientNumber: string; fullName: string; phone: string | null }
-export type CanonicalPatientRow = CanonicalPatientIdentity & Partial<Omit<PatientListRow, keyof CanonicalPatientIdentity>>;
+export type CanonicalPatientRow = CanonicalPatientIdentity & Partial<Omit<PatientListRow, keyof CanonicalPatientIdentity>> & { hasMedicalAlert?: boolean };
 
 export function patientDirectoryProjection(scope: Pick<CanonicalSnapshotScope, "granted" | "appointmentScope">): PatientDirectoryProjection {
+  const care = PATIENT_CARE_CAPABILITIES.some(capability => scope.granted(capability));
   return Object.freeze({
-    care: PATIENT_CARE_CAPABILITIES.some(capability => scope.granted(capability)),
+    care,
+    operational: care || scope.granted("patients.operational-summary.view"),
     schedule: scope.appointmentScope.kind === "all",
     balances: scope.granted("finance.patient-ledger.view"),
   });
@@ -83,6 +89,10 @@ function project(row: PatientListRow | { id: number; patientNumber: string; full
   if (projection.schedule && "gender" in row) Object.assign(out, { lastVisitAt: row.lastVisitAt, nextAppointment: row.nextAppointment });
   if (projection.care) {
     out.medicalAlert = row.medicalAlert;
+    if ("gender" in row) Object.assign(out, { activeOrtho: row.activeOrtho, flags: row.flags });
+  } else if (projection.operational) {
+    // Existence only: the alert's text is medical information.
+    Object.assign(out, { hasMedicalAlert: Boolean(row.medicalAlert && row.medicalAlert.trim()) });
     if ("gender" in row) Object.assign(out, { activeOrtho: row.activeOrtho, flags: row.flags });
   }
   // The photo is served by /api/documents/[id], which is not canonical yet: no
@@ -102,7 +112,14 @@ export async function readCanonicalPatientSearch(session: VerifiedDurableSession
   return runCanonicalReadSnapshot(session, "read:patients.directory", async (query, scope) => {
     const projection = patientDirectoryProjection(scope);
     const rows = await searchPatientsWith(query, term, SEARCH_LIMIT, doctorPartyOf(scope));
-    return { rows: rows.map(row => project(row, projection)), projection };
+    // Search rows carry only the stored alert text; the operational summary uses the one
+    // shared existence predicate (stored text or latest medical history), never the text.
+    const alerted = projection.operational && !projection.care ? await patientsWithMedicalAlertWith(query, rows.map(row => row.id)) : null;
+    return { rows: rows.map(row => {
+      const out = project(row, projection);
+      if (alerted) out.hasMedicalAlert = alerted.has(row.id);
+      return out;
+    }), projection };
   }, { errorPrefix: "STAFF_READ", maxBytes: PATIENT_DIRECTORY_MAX_BYTES });
 }
 
@@ -115,7 +132,9 @@ export async function readCanonicalPatientBrowse(session: VerifiedDurableSession
     if (input.filter === "debt" && !projection.balances) {
       throw new CanonicalPatientReadRefusal("patient_filter_not_granted", "تصفية المرضى بالمبالغ تحتاج صلاحية عرض حساب المريض.");
     }
-    if (((["alert", "ortho"] as PatientListFilter[]).includes(input.filter) || input.flag) && !projection.care) {
+    // The alert and orthodontic filters select on existence, which the operational
+    // summary shows anyway; they never match on the alert's text.
+    if (((["alert", "ortho"] as PatientListFilter[]).includes(input.filter) || input.flag) && !projection.operational) {
       throw new CanonicalPatientReadRefusal("patient_filter_not_granted", "هذه التصفية تعتمد على بيانات العلاج، ولا تملك صلاحية عرضها.");
     }
     if ((input.filter === "no_next" || input.sort === "last_visit") && !projection.schedule) {
@@ -168,7 +187,8 @@ const IDENTITY_FIELDS = ["id", "patientNumber", "fullName", "phone", "altPhone",
   "guardianName", "guardianPhone", "nationalId", "email", "preferredChannel", "createdAt"] as const;
 /** Care (clinical): one of PATIENT_CARE_CAPABILITIES — never an appointment grant. */
 const CARE_FIELDS = ["medicalAlert", "flags", "note", "referralSource", "referredBy"] as const;
-export type CanonicalPatientCore = Pick<Patient, typeof IDENTITY_FIELDS[number]> & Partial<Pick<Patient, typeof CARE_FIELDS[number]>>;
+export type CanonicalPatientCore = Pick<Patient, typeof IDENTITY_FIELDS[number]> & Partial<Pick<Patient, typeof CARE_FIELDS[number]>>
+  & { hasMedicalAlert?: boolean; activeOrtho?: boolean };
 export interface CanonicalPatientFile {
   readonly patient: CanonicalPatientCore;
   /** Present only with the care summary. */
@@ -185,6 +205,10 @@ export async function readCanonicalPatientFile(session: VerifiedDurableSession, 
     if (!patient) throw new CanonicalPatientReadRefusal("patient_not_found", "لا يوجد مريض بهذا الرقم ضمن مرضاك.");
     const core = Object.fromEntries(IDENTITY_FIELDS.map(field => [field, patient[field] ?? null])) as unknown as CanonicalPatientCore;
     if (projection.care) for (const field of CARE_FIELDS) (core as Record<string, unknown>)[field] = patient[field] ?? null;
+    else if (projection.operational) {
+      const activeOrtho = (await query.query<{ active: boolean }>("SELECT EXISTS (SELECT 1 FROM ortho_cases WHERE patient_id = $1 AND status = 'active') AS active", [patientId])).rows[0]?.active === true;
+      Object.assign(core, { flags: patient.flags ?? [], hasMedicalAlert: await patientHasMedicalAlertWith(query, patientId), activeOrtho });
+    }
     const appointmentScope = scope.appointmentScope;
     return {
       patient: core,
@@ -279,7 +303,7 @@ export async function readCanonicalArrivalPanel(session: VerifiedDurableSession,
     const appointments = scope.appointmentScope.kind === "all" ? undefined
       : scope.appointmentScope.kind === "own" ? scope.appointmentScope.clinicianPartyId : null;
     const panel = await arrivalPanelWith(query, patientId, {
-      includeMoney: projection.balances, includeClinical: projection.care, appointmentDoctorPartyId: appointments,
+      includeMoney: projection.balances, includeClinical: projection.operational, appointmentDoctorPartyId: appointments,
     }, {
       debts: (ids, includeNonPositive) => computeDebtRowsInSnapshot([...ids], includeNonPositive, query),
       openings: id => listLegacyOpeningPositionsWith(query, id),
@@ -294,6 +318,7 @@ export async function readCanonicalArrivalPanel(session: VerifiedDurableSession,
       ...base,
       ...(appointments === null ? {} : { appointments: todays }),
       ...(projection.care ? { cases, ortho } : {}),
+      ...(projection.operational ? { activeOrtho: ortho !== null, hasMedicalAlert: await patientHasMedicalAlertWith(query, patientId) } : {}),
       ...(projection.balances ? { money } : {}),
       canCollect: projection.balances && scope.granted("finance.payments.collect"),
       projection: { ...projection, appointments: scope.appointmentScope.kind },
@@ -324,7 +349,9 @@ export async function readCanonicalPatientWorkflow(session: VerifiedDurableSessi
     const { medicalAlert, ...identity } = summary.patient;
     const alerts = summary.alerts.filter(alert => FINANCIAL_ALERTS.has(alert.kind) ? projection.balances : projection.care);
     return {
-      patient: projection.care ? { ...identity, medicalAlert } : identity,
+      patient: projection.care ? { ...identity, medicalAlert }
+        : projection.operational ? { ...identity, hasMedicalAlert: await patientHasMedicalAlertWith(query, patientId), activeOrtho: summary.counts.orthoCase }
+          : identity,
       openVisit: summary.openVisit,
       today, timeZone: CLINIC_TIME_ZONE,
       ...(projection.schedule ? { nextAppointment: summary.nextAppointment } : {}),

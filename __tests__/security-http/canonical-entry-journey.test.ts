@@ -258,3 +258,54 @@ it("mobile shell keeps navigation usable and logout clears the browser cookie", 
  await context.close();
  expect(await ddlLog()).toEqual([]);
 });
+
+it("owner decisions 3 and 4: a starting template only fills the form; hiding a module revokes it on the server", async () => {
+ const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "ar" });
+ const page = await context.newPage();
+ await page.goto(`${baseUrl}/login`);
+ await page.getByLabel("اسم المستخدم", { exact: true }).fill(ACCOUNTS.owner.username);
+ await page.getByLabel("كلمة المرور", { exact: true }).fill(ACCOUNTS.owner.password);
+ await page.locator("#login-submit-btn").click();
+ await page.getByTestId("canonical-shell").waitFor();
+ await page.goto(`${baseUrl}/staff-access`);
+ const permissionsOf = async (id: number) => (await db.query<{ permissions: string }>("SELECT permissions FROM users WHERE id=$1", [id])).rows[0].permissions;
+
+ // Template: fills the form, saves nothing until "save".
+ const targetRow = page.getByTestId("staff-directory").locator("li", { hasText: ACCOUNTS.target.username });
+ await targetRow.getByRole("button", { name: "الصلاحيات" }).click();
+ const editor = page.getByTestId("capability-editor");
+ await editor.getByText(ACCOUNTS.target.display).waitFor();
+ const before = await permissionsOf(ids.target);
+ await editor.getByTestId("starting-template").getByRole("combobox").selectOption("cashier");
+ await editor.getByRole("button", { name: "تطبيق على النموذج" }).click();
+ await expect.poll(() => editor.getByRole("note").filter({ hasText: "ولم يُحفظ بعد" }).count()).toBe(1);
+ expect(await editor.getByLabel("تحصيل دفعة").isChecked()).toBe(true);
+ expect(await permissionsOf(ids.target)).toBe(before);
+ await editor.getByRole("button", { name: "حفظ الصلاحيات" }).click();
+ await expect.poll(() => editor.getByRole("status").textContent()).toMatch(/حُفظت الصلاحيات/);
+ const saved = JSON.parse(await permissionsOf(ids.target));
+ expect(saved).toMatchObject({ patientScope: "all", appointmentScope: "none", grants: { "finance.payments.collect": true, "finance.shifts.operate": true } });
+ expect(saved.grants).not.toHaveProperty("staff.view");
+
+ // Module hiding: the manager's whole staff module is revoked in one atomic save.
+ const manager = await login("manager");
+ expect((await api("/api/staff-access", manager.cookie)).status).toBe(200);
+ const managerRow = page.getByTestId("staff-directory").locator("li", { hasText: ACCOUNTS.manager.username });
+ await managerRow.getByRole("button", { name: "الصلاحيات" }).click();
+ await editor.getByText(ACCOUNTS.manager.display).waitFor();
+ const staffModule = editor.getByTestId("module-staff");
+ await staffModule.getByRole("button", { name: "إخفاء الوحدة" }).click();
+ await expect.poll(() => staffModule.getByText("مخفاة").count()).toBe(1);
+ await editor.getByRole("button", { name: "حفظ الصلاحيات" }).click();
+ await expect.poll(() => editor.getByRole("status").textContent()).toMatch(/حُفظت الصلاحيات/);
+ await context.close();
+ // The live session is refused at once; a fresh login is refused by the server, not just hidden.
+ expect((await api("/api/staff-access", manager.cookie)).status).toBe(401);
+ const fresh = await login("manager");
+ const directory = await api("/api/staff-access", fresh.cookie);
+ expect(directory.status).toBe(403);
+ expect((await directory.json()).message).toMatch(ARABIC);
+ const { rows: [audit] } = await db.query("SELECT entity_id FROM audit_log WHERE action='staff.capabilities.update' ORDER BY id DESC LIMIT 1");
+ expect(audit).toEqual({ entity_id: String(ids.manager) });
+ expect(await ddlLog()).toEqual([]);
+});

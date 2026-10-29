@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
 import { createSessionToken, signDurableSessionClaims } from "../lib/auth";
 import { selectStaffEnvelope } from "../lib/staff-session-admission";
-import { STAFF_CAPABILITIES } from "../lib/staff-capability-catalogue";
+import { STAFF_AUTHORIZATION_POLICY_VERSION, STAFF_CAPABILITIES } from "../lib/staff-capability-catalogue";
 import { STAFF_CAPABILITY_LABELS, staffCapabilityGroup, toggleStaffCapability } from "../lib/staff-capability-labels";
 import { canonicalPageAllowed, canonicalPageFor, canonicalPagesFor, isCanonicalPage } from "../lib/canonical-navigation";
 
 const durable = () => signDurableSessionClaims({
  userId: 2, username: "synthetic", expiresAt: Date.now() + 60_000,
- durableIdentity: { schemaVersion: 2, policyVersion: 5, realmId: "11111111-1111-4111-8111-111111111111", subjectId: "22222222-2222-4222-8222-222222222222",
+ durableIdentity: { schemaVersion: 2, policyVersion: STAFF_AUTHORIZATION_POLICY_VERSION, realmId: "11111111-1111-4111-8111-111111111111", subjectId: "22222222-2222-4222-8222-222222222222",
   generationId: "33333333-3333-4333-8333-333333333333", registryRevision: "4", controlEpoch: "2", accountEpoch: "3", permissionRevision: 1,
   credentialVersion: "a".repeat(43), provider: null },
 });
@@ -51,7 +51,7 @@ describe("capability presentation", () => {
  it("navigation is a projection of current grants over accepted canonical pages only", () => {
   expect(canonicalPagesFor([], false)).toEqual([]);
   expect(canonicalPagesFor(["staff.view"], false).map(p => p.href)).toEqual(["/staff-access"]);
-  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/patients", "/staff-access", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
+  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/patients", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
   expect(canonicalPagesFor(["inventory.custody.view"], false).map(p => p.href)).toEqual(["/inventory/custody"]);
   expect(isCanonicalPage("/staff-access")).toBe(true);
   expect(isCanonicalPage("/patients")).toBe(true);

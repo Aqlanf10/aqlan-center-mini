@@ -26,6 +26,8 @@ interface PatientSummary {
   fullName: string;
   phone: string | null;
   medicalAlert: string | null;
+  /** الملخص التشغيلي (الهوية الموحّدة): وجود تنبيه طبي دون نصه. */
+  hasMedicalAlert?: boolean;
   /** (PAT-1) في التصفّح فقط — البحث يعيد الأساسيات. */
   age?: number | null;
   lastVisitAt?: string | null;
@@ -40,7 +42,7 @@ interface PatientSummary {
 interface PageResult { rows: PatientSummary[]; total: number; page: number; pageSize: number; projection?: Projection }
 
 /** جلسة الهوية الموحّدة: مجموعات الأعمدة التي يملكها الموظف كما قرّرها الخادم. */
-interface Projection { care: boolean; schedule: boolean; balances: boolean }
+interface Projection { care: boolean; operational?: boolean; schedule: boolean; balances: boolean }
 /** المرشّحات التي تحتاج بيانات العلاج — تُخفى لمن لا يملكها. */
 const CARE_FILTERS: readonly PatientListFilter[] = ["alert", "ortho"];
 
@@ -186,7 +188,7 @@ export default function PatientsPage() {
               <option key={key} value={key}>ترتيب: {label}</option>
             ))}
           </select>
-          {flagList.length > 0 && projection?.care !== false ? (
+          {flagList.length > 0 && (projection === null || projection.care || projection.operational) ? (
             <select
               value={flag}
               onChange={(event) => { setFlag(event.target.value); setPage(0); }}
@@ -230,6 +232,10 @@ export default function PatientsPage() {
                   {patient.medicalAlert ? (
                     <span className="mt-1.5 inline-block rounded-lg bg-red-50 border border-red-200 px-2 py-0.5 text-[11px] font-bold text-red-700">
                       ⚠ {patient.medicalAlert}
+                    </span>
+                  ) : patient.hasMedicalAlert ? (
+                    <span className="mt-1.5 inline-block rounded-lg bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                      ⚠ يوجد تنبيه طبي — نسّق مع الطبيب قبل الحجز
                     </span>
                   ) : null}
                   {/* (PAT-1) ما يُسأل عنه قبل فتح الملف: العمر، التقويم، آخر زيارة، الموعد القادم، المستحق. */}
@@ -291,7 +297,7 @@ function filterAllowed(filter: PatientListFilter, projection: Projection | null)
   if (!projection) return true;
   if (filter === "debt") return projection.balances;
   if (filter === "no_next") return projection.schedule;
-  if (CARE_FILTERS.includes(filter)) return projection.care;
+  if (CARE_FILTERS.includes(filter)) return projection.care || projection.operational === true;
   return true;
 }
 

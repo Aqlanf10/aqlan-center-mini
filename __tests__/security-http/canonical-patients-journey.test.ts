@@ -47,12 +47,12 @@ it("HTTP: own scope sees only the linked clinician's patients; all scope sees ev
   expect(found.map(row => row.fullName)).toEqual(["مريض تجريبي أول"]);
   expect(found[0].medicalAlert).toContain("حساسية");
   const page = await (await journey.api("/api/patients?page=0&filter=all&sort=name", doctor.cookie)).json();
-  expect(page).toMatchObject({ total: 1, projection: { care: true, schedule: false, balances: false } });
+  expect(page).toMatchObject({ total: 1, projection: { care: true, operational: true, schedule: false, balances: false } });
   expect(page.rows[0]).not.toHaveProperty("balances");
 
   const reception = await journey.login("reception");
   const all = await (await journey.api("/api/patients?page=0&filter=all&sort=name", reception.cookie)).json();
-  expect(all).toMatchObject({ total: 3, projection: { care: false, schedule: false, balances: false } });
+  expect(all).toMatchObject({ total: 3, projection: { care: false, operational: false, schedule: false, balances: false } });
   for (const row of all.rows) expect(Object.keys(row).sort()).toEqual(["age", "fullName", "gender", "id", "patientNumber", "phone"]);
   expect(await journey.ddlLog()).toEqual([]);
 });

@@ -7,7 +7,7 @@ const document=(grants:StaffCapabilityDocument["grants"]={}):StaffCapabilityDocu
 const subject={userId:17,role:"doctor",isActive:true,clinicianPartyId:null};
 const resolve=(grants:StaffCapabilityDocument["grants"])=>resolveStaffCapabilities({subject,permissionDocument:document(grants)});
 it("policy4 keeps schema1 and old item grants unchanged without new implied access",()=>{
- expect(STAFF_AUTHORIZATION_POLICY_VERSION).toBe(5);expect(STAFF_CAPABILITY_SCHEMA_VERSION).toBe(1);
+ expect(STAFF_AUTHORIZATION_POLICY_VERSION).toBe(6);expect(STAFF_CAPABILITY_SCHEMA_VERSION).toBe(1);
  const old=document({"inventory.references.view":true,"inventory.items.create":true});
  expect(parseStaffCapabilityDocument(old)).toMatchObject({ok:true,value:old});
  const access=resolveStaffCapabilities({subject,permissionDocument:old});

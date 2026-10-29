@@ -12,6 +12,9 @@ export const STAFF_CAPABILITY_GROUPS = [
  { key: "staff", label: "الطاقم" },
  { key: "settings", label: "الإعدادات" },
  { key: "audit", label: "سجل التدقيق" },
+ { key: "visits", label: "الزيارات والوصول" },
+ { key: "hr", label: "الموارد البشرية" },
+ { key: "work", label: "المهام والرسائل" },
 ] as const;
 export type StaffCapabilityGroup = typeof STAFF_CAPABILITY_GROUPS[number]["key"];
 
@@ -96,9 +99,52 @@ export const STAFF_CAPABILITY_LABELS: Readonly<Record<StaffCapability, string>> 
  "settings.finance.edit": "تعديل الإعدادات المالية",
  "audit.view": "عرض سجل التدقيق",
  "audit.export": "تصدير سجل التدقيق",
+ "appointments.schedule.manage": "إدارة حجب أوقات الأطباء",
+ "visits.manage": "تسجيل الوصول وإدارة الزيارة",
+ "visits.delete": "حذف زيارة",
+ "clinical.ortho.view": "عرض حالات التقويم",
+ "clinical.ortho.edit": "توثيق حالات التقويم وخططها",
+ "clinical.ceph.analyze": "تحليل السيفالومتري",
+ "clinical.prescriptions.write": "كتابة الوصفات وإلغاؤها",
+ "clinical.referrals.manage": "الإحالات",
+ "clinical.lab.view": "عرض أوامر المختبر وأسعاره",
+ "clinical.lab.order": "طلب وتحديث أعمال المختبر",
+ "clinical.lab.cancel": "إلغاء أمر مختبر",
+ "clinical.laboratories.manage": "إدارة المختبرات",
+ "finance.lab-prices.edit": "تعديل أسعار المختبر وخدماته",
+ "patients.merge": "دمج ملفين",
+ "patients.number.manage": "تعديل رقم الملف",
+ "patients.documents.delete": "حذف مستند مريض",
+ "patients.history.record": "تسجيل الوثائق التاريخية",
+ "patients.history.correct": "تصحيح وثيقة تاريخية",
+ "finance.patient-ledger.manage": "مسؤولية الدفع وحساب المريض",
+ "finance.legacy.record": "تسجيل المعالجات والأرصدة السابقة",
+ "finance.legacy.void": "إبطال اتفاق سابق",
+ "finance.agreements.manage": "تعديل الاتفاقيات والتسويات",
+ "finance.invoices.correct": "تصحيح فاتورة",
+ "finance.payables.record": "تسجيل مستحق مورد يدوي",
+ "finance.parties.manage": "إدارة الجهات (موردون/مختبرات)",
+ "finance.opening-balances.manage": "الأرصدة الافتتاحية",
+ "finance.fx.manage": "أسعار الصرف",
+ "finance.journal.post": "قيد يدوي",
+ "finance.reconciliation.manage": "اعتماد تسويات المختبر",
+ "hr.directory.view": "دليل الموظفين والجداول",
+ "hr.attendance.record": "تسجيل الحضور",
+ "hr.attendance.correct": "تصحيح الحضور",
+ "hr.staff.manage": "ملفات الموظفين والعقود",
+ "hr.leaves.request": "طلب الإجازات وعرضها",
+ "hr.leaves.approve": "اعتماد الإجازات والأرصدة",
+ "hr.schedules.manage": "إدارة جداول الدوام",
+ "hr.payroll.manage": "الرواتب وصرفها",
+ "hr.reports.view": "تقارير الموارد البشرية",
+ "hr.settings.edit": "إعدادات الموارد البشرية",
+ "tasks.use": "المهام (المسندة والمنشأة)",
+ "messages.use": "الرسائل الداخلية والخارجية",
+ "patients.operational-summary.view": "ملخص المريض التشغيلي (للحجز والتنسيق)",
 });
 export function staffCapabilityGroup(capability: StaffCapability): StaffCapabilityGroup {
  const prefix = capability.split(".")[0];
+ if (prefix === "tasks" || prefix === "messages") return "work";
  return (STAFF_CAPABILITY_GROUPS.some(group => group.key === prefix) ? prefix : "settings") as StaffCapabilityGroup;
 }
 export const STAFF_SCOPE_LABELS: Readonly<Record<StaffRecordScope, string>> = Object.freeze({

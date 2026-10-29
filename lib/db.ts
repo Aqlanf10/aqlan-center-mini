@@ -5356,6 +5356,28 @@ export async function listPatientAppointmentsWith(q: Pick<DbClient, "query">, pa
   );
   return rows.map(toAppointment);
 }
+/** Whether a patient has a medical alert, by the same definition as the list's
+ * "medical alert" filter: the stored alert text, or the latest medical-history version's
+ * allergies, risky "yes" answers or ASA III and above. Existence only (the operational
+ * summary never carries the text). */
+export async function patientHasMedicalAlertWith(q: Pick<DbClient, "query">, patientId: number): Promise<boolean> {
+  return (await patientsWithMedicalAlertWith(q, [patientId])).has(patientId);
+}
+/** The same predicate for a batch (search results). */
+export async function patientsWithMedicalAlertWith(q: Pick<DbClient, "query">, patientIds: readonly number[]): Promise<Set<number>> {
+  if (patientIds.length === 0) return new Set();
+  const { rows } = await q.query<{ id: number }>(
+    `SELECT p.id FROM patients p WHERE p.id = ANY($1::int[]) AND (COALESCE(btrim(p.medical_alert), '') <> '' OR EXISTS (
+       SELECT 1 FROM (SELECT h.answers, h.allergies, h.asa_class FROM patient_medical_history h
+                       WHERE h.patient_id = p.id ORDER BY h.id DESC LIMIT 1) latest
+        WHERE jsonb_array_length(latest.allergies) > 0
+           OR latest.asa_class IN ('III', 'IV', 'V')
+           OR EXISTS (SELECT 1 FROM jsonb_each_text(latest.answers) answer
+                       WHERE answer.value = 'yes' AND answer.key = ANY($2::text[]))))`,
+    [[...patientIds], ALERT_QUESTION_KEYS],
+  );
+  return new Set(rows.map(row => row.id));
+}
 /** Lock-free "this clinician's patient" for one patient, inside a caller-owned
  * snapshot: the same predicate as the list filter (DOCTOR_PATIENT_CONDITION) and the
  * writers' witnesses (doctorOwnsPatient), without their FOR SHARE locks. */
@@ -8016,7 +8038,12 @@ export async function saveSettings(values: Partial<Record<SettingKey, string>>):
  */
 export async function readStoredSettings(): Promise<Map<string, { value: string; updatedAt: string }>> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ key: string; value: string; updated_at: Date }>(
+  return readStoredSettingsWith(getPool());
+}
+
+/** Stored settings with stamps over a caller-owned query facade (no ensureSchema). */
+export async function readStoredSettingsWith(q: Pick<DbClient, "query">): Promise<Map<string, { value: string; updatedAt: string }>> {
+  const { rows } = await q.query<{ key: string; value: string; updated_at: Date }>(
     `SELECT key, value, updated_at FROM settings`,
   );
   const stored = new Map<string, { value: string; updatedAt: string }>();
@@ -8093,87 +8120,107 @@ async function documentPrefixProblemInTx(
  *
  * ٣) **الأسرار**: لا تُنقل قيمتها إلى السجل بحالٍ — الحالة المعنوية وحدها.
  */
-export async function saveSettingsAudited(input: {
+export interface SettingsWriteInput {
   values: Readonly<Record<string, string>>;
   /** الطابع المتوقَّع لكل مفتاح: نصٌّ للمخزَّن، و`null` لِما لم يُخزَّن بعد. */
   expected?: Readonly<Record<string, string | null>>;
+  reason?: string | null;
+}
+export type SettingsWriteCore =
+  | { ok: true; changed: string[]; audits: { key: string; details: Record<string, unknown> }[] }
+  | { ok: false; conflict: SettingsWriteConflict }
+  | { ok: false; problem: string };
+
+/**
+ * The write itself, on the caller's open transaction: key locks, row locks, the
+ * expected-stamp comparison, the in-transaction prefix rule and the upserts. A refusal
+ * (conflict or problem) is returned BEFORE any row is written, so the caller may end
+ * its transaction either way. Audit rows are returned for the caller to write: the
+ * legacy path after commit, the canonical path in the same transaction.
+ */
+export async function writeSettingsInTransaction(client: DbClient, input: SettingsWriteInput): Promise<SettingsWriteCore> {
+  const keys = Object.keys(input.values);
+  const audits: { key: string; details: Record<string, unknown> }[] = [];
+  // FOR UPDATE cannot lock a default that has no row yet. Serialize first
+  // writes too; sorted keys avoid deadlocks for overlapping batches.
+  // (P3-1) طلبٌ يمسّ بادئةً يقفل البادئات الأربع معًا — فلا يمرّ حفظان متزامنان.
+  const prefixKeys: string[] = Object.values(DOCUMENT_PREFIX_SETTING);
+  const touchesPrefix = keys.some((key) => prefixKeys.includes(key));
+  const lockKeys = touchesPrefix ? Array.from(new Set([...keys, ...prefixKeys])) : keys;
+  for (const key of [...lockKeys].sort()) {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('clinic-setting:' || $1))", [key]);
+  }
+  const { rows } = await client.query<{ key: string; value: string; updated_at: Date }>(
+    `SELECT key, value, updated_at FROM settings WHERE key = ANY($1::text[]) FOR UPDATE`,
+    [keys],
+  );
+  const stored = new Map(rows.map((row) => [row.key, row]));
+
+  if (input.expected) {
+    for (const key of keys) {
+      if (!(key in input.expected)) continue;
+      const current = stored.get(key);
+      const currentStamp = current ? current.updated_at.toISOString() : null;
+      if ((input.expected[key] ?? null) !== currentStamp) {
+        return { ok: false, conflict: { key, currentUpdatedAt: currentStamp } };
+      }
+    }
+  }
+
+  if (touchesPrefix) {
+    const problem = await documentPrefixProblemInTx(
+      client,
+      Object.fromEntries(keys.filter((key) => prefixKeys.includes(key)).map((key) => [key, String(input.values[key])])),
+    );
+    if (problem) return { ok: false, problem };
+  }
+
+  const changed: string[] = [];
+  for (const key of keys) {
+    const definition = settingDefinition(key);
+    if (!definition) continue;
+    const current = stored.get(key);
+    const before = current?.value ?? SETTING_DEFAULTS[key as SettingKey] ?? "";
+    const after = String(input.values[key]).trim();
+    // Explicitly saving a display default is still the first persisted value.
+    // The advisory lock and expected stamp above also protect this first write.
+    if (current && before === after) continue;
+    await client.query(
+      `INSERT INTO settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key, after],
+    );
+    changed.push(key);
+    audits.push({
+      key,
+      details: settingAuditDetails({ definition, before, after, reason: input.reason, previouslyStored: !!current }),
+    });
+  }
+  return { ok: true, changed, audits };
+}
+
+export async function saveSettingsAudited(input: SettingsWriteInput & {
   actor: string;
   actorRole?: string | null;
-  reason?: string | null;
   mode?: "update" | "reset";
 }): Promise<SettingsWriteResult> {
   await ensureSchema();
   const keys = Object.keys(input.values);
   if (keys.length === 0) return { ok: true, settings: await getSettings(), changed: [] };
 
-  const audits: { key: string; details: Record<string, unknown> }[] = [];
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // FOR UPDATE cannot lock a default that has no row yet. Serialize first
-    // writes too; sorted keys avoid deadlocks for overlapping batches.
-    // (P3-1) طلبٌ يمسّ بادئةً يقفل البادئات الأربع معًا — فلا يمرّ حفظان متزامنان.
-    const prefixKeys: string[] = Object.values(DOCUMENT_PREFIX_SETTING);
-    const touchesPrefix = keys.some((key) => prefixKeys.includes(key));
-    const lockKeys = touchesPrefix ? Array.from(new Set([...keys, ...prefixKeys])) : keys;
-    for (const key of [...lockKeys].sort()) {
-      await client.query("SELECT pg_advisory_xact_lock(hashtext('clinic-setting:' || $1))", [key]);
-    }
-    const { rows } = await client.query<{ key: string; value: string; updated_at: Date }>(
-      `SELECT key, value, updated_at FROM settings WHERE key = ANY($1::text[]) FOR UPDATE`,
-      [keys],
-    );
-    const stored = new Map(rows.map((row) => [row.key, row]));
-
-    if (input.expected) {
-      for (const key of keys) {
-        if (!(key in input.expected)) continue;
-        const current = stored.get(key);
-        const currentStamp = current ? current.updated_at.toISOString() : null;
-        if ((input.expected[key] ?? null) !== currentStamp) {
-          await client.query("ROLLBACK");
-          return { ok: false, conflict: { key, currentUpdatedAt: currentStamp } };
-        }
-      }
-    }
-
-    if (touchesPrefix) {
-      const problem = await documentPrefixProblemInTx(
-        client,
-        Object.fromEntries(keys.filter((key) => prefixKeys.includes(key)).map((key) => [key, String(input.values[key])])),
-      );
-      if (problem) {
-        await client.query("ROLLBACK");
-        return { ok: false, problem };
-      }
-    }
-
-    const changed: string[] = [];
-    for (const key of keys) {
-      const definition = settingDefinition(key);
-      if (!definition) continue;
-      const current = stored.get(key);
-      const before = current?.value ?? SETTING_DEFAULTS[key as SettingKey] ?? "";
-      const after = String(input.values[key]).trim();
-      // Explicitly saving a display default is still the first persisted value.
-      // The advisory lock and expected stamp above also protect this first write.
-      if (current && before === after) continue;
-      await client.query(
-        `INSERT INTO settings (key, value) VALUES ($1, $2)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-        [key, after],
-      );
-      changed.push(key);
-      audits.push({
-        key,
-        details: settingAuditDetails({ definition, before, after, reason: input.reason, previouslyStored: !!current }),
-      });
+    const result = await writeSettingsInTransaction(client, input);
+    if (!result.ok) {
+      await client.query("ROLLBACK");
+      return result;
     }
     await client.query("COMMIT");
 
     invalidateSettingsCache();
     /* التدقيق بعد الإتمام: صفُّ تدقيقٍ لتغييرٍ تراجع أسوأ من غياب الصفّ. */
-    for (const entry of audits) {
+    for (const entry of result.audits) {
       await recordAudit({
         action: input.mode === "reset" ? SETTINGS_AUDIT_RESET : SETTINGS_AUDIT_UPDATE,
         entity: SETTINGS_AUDIT_ENTITY,
@@ -8183,7 +8230,7 @@ export async function saveSettingsAudited(input: {
         actorRole: input.actorRole ?? null,
       });
     }
-    return { ok: true, settings: await getSettings(), changed };
+    return { ok: true, settings: await getSettings(), changed: result.changed };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -23823,9 +23870,6 @@ const DOCUMENT_ASSOCIATIONS_SQL = `
   ))`;
 
 /** صور شدّاتٍ — ألبوم الجلسة هو صورُها، تُحضَّر دفعةً واحدة لا استعلامًا لكل جلسة. */
-async function photosForAdjustments(adjustmentIds: number[]): Promise<Map<number, PatientDocument[]>> {
-  return photosForAdjustmentsWith(getPool(), adjustmentIds);
-}
 async function photosForAdjustmentsWith(q: Pick<DbClient, "query">, adjustmentIds: number[]): Promise<Map<number, PatientDocument[]>> {
   if (adjustmentIds.length === 0) return new Map();
   const { rows } = await q.query<DocumentRow>(
@@ -29715,9 +29759,6 @@ async function referralBlockersByCase(
 }
 
 /** أحداث الإحالات الداخلية في خط المريض الزمني — من سطور التدقيق التي كُتبت مع كل خطوة. */
-async function referralTimelineEvents(patientId: number, cap: number): Promise<TimelineEvent[]> {
-  return referralTimelineEventsWith(getPool(), patientId, cap);
-}
 async function referralTimelineEventsWith(q: Pick<DbClient, "query">, patientId: number, cap: number): Promise<TimelineEvent[]> {
   const { rows } = await q.query<{
     id: string; action: string; created_at: Date; referral_id: number; to_name: string; reason: string;

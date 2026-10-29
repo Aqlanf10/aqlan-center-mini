@@ -24,6 +24,8 @@ interface CorePatient {
   guardianName: string | null; guardianPhone: string | null; nationalId: string | null; email: string | null;
   preferredChannel: string | null; flags: string[] | null; createdAt: string;
   medicalAlert?: string | null; note?: string | null; referralSource?: string | null; referredBy?: string | null;
+  /** الملخص التشغيلي: وجود تنبيه طبي دون نصه، ووجود حالة تقويم نشطة. */
+  hasMedicalAlert?: boolean; activeOrtho?: boolean;
 }
 interface PatientFileView {
   patient: CorePatient;
@@ -82,6 +84,11 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         </div>
         {patient.medicalAlert ? (
           <p role="note" className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700">⚠ {patient.medicalAlert}</p>
+        ) : patient.hasMedicalAlert ? (
+          <p role="note" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800">⚠ يوجد تنبيه طبي — نسّق مع الطبيب قبل الحجز</p>
+        ) : null}
+        {patient.activeOrtho ? (
+          <p className="mt-2 inline-block rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-bold text-indigo-700">حالة تقويم نشطة</p>
         ) : null}
         {patient.flags?.length ? (
           <p className="mt-2 flex flex-wrap gap-1.5">

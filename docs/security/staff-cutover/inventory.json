@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "4f40852ca39767582e0c2082bb0c5e835fc85f60aa8a21f416833a6b270523bf",
+  "sourceDigest": "d92fad876965e8ad799abbf277dcef3ee3b81be1c6f2abfbede70a02d3908d08",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -33,7 +33,8 @@
     "inventory.reconcile",
     "inventory.costs.view",
     "finance.suppliers.view",
-    "patients.create"
+    "patients.create",
+    "settings.view"
   ],
   "summary": {
     "routeMethods": 414,
@@ -3706,15 +3707,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 93
         },
         {
           "symbol": "requireSession",
-          "line": 67
+          "line": 115
         },
         {
           "symbol": "requireSession",
-          "line": 151
+          "line": 202
         }
       ]
     },
@@ -13220,15 +13221,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 93
         },
         {
           "symbol": "requireSession",
-          "line": 67
+          "line": 115
         },
         {
           "symbol": "requireSession",
-          "line": 151
+          "line": 202
         }
       ]
     },
@@ -13252,15 +13253,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 93
         },
         {
           "symbol": "requireSession",
-          "line": 67
+          "line": 115
         },
         {
           "symbol": "requireSession",
-          "line": 151
+          "line": 202
         }
       ]
     },
@@ -13284,15 +13285,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 93
         },
         {
           "symbol": "requireSession",
-          "line": 67
+          "line": 115
         },
         {
           "symbol": "requireSession",
-          "line": 151
+          "line": 202
         }
       ]
     },
