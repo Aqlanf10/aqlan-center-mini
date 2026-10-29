@@ -280,6 +280,10 @@ html[data-reprint="true"] .reprint-mark {
     margin: 10mm 10mm 14mm;
     @bottom-center { content: counter(page) " / " counter(pages); direction: ltr; font: 8pt Arial, sans-serif; color: #475569; }
   }
+  /* HR uses print-sheet rather than .sheet. Its desktop preview dimensions
+     must not survive inside the named page's printable content box. */
+  .hr-staff-sheet,
+  .hr-tasks-sheet { width: auto; min-height: 0; margin: 0; padding: 0; }
   .hr-staff-sheet { page: hr-staff; }
   .hr-tasks-sheet { page: hr-tasks; }
 }
