@@ -198,7 +198,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/[id]/materials": { GET: CLINIC },
   "/api/patients/[id]/medical-history": { GET: CLINIC, POST: CLINIC },
   "/api/patients/[id]/merge": { POST: ADMIN },
-  "/api/patients/[id]/number": { GET: ADMIN, PATCH: ADMIN },
+  "/api/patients/[id]/number": { PATCH: ADMIN },
   "/api/patients/[id]/photo": { PUT: CLINIC },
   "/api/patients/[id]/plans": { GET: CLINIC },
   "/api/patients/[id]/clinical-context": { GET: CLINIC },

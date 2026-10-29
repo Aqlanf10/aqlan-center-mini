@@ -29,5 +29,5 @@ it("does not expose an unused identity read endpoint",()=>{expect(numbers).not.t
 it("uses the dedicated future-only floor command",async()=>{mock.session={role:"admin"};const body={minimumNext:"8000",expectedVersion:"1",expectedNextNumber:"P-07000",reason:"Future files"};expect((await settings.PATCH(request(body))).status).toBe(200);expect(mock.configure).toHaveBeenCalledWith(mock.session,body);});
 
 it.each(["/api/patients/[id]/number","/api/settings/patient-numbering"])("registers the strict admin-only read/write boundary for %s",pattern=>{
- expect(HTTP_PERMISSIONS[pattern]).toEqual({GET:["admin"],PATCH:["admin"]});
+ expect(HTTP_PERMISSIONS[pattern]).toEqual(pattern === "/api/patients/[id]/number" ? {PATCH:["admin"]} : {GET:["admin"],PATCH:["admin"]});
 });
