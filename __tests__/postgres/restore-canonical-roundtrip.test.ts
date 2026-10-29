@@ -46,6 +46,7 @@ import { supplierInvoiceDigest } from "../../lib/inventory-domain/supplier-finan
 import { valuationSnapshot, type SupplierInvoiceRevision, type RequestRevision, type PurchaseOrder } from "../../lib/inventory-domain/procurement";
 import { SUPPLIER_PROTOCOL, type SupplierIntent, type SupplierAction, type SupplierAdmission } from "../../lib/inventory-supplier-protocol";
 import { ProtectedInventoryHistoryError } from "../../lib/inventory-domain/reset-protection";
+import { OWNER_ONLY_OPERATIONS, STAFF_CAPABILITIES } from "../../lib/staff-capability-catalogue";
 assertRealPostgresUrl();
 stubPostgresEnv();
 vi.stubEnv("SESSION_SECRET", "synthetic-restore-roundtrip-secret-2026");
@@ -286,6 +287,23 @@ describe("after a SYNTHETIC seal of the target (test fixture) and the owner's co
     const independent = await supplierInvoice();
     const result = await execute("manager", await admit("manager", await intentFor(independent)));
     expect(result).toMatchObject({ status: "committed", result: { status: "posted" } });
+  });
+
+  it("R5 refusal (no recovery exists yet): neither a delegate holding supplier-invoices.cancel nor the owner releases a held source intent; nothing moves", async () => {
+    const snapshot = async () => (await db.getPool().query(`SELECT
+      (SELECT count(*) FROM inventory_command_retirements)::int AS retirements, (SELECT count(*) FROM inventory_command_bindings)::int AS bindings,
+      (SELECT count(*) FROM inventory_supplier_intents)::int AS intents, (SELECT count(*) FROM inventory_supplier_intent_rejections)::int AS rejections,
+      (SELECT count(*) FROM audit_log)::int AS audits`)).rows[0];
+    const before = await snapshot();
+    for (const who of ["manager", "owner"] as const) {
+      await expect(transport.executeSupplierIntentCanonical(await session(who), pendingAdmission, "Synthetic release attempt")).rejects.toMatchObject({ code: "supplier_saved_authority_mismatch" });
+      await expect(execute(who, pendingAdmission)).rejects.toMatchObject({ code: "supplier_saved_authority_mismatch" });
+    }
+    expect(await snapshot()).toEqual(before);
+    // The reviewed recovery is not an operation of the live catalogue (no grant and no owner authority to call it).
+    expect(STAFF_CAPABILITIES as readonly string[]).not.toContain("inventory.supplier-intent.recover");
+    expect(OWNER_ONLY_OPERATIONS as readonly string[]).not.toContain("inventory.supplier-intent.recover");
+    expect(Object.keys(transport).filter(name => /recover/i.test(name))).toEqual([]);
   });
 
   it("reset after restore refuses while inventory history exists, before any backup runs", async () => {
