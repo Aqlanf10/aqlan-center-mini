@@ -146,7 +146,11 @@ it("a provider clinical-epoch change committed while issuance waits denies the p
  if (fresh.kind === "issued") expect(revalidateVerifiedDurableSession(readVerifiedDurableSession(fresh.token)!)!.durableIdentity.provider).toEqual({ partyId: 20, clinicalEpoch: await epoch() });
 });
 
-it("password work is bound to the subject incarnation: a re-bound numeric ID never inherits it", async () => {
+// Scope (Dot 6479317375 item 3): this proves the database refuses a rebind, and that a
+// candidate/proof subject mismatch (injected through a Proxy) refuses after the password
+// match. It is NOT a real permitted ID-reuse race; that lifecycle boundary does not exist
+// yet and is proved when the preparation/seal service introduces it.
+it("subject binding: the database refuses a rebind, and an injected candidate/proof subject mismatch refuses", async () => {
  // Ready identity history is immutable: the database itself refuses a rebind.
  await expect(pool.query(`UPDATE ${schema}.staff_identity_current SET subject_id=gen_random_uuid() WHERE user_id=3`)).rejects.toThrow();
  // If the candidate's subject differed from the locked proof (ID reuse across a
@@ -185,7 +189,9 @@ it("audit failure rolls back issuance and yields no token", async () => {
  expect(await auditCount()).toBe(before);
 });
 
-it("a COMMIT failure yields no token, persists nothing and never recycles an uncertain connection", async () => {
+// Scope: a COMMIT-time REJECTION (deferred constraint) rolls back. The lost-acknowledgement
+// case (server committed, client saw an error) is the two cases below.
+it("a COMMIT-time rejection yields no token, persists nothing and leaves the pool healthy", async () => {
  // A deferred constraint trigger fails exactly at COMMIT, after every proof passed.
  const before = await auditCount();
  await pool.query(`CREATE FUNCTION ${schema}.synthetic_commit_block() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'synthetic commit failure'; END$$`);
@@ -198,6 +204,63 @@ it("a COMMIT failure yields no token, persists nothing and never recycles an unc
  }
  expect(await auditCount()).toBe(before);
  // The pool is still healthy for the next issuance (no leaked aborted transaction).
+ expect((await issue("synthetic-reception", "reception-pass-3")).kind).toBe("issued");
+});
+
+/** A pool whose clients run the real COMMIT, then report a transport error: the
+ * server committed but the acknowledgement was lost. Optionally the cleanup ROLLBACK
+ * fails too. Records how each client was released. */
+function lostCommitAckPool(options: { cleanupFails: boolean }) {
+ const releases: (boolean | undefined)[] = [];
+ const wrapped = new Proxy(pool, { get(target, key, receiver) {
+  // pg-pool's own query() calls this.connect(callback): keep every other member bound to
+  // the real pool so only the issuer's explicit transaction lease is wrapped.
+  if (key !== "connect") { const value = Reflect.get(target, key, receiver); return typeof value === "function" ? value.bind(target) : value; }
+  return async () => {
+   const client = await target.connect();
+   // Only the issuance transaction (the one that writes the login audit row) loses its
+   // acknowledgement; the login-limit transactions commit normally.
+   let issuance = false, committed = false;
+   return new Proxy(client, { get(c, k, r) {
+    if (k === "query") return async (...args: Parameters<typeof client.query>) => {
+     const sql = typeof args[0] === "string" ? args[0] : "";
+     const values: unknown[] = Array.isArray(args[1]) ? (args[1] as unknown[]) : [];
+     if (/INSERT INTO\s+\S*audit_log/i.test(sql) && values.includes("auth.canonical_login")) issuance = true;
+     if (sql === "COMMIT" && issuance) {
+      await (c.query as (...a: unknown[]) => Promise<unknown>).call(c, "COMMIT");
+      committed = true;
+      throw new Error("synthetic lost COMMIT acknowledgement");
+     }
+     if (sql === "ROLLBACK" && committed && options.cleanupFails) throw new Error("synthetic cleanup failure");
+     return (c.query as (...a: unknown[]) => Promise<unknown>).apply(c, args);
+    };
+    if (k === "release") return (destroy?: boolean) => { if (issuance) releases.push(destroy); return c.release(destroy); };
+    return Reflect.get(c, k, r);
+   } });
+  };
+ } });
+ return { wrapped, releases };
+}
+
+it("a lost COMMIT acknowledgement returns no token and keeps the original error, even though the server committed", async () => {
+ const before = await auditCount();
+ const { wrapped, releases } = lostCommitAckPool({ cleanupFails: false });
+ await expect(issueDurableStaffSessionIn(wrapped, schema, { username: "synthetic-reception", password: "reception-pass-3", headers: headers() }))
+  .rejects.toThrow("synthetic lost COMMIT acknowledgement");
+ // The server did commit: the login audit row exists although no session was issued.
+ // That is the accepted outcome of an unknown commit (no token is ever derived from it);
+ // the test does not claim the audit was rolled back.
+ expect(await auditCount()).toBe(before + 1);
+ // The cleanup ROLLBACK succeeded, so the connection was provably clean and reused.
+ expect(releases).toEqual([undefined]); // released without destroy
+ expect((await issue("synthetic-reception", "reception-pass-3")).kind).toBe("issued");
+});
+
+it("a lost COMMIT acknowledgement with a failed cleanup destroys the uncertain connection", async () => {
+ const { wrapped, releases } = lostCommitAckPool({ cleanupFails: true });
+ await expect(issueDurableStaffSessionIn(wrapped, schema, { username: "synthetic-reception", password: "reception-pass-3", headers: headers() }))
+  .rejects.toThrow("synthetic lost COMMIT acknowledgement"); // the original error, not the cleanup error
+ expect(releases).toEqual([true]);
  expect((await issue("synthetic-reception", "reception-pass-3")).kind).toBe("issued");
 });
 

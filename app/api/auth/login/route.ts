@@ -241,7 +241,7 @@ export async function POST(request: Request) {
           ? "الأداة غير مكتملة الإعداد: SESSION_SECRET ناقص في إعدادات النشر."
           : "تعذّر تسجيل الدخول. أعد المحاولة.",
       },
-      { status: missingSecret ? 503 : 500 },
+      { status: missingSecret ? 503 : 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
