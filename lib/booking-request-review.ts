@@ -8,6 +8,7 @@ export async function bookingRequestDoctor(client: DbClient, input: {
 }): Promise<number | null> {
   if (!input.caseId && !input.followUp) return input.doctorId;
   if (!input.patientId) throw new Error("BOOKING_CASE_REQUIRED");
+  if (!input.caseId) await client.query("LOCK TABLE clinical_cases IN SHARE MODE");
   // SHARE also protects responsibility edits until the appointment commit.
   const { rows } = await client.query<{ id: number; responsible_party_id: number | null }>(
     `SELECT id,responsible_party_id FROM clinical_cases WHERE patient_id=$1 AND status IN ('active','waiting')

@@ -251,7 +251,7 @@ export default function RequestsPage() {
                   <p className="mt-1 text-xs text-slate-500">
                     {request.preferredDate ? friendlyDate(request.preferredDate) : "أي يوم"}
                     {" · "}
-                    {PERIOD_LABELS[request.preferredPeriod]}
+                    {request.preferences?.time ? friendlyTime(request.preferences.time) : PERIOD_LABELS[request.preferredPeriod]}
                     {" · "}
                     {hoursWaiting(request.createdAt, now)}
                   </p>

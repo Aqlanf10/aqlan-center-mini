@@ -620,3 +620,20 @@ Application shade edits commit their audit record in the same transaction and
 use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
+
+
+### 0090_booking_request_preferences.sql
+
+Adds nullable `request_key`/`request_hash`, a non-null JSONB `preferences` column
+with an empty-object default, and a partial unique request-key index to
+`booking_requests`. These fields preserve public service/doctor/time preferences
+and an exact retry receipt. Existing rows, patient identities, invoices, payments,
+and appointment links are not rewritten. Preferences are advisory and are
+validated again against current settings and duty at reception confirmation.
+
+The numbered and runtime SQL are byte-identical and checksum registered. No
+historical request keys are invented. As with other ordinary PostgreSQL DDL,
+application requires a reviewed maintenance window because ALTER TABLE and index
+creation acquire locks. This branch has applied it only to freshly created,
+isolated synthetic databases. Staging verification is required before release;
+no Production application is authorized by this work.

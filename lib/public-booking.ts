@@ -5,7 +5,7 @@ import { doctorAvailabilitySuggestions } from "./appointment-availability-adviso
 import { addDays, clinicDateString, toMinutes } from "./schedule";
 import type { BookingRequestInput } from "./booking";
 
-async function liveSettings() {
+export async function publicBookingSettings() {
   await ensureSchema();
   const client = await getPool().connect();
   try { return await getSettingsInTransaction(client); } finally { client.release(); }
@@ -13,7 +13,7 @@ async function liveSettings() {
 
 /** Public allowlist only. No patient rows, HR identities, block reasons or internal settings. */
 export async function publicBookingCatalog() {
-  const [settings, services, doctors] = await Promise.all([liveSettings(), listAppointmentServices(), listParties("doctor")]);
+  const [settings, services, doctors] = await Promise.all([publicBookingSettings(), listAppointmentServices(), listParties("doctor")]);
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const horizon = Math.min(366, Math.max(1, Number(settings["scheduling.max_days_ahead"]) || 60));
   const workingDays = (settings["clinic.working_days"] ?? "0,1,2,3,4,5,6").split(",").filter(Boolean).map(Number);
@@ -30,7 +30,7 @@ export async function publicBookingTimes(date: string, serviceId: number, doctor
   if (!catalog.days.includes(date) || !catalog.services.some(service => service.id === serviceId)
     || !catalog.doctors.some(doctor => doctor.id === doctorId)) throw new Error("BOOKING_SELECTION_INVALID");
   const [services, context, appointments, blocks, roster] = await Promise.all([
-    listAppointmentServices(), liveSettings().then(loadCapacityContext), listAppointmentsByDate(date),
+    listAppointmentServices(), publicBookingSettings().then(loadCapacityContext), listAppointmentsByDate(date),
     loadProviderBlockWindows(doctorId, date), readDoctorAvailabilityAdvisory(doctorId, date, CLINIC_TIME_ZONE),
   ]);
   const service = services.find(row => row.id === serviceId);

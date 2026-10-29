@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSetting } from "@/components/SettingsProvider";
 import { Logo } from "@/components/Icon";
 import {
   ChatComposer,
@@ -179,6 +180,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: { fullName: string; patie
 }
 
 function AppointmentsTab() {
+  const clinicPhone = useSetting("clinic.phone");
   const [feed, setFeed] = useState<{ today: string; appointments: PortalAppointmentView[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -218,7 +220,7 @@ function AppointmentsTab() {
   if (error) return <p className="rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm font-bold text-danger-800">{error}</p>;
   if (!feed) return <p className="text-sm text-slate-500">جارٍ التحميل…</p>;
   if (feed.appointments.length === 0) {
-    return <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">لا مواعيد قادمة في ملفك. لطلب موعد استخدم صفحة طلب الموعد أو اتصل بالاستقبال.</p>;
+    return <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">لا مواعيد قادمة في ملفك. <a href="/book" className="font-bold underline">اطلب موعدًا</a> أو اتصل بالاستقبال.</p>;
   }
 
   return (
@@ -230,7 +232,6 @@ function AppointmentsTab() {
               <p className="font-black text-navy-900">{friendlyDate(appointment.scheduledDate)}</p>
               <p className="text-sm text-slate-600">الساعة {appointment.scheduledTime} · {appointment.durationMinutes} دقيقة</p>
               {appointment.appointmentType && <p className="text-xs text-slate-500">{appointment.appointmentType}</p>}
-              {appointment.note && <p className="mt-1 text-xs text-slate-500">{appointment.note}</p>}
             </div>
             {appointment.patientConfirmedAt ? (
               <span className="rounded-lg bg-success-100 px-2 py-1 text-xs font-black text-success-800">مؤكد الحضور ✓</span>
@@ -245,6 +246,10 @@ function AppointmentsTab() {
           </div>
         </article>
       ))}
+      <p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+        لإلغاء الموعد أو تغيير وقته تواصل مع الاستقبال.
+        {clinicPhone && <> <a href={`tel:${clinicPhone}`} dir="ltr" className="font-bold underline">{clinicPhone}</a></>}
+      </p>
     </section>
   );
 }

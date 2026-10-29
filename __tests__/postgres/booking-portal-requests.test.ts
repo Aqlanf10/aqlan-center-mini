@@ -50,6 +50,7 @@ it("inherits the approved responsible doctor for every specialty and rejects amb
       await client.query("UPDATE clinical_cases SET responsible_party_id=$2 WHERE id=$1", [caseId, doctors[1].id]);
       await expect(bookingRequestDoctor(client, { patientId: patient.id, caseId, doctorId: doctors[0].id, followUp: true })).rejects.toThrow("BOOKING_RESPONSIBLE_CHANGED");
       expect(await bookingRequestDoctor(client, { patientId: patient.id, caseId, doctorId: null, followUp: true })).toBe(doctors[1].id);
+      if (specialty === "orthodontics") expect(await bookingRequestDoctor(client, { patientId: patient.id, caseId: null, doctorId: null, followUp: true })).toBe(doctors[1].id);
     }
     await expect(bookingRequestDoctor(client, { patientId: patient.id, caseId: null, doctorId: null, followUp: true })).rejects.toThrow("BOOKING_CASE_REQUIRED");
     await client.query("ROLLBACK");

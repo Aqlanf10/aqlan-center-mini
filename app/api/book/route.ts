@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { clientIpFromForwardedFor } from "@/lib/net";
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, createBookingRequest, getSettings } from "@/lib/db";
+import { CLINIC_TIME_ZONE, createBookingRequest } from "@/lib/db";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
-import { publicBookingCatalog, publicBookingTimes, validatePublicBookingSelection } from "@/lib/public-booking";
+import { publicBookingCatalog, publicBookingSettings, publicBookingTimes, validatePublicBookingSelection } from "@/lib/public-booking";
 import { validateBookingRequest } from "@/lib/booking";
 import { clinicDateString } from "@/lib/schedule";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -80,7 +80,9 @@ export async function POST(request: Request) {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   /* أقصى مدى للحجز من الإعداد `scheduling.max_days_ahead` — والافتراضيّ داخل
      الدالّة يحفظ سلوك اليوم إن غاب المفتاح أو فسد. */
-  const bookingSettings = await getSettings();
+  let bookingSettings;
+  try { bookingSettings = await publicBookingSettings(); }
+  catch { return NextResponse.json({ message: "تعذّر التحقق من إعدادات الحجز. أعد المحاولة." }, { status: 503 }); }
   const validation = validateBookingRequest(
     source, today, Number(bookingSettings["scheduling.max_days_ahead"]),
   );
