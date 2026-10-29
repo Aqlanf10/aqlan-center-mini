@@ -34,12 +34,12 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 316 |
+| existing | 315 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 28 |
+| canonical-done | 29 |
 
 | Record scope | Routes |
 |---|---|
@@ -344,6 +344,16 @@ Read only. Record reads `read:appointments.day` and `read:appointments.mine`, on
 - **Personal schedule:** the actor's own validated clinician party only (`clinician_link_required`, 403 otherwise), never a client-selected doctor. The file link is offered only when the patient is inside the actor's current patient scope; otherwise it is `null`, not an error.
 - **Screen:** `/appointments` («المواعيد») is registered for an account with an appointment scope: a read-only day view (previous/next day, lab readiness chips), with the existing «جدول مواعيدي» card (it calls only `/api/appointments/mine`) for an `own`-scope clinician. A route layout (`app/appointments/layout.tsx`) renders the canonical view for a canonical session, so the legacy page is never mounted for it; the legacy page itself is unchanged. Booking, rescheduling and cancelling are the next slices.
 - **Tests:** PG `appointments-canonical-day` (5): all versus own rows, lab readiness only with the summary, patient scope alone refused, invalid dates, the personal schedule and its file link by patient scope, no clinician link refused. Built journey `canonical-appointments-journey` (3).
+
+### Slice 16 — booking (`POST /api/appointments`)
+One admitted `appointments.create` transaction through **the same capacity engine** (`commandCanonicalBooking` → `bookAppointment(..., { client, audit })`). `writeAppointmentInDay` gains an optional caller transaction: with it, the day locks, the judgement and the insert run on the admitted transaction and the writer neither begins, commits nor rolls back; without it nothing changes. `appointments.create` joins `CLINIC_RUNTIME_ACTIONS`.
+- **Atomic audit:** the booking, its `appointment.create` row and any `appointment.capacity_override` row commit or roll back together (the legacy route writes no creation row and its override row after the commit; both unchanged).
+- **Patient:** appointment scope `all` books any patient; `own` books only the clinician's own patients (the patient list's condition), so a booking never pulls a new patient into the clinician's scope. Outside answers like a missing patient (404).
+- **Doctor:** `own` books on its own clinician party only (default); another doctor is refused (403 `booking_doctor_not_allowed`), and a return booking whose case clinician is someone else rolls back.
+- **Capacity override:** only with `appointments.override-capacity`. The engine receives the display label `canonical`, so neither the legacy admin override nor the doctor self-assignment by role ever applies.
+- **Refusals:** every engine refusal rolls the transaction back and answers as the legacy route does: 400 with the engine's code (for example `return_booking_context_required`), or 409 with the conflict (reasons, suggestion, `canOverride`, and the nearby-appointment confirmation token).
+- **Screen:** the canonical day view offers «حجز موعد» to `appointments.create`: the patient from the canonical search, time, duration and note; a full chair shows its reasons and suggestion; the override reason field appears only with the override grant; the nearby-appointment confirmation is a second, explicit click. Return bookings, rescheduling and cancelling are later slices.
+- **Tests:** PG `appointments-canonical-booking` (7): creation audit, a role label never overrides capacity, override with atomic audit, engine refusals with codes, two concurrent bookings for the last chair, own scope (outside equals missing, own party only), admission and revocation, audit rollback. Built journey `canonical-appointments-journey` now 5 (mobile booking with a full-chair refusal shown, then a successful booking with its audit).
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.

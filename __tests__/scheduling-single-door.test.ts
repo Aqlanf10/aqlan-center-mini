@@ -83,6 +83,8 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
     expect(callers("bookAppointment")).toEqual([
       "app/api/appointments/route.ts",
       "lib/ai-tools/action-tools.ts",
+      // The canonical booking (M2 slice 16) is the same door on the admitted transaction.
+      "lib/canonical-appointments.ts",
       "lib/waiting-list-booking.ts",
     ]);
     expect(callers("rescheduleAppointment")).toEqual(["app/api/appointments/[id]/route.ts"]);

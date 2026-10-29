@@ -4461,39 +4461,52 @@ export async function writeAppointmentInDay<T>(input: {
     | ({ ok: true } | { ok: false; conflict: unknown })
     | Promise<{ ok: true } | { ok: false; conflict: unknown }>;
   commit: (client: DbClient) => Promise<T>;
+  /** The caller's own transaction (canonical, M2 slice 16): no BEGIN, COMMIT or
+   * ROLLBACK here; a refused judgement returns before any write and the caller
+   * decides. Without it the writer owns its transaction, as before. */
+  client?: DbClient;
 }): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
+  if (input.client) return writeAppointmentInDayOn(input.client, input);
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await input.beforeLocks?.(client);
-    // Lock the whole forward warning window before reading. Adjacent-day
-    // bookings share a lock, so confirmation snapshots cannot miss a concurrent
-    // committed appointment. Sorted order matches cross-day rescheduling.
-    for (const date of [input.date, addDays(input.date, 1), addDays(input.date, 2)]) {
-      await client.query(
-        `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`, [date],
-      );
-    }
-    const { rows } = await client.query<AppointmentRow>(
-      `${APPOINTMENT_SELECT} WHERE a.scheduled_date = $1 ORDER BY a.scheduled_time`,
-      [input.date],
-    );
-    const day = rows.map(toAppointment);
-    const verdict = await input.judge(day, client);
-    if (!verdict.ok) {
-      await client.query("ROLLBACK");
-      return { ok: false, conflict: verdict.conflict };
-    }
-    const value = await input.commit(client);
-    await client.query("COMMIT");
-    return { ok: true, value };
+    const result = await writeAppointmentInDayOn(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+async function writeAppointmentInDayOn<T>(client: DbClient, input: {
+  date: string;
+  beforeLocks?: (client: DbClient) => Promise<void>;
+  judge: (day: Appointment[], client: DbClient) =>
+    | ({ ok: true } | { ok: false; conflict: unknown })
+    | Promise<{ ok: true } | { ok: false; conflict: unknown }>;
+  commit: (client: DbClient) => Promise<T>;
+}): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
+  await input.beforeLocks?.(client);
+  // Lock the whole forward warning window before reading. Adjacent-day
+  // bookings share a lock, so confirmation snapshots cannot miss a concurrent
+  // committed appointment. Sorted order matches cross-day rescheduling.
+  for (const date of [input.date, addDays(input.date, 1), addDays(input.date, 2)]) {
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`, [date],
+    );
+  }
+  const { rows } = await client.query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.scheduled_date = $1 ORDER BY a.scheduled_time`,
+    [input.date],
+  );
+  const day = rows.map(toAppointment);
+  const verdict = await input.judge(day, client);
+  if (!verdict.ok) return { ok: false, conflict: verdict.conflict };
+  return { ok: true, value: await input.commit(client) };
 }
 
 /**

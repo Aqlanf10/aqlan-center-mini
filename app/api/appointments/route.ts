@@ -12,7 +12,7 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
-import { readCanonicalAppointmentDay } from "@/lib/canonical-appointments";
+import { CanonicalAppointmentRefusal, CanonicalBookingConflict, commandCanonicalBooking, parseCanonicalBooking, readCanonicalAppointmentDay } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +89,24 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 16): one admitted appointments.create transaction
+    // through the same capacity engine; refusals answer as below.
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; return NextResponse.json({ code: "invalid_booking_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try {
+      const result = await commandCanonicalBooking(selected.handle, parseCanonicalBooking(canonicalBody));
+      return NextResponse.json(result.warning ? { ...result.appointment, warning: result.warning } : result.appointment, { status: 201, headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalBookingConflict) return NextResponse.json(error.conflict, { status: 409, headers: NO_STORE });
+      if (error instanceof CanonicalAppointmentRefusal && error.engineCode) {
+        return NextResponse.json({ code: error.engineCode, message: error.message }, { status: error.status, headers: NO_STORE });
+      }
+      return canonicalWaitingFailure(error, "تعذّر حجز الموعد. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   let body: unknown;

@@ -18,7 +18,7 @@ import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor }
 import type { Role } from "./roles";
 import {
   getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
-  writeAppointmentAcrossDays, writeAppointmentInDay, type DbClient,
+  writeAppointmentAcrossDays, writeAppointmentInDay, type AuditInput, type DbClient,
 } from "./db";
 import {
   prepareCapacityEvaluator, loadCapacityContext, resolveService, type CapacityContext,
@@ -139,8 +139,10 @@ export async function recordCapacityOverride(input: {
   actor: string;
   actorRole?: string | null;
   channel: BookingActor["channel"];
-}): Promise<void> {
-  await recordAudit({
+}, audit?: (input: AuditInput) => Promise<void>): Promise<void> {
+  // The canonical path passes its transaction's audit writer: the row is atomic with
+  // the booking. The legacy path keeps its best-effort write after the commit.
+  const row: AuditInput = {
     action: "appointment.capacity_override",
     entity: "appointment",
     entityId: String(input.appointmentId),
@@ -156,7 +158,9 @@ export async function recordCapacityOverride(input: {
       القناة: input.channel,
       السبب: input.reason,
     },
-  }).catch(() => {});
+  };
+  if (audit) await audit(row);
+  else await recordAudit(row).catch(() => {});
 }
 
 function timeToMinutes(time: string): number {
@@ -350,6 +354,10 @@ export async function judgeBookingInDay(input: {
  */
 export async function bookAppointment(
   input: BookAppointmentInput, actor: BookingActor,
+  /** The canonical path (M2 slice 16): its admitted transaction, and an atomic audit
+   * writer on it for the capacity override. Without them, as before: the engine owns
+   * its transaction and the override audit is written after the commit. */
+  options: { client?: DbClient; audit?: (input: AuditInput) => Promise<void> } = {},
 ): Promise<BookingResult> {
   const patientId = Number(input.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
@@ -423,6 +431,7 @@ export async function bookAppointment(
 
   const result = await writeAppointmentInDay({
     date: input.date,
+    client: options.client,
     judge: async (sameDay, client) => {
       if (input.bookingIntent === "ortho_follow_up") {
         // Existing order: day advisory lock, then this service row. The row lock
@@ -517,7 +526,7 @@ export async function bookAppointment(
       reason: overrideReason, serviceName: service?.nameAr,
       actor: actor.username, actorRole: (actor.role ?? null) as string | null,
       channel: actor.channel,
-    });
+    }, options.audit);
   }
 
   return {

@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "dd21caba25ebabcf216429c5b60cf93fb9f5352560474554e53ef60b8c696203",
+  "sourceDigest": "6424b61e4ed2ea8d451c6b66285510db5e45dc962826f1bdb8f81a8f2fd80cf8",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -37,7 +37,8 @@
     "patients.edit",
     "settings.view",
     "visits.manage",
-    "appointments.edit"
+    "appointments.edit",
+    "appointments.create"
   ],
   "summary": {
     "routeMethods": 414,
@@ -569,7 +570,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 110
         },
         {
           "symbol": "findUserByUsername",
@@ -581,7 +582,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 114
+          "line": 132
         }
       ]
     },
@@ -4668,7 +4669,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 110
         },
         {
           "symbol": "findUserByUsername",
@@ -4680,7 +4681,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 114
+          "line": 132
         }
       ]
     },
@@ -4708,7 +4709,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 110
         },
         {
           "symbol": "findUserByUsername",
@@ -4720,7 +4721,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 114
+          "line": 132
         }
       ]
     },
