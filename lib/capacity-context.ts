@@ -20,6 +20,7 @@ import type { Appointment } from "./schedule";
 
 export interface CapacityContext {
   shifts: Shift[];
+  workingDays?: number[];
   chairs: number;
   nearCapacityPercent: number;
   emergencyReserveMinutes: number;
@@ -45,6 +46,7 @@ export async function loadCapacityContext(): Promise<CapacityContext> {
   };
   return {
     shifts,
+    workingDays: (settings["clinic.working_days"] ?? "0,1,2,3,4,5,6").split(",").filter(Boolean).map(Number),
     chairs: chairCount(settings),
     nearCapacityPercent: number("scheduling.near_capacity_percent", 80),
     emergencyReserveMinutes: number("scheduling.emergency_reserve_minutes", 0),
@@ -153,6 +155,7 @@ export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): 
     bufferAfterMinutes: input.bufferAfterMinutes ?? service?.bufferAfterMinutes ?? 0,
     chairs: context.chairs,
     shifts: context.shifts,
+    workingDays: context.workingDays,
     nearCapacityPercent: context.nearCapacityPercent,
     service: service ?? FALLBACK_SERVICE,
     providerId: input.providerId ?? null,

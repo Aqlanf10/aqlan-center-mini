@@ -20,6 +20,7 @@ export type SettingKey =
   | "clinic.phone"
   | "clinic.address"
   | "clinic.chairs"
+  | "clinic.working_days"
   | "clinic.day_start"
   | "clinic.day_end"
   | "finance.base_currency"
@@ -101,6 +102,7 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "clinic.phone": "04-253028",
   "clinic.address": "تعز — الجمهورية اليمنية",
   "clinic.chairs": "2",
+  "clinic.working_days": "0,1,2,3,4,5,6",
   "clinic.day_start": "09:00",
   "clinic.day_end": "21:00",
   "finance.base_currency": "YER",
@@ -323,6 +325,10 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "clinic.name" && (trimmed.length < 3 || trimmed.length > 160)) {
     return "اسم المركز قصير أو طويل أكثر من اللازم.";
   }
+  if (key === "clinic.working_days") {
+    if (trimmed && !/^[0-6](,[0-6])*$/.test(trimmed)) return "أيام العمل أرقام مفصولة بفواصل من 0 (الأحد) إلى 6 (السبت)، والفراغ يعني إغلاق جميع الأيام.";
+    if (new Set(trimmed.split(",")).size !== trimmed.split(",").length) return "لا تكرر يوم العمل.";
+  }
   if (key === "clinic.chairs") {
     const chairs = Number(trimmed);
     if (!Number.isInteger(chairs) || chairs < 1 || chairs > 20) return "عدد الكراسي بين 1 و20.";
@@ -478,6 +484,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "finance.commission_material_rate", label: "خصم إهلاك المواد من العمولة", hint: "on = خصم نسب التخصصات المحدَّدة في «نسب إهلاك المواد»؛ off = إبقاء الأرقام كما كانت.", kind: "text", group: "finance" },
 
   { key: "clinic.chairs", label: "عدد الكراسي", hint: "يحكم الحجز والانتظار وشاشة الصالة", kind: "number", group: "operations" },
+  { key: "clinic.working_days", label: "أيام عمل المركز", hint: "0 الأحد، 1 الاثنين، 2 الثلاثاء، 3 الأربعاء، 4 الخميس، 5 الجمعة، 6 السبت — مثل 0,1,2,3,4,6", kind: "text", group: "operations" },
   { key: "clinic.day_start", label: "بداية الدوام", kind: "time", group: "operations" },
   { key: "clinic.day_end", label: "نهاية الدوام", kind: "time", group: "operations" },
   { key: "lab.default_days", label: "مهلة المختبر الافتراضية (أيام)", kind: "number", group: "operations" },

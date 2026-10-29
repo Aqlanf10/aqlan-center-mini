@@ -32,6 +32,7 @@ export function doctorAvailabilitySlots(input: {
   const selectedService = service ?? FALLBACK_SERVICE;
   const before = service?.bufferBeforeMinutes ?? 0;
   const after = service?.bufferAfterMinutes ?? 0;
+  if (context.workingDays && !context.workingDays.includes(new Date(`${date}T12:00:00Z`).getUTCDay())) return [];
   const starts = new Set<number>();
   for (const shift of usableShifts(context.shifts)) {
     for (let minute = Math.ceil(shift.start / 15) * 15; minute + durationMinutes <= shift.end; minute += 15) {
@@ -64,7 +65,7 @@ export function doctorAvailabilitySlots(input: {
     const verdict = judgeFullCapacity({
       appointments, date, time, durationMinutes,
       bufferBeforeMinutes: before, bufferAfterMinutes: after,
-      chairs: context.chairs, shifts: context.shifts,
+      chairs: context.chairs, shifts: context.shifts, workingDays: context.workingDays,
       nearCapacityPercent: context.nearCapacityPercent,
       service: selectedService, providerId: doctorId, providerBlocks: blocks,
       emergencyReserveMinutesPerShift: context.emergencyReserveMinutes,

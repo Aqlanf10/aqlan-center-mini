@@ -55,7 +55,9 @@ export function createPortalToken(payload: PortalPayload): string {
 
 export function readPortalToken(token: string | undefined): PortalPayload | null {
   if (!token) return null;
-  const [body, signature] = token.split(".");
+  const segments = token.split(".");
+  if (segments.length !== 2) return null;
+  const [body, signature] = segments;
   if (!body || !signature) return null;
 
   const expected = portalSign(body);
@@ -65,8 +67,8 @@ export function readPortalToken(token: string | undefined): PortalPayload | null
 
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as PortalPayload;
-    if (typeof payload.expiresAt !== "number" || payload.expiresAt < Date.now()) return null;
-    if (typeof payload.patientId !== "number" || !payload.patientNumber) return null;
+    if (!Number.isFinite(payload.expiresAt) || payload.expiresAt <= Date.now()) return null;
+    if (!Number.isSafeInteger(payload.patientId) || payload.patientId <= 0 || typeof payload.patientNumber !== "string" || !payload.patientNumber) return null;
     return payload;
   } catch {
     return null;
@@ -253,7 +255,8 @@ export function toPortalAppointment(
     scheduledTime: appointment.scheduledTime,
     durationMinutes: appointment.durationMinutes,
     appointmentType: appointment.appointmentType ?? null,
-    note: appointment.note ?? null,
+    // Appointment notes are staff-authored and may contain internal information.
+    note: null,
     patientConfirmedAt,
     // المؤكد سلفًا لا يعود قابلًا للتأكيد — الزر لا يُعرض مرتين.
     confirmable: !patientConfirmedAt

@@ -251,6 +251,14 @@ export async function judgeBookingInDay(input: {
     };
   }
 
+  // Closed hours are never capacity that can be purchased with an override.
+  if (verdict.outsideHours) return {
+    ok: false, verdict,
+    conflict: { message: "الوقت خارج أيام أو ورديات المركز. اختر وقتًا ضمن الدوام.",
+      state: "OVER_CAPACITY", reasons: ["خارج دوام المركز"], dayPercent: verdict.dayPercent,
+      canOverride: false, overrideHint: "عدّل إعدادات الدوام المعتمدة أولًا.", suggestion: null,
+      suggestionMessage: "اختر وقتًا ضمن أيام وورديات المركز." },
+  };
   if (verdict.state !== "OVER_CAPACITY") return { ok: true, verdict, overridden: false };
 
   /* التجاوز حقٌّ موثَّق: صلاحيةٌ **وسبب**. وغيابُ أيّهما رفضٌ لا استثناء — وهذا

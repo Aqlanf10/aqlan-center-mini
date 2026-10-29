@@ -87,7 +87,8 @@ export function validateBookingRequest(raw: {
   let preferredDate: string | null = null;
   if (typeof raw.preferredDate === "string" && raw.preferredDate.trim()) {
     const candidate = raw.preferredDate.trim();
-    if (!DATE_PATTERN.test(candidate)) {
+    if (!DATE_PATTERN.test(candidate) || !Number.isFinite(Date.parse(`${candidate}T00:00:00Z`))
+      || new Date(`${candidate}T00:00:00Z`).toISOString().slice(0, 10) !== candidate) {
       return { ok: false, message: "اختر يومًا من القائمة." };
     }
     if (candidate < today) {

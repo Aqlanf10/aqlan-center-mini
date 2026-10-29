@@ -179,6 +179,7 @@ export interface FullCapacityInput {
   chairs: number;
   /** الورديات الحقيقية — واحدةٌ أو أكثر، وما بينها مغلق. */
   shifts: readonly Shift[];
+  workingDays?: readonly number[];
   nearCapacityPercent: number;
   /** متطلّبات الخدمة المطلوبة. */
   service: Pick<AppointmentService,
@@ -225,7 +226,7 @@ export function withinAnyShift(
   window: { start: number; end: number }, shifts: readonly Shift[],
 ): boolean {
   const usable = usableShifts(shifts);
-  if (usable.length === 0) return true;
+  if (usable.length === 0) return false;
   return usable.some((shift) => window.start >= shift.start && window.end <= shift.end);
 }
 
@@ -263,12 +264,14 @@ function windowOf(appointment: Appointment): { start: number; end: number } | nu
 export function judgeFullCapacity(input: FullCapacityInput): CapacityVerdict {
   const {
     appointments, date, time, durationMinutes, bufferBeforeMinutes, bufferAfterMinutes,
-    chairs, shifts, nearCapacityPercent, service, providerId, chairNo,
+    chairs, nearCapacityPercent, service, providerId, chairNo,
     providerBlocks = [], emergencyReserveMinutesPerShift = 0,
     newPatientDailyLimit = 0, isNewPatient = false, newPatientsBookedToday = 0,
     excludeId,
   } = input;
 
+  const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+  const shifts = input.workingDays && !input.workingDays.includes(weekday) ? [] : input.shifts;
   const startMinutes = toMinutes(time);
   const reasons: string[] = [];
   const over = (message: string[]): CapacityVerdict => ({
