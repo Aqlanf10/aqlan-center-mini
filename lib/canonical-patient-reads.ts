@@ -4,6 +4,7 @@ import {
   listPatientProblemsWith, listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
   listPatientDiagnosesWith, listIntakeFormsWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
   CLINIC_TIME_ZONE, listPatientCasesWith, listPatientPlansWith, openOrthoCaseForWith, type DbClient, type PatientListRow,
+  listPatientCaseRowsWith, listPatientPlannedVisitsWith, patientLedgerInSnapshot, patientWorkflowWith,
 } from "./db";
 import { deriveAlerts, reviewDue } from "./medical-history";
 import { parseConsentMode } from "./patient-identity";
@@ -295,6 +296,51 @@ export async function readCanonicalArrivalPanel(session: VerifiedDurableSession,
       ...(projection.care ? { cases, ortho } : {}),
       ...(projection.balances ? { money } : {}),
       canCollect: projection.balances && scope.granted("finance.payments.collect"),
+      projection: { ...projection, appointments: scope.appointmentScope.kind },
+    };
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * Patient workflow summary (M2 slice 6, GET /api/patients/[id]/workflow).
+ * Groups: identity (basic fields, open visit) for every admitted actor; schedule (next
+ * appointment); care (medical alert, last visit, plans, planned visits, counts, cases,
+ * clinical alerts); balances (financial summary, plan money fields, overdue-installment
+ * alerts). Rebooking is not offered until /api/planned-visits/[id]/rebook is canonical.
+ * ------------------------------------------------------------------------- */
+const PLAN_MONEY_FIELDS = ["totalMinor", "doneMinor", "remainingMinor", "overdueMinor", "nextDueDate", "baseCurrency"] as const;
+const FINANCIAL_ALERTS = new Set(["overdue_installment"]);
+export async function readCanonicalPatientWorkflow(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.record", patientId, async (query, scope) => {
+    const projection = patientDirectoryProjection(scope);
+    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    const summary = await patientWorkflowWith(query, patientId, today, {
+      plans: id => listPatientPlansWith(query, id, today),
+      plannedVisits: id => listPatientPlannedVisitsWith(query, id),
+      ledger: id => patientLedgerInSnapshot(id, query as DbClient),
+      caseRows: id => listPatientCaseRowsWith(query, id),
+    });
+    if (!summary.patient) throw new CanonicalPatientReadRefusal("patient_not_found", "لا يوجد مريض بهذا الرقم ضمن مرضاك.");
+    const { medicalAlert, ...identity } = summary.patient;
+    const alerts = summary.alerts.filter(alert => FINANCIAL_ALERTS.has(alert.kind) ? projection.balances : projection.care);
+    return {
+      patient: projection.care ? { ...identity, medicalAlert } : identity,
+      openVisit: summary.openVisit,
+      today, timeZone: CLINIC_TIME_ZONE,
+      ...(projection.schedule ? { nextAppointment: summary.nextAppointment } : {}),
+      ...(projection.care ? {
+        lastVisit: summary.lastVisit,
+        activePlans: summary.activePlans.map(plan => projection.balances ? plan
+          : Object.fromEntries(Object.entries(plan).filter(([key]) => !(PLAN_MONEY_FIELDS as readonly string[]).includes(key)))),
+        plannedVisits: summary.plannedVisits.map(visit => {
+          const { rebookHasReferral: _referral, rebookReferralReceiverId: _receiver, ...visible } = visit as typeof visit & { rebookHasReferral?: unknown; rebookReferralReceiverId?: unknown };
+          return { ...visible, canRebook: false, rebookBlockedReason: visible.canRebook ? "إعادة الحجز لم تُنقل بعد إلى الهوية الموحّدة." : visible.rebookBlockedReason };
+        }),
+        counts: summary.counts, assessmentCases: summary.assessmentCases, legacyCases: summary.legacyCases,
+      } : {}),
+      ...(alerts.length || projection.care || projection.balances ? { alerts } : {}),
+      ...(projection.balances ? { financial: summary.financial } : {}),
+      canSeeFinancial: projection.balances,
       projection: { ...projection, appointments: scope.appointmentScope.kind },
     };
   });

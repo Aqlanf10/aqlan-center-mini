@@ -297,3 +297,19 @@ it("HTTP: the arrival panel follows grants and scope, never the role label", asy
   expect((await refused.json()).message).toMatch(ARABIC);
   expect(await journey.ddlLog()).toEqual([]);
 });
+
+it("HTTP: the workflow summary projects by grant; identity-only gets no clinical, schedule or money keys", async () => {
+  const { rows: [own] } = await journey.db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number='SYN-J-1'");
+  const doctor = await journey.login("doctor");
+  const clinical = await (await journey.api(`/api/patients/${own.id}/workflow`, doctor.cookie)).json();
+  expect(clinical.patient.medicalAlert).toBe("حساسية بنسلين تجريبية");
+  expect(clinical).toHaveProperty("lastVisit");
+  expect(clinical).not.toHaveProperty("financial");
+  const reception = await journey.login("reception");
+  const identity = await journey.api(`/api/patients/${own.id}/workflow`, reception.cookie);
+  expect(identity.status).toBe(200);
+  const body = await identity.json();
+  for (const key of ["lastVisit", "activePlans", "financial", "nextAppointment", "alerts"]) expect(body).not.toHaveProperty(key);
+  expect(body.patient).not.toHaveProperty("medicalAlert");
+  expect(await journey.ddlLog()).toEqual([]);
+});

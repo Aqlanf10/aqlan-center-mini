@@ -34,13 +34,13 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 188 |
+| existing | 187 |
 | proposed | 142 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 14 |
+| canonical-done | 15 |
 
 | Record scope | Routes |
 |---|---|
@@ -239,6 +239,22 @@ Admitted by `read:patients.record`. One snapshot: `arrivalPanelWith` reads every
 - `canCollect` requires both balances and `finance.payments.collect`. The collect route proves it again, with its open-shift rule.
 - A role label (cashier, reception) decides nothing.
 - Groups the actor cannot see are not read at all.
+
+### Slice 6 — workflow summary (`GET /api/patients/[id]/workflow`)
+Admitted by `read:patients.record`. `patientWorkflowWith` reads every source through the owning facade: plans, planned visits, the ledger (`patientLedgerInSnapshot`) and case rows. The legacy path passes its standalone readers unchanged.
+
+| Group | Contents | Shown when |
+|---|---|---|
+| identity | basic patient fields, open visit | every admitted actor |
+| schedule | next appointment | `appointmentScope` is `all` |
+| care | medical alert, last visit, plans without money fields, planned visits, counts, cases, clinical alerts | clinical grant |
+| balances | financial summary, plan money fields, overdue-installment alerts | `finance.patient-ledger.view` |
+
+- **Authority setting:** `workflow.doctor_financial_view` does not widen canonical visibility; grants decide.
+- **Rebooking:** not offered until its own route is canonical.
+
+### Single-snapshot guard
+Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 
 ## 6. Dot review 6480538845: what the map now records
 

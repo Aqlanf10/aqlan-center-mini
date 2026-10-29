@@ -4116,8 +4116,19 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 6: read:patients.record; one snapshot via patientWorkflowWith.",
+  "projection": {
+   "legacy": "canAccessPatient; cases by HTTP_PERMISSIONS of /cases; money by canHandleMoney or doctor + workflow.doctor_financial_view; assistant header-only; rebooking by role.",
+   "groups": {
+    "identity": "basic patient fields and the open visit — every admitted actor",
+    "schedule": "next appointment — appointmentScope all",
+    "care": "medical alert, last visit, plans (no money fields), planned visits, counts, cases, clinical alerts — clinical grant",
+    "balances": "financial summary, plan money fields, overdue-installment alerts — finance.patient-ledger.view"
+   },
+   "fields": "canRebook = false until /api/planned-visits/[id]/rebook is canonical; workflow.doctor_financial_view (an authority setting) does not widen canonical visibility",
+   "counts": "hidden groups' keys are removed; alerts are filtered by their group"
+  }
  },
  {
   "route": "/api/patients/import",

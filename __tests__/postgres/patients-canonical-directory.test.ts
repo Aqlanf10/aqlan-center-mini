@@ -442,6 +442,7 @@ describe("every canonical read stays inside its one owning snapshot", () => {
       ["referrals", s => reads.readCanonicalReferrals(s, any.id)],
       ["contact", s => reads.readCanonicalContactConsents(s, any.id)],
       ["arrival panel", s => reads.readCanonicalArrivalPanel(s, any.id)],
+      ["workflow", s => reads.readCanonicalPatientWorkflow(s, any.id)],
     ];
     for (const [name, read] of readers) {
       const session = await fx.session("owner");
@@ -454,3 +455,42 @@ describe("every canonical read stays inside its one owning snapshot", () => {
     }
   });
 });
+
+describe("patient workflow summary (slice 6)", () => {
+  const iota = async () => (await fx.pool.query<{ id: number }>("SELECT id FROM patients WHERE patient_number='SYN-PA-8'")).rows[0].id;
+  const workflow = async (k: Key) => reads.readCanonicalPatientWorkflow(await fx.session(k), await iota());
+
+  it("identity-only: basic fields and the open visit, no clinical, schedule or money keys", async () => {
+    const view = await workflow("identity");
+    expect(view.patient).not.toHaveProperty("medicalAlert");
+    for (const key of ["nextAppointment", "lastVisit", "activePlans", "plannedVisits", "counts", "assessmentCases", "legacyCases", "alerts", "financial"]) {
+      expect(view).not.toHaveProperty(key);
+    }
+    expect(view.canSeeFinancial).toBe(false);
+  });
+
+  it("reception (schedule + balances): next appointment and money, never clinical fields", async () => {
+    const view = await workflow("reception");
+    expect(view).toHaveProperty("nextAppointment");
+    expect(view).toHaveProperty("financial");
+    expect(view).not.toHaveProperty("lastVisit");
+    expect(view.patient).not.toHaveProperty("medicalAlert");
+    for (const alert of view.alerts ?? []) expect(alert.kind).toBe("overdue_installment");
+  });
+
+  it("clinical-only: plans without money fields, planned visits never rebookable yet", async () => {
+    const view = await workflow("clinicalAll");
+    expect(view).toHaveProperty("lastVisit");
+    expect(view).not.toHaveProperty("financial");
+    for (const plan of view.activePlans ?? []) for (const key of ["totalMinor", "remainingMinor", "overdueMinor"]) expect(plan).not.toHaveProperty(key);
+    for (const visit of view.plannedVisits ?? []) expect(visit.canRebook).toBe(false);
+  });
+
+  it("outside the scope reads like missing; the owner gets every group", async () => {
+    await expect(workflow("creatorOwn")).rejects.toMatchObject({ code: "patient_not_found" });
+    const owner = await workflow("owner");
+    for (const key of ["nextAppointment", "lastVisit", "activePlans", "financial", "alerts"]) expect(owner).toHaveProperty(key);
+    expect(owner.canSeeFinancial).toBe(true);
+  });
+});
+

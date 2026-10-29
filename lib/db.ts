@@ -11052,7 +11052,7 @@ export async function patientLedger(patientId: number): Promise<{
 }
 
 /** Caller owns a coherent read snapshot; never acquire another pool connection. */
-async function patientLedgerInSnapshot(patientId: number, client: DbClient) {
+export async function patientLedgerInSnapshot(patientId: number, client: DbClient) {
   const invoices = await listPatientInvoices(patientId, client);
   const openings = await getPatientOpeningBalances(patientId, client);
   const payments = await listPatientPayments(patientId, client);
@@ -21813,13 +21813,17 @@ function toPlannedVisit(row: PlannedVisitRow): PlannedVisitView {
 
 export async function listPatientPlannedVisits(patientId: number): Promise<PlannedVisitView[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<PlannedVisitRow>(
+  return listPatientPlannedVisitsWith(getPool(), patientId);
+}
+/** A patient's open planned visits over a caller-owned query facade. */
+export async function listPatientPlannedVisitsWith(q: Pick<DbClient, "query">, patientId: number): Promise<PlannedVisitView[]> {
+  const { rows } = await q.query<PlannedVisitRow>(
     `${PLANNED_VISIT_SELECT}
       WHERE v.patient_id = $1 AND v.status NOT IN ('completed', 'cancelled')
       ORDER BY v.status = 'in_progress' DESC, v.sequence, v.id`,
     [patientId],
   );
-  const contexts = await readPlannedVisitContexts(getPool(), rows.map(row => row.id));
+  const contexts = await readPlannedVisitContexts(q, rows.map(row => row.id));
   return rows.map(row => ({ ...toPlannedVisit(row), ...contexts.get(row.id) }));
 }
 
@@ -22106,7 +22110,7 @@ export async function startVisitFromPlannedVisit(input: {
  * والمال يُحسب هنا لا في الواجهة: فصل الصلاحيات يجب أن يكون في الخادم — إخفاء
  * الزر في الشاشة ليس منعًا.
  */
-export async function patientWorkflow(patientId: number, today: string): Promise<{
+export interface PatientWorkflowSummary {
   patient: {
     id: number; patientNumber: string; fullName: string; phone: string | null;
     gender: string; birthYear: number | null; medicalAlert: string | null;
@@ -22131,9 +22135,29 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   /** (INV-LINK D) حالاتٌ فتحتها فاتورة علاجية وتنتظر تقييم الطبيب. */
   assessmentCases: { id: number; patientId: number; kind: "specialty"; orthoCaseId: null; specialty: string; title: string; needsAssessment: true }[];
   legacyCases: { id: number | null; patientId: number; kind: "specialty" | "ortho"; orthoCaseId: number | null; specialty: string; title: string; site: string | null; status: string; legacy: true }[];
-}> {
+}
+export async function patientWorkflow(patientId: number, today: string): Promise<PatientWorkflowSummary> {
   await ensureSchema();
-  const pool = getPool();
+  return patientWorkflowWith(getPool(), patientId, today, {
+    plans: listPatientPlans, plannedVisits: listPatientPlannedVisits, ledger: patientLedger, caseRows: listPatientCaseRows,
+  });
+}
+
+/** Sources of the workflow summary. The legacy path passes the standalone readers (plans
+ * and ledger each in their own read snapshot, unchanged); the canonical path passes
+ * readers bound to its one owning snapshot facade. */
+export interface PatientWorkflowSources {
+  plans(patientId: number, today: string): Promise<TreatmentPlan[]>;
+  plannedVisits(patientId: number): Promise<PlannedVisitView[]>;
+  ledger(patientId: number): ReturnType<typeof patientLedger>;
+  caseRows(patientId: number): Promise<SpecialtyCaseRow[]>;
+}
+export async function patientWorkflowWith(
+  pool: Pick<DbClient, "query">,
+  patientId: number,
+  today: string,
+  sources: PatientWorkflowSources,
+): Promise<PatientWorkflowSummary> {
 
   const { rows: patientRows } = await pool.query<{
     id: number; patient_number: string; full_name: string; phone: string | null;
@@ -22220,8 +22244,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
             }
           : null;
       })(),
-      listPatientPlans(patientId, today),
-      listPatientPlannedVisits(patientId),
+      sources.plans(patientId, today),
+      sources.plannedVisits(patientId),
       (async () => {
         const { rows } = await pool.query<{
           visits: string; open_lab: string; documents: string; ortho: string;
@@ -22240,7 +22264,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
           orthoCase: Number(rows[0]?.ortho ?? 0) > 0,
         };
       })(),
-      patientLedger(patientId),
+      sources.ledger(patientId),
     ]);
 
   const livePlans = plans.filter((plan) => plan.status === "active");
@@ -22416,7 +22440,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
 
   // These workflow projections do not expose waitingOn; blocker alerts were
   // already read above. Keep this case read fresh without fetching blockers again.
-  const patientCases = (await listPatientCaseRows(patientId)).map(toSpecialtyCase);
+  const patientCases = (await sources.caseRows(patientId)).map(toSpecialtyCase);
   const assessmentCases = patientCases
     .filter((one) => one.kind === "specialty" && one.needsAssessment === true && one.id !== null && one.orthoCaseId === null && one.legacy !== true)
     .map((one) => ({ id: one.id as number, patientId: one.patientId, kind: "specialty" as const,
@@ -28115,7 +28139,7 @@ async function listPatientCaseRows(patientId: number): Promise<SpecialtyCaseRow[
   await ensureSchema();
   return listPatientCaseRowsWith(getPool(), patientId);
 }
-async function listPatientCaseRowsWith(q: Pick<DbClient, "query">, patientId: number): Promise<SpecialtyCaseRow[]> {
+export async function listPatientCaseRowsWith(q: Pick<DbClient, "query">, patientId: number): Promise<SpecialtyCaseRow[]> {
   const { rows } = await q.query<SpecialtyCaseRow>(
     `SELECT * FROM (${SPECIALTY_CASE_SELECT}) x
       ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
