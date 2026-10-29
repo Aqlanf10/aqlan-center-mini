@@ -82,6 +82,7 @@ const SPECIALIZED_LINKS = [
   ["/settings/export", "النسخ والتصدير"],
   ["/settings/reset", "إعادة الضبط (مسح البيانات التجريبية)"],
   ["/settings/import", "استيراد مرضى المركز القديم"],
+  ["/settings/patient-numbering", "ترقيم ملفات المرضى الجدد"],
   ["/settings/ai", "الذكاء الاصطناعي"],
   ["/settings/messaging", "قنوات الرسائل: واتساب، الرسائل النصية، البريد"],
 ] as const;

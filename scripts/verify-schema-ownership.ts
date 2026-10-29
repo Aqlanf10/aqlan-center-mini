@@ -203,14 +203,14 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 
 function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
   const expected = [...Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0")),
-    '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087'];
+    '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0080', '0087'];
   const actual = files.map((file) => file.version);
   const reviewedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
     '0045_hr_staff.sql', '0046_hr_tasks.sql', '0048_hr_contracts_attendance_leaves.sql',
     '0049_hr_payroll_disbursements.sql', '0050_hr_payroll_integrity.sql',
     '0051_ortho_treatment_strategy.sql', '0052_ortho_assessment.sql', '0056_hr_employment_history.sql',
     '0057_hr_schedule_policy_versions.sql', '0058_hr_temporal_write_receipts.sql',
-    '0059_invoice_debt_installments.sql', '0060_historical_treatment_documents.sql', '0061_invoice_correction_lineage.sql', '0063_invoice_currency_reclassification.sql', '0064_approved_agreement_principal.sql', '0065_inventory_purchase_receipts.sql', '0066_agreement_delta_amendments.sql', '0067_patient_appointment_history_index.sql', '0068_collection_attempt_retirements.sql', '0069_unpaid_currency_transitions.sql', '0078_agreement_reconciliation.sql', '0087_agreement_reminder_metadata.sql'];
+    '0059_invoice_debt_installments.sql', '0060_historical_treatment_documents.sql', '0061_invoice_correction_lineage.sql', '0063_invoice_currency_reclassification.sql', '0064_approved_agreement_principal.sql', '0065_inventory_purchase_receipts.sql', '0066_agreement_delta_amendments.sql', '0067_patient_appointment_history_index.sql', '0068_collection_attempt_retirements.sql', '0069_unpaid_currency_transitions.sql', '0078_agreement_reconciliation.sql', '0080_patient_numbering.sql', '0087_agreement_reminder_metadata.sql'];
   if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
   }
@@ -437,11 +437,11 @@ export async function runSchemaOwnershipCharacterization(
     if (migrationCatalog.registry.rows.length !== provenance.length) {
       throw new Error("SCHEMA_OWNERSHIP_REGISTRY_MISMATCH: unexpected registry row count.");
     }
-    const runtimeExtensions = provenance.filter(item => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087'].includes(item.version));
+    const runtimeExtensions = provenance.filter(item => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0080', '0087'].includes(item.version));
     if (runtimeCatalog.registry.rows.length !== runtimeExtensions.length || runtimeExtensions.some(item =>
       !runtimeCatalog.registry.rows.some(row => row.version === item.version && row.name === item.name
         && row.checksum === item.checksum && row.adopted === false))) {
-      throw new Error('SCHEMA_OWNERSHIP_RUNTIME_REGISTRY_MISMATCH: expected exact 0051–0052, 0056–0058, 0063–0069 and 0078/0087 extension contracts.');
+      throw new Error('SCHEMA_OWNERSHIP_RUNTIME_REGISTRY_MISMATCH: expected exact 0051–0052, 0056–0058, 0063–0069 and 0078/0080/0087 extension contracts.');
     }
 
     const rawComparison = compareDetailedSchemaCatalogs(migrationCatalog, runtimeCatalog);

@@ -23,7 +23,7 @@ export type AuditAction =
   | "payment.correct"
   | "expense.create"
   | "shift.open" | "shift.close"
-  | "patient.create" | "patient.update"
+  | "patient.create" | "patient.update" | "patient.number.change" | "patient.numbering.configure"
   /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
   | "patient.merge"
   /* (P1-5) استيراد دفعة مرضى من ملف المركز القديم — ببصمة الملف. */
@@ -194,6 +194,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "shift.close": "إغلاق وردية وجرد",
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
+  "patient.number.change": "تعديل رقم ملف المريض",
+  "patient.numbering.configure": "تعديل حد ترقيم الملفات الجديدة",
   "patient.merge": "دمج ملف مريض مكرر",
   "system.reset": "إعادة ضبط — مسح البيانات التجريبية",
   "patient.import": "استيراد مرضى من ملف",
