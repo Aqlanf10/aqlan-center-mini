@@ -92,14 +92,18 @@ export interface LegacyOpeningPosition {
 
 export async function listLegacyOpeningPositions(patientId: number): Promise<LegacyOpeningPosition[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ currency: string }>(
+  return listLegacyOpeningPositionsWith(getPool(), patientId);
+}
+/** Opening positions over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function listLegacyOpeningPositionsWith(q: Pick<DbClient, "query">, patientId: number): Promise<LegacyOpeningPosition[]> {
+  const { rows } = await q.query<{ currency: string }>(
     `SELECT currency FROM patient_opening_balances WHERE patient_id = $1 ORDER BY currency`,
     [patientId],
   );
   const positions: LegacyOpeningPosition[] = [];
   for (const row of rows) {
     if (!isCurrency(row.currency)) throw new Error(`عملة رصيد افتتاحي غير صالحة: ${row.currency}`);
-    const position = await openingPosition(getPool() as unknown as DbClient, patientId, row.currency);
+    const position = await openingPosition(q as unknown as DbClient, patientId, row.currency);
     if (position) positions.push({ currency: row.currency, ...position });
   }
   return positions;

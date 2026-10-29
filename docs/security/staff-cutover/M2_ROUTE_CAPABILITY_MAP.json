@@ -3094,8 +3094,19 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 5: read:patients.record; groups by grant and scope.",
+  "projection": {
+   "legacy": "canHandleMoney(role) desk, or a doctor on own patients; cashier finance flags gate balances and collection; cashierArrivalProjection for cashiers.",
+   "groups": {
+    "visit": "today's active visit — every actor admitted to the record",
+    "appointments": "today's appointments — appointmentScope all; own lists the actor's own; none removes the key",
+    "care": "cases and orthodontic status — clinical grant",
+    "balances": "money lines and suggestions — finance.patient-ledger.view"
+   },
+   "fields": "canCollect = balances AND finance.payments.collect (the collect route proves it again with its open-shift rule)",
+   "counts": "hidden groups' keys are removed, never zeroed"
+  }
  },
  {
   "route": "/api/patients/[id]/cases",

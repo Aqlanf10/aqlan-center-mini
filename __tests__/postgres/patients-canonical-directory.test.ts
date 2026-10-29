@@ -32,6 +32,7 @@ const ACCOUNTS = {
   finance: { username: "SYN-P-FINANCE", role: "accountant", patientScope: "all", grants: { "finance.patient-ledger.view": true } },
   creatorAll: { username: "SYN-P-CREATOR-ALL", role: "reception", patientScope: "all", grants: { "patients.create": true } },
   creatorOwn: { username: "SYN-P-CREATOR-OWN", role: "doctor", doctor: true, patientScope: "own", grants: { "patients.create": true } },
+  collector: { username: "SYN-P-COLLECTOR", role: "cashier", patientScope: "all", grants: { "finance.patient-ledger.view": true, "finance.payments.view": true, "finance.payments.collect": true } },
   doctorC: { username: "SYN-P-DOCTOR-C", role: "doctor", doctor: true, patientScope: "own", appointmentScope: "own", grants: { "clinical.plans.view": true } },
 } as const;
 type Key = keyof typeof ACCOUNTS;
@@ -373,3 +374,52 @@ describe("more patient file reads (slice 4)", () => {
     await expect(reads.readCanonicalContactConsents(await fx.session("doctorB"), eta)).rejects.toMatchObject({ code: "patient_not_found" });
   });
 });
+
+describe("arrival panel (slice 5)", () => {
+  let iota = 0;
+  beforeAll(async () => {
+    iota = (await fx.pool.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id) VALUES('SYN-PA-8','SYN File Iota','0555555555',$1) RETURNING id", [fx.parties.doctorA!])).rows[0].id;
+    const today = "(now() AT TIME ZONE 'Asia/Aden')::date";
+    await fx.pool.query(`INSERT INTO appointments(patient_id,doctor_id,scheduled_date,scheduled_time) VALUES($1,$2,${today},'10:00'),($1,$3,${today},'12:00')`, [iota, fx.parties.doctorA!, fx.parties.doctorB!]);
+    await fx.pool.query("INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency,status,created_by) VALUES('SYN-PA-IOTA',$1,9000,0,'YER','open','synthetic')", [iota]);
+  });
+  const panel = async (k: Key) => reads.readCanonicalArrivalPanel(await fx.session(k), iota);
+
+  it("reception context: today's appointments and money, no clinical keys, no collection without the grant", async () => {
+    const view = await panel("reception");
+    expect(view.appointments!.map(a => a.time)).toEqual(["10:00", "12:00"]);
+    expect(view.money!.lines.find(line => line.currency === "YER")).toBeTruthy();
+    expect(view).not.toHaveProperty("cases");
+    expect(view).not.toHaveProperty("ortho");
+    expect(view.canCollect).toBe(false);
+  });
+
+  it("collection is offered only with the ledger AND finance.payments.collect; no appointment scope removes the key", async () => {
+    const view = await panel("collector");
+    expect(view.canCollect).toBe(true);
+    expect(view).not.toHaveProperty("appointments");
+    expect(view).not.toHaveProperty("cases");
+  });
+
+  it("a clinical actor gets cases and ortho but no money; the owner gets everything", async () => {
+    const clinical = await panel("clinicalAll");
+    expect(clinical).toHaveProperty("cases");
+    expect(clinical).toHaveProperty("ortho");
+    expect(clinical).not.toHaveProperty("money");
+    expect(clinical.canCollect).toBe(false);
+    const owner = await panel("owner");
+    expect(owner.appointments).toHaveLength(2);
+    expect(owner).toHaveProperty("money");
+    expect(owner.canCollect).toBe(true);
+  });
+
+  it("outside the scope or missing reads the same; identity-only sees the visit state only", async () => {
+    // doctorB has an appointment with this patient, so the patient IS inside doctorB's
+    // own scope (the shared predicate counts appointments); creatorOwn has no link to it.
+    expect((await panel("doctorB")).patientName).toBe("SYN File Iota");
+    await expect(panel("creatorOwn")).rejects.toMatchObject({ code: "patient_not_found" });
+    const identity = await panel("identity");
+    expect(Object.keys(identity).sort()).toEqual(["activeVisit", "canCollect", "patientId", "patientName", "projection", "today"]);
+  });
+});
+

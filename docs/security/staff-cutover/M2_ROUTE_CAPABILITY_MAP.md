@@ -34,13 +34,13 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 189 |
+| existing | 188 |
 | proposed | 142 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 13 |
+| canonical-done | 14 |
 
 | Record scope | Routes |
 |---|---|
@@ -225,6 +225,20 @@ Evidence:
 - **`contact` (GET)** uses `read:patients.record`: consent mode, per-channel state and history for anyone admitted to the record. Whether recording is offered follows `patients.edit`, the write's capability, never a role label.
 - **Screen:** the profile shows the consent state for everyone, and referrals inside the clinical panels.
 - **Not yet migrated:** `family` (GET), because its view is built from the legacy session.
+
+### Slice 5 — arrival panel (`GET /api/patients/[id]/arrival-panel`)
+Admitted by `read:patients.record`. One snapshot: `arrivalPanelWith` reads every source (balances, previous balances and arrangements, plans, cases, orthodontics) through the owning facade. The legacy path passes its unchanged standalone readers.
+
+| Group | Contents | Shown when |
+|---|---|---|
+| visit | today's active visit | every actor admitted to the record |
+| appointments | today's appointments | appointment scope: `all` lists all, `own` only the actor's, `none` removes the key |
+| care | cases and orthodontic status | clinical grant |
+| balances | money lines and suggestions | `finance.patient-ledger.view` |
+
+- `canCollect` requires both balances and `finance.payments.collect`. The collect route proves it again, with its open-shift rule.
+- A role label (cashier, reception) decides nothing.
+- Groups the actor cannot see are not read at all.
 
 ## 6. Dot review 6480538845: what the map now records
 

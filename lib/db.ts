@@ -20534,6 +20534,12 @@ async function readPlans(where:string,params:unknown[],today:string):Promise<Tre
   },usesSharedLocalDatabaseConnection());
 }
 const PATIENT_PLANS_WHERE="WHERE t.patient_id=$1 ORDER BY t.created_at DESC";
+/** A patient's plans over a caller-owned READ ONLY snapshot facade (the caller owns the
+ * snapshot that readPlans otherwise opens itself). */
+export async function listPatientPlansWith(q: Pick<DbClient, "query">, patientId: number, today: string): Promise<TreatmentPlan[]> {
+  const {rows}=await q.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
+  return hydratePlans(rows,today,q as DbClient);
+}
 /**
  * A patient statement's ledger, plan currencies and plans from one read-only snapshot, so a
  * payment committed meanwhile is seen by all of them or by none. Standalone readers are unchanged.
@@ -23072,8 +23078,11 @@ const toAdjustment = (row: AdjustmentRow, photos: PatientDocument[] = []): Ortho
 });
 
 async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]> {
+  return hydrateCasesWith(getPool(), rows, today);
+}
+async function hydrateCasesWith(q: Pick<DbClient, "query">, rows: CaseRow[], today: string): Promise<OrthoCase[]> {
   if (rows.length === 0) return [];
-  const { rows: adjustmentRows } = await getPool().query<AdjustmentRow>(
+  const { rows: adjustmentRows } = await q.query<AdjustmentRow>(
     `SELECT a.id, a.case_id, a.visit_id, v.signed_at IS NOT NULL AS visit_signed,
             a.done_on, a.phase, a.upper_wire, a.lower_wire, a.elastics,
             a.elastic_note, a.done, a.next_weeks, a.note, a.recorded_by
@@ -23083,7 +23092,7 @@ async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]
     [rows.map((row) => row.id)],
   );
   const byCase = new Map<number, OrthoAdjustment[]>();
-  const photos = await photosForAdjustments(adjustmentRows.map((row) => row.id));
+  const photos = await photosForAdjustmentsWith(q, adjustmentRows.map((row) => row.id));
   for (const row of adjustmentRows) {
     const list = byCase.get(row.case_id) ?? [];
     list.push(toAdjustment(row, photos.get(row.id) ?? []));
@@ -23149,12 +23158,16 @@ export async function getOrthoCase(id: number, today: string): Promise<OrthoCase
 /** الحالة المفتوحة لمريض — لشاشة الزيارة، فيرى الطبيب السلك قبل أن يبدأ. */
 export async function openOrthoCaseFor(patientId: number, today: string): Promise<OrthoCase | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<CaseRow>(
+  return openOrthoCaseForWith(getPool(), patientId, today);
+}
+/** The patient's open orthodontic case over a caller-owned query facade. */
+export async function openOrthoCaseForWith(q: Pick<DbClient, "query">, patientId: number, today: string): Promise<OrthoCase | null> {
+  const { rows } = await q.query<CaseRow>(
     `${CASE_SELECT} WHERE c.patient_id = $1 AND c.status IN ('active','retention')
       ORDER BY c.created_at DESC LIMIT 1`,
     [patientId],
   );
-  return (await hydrateCases(rows, today))[0] ?? null;
+  return (await hydrateCasesWith(q, rows, today))[0] ?? null;
 }
 
 export async function listOrthoCases(today: string, status?: CaseStatus): Promise<OrthoCase[]> {
@@ -23787,8 +23800,11 @@ const DOCUMENT_ASSOCIATIONS_SQL = `
 
 /** صور شدّاتٍ — ألبوم الجلسة هو صورُها، تُحضَّر دفعةً واحدة لا استعلامًا لكل جلسة. */
 async function photosForAdjustments(adjustmentIds: number[]): Promise<Map<number, PatientDocument[]>> {
+  return photosForAdjustmentsWith(getPool(), adjustmentIds);
+}
+async function photosForAdjustmentsWith(q: Pick<DbClient, "query">, adjustmentIds: number[]): Promise<Map<number, PatientDocument[]>> {
   if (adjustmentIds.length === 0) return new Map();
-  const { rows } = await getPool().query<DocumentRow>(
+  const { rows } = await q.query<DocumentRow>(
     `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents d
       WHERE adjustment_id = ANY($1::int[]) AND removed_at IS NULL
         AND ${DOCUMENT_ASSOCIATIONS_SQL}
@@ -28097,7 +28113,10 @@ const SPECIALTY_CASE_SELECT = `
 
 async function listPatientCaseRows(patientId: number): Promise<SpecialtyCaseRow[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<SpecialtyCaseRow>(
+  return listPatientCaseRowsWith(getPool(), patientId);
+}
+async function listPatientCaseRowsWith(q: Pick<DbClient, "query">, patientId: number): Promise<SpecialtyCaseRow[]> {
+  const { rows } = await q.query<SpecialtyCaseRow>(
     `SELECT * FROM (${SPECIALTY_CASE_SELECT}) x
       ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
     [patientId],
@@ -28106,8 +28125,13 @@ async function listPatientCaseRows(patientId: number): Promise<SpecialtyCaseRow[
 }
 
 export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
-  const rows = await listPatientCaseRows(patientId);
-  const blockers = await referralBlockersByCase(getPool(), patientId);
+  await ensureSchema();
+  return listPatientCasesWith(getPool(), patientId);
+}
+/** A patient's specialty cases over a caller-owned query facade. */
+export async function listPatientCasesWith(q: Pick<DbClient, "query">, patientId: number): Promise<SpecialtyCase[]> {
+  const rows = await listPatientCaseRowsWith(q, patientId);
+  const blockers = await referralBlockersByCase(q, patientId);
   return rows.map((row) => {
     const item = toSpecialtyCase(row);
     const waiting = item.id !== null ? blockers.get(item.id) : undefined;

@@ -1,3 +1,5 @@
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalArrivalPanel } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
 import { arrivalPanel, cashierArrivalProjection } from "@/lib/arrival-panel-db";
 import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
@@ -11,6 +13,9 @@ export const dynamic = "force-dynamic";
  * فقط وبلا مال إلا بصلاحية «مدفوعات مرضاي». الدفع لا يُحجب به دخولٌ ولا نداء.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 5): projection by grant and scope, never by role label.
+  const canonical = await canonicalPatientGet((await context.params).id, readCanonicalArrivalPanel, "تعذّر تحميل لوحة الوصول.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const patientId = Number((await context.params).id);

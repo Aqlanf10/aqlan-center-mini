@@ -3,10 +3,12 @@ import {
   browsePatientsWith, computeDebtRowsInSnapshot, getPatientWith, getSettingsWith, listMedicalHistoryWith, listPatientAppointmentsWith,
   listPatientProblemsWith, listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
   listPatientDiagnosesWith, listIntakeFormsWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
-  CLINIC_TIME_ZONE, type PatientListRow,
+  CLINIC_TIME_ZONE, listPatientCasesWith, listPatientPlansWith, openOrthoCaseForWith, type DbClient, type PatientListRow,
 } from "./db";
 import { deriveAlerts, reviewDue } from "./medical-history";
 import { parseConsentMode } from "./patient-identity";
+import { arrivalPanelWith } from "./arrival-panel-db";
+import { listLegacyBalanceArrangements, listLegacyOpeningPositionsWith } from "./legacy-balance-arrangements-db";
 import { clinicDateString } from "./schedule";
 import type { TimelineEvent } from "./workflow";
 import type { CanonicalSnapshotQuery } from "./canonical-read-snapshot";
@@ -259,6 +261,42 @@ export async function readCanonicalContactConsents(session: VerifiedDurableSessi
     const states = await contactConsentStatesWith(query, [patientId]);
     const settings = await getSettingsWith(query);
     return { mode: parseConsentMode(settings["messaging.consent_mode"]), states: states.get(patientId), history, canRecord: scope.granted("patients.edit") };
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * Arrival panel (M2 slice 5): reception's arrival context for one patient.
+ * Groups: today's active visit for every admitted actor; today's appointments by
+ * appointment scope (all, own = the actor's own, none = no key); cases and orthodontic
+ * status with the care group; money with the balances group; collection is offered
+ * only with balances AND finance.payments.collect (the collect route proves it again,
+ * with its open-shift rule). A hidden group's key is removed, never zeroed.
+ * ------------------------------------------------------------------------- */
+export async function readCanonicalArrivalPanel(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.record", patientId, async (query, scope) => {
+    const projection = patientDirectoryProjection(scope);
+    const appointments = scope.appointmentScope.kind === "all" ? undefined
+      : scope.appointmentScope.kind === "own" ? scope.appointmentScope.clinicianPartyId : null;
+    const panel = await arrivalPanelWith(query, patientId, {
+      includeMoney: projection.balances, includeClinical: projection.care, appointmentDoctorPartyId: appointments,
+    }, {
+      debts: (ids, includeNonPositive) => computeDebtRowsInSnapshot([...ids], includeNonPositive, query),
+      openings: id => listLegacyOpeningPositionsWith(query, id),
+      arrangements: (id, today) => listLegacyBalanceArrangements(id, today, false, query as DbClient),
+      plans: (id, today) => listPatientPlansWith(query, id, today),
+      cases: id => listPatientCasesWith(query, id),
+      ortho: (id, today) => openOrthoCaseForWith(query, id, today),
+    });
+    if (!panel) throw new CanonicalPatientReadRefusal("patient_not_found", "لا يوجد مريض بهذا الرقم ضمن مرضاك.");
+    const { cases, ortho, money, appointments: todays, ...base } = panel;
+    return {
+      ...base,
+      ...(appointments === null ? {} : { appointments: todays }),
+      ...(projection.care ? { cases, ortho } : {}),
+      ...(projection.balances ? { money } : {}),
+      canCollect: projection.balances && scope.granted("finance.payments.collect"),
+      projection: { ...projection, appointments: scope.appointmentScope.kind },
+    };
   });
 }
 

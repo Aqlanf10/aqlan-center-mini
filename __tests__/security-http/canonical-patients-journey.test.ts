@@ -281,3 +281,19 @@ it("browser: without a clinical grant the file never calls clinical reads; the t
   expect(await journey.ddlLog()).toEqual([]);
 });
 
+
+it("HTTP: the arrival panel follows grants and scope, never the role label", async () => {
+  const { rows: [own] } = await journey.db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number='SYN-J-3'");
+  const reception = await journey.login("reception"); // patient scope all, no grants
+  const panel = await journey.api(`/api/patients/${own.id}/arrival-panel`, reception.cookie);
+  expect(panel.status).toBe(200);
+  expect(panel.headers.get("cache-control")).toMatch(/no-store/);
+  const body = await panel.json();
+  for (const key of ["money", "cases", "ortho", "appointments"]) expect(body).not.toHaveProperty(key);
+  expect(body.canCollect).toBe(false);
+  const noScope = await journey.login("noScope");
+  const refused = await journey.api(`/api/patients/${own.id}/arrival-panel`, noScope.cookie);
+  expect(refused.status).toBe(403);
+  expect((await refused.json()).message).toMatch(ARABIC);
+  expect(await journey.ddlLog()).toEqual([]);
+});
