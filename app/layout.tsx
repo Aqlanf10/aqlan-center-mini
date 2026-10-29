@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import { CLINIC_TIME_ZONE, findUserByUsername, getSettingsSafe } from "@/lib/db";
+import { CLINIC_TIME_ZONE, findUserByUsername, getSettingsSafe, readStoredSettings } from "@/lib/db";
 import { publicSubset } from "@/lib/settings";
 import { SettingsProvider } from "@/components/SettingsProvider";
 import { SessionProvider } from "@/components/SessionProvider";
@@ -65,6 +65,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     requireSession().catch(() => null),
   ]);
 
+  const publicSettings = publicSubset(settings);
+  if (!session) {
+    // Publication/hiding must be reflected on the next public navigation, even
+    // when another server bundle still holds the ordinary five-second cache.
+    // Only this non-sensitive display flag is overlaid; image bytes remain
+    // independently authorized from fresh DB state by the fixed public endpoint.
+    try {
+      const stored = await readStoredSettings();
+      publicSettings["clinic.login_photo_visible"] = stored.get("clinic.login_photo_visible")?.value === "true" ? "true" : "false";
+    } catch { publicSettings["clinic.login_photo_visible"] = "false"; }
+  }
+
   let user = null;
   if (session) {
     user = await findUserByUsername(session.username).catch(() => null);
@@ -73,7 +85,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="ar" dir="rtl" className={arabic.variable}>
       <body className="min-h-full bg-canvas font-sans text-navy-900 antialiased">
-        <SettingsProvider value={publicSubset(settings)}>
+        <SettingsProvider value={publicSettings}>
           <SessionProvider
             value={
               session

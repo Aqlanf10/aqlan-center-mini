@@ -78,6 +78,10 @@ describe("owner uploads and controls the login photo through Settings", () => {
           await show.press("Enter");
           expect((await shown).status()).toBe(200);
           await card.getByText("الحالة: ظاهرة للزوار", { exact: true }).waitFor();
+          const publicImage = await fetch(`${baseUrl}/api/branding/login-photo`);
+          expect(publicImage.status).toBe(200);
+          expect(publicImage.headers.get("cache-control")).toContain("no-store");
+          expect(Buffer.from(await publicImage.arrayBuffer()).equals(PNG)).toBe(true);
           await freshLogin(visitor);
           const photo = visitor.getByRole("img", { name: "صورة شاشة الدخول", exact: true });
           await photo.waitFor();

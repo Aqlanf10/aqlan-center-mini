@@ -7,7 +7,7 @@ vi.mock("../lib/session", () => ({ requireSession: vi.fn(async () => null) }));
 vi.mock("../lib/db", async (importOriginal) => {
   const db = await importOriginal<typeof import("../lib/db")>();
   const { SETTING_DEFAULTS } = await import("../lib/settings");
-  return { ...db, getSettingsSafe: vi.fn(async () => SETTING_DEFAULTS) };
+  return { ...db, getSettingsSafe: vi.fn(async () => SETTING_DEFAULTS), readStoredSettings: vi.fn(async () => new Map()) };
 });
 // Layout test inspects the serialized props, without rendering client hooks.
 vi.mock("../components/AppShell", () => ({ AppShell: () => null }));

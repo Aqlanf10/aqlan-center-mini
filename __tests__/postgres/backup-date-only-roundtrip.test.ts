@@ -10,6 +10,9 @@ import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
 // Synthetic representative HR/financial date shapes only, not financial rules.
 // The date-only table also guards the projection's no-timestamp fast path.
 const SCHEMA = `
+  -- Full backup also snapshots optional branding-photo settings. Keep this
+  -- empty fixture table: no photo, no application migrations or live settings.
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT now());
   CREATE TABLE staff_dates (
     id SERIAL PRIMARY KEY, hire_date DATE, salary_effective_on DATE, end_date DATE
   );
