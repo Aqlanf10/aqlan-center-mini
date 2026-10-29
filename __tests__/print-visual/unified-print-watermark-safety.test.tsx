@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import QRCode from "qrcode";
 import { describe, expect, it } from "vitest";
 import { PrintDocumentWatermark } from "../../components/PrintDocument";
@@ -16,6 +16,25 @@ const shared = readFileSync(resolve("components/print-document.css"), "utf8");
 const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
 function html(markup: string, extra = "") {
   return `<!doctype html><html lang="ar" dir="rtl"><style>*{box-sizing:border-box}body{margin:0;background:white}.print\\:hidden{display:none}${shared}${extra}</style><body>${markup.replaceAll('src="/logo.png"', `src="${logo}"`)}</body></html>`;
+}
+/** Decode PNG pixels rather than comparing encoder bytes/metadata. */
+async function pixelDifference(page: Page, first: Buffer, second: Buffer) {
+  return page.evaluate(async ([a, b]) => {
+    const decode = async (encoded: string) => {
+      const image = new Image(); image.src = `data:image/png;base64,${encoded}`; await image.decode();
+      const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d"); if (!context) throw new Error("PNG pixel decoder unavailable");
+      context.drawImage(image, 0, 0);
+      return { width: canvas.width, height: canvas.height, pixels: context.getImageData(0, 0, canvas.width, canvas.height).data };
+    };
+    const [left, right] = await Promise.all([decode(a), decode(b)]);
+    if (left.width !== right.width || left.height !== right.height) throw new Error("Compared pixel dimensions changed");
+    let differentPixels = 0;
+    for (let offset = 0; offset < left.pixels.length; offset += 4) {
+      if ([0, 1, 2, 3].some(channel => left.pixels[offset + channel] !== right.pixels[offset + channel])) differentPixels++;
+    }
+    return differentPixels;
+  }, [first.toString("base64"), second.toString("base64")]);
 }
 function modalCss() {
   return readFileSync(resolve("components/PrintReportModal.module.css"), "utf8")
@@ -55,11 +74,24 @@ describe("hosted watermark isolation and protected-pixel behavior", () => {
     try {
       const page = await browser.newPage({ viewport: { width: 794, height: 1123 } }); await page.route("**/*", route => route.abort()); await page.setContent(html(markup)); await page.emulateMedia({ media: "print" });
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode().catch(() => undefined))); });
-      const protectedWithLogo = await page.locator("#protected-pixels").screenshot();
-      const pageWithLogo = await page.screenshot();
+      mkdirSync(output, { recursive: true });
+      const protectedRegion = page.locator("#protected-pixels");
+      const box = await protectedRegion.boundingBox(); expect(box).not.toBeNull();
+      const painted = await protectedRegion.evaluate(node => ({ background: getComputedStyle(node).backgroundColor, zIndex: getComputedStyle(node).zIndex }));
+      expect(painted).toEqual({ background: "rgb(255, 255, 255)", zIndex: "20" });
+      // Locator screenshots round fractional CSS edges outward. Such edge pixels
+      // partly belong to the surrounding watermark, not to the opaque region.
+      // Compare every fully covered pixel on one stable integer-aligned crop.
+      const clip = { x: Math.ceil(box!.x), y: Math.ceil(box!.y), width: Math.floor(box!.x + box!.width) - Math.ceil(box!.x), height: Math.floor(box!.y + box!.height) - Math.ceil(box!.y) };
+      expect(clip.width).toBeGreaterThan(140); expect(clip.height).toBeGreaterThan(100);
+      const protectedWithLogo = await page.screenshot({ clip, path: resolve(output, "protected-with-logo.png") });
+      const pageWithLogo = await page.screenshot({ path: resolve(output, "protected-page-with-logo.png") });
       await page.locator(".print-document-watermark").evaluate(node => { (node as HTMLElement).style.display = "none"; });
-      expect((await page.locator("#protected-pixels").screenshot()).equals(protectedWithLogo)).toBe(true);
-      expect((await page.screenshot()).equals(pageWithLogo)).toBe(false);
+      expect(await protectedRegion.boundingBox()).toEqual(box);
+      const protectedWithoutLogo = await page.screenshot({ clip, path: resolve(output, "protected-without-logo.png") });
+      const pageWithoutLogo = await page.screenshot({ path: resolve(output, "protected-page-without-logo.png") });
+      expect(await pixelDifference(page, protectedWithoutLogo, protectedWithLogo), JSON.stringify({ box, clip, painted })).toBe(0);
+      expect(await pixelDifference(page, pageWithoutLogo, pageWithLogo)).toBeGreaterThan(0);
     } finally { await browser.close(); }
   });
 });
