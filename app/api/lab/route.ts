@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
-import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME } from "@/lib/lab";
+import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME, labToothInputProblem, parseLabTeeth } from "@/lib/lab";
 import { LabOrderPricingConflict } from "@/lib/lab-order-pricing";
 import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -11,6 +11,8 @@ import { rateFromSettings } from "@/lib/settings";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+
+import { parseLabShadeSpecification } from "@/lib/lab-shades";
 
 export const dynamic = "force-dynamic";
 
@@ -169,7 +171,39 @@ export async function POST(request: Request) {
     ? source.payableAccountCode.trim().slice(0, 10) : null;
   const isPosted = source.isPosted !== undefined ? Boolean(source.isPosted) : true;
 
+  const toothNumbers = typeof source.toothNumbers === "string" ? source.toothNumbers.trim() : null;
+  const toothProblem = labToothInputProblem(toothNumbers, workType);
+  if (toothProblem) return NextResponse.json({ message: toothProblem }, { status: 400 });
+  const shadeResult = parseLabShadeSpecification(source.shadeSpecification ?? null, Object.keys(parseLabTeeth(toothNumbers)).map(Number));
+  if (!shadeResult.ok) return NextResponse.json({ message: shadeResult.error }, { status: 400 });
+  if (typeof source.shade === "string" && source.shade.length > 30) return NextResponse.json({ message: "رمز اللون العام أطول من الحد المسموح." }, { status: 400 });
+  const submittedDoctorId = source.doctorId == null || source.doctorId === "" ? null : Number(source.doctorId);
+  if (submittedDoctorId !== null && (!Number.isSafeInteger(submittedDoctorId) || submittedDoctorId <= 0)) {
+    return NextResponse.json({ message: "اختر طبيبًا صحيحًا للإرسالية." }, { status: 400 });
+  }
+  const boundDoctorId = session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null;
+  if (session.role === "doctor" && submittedDoctorId !== null && submittedDoctorId !== boundDoctorId) {
+    return NextResponse.json({ message: "لا يمكن إرسال العمل باسم طبيب آخر من هذا الحساب." }, { status: 403 });
+  }
+  const doctorId = session.role === "doctor" ? boundDoctorId : submittedDoctorId;
+  if (!quickNeeded && doctorId === null) {
+    return NextResponse.json({ message: "حدّد الطبيب المعالج قبل إرسال العمل إلى المختبر." }, { status: 400 });
+  }
+
   try {
+    if (doctorId !== null) {
+      const doctors = await listParties("doctor");
+      if (!doctors.some(doctor => doctor.id === doctorId && doctor.kind === "doctor" && doctor.isActive)) {
+        return NextResponse.json({ message: "الطبيب غير متاح أو غير نشط؛ حدّد طبيبًا نشطًا." }, { status: 409 });
+      }
+    }
+    const selectedLabServiceId = Number(source.labServiceId);
+    if (Number.isSafeInteger(selectedLabServiceId) && selectedLabServiceId > 0) {
+      const selectedService = (await listLabServices()).find(service => service.id === selectedLabServiceId && service.isActive);
+      if (!selectedService) return NextResponse.json({ message: "خدمة المختبر غير متاحة؛ أعد اختيار الخدمة." }, { status: 409 });
+      const serviceProblem = labToothInputProblem(toothNumbers, selectedService.name, selectedService.code);
+      if (serviceProblem) return NextResponse.json({ message: serviceProblem }, { status: 400 });
+    }
     const created = await createLabOrder({
       patientId, labName, labPhone, workType, details, sentDate, dueDate, note,
       partyId, costMinor, costCurrency, baseCurrency: base, exchangeRate,
@@ -180,11 +214,9 @@ export async function POST(request: Request) {
       /* المختبرات السنية V2: الحقول السريرية الموسّعة — تُقرأ إن وُجدت وصفتها. */
       labServiceId: Number.isInteger(Number(source.labServiceId)) && Number(source.labServiceId) > 0
         ? Number(source.labServiceId) : null,
-      doctorId: session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
-        ? session.partyId
-        : (Number.isInteger(Number(source.doctorId)) && Number(source.doctorId) > 0
-          ? Number(source.doctorId) : null),
-      toothNumbers: typeof source.toothNumbers === "string" ? source.toothNumbers.slice(0, 120) : null,
+      doctorId,
+      toothNumbers,
+      shadeSpecification: shadeResult.value,
       shade: typeof source.shade === "string" ? source.shade.slice(0, 30) : null,
       stumpShade: typeof source.stumpShade === "string" ? source.stumpShade.slice(0, 30) : null,
       priority: source.priority === "urgent" || source.priority === "rush" ? source.priority : "normal",

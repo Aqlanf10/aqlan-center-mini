@@ -8,7 +8,7 @@ describe("external lab dispatch privacy", () => {
     const before = structuredClone(source);
     const external = toLabDispatchExternal(source);
     expect(Object.keys(external).sort()).toEqual([
-      "reference", "labName", "labPhone", "doctorName", "workType", "teeth", "toothNumbers",
+      "patientName", "shadeSpecification", "reference", "labName", "labPhone", "doctorName", "workType", "teeth", "toothNumbers",
       "shade", "stumpShade", "priority", "impressionType", "sentDate", "dueDate", "reviewWarnings",
     ].sort());
     const json = JSON.stringify(external);
@@ -20,6 +20,28 @@ describe("external lab dispatch privacy", () => {
     expect(external.teeth).toEqual([{ code: 14, role: "abutment" }, { code: 15, role: "pontic" }, { code: 16, role: "abutment" }]);
     expect(external.reviewWarnings.join(" ")).toContain("الملاحظات الداخلية");
     expect(source).toEqual(before);
+  });
+
+  it("exports only the name when the trusted clinic policy explicitly enables it", () => {
+    const source = dispatchOrder();
+    for (const policy of [{}, { "lab.patient_identity_mode": "bad" }, { "lab.patient_identity_mode": "code" }]) expect(toLabDispatchExternal(source, policy).patientName).toBeNull();
+    const result = toLabDispatchExternal(source, { "lab.patient_identity_mode": "name" });
+    expect(result.patientName).toBe(source.patientName);
+    for (const canary of DISPATCH_PRIVATE_CANARIES.slice(1)) expect(JSON.stringify(result)).not.toContain(canary);
+    expect(labDispatchQrPayload(result)).toBe('{"rx":"RX-381"}');
+    expect(formatLabPrescriptionText(source, "CLINIC", "PHONE", { "lab.patient_identity_mode": "name" })).toContain(source.patientName);
+  });
+
+  it("exports validated zones without inferring or remapping legacy shades", () => {
+    const shadeSpecification = { version: 1 as const, teeth: [{ toothCode: 14, cervical: { guide: "vita_classical" as const, code: "A3" }, body: { guide: "vita_3d_master" as const, code: "0M1" }, incisal: null }] };
+    const source = dispatchOrder({ shadeSpecification, shade: "OM1" });
+    const result = toLabDispatchExternal(source);
+    expect(result.shadeSpecification).toEqual(shadeSpecification);
+    expect(result.shade).toBe("OM1");
+    expect(formatLabPrescriptionText(source, "CLINIC")).toContain("0M1");
+    const invalid = toLabDispatchExternal(dispatchOrder({ shadeSpecification: { ...shadeSpecification, teeth: [{ ...shadeSpecification.teeth[0], toothCode: 11 }] } }));
+    expect(invalid.shadeSpecification).toBeNull();
+    expect(invalid.reviewWarnings.join(" ")).toContain("مواصفات اللون التفصيلية غير صالحة");
   });
 
   it("QR carries only a stable order reference, independent of patient identity", () => {
@@ -76,9 +98,10 @@ describe("external lab dispatch privacy", () => {
 
   it("does not relabel a historical prescription after a live catalogue rename", () => {
     const external = toLabDispatchExternal(dispatchOrder({ workType: "تاج زيركون كامل", serviceName: "تاج إيماكس" }));
-    expect(external.workType).toBe("غير محدد في دليل المعمل");
+    expect(external.workType).toBe("تاج زيركون كامل");
     expect(external.reviewWarnings.join(" ")).toContain("لا يطابق نوع العمل المحفوظ");
-    expect(JSON.stringify(external)).not.toContain("تاج إيماكس");
+    expect(external.reviewWarnings.join(" ")).toContain("الخدمة الحالية في دليل المعمل (مرجع منفصل): تاج إيماكس");
+    expect(external.workType).not.toBe("تاج إيماكس");
   });
 
   it("retains a catalogue-linked remake label without exporting the original internal ID", () => {
@@ -90,4 +113,11 @@ describe("external lab dispatch privacy", () => {
   it.each([0, -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1])("refuses invalid order reference %s", (id) => {
     expect(() => toLabDispatchExternal(dispatchOrder({ id }))).toThrow("Invalid lab order reference");
   });
+});
+
+it("prints a corrected standard clinical work type and preserves distinct catalog context without repricing", () => {
+  const external = toLabDispatchExternal(dispatchOrder({ workType: "طقم أسنان جزئي كاست", toothNumbers: "11(Denture Tooth)" }));
+  expect(external.workType).toBe("طقم أسنان جزئي كاست");
+  expect(external.reviewWarnings.join(" ")).toContain("SYNTHETIC_CATALOGUE_CROWN");
+  expect(external.reviewWarnings.join(" ")).toContain("لا يغيّر التسعير المحفوظ");
 });

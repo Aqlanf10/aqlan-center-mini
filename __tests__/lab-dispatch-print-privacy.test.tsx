@@ -1,4 +1,5 @@
 import React from "react";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import QRCode from "qrcode";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,6 +40,8 @@ describe("actual lab document render privacy", () => {
     mocks.getLabOrderById.mockResolvedValue(source);
     const html = await renderPage();
     assertPrivateAbsent(html);
+    expect(html).toContain('data-dental-arch="18,17,16,15,14,13,12,11,21,22,23,24,25,26,27,28" dir="ltr"');
+    expect(html).toContain('data-dental-arch="48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38" dir="ltr"');
     for (const expected of ["RX-381", "SYNTHETIC_CATALOGUE_CROWN", "SYNTHETIC_LAB", "SYNTHETIC_DOCTOR", "SYNTHETIC_CLINIC", "A2", "ND2", "دعامة جسر", "دمية جسر", "مراجعة فنية مطلوبة", "الملاحظات الداخلية", "2000-02-05"]) expect(html).toContain(expected);
     expect(qr).toHaveBeenCalledTimes(1);
     expect(qr.mock.calls[0][0]).toBe('{"rx":"RX-381"}');
@@ -47,6 +50,27 @@ describe("actual lab document render privacy", () => {
     expect(html).toContain(encoded);
     expect(mocks.canAccessPatient).toHaveBeenCalledWith(expect.objectContaining({ role: "admin" }), 910007);
     expect(source).toEqual(before);
+  });
+
+  it("scopes A4 pagination, unbroken dates and a non-orphan closing to this dispatch", () => {
+    const css = readFileSync(new URL("../app/print/lab/[id]/lab-dispatch.module.css", import.meta.url), "utf8");
+    expect(css).toMatch(/@page lab-dispatch\s*\{\s*size: A4 portrait/);
+    expect(css).toMatch(/page: lab-dispatch/);
+    expect(css).toMatch(/\.date\s*\{[^}]*white-space: nowrap/s);
+    expect(css).toMatch(/\.closing\s*\{[^}]*break-inside: avoid/s);
+  });
+
+  it("uses the stored name policy, keeps QR reference-only and prints structured zones", async () => {
+    mocks.getSettingsSafe.mockResolvedValue({ ...settings, "lab.patient_identity_mode": "name" });
+    mocks.getLabOrderById.mockResolvedValue(dispatchOrder({ shadeSpecification: { version: 1, teeth: [{ toothCode: 14, cervical: { guide: "vita_classical", code: "A3" }, body: { guide: "vita_3d_master", code: "0M1" }, incisal: null }] } }));
+    const qr = vi.spyOn(QRCode, "toDataURL");
+    const html = await renderPage();
+    expect(html).toContain(DISPATCH_PRIVATE_CANARIES[0]);
+    for (const canary of DISPATCH_PRIVATE_CANARIES.slice(1)) expect(html).not.toContain(canary);
+    expect(html).toContain("0M1");
+    expect(html).toContain("VITA SYSTEM 3D-MASTER");
+    expect(html).toContain('dir="ltr" class=');
+    expect(qr.mock.calls[0][0]).toBe('{"rx":"RX-381"}');
   });
 
   it.each([

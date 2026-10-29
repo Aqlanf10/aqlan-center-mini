@@ -5,8 +5,8 @@
   "generatedOnServerVersion": "18.6",
   "counts": {
     "tables": 133,
-    "columns": 1692,
-    "constraints": 1955,
+    "columns": 1693,
+    "constraints": 1956,
     "indexes": 413,
     "triggers": 100
   },
@@ -8540,6 +8540,10 @@
           "type": "text",
           "nullable": true
         },
+        "shade_specification": {
+          "type": "jsonb",
+          "nullable": true
+        },
         "source": {
           "type": "text",
           "nullable": false
@@ -8577,7 +8581,9 @@
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "lab_orders_shade_specification_valid"
+      ],
       "foreignKeys": [
         {
           "columns": [

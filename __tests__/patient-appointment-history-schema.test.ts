@@ -19,6 +19,7 @@ describe("patient appointment history index provenance", () => {
       "0069_unpaid_currency_transitions.sql",
       "0078_agreement_reconciliation.sql",
       "0087_agreement_reminder_metadata.sql",
+      "0089_lab_shade_specification.sql",
     ]);
   });
 

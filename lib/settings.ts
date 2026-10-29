@@ -35,6 +35,7 @@ export type SettingKey =
   | "documents.reversal_prefix"
   | "patients.referral_sources"
   | "lab.default_days"
+  | "lab.patient_identity_mode"
   | "recall.lapse_weeks"
   | "ortho.adjustment_service_ids"
   | "followup.proposal_days"
@@ -126,6 +127,7 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* (P3-8ب) قائمة «من أين جاء المريض» في ملفه — مفصولة بفواصل، والعيادة تعدّلها. */
   "patients.referral_sources": "توصية مريض,طبيب أحاله,وسائل التواصل الاجتماعي,لافتة أو مرور,بحث في الإنترنت,أخرى",
   "lab.default_days": "7",
+  "lab.patient_identity_mode": "code",
   "recall.lapse_weeks": "6",
   "ortho.adjustment_service_ids": "",
   "followup.proposal_days": "7",
@@ -231,6 +233,8 @@ export const ALL_SETTING_KEYS = Object.keys(SETTING_DEFAULTS) as SettingKey[];
  * لا **ممنوعًا**: مفتاحٌ يُضاف غدًا (نسبة طبيب، رقم حساب) يكون محجوبًا تلقائيًا.
  */
 export const PUBLIC_SETTING_KEYS: SettingKey[] = [
+  // Display policy only, never patient data; used by the lab dispatch preview.
+  "lab.patient_identity_mode",
   "clinic.name",
   "clinic.lead_doctor",
   "clinic.lead_doctor_title",
@@ -256,6 +260,15 @@ export function withDefaults(stored: Partial<Record<string, string>>): SettingsM
     result[key] = value !== undefined && value !== null && value !== "" ? value : SETTING_DEFAULTS[key];
   }
   return result;
+}
+
+export type LabPatientIdentityMode = "code" | "name";
+
+/** Read only trusted clinic settings. Missing or corrupt policy always keeps patient names private. */
+export function labPatientIdentityMode(
+  settings: Readonly<Partial<SettingsMap>>,
+): LabPatientIdentityMode {
+  return settings["lab.patient_identity_mode"] === "name" ? "name" : "code";
 }
 
 export function publicSubset(settings: SettingsMap): Partial<SettingsMap> {
@@ -336,6 +349,9 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   ) {
     const problem = documentPrefixProblem(trimmed);
     if (problem) return problem;
+  }
+  if (key === "lab.patient_identity_mode" && trimmed !== "code" && trimmed !== "name") {
+    return "هوية المريض في إرسالية المعمل: اختر الترميز أو الاسم.";
   }
   if (key === "lab.default_days") {
     const days = Number(trimmed);
