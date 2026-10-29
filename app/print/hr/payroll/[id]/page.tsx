@@ -25,6 +25,10 @@ export default async function PayrollPrintPage({
   }
 
   const { id } = await params;
+  // Match the payroll reader contract before calling it; malformed URLs are
+  // missing resources, not unhandled domain errors during server rendering.
+  const runId = Number(id);
+  if (!Number.isSafeInteger(runId) || runId <= 0) notFound();
   const run = await getPayrollRunById(id);
   if (!run) {
     notFound();
