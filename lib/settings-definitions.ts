@@ -177,6 +177,10 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     sensitivity: "normal", permission: "settings.manage" }),
 
   // ── ساعات العمل والطاقة ─────────────────────────────────────────────────
+  def({ key: "clinic.working_days", category: "hours", label: "أيام عمل المركز", type: "STRING",
+    defaultValue: SETTING_DEFAULTS["clinic.working_days"], order: 5, scope: "clinic",
+    sensitivity: "normal", permission: "settings.manage",
+    help: "أرقام بفواصل: 0 الأحد، 1 الاثنين، 2 الثلاثاء، 3 الأربعاء، 4 الخميس، 5 الجمعة، 6 السبت. الفراغ يغلق جميع الأيام." }),
   def({ key: "clinic.day_start", keywords: ["دوام", "ساعات", "بداية", "hours"],
     category: "hours", label: "بداية الفترة الأولى", type: "TIME",
     defaultValue: SETTING_DEFAULTS["clinic.day_start"], order: 10, scope: "clinic",

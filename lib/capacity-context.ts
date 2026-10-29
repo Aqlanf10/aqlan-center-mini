@@ -13,7 +13,7 @@ import {
   resolveServiceByLegacyType, type DbClient,
 } from "./db";
 import { clinicDayStart } from "./clinicZone";
-import { chairCount } from "./settings";
+import { chairCount, type SettingsMap } from "./settings";
 import { judgeFullCapacity, type CapacityVerdict, type ProviderBlockWindow, type Shift } from "./capacity";
 import type { AppointmentService } from "./appointment-services";
 import type { Appointment } from "./schedule";
@@ -28,8 +28,8 @@ export interface CapacityContext {
 }
 
 /** يقرأ سياسة السعة من الإعدادات — مصدرٌ واحد لساعات المركز وطاقته. */
-export async function loadCapacityContext(): Promise<CapacityContext> {
-  const settings = await getSettings();
+export async function loadCapacityContext(currentSettings?: SettingsMap): Promise<CapacityContext> {
+  const settings = currentSettings ?? await getSettings();
   const shifts: Shift[] = [
     { start: settings["clinic.day_start"], end: settings["clinic.day_end"] },
   ];

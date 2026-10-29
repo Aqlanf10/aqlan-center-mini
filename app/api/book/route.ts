@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { clientIpFromForwardedFor } from "@/lib/net";
 import { NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, countRecentRequests, createBookingRequest, getSettings } from "@/lib/db";
+import { CLINIC_TIME_ZONE, createBookingRequest, getSettings } from "@/lib/db";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
+import { publicBookingCatalog, publicBookingTimes, validatePublicBookingSelection } from "@/lib/public-booking";
 import { validateBookingRequest } from "@/lib/booking";
 import { clinicDateString } from "@/lib/schedule";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -19,8 +21,7 @@ export const dynamic = "force-dynamic";
  * نفس الشبكة أرسل قبلها — وهو بالضبط «العيادة لا تهتم» الذي نعالجه. يبقى الحدّ
  * موجودًا ليوقف من يرسل ألفًا في دقيقة، لا ليحكم على مريض.
  */
-const MAX_PER_PHONE_PER_DAY = 3;
-const MAX_PER_SOURCE_PER_DAY = 60;
+
 
 /**
  * بصمة مصدر الطلب — لا عنوانه.
@@ -89,29 +90,46 @@ export async function POST(request: Request) {
 
   try {
     const hash = sourceHash(request);
-    const recent = await countRecentRequests(validation.value.phone, hash);
-    // رسالتان مختلفتان: من أرسل ثلاثة طلبات اليوم يُقال له إنها وصلت، ومن مُنع بسبب
-    // مصدرٍ مزدحم لم يرسل شيئًا — فإخباره «وصلتنا طلباتكم» كذبٌ يجعله ينتظر ردًّا
-    // لن يأتي. لكلٍّ رسالته، وكلتاهما تعطيه طريقًا آخر إلى العيادة.
-    if (recent.byPhone >= MAX_PER_PHONE_PER_DAY) {
-      return NextResponse.json(
-        { message: "وصلتنا طلباتكم اليوم وسنتصل بكم. للحالات المستعجلة اتصلوا بالمركز مباشرة." },
-        { status: 429 },
-      );
+    const requestKey = request.headers.get("Idempotency-Key");
+    if (requestKey !== null && !IDEMPOTENCY_KEY_PATTERN.test(requestKey)) {
+      return NextResponse.json({ message: "معرّف الطلب غير صالح." }, { status: 400 });
     }
-    if (recent.bySource >= MAX_PER_SOURCE_PER_DAY) {
-      return NextResponse.json(
-        { message: "تعذّر استقبال الطلب الآن. اتصلوا بالمركز مباشرة لحجز موعدكم." },
-        { status: 429 },
-      );
-    }
-    await createBookingRequest(validation.value, hash);
+    await createBookingRequest(validation.value, hash, requestKey,
+      () => validatePublicBookingSelection(validation.value));
     // لا يُعاد أي شيء من السجل: الصفحة عامة، ولا سبب يجعلها تعرف مُعرّفات قاعدة البيانات.
     return NextResponse.json({ received: true }, { status: 201 });
-  } catch {
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    const errors: Record<string, [number, string]> = {
+      BOOKING_KEY_CONFLICT: [409, "تغيّرت بيانات محاولة الإرسال. ارجع للملخص وابدأ طلبًا جديدًا."],
+      BOOKING_PHONE_LIMIT: [429, "وصلتنا طلباتكم اليوم وسنتصل بكم. للحالات المستعجلة اتصلوا بالمركز مباشرة."],
+      BOOKING_SOURCE_LIMIT: [429, "تعذّر استقبال الطلب الآن. اتصلوا بالمركز مباشرة لحجز موعدكم."],
+      BOOKING_SELECTION_INVALID: [400, "الاختيارات غير متاحة الآن. حدّث الأوقات واختر موعدًا ضمن الدوام."],
+      BOOKING_SLOT_UNAVAILABLE: [409, "لم يعد الوقت متاحًا. حدّث الأوقات واختر وقتًا آخر."],
+    };
+    if (errors[code]) return NextResponse.json({ message: errors[code][1] }, { status: errors[code][0], headers: { "Cache-Control": "no-store" } });
     return NextResponse.json(
       { message: "تعذّر إرسال الطلب. أعيدوا المحاولة أو اتصلوا بالمركز." },
       { status: 503 },
     );
+  }
+}
+
+/** Same public path and existing abuse controls; no private availability route is exposed. */
+export async function GET(request: Request) {
+  const limit = await consumeSecurityLimit({ scope: "book-availability", identifier: sourceHash(request) ?? "public",
+    maximum: BOOK_RATE_LIMIT.maximum * 20, windowMinutes: BOOK_RATE_LIMIT.windowMinutes, headers: request.headers });
+  if (!limit.allowed) return NextResponse.json({ message: "طلبات كثيرة. أعد المحاولة بعد قليل." },
+    { status: 429, headers: { "Retry-After": String(Math.max(1, limit.retryAfterSeconds)) } });
+  try {
+    const query = new URL(request.url).searchParams;
+    const result = query.has("date")
+      ? await publicBookingTimes(query.get("date") ?? "", Number(query.get("serviceId")), Number(query.get("doctorId")))
+      : await publicBookingCatalog();
+    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    const invalid = error instanceof Error && error.message === "BOOKING_SELECTION_INVALID";
+    return NextResponse.json({ message: invalid ? "اختر يومًا وخدمة وطبيبًا متاحين." : "تعذّر تحميل الأوقات. أعد المحاولة." },
+      { status: invalid ? 400 : 503, headers: { "Cache-Control": "no-store" } });
   }
 }
