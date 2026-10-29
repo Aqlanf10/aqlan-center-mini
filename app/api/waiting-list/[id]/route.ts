@@ -14,6 +14,9 @@ import {
   type WaitingUrgency,
 } from "@/lib/waiting-list";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalWaitingMove, parseCanonicalWaitingMove, readCanonicalWaitingEntry } from "@/lib/canonical-waiting-list";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +30,15 @@ const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
  * الاتصال به ولا ملاحظاتها.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalWaitingEntry(selected.handle, Number((await context.params).id)), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر تحميل سجلّ الاتصال.");
+    }
+  }
   const guard = await authorize(context);
   if ("response" in guard) return guard.response;
 
@@ -50,6 +62,25 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * صفَّه ولو نادى المسار مباشرةً. **إخفاءُ الزر في الشاشة ليس تفويضًا.**
  */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 14): offer, contact, preferences, cancel and expire on
+    // appointments.edit; book waits for the appointment slice (409).
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_waiting_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const result = await commandCanonicalWaitingMove(selected.handle, Number((await context.params).id), parseCanonicalWaitingMove(canonicalBody));
+      const payload = result.kind === "entry" ? result.entry : result.kind === "contact" ? { ok: true, event: result.event } : { ok: true };
+      return NextResponse.json(payload, { headers: NO_STORE });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+    }
+  }
   const guard = await authorize(context);
   if ("response" in guard) return guard.response;
   const { id, session } = guard;

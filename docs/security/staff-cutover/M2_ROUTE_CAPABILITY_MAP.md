@@ -34,12 +34,12 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 321 |
+| existing | 318 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 23 |
+| canonical-done | 26 |
 
 | Record scope | Routes |
 |---|---|
@@ -321,6 +321,16 @@ Read only: the record read `read:visits.readiness`, one owning snapshot (`readCa
 - Hidden groups are omitted, never replaced by neutral values (no empty balance list that would read as «no debt»).
 - **Screen:** each waiting row of `/visits` shows the projected checklist and dues, and «أقِرّ الجاهزية» (the slice 12 `clear` move) when `visits.manage` is held; the readiness read failing never hides the queue.
 - **Tests:** PG `visits-canonical-readiness` (7): the four groups (no alert text or medical history in the operational payload), own scope and the patient mode (outside equals missing), the stepper with and without the ledger grant, a canonical clearance shown on the next read. Built journey `canonical-today-queue-journey` now 6.
+
+### Slice 14 — waiting list (`/api/waiting-list` GET, POST; `/api/waiting-list/[id]` GET, PATCH)
+Step 2 of the order (appointments, recall, waiting list). A scheduling record, so the **appointment scope** decides, with the meaning it has for appointments (slice 2): `all` lists every entry; `own` lists the entries assigned to the actor's clinician party. The legacy doctor view also listed unassigned entries and other doctors' entries for its patients; the canonical `own` scope does not. `appointments.edit` joins `CLINIC_RUNTIME_ACTIONS`; the runtime gains `staffOperationAppointmentScope`.
+- **Reads:** the record read `read:waiting-list`, one owning snapshot: entries, stale marks from `scheduling.waiting_list_hold_days`, and the contact history, all from the same snapshot. An entry outside the scope answers exactly like a missing one (404). `canEdit` = `appointments.edit` (display only).
+- **Writes:** one admitted `appointments.edit` transaction each: add, offer, contact, preferences, cancel, expire. The entry row is locked first, then checked against the scope. The audit row is written in the same transaction: the legacy path keeps its best-effort audit after the write, the canonical path makes it atomic (`*With` writers take an audit callback, `WaitingAudit`).
+- **References:** an `own`-scope actor adds entries only for its own patients (the patient list's condition), assigned to its own clinician party by default; another doctor, or clearing the doctor, is refused (403 `waiting_doctor_not_allowed`), so an entry never leaves the scope of the actor who wrote it. A named doctor must be active and a named service must exist (400), instead of a foreign-key error.
+- **Not canonical yet (409 `waiting_action_not_canonical`):** the free-slot matching mode of the list (`date`/`time`/… parameters) and `book`. Both go through the appointment engine and move with the appointment routes. `booked` refuses as before (400).
+- **Screen:** `/waiting-list` is registered for an account with an appointment scope. It reuses the existing page, which only calls these routes. Write controls follow `canEdit`; the appointments screen is not linked for canonical sessions.
+- **Screen fix:** the row's action buttons kept their intrinsic width (`shrink-0`) and pushed «إغلاق» off a 390px screen; they now wrap (`max-w-full`), for legacy sessions too.
+- **Tests:** PG `waiting-list-canonical` (7): add with atomic audit, duplicate need, inactive doctor and unknown service, own scope (outside equals missing, own party only), appointment scope rather than patient scope, contact → preferences → cancel with audit, own-scope moves outside equal missing, book/booked refusals, audit rollback, revocation. Legacy waiting-list PG files (6, 29 tests) and HTTP files (7) unchanged and passing. Built journey `canonical-waiting-list-journey` (2): HTTP scope and refusals, mobile browser call recording without horizontal scroll, viewer without write controls.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.

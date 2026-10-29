@@ -6242,8 +6242,16 @@
   "need": [],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 14: record read read:waiting-list (appointment scope) in one owning snapshot; hold days and contact history from the same snapshot; the free-slot matching mode refuses (409 waiting_action_not_canonical) until the appointment engine is canonical.",
+  "projection": {
+   "legacy": "doctor isolation via canViewAllPatients and patient ownership; every other admitted role reads every entry.",
+   "groups": {
+    "identity": "entries (patient name and phone, preferences, status, contact history) — every actor admitted to the waiting list"
+   },
+   "rows": "appointment scope all: every entry; own: entries assigned to the actor's clinician party (as for appointments)",
+   "fields": "canEdit = appointments.edit (display only)"
+  }
  },
  {
   "route": "/api/waiting-list",
@@ -6258,8 +6266,8 @@
   ],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 14: operation appointments.edit; own scope: the patient must be the clinician's (outside = missing 404) and the entry is assigned to the clinician party; active doctor and existing service checked; audit atomic."
  },
  {
   "route": "/api/waiting-list/[id]",
@@ -6272,8 +6280,15 @@
   "need": [],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 14: record read read:waiting-list; entry inside the appointment scope (outside = missing 404) with its contact events.",
+  "projection": {
+   "legacy": "authorize(): canAccessPatient on the entry's patient.",
+   "groups": {
+    "identity": "the entry and its contact events — every actor admitted to the entry"
+   },
+   "rows": "as GET /api/waiting-list"
+  }
  },
  {
   "route": "/api/waiting-list/[id]",
@@ -6289,39 +6304,39 @@
   "anyOf": [],
   "scope": "appointment",
   "status": "existing",
-  "note": "",
+  "note": "M2 slice 14: offer, contact, preferences, cancelled and expired are canonical (appointments.edit, entry row locked then scope-checked, outside = missing 404, audit atomic); booked refuses as before (400); book refuses on the canonical path (409 waiting_action_not_canonical) until the appointment slice. The route entry stays existing until book moves.",
   "branches": {
    "discriminator": "action",
    "values": {
     "offer": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 14)."
     },
     "contact": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 14)."
     },
     "preferences": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 14)."
     },
     "book": {
      "need": [
       "appointments.create"
      ],
-     "note": "Creates the appointment from the waiting entry."
+     "note": "Creates the appointment from the waiting entry. Not canonical yet (409 on the canonical path)."
     },
     "booked": {
      "need": [],
-     "note": "Marks an entry already booked elsewhere."
+     "note": "Canonical (M2 slice 14). Marks an entry already booked elsewhere."
     },
     "cancelled": {
      "need": [],
-     "note": "Reason required."
+     "note": "Canonical (M2 slice 14). Reason required."
     },
     "expired": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 14)."
     }
    },
    "fields": [

@@ -3,7 +3,7 @@ import type { DbClient, DbPool } from "./db";
 import { withIsolation } from "./transactions";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { revalidateVerifiedDurableSession, type VerifiedDurableSession } from "./staff-durable-session";
-import { canPerformOwnerOperation, hasStaffCapability, patientCapabilityConstraint, type StaffRecordConstraint } from "./staff-capabilities";
+import { appointmentCapabilityConstraint, canPerformOwnerOperation, hasStaffCapability, patientCapabilityConstraint, type StaffRecordConstraint } from "./staff-capabilities";
 import type { OwnerOnlyOperation, StaffCapability } from "./staff-capability-catalogue";
 import { loadLockedStaffAuthority } from "./staff-authority-proof-internal";
 
@@ -20,7 +20,7 @@ export const INVENTORY_RUNTIME_ACTIONS = Object.freeze([
 export type InventoryRuntimeAction = typeof INVENTORY_RUNTIME_ACTIONS[number];
 /** Clinic operations migrated in M2 (docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md §5).
  * Each is an exact catalogue capability admitted by `withStaffOperation`. */
-export const CLINIC_RUNTIME_ACTIONS = Object.freeze(["patients.create", "patients.edit", "settings.view", "visits.manage"] as const);
+export const CLINIC_RUNTIME_ACTIONS = Object.freeze(["patients.create", "patients.edit", "settings.view", "visits.manage", "appointments.edit"] as const);
 export type ClinicRuntimeAction = typeof CLINIC_RUNTIME_ACTIONS[number];
 export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view" | "inventory.items.create" | "inventory.units.revise" | "inventory.locations.create" | InventoryRuntimeAction | ClinicRuntimeAction;
 // A literal list (the readiness audit reads it as an AST constant); a unit test pins it
@@ -32,7 +32,7 @@ const actions = new Set<string>(["staff.view","staff.permissions.edit","inventor
  "inventory.custody.view","inventory.custody.dispatch","inventory.custody.acknowledge","inventory.custody.use",
  "inventory.custody.stocktake","inventory.custody.approve-waste","inventory.custody.settlement.propose",
  "inventory.custody.settlement.object","inventory.reconcile","inventory.costs.view","finance.suppliers.view",
- "patients.create","patients.edit","settings.view","visits.manage"]);
+ "patients.create","patients.edit","settings.view","visits.manage","appointments.edit"]);
 /** Test hook: the exact admitted action list (copy). */
 export function staffRuntimeActions(): readonly string[] { return Object.freeze([...actions]); }
 declare const operationBrand: unique symbol;
@@ -107,6 +107,12 @@ export async function staffOperationOwnerOperations<O extends OwnerOnlyOperation
 export async function staffOperationPatientScope(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,schema?:string):Promise<StaffRecordConstraint>{
  const current=await assertAndLoadStaffOperation(client,handle,action,schema);
  return patientCapabilityConstraint(current.access);
+}
+/** The same for the appointment record constraint (scheduling records: appointments and
+ * the waiting list). */
+export async function staffOperationAppointmentScope(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,schema?:string):Promise<StaffRecordConstraint>{
+ const current=await assertAndLoadStaffOperation(client,handle,action,schema);
+ return appointmentCapabilityConstraint(current.access);
 }
 /** Fresh exact-handle assertion, then the actor's current linked clinician party (or null). */
 export async function staffOperationClinician(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,schema?:string):Promise<number|null>{

@@ -4,6 +4,7 @@ import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import { useSession } from "@/components/SessionProvider";
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
@@ -68,6 +69,10 @@ function formatMoment(value: string | null | undefined): string {
 }
 
 export default function WaitingListPage() {
+  /* جلسة الهوية الموحّدة (M2 slice 14): الخادم يُرجع `canEdit` من صلاحية appointments.edit،
+     فتُخفى أزرار الكتابة عمّن لا يملكها؛ وشاشة المواعيد لم تُنقل بعد فلا تُربط. */
+  const canonical = useSession()?.canonical === true;
+  const [canEdit, setCanEdit] = useState(true);
 
   const [entries, setEntries] = useState<WaitingEntry[]>([]);
   const [history, setHistory] = useState<Record<number, ContactEvent[]>>({});
@@ -92,6 +97,7 @@ export default function WaitingListPage() {
       }
       setEntries(Array.isArray(data?.entries) ? data.entries : []);
       setHistory(data?.history && typeof data.history === "object" ? data.history : {});
+      setCanEdit(data?.canEdit !== false);
       setError(null);
     } catch {
       setError("تعذّر الاتصال بالخادم.");
@@ -239,7 +245,8 @@ export default function WaitingListPage() {
                     )}
                   </div>
 
-                  <div className="flex shrink-0 flex-wrap gap-1.5">
+                  <div className="flex max-w-full shrink-0 flex-wrap gap-1.5">
+                    {canEdit && (<>
                     <button
                       type="button"
                       data-action="contact"
@@ -261,6 +268,7 @@ export default function WaitingListPage() {
                     >
                       تعديل التفضيلات
                     </button>
+                    </>)}
                     {events.length > 0 && (
                       <button
                         type="button"
@@ -271,6 +279,7 @@ export default function WaitingListPage() {
                         سجلّ الاتصال ({events.length})
                       </button>
                     )}
+                    {canEdit && (
                     <button
                       type="button"
                       data-action="close"
@@ -280,6 +289,7 @@ export default function WaitingListPage() {
                     >
                       إغلاق
                     </button>
+                    )}
                   </div>
                 </div>
 
@@ -568,7 +578,7 @@ export default function WaitingListPage() {
         القائمة ترشِّح ولا تحجز: الحجز يتمّ من شاشة المواعيد — حين يشغر مكانٌ تظهر
         هناك لوحةُ المرشَّحين بسبب ترشيح كلٍّ منهم — فيمرّ من محرّك السعة نفسه.
         وموعدٌ يُفرض على مريضٍ لم يؤكّد هو وعدٌ لا يستطيع المركز الوفاء به. و
-        <a href="/appointments" className="font-bold text-navy-800 underline">شاشة المواعيد</a>
+        {canonical ? <span className="font-bold">شاشة المواعيد</span> : <a href="/appointments" className="font-bold text-navy-800 underline">شاشة المواعيد</a>}
         {" "}هي مكان الحجز.
       </p>
     </div>

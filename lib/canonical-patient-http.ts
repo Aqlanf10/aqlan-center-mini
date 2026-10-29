@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { CanonicalPatientReadRefusal } from "./canonical-patient-reads";
 import { CanonicalPatientWriteRefusal } from "./canonical-patient-writes";
 import { CanonicalVisitRefusal } from "./canonical-visits";
+import { CanonicalWaitingRefusal } from "./canonical-waiting-list";
 import { staffAdmissionRefusal } from "./staff-capability-editor";
 import { selectRequestStaffEnvelope } from "./staff-session-admission";
 import type { VerifiedDurableSession } from "./staff-durable-session";
@@ -46,6 +47,18 @@ export function canonicalVisitFailure(error: unknown, fallback: string): NextRes
     return NextResponse.json({ code: error.code, message: error.message, ...(error.visitId ? { visitId: error.visitId } : {}) }, { status: error.status, headers: NO_STORE });
   }
   return canonicalPatientReadFailure(error, fallback);
+}
+
+/** Canonical waiting-list routes (M2 slice 14). Scope refusals read as no access to the
+ * schedule, not to patients. */
+export function canonicalWaitingFailure(error: unknown, fallback: string): NextResponse {
+  if (error instanceof CanonicalWaitingRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  const refusal = staffAdmissionRefusal(error);
+  if (refusal) {
+    const message = /RECORD_SCOPE_DENIED$/.test(refusal.code) ? "لا تملك صلاحية على مواعيد المرضى." : refusal.message;
+    return NextResponse.json({ code: refusal.code, message }, { status: refusal.status, headers: NO_STORE });
+  }
+  return NextResponse.json({ message: fallback }, { status: 500, headers: NO_STORE });
 }
 
 const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جديد.";

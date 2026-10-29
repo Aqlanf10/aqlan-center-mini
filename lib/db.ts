@@ -27272,12 +27272,18 @@ export async function listWaitingEntries(
   options: { includeResolved?: boolean; patientId?: number } = {},
 ): Promise<WaitingEntry[]> {
   await ensureSchema();
+  return listWaitingEntriesWith(getPool(), options);
+}
+
+export async function listWaitingEntriesWith(
+  q: Pick<DbClient, "query">, options: { includeResolved?: boolean; patientId?: number } = {},
+): Promise<WaitingEntry[]> {
   const clauses: string[] = [];
   const params: unknown[] = [];
   if (!options.includeResolved) clauses.push(`w.status = ANY($${params.push(OPEN_STATUSES)}::text[])`);
   if (options.patientId) clauses.push(`w.patient_id = $${params.push(options.patientId)}`);
   const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
-  const { rows } = await getPool().query<WaitingRow>(
+  const { rows } = await q.query<WaitingRow>(
     `${WAITING_SELECT}${where}
       ORDER BY CASE w.urgency WHEN 'urgent' THEN 0 WHEN 'soon' THEN 1 ELSE 2 END,
                w.created_at, w.id`,
@@ -27288,9 +27294,18 @@ export async function listWaitingEntries(
 
 export async function getWaitingEntry(id: number): Promise<WaitingEntry | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<WaitingRow>(`${WAITING_SELECT} WHERE w.id = $1`, [id]);
+  return getWaitingEntryWith(getPool(), id);
+}
+
+export async function getWaitingEntryWith(q: Pick<DbClient, "query">, id: number): Promise<WaitingEntry | null> {
+  const { rows } = await q.query<WaitingRow>(`${WAITING_SELECT} WHERE w.id = $1`, [id]);
   return rows[0] ? toWaitingEntry(rows[0]) : null;
 }
+
+/** Where a waiting-list writer records its audit row: the legacy routes pass recordAudit
+ * (best effort after the write, never throws); the canonical path passes an atomic
+ * insertAuditRow on its transaction (M2 slice 14). */
+export type WaitingAudit = (input: AuditInput) => Promise<void>;
 
 export type WaitingWriteResult =
   | { ok: true; entry: WaitingEntry }
@@ -27307,6 +27322,13 @@ export async function addWaitingEntry(
   input: WaitingEntryInput, actor: { actor: string; actorRole?: string | null },
 ): Promise<WaitingWriteResult> {
   await ensureSchema();
+  return addWaitingEntryWith(getPool(), input, actor, recordAudit);
+}
+
+export async function addWaitingEntryWith(
+  q: Pick<DbClient, "query">, input: WaitingEntryInput, actor: { actor: string; actorRole?: string | null },
+  audit: WaitingAudit,
+): Promise<WaitingWriteResult> {
   const problem = validateWaitingEntry(input);
   if (problem) return { ok: false, message: problem };
 
@@ -27318,7 +27340,7 @@ export async function addWaitingEntry(
      الحارسان فهرسين جزئيّين — واحدٌ للمريض مع خدمة، وآخرُ لصفّه العامّ — ولا
      تستدلّ الجملةُ الواحدة عليهما معًا. وذكرُ أحدهما يجعل الآخر يرفع خطأً بدل
      أن يُردّ التكرار بلطف، فيرى الموظّف عطبًا مكان رسالةٍ عربية. */
-  const { rows } = await getPool().query<{ id: number }>(
+  const { rows } = await q.query<{ id: number }>(
     `INSERT INTO waiting_list
        (patient_id, service_id, doctor_id, earliest_date, latest_date, preferred_period,
         urgency, duration_minutes, note, created_by,
@@ -27335,7 +27357,7 @@ export async function addWaitingEntry(
   );
   if (!rows[0]) {
     /* التصادم بالحاجة لا بالمريض: نفس المريض لنفس الخدمة، أو صفُّه العامّ. */
-    const { rows: existing } = await getPool().query<{ id: number }>(
+    const { rows: existing } = await q.query<{ id: number }>(
       `SELECT id FROM waiting_list
         WHERE patient_id = $1 AND status = ANY($2::text[])
           AND service_id IS NOT DISTINCT FROM $3 LIMIT 1`,
@@ -27348,9 +27370,9 @@ export async function addWaitingEntry(
         : "هذا المريض ينتظر هذه الحاجة سلفًا.",
     };
   }
-  const entry = await getWaitingEntry(rows[0].id);
+  const entry = await getWaitingEntryWith(q, rows[0].id);
   if (!entry) return { ok: false, message: "تعذّر حفظ الانتظار. أعد المحاولة." };
-  await recordAudit({
+  await audit({
     action: "waiting_list.add", entity: "waiting_list", entityId: String(entry.id),
     entityLabel: entry.patientName ?? `#${entry.id}`,
     actor: actor.actor, actorRole: actor.actorRole ?? null,
@@ -27360,7 +27382,7 @@ export async function addWaitingEntry(
       المدى: describeWindow(entry),
       الخدمة: entry.serviceName ?? "غير محدَّدة",
     },
-  }).catch(() => {});
+  });
   return { ok: true, entry };
 }
 
@@ -27375,7 +27397,13 @@ export async function markWaitingOffered(
   id: number, actor: { actor: string; actorRole?: string | null },
 ): Promise<{ ok: boolean; reason?: "not_found" | "not_open" }> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  return markWaitingOfferedWith(getPool(), id, actor, recordAudit);
+}
+
+export async function markWaitingOfferedWith(
+  q: Pick<DbClient, "query">, id: number, actor: { actor: string; actorRole?: string | null }, audit: WaitingAudit,
+): Promise<{ ok: boolean; reason?: "not_found" | "not_open" }> {
+  const { rows } = await q.query<{ id: number }>(
     `UPDATE waiting_list
         SET status = 'offered', offered_at = NOW(), offered_by = $2, updated_at = NOW()
       WHERE id = $1 AND status = 'waiting'
@@ -27383,13 +27411,13 @@ export async function markWaitingOffered(
     [id, actor.actor],
   );
   if (rows.length === 0) {
-    const current = await getWaitingEntry(id);
+    const current = await getWaitingEntryWith(q, id);
     return { ok: false, reason: current ? "not_open" : "not_found" };
   }
-  await recordAudit({
+  await audit({
     action: "waiting_list.offer", entity: "waiting_list", entityId: String(id),
     actor: actor.actor, actorRole: actor.actorRole ?? null, details: {},
-  }).catch(() => {});
+  });
   return { ok: true };
 }
 
@@ -27409,7 +27437,20 @@ export async function resolveWaitingEntry(
   actor: { actor: string; actorRole?: string | null },
 ): Promise<{ ok: boolean; reason?: "not_found" | "already_resolved" }> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  return resolveWaitingEntryWith(getPool(), id, input, actor, recordAudit);
+}
+
+export async function resolveWaitingEntryWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+  /* «حُجز» ليست من خيارات هذا الباب: الحالة لا تصير «حُجز» إلا في
+     `markWaitingBooked` ومعها رقمُ موعدٍ وَلَده التحويل نفسه. وإبقاؤها هنا
+     يترك بابًا ثانيًا لحالةٍ لها بابٌ واحد. */
+  input: { status: "cancelled" | "expired"; reason?: string | null; appointmentId?: number | null },
+  actor: { actor: string; actorRole?: string | null },
+  audit: WaitingAudit,
+): Promise<{ ok: boolean; reason?: "not_found" | "already_resolved" }> {
+  const { rows } = await q.query<{ id: number }>(
     `UPDATE waiting_list
         SET status = $2, resolved_at = NOW(), resolved_by = $3,
             resolution_reason = $4, appointment_id = COALESCE($5, appointment_id),
@@ -27420,14 +27461,14 @@ export async function resolveWaitingEntry(
      input.appointmentId ?? null, OPEN_STATUSES],
   );
   if (rows.length === 0) {
-    const current = await getWaitingEntry(id);
+    const current = await getWaitingEntryWith(q, id);
     return { ok: false, reason: current ? "already_resolved" : "not_found" };
   }
-  await recordAudit({
+  await audit({
     action: "waiting_list.resolve", entity: "waiting_list", entityId: String(id),
     actor: actor.actor, actorRole: actor.actorRole ?? null,
     details: { الحالة: input.status, السبب: input.reason ?? "", الموعد: input.appointmentId ?? "" },
-  }).catch(() => {});
+  });
   return { ok: true };
 }
 
@@ -27459,7 +27500,13 @@ export async function listWaitingContactEvents(
   waitingListId: number,
 ): Promise<ContactEvent[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ContactEventRow>(
+  return listWaitingContactEventsWith(getPool(), waitingListId);
+}
+
+export async function listWaitingContactEventsWith(
+  q: Pick<DbClient, "query">, waitingListId: number,
+): Promise<ContactEvent[]> {
+  const { rows } = await q.query<ContactEventRow>(
     `SELECT id::text, waiting_list_id, contacted_at, contacted_by, contacted_by_role,
             channel, outcome, note, slot_date::text, slot_time::text, appointment_id
        FROM waiting_list_contact_events
@@ -27474,10 +27521,17 @@ export async function listWaitingContactEvents(
 export async function listWaitingContactEventsFor(
   waitingListIds: readonly number[],
 ): Promise<Map<number, ContactEvent[]>> {
+  if (waitingListIds.length === 0) return new Map();
+  await ensureSchema();
+  return listWaitingContactEventsForWith(getPool(), waitingListIds);
+}
+
+export async function listWaitingContactEventsForWith(
+  q: Pick<DbClient, "query">, waitingListIds: readonly number[],
+): Promise<Map<number, ContactEvent[]>> {
   const byEntry = new Map<number, ContactEvent[]>();
   if (waitingListIds.length === 0) return byEntry;
-  await ensureSchema();
-  const { rows } = await getPool().query<ContactEventRow>(
+  const { rows } = await q.query<ContactEventRow>(
     `SELECT id::text, waiting_list_id, contacted_at, contacted_by, contacted_by_role,
             channel, outcome, note, slot_date::text, slot_time::text, appointment_id
        FROM waiting_list_contact_events
@@ -27510,10 +27564,23 @@ export async function recordWaitingContact(
   actor: { actor: string; actorRole?: string | null },
 ): Promise<{ ok: true; event: ContactEvent } | { ok: false; message: string }> {
   await ensureSchema();
-  const entry = await getWaitingEntry(waitingListId);
+  return recordWaitingContactWith(getPool(), waitingListId, input, actor, recordAudit);
+}
+
+export async function recordWaitingContactWith(
+  q: Pick<DbClient, "query">,
+  waitingListId: number,
+  input: {
+    outcome: ContactOutcome; channel: ContactChannel; note?: string | null;
+    slotDate?: string | null; slotTime?: string | null; appointmentId?: number | null;
+  },
+  actor: { actor: string; actorRole?: string | null },
+  audit: WaitingAudit,
+): Promise<{ ok: true; event: ContactEvent } | { ok: false; message: string }> {
+  const entry = await getWaitingEntryWith(q, waitingListId);
   if (!entry) return { ok: false, message: "الانتظار غير موجود." };
 
-  const { rows } = await getPool().query<ContactEventRow>(
+  const { rows } = await q.query<ContactEventRow>(
     `INSERT INTO waiting_list_contact_events
        (waiting_list_id, contacted_by, contacted_by_role, channel, outcome, note,
         slot_date, slot_time, appointment_id)
@@ -27528,7 +27595,7 @@ export async function recordWaitingContact(
   /* الحالة تتبع المحاولة ولا تُغلق القائمة من تلقاء نفسها: رفضُ موعدٍ ليس
      انسحابًا من الانتظار. و«نودي» تُرفع لتعرف الشاشة أنه كُلِّم. */
   if (OPEN_STATUSES.includes(entry.status)) {
-    await getPool().query(
+    await q.query(
       `UPDATE waiting_list SET status = 'offered', offered_at = COALESCE(offered_at, NOW()),
               offered_by = COALESCE(offered_by, $2), updated_at = NOW()
         WHERE id = $1 AND status = 'waiting'`,
@@ -27536,12 +27603,12 @@ export async function recordWaitingContact(
     );
   }
 
-  await recordAudit({
+  await audit({
     action: "waiting_list.contact", entity: "waiting_list", entityId: String(waitingListId),
     entityLabel: entry.patientName ?? `#${waitingListId}`,
     actor: actor.actor, actorRole: actor.actorRole ?? null,
     details: { النتيجة: input.outcome, القناة: input.channel },
-  }).catch(() => {});
+  });
 
   return { ok: true, event: toContactEvent(rows[0]) };
 }
@@ -27558,7 +27625,16 @@ export async function updateWaitingPreferences(
   actor: { actor: string; actorRole?: string | null },
 ): Promise<WaitingWriteResult> {
   await ensureSchema();
-  const before = await getWaitingEntry(id);
+  return updateWaitingPreferencesWith(getPool(), id, input, actor, recordAudit);
+}
+
+export async function updateWaitingPreferencesWith(
+  q: Pick<DbClient, "query">,
+  id: number, input: Partial<WaitingEntryInput>,
+  actor: { actor: string; actorRole?: string | null },
+  audit: WaitingAudit,
+): Promise<WaitingWriteResult> {
+  const before = await getWaitingEntryWith(q, id);
   if (!before) return { ok: false, message: "الانتظار غير موجود." };
   if (!OPEN_STATUSES.includes(before.status)) {
     return { ok: false, message: "لا تُعدَّل تفضيلات انتظارٍ مُغلق." };
@@ -27582,7 +27658,7 @@ export async function updateWaitingPreferences(
   const problem = validateWaitingEntry(merged);
   if (problem) return { ok: false, message: problem };
 
-  await getPool().query(
+  await q.query(
     `UPDATE waiting_list
         SET service_id = $2, doctor_id = $3, earliest_date = $4::date, latest_date = $5::date,
             preferred_period = $6, preferred_shift = $7, preferred_days = $8::smallint[],
@@ -27612,21 +27688,21 @@ export async function updateWaitingPreferences(
     changes["اليوم نفسه"] = merged.sameDayAvailable ? "متاح" : "غير متاح";
   }
   if (merged.urgency !== before.urgency) {
-    await recordAudit({
+    await audit({
       action: "waiting_list.priority_change", entity: "waiting_list", entityId: String(id),
       actor: actor.actor, actorRole: actor.actorRole ?? null,
       details: { من: before.urgency, إلى: merged.urgency },
-    }).catch(() => {});
+    });
   }
   if (Object.keys(changes).length > 0) {
-    await recordAudit({
+    await audit({
       action: "waiting_list.update_preferences", entity: "waiting_list", entityId: String(id),
       entityLabel: before.patientName ?? `#${id}`,
       actor: actor.actor, actorRole: actor.actorRole ?? null, details: changes,
-    }).catch(() => {});
+    });
   }
 
-  const after = await getWaitingEntry(id);
+  const after = await getWaitingEntryWith(q, id);
   return after ? { ok: true, entry: after } : { ok: false, message: "تعذّر قراءة الانتظار بعد التعديل." };
 }
 

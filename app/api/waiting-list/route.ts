@@ -14,6 +14,9 @@ import {
   type ContactEvent, type PreferredPeriod, type PreferredShift, type WaitingUrgency,
 } from "@/lib/waiting-list";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalWaitingAdd, parseCanonicalWaitingAdd, readCanonicalWaitingList } from "@/lib/canonical-waiting-list";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +35,23 @@ const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
  * فيه كلُّ بابٍ يفتح مكانًا، لا نسخةٌ في كلّ شاشة.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 14): entries inside the appointment scope. The free-slot
+    // matching mode goes through the appointment engine and is not canonical yet.
+    const params = new URL(request.url).searchParams;
+    if (["date", "time", "serviceId", "doctorId", "appointmentId", "durationMinutes"].some(key => params.has(key))) {
+      return NextResponse.json({ code: "waiting_action_not_canonical", message: "ترشيح المكان الشاغر لم يُنقل بعد إلى الهوية الموحّدة." }, { status: 409, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await readCanonicalWaitingList(selected.handle, {
+        includeResolved: params.get("includeResolved") === "1", withHistory: params.get("withHistory") === "1",
+      }), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر تحميل قائمة الانتظار.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -108,6 +128,22 @@ export async function GET(request: Request) {
  * يحمي الملفّ الطبيّ — لا فحصُ «هل معه جلسة».
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 14): add on appointments.edit, patient inside the scope.
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_waiting_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await commandCanonicalWaitingAdd(selected.handle, parseCanonicalWaitingAdd(canonicalBody)), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر حفظ الانتظار. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
