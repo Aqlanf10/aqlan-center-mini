@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import styles from "./lab-dispatch.module.css";
 import { DentalArchRow } from "@/components/dental/DentalArchRow";
 import { PERMANENT_UPPER, PERMANENT_LOWER, PRIMARY_UPPER, PRIMARY_LOWER } from "@/lib/dental";
@@ -85,59 +86,28 @@ export default async function LabOrderPrintPage({
           settings={settings}
           title="تذكرة إرسالية معمل تركيبات وتعويضات الأسنان"
         />
-        <div style={{ textAlign: "center", marginTop: "-2mm", marginBottom: "2mm", fontSize: "8pt", color: "#64748b" }}>
+        <div style={{ textAlign: "center", marginTop: "1mm", marginBottom: "2mm", fontSize: "8pt", lineHeight: 1.5, color: "#64748b" }}>
           Dental Laboratory Dispatch · {order.reference}
         </div>
 
-        {/* شريط البيانات الأساسية */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 100px",
-            gap: "3mm",
-            backgroundColor: "#f8fafc",
-            border: "1.5px solid #cbd5e1",
-            borderRadius: "3mm",
-            padding: "3mm 4mm",
-            marginTop: "3mm",
-            fontSize: "9pt",
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5mm" }}>
-            <span style={{ color: "#64748b", fontWeight: "bold" }}>مرجع الطلب:</span>
-            <strong dir="ltr" style={{ fontSize: "14pt", color: "#0f172a" }}>{order.reference}</strong>
-            <span>تُطابق الإرسالية داخل العيادة بهذا المرجع.</span>
-            {order.patientName ? <div><span>اسم المريض: </span><strong>{order.patientName}</strong></div> : null}
+        {/* Shared compact identity; the external DTO and reference-only QR stay unchanged. */}
+        <div className="print-lab-metadata">
+          <div>
+            <PrintMetadata>
+              <div className="line"><span>مرجع الطلب:</span><strong dir="ltr">{order.reference}</strong></div>
+              {order.patientName ? <div className="line"><span>اسم المريض: </span><strong>{order.patientName}</strong></div> : null}
+              <div className="line"><span>المختبر: </span><strong>{order.labName}{order.labPhone ? <span dir="ltr" style={{ marginRight: "2mm", fontSize: "8pt" }}>({order.labPhone})</span> : null}</strong></div>
+              <div className="line"><span>الطبيب المعالج: </span><strong>{order.doctorName || "غير محدد"}</strong></div>
+              <div className="line"><span>تاريخ الإرسال: </span><strong dir="ltr" className={styles.date}>{order.sentDate}</strong></div>
+              <div className="line"><span>التسليم المطلوب: </span><strong dir="ltr" className={styles.date} style={{ color: "#b91c1c" }}>{order.dueDate}</strong></div>
+            </PrintMetadata>
+            <p className="footer-note">تُطابق الإرسالية داخل العيادة بهذا المرجع.</p>
           </div>
-
-          {/* بيانات الطلب والمختبر */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5mm" }}>
-            <div>
-              <span style={{ color: "#64748b", fontWeight: "bold" }}>المختبر: </span>
-              <strong style={{ fontSize: "10.5pt", color: "#0f172a" }}>{order.labName}</strong>
-              {order.labPhone && <span dir="ltr" style={{ marginRight: "2mm", fontSize: "8pt", color: "#64748b" }}>({order.labPhone})</span>}
-            </div>
-            <div>
-              <span style={{ color: "#64748b" }}>الطبيب المعالج: </span>
-              <strong style={{ color: "#334155" }}>{order.doctorName || "غير محدد"}</strong>
-            </div>
-            <div className={styles.metadataDates}>
-              <div>
-                <span style={{ color: "#64748b" }}>تاريخ الإرسال: </span>
-                <strong dir="ltr" className={styles.date} style={{ color: "#0f172a" }}>{order.sentDate}</strong>
-              </div>
-              <div>
-                <span style={{ color: "#64748b" }}>التسليم المطلوب: </span>
-                <strong dir="ltr" className={styles.date} style={{ color: "#b91c1c" }}>{order.dueDate}</strong>
-              </div>
-            </div>
-          </div>
-
           {/* باركود QR ودرجة الأولوية */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
             {qrCodeDataUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={qrCodeDataUrl} alt={`مرجع الطلب ${order.reference}`} style={{ width: "65px", height: "65px", borderRadius: "4px" }} />
+              <img className="print-watermark-protected" src={qrCodeDataUrl} alt={`مرجع الطلب ${order.reference}`} style={{ width: "65px", height: "65px", borderRadius: "4px" }} />
             ) : null}
             <span
               style={{
@@ -168,7 +138,7 @@ export default async function LabOrderPrintPage({
           <h3 style={{ fontSize: "10pt", fontWeight: "900", color: "#0f172a", marginBottom: "1.5mm" }}>
             المواصفات الفنية للتعويضات السنية
           </h3>
-          <table
+          <PrintTableFrame><table
             style={{
               width: "100%",
               borderCollapse: "collapse",
@@ -252,7 +222,7 @@ export default async function LabOrderPrintPage({
                 </td>
               </tr>
             </tbody>
-          </table>
+          </table></PrintTableFrame>
         </div>
 
         {order.shadeSpecification?.teeth.length ? <section className={styles.shades} aria-label="ألوان مناطق الأسنان">
@@ -262,6 +232,7 @@ export default async function LabOrderPrintPage({
 
         {/* المخطط السني المرئي المبسط للطباعة */}
         <div
+          className="print-watermark-protected"
           style={{
             marginTop: "4mm",
             padding: "3mm",
@@ -305,7 +276,7 @@ export default async function LabOrderPrintPage({
             }} />
 
           {/* خط منتصف الإطباق */}
-          <div style={{ height: "1px", backgroundColor: "#cbd5e1", margin: "1mm auto", width: "90%" }} />
+          <div className="lab-occlusal-divider" style={{ height: "1px", backgroundColor: "#cbd5e1", margin: "1mm 5%", width: "auto" }} />
 
           {/* الفك السفلي */}
           <DentalArchRow teeth={lowerTeeth} style={{ display: "flex", justifyContent: "center", gap: "1mm", marginTop: "1.5mm" }} renderTooth={(tooth) => {

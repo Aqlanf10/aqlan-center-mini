@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { operationalStatus, operationalStatusLabel } from "@/lib/hr-operational-employment-shared";
 import { canManageStaff, listStaff } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
@@ -54,13 +55,14 @@ export default async function HrStaffPrintPage({
   return (
     <div className="print-sheet hr-staff-sheet" dir="rtl">
       <PrintHeader settings={settings} title="كشف الطاقم وشروط الأجر" />
-      <p className="report-meta">
-        صادر بتاريخ {friendlyDateLong(reportAsOf)} — عدد الملفات: {staff.length}
-        {departmentParam ? ` — القسم: ${HR_DEPARTMENT_LABEL[departmentParam as never]}` : ""}
-        {statusParam ? ` — الحالة: ${HR_WORK_STATUS_LABEL[statusParam as never]}` : ""}
-      </p>
+      <PrintMetadata>
+        <div><span>صادر بتاريخ</span><span>{friendlyDateLong(reportAsOf)}</span></div>
+        <div><span>عدد الملفات</span><span>{staff.length}</span></div>
+        {departmentParam ? <div><span>القسم</span><span>{HR_DEPARTMENT_LABEL[departmentParam as never]}</span></div> : null}
+        {statusParam ? <div><span>الحالة</span><span>{HR_WORK_STATUS_LABEL[statusParam as never]}</span></div> : null}
+      </PrintMetadata>
 
-      <table className="report-table hr-staff-table">
+      <PrintTableFrame><table className="report-table hr-staff-table">
         <thead>
           <tr>
             <th>#</th>
@@ -106,7 +108,7 @@ export default async function HrStaffPrintPage({
             <tr><td colSpan={13} className="empty">لا ملفات مطابقة.</td></tr>
           )}
         </tbody>
-      </table>
+      </table></PrintTableFrame>
 
       {salaryTotalsByCurrency.size > 0 && (
         <section className="hr-salary-summary">

@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import {
   getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
@@ -179,17 +180,7 @@ export default async function CephPrintReportPage({
         />
 
         {/* بطاقة بيانات المريض والتحليل */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: "2mm",
-          backgroundColor: "#f8fafc",
-          border: "1px solid #cbd5e1",
-          borderRadius: "2mm",
-          padding: "2.5mm 3.5mm",
-          margin: "2.5mm 0",
-          fontSize: "8pt",
-        }}>
+        <PrintMetadata>
           <div>
             <span style={{ color: "#64748b" }}>المريض / Patient: </span>
             <b style={{ color: "#0f172a" }}>{patient?.fullName ?? `#${study.analysis.patientId}`}</b>
@@ -232,11 +223,11 @@ export default async function CephPrintReportPage({
             <span style={{ color: "#64748b" }}>المرجع / Ref Set: </span>
             <span style={{ fontSize: "7.5pt" }}>{refSet?.name ?? "المعدلات القياسية المدمجة"}</span>
           </div>
-        </div>
+        </PrintMetadata>
 
         {/* قسم المخطط الهندسي السيفالومتري والرسم التخطيطي */}
         {ptsList.length >= 4 && (
-          <div style={{
+          <div className="print-watermark-protected" style={{
             margin: "2mm 0 3mm",
             border: "1px solid #e2e8f0",
             borderRadius: "2mm",
@@ -355,7 +346,7 @@ export default async function CephPrintReportPage({
                   }}>
                     {group === "sagittal" ? "الهيكل السهمي · Sagittal Skeletal" : "الهيكل العمودي · Vertical Skeletal"}
                   </div>
-                  <table className="items" style={{ fontSize: "7pt" }}>
+                  <PrintTableFrame><table className="items" style={{ fontSize: "7pt" }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: "right" }}>القياس / Parameter</th>
@@ -412,7 +403,7 @@ export default async function CephPrintReportPage({
                         );
                       })}
                     </tbody>
-                  </table>
+                  </table></PrintTableFrame>
                 </div>
               ))}
             </div>
@@ -431,7 +422,7 @@ export default async function CephPrintReportPage({
                   }}>
                     {group === "dental" ? "العلاقة السنية والقواطع · Dental Analysis" : "الأنسجة الرخوة والبروفايل · Soft Tissue & Profile"}
                   </div>
-                  <table className="items" style={{ fontSize: "7pt" }}>
+                  <PrintTableFrame><table className="items" style={{ fontSize: "7pt" }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: "right" }}>القياس / Parameter</th>
@@ -488,7 +479,7 @@ export default async function CephPrintReportPage({
                         );
                       })}
                     </tbody>
-                  </table>
+                  </table></PrintTableFrame>
                 </div>
               ))}
             </div>

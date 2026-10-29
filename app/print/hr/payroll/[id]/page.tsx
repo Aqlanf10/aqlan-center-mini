@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { canManageStaff } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
@@ -34,7 +35,8 @@ export default async function PayrollPrintPage({
   const currency = run.currency as Currency;
 
   return (
-    <div className="mx-auto max-w-5xl p-6 print:p-0">
+    <div className="sheet sheet-report sheet-report-landscape print-document payroll-print" dir="rtl">
+      <style>{`@page aqlan-payroll { size: A4 landscape; margin: 8mm; } @media print { .payroll-print { page: aqlan-payroll; } }`}</style>
       <div className="mb-4 flex justify-end print:hidden">
         <PrintButton />
       </div>
@@ -43,7 +45,7 @@ export default async function PayrollPrintPage({
 
       <div className="my-6 space-y-4 text-sm text-gray-900">
         {/* Run Meta */}
-        <div className="flex flex-wrap items-center justify-between border-b pb-3">
+        <PrintMetadata>
           <div>
             <span className="font-semibold text-gray-600">العملة: </span>
             <span className="font-bold text-base">
@@ -62,11 +64,11 @@ export default async function PayrollPrintPage({
             <span className="font-semibold text-gray-600">تاريخ الاعتماد: </span>
             <span>{run.approvedAt ? run.approvedAt.slice(0, 10) : "قيد المراجعة"}</span>
           </div>
-        </div>
+        </PrintMetadata>
 
         {/* Table of items */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-xs border border-collapse border-gray-300">
+        <div className="overflow-x-auto print-document-table-container">
+          <PrintTableFrame><table className="w-full text-right text-xs border border-collapse border-gray-300">
             <thead className="bg-gray-100 font-bold border-b border-gray-300">
               <tr>
                 <th className="p-2 border">#</th>
@@ -116,11 +118,11 @@ export default async function PayrollPrintPage({
                 <td className="p-2 border"></td>
               </tr>
             </tfoot>
-          </table>
+          </table></PrintTableFrame>
         </div>
 
         {/* Triple Signatures Block */}
-        <div className="mt-12 pt-8 grid grid-cols-3 text-center text-xs">
+        <div className="print-document-signatures mt-12 pt-8 grid grid-cols-3 text-center text-xs">
           <div>
             <div className="font-bold mb-8">إعداد مسؤول الموارد البشرية</div>
             <div className="text-gray-400">............................................</div>

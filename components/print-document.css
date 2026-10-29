@@ -1,0 +1,118 @@
+/* Approved installment-contract identity, shared by print routes and report
+ * adapters. No selectors target clinical diagrams, stored files, or screen UI.
+ * The original agreement classes/CSS remain the pixel-regression anchor. */
+.print-brand-identity .print-logo { width: 11mm; height: 11mm; color: #0d2137; margin: 0 auto 1.5mm; display: block; object-fit: contain; }
+.print-brand-identity .clinic-name { font-size: 13pt; font-weight: 800; line-height: 1.4; }
+.print-brand-identity .clinic-sub { font-size: 8pt; color: #333; line-height: 1.5; }
+.print-brand-header > .rule { border-top: 1px solid #000; margin: 3mm 0; }
+.print-brand-header > .doc-title { font-size: 12pt; font-weight: 800; }
+.print-report-header { break-inside: avoid; page-break-inside: avoid; }
+.print-report-subtitle, .print-report-meta { margin: 1mm 0; text-align: center; font-size: 8pt; line-height: 1.5; color: #333; overflow-wrap: anywhere; }
+.print-report-footer { break-inside: avoid; page-break-inside: avoid; margin-top: 3mm; }
+.print-report-footer .print-footer-rule { border-top: 1px dashed #666; margin: 2.5mm 0; }
+.print-report-footer .print-contact-footer { font-size: 7.5pt; line-height: 1.6; color: #333; }
+
+.print-document { color: #000; font-family: "Noto Naskh Arabic", "Segoe UI", Tahoma, sans-serif; }
+.print-metadata:where(:not(.print-metadata-on-print)) {
+  direction: ltr; display: grid; grid-auto-flow: dense; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 4mm;
+  margin: 2mm 0; padding: 1mm 2mm; border: 1px solid #e2e8f0; border-radius: 1mm;
+  background: #f8fafc; font-size: 9pt; line-height: 1.3;
+}
+.print-metadata:where(:not(.print-metadata-on-print)) > * {
+  direction: rtl; min-width: 0; margin: 0; padding: .7mm 0; overflow-wrap: anywhere; break-inside: avoid;
+}
+.print-metadata:where(:not(.print-metadata-on-print)) > div { display: flex; align-items: baseline; justify-content: space-between; gap: 2mm; }
+.print-metadata > div > :first-child:not(:only-child) { flex-shrink: 0; }
+/* Explicit placement mirrors AgreementIdentitySummary; reliable RTL in both
+   browser print and independent paged renderers. */
+.print-metadata:where(:not(.print-metadata-on-print)) > :nth-child(odd) { grid-column: 2; }
+.print-metadata:where(:not(.print-metadata-on-print)) > :nth-child(even) { grid-column: 1; }
+.sheet-a6 .print-metadata { grid-template-columns: minmax(0, 1fr); }
+.sheet-a6 .print-metadata > * { grid-column: 1; }
+.print-table-frame:not(.print-table-frame-on-print) { position: relative; isolation: isolate; }
+.print-table-watermark {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 50%; max-width: 90mm; height: 80%; max-height: 90mm;
+  opacity: .15; pointer-events: none; user-select: none; z-index: 1;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.print-table-watermark img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.print-table-frame:not(.print-table-frame-on-print) > table { width: 100%; border-collapse: collapse; }
+.print-table-frame:not(.print-table-frame-on-print) > table > :is(thead, tbody, tfoot) > tr > :is(th, td) { position: relative; z-index: 2; vertical-align: top; }
+.print-table-frame:not(.print-table-frame-on-print) > table > thead { display: table-header-group; }
+.print-table-frame:not(.print-table-frame-on-print) > table > tfoot { display: table-row-group; }
+.print-table-frame:not(.print-table-frame-on-print) > table > :is(thead, tbody, tfoot) > tr { break-inside: avoid; page-break-inside: avoid; }
+.print-document-signatures { break-inside: avoid; page-break-inside: avoid; }
+.print-document-notes { font-size: 8pt; line-height: 1.5; overflow-wrap: anywhere; }
+.print-document-kpis { break-inside: avoid; page-break-inside: avoid; }
+
+@media screen {
+  .print-table-frame-on-print, .print-metadata-on-print { display: contents; }
+  .print-table-frame-on-print > .print-table-watermark { display: none; }
+}
+@media print {
+  .print-document, .print-document-on-print { color: #000; font-family: "Noto Naskh Arabic", "Segoe UI", Tahoma, sans-serif; }
+  .print-metadata {
+    direction: ltr; display: grid; grid-auto-flow: dense; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 4mm;
+    margin: 2mm 0; padding: 1mm 2mm; border: 1px solid #e2e8f0; border-radius: 1mm;
+    background: #f8fafc; font-size: 9pt; line-height: 1.3;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .print-metadata > * { direction: rtl; min-width: 0; margin: 0; padding: .7mm 0; overflow-wrap: anywhere; }
+  .print-metadata > div { display: flex; align-items: baseline; justify-content: space-between; gap: 2mm; }
+  .print-metadata > :nth-child(odd) { grid-column: 2; }
+  .print-metadata > :nth-child(even) { grid-column: 1; }
+  .sheet-a6 .print-metadata { grid-template-columns: minmax(0, 1fr); }
+  .sheet-a6 .print-metadata > * { grid-column: 1; }
+  [dir="ltr"] .print-metadata-on-print > *, [lang="en"] .print-metadata > * { direction: ltr; }
+  [lang="en"] .print-metadata > :nth-child(odd) { grid-column: 1; }
+  [lang="en"] .print-metadata > :nth-child(even) { grid-column: 2; }
+  .print-table-frame { display: block; position: relative; isolation: isolate; overflow: visible; break-inside: auto; page-break-inside: auto; }
+  .print-table-frame > table { width: 100%; border-collapse: collapse; }
+  .print-table-frame > table > :is(thead, tbody, tfoot) > tr > :is(th, td) { position: relative; z-index: 2; vertical-align: top; }
+  .print-table-frame > table > thead { display: table-header-group; }
+  /* Monetary totals are source evidence, not a repeated page subtotal. */
+  .print-table-frame > table > tfoot { display: table-row-group; }
+  .print-table-frame > table > :is(thead, tbody, tfoot) > tr { break-inside: avoid; page-break-inside: avoid; }
+  .print-document-table-container { overflow: visible !important; max-height: none !important; }
+  .print-document :is(h1, h2, h3), .print-document-on-print :is(h1, h2, h3) { break-after: avoid; page-break-after: avoid; }
+}
+.print-metadata-single { margin: 2mm 0; padding: 1mm 2mm; border: 1px solid #e2e8f0; border-radius: 1mm; background: #f8fafc; font-size: 8pt; line-height: 1.5; }
+.print-lab-metadata { display: grid; grid-template-columns: minmax(0, 1fr) 23mm; align-items: start; gap: 3mm; }
+
+/* The owner requires a central logo on every printed document, including plain
+   forms and continuation pages. One BODY-owned real image avoids both repeated
+   table-header copies and multi-lab/modal duplicates. Contracts use the same
+   fixed physical size: the owner explicitly superseded table-height sizing. */
+.print-document-watermark { display: none; }
+@media print {
+  body:has(.print-brand-header) > .print-document-watermark {
+    display: block;
+    position: fixed;
+    left: 50%; top: 50%;
+    width: 76mm; height: 65mm;
+    max-width: 60%; max-height: 55%;
+    transform: translate(-50%, -50%);
+    opacity: .15;
+    z-index: 10;
+    pointer-events: none; user-select: none;
+    mix-blend-mode: multiply;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .print-document-watermark-image { display: block; width: 100%; height: 100%; object-fit: contain; }
+  /* Keep the logical compact sheet's midpoint on operator-selected A4 stock;
+     this changes neither the paper size nor document flow. */
+  body:has(.print-brand-header):has(.sheet-a6) > .print-document-watermark { top: min(50%, 66mm); width: 52mm; height: 44mm; }
+  body:has(.print-brand-header):has(.sheet-a5) > .print-document-watermark { top: min(50%, 97mm); width: 64mm; height: 54mm; }
+  body:has(> .print-document-watermark) :is(.print-table-watermark, .agreement-table-watermark) { display: none; }
+  /* QR quiet zones, saved signatures, and clinical geometry/color stay above
+     decoration. No medical SVG/FDI/image content is changed. */
+  body:has(> .print-document-watermark) :is(.print-watermark-protected, .sign-row, .print-document-signatures, [data-signature-img]) {
+    position: relative; z-index: 20;
+  }
+  /* Protect actual pixels, not the entire empty signature row: a full-width
+     white band would unnecessarily cut the central logo in short contracts. */
+  body:has(> .print-document-watermark) :is(.print-watermark-protected, [data-signature-img]) {
+    background-color: white;
+  }
+}

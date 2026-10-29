@@ -309,19 +309,17 @@ table.agreement-installments td { padding: 0.45mm 0.7mm; line-height: 1.15; }
 .agreement-signatures,
 .agreement-closing { break-inside: avoid; page-break-inside: avoid; }
 
-/* Requested 85% transparency (15% opacity), scoped to the schedule only.
- * The normal-flow wrapper creates exactly one mark even across printed pages.
- * Cells stay above the logo; it never covers the header, financial box or signatures. */
+/* Screen fallback: fixed physical logo size, independent of installment count.
+ * Printed documents use the body-owned fixed page image in print-document.css,
+ * which suppresses this fallback and protects signatures/clinical content. */
 .agreement-schedule-table { position: relative; isolation: isolate; }
 .agreement-table-watermark {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 50%;
-  max-width: 90mm;
-  height: 80%;
-  max-height: 90mm;
+  width: 76mm;
+  height: 65mm;
   opacity: 0.15;
   pointer-events: none;
   user-select: none;

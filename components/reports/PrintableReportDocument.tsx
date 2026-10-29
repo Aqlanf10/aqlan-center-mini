@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { CURRENCIES, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import type { ReportColumn, ReportResult, ReportRow } from "@/lib/reports-types";
@@ -68,10 +69,10 @@ function ReportTable({ title, columns, rows, base, groups }: {
   return (
     <section className="report-section">
       {title ? <h2 className="report-section-title">{title}</h2> : null}
-      <table className="items report-table">
+      <PrintTableFrame><table className="items report-table">
         <thead>
           <tr>
-            {columns.map((column) => <th key={column.key}>{column.label}</th>)}
+            {columns.map((column) => <th key={column.key} className={column.type === "money" || column.type === "count" || column.type === "percent" ? "num" : undefined}>{column.label}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -130,7 +131,7 @@ function ReportTable({ title, columns, rows, base, groups }: {
             </tr>
           </tfoot>
         ) : null}
-      </table>
+      </table></PrintTableFrame>
     </section>
   );
 }
@@ -161,12 +162,12 @@ export function PrintableReportDocument({
       <div className={`sheet sheet-report ${landscape ? "sheet-report-landscape" : ""}`} data-report={result.report}>
         <PrintHeader settings={settings} title={result.title} />
 
-        <div className="report-meta">
+        <PrintMetadata>
           <div><strong>الفترة:</strong> {result.periodLabel}</div>
           <div><strong>الفلاتر:</strong> {result.filtersLabel || "بدون فلاتر إضافية"}</div>
           <div><strong>أُنشئ:</strong> {generatedAt} · <strong>بواسطة:</strong> {generatedBy}</div>
           <div><strong>العملة الأساسية:</strong> {result.baseCurrency}</div>
-        </div>
+        </PrintMetadata>
 
         {result.subtitle ? <p className="report-subtitle">{result.subtitle}</p> : null}
 
@@ -189,9 +190,9 @@ export function PrintableReportDocument({
         {result.comparison ? (
           <section className="report-section">
             <h2 className="report-section-title">{result.comparison.title}</h2>
-            <table className="items report-table">
+            <PrintTableFrame><table className="items report-table">
               <thead>
-                <tr><th>المؤشر</th><th>الحالي</th><th>السابق</th><th>التغير</th></tr>
+                <tr><th>المؤشر</th><th className="num">الحالي</th><th className="num">السابق</th><th className="num">التغير</th></tr>
               </thead>
               <tbody>
                 {result.comparison.entries.map((entry) => {
@@ -206,14 +207,14 @@ export function PrintableReportDocument({
                   );
                 })}
               </tbody>
-            </table>
+            </table></PrintTableFrame>
           </section>
         ) : null}
 
         {result.bars && result.bars.length > 0 ? (
           <section className="report-section">
             <h2 className="report-section-title">الاتجاه</h2>
-            <table className="items report-table report-bars-table">
+            <PrintTableFrame><table className="items report-table report-bars-table">
               <tbody>
                 {result.bars.map((bar) => (
                   <tr key={bar.label}>
@@ -222,7 +223,7 @@ export function PrintableReportDocument({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></PrintTableFrame>
           </section>
         ) : null}
 

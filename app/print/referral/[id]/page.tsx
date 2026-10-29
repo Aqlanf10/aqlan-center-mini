@@ -1,3 +1,4 @@
+import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, getPatient, getReferral, getSettingsSafe } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -44,14 +45,14 @@ export default async function ReferralPrintPage({ params }: { params: Promise<{ 
       <div className="sheet sheet-a5">
         <PrintHeader settings={settings} title="خطاب إحالة" compact />
 
-        <div className="line"><span>التاريخ</span><span>{friendlyDateLong(date)}</span></div>
+        <PrintMetadata><div className="line"><span>التاريخ</span><span>{friendlyDateLong(date)}</span></div>
         <div className="line">
           <span>إلى الزميل</span>
           <span style={{ fontWeight: 800 }}>{referral.toName} — {REFERRAL_SPECIALTY_LABEL[referral.toSpecialty]}</span>
         </div>
         {referral.urgency !== "routine" ? (
           <div className="line"><span>الاستعجال</span><span style={{ fontWeight: 800 }}>{REFERRAL_URGENCY_LABEL[referral.urgency]}</span></div>
-        ) : null}
+        ) : null}</PrintMetadata>
         <div className="rule" />
 
         <div className="line"><span>المريض</span><span style={{ fontWeight: 800 }}>{patient.fullName}</span></div>

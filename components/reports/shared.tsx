@@ -3,8 +3,9 @@
 import { reportCsv, reportExcel } from "@/lib/report-export";
 import { Fragment, useMemo, useState } from "react";
 import { formatAmount, CURRENCY_SHORT, isCurrency, type Currency } from "@/lib/money";
-import { Icon, Logo } from "@/components/Icon";
-import { useSetting } from "@/components/SettingsProvider";
+import { Icon } from "@/components/Icon";
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
+import { ReportPrintHeader } from "@/components/ReportPrintHeader";
 import {
   PERIOD_PRESETS, PATIENT_STATUS_FILTERS, DEBT_STATUS_FILTERS,
   type KpiItem, type ReportColumn, type ReportRow, type ReportResult,
@@ -206,7 +207,7 @@ export function DataTable({
               className={`whitespace-nowrap px-2.5 py-2 ${
                 column.type === "money" || column.type === "count" || column.type === "percent"
                   ? "font-mono tabular-nums"
-                  : ""
+                  : "print:whitespace-normal print:[overflow-wrap:anywhere]"
               } ${column.type === "money" && Number(value) < 0 ? "text-danger-700" : "text-slate-700"}`}
             >
               {isPatientLink && patientId ? (
@@ -257,8 +258,8 @@ export function DataTable({
         ) : null}
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs print:border-0 print:shadow-none">
-        <table className="w-full min-w-max text-right text-xs">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs print:overflow-visible print:border-0 print:shadow-none">
+        <PrintTableFrame printOnly><table className="w-full min-w-max text-right text-xs print:min-w-0">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/60 print:bg-white">
               {columns.map((column) => (
@@ -266,7 +267,7 @@ export function DataTable({
                   key={column.key}
                   scope="col"
                   aria-sort={sort?.key === column.key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
-                  className={`whitespace-nowrap px-2.5 py-2.5 font-bold text-navy-900 ${column.type === "money" || column.type === "count" || column.type === "percent" ? "" : ""} cursor-pointer select-none hover:text-brand-blue ${compact ? "text-[11px]" : ""}`}
+                  className={`whitespace-nowrap print:whitespace-normal px-2.5 py-2.5 font-bold text-navy-900 ${column.type === "money" || column.type === "count" || column.type === "percent" ? "" : ""} cursor-pointer select-none hover:text-brand-blue ${compact ? "text-[11px]" : ""}`}
                   title="اضغط للترتيب"
                 >
                   <button type="button" className="w-full text-right" onClick={() => toggleSort(column.key)}>
@@ -320,7 +321,7 @@ export function DataTable({
               </tr>
             </tfoot>
           ) : null}
-        </table>
+        </table></PrintTableFrame>
       </div>
     </div>
   );
@@ -404,72 +405,24 @@ export function PrintFrame({ result, clinicName, generated }: {
   clinicName: string;
   generated: { at: string; by: string; clinicTimeZone?: unknown };
 }) {
-  // الهوية من الإعدادات مباشرة: التقرير المعروض على الشاشة قد يُطبع بعد شهور،
-  // والطبيب والعنوان والهاتف يومها قد يكونان تغيّرا — فتُقرأ وقت الطباعة.
-  const doctor = useSetting("clinic.lead_doctor");
-  const doctorTitle = useSetting("clinic.lead_doctor_title");
-  const phoneText = useSetting("clinic.phone");
-  const addressText = useSetting("clinic.address");
-  const doctorLine = `${doctor} — ${doctorTitle}`;
-
   return (
     <div className="hidden print:block" dir="rtl">
-      {/* الشعار والهوية الكاملة فوق كل تقرير: ورقةٌ على مكتب المالك أو تُرفع
-          للمراجع تحمل الشعار والاسم والطبيب — قرار المالك: كل تقرير باسم المركز. */}
-      <div className="mb-4 border-b-2 border-navy-900 pb-2">
-        <div className="flex items-center gap-3">
-          <Logo className="h-14 w-14 shrink-0" />
-          <div className="min-w-0 text-right">
-            <p className="text-base font-black leading-snug">{clinicName}</p>
-            <p className="text-[10px] font-semibold text-slate-600">
-              {doctorLine}
-            </p>
-            <p className="text-[9px] text-slate-500">
-              {addressText}
-              {phoneText ? (
-                <>
-                  {addressText ? " · " : ""}
-                  هاتف: <span dir="ltr">{phoneText}</span>
-                </>
-              ) : null}
-            </p>
-          </div>
-        </div>
-        <div className="mt-2 text-center">
-          <p className="text-sm font-bold">{result.title}</p>
-          <p className="text-[11px]">الفترة: {result.periodLabel}</p>
-          {result.filtersLabel && result.filtersLabel !== "الفرع: الرئيسي" ? (
-            <p className="text-[10px] text-slate-600">{result.filtersLabel}</p>
-          ) : null}
-        </div>
-      </div>
+      <ReportPrintHeader title={result.title} clinicName={clinicName} />
+      <PrintMetadata>
+        <div className="line"><span>الفترة</span><span>{result.periodLabel}</span></div>
+        {result.filtersLabel && result.filtersLabel !== "الفرع: الرئيسي" ? (
+          <div className="line"><span>المرشّحات</span><span>{result.filtersLabel}</span></div>
+        ) : null}
+        <div className="line"><span>العملة الأساسية</span><span>{result.baseCurrency}</span></div>
+        <div className="line"><span>أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by}</span></div>
+      </PrintMetadata>
       <style>{`
         @media print {
-          @page { size: A4 landscape; margin: 12mm; }
-          body { background: white !important; }
-        }
-        .report-print-footer {
-          display: none;
-        }
-        @media print {
-          .report-print-footer {
-            display: flex;
-            position: fixed;
-            bottom: 0;
-            right: 0;
-            left: 0;
-            justify-content: space-between;
-            border-top: 1px solid #cbd5e1;
-            padding-top: 2mm;
-            font-size: 9px;
-            color: #475569;
-          }
+          @page aqlan-report-view { size: A4 landscape; margin: 12mm; }
+          body:has(.report-view-print) { background: white !important; }
+          .report-view-print { page: aqlan-report-view; background: white; }
         }
       `}</style>
-      <div className="report-print-footer">
-        <span>أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by}</span>
-        <span>{clinicName}</span>
-      </div>
     </div>
   );
 }

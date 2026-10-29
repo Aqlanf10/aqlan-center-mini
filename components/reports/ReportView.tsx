@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
+import { ReportPrintFooter } from "@/components/ReportPrintHeader";
 import { DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv, exportExcel } from "./shared";
 import type { ReportResult } from "@/lib/reports-types";
 import { applyReportView, type ReportViewSpec } from "@/lib/report-view";
@@ -62,7 +63,7 @@ export function ReportView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="report-view-print print-document-on-print space-y-4">
       <PrintFrame result={result} clinicName={clinicName} generated={generated} />
 
       {/* الترويسة على الشاشة */}
@@ -241,6 +242,7 @@ export function ReportView({
         </footer>
       ) : null}
 
+      <div className="hidden print:block"><ReportPrintFooter /></div>
       <p className="text-[10px] text-slate-400 print:hidden">
         أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by} · العملة الأساسية: {result.baseCurrency}
       </p>

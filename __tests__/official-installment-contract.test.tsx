@@ -188,8 +188,8 @@ describe("compact six-column financial rows", () => {
   });
 });
 
-describe("table-only agreement watermark", () => {
-  it.each([1, 2, 24, 36])("bounds one decorative logo inside a %i-row schedule, not a fixed page overlay", (count) => {
+describe("fixed-size agreement watermark screen fallback", () => {
+  it.each([1, 2, 4, 6, 12, 24, 36, 60])("retains one fixed-physical-size fallback for a %i-row schedule", (count) => {
     const rows = Array.from({ length: count }, (_, index) => ({ key: index, number: index + 1,
       dueDate: "2027-01-01", amountMinor: 10_000, paid: false, settledMinor: 0, remainingMinor: 10_000 }));
     const html = renderToStaticMarkup(createElement(AgreementInstallmentTable, { rows, currency: "SAR" }));
@@ -202,7 +202,9 @@ describe("table-only agreement watermark", () => {
     expect(watermark).toContain("position: absolute");
     expect(watermark).not.toContain("position: fixed");
     expect(watermark).toContain("pointer-events: none");
-    expect(watermark).toContain("height: 80%");
+    expect(watermark).toContain("width: 76mm");
+    expect(watermark).toContain("height: 65mm");
+    expect(watermark).not.toMatch(/(?:width|height):\s*\d+%/);
     expect(css).toContain("height: 100%; object-fit: contain");
   });
 });

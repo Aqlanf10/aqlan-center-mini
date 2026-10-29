@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import labelStyles from "./labels.module.css";
 import { statementAgreementsRequireReview } from "@/lib/statement-lines";
 import { StatementHistoricalDetails, StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
@@ -118,14 +119,14 @@ export default async function StatementPage({ params, searchParams }: {
         `}</style>
         <PrintHeader settings={settings} title="كشف حساب" />
 
-        <div className="line">
+        <PrintMetadata><div className="line">
           <span>المريض</span>
           <span style={{ fontWeight: 700 }}>{patient.fullName}</span>
         </div>
         <div className="line">
           <span>رقم الملف</span>
           <span className="num" dir="ltr">{patient.patientNumber}</span>
-        </div>
+        </div></PrintMetadata>
         <div className="rule" />
 
         {/* (P1-5ب) الرصيد الافتتاحي بعملته — سطرٌ لكل عملة، لا يُحوَّل. */}
@@ -143,7 +144,7 @@ export default async function StatementPage({ params, searchParams }: {
         {showInvoiceDetails ? <StatementInvoiceDetails invoices={ledger.invoices} /> : null}
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "5mm 0 2mm" }}>الدفعات</p>
-        <table className="items">
+        <PrintTableFrame><table className="items">
           <thead>
             <tr>
               <th>السند</th><th>التاريخ</th><th>المدفوع</th><th className="num">المكافئ</th>
@@ -168,7 +169,7 @@ export default async function StatementPage({ params, searchParams }: {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></PrintTableFrame>
 
         <div style={{ marginTop: "5mm" }}>
           {activeCurrencies.map((currency) => {

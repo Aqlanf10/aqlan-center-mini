@@ -1,3 +1,4 @@
+import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getPatient, getPrescription, getSettingsSafe } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -121,7 +122,7 @@ export default async function PrescriptionPrintPage({
         <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact />
 
         {/* معلومات المريض */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2mm", fontSize: "9pt", marginTop: "1mm" }}>
+        <PrintMetadata>
           <div className="line">
             <span style={{ color: "#475569" }}>المريض:</span>
             <span style={{ fontWeight: 800 }}>{patient.fullName}</span>
@@ -138,7 +139,7 @@ export default async function PrescriptionPrintPage({
             <span style={{ color: "#475569" }}>التاريخ:</span>
             <span>{friendlyDateLong(dateStr)}</span>
           </div>
-        </div>
+        </PrintMetadata>
 
         {/* تنبيه الحساسية والأمراض المزمنة */}
         {patient.medicalAlert ? (
