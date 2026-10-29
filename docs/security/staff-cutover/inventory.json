@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "da467d3b768564dfbdf0f15acedb55d37045bf4b15f6481d8f02f731fa402c3e",
+  "sourceDigest": "abbf9e58e018c69341611ced3144368d7bfcbb400d6e50bdf45519dec17308ed",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -42,12 +42,12 @@
     "appointments.cancel"
   ],
   "summary": {
-    "routeMethods": 414,
+    "routeMethods": 416,
     "routeClassifications": {
       "public-separate-portal": 24,
       "staff-legacy-held": 383,
       "canonical-ready": 0,
-      "unknown": 7
+      "unknown": 9
     },
     "pages": 97,
     "pageClassifications": {
@@ -299,6 +299,7 @@
     "app/api/settings/reset/route.ts",
     "app/api/settings/route.ts",
     "app/api/shifts/route.ts",
+    "app/api/staff-access/[id]/account/route.ts",
     "app/api/staff-access/[id]/route.ts",
     "app/api/staff-access/route.ts",
     "app/api/tasks/[id]/checklist/route.ts",
@@ -14281,6 +14282,28 @@
       "route": "/api/staff-access/[id]",
       "method": "PATCH",
       "file": "app/api/staff-access/[id]/route.ts",
+      "httpAccess": "canonical",
+      "classification": "unknown",
+      "workflow": "administration",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Unrecognized HTTP access class; review required",
+      "directHelperEvidence": []
+    },
+    {
+      "route": "/api/staff-access/[id]/account",
+      "method": "GET",
+      "file": "app/api/staff-access/[id]/account/route.ts",
+      "httpAccess": "canonical",
+      "classification": "unknown",
+      "workflow": "administration",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Unrecognized HTTP access class; review required",
+      "directHelperEvidence": []
+    },
+    {
+      "route": "/api/staff-access/[id]/account",
+      "method": "PATCH",
+      "file": "app/api/staff-access/[id]/account/route.ts",
       "httpAccess": "canonical",
       "classification": "unknown",
       "workflow": "administration",

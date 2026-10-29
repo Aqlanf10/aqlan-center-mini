@@ -11511,7 +11511,28 @@ async function withDoctorCommissionChange<T>(
   partiesAfter?: (client: DbClient, result: T) => Promise<Array<number | null | undefined>>,
   beforeCommit?: (client: DbClient) => Promise<void>,
 ): Promise<{ result: T; changes: CommissionChange[] }> {
-  const outcome = await withTransaction(getPool(), async (client) => {
+  const outcome = await withTransaction(getPool(), client =>
+    doctorCommissionChangeOn(client, ctx, source, partiesOf, mutate, partiesAfter, beforeCommit));
+  for (const change of outcome.changes) await recordAudit(doctorCommissionAuditInput(change, ctx));
+  return outcome;
+}
+
+/**
+ * The same commission change on a transaction the CALLER owns (the canonical account
+ * editor): parties locked in id order, baselines before the write, the new snapshot
+ * after it. The caller writes `doctorCommissionAuditInput` rows in that transaction.
+ * Tables resolve through the connection's search path, exactly as the legacy writer.
+ */
+export async function doctorCommissionChangeOn<T>(
+  client: DbClient,
+  ctx: CommissionChangeContext,
+  source: "party" | "advanced",
+  partiesOf: (client: DbClient) => Promise<Array<number | null | undefined>>,
+  mutate: (client: DbClient) => Promise<T>,
+  partiesAfter?: (client: DbClient, result: T) => Promise<Array<number | null | undefined>>,
+  beforeCommit?: (client: DbClient) => Promise<void>,
+): Promise<{ result: T; changes: CommissionChange[] }> {
+  {
     const initial = [...new Set((await partiesOf(client)).filter((id): id is number => typeof id === "number" && id > 0))]
       .sort((a, b) => a - b);
     for (const partyId of initial) {
@@ -11534,29 +11555,29 @@ async function withDoctorCommissionChange<T>(
     }
     if (beforeCommit) await beforeCommit(client);
     return { result, changes };
-  });
-  for (const change of outcome.changes) {
-    await recordAudit({
-      action: "doctor.commission.update",
-      entity: "party",
-      entityId: change.partyId,
-      entityLabel: change.partyName,
-      details: {
-        الطبيب: change.partyName,
-        المصدر: change.source === "party" ? "نسبة الجهة" : "الإعداد المتقدّم",
-        قبل: describeCommissionSnapshot(change.before),
-        بعد: describeCommissionSnapshot(change.after),
-        قبل_القيمة: change.before,
-        بعد_القيمة: change.after,
-        نافذ_من: change.effectiveFrom,
-        السبب: ctx.reason ?? null,
-        سجل_العمولة: change.historyId,
-      },
-      actor: ctx.actor,
-      actorRole: ctx.actorRole ?? null,
-    });
   }
-  return outcome;
+}
+
+export function doctorCommissionAuditInput(change: CommissionChange, ctx: CommissionChangeContext): AuditInput {
+  return {
+    action: "doctor.commission.update",
+    entity: "party",
+    entityId: change.partyId,
+    entityLabel: change.partyName,
+    details: {
+      الطبيب: change.partyName,
+      المصدر: change.source === "party" ? "نسبة الجهة" : "الإعداد المتقدّم",
+      قبل: describeCommissionSnapshot(change.before),
+      بعد: describeCommissionSnapshot(change.after),
+      قبل_القيمة: change.before,
+      بعد_القيمة: change.after,
+      نافذ_من: change.effectiveFrom,
+      السبب: ctx.reason ?? null,
+      سجل_العمولة: change.historyId,
+    },
+    actor: ctx.actor,
+    actorRole: ctx.actorRole ?? null,
+  };
 }
 
 function describeCommissionSnapshot(value: CommissionSnapshotValue | null): string {

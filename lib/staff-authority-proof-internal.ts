@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import type { DbClient } from "./db";
 import { sessionCredentialVersion } from "./auth";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
@@ -30,9 +31,9 @@ export interface ProvedAccountAuthority {
  * establish transaction/fence lifetime. No callbacks, arbitrary SQL or
  * caller-selectable locking mode are exported. The user ID is a locator; nothing
  * about the account is trusted until every anchor below is proved from current rows. */
-async function proveAccount(client: Pick<DbClient, "query">, userId: number, schema: string, rowLock: RowLock): Promise<ProvedAccountAuthority> {
- if (!Number.isSafeInteger(userId) || userId <= 0) refuse("ACCOUNT_INVALID");
- const s = staffIdentitySchemaName(schema);
+/** The ready control and identity state with an intact history: the part of every proof
+ * that does not depend on the account. */
+async function proveReadyControl(client: Pick<DbClient, "query">, s: string, rowLock: RowLock) {
  await inspectStaffRuntimeSchema(client, s);
  const {rows:controls}=await client.query<{state:string;realm_id:string;owner_user_id:number;binding_epoch:string}>(`SELECT state,realm_id,owner_user_id,binding_epoch::text FROM ${s}.staff_authority_control WHERE singleton${rowLock}`);
  const c=controls[0];
@@ -54,6 +55,12 @@ async function proveAccount(client: Pick<DbClient, "query">, userId: number, sch
  NOT EXISTS(SELECT 1 FROM ${s}.staff_identity_binding_events e LEFT JOIN ${s}.staff_identity_current b ON b.user_id=e.user_id WHERE NOT EXISTS(SELECT 1 FROM ${s}.staff_identity_binding_events later WHERE later.user_id=e.user_id AND later.registry_revision>e.registry_revision) AND ((e.new_subject_id IS NULL AND b.user_id IS NOT NULL) OR (e.new_subject_id IS NOT NULL AND (b.subject_id IS DISTINCT FROM e.new_subject_id OR b.bound_registry_revision IS DISTINCT FROM e.registry_revision)))) AND
  NOT EXISTS(SELECT 1 FROM ${s}.staff_identity_current b LEFT JOIN ${s}.staff_identity_subjects p ON p.subject_id=b.subject_id LEFT JOIN ${s}.staff_identity_binding_events e ON e.registry_revision=b.bound_registry_revision WHERE p.user_id_at_binding IS DISTINCT FROM b.user_id OR p.realm_id IS DISTINCT FROM $2::uuid OR e.new_subject_id IS DISTINCT FROM b.subject_id OR e.user_id IS DISTINCT FROM b.user_id OR EXISTS(SELECT 1 FROM ${s}.staff_identity_binding_events later WHERE later.user_id=b.user_id AND later.registry_revision>e.registry_revision)) AS valid`,[h.generation_id,h.realm_id,h.registry_revision]);
  if(integrity?.valid!==true)refuse("HISTORY_INVALID");
+ return { c, h };
+}
+async function proveAccount(client: Pick<DbClient, "query">, userId: number, schema: string, rowLock: RowLock): Promise<ProvedAccountAuthority> {
+ if (!Number.isSafeInteger(userId) || userId <= 0) refuse("ACCOUNT_INVALID");
+ const s = staffIdentitySchemaName(schema);
+ const { c, h } = await proveReadyControl(client, s, rowLock);
  const {rows:users}=await client.query<{id:number;username:string;display_name:unknown;role:string;is_active:boolean;authorization_mode:string;authorization_epoch:string;password_hash:string;permissions:unknown;party_id:number|null}>(`SELECT id,username,display_name,role,is_active,authorization_mode,authorization_epoch::text,password_hash,permissions,party_id FROM ${s}.users WHERE id=ANY($1::integer[]) ORDER BY id${rowLock}`,[[c.owner_user_id,userId]]);
  const owner=users.find(u=>u.id===c.owner_user_id),user=users.find(u=>u.id===userId);
  if(!owner || !owner.is_active || owner.role!=="admin" || owner.authorization_mode!=="canonical" || !user || !user.is_active || user.authorization_mode!=="canonical")refuse("ACCOUNT_INVALID");
@@ -165,4 +172,43 @@ export async function loadExclusiveWriterAuthority(client: DbClient, session: Ve
  if(!hasStaffCapability(proof.access,action))refuse("CAPABILITY_DENIED");
  if(!revalidateVerifiedDurableSession(session))refuse("SESSION_EXPIRED");
  return proof;
+}
+
+/** Administrative TARGET state for an account writer (review 6507696166 item 2), kept
+ * apart from the actor's session proof: the actor proves its live session through
+ * `loadExclusiveWriterAuthority` unchanged; the target is not a session and may be
+ * inactive (to activate it) or linked to a doctor party that is no longer active (to
+ * repair the link). Still required: the ready control and intact history, a canonical
+ * account with a parseable permission document and a current subject binding. The
+ * writer holds the EXCLUSIVE lifecycle fence and locks the target row FOR UPDATE; the
+ * reader holds the shared fence and locks it FOR SHARE. `version` is the CAS over the
+ * account fields themselves (never the password hash). Nothing here grants: the target
+ * is never resolved into a ResolvedStaffAccess. */
+export interface AdministrativeTargetState {
+ readonly user: Readonly<{ id: number; username: string; displayName: string | null; role: string; isActive: boolean; partyId: number | null; authorizationEpoch: string }>;
+ readonly ownerUserId: number;
+ readonly isOwner: boolean;
+ readonly provider: "none" | "active" | "stale";
+ readonly document: StaffCapabilityDocument;
+ readonly version: string;
+}
+export async function loadAdministrativeTargetState(client: DbClient, userId: number, schema: string, lock: "update" | "share"): Promise<AdministrativeTargetState> {
+ if (!Number.isSafeInteger(userId) || userId <= 0) refuse("TARGET_INVALID");
+ const s = staffIdentitySchemaName(schema);
+ const { c } = await proveReadyControl(client, s, " FOR SHARE");
+ const {rows:[user]}=await client.query<{id:number;username:string;display_name:unknown;role:string;is_active:boolean;authorization_mode:string;authorization_epoch:string;party_id:number|null;permissions:unknown}>(`SELECT id,username,display_name,role,is_active,authorization_mode,authorization_epoch::text,party_id,permissions FROM ${s}.users WHERE id=$1 ${lock==="update"?"FOR UPDATE":"FOR SHARE"}`,[userId]);
+ if(!user || user.authorization_mode!=="canonical" || typeof user.username!=="string" || user.username.length<1 || user.username.length>200 || typeof user.is_active!=="boolean")refuse("TARGET_INVALID");
+ const {rows:bindings}=await client.query<{subject_id:string}>(`SELECT subject_id::text FROM ${s}.staff_identity_current WHERE user_id=$1 FOR SHARE`,[userId]);
+ if(bindings.length!==1)refuse("TARGET_INVALID");
+ const parsed=parseStaffCapabilityDocument(user.permissions);
+ if(!parsed.ok)refuse("TARGET_INVALID");
+ let provider:AdministrativeTargetState["provider"]="none";
+ if(user.party_id!==null){
+  const {rows:[party]}=await client.query<{kind:string;is_active:boolean}>(`SELECT kind,is_active FROM ${s}.parties WHERE id=$1 FOR SHARE`,[user.party_id]);
+  provider=party && party.kind==="doctor" && party.is_active ? "active" : "stale";
+ }
+ const displayName=typeof user.display_name==="string" && user.display_name.length<=200 ? user.display_name : null;
+ const version=createHash("sha256").update(JSON.stringify([user.id,user.username,displayName,user.role,user.is_active,user.party_id,user.authorization_epoch])).digest("hex");
+ return Object.freeze({user:Object.freeze({id:user.id,username:user.username,displayName,role:user.role,isActive:user.is_active,partyId:user.party_id,authorizationEpoch:user.authorization_epoch}),
+  ownerUserId:c.owner_user_id,isOwner:user.id===c.owner_user_id,provider,document:parsed.value,version});
 }

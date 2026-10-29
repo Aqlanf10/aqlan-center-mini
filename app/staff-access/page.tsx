@@ -7,11 +7,13 @@ import { STAFF_CAPABILITIES, type StaffCapability, type StaffRecordScope } from 
 import { STAFF_CAPABILITY_LABELS, STAFF_SCOPE_LABELS, toggleStaffCapability } from "@/lib/staff-capability-labels";
 import { STAFF_MODULES, staffModuleVisible } from "@/lib/staff-modules";
 import { STAFF_STARTING_TEMPLATES, applyStartingTemplate } from "@/lib/staff-starting-templates";
+import { StaffAccountEditor } from "@/components/staff/StaffAccountEditor";
 
 /**
  * صلاحيات الطاقم — الهوية الموحّدة.
  *
- * الدليل يُقرأ بقدرة staff.view، والمحرّر بقدرة staff.permissions.edit. الواجهة تعرض
+ * الدليل يُقرأ بقدرة staff.view، والمحرّر بقدرة staff.permissions.edit، وقسم الحساب
+ * (تفعيل/إيقاف/اسم، وللمالك: الدور وربط الطبيب وكلمة المرور المؤقتة) بقدراته. الواجهة تعرض
  * ما يسمح به الخادم (editable/delegable/scopeOptions) ولا تقرّر شيئًا: الحفظ يمر
  * بمراجعة متوقّعة (CAS) وسياسة المنح كاملة في الخادم، وأي رفض يُعرض كما هو.
  */
@@ -27,6 +29,7 @@ const roleLabel = (role: string) => ROLE_LABEL[role as Role] ?? role;
 export default function StaffAccessPage() {
   const session = useSession();
   const canEdit = session?.isOwner === true || (session?.capabilities ?? []).includes("staff.permissions.edit");
+  const canManage = canEdit || (session?.capabilities ?? []).some(capability => capability === "staff.profile.edit" || capability === "staff.accounts.disable");
   const [rows, setRows] = useState<DirectoryRow[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -71,10 +74,10 @@ export default function StaffAccessPage() {
                     {roleLabel(row.role)}{row.clinicianPartyId ? " — مرتبط بطبيب" : ""}{row.isActive ? "" : " — غير نشط"}
                   </p>
                 </div>
-                {canEdit ? (
+                {canManage ? (
                   <button type="button" onClick={() => setSelected(row.id)} aria-pressed={selected === row.id}
                     className={`min-h-11 shrink-0 rounded-xl px-3 text-xs font-bold ${selected === row.id ? "bg-navy-900 text-white" : "border border-slate-300 text-navy-900"}`}>
-                    الصلاحيات
+                    {canEdit ? "الحساب والصلاحيات" : "الحساب"}
                   </button>
                 ) : null}
               </li>
@@ -89,8 +92,13 @@ export default function StaffAccessPage() {
         </section>
         <section aria-label="محرّر الصلاحيات" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
           {selected === null
-            ? <p className="text-sm text-slate-600">{canEdit ? "اختر موظفًا لعرض صلاحياته." : "عرض الدليل فقط: تعديل الصلاحيات يحتاج صلاحية «إدارة صلاحيات الطاقم»."}</p>
-            : <CapabilityEditor key={selected} userId={selected} />}
+            ? <p className="text-sm text-slate-600">{canManage ? "اختر موظفًا لعرض حسابه وصلاحياته." : "عرض الدليل فقط: إدارة الحسابات والصلاحيات تحتاج صلاحيتها."}</p>
+            : (
+              <div className="space-y-4">
+                <StaffAccountEditor key={`account-${selected}`} userId={selected} onSaved={() => void load(null)} />
+                {canEdit ? <CapabilityEditor key={selected} userId={selected} /> : null}
+              </div>
+            )}
         </section>
       </div>
     </div>

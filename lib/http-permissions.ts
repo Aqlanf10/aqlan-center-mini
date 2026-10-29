@@ -53,6 +53,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   /* الهوية الموحّدة: دليل الطاقم (staff.view) ومحرّر الصلاحيات (staff.permissions.edit). */
   "/api/staff-access": { GET: CANONICAL },
   "/api/staff-access/[id]": { GET: CANONICAL, PATCH: CANONICAL },
+  /* محرّر الحسابات (staff.view للقراءة؛ الكتابة بحسب الحقل: staff.profile.edit، staff.accounts.disable، عمليات المالك). */
+  "/api/staff-access/[id]/account": { GET: CANONICAL, PATCH: CANONICAL },
   "/api/lab/work-intents/capability": { GET: CLINICAL },
   "/api/visits/[id]/lab-work-command": { GET: CLINICAL },
   "/api/ortho/[id]/followup-coverage": { GET: ADMIN, POST: ADMIN, PUT: ADMIN },

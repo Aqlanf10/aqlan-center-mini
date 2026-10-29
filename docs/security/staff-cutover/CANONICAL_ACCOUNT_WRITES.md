@@ -1,6 +1,7 @@
 # Canonical staff account writes: findings and proposal (owner decision 5, step 3)
 
-Status: **proposal for review**. Nothing here is implemented, installed or activated.
+Status: **Proposal A implemented for review** (review 6507696166 item 2; §5 below). Proposal B
+stays design-only for M4. Nothing is installed or activated; no live database or account was touched.
 It covers the "accounts" area of the unified settings (`UNIFIED_SETTINGS_INVENTORY.md`):
 create, disable/enable, display profile, credential reset, role label, clinician link.
 
@@ -69,3 +70,85 @@ B2 needs:
 1. Review of this proposal.
 2. Proposal A (no schema change).
 3. Proposal B with M4.
+
+## 5. Proposal A as implemented (review 6507696166 item 2)
+
+| Part | Where |
+|---|---|
+| Administrative target state, separate from the actor's session proof | `loadAdministrativeTargetState` in `lib/staff-authority-proof-internal.ts` |
+| Pure policy (batch rule, owner, self, delegation bound, owner operations) | `validateStaffAccountChange` in `lib/staff-capabilities.ts` |
+| Writer and read view | `lib/staff-account-editor.ts` |
+| HTTP | `GET/PATCH /api/staff-access/[id]/account` |
+| Screen | the "الحساب" section of `/staff-access` (`components/staff/StaffAccountEditor.tsx`) |
+| Commission effect of a link change, in the writer's own transaction | `doctorCommissionChangeOn` + `doctorCommissionAuditInput` in `lib/db.ts` (the legacy `withDoctorCommissionChange` is the same code, its own transaction, audit after commit as before) |
+
+**Target proof.** `loadLockedIssuanceAuthority` (the live login proof) is unchanged and still
+rejects an inactive account or a stale doctor link. The editor never uses it for the target.
+`loadAdministrativeTargetState` proves the ready control and intact history, then locks the
+target row (`FOR UPDATE` in the writer, `FOR SHARE` in the read view), and requires a canonical
+account with a parseable permission document and exactly one current subject binding. It
+accepts an inactive account (to activate it) and a link to a doctor party that is no longer
+active (reported as `stale`, to repair it). It returns the stored document only for the
+delegation bound; the target is never resolved into a `ResolvedStaffAccess` and grants nothing.
+
+**Order in one READ COMMITTED transaction.**
+1. Transaction identity; `lock_timeout` 5 s.
+2. EXCLUSIVE lifecycle fence first. There is no shared→exclusive upgrade: the writer does not pass through `withStaffOperation`.
+3. Actor proof `loadExclusiveWriterAuthority(…, "staff.view")`: the full live session proof, with nothing relaxed.
+4. Target lock and administrative proof.
+5. The batch rule (`validateStaffAccountChange`):
+   - every changed field needs its own authority, and one refused field refuses the save;
+   - unknown fields and invalid values are refused before any lock;
+   - fields equal to the locked value are not changes;
+   - a password is always a change.
+6. Version CAS. The CAS input is SHA-256 over `[id, username, displayName, role, is_active, party_id, authorization_epoch]`; the password hash is never part of it. The UPDATE repeats the epoch predicate.
+7. An active account must be able to sign in. Activation, or keeping an account active, on a stale link is refused unless the same save repairs or removes the link (409 `stale-clinician-link`).
+8. Write. A link change runs through the commission core:
+   - parties are locked in id order;
+   - baselines are taken before the write;
+   - new snapshots are taken after it;
+   - `doctor.commission.update` rows are written in the same transaction.
+9. `staff.account.update` audit row in the same transaction:
+   - `changes` holds before/after values for non-secret fields only;
+   - `credentialReset` is a boolean;
+   - `fields` and `sessionsRevoked` are recorded;
+   - no password, hash or credential version.
+10. Final checks: a fresh actor proof, the target re-proof, the same XID and the session's live clock.
+
+**Revocation.** The frozen 0076 trigger increments the target's own `authorization_epoch` on an
+active, role, link or password change, so only that account's sessions are refused. A display
+name change is display only and keeps sessions. Other accounts' sessions are untouched.
+
+**Authorities.**
+
+| Field | Authority |
+|---|---|
+| `displayName` | `staff.profile.edit` |
+| `active` | `staff.accounts.disable` (both directions) |
+| `roleLabel` | owner operation `staff.role.change`. It is a label: the canonical resolver ignores it, and a test proves capabilities are identical after relabelling to `admin` |
+| `clinicianPartyId` | owner operation `staff.clinician-link.change`. The target must be an active doctor party, or none |
+| `temporaryPassword` | owner operation `staff.credentials.reset`. 8–1024 characters, hashed with `hashPassword` before the transaction. A forced change at next login is a separate policy and is NOT added |
+
+A delegate never manages an account whose stored document is beyond its own authority.
+The owner is never a target, and no actor changes its own account here.
+
+**Tests.**
+
+- PG `__tests__/postgres/staff-account-editor.test.ts` (13):
+  - the read view per actor;
+  - deactivation revokes only the target's sessions, with an audit row, and blocks login;
+  - activation from inactive;
+  - stale version 409; a display name change keeps sessions;
+  - the batch rule, unknown fields and invalid values;
+  - owner, self and delegation bounds;
+  - a role label never grants;
+  - a temporary password (owner only, no secret in audit or response);
+  - relinking with commission history and audits; inactive or unknown doctor refused;
+  - stale-link repair;
+  - audit failure rolls back;
+  - a request in flight by the target serialized against the exclusive fence, both orders.
+- Unit `__tests__/staff-capabilities.test.ts` (account change policy, 3).
+- Built journey `__tests__/security-http/canonical-account-editor-journey.test.ts` (3, portOffset 27):
+  - HTTP refusals;
+  - delegate deactivation and reactivation through the preview;
+  - the owner relinks and resets the password in one save, with commission history and audits.

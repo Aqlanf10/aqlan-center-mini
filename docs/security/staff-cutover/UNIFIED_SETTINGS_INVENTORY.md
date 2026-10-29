@@ -6,7 +6,7 @@ Status: **inventory and plan**. It lists what exists on WORK, what is canonical,
 
 | Area | Today (page / API) | Canonical status | Who may change it | Missing |
 |---|---|---|---|---|
-| Staff accounts (create, disable, profile) | `/settings/users`, `/api/users`, `/api/users/[id]` (legacy) | not canonical | `staff.accounts.create`, `staff.accounts.disable`, `staff.profile.edit`; role, credential and clinician link are owner-only | proposal `CANONICAL_ACCOUNT_WRITES.md`: updates of existing accounts need no schema change; creating an account in a ready identity needs a reviewed schema/lifecycle change (M4) |
+| Staff accounts (create, disable, profile) | `/settings/users`, `/api/users`, `/api/users/[id]` (legacy) | updates canonical (`/staff-access` → «الحساب», `/api/staff-access/[id]/account`); creation not canonical | `staff.accounts.create`, `staff.accounts.disable`, `staff.profile.edit`; role, credential and clinician link are owner-only | `CANONICAL_ACCOUNT_WRITES.md` §5: updates of existing accounts implemented for review (no schema change); creating an account in a ready identity needs a reviewed schema/lifecycle change (M4, B2) |
 | Permissions (capabilities) | `/staff-access`, `/api/staff-access/[id]` | **canonical**: atomic CAS save, delegation limits, audit, protected owner | `staff.permissions.edit` within the editor's own authority | — |
 | Starting templates | editor «قالب بداية» (`lib/staff-starting-templates.ts`) | **done**: fills the form only; nothing is effective until the owner confirms the account (`confirmation`, map §7 item 3b) | as above | assistant template (needs a "today's visits" scope decision) |
 | Initial confirmation | editor banner and change preview | **done**: pending documents grant nothing; only the owner confirms; delegates maintain confirmed accounts within their authority | owner | — |
@@ -38,5 +38,5 @@ Every tab is a projection of the account's current grants. The server re-proves 
 ## 3. Order
 1. **Done:** the canonical settings read and the batch write for `/api/settings`, all key classes (M2 slice 7; PG `settings-canonical`, journey `canonical-settings-journey`).
 2. **Done (first form):** the settings screen under the canonical shell (`/settings`, `settings.view`). The staff tab links to `/staff-access`. Tabs for the remaining areas are added as each one becomes canonical.
-3. Account writes in the staff editor: proposal for review (`CANONICAL_ACCOUNT_WRITES.md`); updates first, creation with M4.
+3. Account writes in the staff editor: updates of existing accounts implemented for review (`CANONICAL_ACCOUNT_WRITES.md` §5); creation with M4.
 4. Catalogue routes (services, prices, lab), then the owner-only tab with M4.
