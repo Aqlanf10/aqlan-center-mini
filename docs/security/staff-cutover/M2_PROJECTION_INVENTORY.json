@@ -1,0 +1,280 @@
+{
+ "/api/appointments": [
+  "permissions?.canViewAllAppointments",
+  "role === \"doctor\""
+ ],
+ "/api/appointments/availability": [
+  "role !== \"admin\"",
+  "role !== \"doctor\"",
+  "role !== \"reception\"",
+  "role === \"doctor\""
+ ],
+ "/api/appointments/mine": [
+  "role !== \"admin\"",
+  "role !== \"doctor\""
+ ],
+ "/api/audit": [
+  "isAdmin("
+ ],
+ "/api/backup": [
+  "isAdmin("
+ ],
+ "/api/backup/documents": [
+  "isAdmin("
+ ],
+ "/api/backup/full": [
+  "isAdmin("
+ ],
+ "/api/booking-requests": [
+  "role !== \"admin\"",
+  "role !== \"reception\""
+ ],
+ "/api/ceph/compare": [
+  "isAdmin(",
+  "role !== \"doctor\""
+ ],
+ "/api/ceph/superimpose": [
+  "isAdmin(",
+  "role !== \"doctor\""
+ ],
+ "/api/documents/[id]": [
+  "isAdmin("
+ ],
+ "/api/executive": [
+  "isAdmin(",
+  "role === \"doctor\""
+ ],
+ "/api/expense-attachments/[id]": [
+  "canViewMoney("
+ ],
+ "/api/expenses": [
+  "canViewMoney(",
+  "role === \"doctor\""
+ ],
+ "/api/expenses/[id]/attachments": [
+  "canViewMoney("
+ ],
+ "/api/export": [
+  "isAdmin("
+ ],
+ "/api/finance/commission-overrides": [
+  "isAdmin("
+ ],
+ "/api/finance/debts": [
+  "canViewMoney("
+ ],
+ "/api/finance/expense-categories": [
+  "financeAccess",
+  "role === \"doctor\""
+ ],
+ "/api/finance/lab-accounting": [
+  "canViewMoney("
+ ],
+ "/api/finance/lab-reconciliation": [
+  "isAdmin("
+ ],
+ "/api/finance/reconciliation": [
+  "canViewMoney("
+ ],
+ "/api/finance/report": [
+  "financeAccess",
+  "role === \"doctor\""
+ ],
+ "/api/hr/attendance": [
+  "role !== \"admin\"",
+  "role !== \"reception\""
+ ],
+ "/api/hr/schedules": [
+  "role !== \"admin\"",
+  "role !== \"reception\""
+ ],
+ "/api/hr/schedules/[id]": [
+  "role !== \"admin\"",
+  "role !== \"reception\""
+ ],
+ "/api/inventory/[id]": [
+  "isAdmin("
+ ],
+ "/api/inventory/patient-cost": [
+  "role === \"doctor\""
+ ],
+ "/api/inventory/value": [
+  "isAdmin("
+ ],
+ "/api/invoices": [
+  "canViewMoney("
+ ],
+ "/api/invoices/[id]": [
+  "canViewMoney("
+ ],
+ "/api/invoices/archive": [
+  "canViewMoney("
+ ],
+ "/api/lab": [
+  "role === \"doctor\""
+ ],
+ "/api/ortho/billing-decisions": [
+  "role === \"doctor\""
+ ],
+ "/api/ortho/followups": [
+  "permissions?.canViewAllPatients",
+  "role === \"doctor\""
+ ],
+ "/api/parties": [
+  "isAdmin("
+ ],
+ "/api/party-openings": [
+  "role === \"admin\""
+ ],
+ "/api/patients": [
+  "isRestrictedRole(",
+  "permissions?.canViewAllPatients",
+  "role === \"doctor\""
+ ],
+ "/api/patients/[id]/arrival-panel": [
+  "canHandleMoney(",
+  "financeAccess",
+  "role === \"cashier\"",
+  "role === \"doctor\""
+ ],
+ "/api/patients/[id]/documents": [
+  "isAdmin("
+ ],
+ "/api/patients/[id]/historical-documents": [
+  "role===\"doctor\""
+ ],
+ "/api/patients/[id]/ledger": [
+  "canViewMoney(",
+  "role === \"admin\"",
+  "role === \"doctor\"",
+  "role === \"reception\""
+ ],
+ "/api/patients/[id]/legacy-onboarding": [
+  "permissions?.canViewPlans",
+  "role === \"admin\"",
+  "role === \"doctor\"",
+  "role === \"reception\""
+ ],
+ "/api/patients/[id]/legacy-treatments": [
+  "role !== \"admin\"",
+  "role !== \"reception\"",
+  "role === \"admin\"",
+  "role === \"doctor\""
+ ],
+ "/api/patients/[id]/legacy-treatments/[agreementId]/void": [
+  "isAdmin("
+ ],
+ "/api/patients/[id]/number": [
+  "isAdmin("
+ ],
+ "/api/patients/[id]/plans": [
+  "canHandleMoney(",
+  "role === \"doctor\""
+ ],
+ "/api/patients/[id]/prescriptions": [
+  "isAdmin(",
+  "role !== \"doctor\""
+ ],
+ "/api/patients/[id]/statement": [
+  "canViewMoney(",
+  "financeAccess",
+  "role === \"accountant\"",
+  "role === \"cashier\""
+ ],
+ "/api/patients/[id]/timeline": [
+  "canHandleMoney("
+ ],
+ "/api/patients/[id]/treatment-financial-context": [
+  "canViewMoney(",
+  "financeAccess",
+  "role === \"accountant\"",
+  "role === \"cashier\""
+ ],
+ "/api/patients/[id]/workflow": [
+  "canHandleMoney(",
+  "role === \"assistant\"",
+  "role === \"doctor\""
+ ],
+ "/api/payables": [
+  "canViewMoney("
+ ],
+ "/api/payments": [
+  "canViewMoney("
+ ],
+ "/api/plan-templates": [
+  "canViewMoney(",
+  "isAdmin(",
+  "permissions?.canViewServicePrices",
+  "role === \"doctor\""
+ ],
+ "/api/plans": [
+  "canViewMoney(",
+  "isRestrictedRole(",
+  "permissions?.canViewPlans",
+  "role === \"doctor\""
+ ],
+ "/api/plans/proposals": [
+  "canViewMoney("
+ ],
+ "/api/referrals/mine": [
+  "role !== \"admin\"",
+  "role !== \"doctor\""
+ ],
+ "/api/report": [
+  "role === \"doctor\""
+ ],
+ "/api/reports": [
+  "financeAccess",
+  "role === \"accountant\"",
+  "role === \"reception\""
+ ],
+ "/api/reports/daily-clinic": [
+  "role !== \"admin\""
+ ],
+ "/api/reports/saved": [
+  "financeAccess",
+  "role === \"admin\""
+ ],
+ "/api/services": [
+  "canHandleMoney(",
+  "canViewMoney(",
+  "permissions?.canViewServicePrices",
+  "role === \"doctor\""
+ ],
+ "/api/settings/backup": [
+  "isAdmin("
+ ],
+ "/api/settings/display/announcements": [
+  "isAdmin("
+ ],
+ "/api/settings/patient-numbering": [
+  "isAdmin("
+ ],
+ "/api/settings/readiness": [
+  "isAdmin("
+ ],
+ "/api/shifts": [
+  "canViewMoney(",
+  "permissions?.canViewCashDrawer",
+  "role === \"doctor\""
+ ],
+ "/api/users": [
+  "isAdmin("
+ ],
+ "/api/visits/[id]/clinical": [
+  "role === \"assistant\""
+ ],
+ "/api/visits/[id]/financial-context": [
+  "canViewMoney(",
+  "role === \"assistant\""
+ ],
+ "/api/visits/readiness": [
+  "isAdmin(",
+  "permissions?.canViewAllPatients",
+  "permissions?.canViewPatientPayments",
+  "role !== \"doctor\"",
+  "role === \"assistant\"",
+  "role === \"doctor\"",
+  "role === \"reception\""
+ ]
+}

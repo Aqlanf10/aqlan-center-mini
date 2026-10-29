@@ -5,7 +5,7 @@ import { useClinicName } from "./SettingsProvider";
 import { useSessionActions } from "./SessionProvider";
 import { Icon, Logo } from "./Icon";
 import { ROLE_LABEL, type Role } from "@/lib/roles";
-import { canonicalPageFor, canonicalPagesFor } from "@/lib/canonical-navigation";
+import { canonicalPageAllowed, canonicalPageFor, canonicalPagesFor } from "@/lib/canonical-navigation";
 
 /**
  * قشرة جلسة الهوية الموحّدة.
@@ -21,9 +21,10 @@ export function CanonicalShell({ children }: { children: React.ReactNode }) {
   const clinicName = useClinicName();
   const { session, logout } = useSessionActions();
   if (!session) return null;
-  const pages = canonicalPagesFor(session.capabilities, session.isOwner, { patientScope: session.patientScope, appointmentScope: session.appointmentScope });
+  const scopes = { patientScope: session.patientScope, appointmentScope: session.appointmentScope };
+  const pages = canonicalPagesFor(session.capabilities, session.isOwner, scopes);
   const current = canonicalPageFor(pathname);
-  const ready = current !== null && pages.includes(current);
+  const ready = current !== null && canonicalPageAllowed(current, session.capabilities, session.isOwner, scopes);
   const roleLabel = ROLE_LABEL[session.role as Role] ?? session.role;
 
   async function signOut() {
@@ -47,7 +48,7 @@ export function CanonicalShell({ children }: { children: React.ReactNode }) {
             <Icon name="tooth" className="h-[18px] w-[18px] shrink-0" /> مساحة العمل
           </a>
           {pages.map(page => {
-            const active = current === page;
+            const active = current === page || (current?.pattern !== undefined && current.href.startsWith(`${page.href}/`));
             return (
               <a key={page.href} href={page.href} aria-current={active ? "page" : undefined}
                 className={`flex min-h-11 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 text-sm font-semibold ${active ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-navy-50 hover:text-navy-900"}`}>

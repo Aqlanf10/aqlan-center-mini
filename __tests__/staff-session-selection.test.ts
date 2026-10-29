@@ -4,7 +4,7 @@ import { createSessionToken, signDurableSessionClaims } from "../lib/auth";
 import { selectStaffEnvelope } from "../lib/staff-session-admission";
 import { STAFF_CAPABILITIES } from "../lib/staff-capability-catalogue";
 import { STAFF_CAPABILITY_LABELS, staffCapabilityGroup, toggleStaffCapability } from "../lib/staff-capability-labels";
-import { canonicalPageFor, canonicalPagesFor, isCanonicalPage } from "../lib/canonical-navigation";
+import { canonicalPageAllowed, canonicalPageFor, canonicalPagesFor, isCanonicalPage } from "../lib/canonical-navigation";
 
 const durable = () => signDurableSessionClaims({
  userId: 2, username: "synthetic", expiresAt: Date.now() + 60_000,
@@ -55,9 +55,12 @@ describe("capability presentation", () => {
   expect(canonicalPagesFor(["inventory.custody.view"], false).map(p => p.href)).toEqual(["/inventory/custody"]);
   expect(isCanonicalPage("/staff-access")).toBe(true);
   expect(isCanonicalPage("/patients")).toBe(true);
-  // The patient list is exact: a profile is a separate page, not canonical yet.
-  expect(isCanonicalPage("/patients/12")).toBe(false);
+  // The patient list is exact; one patient's file is a separate, pattern-matched page.
+  expect(isCanonicalPage("/patients/12")).toBe(true);
+  expect(canonicalPageFor("/patients/12")?.href).toBe("/patients/[id]");
   expect(isCanonicalPage("/patients/12/ortho")).toBe(false);
+  expect(isCanonicalPage("/patients/0")).toBe(false);
+  expect(isCanonicalPage("/patients/abc")).toBe(false);
   // Legacy-only inventory screens (overview, valuation review) are not canonical pages yet.
   expect(isCanonicalPage("/inventory")).toBe(false);
   expect(isCanonicalPage("/inventory/review")).toBe(false);
@@ -67,6 +70,11 @@ describe("capability presentation", () => {
   expect(canonicalPagesFor(["clinical.plans.view", "finance.patient-ledger.view"], false).map(p => p.href)).toEqual([]);
   expect(canonicalPagesFor([], false, { patientScope: "none" }).map(p => p.href)).toEqual([]);
   expect(canonicalPagesFor([], false, { patientScope: "own" }).map(p => p.href)).toEqual(["/patients"]);
+  // A parameterised page is never a menu entry, but follows the same scope rule.
+  const file = canonicalPageFor("/patients/7")!;
+  expect(canonicalPageAllowed(file, [], false, { patientScope: "own" })).toBe(true);
+  expect(canonicalPageAllowed(file, ["clinical.plans.view"], false, { patientScope: "none" })).toBe(false);
+  expect(canonicalPageAllowed(file, [], true)).toBe(true);
   expect(canonicalPagesFor(["staff.view"], false, { patientScope: "all" }).map(p => p.href)).toEqual(["/patients", "/staff-access"]);
   // The appointment scope does not open the patient list.
   expect(canonicalPagesFor([], false, { appointmentScope: "all" }).map(p => p.href)).toEqual([]);

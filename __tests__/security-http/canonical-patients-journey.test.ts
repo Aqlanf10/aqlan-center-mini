@@ -47,13 +47,13 @@ it("HTTP: own scope sees only the linked clinician's patients; all scope sees ev
   expect(found.map(row => row.fullName)).toEqual(["مريض تجريبي أول"]);
   expect(found[0].medicalAlert).toContain("حساسية");
   const page = await (await journey.api("/api/patients?page=0&filter=all&sort=name", doctor.cookie)).json();
-  expect(page).toMatchObject({ total: 1, projection: { care: true, balances: false } });
+  expect(page).toMatchObject({ total: 1, projection: { care: true, schedule: false, balances: false } });
   expect(page.rows[0]).not.toHaveProperty("balances");
 
   const reception = await journey.login("reception");
   const all = await (await journey.api("/api/patients?page=0&filter=all&sort=name", reception.cookie)).json();
-  expect(all).toMatchObject({ total: 3, projection: { care: false, balances: false } });
-  for (const row of all.rows) expect(Object.keys(row).sort()).toEqual(["fullName", "id", "patientNumber", "phone"]);
+  expect(all).toMatchObject({ total: 3, projection: { care: false, schedule: false, balances: false } });
+  for (const row of all.rows) expect(Object.keys(row).sort()).toEqual(["age", "fullName", "gender", "id", "patientNumber", "phone"]);
   expect(await journey.ddlLog()).toEqual([]);
 });
 
@@ -103,7 +103,7 @@ it("browser: the doctor opens the patient list from the shell and sees exactly t
   expect(await page.getByRole("button", { name: "تنبيه طبي" }).count()).toBe(1);
   expect(await page.getByRole("button", { name: "عليهم مبالغ" }).count()).toBe(0);
   expect(await page.getByRole("button", { name: "+ مريض جديد" }).count()).toBe(0);
-  expect(await page.locator('a[href^="/patients/"]').count()).toBe(0);
+  expect(await page.locator('a[href^="/patients/"]').count()).toBe(1);
   // Searching narrows within the same scope.
   await page.getByLabel("بحث عن مريض").fill("SYN-J-2");
   await page.getByText("لا توجد نتائج مطابقة لخيارات البحث أو الفلتر.").waitFor();
@@ -194,3 +194,58 @@ it("browser: a reception account creates a patient, confirms a duplicate warning
   expect(rows).toEqual([{ actor: ACCOUNTS.creator.username, confirmed: "false" }, { actor: ACCOUNTS.creator.username, confirmed: "true" }]);
   expect(await journey.ddlLog()).toEqual([]);
 });
+
+it("HTTP: one patient's file is admitted by scope; outside and missing read the same", async () => {
+  const { rows } = await journey.db.query<{ id: number; patient_number: string }>("SELECT id, patient_number FROM patients WHERE patient_number IN ('SYN-J-1','SYN-J-2') ORDER BY patient_number");
+  const [own, other] = rows;
+  const doctor = await journey.login("doctor");
+  const file = await journey.api(`/api/patients/${own.id}`, doctor.cookie);
+  expect(file.status).toBe(200);
+  expect(file.headers.get("cache-control")).toMatch(/no-store/);
+  const body = await file.json();
+  expect(body.patient).toMatchObject({ fullName: "مريض تجريبي أول", medicalAlert: "حساسية بنسلين تجريبية" });
+  expect(body.projection).toMatchObject({ care: true, appointments: "none" });
+  expect(body).not.toHaveProperty("appointments");
+  const outside = await journey.api(`/api/patients/${other.id}`, doctor.cookie);
+  const missing = await journey.api("/api/patients/987654", doctor.cookie);
+  expect([outside.status, missing.status]).toEqual([404, 404]);
+  const [outsideBody, missingBody] = [await outside.json(), await missing.json()];
+  expect(outsideBody).toEqual(missingBody);
+  expect(outsideBody.message).toMatch(ARABIC);
+  const reception = await journey.login("reception");
+  const identityOnly = await (await journey.api(`/api/patients/${own.id}`, reception.cookie)).json();
+  expect(identityOnly.patient).not.toHaveProperty("medicalAlert");
+  expect(identityOnly).not.toHaveProperty("visits");
+  const projection = await journey.api(`/api/patients/${own.id}?projection=appointments`, doctor.cookie);
+  expect(projection.status).toBe(409);
+  expect((await projection.json()).message).toMatch(ARABIC);
+  expect(await journey.ddlLog()).toEqual([]);
+});
+
+it("browser: the doctor opens a patient's file from the list; only the canonical file read is called", async () => {
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar" });
+  const page = await context.newPage();
+  await journey.browserLogin(page, "doctor");
+  const apiCalls: string[] = [];
+  const failures: string[] = [];
+  page.on("request", request => { const path = new URL(request.url()).pathname; if (path.startsWith("/api/")) apiCalls.push(path); });
+  page.on("response", response => { const path = new URL(response.url()).pathname; if (path.startsWith("/api/") && response.status() >= 400) failures.push(`${response.status()} ${path}`); });
+  await page.getByRole("link", { name: "المرضى" }).first().click();
+  await page.getByText("مريض تجريبي أول").first().click();
+  await page.waitForURL(/\/patients\/\d+$/);
+  const profile = page.getByTestId("canonical-patient-profile");
+  await profile.getByRole("heading", { name: "مريض تجريبي أول" }).waitFor();
+  await profile.getByText("⚠ حساسية بنسلين تجريبية").waitFor();
+  await profile.getByRole("heading", { name: "الزيارات الأخيرة" }).waitFor();
+  expect(await profile.getByRole("heading", { name: /المواعيد/ }).count()).toBe(0);
+  expect(new Set(apiCalls.filter(path => !/^\/api\/auth\/me$/.test(path)).map(path => path.replace(/\/\d+$/, "/:id")))).toEqual(new Set(["/api/patients", "/api/patients/:id"]));
+  expect(failures).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  // A file outside the scope shows the bounded Arabic refusal, not the legacy file.
+  const { rows: [other] } = await journey.db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number='SYN-J-2'");
+  await page.goto(`${journey.baseUrl}/patients/${other.id}`);
+  await page.getByRole("alert").filter({ hasText: "لا يوجد مريض بهذا الرقم ضمن مرضاك" }).waitFor();
+  await context.close();
+  expect(await journey.ddlLog()).toEqual([]);
+});
+

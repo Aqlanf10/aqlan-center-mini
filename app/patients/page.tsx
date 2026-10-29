@@ -40,13 +40,13 @@ interface PatientSummary {
 interface PageResult { rows: PatientSummary[]; total: number; page: number; pageSize: number; projection?: Projection }
 
 /** جلسة الهوية الموحّدة: مجموعات الأعمدة التي يملكها الموظف كما قرّرها الخادم. */
-interface Projection { care: boolean; balances: boolean }
-/** المرشّحات والترتيب التي تحتاج بيانات العلاج أو الحساب — تُخفى لمن لا يملكها. */
-const CARE_FILTERS: readonly PatientListFilter[] = ["alert", "ortho", "no_next"];
+interface Projection { care: boolean; schedule: boolean; balances: boolean }
+/** المرشّحات التي تحتاج بيانات العلاج — تُخفى لمن لا يملكها. */
+const CARE_FILTERS: readonly PatientListFilter[] = ["alert", "ortho"];
 
 export default function PatientsPage() {
-  /* الهوية الموحّدة (M2): القائمة تُقرأ بنطاق المرضى وبإسقاط الصلاحيات. ملف المريض
-     والإنشاء لم يُنقلا بعد، فلا يظهر رابطهما هنا حتى يُنقلا. */
+  /* الهوية الموحّدة (M2): القائمة تُقرأ بنطاق المرضى وبإسقاط الصلاحيات، والملف يفتح
+     الملف الموحّد المُسقط (components/patient/CanonicalPatientProfile). */
   const session = useSession();
   const canonical = session?.canonical === true;
   const canCreate = !canonical || session?.isOwner === true || session?.capabilities?.includes("patients.create") === true;
@@ -182,7 +182,7 @@ export default function PatientsPage() {
             aria-label="ترتيب القائمة"
             className="mr-auto rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600"
           >
-            {(Object.entries(PATIENT_LIST_SORTS) as [PatientListSort, string][]).filter(([key]) => key !== "last_visit" || projection?.care !== false).map(([key, label]) => (
+            {(Object.entries(PATIENT_LIST_SORTS) as [PatientListSort, string][]).filter(([key]) => key !== "last_visit" || projection?.schedule !== false).map(([key, label]) => (
               <option key={key} value={key}>ترتيب: {label}</option>
             ))}
           </select>
@@ -214,7 +214,7 @@ export default function PatientsPage() {
         <ul className="space-y-2">
           {filteredResults.map((patient) => (
             <li key={patient.id}>
-              <PatientRowFrame href={canonical ? null : `/patients/${patient.id}`}>
+              <PatientRowFrame href={`/patients/${patient.id}`}>
                 {patient.photoDocumentId ? (
                   <img src={`/api/documents/${patient.photoDocumentId}`} alt="" loading="lazy"
                     className="h-10 w-10 shrink-0 rounded-xl object-cover" />
@@ -290,6 +290,7 @@ export default function PatientsPage() {
 function filterAllowed(filter: PatientListFilter, projection: Projection | null): boolean {
   if (!projection) return true;
   if (filter === "debt") return projection.balances;
+  if (filter === "no_next") return projection.schedule;
   if (CARE_FILTERS.includes(filter)) return projection.care;
   return true;
 }

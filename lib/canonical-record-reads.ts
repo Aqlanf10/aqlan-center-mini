@@ -22,6 +22,8 @@ export interface CanonicalRecordReadRule {
 export const CANONICAL_RECORD_READS = Object.freeze({
   /** GET /api/patients: search and browse the patient list. */
   "read:patients.directory": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]: one patient's file, only inside the actor's patient scope. */
+  "read:patients.record": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze([]) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

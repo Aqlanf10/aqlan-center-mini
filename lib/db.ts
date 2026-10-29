@@ -5324,28 +5324,47 @@ export interface PatientFile {
 export async function getPatientFile(id: number): Promise<PatientFile | null> {
   await ensureSchema();
   const pool = getPool();
-  const { rows: patients } = await pool.query<PatientRow>(
-    `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = $1`, [id],
-  );
-  if (!patients[0]) return null;
+  const patient = await getPatientWith(pool, id);
+  if (!patient) return null;
 
-  const [{ rows: visitRows }, { rows: appointmentRows }] = await Promise.all([
-    pool.query<VisitRow>(
-      `SELECT * FROM visits WHERE patient_id = $1 ORDER BY arrived_at DESC LIMIT 50`,
-      [id],
-    ),
-    pool.query<AppointmentRow>(
-      `${APPOINTMENT_SELECT} WHERE a.patient_id = $1
-        ORDER BY a.scheduled_date DESC, a.scheduled_time DESC LIMIT 50`,
-      [id],
-    ),
+  const [visits, appointments] = await Promise.all([
+    listPatientVisitsWith(pool, id),
+    listPatientAppointmentsWith(pool, id, null),
   ]);
 
-  return {
-    patient: toPatient(patients[0]),
-    visits: visitRows.map(toVisit),
-    appointments: appointmentRows.map(toAppointment),
-  };
+  return { patient, visits, appointments };
+}
+
+/** One patient row over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function getPatientWith(q: Pick<DbClient, "query">, id: number): Promise<Patient | null> {
+  const { rows } = await q.query<PatientRow>(`SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = $1`, [id]);
+  return rows[0] ? toPatient(rows[0]) : null;
+}
+/** The patient's latest visits (newest first). */
+export async function listPatientVisitsWith(q: Pick<DbClient, "query">, patientId: number, limit = 50): Promise<Visit[]> {
+  const { rows } = await q.query<VisitRow>(
+    `SELECT * FROM visits WHERE patient_id = $1 ORDER BY arrived_at DESC LIMIT $2`, [patientId, limit]);
+  return rows.map(toVisit);
+}
+/** The patient's latest appointments (newest first); `doctorPartyId` limits them to
+ * one clinician's appointments (an `own` appointment scope), null lists all. */
+export async function listPatientAppointmentsWith(q: Pick<DbClient, "query">, patientId: number, doctorPartyId: number | null, limit = 50): Promise<Appointment[]> {
+  const { rows } = await q.query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.patient_id = $1 AND ($2::int IS NULL OR a.doctor_id = $2::int)
+      ORDER BY a.scheduled_date DESC, a.scheduled_time DESC LIMIT $3`,
+    [patientId, doctorPartyId, limit],
+  );
+  return rows.map(toAppointment);
+}
+/** Lock-free "this clinician's patient" for one patient, inside a caller-owned
+ * snapshot: the same predicate as the list filter (DOCTOR_PATIENT_CONDITION) and the
+ * writers' witnesses (doctorOwnsPatient), without their FOR SHARE locks. */
+export async function patientInDoctorScopeWith(q: Pick<DbClient, "query">, doctorPartyId: number, patientId: number): Promise<boolean> {
+  const { rows } = await q.query<{ inside: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM patients WHERE patients.id = $2 AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")}) AS inside`,
+    [doctorPartyId, patientId],
+  );
+  return rows[0]?.inside === true;
 }
 
 /**

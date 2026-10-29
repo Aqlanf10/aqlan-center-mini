@@ -12,7 +12,8 @@ import { duplicateWarning, findDuplicates } from "@/lib/duplicates";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { staffAdmissionRefusal } from "@/lib/staff-capability-editor";
-import { CanonicalPatientReadRefusal, readCanonicalPatientBrowse, readCanonicalPatientSearch } from "@/lib/canonical-patient-reads";
+import { readCanonicalPatientBrowse, readCanonicalPatientSearch } from "@/lib/canonical-patient-reads";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import type { VerifiedDurableSession } from "@/lib/staff-durable-session";
 import { commandCanonicalPatientCreate } from "@/lib/canonical-patient-writes";
 
@@ -22,8 +23,6 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 const PAGE_SIZE = 25;
-
-const NO_STORE = { "Cache-Control": "private, no-store" } as const;
 
 /**
  * Canonical identity (M2 slice 1). A canonical cookie never falls back to the legacy
@@ -47,15 +46,7 @@ async function canonicalGet(request: Request, handle: VerifiedDurableSession) {
     });
     return NextResponse.json(body, { headers: NO_STORE });
   } catch (error) {
-    if (error instanceof CanonicalPatientReadRefusal) {
-      return NextResponse.json({ code: error.code, message: error.message }, { status: error.code === "invalid_patient_query" ? 400 : 403, headers: NO_STORE });
-    }
-    const refusal = staffAdmissionRefusal(error);
-    if (refusal) {
-      const message = /RECORD_SCOPE_DENIED$/.test(refusal.code) ? "لا تملك صلاحية عرض المرضى." : refusal.message;
-      return NextResponse.json({ code: refusal.code, message }, { status: refusal.status, headers: NO_STORE });
-    }
-    return NextResponse.json({ message: "تعذّر البحث. أعد المحاولة." }, { status: 500, headers: NO_STORE });
+    return canonicalPatientReadFailure(error, "تعذّر البحث. أعد المحاولة.");
   }
 }
 

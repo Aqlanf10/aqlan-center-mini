@@ -34,13 +34,13 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 198 |
+| existing | 197 |
 | proposed | 142 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 4 |
+| canonical-done | 5 |
 
 | Record scope | Routes |
 |---|---|
@@ -144,26 +144,32 @@ The owning RR snapshot reader (`lib/canonical-read-snapshot.ts`) admits a record
 
 ### Slice 1 — `GET /api/patients` (search and browse)
 
-| Column group | Fields | Shown when the actor holds |
+**Release-gated.** Which delegated grants see which column group is open owner policy (Dot 6480538845 item 4). The implementation keeps the narrowest technical default. Appointment grants never reveal clinical fields.
+
+| Column group | Fields | Shown when |
 |---|---|---|
-| identity | id, file number, name, phone | admitted (scope not `none`) |
-| care summary | medical alert, gender, age, last visit, next appointment, active orthodontics, flags | one of `clinical.plans.view`, `clinical.visits.document`, `clinical.xrays.view`, `appointments.create`, `appointments.edit` |
+| identity | id, file number, name, phone, gender, age | admitted (scope not `none`) |
+| schedule (operational) | last visit, next appointment | `appointmentScope` is `all` |
+| care (clinical) | medical alert, active orthodontics, flags | one of `clinical.plans.view`, `clinical.visits.document`, `clinical.xrays.view` |
 | balances | amounts due per currency | `finance.patient-ledger.view` |
 
-**For review (owner, with Dot):** which capabilities admit the care summary.
+The protected owner holds every group.
 
 How the projection behaves:
 - **Hidden groups are omitted, not zeroed.** An empty balance list would read as "no debt".
-- **Selecting on a hidden group refuses** with `patient_filter_not_granted`. This covers the debt filter, the care filters, the last-visit sort and flag filters, so hidden fields cannot be learned through filtering.
+- **Selecting on a hidden group refuses** with `patient_filter_not_granted`, so hidden fields cannot be learned through filters or counts:
+  - debt filter → balances;
+  - no-next-appointment filter and last-visit sort → schedule;
+  - medical-alert, orthodontic and flag filters → care.
 - **The patient photo is not published** until `/api/documents/[id]` is canonical.
-- **The screen** registers `/patients` as an exact page in the canonical shell. It is visible when the patient scope is not `none`. The list hides filters outside the projection. The profile link stays hidden until the profile routes are migrated. The create form follows slice 1b.
+- **The screen** registers `/patients` as an exact page in the canonical shell. It is visible when the patient scope is not `none`. The list hides filters outside the projection. Rows open the canonical file (slice 2). The create form follows slice 1b.
 
-Evidence: `__tests__/postgres/patients-canonical-directory.test.ts` (13 cases):
+Evidence: `__tests__/postgres/patients-canonical-directory.test.ts`:
 - scope `all`, `own`, owner, `none`, unlinked `own`, admin label;
-- identity-only, ledger-only and full projections;
-- refused filters;
-- invalid input;
-- revocation: a stale session, and a scope or grant change applied at the next read.
+- identity-only, schedule-only, clinical-only, ledger-only and full projections;
+- appointment grants never open clinical fields or filters;
+- refused filters and invalid input;
+- revocation.
 
 ### Slice 1b — `POST /api/patients` (create)
 One admitted operation for the exact capability `patients.create`. It is listed in `CLINIC_RUNTIME_ACTIONS` and in the runtime's literal action set. The same transaction holds:
@@ -191,4 +197,34 @@ Evidence:
 - Built-app journey, 2 cases:
   - HTTP refusals, the previous-balance refusal and validation;
   - mobile browser creation with duplicate confirmation, and the audit trail.
+
+### Slice 2 — `GET /api/patients/[id]` (one patient's file)
+- **`read:patients.record`.** In the same snapshot, the patient must exist and be inside the actor's patient scope (`own` uses the list's predicate, without locks). Outside the scope reads exactly like a missing patient: `patient_not_found`, 404, identical body. The response never reveals whether a file exists.
+- **Projection:**
+  - identity and contact for every admitted actor;
+  - care (medical alert, flags, note, referral, recent visits) with a clinical grant;
+  - appointments by appointment scope: `all` lists every appointment, `own` only the actor's, `none` omits the key.
+- **Not yet canonical:** the bounded `?projection=` mode refuses (409 `projection_not_canonical`).
+- **Screen:** `/patients/[id]` is a pattern-matched canonical page, not in the menu. A canonical session gets `CanonicalPatientProfile`: one read, only the projected sections. It never calls the legacy panels. Every other section appears there only when its route is migrated.
+- **Evidence:**
+  - PostgreSQL, 5 cases: own clinician file with own appointments only; outside equals missing; appointment grants never reveal clinical fields; no appointment scope; scope `none`, a stale session, and the owner.
+  - Built-app journeys: HTTP, plus a mobile browser opening the file from the list. Only `/api/patients` and `/api/patients/:id` are called; an out-of-scope file shows the Arabic refusal.
+
+## 6. Dot review 6480538845: what the map now records
+
+1. **Settings, per key.** `lib/settings-capabilities.ts` classifies every defined setting key exactly once (unit test against `SETTING_DEFINITIONS`):
+   - operational → `settings.operational.edit`;
+   - finance → `settings.finance.edit`;
+   - authority → owner-only `settings.security.change`: `workflow.doctor_financial_view`, `finance.reception_adds_opening_balance`;
+   - integration → owner-only `settings.integrations.change`: automatic reminders, consent mode, external AI;
+   - backup → owner-only `clinic.backup.manage`.
+
+   Operational never inherits the other classes. A batch needs every key's requirement; an unknown or refused key refuses the whole batch. Acceptance for the settings slice: no partial write, the existing expected-version CAS, and the audit row in the same transaction. Keys marked `forReview` need the owner's confirmation; they do not widen access.
+2. **Branches.** Every entry whose handler branches on a request-body `action`, `op`, `mode` or `decision` declares `branches` with one requirement per value, plus `fields` for sensitive fields such as the capacity override, price overrides, role or credential changes. `scripts/audits/m2-route-scan.mjs` re-scans the handlers, and the map test fails when a branch value has no rule. Examples:
+   - `booking-requests/[id]`: `confirm` needs `appointments.create`, `reject` needs `appointments.cancel`, and the capacity override needs `appointments.override-capacity`. The route itself grants nothing.
+   - ortho billing decision: `no_charge` needs `clinical.ortho.edit`, `billed` needs `finance.invoices.create`.
+3. **Projections.** `M2_PROJECTION_INVENTORY.json` lists every GET handler with a role-dependent signal (72 routes). It is generated from the code and drift-tested. No GET route can become `canonical-done` without a declared `projection`. Example: documents. `isAdmin` passes removed documents today; canonically they need `patients.documents.delete` (proposed) or the owner, never `clinical.xrays.view` alone. Counts cover only the projected rows.
+4. **Care summary.** Narrowed as described in slice 1. Release-gated until the owner decides reception's clinical-summary scope.
+
+Still open, not inferred: the owner decisions (four owner-only operations; empty manual grants versus per-account confirmed templates; reception's clinical-summary scope), the restore hold, owner-only recovery, and the issuer lost-COMMIT acknowledgement review (6479317375).
 

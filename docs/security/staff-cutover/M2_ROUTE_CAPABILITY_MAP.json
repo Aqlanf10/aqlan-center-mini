@@ -114,7 +114,59 @@
   "anyOf": [],
   "scope": "appointment",
   "status": "existing",
-  "note": "Capacity override additionally requires appointments.override-capacity."
+  "note": "Capacity override additionally requires appointments.override-capacity.",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "arrive": {
+     "need": [
+      "visits.manage"
+     ],
+     "note": "Check-in opens the visit."
+    },
+    "reminded": {
+     "need": [],
+     "note": "Records that a reminder was sent."
+    },
+    "cancel": {
+     "need": [
+      "appointments.cancel"
+     ],
+     "note": "Cancellation reason required."
+    },
+    "no_show": {
+     "need": [
+      "appointments.cancel"
+     ],
+     "note": "Same terminal decision family as cancel."
+    },
+    "reschedule": {
+     "need": [],
+     "note": "Moves the appointment within the actor's appointment scope."
+    },
+    "close_done": {
+     "need": [
+      "visits.manage"
+     ],
+     "note": "Closes the day's appointment as done."
+    },
+    "close_no_show": {
+     "need": [
+      "visits.manage"
+     ],
+     "note": "Closes the day's appointment as no-show."
+    }
+   },
+   "fields": [
+    {
+     "field": "overrideReason",
+     "need": [
+      "appointments.override-capacity"
+     ],
+     "note": "Booking beyond capacity, with a bounded reason."
+    }
+   ]
+  }
  },
  {
   "route": "/api/appointments/availability",
@@ -286,13 +338,37 @@
    "admin",
    "reception"
   ],
-  "need": [
-   "appointments.create"
-  ],
+  "need": [],
   "anyOf": [],
   "scope": null,
   "status": "existing",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "confirm": {
+     "need": [
+      "appointments.create"
+     ],
+     "note": "Creates the appointment."
+    },
+    "reject": {
+     "need": [
+      "appointments.cancel"
+     ],
+     "note": "Rejecting a request never needs, and never grants, booking."
+    }
+   },
+   "fields": [
+    {
+     "field": "overrideReason",
+     "need": [
+      "appointments.override-capacity"
+     ],
+     "note": "Confirmation beyond capacity."
+    }
+   ]
+  }
  },
  {
   "route": "/api/cases/[id]",
@@ -906,7 +982,20 @@
   "anyOf": [],
   "scope": null,
   "status": "existing",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "sync_accounting": {
+     "need": [],
+     "note": "Maintenance of the category-account links."
+    },
+    "ensure_all_linked": {
+     "need": [],
+     "note": "Maintenance of the category-account links."
+    }
+   }
+  }
  },
  {
   "route": "/api/finance/fx",
@@ -1086,7 +1175,16 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "decide": {
+     "need": [],
+     "note": "The decider must differ from the requester (business rule)."
+    }
+   }
+  }
  },
  {
   "route": "/api/hr/contracts",
@@ -1142,7 +1240,16 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "transition": {
+     "need": [],
+     "note": "Contract status transition."
+    }
+   }
+  }
  },
  {
   "route": "/api/hr/contracts/[id]",
@@ -1319,7 +1426,16 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+  "note": "Disbursement also requires an open cashier shift and the treasury rule.",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "reverse": {
+     "need": [],
+     "note": "Reversal; open cashier shift and treasury rule apply."
+    }
+   }
+  }
  },
  {
   "route": "/api/hr/payroll/history-preview",
@@ -1361,7 +1477,16 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+  "note": "Disbursement also requires an open cashier shift and the treasury rule.",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "close": {
+     "need": [],
+     "note": ""
+    }
+   }
+  }
  },
  {
   "route": "/api/hr/payroll/runs",
@@ -1389,7 +1514,20 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": "Disbursement also requires an open cashier shift and the treasury rule."
+  "note": "Disbursement also requires an open cashier shift and the treasury rule.",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "calculate": {
+     "need": [],
+     "note": ""
+    },
+    "approve": {
+     "need": [],
+     "note": "The approver must differ from the calculator (business rule)."
+    }
+   }
+  }
  },
  {
   "route": "/api/hr/reports",
@@ -1559,7 +1697,24 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "link_user": {
+     "need": [
+      "staff.profile.edit"
+     ],
+     "note": "Links the HR record to a staff account; grants nothing."
+    },
+    "unlink_user": {
+     "need": [
+      "staff.profile.edit"
+     ],
+     "note": ""
+    }
+   }
+  }
  },
  {
   "route": "/api/hr/staff/[id]/history",
@@ -1948,7 +2103,21 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "none",
+   "values": {},
+   "fields": [
+    {
+     "field": "lab work lines",
+     "need": [
+      "clinical.visits.document"
+     ],
+     "note": "Today admin/doctor only."
+    }
+   ]
+  },
+  "branchExempt": "`mode === \"existing\"` reads a line item's mode, not a request branch."
  },
  {
   "route": "/api/lab",
@@ -2010,7 +2179,49 @@
   "anyOf": [],
   "scope": "patient",
   "status": "proposed",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "complete_prescription": {
+     "need": [
+      "clinical.visits.document"
+     ],
+     "note": "Clinical prescription content."
+    },
+    "events": {
+     "need": [],
+     "note": "Order tracking events."
+    },
+    "post": {
+     "need": [
+      "finance.payables.record"
+     ],
+     "note": "Recognises the lab cost."
+    },
+    "unpost": {
+     "need": [
+      "finance.payables.record"
+     ],
+     "note": "Reverses the recognition with a reason."
+    },
+    "update_accounting": {
+     "need": [
+      "finance.payables.record"
+     ],
+     "note": ""
+    }
+   },
+   "fields": [
+    {
+     "field": "any change after dispatch (status other than needed)",
+     "need": [
+      "clinical.lab.cancel"
+     ],
+     "note": "Today admin-only."
+    }
+   ]
+  }
  },
  {
   "route": "/api/lab/backlog",
@@ -2112,7 +2323,16 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "seed_defaults": {
+     "need": [],
+     "note": ""
+    }
+   }
+  }
  },
  {
   "route": "/api/lab/services/[id]",
@@ -2591,13 +2811,28 @@
    "reception",
    "doctor"
   ],
-  "need": [
-   "finance.invoices.create"
-  ],
+  "need": [],
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "decision",
+   "values": {
+    "billed": {
+     "need": [
+      "finance.invoices.create"
+     ],
+     "note": "Links the adjustment to its invoice."
+    },
+    "no_charge": {
+     "need": [
+      "clinical.ortho.edit"
+     ],
+     "note": "Clinical decision; the case's responsible clinician or the owner."
+    }
+   }
+  }
  },
  {
   "route": "/api/ortho/baseline",
@@ -2720,7 +2955,20 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "adjust": {
+     "need": [],
+     "note": ""
+    },
+    "void_advance": {
+     "need": [],
+     "note": ""
+    }
+   }
+  }
  },
  {
   "route": "/api/party-openings",
@@ -2750,7 +2998,18 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 1: record read read:patients.directory (patient scope); projection by grant (identity / care summary / balances), see §5."
+  "note": "M2 slice 1: record read read:patients.directory (patient scope); projection by grant (identity / care summary / balances), see §5.",
+  "projection": {
+   "legacy": "isRestrictedRole → identity only; doctor without canViewAllPatients → own patients.",
+   "groups": {
+    "identity": "id, file number, name, phone, gender, age — every admitted actor",
+    "schedule": "last visit, next appointment — appointmentScope all",
+    "care": "medical alert, active orthodontics, flags — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view",
+    "balances": "amounts due — finance.patient-ledger.view"
+   },
+   "filters": "debt → balances; no_next and last_visit sort → schedule; alert, ortho, flag → care; otherwise refused (patient_filter_not_granted)",
+   "omitted": "photoDocumentId until /api/documents/[id] is canonical"
+  }
  },
  {
   "route": "/api/patients",
@@ -2794,8 +3053,18 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 2: record read read:patients.record (patient inside the scope, else 404); projection by grant.",
+  "projection": {
+   "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients); full file for every admitted role.",
+   "groups": {
+    "identity": "identity and contact fields — every admitted actor",
+    "care": "medical alert, flags, note, referral source/by, recent visits — clinical grant (as the list)",
+    "appointments": "the patient's appointments — appointmentScope all; own lists the actor's own appointments; none omits the key"
+   },
+   "rows": "patient outside the scope reads exactly like a missing one (patient_not_found, 404)",
+   "omitted": "?projection= bounded mode (409 projection_not_canonical) until migrated"
+  }
  },
  {
   "route": "/api/patients/[id]",
@@ -3048,7 +3317,15 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": ""
+  "note": "",
+  "projection": {
+   "legacy": "listPatientDocuments(patientId, isAdmin(role)): admin also receives removed (soft-deleted) documents.",
+   "groups": {
+    "documents": "active documents — clinical.xrays.view within the patient scope",
+    "removed": "removed documents and their removal metadata — patients.documents.delete (proposed) or the protected owner; never clinical.xrays.view alone"
+   },
+   "counts": "counts and filters cover only the projected rows (no removed-document count leaks)"
+  }
  },
  {
   "route": "/api/patients/[id]/documents",
@@ -3761,7 +4038,20 @@
   "anyOf": [],
   "scope": null,
   "status": "owner-only",
-  "note": "Bulk import is owner-only (proposed owner operation)."
+  "note": "Bulk import is owner-only (proposed owner operation).",
+  "branches": {
+   "discriminator": "mode",
+   "values": {
+    "preview": {
+     "need": [],
+     "note": "Read-only classification."
+    },
+    "commit": {
+     "need": [],
+     "note": ""
+    }
+   }
+  }
  },
  {
   "route": "/api/patients/import/legacy",
@@ -3775,7 +4065,20 @@
   "anyOf": [],
   "scope": null,
   "status": "owner-only",
-  "note": "Bulk import is owner-only (proposed owner operation)."
+  "note": "Bulk import is owner-only (proposed owner operation).",
+  "branches": {
+   "discriminator": "mode",
+   "values": {
+    "preview": {
+     "need": [],
+     "note": "Read-only classification."
+    },
+    "commit": {
+     "need": [],
+     "note": ""
+    }
+   }
+  }
  },
  {
   "route": "/api/payables",
@@ -3853,7 +4156,22 @@
   "anyOf": [],
   "scope": null,
   "status": "existing",
-  "note": "Requires an open cashier shift."
+  "note": "Requires an open cashier shift.",
+  "branches": {
+   "discriminator": "mode",
+   "values": {
+    "void": {
+     "need": [],
+     "note": ""
+    },
+    "correct": {
+     "need": [
+      "finance.payments.collect"
+     ],
+     "note": "Void plus re-record."
+    }
+   }
+  }
  },
  {
   "route": "/api/payments/attempts/retire",
@@ -4679,7 +4997,8 @@
   ],
   "scope": null,
   "status": "existing",
-  "note": "Each key is classified operational or financial; the route refuses keys outside the caller's grants."
+  "note": "Per-key policy: lib/settings-capabilities.ts (every key classified once: operational, finance, or owner-only authority/integration/backup). A batch needs every key's requirement; one refused or unknown key refuses the whole batch with no partial write; CAS and audit stay in the same transaction.",
+  "keyPolicy": "lib/settings-capabilities.ts"
  },
  {
   "route": "/api/settings",
@@ -4696,7 +5015,8 @@
   ],
   "scope": null,
   "status": "existing",
-  "note": "Each key is classified operational or financial; the route refuses keys outside the caller's grants."
+  "note": "Per-key policy: lib/settings-capabilities.ts (every key classified once: operational, finance, or owner-only authority/integration/backup). A batch needs every key's requirement; one refused or unknown key refuses the whole batch with no partial write; CAS and audit stay in the same transaction.",
+  "keyPolicy": "lib/settings-capabilities.ts"
  },
  {
   "route": "/api/settings/ai",
@@ -5338,7 +5658,24 @@
   "anyOf": [],
   "scope": null,
   "status": "proposed",
-  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+  "note": "Assignee/creator scope; managing others' tasks needs tasks.manage.",
+  "branches": {
+   "discriminator": "op",
+   "values": {
+    "add": {
+     "need": [],
+     "note": ""
+    },
+    "toggle": {
+     "need": [],
+     "note": ""
+    },
+    "remove": {
+     "need": [],
+     "note": ""
+    }
+   }
+  }
  },
  {
   "route": "/api/tasks/[id]/comments",
@@ -5428,7 +5765,41 @@
   "anyOf": [],
   "scope": null,
   "status": "existing",
-  "note": "Role, credential and clinician-link changes are owner-only (staff.role.change, staff.credentials.reset, staff.clinician-link.change); deactivation needs staff.accounts.disable."
+  "note": "Role, credential and clinician-link changes are owner-only (staff.role.change, staff.credentials.reset, staff.clinician-link.change); deactivation needs staff.accounts.disable.",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "link_doctor": {
+     "need": [
+      "staff.clinician-link.change"
+     ],
+     "note": "Owner-only."
+    }
+   },
+   "fields": [
+    {
+     "field": "role",
+     "need": [
+      "staff.role.change"
+     ],
+     "note": "Owner-only."
+    },
+    {
+     "field": "isActive",
+     "need": [
+      "staff.accounts.disable"
+     ],
+     "note": ""
+    },
+    {
+     "field": "password",
+     "need": [
+      "staff.credentials.reset"
+     ],
+     "note": "Owner-only."
+    }
+   ]
+  }
  },
  {
   "route": "/api/visits",
@@ -5489,7 +5860,52 @@
   "anyOf": [],
   "scope": "patient",
   "status": "proposed",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "call": {
+     "need": [],
+     "note": ""
+    },
+    "call_again": {
+     "need": [],
+     "note": ""
+    },
+    "seat": {
+     "need": [],
+     "note": ""
+    },
+    "clear": {
+     "need": [],
+     "note": "Clearance before call."
+    },
+    "defer": {
+     "need": [
+      "finance.payments.collect"
+     ],
+     "note": "Defers collection: a money decision."
+    },
+    "return": {
+     "need": [],
+     "note": ""
+    },
+    "finish": {
+     "need": [],
+     "note": ""
+    },
+    "link": {
+     "need": [],
+     "note": "Links the walk-in visit to an existing patient within the patient scope."
+    },
+    "open_file": {
+     "need": [
+      "patients.create"
+     ],
+     "note": "Opens a new patient file for a walk-in."
+    }
+   }
+  }
  },
  {
   "route": "/api/visits/[id]/billing-preview",
@@ -5536,7 +5952,45 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": "Signing additionally requires clinical.visits.sign."
+  "note": "Signing additionally requires clinical.visits.sign.",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "addendum": {
+     "need": [],
+     "note": "Addendum to a signed visit; signed content is never edited."
+    },
+    "sign": {
+     "need": [
+      "clinical.visits.sign"
+     ],
+     "note": ""
+    }
+   },
+   "fields": [
+    {
+     "field": "priceOverrides[].kind=discount",
+     "need": [
+      "finance.discounts.apply"
+     ],
+     "note": "Within billing.max_discount_percent; beyond it finance.discounts.override."
+    },
+    {
+     "field": "priceOverrides[].kind=increase",
+     "need": [
+      "finance.price-increases.apply"
+     ],
+     "note": ""
+    },
+    {
+     "field": "orthoSession",
+     "need": [
+      "clinical.ortho.edit"
+     ],
+     "note": "Orthodontic session data."
+    }
+   ]
+  }
  },
  {
   "route": "/api/visits/[id]/financial-context",
@@ -5702,6 +6156,50 @@
   "anyOf": [],
   "scope": "appointment",
   "status": "existing",
-  "note": ""
+  "note": "",
+  "branches": {
+   "discriminator": "action",
+   "values": {
+    "offer": {
+     "need": [],
+     "note": ""
+    },
+    "contact": {
+     "need": [],
+     "note": ""
+    },
+    "preferences": {
+     "need": [],
+     "note": ""
+    },
+    "book": {
+     "need": [
+      "appointments.create"
+     ],
+     "note": "Creates the appointment from the waiting entry."
+    },
+    "booked": {
+     "need": [],
+     "note": "Marks an entry already booked elsewhere."
+    },
+    "cancelled": {
+     "need": [],
+     "note": "Reason required."
+    },
+    "expired": {
+     "need": [],
+     "note": ""
+    }
+   },
+   "fields": [
+    {
+     "field": "overrideReason",
+     "need": [
+      "appointments.override-capacity"
+     ],
+     "note": "Booking beyond capacity."
+    }
+   ]
+  }
  }
 ]

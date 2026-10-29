@@ -18,6 +18,9 @@ import { isPreferredChannel, normalizePatientEmail, normalizePatientFlags, parse
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalPatientFile } from "@/lib/canonical-patient-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +55,22 @@ async function doctorBlocked(patientId: number, skipAllGrant = false): Promise<s
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 2): one owning snapshot, patient inside the scope,
+    // projection by grant. The bounded appointments projection mode is not canonical yet.
+    const id = readId((await context.params).id);
+    if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+    if (new URL(_request.url).searchParams.has("projection")) {
+      return NextResponse.json({ code: "projection_not_canonical", message: "هذا العرض لم يُنقل بعد إلى الهوية الموحّدة." }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
+    }
+    try {
+      return NextResponse.json(await readCanonicalPatientFile(selected.handle, id), { headers: { "Cache-Control": "private, no-store" } });
+    } catch (error) {
+      return canonicalPatientReadFailure(error, "تعذّر تحميل ملف المريض.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const { id: rawId } = await context.params;
