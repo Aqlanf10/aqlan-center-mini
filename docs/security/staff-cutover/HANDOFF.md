@@ -317,6 +317,10 @@ node scripts/audits/m2-route-scan.mjs --write
 8. ✅ `planned-visits/[id]/schedule` (الشريحة 22) و`rebook` (الشريحة 23).
 9. ✅ `recall` — الشريحة 24 (مثال `canonical-entry-journey` صار `/lab`؛ عند تحويل المختبر غيّره إلى مسار آخر غير قانوني).
 10. ✅ `provider-blocks` — الشريحة 25. المتبقي: `shifts`، `display` (شاشة النداء)، `visits/[id]/next`.
+11. **جارٍ: الشريحة 26 `shifts`** — التمهيد مدفوع (`f40cd1fb`): `getOpenShiftWith`/`openShiftWith`/`closeShiftWith`/`listShiftsWith`/`listShiftPaymentsWith`/`listShiftExpensesWith` و`readReceiptProvenanceWith` (بنقطة حفظ داخل اللقطة). المتبقي:
+    - `lib/canonical-shifts.ts`: قراءة `runCanonicalReadSnapshot` بإجراء `finance.shifts.view`، وفتح/إغلاق بـ`withStaffOperation` تحت `finance.shifts.operate`. يجب إضافة `finance.shifts.operate` إلى `CLINIC_RUNTIME_ACTIONS` في `lib/staff-operation-runtime.ts` (الثابت والمجموعة) و`scripts/audits/staff-cutover-readiness.test.mjs`، وإضافة `finance.shifts.view` قراءةً مسجلة أو إجراءً.
+    - تدقيق `shift.open`/`shift.close` ذري (القديم بعد الالتزام).
+    - الفروع القانونية في `app/api/shifts/route.ts`، اختبارات PG، رحلة (portOffset 33)، الخريطة.
 
 ### 5.3 بقية خريطة M2 (المتبقي حسب المنطقة)
 
