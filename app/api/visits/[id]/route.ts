@@ -6,6 +6,9 @@ import { callVisitAgain, callVisitGated, clearVisit, deferVisitPayment, deleteVi
 import { normalizeEmergencyReason } from "@/lib/chair-readiness";
 import { authorizeVisit, authorizeVisitLink } from "@/lib/operational-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalVisitFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalVisitMove, parseCanonicalVisitMove } from "@/lib/canonical-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +27,25 @@ function gatedResponse(result: GatedMoveResult, conflictMessage: string) {
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 12): queue moves on visits.manage, visit inside the scope.
+    const visitId = Number((await context.params).id);
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_visit_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const moved = await commandCanonicalVisitMove(selected.handle, visitId, parseCanonicalVisitMove(canonicalBody));
+      if (moved.kind === "cleared") return NextResponse.json({ ok: true, clearedAt: moved.clearedAt, clearedBy: moved.clearedBy, already: moved.already }, { headers: NO_STORE });
+      return NextResponse.json(moved.warning ? { ...moved.visit, warning: moved.warning } : moved.visit, { headers: NO_STORE });
+    } catch (error) {
+      return canonicalVisitFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useId, useState } from "react";
-import { chairRows, daySummary, waitingRows, type Visit, type WaitLevel } from "@/lib/flow";
+import { chairRows, daySummary, firstFreeChair, waitingRows, type Visit, type WaitLevel } from "@/lib/flow";
 import { useChairCount, useNumberSetting } from "@/components/SettingsProvider";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { sendGatedMove } from "@/components/today/useChairReadiness";
 
 /**
- * قائمة اليوم لجلسة الهوية الموحّدة (M2 slice 11).
+ * قائمة اليوم لجلسة الهوية الموحّدة (M2 slices 11–12).
  *
  * قراءة واحدة: GET /api/visits يعيد زيارات اليوم ضمن نطاق مرضاك فقط، وملاحظة الوصول
- * لمن يملك الملخص التشغيلي. التسجيل يظهر لمن يملك visits.manage، والخادم يتحقق منه مجددًا.
+ * لمن يملك الملخص التشغيلي. التسجيل والنداء والإجلاس والإنهاء تظهر لمن يملك visits.manage،
+ * والخادم يتحقق منها مجددًا في كل حركة (PATCH /api/visits/[id]).
  * لا تُستدعى مسارات قديمة (جاهزية الكرسي، التسليم، المواعيد) حتى تُنقل.
  */
 interface QueueView { visits: (Visit & { note?: string | null })[]; projection: { note: boolean }; canManage: boolean }
@@ -21,6 +23,13 @@ const LEVEL_CLASS: Record<WaitLevel, string> = {
   critical: "border-red-300 bg-red-50",
 };
 const POLL_MS = 20_000;
+const MOVE_DONE = {
+  call: (name: string, chair?: number) => `نُودي على ${name} إلى كرسي ${chair}.`,
+  seat: (name: string, chair?: number) => `جلس ${name} على كرسي ${chair}.`,
+  call_again: (name: string) => `أُعيد النداء على ${name}.`,
+  return: (name: string) => `عاد ${name} إلى الانتظار.`,
+  finish: (name: string) => `انتهت زيارة ${name}.`,
+} as const;
 /** ساعة الوصول بتوقيت العيادة لا بساعة الجهاز. */
 const arrivalTime = (iso: string) => new Date(iso).toLocaleTimeString("ar-YE", { timeZone: CLINIC_ZONE_FALLBACK, hour: "2-digit", minute: "2-digit", hour12: true });
 
@@ -58,6 +67,26 @@ export function CanonicalTodayQueue() {
   const summary = daySummary(chairCount, visits, now);
   const waiting = waitingRows(visits, now, thresholds);
   const chairs = chairRows(chairCount, visits, now);
+  const freeChair = firstFreeChair(chairCount, visits);
+  const [moveMessage, setMoveMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [moving, setMoving] = useState(false);
+  /** حركة طابور واحدة: النداء والإجلاس عبر بوابة الجاهزية (سبب طوارئ مكتوب عند المنع). */
+  async function move(visit: Visit, action: "call" | "seat" | "call_again" | "return" | "finish", chair?: number) {
+    setMoving(true); setMoveMessage(null);
+    try {
+      const response = action === "call" || action === "seat"
+        ? await sendGatedMove(visit.id, { action, chair: chair! })
+        : await fetch(`/api/visits/${visit.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { setMoveMessage({ ok: false, text: payload?.message ?? "تعذّر تنفيذ الإجراء." }); return; }
+      setMoveMessage({ ok: true, text: payload?.warning ?? MOVE_DONE[action](visit.patientName, chair) });
+    } catch { setMoveMessage({ ok: false, text: "تعذّر الاتصال بالخادم. لم تُعتبر الحركة منفّذة؛ حدّث القائمة." }); }
+    finally { setMoving(false); reload(); }
+  }
+  const actionButton = (label: string, onClick: () => void) => (
+    <button type="button" disabled={moving} onClick={onClick}
+      className="min-h-11 rounded-xl border border-navy-300 bg-white px-3 text-xs font-bold text-navy-900 disabled:opacity-50">{label}</button>
+  );
   return (
     <section aria-labelledby="today-queue-title" className="mx-auto max-w-4xl space-y-4" data-testid="canonical-today-queue">
       <header className="flex flex-wrap items-center justify-between gap-2">
@@ -76,6 +105,7 @@ export function CanonicalTodayQueue() {
             ))}
           </dl>
           {view.canManage ? <ArrivalForm onArrived={reload} /> : null}
+          {moveMessage ? <p role={moveMessage.ok ? "status" : "alert"} data-testid="move-message" className={`rounded-xl border p-3 text-sm ${moveMessage.ok ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>{moveMessage.text}</p> : null}
           <section aria-labelledby="waiting-title" className="space-y-2">
             <h2 id="waiting-title" className="text-sm font-bold text-navy-900">المنتظرون ({waiting.length})</h2>
             {waiting.length === 0 ? <p className="text-sm text-slate-600">لا أحد ينتظر الآن.</p> : (
@@ -87,6 +117,12 @@ export function CanonicalTodayQueue() {
                       <span className="text-xs font-semibold text-slate-700">ينتظر منذ {row.waitedMinutes} د — وصل {arrivalTime(row.visit.arrivedAt)}</span>
                     </div>
                     {view.projection.note && row.visit.note ? <p className="mt-1 text-xs text-slate-700">{row.visit.note}</p> : null}
+                    {view.canManage && freeChair !== null ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {actionButton(`نداء إلى كرسي ${freeChair}`, () => void move(row.visit, "call", freeChair))}
+                        {actionButton(`إجلاس على كرسي ${freeChair}`, () => void move(row.visit, "seat", freeChair))}
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -96,15 +132,25 @@ export function CanonicalTodayQueue() {
             <h2 id="chairs-title" className="text-sm font-bold text-navy-900">الكراسي</h2>
             <ul className="grid gap-2 sm:grid-cols-2">
               {chairs.map(row => (
-                <li key={row.chair} className="rounded-2xl border border-slate-200 bg-white p-3 text-sm">
+                <li key={row.chair} className="rounded-2xl border border-slate-200 bg-white p-3 text-sm" data-testid={`chair-${row.chair}`}>
                   <span className="font-bold text-navy-900">كرسي {row.chair}: </span>
                   {row.occupant ? `${row.occupant.patientName} — منذ ${row.busyMinutes} د`
                     : row.calledFor ? `نُودي على ${row.calledFor.patientName}` : "فارغ"}
+                  {view.canManage && row.occupant ? (
+                    <div className="mt-2 flex flex-wrap gap-2">{actionButton("انتهى", () => void move(row.occupant!, "finish"))}</div>
+                  ) : null}
+                  {view.canManage && row.calledFor ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {actionButton("جلس", () => void move(row.calledFor!, "seat", row.chair))}
+                      {actionButton("إعادة النداء", () => void move(row.calledFor!, "call_again"))}
+                      {actionButton("لم يحضر — للانتظار", () => void move(row.calledFor!, "return"))}
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>
           </section>
-          <p className="text-xs text-slate-600">النداء والإجلاس والإنهاء تُنقل إلى الهوية الموحّدة في الشريحة التالية؛ القائمة تتحدّث كل عشرين ثانية.</p>
+          <p className="text-xs text-slate-600">القائمة تتحدّث كل عشرين ثانية. قائمة جاهزية الكرسي تُنقل إلى الهوية الموحّدة في الشريحة التالية.</p>
         </>
       ) : error ? null : <p role="status" className="text-sm text-slate-600">جارٍ تحميل قائمة اليوم…</p>}
     </section>

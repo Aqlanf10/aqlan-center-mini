@@ -1,6 +1,6 @@
 /**
- * M2 slice 11 — canonical Today queue and arrival, built application, owned database
- * and server.
+ * M2 slices 11–12 — canonical Today queue, arrival and queue moves, built application,
+ * owned database and server.
  *
  * UI → HTTP → DB with password logins: the queue lists only visits inside the actor's
  * patient scope, the arrival needs `visits.manage` and a patient inside the scope,
@@ -115,4 +115,54 @@ it("browser: a doctor without visits.manage sees only its own patients' queue an
   expect(await page.getByTestId("arrival-form").count()).toBe(0);
   expect(await page.getByText("ملاحظة وصول تجريبية").count()).toBe(0);
   await context.close();
+});
+
+const patch = (cookie: string, id: number, body: unknown) => journey.api(`/api/visits/${id}`, cookie, { method: "PATCH", body: JSON.stringify(body) });
+
+it("HTTP: queue moves need visits.manage and a visit inside the scope; not-yet-canonical actions refuse", async () => {
+  const { rows: [theirs] } = await journey.db.query<{ id: number }>("SELECT id FROM visits WHERE patient_name = 'مريض الطبيب الآخر'");
+  const doctor = await journey.login("doctor");
+  const outside = await patch(doctor.cookie, theirs.id, { action: "finish" });
+  const missing = await patch(doctor.cookie, 999_999, { action: "finish" });
+  expect([outside.status, missing.status]).toEqual([404, 404]);
+  expect(await outside.json()).toEqual(await missing.json());
+  const other = await journey.login("other");
+  const denied = await patch(other.cookie, theirs.id, { action: "call", chair: 1 });
+  expect(denied.status).toBe(403);
+  expect((await denied.json()).message).toMatch(ARABIC);
+  const reception = await journey.login("reception");
+  const defer = await patch(reception.cookie, theirs.id, { action: "defer" });
+  expect(defer.status).toBe(409);
+  expect(await defer.json()).toMatchObject({ code: "visit_action_not_canonical" });
+  expect(await journey.ddlLog()).toEqual([]);
+});
+
+it("browser: reception calls, seats and finishes a waiting patient from the canonical queue", async () => {
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar" });
+  const page = await context.newPage();
+  const failures: string[] = [];
+  page.on("response", response => {
+    const path = new URL(response.url()).pathname;
+    if (path.startsWith("/api/") && response.status() >= 400) failures.push(`${response.status()} ${path}`);
+  });
+  await journey.browserLogin(page, "reception");
+  failures.length = 0;
+  await page.goto(`${journey.baseUrl}/visits`);
+  const row = page.getByTestId("waiting-list").getByRole("listitem").filter({ hasText: "مريض الطبيب الآخر" });
+  await row.getByRole("button", { name: "نداء إلى كرسي 1" }).click();
+  await page.getByTestId("move-message").filter({ hasText: "تنبيه: لم تُقَرّ جاهزية المريض بعد" }).waitFor();
+  const chair = page.getByTestId("chair-1");
+  await chair.getByText("نُودي على مريض الطبيب الآخر").waitFor();
+  await chair.getByRole("button", { name: "جلس" }).click();
+  await chair.getByText(/مريض الطبيب الآخر — منذ/).waitFor();
+  await chair.getByRole("button", { name: "انتهى" }).click();
+  await page.getByTestId("move-message").filter({ hasText: "انتهت زيارة مريض الطبيب الآخر." }).waitFor();
+  await chair.getByText("فارغ").waitFor();
+  expect(failures).toEqual([]);
+  await context.close();
+  const { rows } = await journey.db.query("SELECT a.action, a.actor FROM audit_log a JOIN visits v ON a.entity = 'visit' AND a.entity_id = v.id::text WHERE v.patient_name = 'مريض الطبيب الآخر' ORDER BY a.id");
+  expect(rows).toEqual([
+    { action: "visit.call", actor: "canon-q-reception" }, { action: "visit.seat", actor: "canon-q-reception" }, { action: "visit.finish", actor: "canon-q-reception" },
+  ]);
+  expect(await journey.ddlLog()).toEqual([]);
 });

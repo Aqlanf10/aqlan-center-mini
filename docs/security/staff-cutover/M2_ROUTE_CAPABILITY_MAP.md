@@ -297,6 +297,16 @@ The crowding screen first. Read: the record read `read:visits.today`, one owning
 - **Screen:** `/visits` («قائمة اليوم») is registered for an account with a patient scope: summary, waiting list by longest wait (thresholds from settings), chairs, and the arrival form with a file search when `visits.manage` is held. It polls every 20 seconds and calls only `/api/visits` and `/api/patients`.
 - **Tests:** PG `visits-canonical-queue` (11); legacy PG files using the refactored writers (54 files, 703 tests); built journey `canonical-today-queue-journey` (3).
 
+### Slice 12 — queue moves (`PATCH /api/visits/[id]`: call, call again, seat, return, finish, clear)
+One admitted `visits.manage` transaction per move (`commandCanonicalVisitMove`). The domain bodies are shared with the legacy route (`gatedVisitMoveWith`, `callVisitAgainWith`, `returnVisitToWaitingWith`, `finishVisitWith`, `clearVisitWith`); the legacy behaviour is unchanged.
+- **Lock order** as the legacy path: the chair-day advisory lock (call and seat), then the visit row `FOR UPDATE`, inside the shared lifecycle fence taken at admission.
+- **Scope after the row lock:** `all`, or `own` when the visit is assigned to the actor's clinician party or its patient is one of the clinician's patients (the queue read's condition). A missing visit and one outside the scope answer identically (404 `visit_not_found`), for every move including call and seat.
+- **Readiness gate unchanged:** `ops.require_clearance_before_call` refuses a call without clearance (409 `clearance_required`); an emergency needs a written reason (`emergency_reason_required`) and its bypass is audited in the same transaction. `clear` (the readiness acknowledgement) needs `visits.manage`; the legacy role list (admin, reception, doctor) is not carried over.
+- Every move writes its audit row with the canonical actor in the same transaction; a refused audit leaves the visit unchanged. Two concurrent calls to one chair: exactly one wins.
+- **Not canonical yet (409 `visit_action_not_canonical`):** `defer` (a money decision, `finance.payments.collect`), `link` and `open_file` (patient-file slices). The route entry stays `existing` until they move.
+- **Screen:** the canonical queue offers «نداء إلى كرسي N» and «إجلاس» on waiting rows (first free chair), «جلس», «إعادة النداء» and «لم يحضر — للانتظار» on a called chair, «انتهى» on an occupied chair; call and seat go through the readiness gate with the written emergency reason.
+- **Tests:** PG `visits-canonical-moves` (6): the whole journey with audit, own scope (outside equals missing, call included), admission and revocation, concurrent calls to one chair, the gate and emergency bypass, audit rollback; legacy PG files for the moved functions (8 files, 57). Built journey `canonical-today-queue-journey` now 5.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

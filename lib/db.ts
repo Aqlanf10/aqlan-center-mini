@@ -2826,34 +2826,40 @@ export async function finishVisit(id: number, actor?: VisitActor): Promise<Visit
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const before = await lockVisitState(client, id);
-    // `chair` يبقى كما كان — لا يُصفَّر هنا. كل من يقرأ «هل الكرسي مشغول؟» في
-    // النظام (seatVisit، callVisit، chairRows، heldChairs) يشترط أيضًا الحالة
-    // 'in_chair'/'called'، فتصفير الكرسي هنا لا يحرّره فعليًا بل يمحو فقط رقم
-    // آخر كرسي جلس عليه المريض — وهو ما تحتاجه لوحة الإشغال (chairOccupancy)
-    // لتحسب دقائق الزيارات المنتهية.
-    const { rows } = await client.query<VisitRow>(
-      `UPDATE visits SET status = 'done', finished_at = NOW()
-        WHERE id = $1 AND status <> 'done' RETURNING *`,
-      [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return null; }
-    if (rows[0].appointment_id) {
-      await client.query(
-        `UPDATE appointments SET status = 'done'
-          WHERE id = $1 AND status IN ('booked', 'arrived')`,
-        [rows[0].appointment_id],
-      );
-    }
-    await auditVisitStep(client, rows[0], "visit.finish", actor, before?.status ?? null, rows[0].chair ?? null);
-    await client.query("COMMIT");
-    return toVisit(rows[0]);
+    const finished = await finishVisitWith(client, id, actor);
+    await client.query(finished ? "COMMIT" : "ROLLBACK");
+    return finished;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function finishVisitWith(client: DbClient, id: number, actor?: VisitActor, admit?: VisitAdmit): Promise<Visit | null> {
+  const before = await lockVisitState(client, id);
+  await admit?.(id);
+  // `chair` يبقى كما كان — لا يُصفَّر هنا. كل من يقرأ «هل الكرسي مشغول؟» في
+  // النظام (seatVisit، callVisit، chairRows، heldChairs) يشترط أيضًا الحالة
+  // 'in_chair'/'called'، فتصفير الكرسي هنا لا يحرّره فعليًا بل يمحو فقط رقم
+  // آخر كرسي جلس عليه المريض — وهو ما تحتاجه لوحة الإشغال (chairOccupancy)
+  // لتحسب دقائق الزيارات المنتهية.
+  const { rows } = await client.query<VisitRow>(
+    `UPDATE visits SET status = 'done', finished_at = NOW()
+      WHERE id = $1 AND status <> 'done' RETURNING *`,
+    [id],
+  );
+  if (!rows[0]) return null;
+  if (rows[0].appointment_id) {
+    await client.query(
+      `UPDATE appointments SET status = 'done'
+        WHERE id = $1 AND status IN ('booked', 'arrived')`,
+      [rows[0].appointment_id],
+    );
+  }
+  await auditVisitStep(client, rows[0], "visit.finish", actor, before?.status ?? null, rows[0].chair ?? null);
+  return toVisit(rows[0]);
 }
 
 /**
@@ -4986,6 +4992,15 @@ export async function markReminderSent(id: number): Promise<boolean> {
  * مختلفان متوازيين كما هما. والنطاق يومٌ واحد لأنّ الحارس نفسه محدودٌ بيوم
  * العيادة عمدًا (زيارةُ أمس لا تُبقي كرسيَّ اليوم مرفوضًا).
  */
+/** The per-chair, per-clinic-day lock every call and seat takes before the visit row. */
+async function lockChairDay(client: DbClient, chair: number): Promise<void> {
+  await client.query(
+    `SELECT pg_advisory_xact_lock(
+       hashtext('visit-chair:' || $1::text || ':' || (NOW() AT TIME ZONE $2)::date::text))`,
+    [chair, CLINIC_TIME_ZONE],
+  );
+}
+
 async function withChairLock<T>(
   chair: number, run: (client: DbClient) => Promise<T>,
 ): Promise<T> {
@@ -4993,11 +5008,7 @@ async function withChairLock<T>(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query(
-      `SELECT pg_advisory_xact_lock(
-         hashtext('visit-chair:' || $1::text || ':' || (NOW() AT TIME ZONE $2)::date::text))`,
-      [chair, CLINIC_TIME_ZONE],
-    );
+    await lockChairDay(client, chair);
     const value = await run(client);
     await client.query("COMMIT");
     return value;
@@ -5054,18 +5065,25 @@ async function inVisitTransaction<T>(run: (client: DbClient) => Promise<T>): Pro
 }
 
 export async function returnVisitToWaiting(id: number, actor?: VisitActor): Promise<Visit | null> {
-  return inVisitTransaction(async (client) => {
-    const before = await lockVisitState(client, id);
-    const { rows } = await client.query<VisitRow>(
-      `UPDATE visits SET status = 'waiting', chair = NULL, called_at = NULL,
-              no_response_count = COALESCE(no_response_count, 0) + 1
-        WHERE id = $1 AND status = 'called' RETURNING *`,
-      [id],
-    );
-    if (!rows[0]) return null;
-    await auditVisitStep(client, rows[0], "visit.return_to_waiting", actor, before?.status ?? null, before?.chair ?? null);
-    return toVisit(rows[0]);
-  });
+  return inVisitTransaction((client) => returnVisitToWaitingWith(client, id, actor));
+}
+
+/** Queue moves inside the caller's transaction (legacy and canonical, M2 slice 12).
+ * `admit` runs once the visit row is locked (the canonical record-scope check). */
+export type VisitAdmit = (visitId: number) => Promise<void>;
+
+export async function returnVisitToWaitingWith(client: DbClient, id: number, actor?: VisitActor, admit?: VisitAdmit): Promise<Visit | null> {
+  const before = await lockVisitState(client, id);
+  await admit?.(id);
+  const { rows } = await client.query<VisitRow>(
+    `UPDATE visits SET status = 'waiting', chair = NULL, called_at = NULL,
+            no_response_count = COALESCE(no_response_count, 0) + 1
+      WHERE id = $1 AND status = 'called' RETURNING *`,
+    [id],
+  );
+  if (!rows[0]) return null;
+  await auditVisitStep(client, rows[0], "visit.return_to_waiting", actor, before?.status ?? null, before?.chair ?? null);
+  return toVisit(rows[0]);
 }
 
 /**
@@ -5113,17 +5131,20 @@ async function callVisitInLock(
  * تحرير الكرسي ولا إعادة المريض إلى قائمة الانتظار فتضيع ترتيبته.
  */
 export async function callVisitAgain(id: number, actor?: VisitActor): Promise<Visit | null> {
-  return inVisitTransaction(async (client) => {
-    const before = await lockVisitState(client, id);
-    const { rows } = await client.query<VisitRow>(
-      `UPDATE visits SET called_at = NOW()
-        WHERE id = $1 AND status = 'called' AND chair IS NOT NULL RETURNING *`,
-      [id],
-    );
-    if (!rows[0]) return null;
-    await auditVisitStep(client, rows[0], "visit.call_again", actor, before?.status ?? null, rows[0].chair ?? null);
-    return toVisit(rows[0]);
-  });
+  return inVisitTransaction((client) => callVisitAgainWith(client, id, actor));
+}
+
+export async function callVisitAgainWith(client: DbClient, id: number, actor?: VisitActor, admit?: VisitAdmit): Promise<Visit | null> {
+  const before = await lockVisitState(client, id);
+  await admit?.(id);
+  const { rows } = await client.query<VisitRow>(
+    `UPDATE visits SET called_at = NOW()
+      WHERE id = $1 AND status = 'called' AND chair IS NOT NULL RETURNING *`,
+    [id],
+  );
+  if (!rows[0]) return null;
+  await auditVisitStep(client, rows[0], "visit.call_again", actor, before?.status ?? null, rows[0].chair ?? null);
+  return toVisit(rows[0]);
 }
 
 /**
@@ -30068,37 +30089,40 @@ export type ClearVisitResult =
  * الزيارة الموقّعة أو المنتهية لا تُقَرّ: الكرسي خلفها.
  */
 export async function clearVisit(id: number, actor: VisitActor): Promise<ClearVisitResult> {
-  return inVisitTransaction(async (client) => {
-    const { rows } = await client.query<ReadinessFactsRow>(
-      `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
-      [CLINIC_TIME_ZONE, id],
-    );
-    const row = rows[0];
-    if (!row) return { ok: false, reason: "not_found" };
-    if (row.cleared_at) {
-      return { ok: true, clearedAt: row.cleared_at.toISOString(), clearedBy: row.cleared_by ?? "", already: true };
-    }
-    if (row.signed_at || row.status === "done") return { ok: false, reason: "closed" };
-    const facts = toReadinessFacts(row);
-    const reviewMonths = Number(await settingInTx(client, "clinical.medical_history_review_months")) || 6;
-    const { rows: todayRows } = await client.query<{ today: string }>(
-      `SELECT ${clinicTodaySql("$1")}::text AS today`, [CLINIC_TIME_ZONE],
-    );
-    const checklist = deriveReadiness(facts, reviewMonths, todayRows[0].today);
-    const { rows: updated } = await client.query<{ cleared_at: Date }>(
-      `UPDATE visits SET cleared_at = NOW(), cleared_by = $2 WHERE id = $1 RETURNING cleared_at`,
-      [id, actor.actor],
-    );
-    await insertAuditRow(client, {
-      action: "visit.clear", entity: "visit", entityId: id, entityLabel: row.patient_name,
-      details: {
-        الحالة: row.status,
-        "يحتاج اطلاعًا": checklist.items.filter((item) => item.state === "attention").map((item) => item.label),
-      },
-      actor: actor.actor, actorRole: actor.actorRole ?? null,
-    });
-    return { ok: true, clearedAt: updated[0].cleared_at.toISOString(), clearedBy: actor.actor, already: false };
+  return inVisitTransaction((client) => clearVisitWith(client, id, actor));
+}
+
+export async function clearVisitWith(client: DbClient, id: number, actor: VisitActor, admit?: VisitAdmit): Promise<ClearVisitResult> {
+  const { rows } = await client.query<ReadinessFactsRow>(
+    `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
+    [CLINIC_TIME_ZONE, id],
+  );
+  await admit?.(id);
+  const row = rows[0];
+  if (!row) return { ok: false, reason: "not_found" };
+  if (row.cleared_at) {
+    return { ok: true, clearedAt: row.cleared_at.toISOString(), clearedBy: row.cleared_by ?? "", already: true };
+  }
+  if (row.signed_at || row.status === "done") return { ok: false, reason: "closed" };
+  const facts = toReadinessFacts(row);
+  const reviewMonths = Number(await settingInTx(client, "clinical.medical_history_review_months")) || 6;
+  const { rows: todayRows } = await client.query<{ today: string }>(
+    `SELECT ${clinicTodaySql("$1")}::text AS today`, [CLINIC_TIME_ZONE],
+  );
+  const checklist = deriveReadiness(facts, reviewMonths, todayRows[0].today);
+  const { rows: updated } = await client.query<{ cleared_at: Date }>(
+    `UPDATE visits SET cleared_at = NOW(), cleared_by = $2 WHERE id = $1 RETURNING cleared_at`,
+    [id, actor.actor],
+  );
+  await insertAuditRow(client, {
+    action: "visit.clear", entity: "visit", entityId: id, entityLabel: row.patient_name,
+    details: {
+      الحالة: row.status,
+      "يحتاج اطلاعًا": checklist.items.filter((item) => item.state === "attention").map((item) => item.label),
+    },
+    actor: actor.actor, actorRole: actor.actorRole ?? null,
   });
+  return { ok: true, clearedAt: updated[0].cleared_at.toISOString(), clearedBy: actor.actor, already: false };
 }
 
 export type GatedMoveResult =
@@ -30117,35 +30141,51 @@ async function gatedVisitMove(
   action: GateAction, id: number, chair: number, actor: VisitActor,
   emergency: { requested: boolean; reason: string | null },
 ): Promise<GatedMoveResult> {
-  return withChairLock(chair, async (client) => {
-    const { rows } = await client.query<{ status: string; cleared_at: Date | null }>(
-      `SELECT status, cleared_at FROM visits WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) return { ok: false, reason: "conflict" } as const;
-    const decision = clearanceGate({
-      cleared: rows[0].cleared_at !== null,
-      requireClearance: (await settingInTx(client, "ops.require_clearance_before_call")) === "true",
-      action,
-      fromStatus: rows[0].status,
-      emergency: emergency.requested,
-      emergencyReason: emergency.reason,
-    });
-    if (!decision.allow) {
-      return { ok: false, reason: "gate", code: decision.code, message: decision.message } as const;
-    }
-    const moved = action === "call"
-      ? await callVisitInLock(client, id, chair, actor)
-      : await seatVisitInLock(client, id, chair, actor);
-    if (!moved) return { ok: false, reason: "conflict" } as const;
-    if (decision.bypass) {
-      await insertAuditRow(client, {
-        action: "visit.clearance_bypass", entity: "visit", entityId: id, entityLabel: moved.patient_name,
-        details: { الحركة: action === "call" ? "نداء" : "إدخال إلى الكرسي", الكرسي: chair, السبب: emergency.reason },
-        actor: actor.actor, actorRole: actor.actorRole ?? null,
-      });
-    }
-    return { ok: true, visit: toVisit(moved), warning: decision.warning, bypassed: decision.bypass } as const;
+  return withChairLock(chair, (client) => gatedVisitMoveInLock(client, action, id, chair, actor, emergency));
+}
+
+/** The gated call/seat inside the caller's transaction (canonical, M2 slice 12): the same
+ * lock order as the legacy path — the chair-day lock, then the visit row — then `admit`. */
+export async function gatedVisitMoveWith(
+  client: DbClient, action: GateAction, id: number, chair: number, actor: VisitActor,
+  emergency: { requested: boolean; reason: string | null }, admit: VisitAdmit,
+): Promise<GatedMoveResult> {
+  await lockChairDay(client, chair);
+  return gatedVisitMoveInLock(client, action, id, chair, actor, emergency, admit);
+}
+
+async function gatedVisitMoveInLock(
+  client: DbClient, action: GateAction, id: number, chair: number, actor: VisitActor,
+  emergency: { requested: boolean; reason: string | null }, admit?: VisitAdmit,
+): Promise<GatedMoveResult> {
+  const { rows } = await client.query<{ status: string; cleared_at: Date | null }>(
+    `SELECT status, cleared_at FROM visits WHERE id = $1 FOR UPDATE`, [id],
+  );
+  await admit?.(id);
+  if (!rows[0]) return { ok: false, reason: "conflict" } as const;
+  const decision = clearanceGate({
+    cleared: rows[0].cleared_at !== null,
+    requireClearance: (await settingInTx(client, "ops.require_clearance_before_call")) === "true",
+    action,
+    fromStatus: rows[0].status,
+    emergency: emergency.requested,
+    emergencyReason: emergency.reason,
   });
+  if (!decision.allow) {
+    return { ok: false, reason: "gate", code: decision.code, message: decision.message } as const;
+  }
+  const moved = action === "call"
+    ? await callVisitInLock(client, id, chair, actor)
+    : await seatVisitInLock(client, id, chair, actor);
+  if (!moved) return { ok: false, reason: "conflict" } as const;
+  if (decision.bypass) {
+    await insertAuditRow(client, {
+      action: "visit.clearance_bypass", entity: "visit", entityId: id, entityLabel: moved.patient_name,
+      details: { الحركة: action === "call" ? "نداء" : "إدخال إلى الكرسي", الكرسي: chair, السبب: emergency.reason },
+      actor: actor.actor, actorRole: actor.actorRole ?? null,
+    });
+  }
+  return { ok: true, visit: toVisit(moved), warning: decision.warning, bypassed: decision.bypass } as const;
 }
 
 export function callVisitGated(

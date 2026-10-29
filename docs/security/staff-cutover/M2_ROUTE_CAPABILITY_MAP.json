@@ -5982,49 +5982,49 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": "",
+  "note": "M2 slice 12: call, call_again, seat, return, finish and clear are canonical (one visits.manage transaction, legacy lock order, visit inside the current patient scope after the row lock, outside = missing 404, readiness gate unchanged, audit atomic). defer, link and open_file refuse on the canonical path (409 visit_action_not_canonical) until their slices; the route stays existing until then.",
   "branches": {
    "discriminator": "action",
    "values": {
     "call": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 12)."
     },
     "call_again": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 12)."
     },
     "seat": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 12)."
     },
     "clear": {
      "need": [],
-     "note": "Clearance before call."
+     "note": "Canonical (M2 slice 12). Clearance before call."
     },
     "defer": {
      "need": [
       "finance.payments.collect"
      ],
-     "note": "Defers collection: a money decision."
+     "note": "Defers collection: a money decision. Not canonical yet (409 on the canonical path)."
     },
     "return": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 12)."
     },
     "finish": {
      "need": [],
-     "note": ""
+     "note": "Canonical (M2 slice 12)."
     },
     "link": {
      "need": [],
-     "note": "Links the walk-in visit to an existing patient within the patient scope."
+     "note": "Links the walk-in visit to an existing patient within the patient scope. Not canonical yet (409 on the canonical path)."
     },
     "open_file": {
      "need": [
       "patients.create"
      ],
-     "note": "Opens a new patient file for a walk-in."
+     "note": "Opens a new patient file for a walk-in. Not canonical yet (409 on the canonical path)."
     }
    }
   }
