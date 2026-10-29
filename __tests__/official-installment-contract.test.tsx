@@ -70,6 +70,8 @@ describe("official installment contract preserves financial evidence in the refe
     expect(html).toContain(`<span>المتبقي للسداد</span><span class="num">${formatMoney(70_000, "SAR")}</span>`);
     expect(html).toContain("المقدمة المقترحة موعد سداد وليست سند قبض");
     expect(html).toContain("إجمالي مبالغ هذا الجدول:");
+    expect(html).toContain("أقساط ما بعد المقدمة المقترحة:");
+    expect(html).toContain("قسط 1");
     expect(html).not.toContain("قيمة الجدول عند اعتماد النسخة");
     expect(html).not.toContain("المتبقي المجدول بعد المقدمة المقترحة");
     expect(html).not.toContain("عملة الاتفاق");
@@ -82,6 +84,17 @@ describe("official installment contract preserves financial evidence in the refe
     const unpaid = rows(html)[2];
     expect(unpaid).toContain(formatMoney(60_000, "SAR"));
     expect(unpaid).not.toContain("مسدد ✓");
+  });
+
+  it("prints the scheduled post-proposal subtotal even when revision and source totals match", async () => {
+    state.agreement!.schedule.principalMinor = 90_000;
+    state.agreement!.schedule.collectedMinor = 20_000;
+    const html = await render();
+    const caption = html.match(/<p[^>]*data-testid="agreement-scheduled-totals"[^>]*>([\s\S]*?)<\/p>/)?.[1];
+    expect(caption).toContain(formatMoney(90_000, "SAR"));
+    expect(caption).toContain(formatMoney(60_000, "SAR"));
+    expect(html).toContain(`<span>المسدد حتى تاريخه</span><span class="num">${formatMoney(20_000, "SAR")}</span>`);
+    expect(html).toContain(`<span>المتبقي للسداد</span><span class="num">${formatMoney(70_000, "SAR")}</span>`);
   });
 
   it("marks only fully settled schedule rows as paid", async () => {
@@ -107,7 +120,7 @@ describe("official installment contract preserves financial evidence in the refe
     expect(html).toContain('data-arrangement-id="9002"');
     expect(html).not.toContain("النسخة 3");
     expect(html).toContain('data-testid="agreement-revision-reference"');
-    expect(html).toContain("مرجع جدول السداد: #9002 · نسخة 3");
+    expect(html).toContain(`مرجع جدول السداد: #9002 · نسخة 3 · ${currency}`);
     expect(html.indexOf('data-testid="agreement-revision-reference"')).toBeGreaterThan(html.indexOf("agreement-signatures"));
     expect(state.read).toHaveBeenCalledExactlyOnceWith(9002, 3, "2026-11-02");
   });
