@@ -5,13 +5,14 @@ import { Fragment, useMemo, useState } from "react";
 import { formatAmount, CURRENCY_SHORT, isCurrency, type Currency } from "@/lib/money";
 import { Icon } from "@/components/Icon";
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
-import { ReportPrintHeader } from "@/components/ReportPrintHeader";
+import { ReportPrintHeader, ReportPrintFooter } from "@/components/ReportPrintHeader";
 import {
   PERIOD_PRESETS, PATIENT_STATUS_FILTERS, DEBT_STATUS_FILTERS,
   type KpiItem, type ReportColumn, type ReportRow, type ReportResult,
   type ReportOptions, type PeriodPreset, type DebtMode, type CompareMode,
 } from "@/lib/reports-types";
 import { DEBT_MODES } from "@/lib/reports-types";
+import { formatReportGeneratedAt } from "@/lib/report-generated-time";
 
 /**
  * أدوات عرض التقارير المشتركة — كل تقرير يُصيَّر بنفس اللبنات: بطاقات أرقام،
@@ -402,7 +403,6 @@ export function BarsChart({ bars, base }: { bars: { label: string; minor: number
 export function PrintFrame({ result, clinicName }: {
   result: ReportResult;
   clinicName: string;
-  generated: { at: string; by: string; clinicTimeZone?: unknown };
 }) {
   return (
     <div className="hidden print:block" dir="rtl">
@@ -423,6 +423,17 @@ export function PrintFrame({ result, clinicName }: {
       `}</style>
     </div>
   );
+}
+
+/** Print attribution belongs after the report body, not inside its heading.
+ * Export the actual composed footer so zone/fallback tests exercise its owner. */
+export function PrintFrameFooter({ generated }: {
+  generated: { at: string; by: string; clinicTimeZone?: unknown };
+}) {
+  return <footer className="report-print-footer hidden print:block">
+    <span className="print-report-meta">أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by}</span>
+    <ReportPrintFooter />
+  </footer>;
 }
 
 // ─── تصدير Excel (CSV بترميز عربي سليم) ──────────────────────────────────────
