@@ -1,6 +1,6 @@
 # Target-side restore protocol for canonical inventory history — PROPOSAL for review
 
-Status: **revision 3: B1, B2 and R1 implemented in isolation (synthetic proof only; see §5); R2 specified with one open dependency (D1); R4, R5 and the full round trip pending.** Revision 2 answered Dot review 6479317375 items 1, 2 and 4; revision 3 answers the focused review 6486144288. Written for Dot's review (6458434508: "restore must not import the source realm or execution history; it needs a reviewed target-side protocol"; 6475545205 item 5: "review the target-side recovery protocol before M3a implementation").
+Status: **revision 3: B1, B2, R1, R4 and the round trip (P1, P2) implemented in isolation (synthetic proof only; see §5); R2 specified with one open dependency (D1); R5 pending as design and refusal tests.** Revision 2 answered Dot review 6479317375 items 1, 2 and 4; revision 3 answers the focused review 6486144288. Written for Dot's review (6458434508: "restore must not import the source realm or execution history; it needs a reviewed target-side protocol"; 6475545205 item 5: "review the target-side recovery protocol before M3a implementation").
 
 Read it with:
 - [CANONICAL-RECOVERY-REQUIREMENTS-20261027.md](CANONICAL-RECOVERY-REQUIREMENTS-20261027.md), the requirements this proposal answers;
@@ -158,8 +158,17 @@ It is **not** in the catalogue or in `OWNER_ONLY_OPERATIONS`. The owner-only lis
 | H5 | done for a new connection and a second restore attempt. |
 | H6 | done (5.5). |
 | H7 | done with the synthetic seal fixture (owner admitted, imported delegate grants inert). |
-| P1 | partial: business rows and the B1/B2 exclusions; exact whole-database equality with inventory and supplier history pending. |
-| P2 | pending (canonical reads of restored inventory history). |
-| R4, O1–O7 | pending; O1–O7 as design and refusal tests only (5.4). |
+| P1 | done: every business table row for row with posted, cancelled and pending supplier history; documents equal except `confirmation`. |
+| P2 | done: canonical supplier-finance reads after the synthetic seal and the owner's confirmation of each account. |
+| R4 | done: pending source intent refused (`supplier_saved_authority_mismatch`); same-invoice nonce durably refused; independent invoice posted. |
+| O1–O7 | pending, as design and refusal tests only (5.4). |
 
-`inventory-authority-restore` (retired parallel schema) stays red until P1, P2 and R4 replace it.
+### 5.7 Replacement of the retired suite
+`inventory-authority-restore` exercised the retired parallel schema: same-realm epoch rotation and a signed `authority` session. As §4 states, it is replaced by `restore-canonical-hold` (B1/B2, R1, H cases) and `restore-canonical-roundtrip`:
+- **P1:** every business table row for row, with documents equal except `confirmation`.
+- **P2:** canonical reads of the restored supplier history after the synthetic seal.
+- **R4:** the pending source intent never executes, a new nonce for its invoice is durably refused, and an independent invoice proceeds.
+- **Carried over from the retired suite:** reset refused after restore while inventory history exists; backup refused on a drifting number projection.
+- **New:** the raw SQL restore CLI refuses a canonical source's SQL. That SQL is marked by B1, and such a source requires the staged restore with its hold.
+
+The retired suite's same-realm assertions are not carried over: they are the opposite of R2, under which no source identity is adopted.

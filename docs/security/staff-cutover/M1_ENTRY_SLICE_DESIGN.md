@@ -170,5 +170,5 @@ The revised order:
 **Diagnosis of the red inventory HTTP step (CI 40678715299).** The obsolete supplier HTTP suite installed the retired parallel authority schema into the shared HTTP database. That schema is an authority footprint, so the shared server's entry correctly answered 503 (maintenance) to every later legacy login. `inventory-reference-closed` failed only because of that pollution. The migrated suite runs on its own database, which removes both failures without weakening an assertion.
 
 **Still open:**
-- `inventory-authority-restore` stays red on purpose. Its canonical replacement waits for review of `docs/inventory/CANONICAL-RESTORE-PROTOCOL-20261028.md`.
+- `inventory-authority-restore` was replaced by `restore-canonical-hold` and `restore-canonical-roundtrip`, as specified in `docs/inventory/CANONICAL-RESTORE-PROTOCOL-20261028.md` (revision 3, §5.7).
 - The supplier ledger page (`/finance/parties`) joins in M2, so its link is hidden in canonical sessions.

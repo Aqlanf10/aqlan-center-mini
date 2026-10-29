@@ -37,6 +37,13 @@ export interface StagedRestoreOptions {
   stagingDir: string;
   /** يرفض الهدف غير الفارغ افتراضًا — لا استعادة فوق بيانات بلا علم صريح. */
   allowNonEmptyTarget?: boolean;
+  /**
+   * Installs schema proposals that are not registered migrations yet (inventory,
+   * supplier transport) on the target, after the hold and the registered migrations and
+   * before the replay. Disposable evidence only until M4 registers them; then this seam
+   * is removed. No production caller passes it.
+   */
+  installUnregisteredProposals?: (client: Client) => Promise<void>;
 }
 
 export interface StagedRestoreResult {
@@ -201,6 +208,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     try {
       const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles });
       result.migrationsApplied = migrationRun.appliedVersions;
+      if (options.installUnregisteredProposals) await options.installUnregisteredProposals(client);
 
     // ── الخطوة ٤: بيانات SQL — مع استبعاد صفوف تسجيل الهجرات نفسها:
     // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا

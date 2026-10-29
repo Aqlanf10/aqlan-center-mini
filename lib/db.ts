@@ -1,6 +1,7 @@
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { clearAccountLoginLimits, consumeSharedLoginLimits, consumeStaffAccountLimit } from "./login-limit-storage";
 import { STAFF_AUTHORITY_COLUMNS, STAFF_AUTHORITY_RELATIONS, readStaffEntryMode } from "./legacy-staff-schema.mjs";
+import { CANONICAL_SOURCE_SQL_MARKER } from "./restore/sql.mjs";
 import { readLegacyStaffSchema, assertLegacyPermissionEnvelope, lockLegacyStaffBoundary, assertLegacyStaffWrite, finishLegacyStaffWrite, type LegacyStaffWriteAuthorization } from "./legacy-staff-boundary";
 import { CommissionLabLineageError } from "./commission-lab-lineage";
 import { LabFinancialBoundaryError, savedLabPayableSnapshot } from "./lab-financial-boundary";
@@ -16506,7 +16507,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     // Restore protocol B1: identity is not data. The target owns its realm, generations,
     // subjects and control; the manifest carries only a provenance line.
     if (STAFF_AUTHORITY_RELATIONS.includes(table)) {
-      yield `\n-- ${table}: target-owned authority, never backed up as data (restore protocol B1)\n`;
+      yield `\n-- ${table}${CANONICAL_SOURCE_SQL_MARKER}\n`;
       continue;
     }
     if (table === "supplier_invoice_number_claims") {

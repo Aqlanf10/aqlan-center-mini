@@ -2,7 +2,7 @@
 import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
-import { prepareBackupSql } from "../lib/restore/sql.mjs";
+import { isCanonicalSourceSql, prepareBackupSql } from "../lib/restore/sql.mjs";
 import { finalizeRestoredStaffIdentityInTransaction } from "../lib/staff-authority-lifecycle.mjs";
 import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
@@ -42,7 +42,13 @@ try {
 
 let sql;
 try {
-  sql = prepareBackupSql(readFileSync(file, "utf8")).dataSql;
+  const text = readFileSync(file, "utf8");
+  // Restore protocol R1: a canonical source needs the staged restore and its hold.
+  if (isCanonicalSourceSql(text)) {
+    console.error("هذه نسخة من قاعدة بهوية موحّدة. استعادتها تمر بالاستعادة المرحلية مع حجز الاستعادة، لا بهذا الأمر.");
+    process.exit(2);
+  }
+  sql = prepareBackupSql(text).dataSql;
 } catch (error) {
   console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
   process.exit(1);
