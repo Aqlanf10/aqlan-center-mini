@@ -27228,7 +27228,7 @@ export interface ProviderBlock {
 }
 
 export async function listProviderBlocks(
-  providerId: number, date: string, client?: DbClient,
+  providerId: number, date: string, client?: Pick<DbClient, "query">,
 ): Promise<ProviderBlock[]> {
   /* على اتصال المعاملة حين يُمرَّر: قراءةُ الحجب أثناء قفل اليوم يجب ألّا تطلب
      اتصالًا ثانيًا من المسبح — وإلا تعلّقت المعاملات المتنافسة كلُّها تنتظر
@@ -27272,26 +27272,35 @@ export async function cancelProviderBlock(
   id: string, actor: { actor: string; actorRole?: string | null },
 ): Promise<{ ok: boolean; reason?: "not_found" | "already_cancelled" }> {
   await ensureSchema();
+  const result = await cancelProviderBlockWith(getPool(), id, actor);
+  if (!result.ok) return { ok: false, reason: result.reason };
+  await recordAudit(result.audit).catch(() => {});
+  return { ok: true };
+}
+
+/** The guarded cancel on the caller's runner; the caller writes `audit`. */
+export async function cancelProviderBlockWith(
+  runner: Pick<DbClient, "query">, id: string, actor: { actor: string; actorRole?: string | null },
+): Promise<{ ok: true; providerId: number; audit: AuditInput } | { ok: false; reason: "not_found" | "already_cancelled" }> {
   /* الحارس داخل الجملة لا في فحصٍ قبلها: ضغطتان معًا على «إلغاء» — واحدةٌ تنجح
      والأخرى تعرف أنها لم تفعل شيئًا، بدل أن تكتبا ختمين ويضيع الأول. */
-  const { rows } = await getPool().query<{ id: string }>(
+  const { rows } = await runner.query<{ id: string; provider_id: number }>(
     `UPDATE provider_blocks
         SET cancelled_at = NOW(), cancelled_by = $2
       WHERE id = $1::bigint AND cancelled_at IS NULL
-      RETURNING id::text`,
+      RETURNING id::text, provider_id`,
     [id, actor.actor],
   );
   if (rows.length === 0) {
-    const { rows: existing } = await getPool().query<{ id: string }>(
+    const { rows: existing } = await runner.query<{ id: string }>(
       `SELECT id::text FROM provider_blocks WHERE id = $1::bigint`, [id],
     );
     return { ok: false, reason: existing.length ? "already_cancelled" : "not_found" };
   }
-  await recordAudit({
-    action: "provider_block.cancel", entity: "provider_block", entityId: id,
-    actor: actor.actor, actorRole: actor.actorRole ?? null, details: {},
-  }).catch(() => {});
-  return { ok: true };
+  return {
+    ok: true, providerId: rows[0].provider_id,
+    audit: { action: "provider_block.cancel", entity: "provider_block", entityId: id, actor: actor.actor, actorRole: actor.actorRole ?? null, details: {} },
+  };
 }
 
 export async function createProviderBlock(input: {
@@ -27299,21 +27308,36 @@ export async function createProviderBlock(input: {
   actor: string; actorRole?: string | null;
 }): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
   await ensureSchema();
+  const result = await createProviderBlockWith(getPool(), input);
+  if (!result.ok) return result;
+  await recordAudit(result.audit).catch(() => {});
+  return { ok: true, id: result.id };
+}
+
+/** The block insert on the caller's runner (legacy pool or an admitted transaction);
+ * the caller writes `audit` (legacy: after the insert, best effort; canonical: in the
+ * same transaction). */
+export async function createProviderBlockWith(runner: Pick<DbClient, "query">, input: {
+  providerId: number; startsAt: string; endsAt: string; reason: string;
+  actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; id: string; audit: AuditInput } | { ok: false; message: string }> {
   if (!(input.reason ?? "").trim()) return { ok: false, message: "اكتب سبب الحجب." };
   if (new Date(input.endsAt).getTime() <= new Date(input.startsAt).getTime()) {
     return { ok: false, message: "نهاية الحجب يجب أن تكون بعد بدايته." };
   }
-  const { rows } = await getPool().query<{ id: string }>(
+  const { rows } = await runner.query<{ id: string }>(
     `INSERT INTO provider_blocks (provider_id, starts_at, ends_at, reason, created_by)
      VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
     [input.providerId, input.startsAt, input.endsAt, input.reason.trim().slice(0, 300), input.actor],
   );
-  await recordAudit({
-    action: "provider_block.create", entity: "provider_block", entityId: rows[0].id,
-    actor: input.actor, actorRole: input.actorRole ?? null,
-    details: { الطبيب: String(input.providerId), من: input.startsAt, إلى: input.endsAt, السبب: input.reason },
-  }).catch(() => {});
-  return { ok: true, id: rows[0].id };
+  return {
+    ok: true, id: rows[0].id,
+    audit: {
+      action: "provider_block.create", entity: "provider_block", entityId: rows[0].id,
+      actor: input.actor, actorRole: input.actorRole ?? null,
+      details: { الطبيب: String(input.providerId), من: input.startsAt, إلى: input.endsAt, السبب: input.reason },
+    },
+  };
 }
 
 /* ═══ (المرحلة ٥) قائمة الانتظار ══════════════════════════════════════════ */

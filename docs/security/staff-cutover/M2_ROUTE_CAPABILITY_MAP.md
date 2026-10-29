@@ -417,6 +417,30 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - **Screen:** `/recall` («المتابعة») registered for a patient scope. Closing a past booking uses the canonical appointment move (slice 17); «حجز موعد» opens the canonical day view's booking form with the patient chosen (`/appointments?bookPatient=`); the legacy proposals panel and quick-booking modal are not mounted for a canonical session. `canonical-entry-journey` now uses `/lab` as its not-yet-canonical example.
 - **Tests:** PG `recall-canonical` (5): all versus own lists (and parity with the legacy lists for the whole scope), appointment scope alone refused, closed weeks; follow-up marks (first time kept, audit), own scope 404 parity, conflicts, capability, scope, revocation and audit rollback. Built journey `canonical-recall-journey` (2, portOffset 23).
 
+### Slice 25 — provider blocks (`GET/POST /api/provider-blocks`, `DELETE /api/provider-blocks/[id]`)
+- **Read:** record read `read:provider-blocks` in one owning snapshot.
+  - **With `providerId`:** that doctor's blocks on the day, when the doctor is inside the appointment scope. With `own` scope that means the actor's own party; another doctor answers like a doctor without blocks, which is how the legacy route answers an unknown id.
+  - **Without `providerId`:** the day panel, meaning every in-scope active doctor and its blocks.
+  - `canManage` = `appointments.schedule.manage`, for display only.
+- **Create:** one admitted `appointments.schedule.manage` transaction. `appointments.schedule.manage` is now in `CLINIC_RUNTIME_ACTIONS`. The legacy route allowed the admin role label.
+  - **Scope:** the appointment scope bounds the doctor: `all` allows any active doctor, `own` only the actor's party, and `none` is refused.
+  - **Day locks:** it takes the booking engine's `appointments-day:` locks for every clinic day the block touches, in ascending order as bookings do. A booking and a block for the same day therefore serialize instead of crossing.
+  - **Validation:** a reason is required (at most 300 characters) and a block lasts at most 92 days.
+  - **Overlap:** the answer reports how many booked or arrived appointments of that doctor overlap the block, as a warning; they are not moved.
+  - **Audit:** `provider_block.create` (with the overlap count) is audited atomically.
+- **Cancel:** the block is locked. For `own` scope, another doctor's block reads like a missing one (404). A second cancel is 409. `provider_block.cancel` is audited atomically.
+- **Shared writers:** `createProviderBlockWith` and `cancelProviderBlockWith` serve both branches; the legacy path keeps its post-write audit.
+- **Screen:** the panel «حجب أوقات الأطباء» in the canonical appointments day view. The legacy app had no screen for blocks. It offers the doctor, the reason, a start time, and an end date and time, all in clinic time; cancelling is one button.
+- **Tests:**
+  - PG `provider-blocks-canonical` (8):
+    - create with overlap and atomic audit, own-scope bound, and refusals that write nothing;
+    - waiting on the day lock;
+    - all and own reads, plus the day panel;
+    - cancel parity and the second cancel;
+    - audit rollback.
+  - Unit `provider-blocks-panel-time` (clinic wall time).
+  - Built journey `canonical-provider-blocks-journey` (2, portOffset 31). The appointments journey's API allowlists now include `/api/provider-blocks`.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

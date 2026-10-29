@@ -267,6 +267,7 @@ node scripts/audits/m2-route-scan.mjs --write
 | 22 | حجز الجلسات المخطَّطة من ملف المريض (`lib/planned-visit-schedule.ts` + `commandCanonicalPlannedVisitSchedule`) وقراءة سياق الحجز القانونية (PG 8، رحلة `canonical-planned-visits-journey` 2، portOffset 21) | commit «M2 slice 22» |
 | 23 | إعادة حجز الجلسات (`rebookPlannedVisitWith` بسلطة قابلة للحقن: قديمة/قانونية) + «أعد حجز الجلسة» وتأكيد الموعد القريب (PG 5، الرحلة 3) | commit «M2 slice 23» |
 | 24 | قوائم المتابعة (`recall`) بنطاق المرضى داخل SQL وتسجيل المتابعة + صفحة «المتابعة» والحجز من النموذج القانوني (PG 5، رحلة `canonical-recall-journey` 2، portOffset 23) | commit «M2 slice 24» |
+| 25 | حجب أوقات الأطباء: قراءة `read:provider-blocks` بنطاق المواعيد (ولوحة اليوم بلا `providerId`)، والإضافة والإلغاء تحت `appointments.schedule.manage` (أُضيف إلى `CLINIC_RUNTIME_ACTIONS`) بأقفال يوم الحجز وتنبيه التداخل + لوحة «حجب أوقات الأطباء» في يوم المواعيد (PG 8، وحدة 1، رحلة `canonical-provider-blocks-journey` 2، portOffset 31) | commit «M2 slice 25» |
 
 **تفاصيل الشريحة 17:** وصل، تذكير، إلغاء، لم يحضر، إغلاق موعد مضى. اختبار PG ‏`appointments-canonical-moves` فيه 8 حالات، ورحلة `canonical-appointments-journey` فيها 7.
 
@@ -315,7 +316,7 @@ node scripts/audits/m2-route-scan.mjs --write
 7. ✅ طلبات الحجز — الشريحة 21. (قرار للمراجعة: التأكيد لشخصٍ غير مسجّل يحتاج `patients.create` أيضًا.)
 8. ✅ `planned-visits/[id]/schedule` (الشريحة 22) و`rebook` (الشريحة 23).
 9. ✅ `recall` — الشريحة 24 (مثال `canonical-entry-journey` صار `/lab`؛ عند تحويل المختبر غيّره إلى مسار آخر غير قانوني).
-10. `provider-blocks`، `shifts`، `display` (شاشة النداء)، `visits/[id]/next`.
+10. ✅ `provider-blocks` — الشريحة 25. المتبقي: `shifts`، `display` (شاشة النداء)، `visits/[id]/next`.
 
 ### 5.3 بقية خريطة M2 (المتبقي حسب المنطقة)
 
@@ -411,7 +412,7 @@ npx tsc --noEmit -p .
 
 ### 6.3 الرحلات
 
-- قيم `portOffset` المستعملة: 5، 7، 9، 11، 13، 15، 17، 19، 21، 23، 25، 26، 27، 29. استعمل 31 فما فوق للجديد.
+- قيم `portOffset` المستعملة: 5، 7، 9، 11، 13، 15، 17، 19، 21، 23، 25، 26، 27، 29، 31. استعمل 33 فما فوق للجديد.
 - الحزمة المساعدة: `__tests__/security-http/_canonical-journey-harness.ts`.
 - الحساب يُعرَّف بـ:
 

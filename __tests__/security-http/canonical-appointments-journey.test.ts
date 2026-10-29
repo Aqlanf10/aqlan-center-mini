@@ -88,7 +88,7 @@ it("browser: reception opens the appointments from the shell and sees lab readin
   await list.getByText(/تاج تجريبي:/).waitFor();
   expect(await page.getByRole("region", { name: "جدول مواعيدي" }).count()).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/appointments")).toEqual([]);
+  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/provider-blocks" && path !== "/api/appointments")).toEqual([]);
   expect(failures).toEqual([]);
   await context.close();
 });
@@ -105,7 +105,7 @@ it("browser: the doctor sees its own schedule card and only its own appointments
   await card.getByRole("link", { name: "مريضة موعد الطبيب" }).waitFor();
   await page.getByTestId("appointments-day-list").getByText("مريضة موعد الطبيب").waitFor();
   expect(await page.getByText("مريض موعد عام").count()).toBe(0);
-  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/appointments" && path !== "/api/appointments/mine")).toEqual([]);
+  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/provider-blocks" && path !== "/api/appointments" && path !== "/api/appointments/mine")).toEqual([]);
   await context.close();
   expect(await journey.ddlLog()).toEqual([]);
 });
@@ -137,7 +137,7 @@ it("browser: a booker books from the canonical day view; the full chair shows it
   await form.getByRole("status").filter({ hasText: "حُجز" }).waitFor();
   await page.getByTestId("appointments-day-list").getByText("مراجعة جديدة للحجز").waitFor();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && !["/api/appointments", "/api/patients"].includes(path))).toEqual([]);
+  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/provider-blocks" && !["/api/appointments", "/api/patients"].includes(path))).toEqual([]);
   await context.close();
   const { rows } = await journey.db.query("SELECT a.actor FROM audit_log a WHERE a.action = 'appointment.create'");
   expect(rows.map(row => row.actor)).toEqual(["canon-ap-booker"]);
@@ -182,7 +182,7 @@ it("browser: the desk marks an arrival and cancels with a reason from the day vi
   await leaving.getByRole("button", { name: "تأكيد الإلغاء" }).click();
   await leaving.getByText(/· ملغى/).waitFor();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/appointments" && !/^\/api\/appointments\/\d+$/.test(path))).toEqual([]);
+  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/provider-blocks" && path !== "/api/appointments" && !/^\/api\/appointments\/\d+$/.test(path))).toEqual([]);
   await context.close();
   const { rows } = await journey.db.query("SELECT a.actor, a.details->>'الإجراء' AS move FROM audit_log a WHERE a.action = 'appointment.update' ORDER BY a.id");
   expect(rows.map(row => [row.actor, row.move])).toEqual([["canon-ap-desk", "arrive"], ["canon-ap-desk", "cancel"]]);
@@ -210,7 +210,7 @@ it("browser: the desk reschedules from the day view; a full chair shows its reas
   await form.getByRole("button", { name: "تأكيد النقل" }).click();
   await page.getByTestId("appointments-day-list").locator("li[data-appointment]").filter({ hasText: "مريض موعد عام" }).getByText("13:30").waitFor();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/appointments" && !/^\/api\/appointments\/\d+$/.test(path))).toEqual([]);
+  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/provider-blocks" && path !== "/api/appointments" && !/^\/api\/appointments\/\d+$/.test(path))).toEqual([]);
   await context.close();
   const { rows } = await journey.db.query("SELECT actor, details->>'السبب' AS reason FROM audit_log WHERE action = 'appointment.reschedule'");
   expect(rows).toEqual([{ actor: "canon-ap-desk", reason: "طلب المريض" }]);
@@ -259,7 +259,7 @@ it("browser: a cancel shows who waits for the freed slot and books one; a mistak
   await mistaken.getByRole("button", { name: /حذف نهائي/ }).click();
   await list.getByText("موعد أُدخل خطأً").waitFor({ state: "detached" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && !["/api/appointments", "/api/waiting-list"].includes(path) && !/^\/api\/(appointments|waiting-list)\/\d+$/.test(path))).toEqual([]);
+  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/provider-blocks" && !["/api/appointments", "/api/waiting-list"].includes(path) && !/^\/api\/(appointments|waiting-list)\/\d+$/.test(path))).toEqual([]);
   await context.close();
   const { rows } = await journey.db.query("SELECT actor, details->>'reason' AS reason FROM audit_log WHERE action = 'appointment.delete'");
   expect(rows).toEqual([{ actor: "canon-ap-desk", reason: "أُدخل مرتين" }]);

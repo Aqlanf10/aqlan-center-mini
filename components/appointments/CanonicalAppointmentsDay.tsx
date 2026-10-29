@@ -7,6 +7,7 @@ import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { addDays, clinicDateString, type Appointment } from "@/lib/schedule";
 import type { LabReadinessItem } from "@/lib/lab-readiness";
+import { ProviderBlocksPanel } from "@/components/appointments/ProviderBlocksPanel";
 
 /**
  * مواعيد اليوم لجلسة الهوية الموحّدة (M2 slices 15–16).
@@ -72,6 +73,7 @@ export function CanonicalAppointmentsDay() {
         </div>
       </header>
       {error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+      {owner || (session?.appointmentScope ?? "none") !== "none" ? <ProviderBlocksPanel date={date} /> : null}
       {freed ? <FreedSlotNotice freed={freed} canBook={canBook && canEdit} onBooked={() => { setFreed(null); setVersion(current => current + 1); }} /> : null}
       {canBook ? <BookingForm date={date} canOverride={canOverride} onBooked={() => setVersion(current => current + 1)} /> : null}
       {view ? (

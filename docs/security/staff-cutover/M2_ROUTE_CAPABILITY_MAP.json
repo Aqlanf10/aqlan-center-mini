@@ -4765,8 +4765,9 @@
   "need": [],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 25: record read read:provider-blocks in one owning snapshot. With providerId: that doctor's blocks on the day when inside the appointment scope (own = the actor's party only; another doctor answers like one without blocks). Without providerId: the day panel — every in-scope active doctor and its blocks. canManage = appointments.schedule.manage (display only).",
+  "projection": {"legacy": "every admitted role read any doctor's blocks by id.", "groups": {"schedule": "block times and reason of in-scope doctors; doctor names for the day panel"}, "rows": "appointment scope all: every active doctor; own: the actor's own party; none: refused"}
  },
  {
   "route": "/api/provider-blocks",
@@ -4778,9 +4779,9 @@
    "appointments.schedule.manage"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "appointment",
+  "status": "canonical-done",
+  "note": "M2 slice 25: one admitted appointments.schedule.manage transaction; the appointment scope bounds the doctor (all: any active doctor; own: the actor's party; none: refused); the booking engine's appointments-day locks for every clinic day the block touches, ascending; reason required (≤300), at most 92 days; reports the overlapping booked/arrived appointments of that doctor (warning); provider_block.create audit atomic."
  },
  {
   "route": "/api/provider-blocks/[id]",
@@ -4792,9 +4793,9 @@
    "appointments.schedule.manage"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "appointment",
+  "status": "canonical-done",
+  "note": "M2 slice 25: one admitted appointments.schedule.manage transaction; the block locked; another doctor's block reads like a missing one for own scope (404); a second cancel is 409; provider_block.cancel audit atomic."
  },
  {
   "route": "/api/recall",

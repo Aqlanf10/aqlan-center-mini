@@ -73,7 +73,7 @@ it("browser: the desk opens «المتابعة», closes a past booking, records
   await page.getByTestId("booking-form").getByLabel("المريض").waitFor();
   expect(await page.getByTestId("booking-form").getByLabel("المريض").inputValue()).toMatch(/مريضة الطبيب المنقطعة|مريض غاب عن موعده/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  const allowed = /^\/api\/(auth\/(login|me)|recall|appointments(\/\d+)?)$/;
+  const allowed = /^\/api\/(auth\/(login|me)|recall|appointments(\/\d+)?|provider-blocks)$/;
   expect(apiCalls.filter(path => !allowed.test(path))).toEqual([]);
   expect(failures).toEqual([]);
   await context.close();
