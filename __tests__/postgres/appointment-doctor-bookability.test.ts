@@ -165,16 +165,20 @@ describe("existing appointment scheduling policy remains unchanged", () => {
     }, actor)).toMatchObject({ ok: true, appointment: { doctorId: null } });
   });
 
-  it("preserves outside-clinic-hours as a warning rather than a rejection", async () => {
+  it("rejects booking and rescheduling outside configured clinic hours", async () => {
     const request = await input();
-    const booked = await bookAppointment({
+    const refused = await bookAppointment({
       ...request, time: "23:00", doctorId: activeDoctor, serviceId: providerService,
     }, actor);
-    expect(booked).toMatchObject({ ok: true, warning: expect.any(String) });
+    expect(refused).toMatchObject({ ok: false, status: 409 });
+    expect((await getPool().query("SELECT id FROM appointments WHERE patient_id=$1", [request.patientId])).rows).toEqual([]);
+    const booked = await bookAppointment({ ...request, time: "10:00", doctorId: activeDoctor, serviceId: providerService }, actor);
     if (!booked.ok) throw new Error("Fixture booking failed");
+    const before = await snapshot(booked.appointment.id);
     expect(await rescheduleAppointment({
       appointmentId: booked.appointment.id, date: request.date, time: "23:30", reason: "Synthetic move",
-    }, actor)).toMatchObject({ ok: true, warning: expect.any(String) });
+    }, actor)).toMatchObject({ ok: false, status: 409 });
+    expect(await snapshot(booked.appointment.id)).toEqual(before);
   });
 
   it("keeps an attributed non-provider-consuming service bookable during doctor blocks", async () => {
