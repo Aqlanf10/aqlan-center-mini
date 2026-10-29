@@ -1,0 +1,130 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/booking-portal-boundaries.test.ts
+
+
+ RUN  v4.1.12 /workspace/booking-portal
+
+ ❯ __tests__/booking-portal-boundaries.test.ts (8 tests | 8 failed) 23ms
+     × rejects outside shift 08:45 even with capacity override 11ms
+     × rejects outside shift 11:45 even with capacity override 1ms
+     × rejects outside shift 14:00 even with capacity override 1ms
+     × rejects outside shift 19:45 even with capacity override 1ms
+     × uses the configured working weekdays, including Friday when open 1ms
+     × rejects normalized invalid calendar dates 1ms
+     × does not expose internal appointment notes 3ms
+     × rejects malformed signed envelopes and invalid patient IDs 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/booking-portal-boundaries.test.ts > booking portal admission and privacy regressions > rejects outside shift 08:45 even with capacity override
+ FAIL  __tests__/booking-portal-boundaries.test.ts > booking portal admission and privacy regressions > rejects outside shift 11:45 even with capacity override
+ FAIL  __tests__/booking-portal-boundaries.test.ts > booking portal admission and privacy regressions > rejects outside shift 14:00 even with capacity override
+ FAIL  __tests__/booking-portal-boundaries.test.ts > booking portal admission and privacy regressions > rejects outside shift 19:45 even with capacity override
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ __tests__/booking-portal-boundaries.test.ts:17:23
+     15|   it.each(["08:45", "11:45", "14:00", "19:45"])("rejects outside shift…
+     16|     const result = await judgeBookingInDay({ ...base, time });
+     17|     expect(result.ok).toBe(false);
+       |                       ^
+     18|     if (!result.ok) expect(result.conflict.canOverride).toBe(false);
+     19|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  __tests__/booking-portal-boundaries.test.ts > booking portal admission and privacy regressions > uses the configured working weekdays, including Friday when open
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ __tests__/booking-portal-boundaries.test.ts:22:23
+     20|   it("uses the configured working weekdays, including Friday when open…
+     21|     const closed = await judgeBookingInDay({ ...base, context: { ...ba…
+     22|     expect(closed.ok).toBe(false);
+       |                       ^
+     23|     const open = await judgeBookingInDay({ ...base, context: { ...base…
+     24|     expect(open.ok).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  __tests__/booking-portal-boundaries.test.ts > booking portal admission and privacy regressions > rejects normalized invalid calendar dates
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ __tests__/booking-portal-boundaries.test.ts:27:132
+     25|   });
+     26|   it("rejects normalized invalid calendar dates", () => {
+     27|     expect(validateBookingRequest({ fullName: "مريض اصطناعي", phone: "…
+       |                                                                                                                                    ^
+     28|   });
+     29|   it("does not expose internal appointment notes", () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  __tests__/booking-portal-boundaries.test.ts > booking portal admission and privacy regressions > does not expose internal appointment notes
+AssertionError: expected '{"id":1,"scheduledDate":"2026-10-30",…' not to contain 'INTERNAL_SYNTHETIC_NOTE'
+
+Expected: "INTERNAL_SYNTHETIC_NOTE"
+Received: "{"id":1,"scheduledDate":"2026-10-30","scheduledTime":"10:00","durationMinutes":30,"appointmentType":null,"note":"INTERNAL_SYNTHETIC_NOTE","patientConfirmedAt":null,"confirmable":true}"
+
+ ❯ __tests__/booking-portal-boundaries.test.ts:32:40
+     30|     const result = toPortalAppointment({ id: 1, scheduledDate: "2026-1…
+     31|       appointmentType: null, note: "INTERNAL_SYNTHETIC_NOTE", status: …
+     32|     expect(JSON.stringify(result)).not.toContain("INTERNAL_SYNTHETIC_N…
+       |                                        ^
+     33|   });
+     34|   it("rejects malformed signed envelopes and invalid patient IDs", () …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  __tests__/booking-portal-boundaries.test.ts > booking portal admission and privacy regressions > rejects malformed signed envelopes and invalid patient IDs
+AssertionError: expected { patientId: 1, …(3) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "expiresAt": 1793288553337,
+  "fullName": "اصطناعي",
+  "patientId": 1,
+  "patientNumber": "SYNTH-1",
+}
+
+ ❯ __tests__/booking-portal-boundaries.test.ts:38:68
+     36|     const payload = { patientId: 1, patientNumber: "SYNTH-1", fullName…
+     37|     expect(readPortalToken(createPortalToken(payload))).toEqual(payloa…
+     38|     expect(readPortalToken(`${createPortalToken(payload)}.extra`)).toB…
+       |                                                                    ^
+     39|     for (const patientId of [-1, 0, 1.5]) expect(readPortalToken(creat…
+     40|     vi.unstubAllEnvs();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  8 failed (8)
+   Start at  15:41:32
+   Duration  644ms (transform 229ms, setup 0ms, import 278ms, tests 23ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

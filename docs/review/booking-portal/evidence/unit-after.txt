@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/booking-portal-boundaries.test.ts __tests__/booking.test.ts __tests__/portal.test.ts __tests__/appointment-conflict-suggestions.test.ts
+
+
+ RUN  v4.1.12 /workspace/booking-portal
+
+
+ Test Files  4 passed (4)
+      Tests  47 passed (47)
+   Start at  15:42:53
+   Duration  2.10s (transform 513ms, setup 0ms, import 662ms, tests 120ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
