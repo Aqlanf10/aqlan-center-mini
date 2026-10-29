@@ -1,7 +1,7 @@
 # ملف التسليم — مشروع الهوية الموحّدة (M0–M5) لنظام مركز د. عقلان
 
 > **الغرض:** يكمل أي وكيل آخر العمل من النقطة نفسها وبالجودة نفسها، دون أن يسأل المالك عن شيء مما يلي.
-> **آخر تحديث:** 2026-10-29 — الشرائح 16–19 ملتزمة ومدفوعة. التالي: §5.2 البند 6 (الحجز من قائمة الانتظار).
+> **آخر تحديث:** 2026-10-29 — الشرائح 16–20 ملتزمة. التالي: §5.2 البند 7 (`booking-requests`).
 > **نسخة من هذا الملف** محفوظة في الفرع: `docs/security/staff-cutover/HANDOFF.md`.
 
 ---
@@ -261,6 +261,7 @@ node scripts/audits/m2-route-scan.mjs --write
 | 17 | حركات الموعد (PG `appointments-canonical-moves` 8) | commit «M2 slices 17–18» |
 | 18 | نقل الموعد بين الأيام عبر محرّك السعة + زر «نقل الموعد» (PG `appointments-canonical-reschedule` 8، الرحلة 8) | commit «M2 slices 17–18» |
 | 19 | حذف الموعد (`appointments.cancel`، أُضيف إلى `CLINIC_RUNTIME_ACTIONS`) + ترشيح المكان الشاغر القانوني (`readCanonicalFreedSlotCandidates`، و`waiting` بعد الإلغاء، وGET قائمة الانتظار بوضع المكان) (PG `appointments-canonical-delete-freed` 8، الرحلة 10) | commit «M2 slice 19» |
+| 20 | الحجز من قائمة الانتظار في معاملة واحدة (`commandCanonicalWaitingBook`) + «احجز له» في إشعار المكان الشاغر (PG `appointments-canonical-waiting-book` 9) | commit «M2 slice 20» |
 
 **تفاصيل الشريحة 17:** وصل، تذكير، إلغاء، لم يحضر، إغلاق موعد مضى. اختبار PG ‏`appointments-canonical-moves` فيه 8 حالات، ورحلة `canonical-appointments-journey` فيها 7.
 
@@ -305,7 +306,7 @@ node scripts/audits/m2-route-scan.mjs --write
 ### 5.2 بقية المواعيد والجدولة
 
 4–5. ✅ الحذف واقتراح المكان الشاغر — الشريحة 19.
-6. حجز قائمة الانتظار (`waiting-list` action `book`) عبر `bookAppointment` القانوني.
+6. ✅ الحجز من قائمة الانتظار — الشريحة 20.
 7. `booking-requests/[id]`:
    - confirm بـ `appointments.create`.
    - reject بـ `appointments.cancel`.

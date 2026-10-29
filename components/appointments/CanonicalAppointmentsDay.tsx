@@ -72,7 +72,7 @@ export function CanonicalAppointmentsDay() {
         </div>
       </header>
       {error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
-      {freed ? <FreedSlotNotice freed={freed} /> : null}
+      {freed ? <FreedSlotNotice freed={freed} canBook={canBook && canEdit} onBooked={() => { setFreed(null); setVersion(current => current + 1); }} /> : null}
       {canBook ? <BookingForm date={date} canOverride={canOverride} onBooked={() => setVersion(current => current + 1)} /> : null}
       {view ? (
         <>
@@ -112,9 +112,28 @@ export function CanonicalAppointmentsDay() {
 /** إجراءات موعدٍ محجوز: كل ردٍّ مرفوض يُعرض نصُّه، ولا يُعتبر الإجراء تامًّا قبل ردٍّ ناجح. */
 /** Who fits the freed slot: names and reasons from the canonical waiting-list match
  * (GET /api/waiting-list?date=&time=), inside the actor's scope, only on request. */
-function FreedSlotNotice({ freed }: { freed: Freed }) {
+function FreedSlotNotice({ freed, canBook, onBooked }: { freed: Freed; canBook: boolean; onBooked: () => void }) {
   const [candidates, setCandidates] = useState<{ id: number; patientName: string; matchReason: string }[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  /* «احجز له» بعد أن يوافق المريض: الحجز عبر محرّك السعة نفسه، ويُغلق صفّه في المعاملة نفسها. */
+  async function bookFor(id: number) {
+    setBusy(true); setMessage(null);
+    try {
+      const response = await fetch(`/api/waiting-list/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "book", date: freed.slot.date, time: freed.slot.time }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const reasons: string[] = Array.isArray(payload?.conflict?.reasons) ? payload.conflict.reasons : [];
+        setMessage([payload?.message ?? "تعذّر الحجز.", ...reasons].join(" — "));
+        return;
+      }
+      onBooked();
+    } catch { setMessage("تعذّر الاتصال بالخادم. لم يُعتبر الحجز تامًّا؛ حدّث القائمة."); }
+    finally { setBusy(false); }
+  }
   async function show() {
     setMessage(null);
     try {
@@ -134,7 +153,10 @@ function FreedSlotNotice({ freed }: { freed: Freed }) {
       {candidates ? (
         <ul className="mt-2 space-y-1 text-xs" aria-label="المرشّحون للمكان الشاغر">
           {candidates.length === 0 ? <li>لم يعد أحدٌ يصلح لهذا المكان.</li> : candidates.map(candidate => (
-            <li key={candidate.id}><span className="font-bold">{candidate.patientName}</span> — {candidate.matchReason}</li>
+            <li key={candidate.id} className="flex flex-wrap items-center gap-2">
+              <span><span className="font-bold">{candidate.patientName}</span> — {candidate.matchReason}</span>
+              {canBook ? <button type="button" disabled={busy} onClick={() => void bookFor(candidate.id)} className="min-h-11 rounded-xl border border-emerald-400 bg-white px-3 text-xs font-bold disabled:opacity-50">احجز له</button> : null}
+            </li>
           ))}
         </ul>
       ) : null}

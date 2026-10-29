@@ -17,6 +17,7 @@ import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
 import { commandCanonicalWaitingMove, parseCanonicalWaitingMove, readCanonicalWaitingEntry } from "@/lib/canonical-waiting-list";
+import { CanonicalAppointmentRefusal, CanonicalBookingConflict, commandCanonicalWaitingBook, parseCanonicalWaitingBook } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -66,12 +67,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
   if (selected.kind === "canonical") {
     // Canonical identity (M2 slice 14): offer, contact, preferences, cancel and expire on
-    // appointments.edit; book waits for the appointment slice (409).
+    // appointments.edit; book (slice 20) adds appointments.create in one transaction.
     let canonicalBody: unknown;
     try {
       canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
     } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
       return NextResponse.json({ code: "invalid_waiting_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    if ((canonicalBody as Record<string, unknown> | null)?.action === "book") {
+      try {
+        const booked = await commandCanonicalWaitingBook(selected.handle, Number((await context.params).id), parseCanonicalWaitingBook(canonicalBody));
+        return NextResponse.json({ ok: true, appointment: booked.appointment, entry: booked.entry, warning: booked.warning, alreadyBooked: booked.alreadyBooked }, { headers: NO_STORE });
+      } catch (error) {
+        // The legacy route's shapes: a capacity conflict with its reasons; an engine code.
+        if (error instanceof CanonicalBookingConflict) return NextResponse.json({ message: error.conflict.message, conflict: error.conflict }, { status: 409, headers: NO_STORE });
+        if (error instanceof CanonicalAppointmentRefusal && error.engineCode) return NextResponse.json({ code: error.engineCode, message: error.message }, { status: error.status, headers: NO_STORE });
+        return canonicalWaitingFailure(error, "تعذّر الحجز. أعد المحاولة.");
+      }
     }
     try {
       const result = await commandCanonicalWaitingMove(selected.handle, Number((await context.params).id), parseCanonicalWaitingMove(canonicalBody));

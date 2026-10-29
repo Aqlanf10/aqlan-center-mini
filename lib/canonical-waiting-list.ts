@@ -36,13 +36,13 @@ import { staffOperationAppointmentScope, staffOperationIdentity, withStaffOperat
  * and any service must exist.
  * Free-slot matching (slice 19): the same ranking, in the same snapshot, over the entries
  * inside the scope; the slot's facts come only from appointments inside the scope.
- * Not canonical yet (409): `book` (it goes through the appointment engine).
+ * Booking (`book`, slice 20) is `commandCanonicalWaitingBook` in canonical-appointments.
  */
 export const WAITING_LIST_MAX_BYTES = 1024 * 1024;
 
 export class CanonicalWaitingRefusal extends Error {
   constructor(
-    readonly code: "invalid_waiting_input" | "waiting_not_found" | "patient_not_found" | "waiting_conflict" | "waiting_doctor_not_allowed" | "waiting_action_not_canonical",
+    readonly code: "invalid_waiting_input" | "waiting_not_found" | "patient_not_found" | "waiting_conflict" | "waiting_doctor_not_allowed",
     readonly status: 400 | 403 | 404 | 409,
     message: string,
   ) {
@@ -204,7 +204,8 @@ export function parseCanonicalWaitingMove(body: unknown): CanonicalWaitingMove {
     case "booked":
       throw new CanonicalWaitingRefusal("invalid_waiting_input", 400, "«حُجز» لا تُكتب يدويًّا. استعمل «احجز له» ليُنشأ الموعد ويُربط بصفّه.");
     case "book":
-      throw new CanonicalWaitingRefusal("waiting_action_not_canonical", 409, "الحجز من قائمة الانتظار لم يُنقل بعد إلى الهوية الموحّدة.");
+      // Booking has its own command (commandCanonicalWaitingBook, slice 20).
+      throw new CanonicalWaitingRefusal("invalid_waiting_input", 400, "استعمل «احجز له» لحجز موعدٍ من قائمة الانتظار.");
     default:
       throw new CanonicalWaitingRefusal("invalid_waiting_input", 400, "إجراء غير معروف.");
   }

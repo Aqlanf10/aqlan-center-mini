@@ -1,7 +1,9 @@
 import "server-only";
-import { CLINIC_TIME_ZONE, arriveAppointmentWith, deleteAppointmentWith, getAppointmentWith, getPool, insertAuditRow, labWorkForPatientsWith, listAppointmentsByDateWith, patientInDoctorScopeWith, transitionAppointmentInTransaction } from "./db";
+import { CLINIC_TIME_ZONE, arriveAppointmentWith, deleteAppointmentWith, findAppointmentForWaitingWith, getAppointmentWith, getWaitingEntryWith, markWaitingBookedWith, getPool, insertAuditRow, labWorkForPatientsWith, listAppointmentsByDateWith, patientInDoctorScopeWith, transitionAppointmentInTransaction } from "./db";
 import { reasonAcceptable, requiresReason } from "./appointment-lifecycle";
-import { readCanonicalFreedSlotCandidates } from "./canonical-waiting-list";
+import { CanonicalWaitingRefusal, readCanonicalFreedSlotCandidates } from "./canonical-waiting-list";
+import type { WaitingEntry } from "./waiting-list";
+import { parseReturnBookingSource } from "./return-booking-source";
 import { STALE_MANUAL_REMINDER_MESSAGE, readManualReminderSnapshot, recordManualAppointmentReminder } from "./manual-appointment-reminder";
 import { bookAppointment, rescheduleAppointment, type BookAppointmentInput, type BookingConflict, type RescheduleInput } from "./book-appointment";
 import type { ReturnBookingSource } from "./return-booking-context";
@@ -406,5 +408,121 @@ export async function commandCanonicalAppointmentDelete(session: VerifiedDurable
     }
     await insertAuditRow(client, result.audit);
     return { message: "حُذف الموعد وسُجِّل في التدقيق." };
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * M2 slice 20: booking from the waiting list (PATCH /api/waiting-list/[id], "book").
+ *
+ * The legacy door claims the entry, books, then marks it booked in three
+ * transactions, with recovery for a crash between them. The canonical door does all
+ * of it in ONE admitted `appointments.edit` transaction (the route's requirement),
+ * plus the branch's `appointments.create`:
+ *  1. the entry row is locked (FOR UPDATE) — before the engine's day locks, the order
+ *     the legacy claim already uses — then checked against the CURRENT appointment
+ *     scope (outside = missing, 404);
+ *  2. an entry already booked answers its appointment (no second one); a closed one
+ *     refuses; a live legacy claim (< 2 minutes) refuses, so the two doors never book
+ *     the same entry twice during the cutover;
+ *  3. recovery: an appointment already carrying this entry's id is linked, not
+ *     rebooked;
+ *  4. the booking goes through `bookAppointment(..., { client, audit })` with the
+ *     entry id written with the appointment; `own` books on its own party only;
+ *  5. the entry is marked booked in the same transaction; the appointment.create,
+ *     any capacity-override and the waiting_list.book rows are atomic.
+ * Any refusal rolls everything back: no claim is ever left behind.
+ * ------------------------------------------------------------------------- */
+export interface CanonicalWaitingBookInput {
+  readonly date: string; readonly time: string;
+  readonly durationMinutes: number | null; readonly serviceId: number | null; readonly doctorId: number | null; readonly chairNo: number | null;
+  readonly overrideReason: string | null; readonly nearbyAppointmentConfirmation: string | null;
+  readonly returnBookingSource: ReturnBookingSource | null; readonly returnBookingFingerprint: string | null;
+}
+
+/** The legacy route's body rules for "book". */
+export function parseCanonicalWaitingBook(body: unknown): CanonicalWaitingBookInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new CanonicalWaitingRefusal("invalid_waiting_input", 400, "طلب غير صالح.");
+  const source = body as Record<string, unknown>;
+  const date = String(source.date ?? ""), time = String(source.time ?? "");
+  if (!DATE_PATTERN.test(date) || !/^\d{1,2}:\d{2}$/.test(time)) throw new CanonicalWaitingRefusal("invalid_waiting_input", 400, "حدّد تاريخ الموعد ووقته.");
+  const returnBookingSource = source.returnBookingSource === undefined ? null : parseReturnBookingSource(source.returnBookingSource);
+  if (source.returnBookingSource !== undefined && !returnBookingSource) throw new CanonicalWaitingRefusal("invalid_waiting_input", 400, "اختر حالة صحيحة للحجز.");
+  const number = (key: string) => source[key] == null ? null : Number(source[key]);
+  return {
+    date, time, durationMinutes: number("durationMinutes"), serviceId: number("serviceId"), doctorId: number("doctorId"), chairNo: number("chairNo"),
+    overrideReason: typeof source.overrideReason === "string" ? source.overrideReason : null,
+    nearbyAppointmentConfirmation: typeof source.nearbyAppointmentConfirmation === "string" ? source.nearbyAppointmentConfirmation.slice(0, 4096) : null,
+    returnBookingSource,
+    returnBookingFingerprint: typeof source.returnBookingFingerprint === "string" ? source.returnBookingFingerprint.slice(0, 128) : null,
+  };
+}
+
+export type CanonicalWaitingBookResult =
+  | { ok: true; appointment: Appointment; entry: WaitingEntry; warning: string | null; alreadyBooked: null }
+  | { ok: true; appointment: null; entry: WaitingEntry; warning: null; alreadyBooked: number };
+
+const WAITING_NOT_FOUND = "الانتظار غير موجود ضمن مواعيدك.";
+
+export async function commandCanonicalWaitingBook(session: VerifiedDurableSession, waitingId: number, input: CanonicalWaitingBookInput, pool = getPool()): Promise<CanonicalWaitingBookResult> {
+  if (!Number.isSafeInteger(waitingId) || waitingId <= 0) throw new CanonicalWaitingRefusal("invalid_waiting_input", 400, "رقم الانتظار غير صالح.");
+  return withStaffOperation(pool, session, "appointments.edit", async (client, handle) => {
+    const held = await staffOperationCapabilities(client, handle, "appointments.edit", ["appointments.create", "appointments.override-capacity"]);
+    if (!held.has("appointments.create")) throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
+    const scope = await staffOperationAppointmentScope(client, handle, "appointments.edit");
+    if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+    const clinician = scope.kind === "own" ? scope.clinicianPartyId : null;
+    const { rows: [locked] } = await client.query<{ claimed: boolean }>(
+      "SELECT (booking_claim_at IS NOT NULL AND booking_claim_at >= NOW() - INTERVAL '2 minutes') AS claimed FROM waiting_list WHERE id = $1 FOR UPDATE", [waitingId]);
+    const entry = locked ? await getWaitingEntryWith(client, waitingId) : null;
+    if (!entry || (clinician !== null && entry.doctorId !== clinician)) throw new CanonicalWaitingRefusal("waiting_not_found", 404, WAITING_NOT_FOUND);
+    if (entry.status === "booked" && entry.appointmentId) return { ok: true, appointment: null, entry, warning: null, alreadyBooked: entry.appointmentId };
+    if (entry.status !== "waiting" && entry.status !== "offered") throw new CanonicalWaitingRefusal("waiting_conflict", 409, "هذا الانتظار مُغلقٌ سلفًا.");
+    if (locked.claimed) throw new CanonicalWaitingRefusal("waiting_conflict", 409, "زميلٌ آخر يحجز لهذا المريض الآن. انتظر لحظة ثم أعد المحاولة.");
+    const identity = await staffOperationIdentity(client, handle, "appointments.edit");
+    const who = { actor: identity.username, actorRole: identity.role };
+    const audit = (row: Parameters<typeof insertAuditRow>[1]) => insertAuditRow(client, row);
+
+    // Recovery: an appointment already written for this entry is linked, never doubled.
+    const orphan = await findAppointmentForWaitingWith(client, waitingId);
+    if (orphan) {
+      if (clinician !== null && orphan.doctorId !== clinician) throw new CanonicalWaitingRefusal("waiting_not_found", 404, WAITING_NOT_FOUND);
+      await markWaitingBookedWith(client, waitingId, orphan.id, who, audit);
+      return { ok: true, appointment: orphan, entry: (await getWaitingEntryWith(client, waitingId))!, warning: null, alreadyBooked: null };
+    }
+
+    if (clinician !== null && input.doctorId != null && input.doctorId !== clinician) {
+      throw new CanonicalAppointmentRefusal("booking_doctor_not_allowed", 403, "تحجز مواعيد مرضاك على اسمك فقط.");
+    }
+    const preferred = input.returnBookingSource ? null : input.doctorId ?? entry.doctorId ?? null;
+    // Role "canonical" is a display label the engine never matches: grants decide.
+    const result = await bookAppointment({
+      patientId: entry.patientId, date: input.date, time: input.time,
+      durationMinutes: input.durationMinutes ?? entry.durationMinutes ?? null,
+      serviceId: input.serviceId ?? entry.serviceId ?? null,
+      doctorId: clinician ?? preferred,
+      returnBookingSource: input.returnBookingSource, returnBookingFingerprint: input.returnBookingFingerprint,
+      chairNo: input.chairNo, note: entry.note ?? null,
+      overrideReason: input.overrideReason, nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
+      waitingListId: waitingId,
+    }, {
+      username: identity.username, userId: identity.userId, role: "canonical", doctorPartyId: null,
+      canOverrideCapacity: held.has("appointments.override-capacity"), channel: "ui",
+    }, { client, audit });
+    if (!result.ok) {
+      if (result.status === 409) throw new CanonicalBookingConflict(result.conflict);
+      throw new CanonicalAppointmentRefusal("booking_refused", 400, result.message, result.code);
+    }
+    if (clinician !== null && result.appointment.doctorId !== clinician) {
+      throw new CanonicalAppointmentRefusal("booking_doctor_not_allowed", 403, "موعد العودة يخص طبيب الحالة المسؤول؛ يحجزه من يملك نطاق المواعيد كاملًا.");
+    }
+    await audit({
+      action: "appointment.create", entity: "appointment", entityId: result.appointment.id, entityLabel: result.appointment.patientName,
+      details: { التاريخ: result.appointment.scheduledDate, الوقت: result.appointment.scheduledTime, الطبيب: result.appointment.doctorId ?? "", التجاوز: result.overridden, "من قائمة الانتظار": waitingId },
+      actor: identity.username, actorRole: identity.role,
+    });
+    const marked = await markWaitingBookedWith(client, waitingId, Number(result.appointment.id), who, audit);
+    // The entry row is locked and open: marking cannot miss; a miss is a bug, so roll back.
+    if (!marked.ok) throw new Error("WAITING_BOOK_MARK_MISSED");
+    return { ok: true, appointment: result.appointment, entry: (await getWaitingEntryWith(client, waitingId))!, warning: result.warning ?? null, alreadyBooked: null };
   });
 }

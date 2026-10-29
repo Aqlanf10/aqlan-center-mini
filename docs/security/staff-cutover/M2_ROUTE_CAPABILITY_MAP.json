@@ -6318,8 +6318,8 @@
   ],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": "M2 slice 14: offer, contact, preferences, cancelled and expired are canonical (appointments.edit, entry row locked then scope-checked, outside = missing 404, audit atomic); booked refuses as before (400); book refuses on the canonical path (409 waiting_action_not_canonical) until the appointment slice. The route entry stays existing until book moves.",
+  "status": "canonical-done",
+  "note": "M2 slice 14: offer, contact, preferences, cancelled and expired are canonical (appointments.edit, entry row locked then scope-checked, outside = missing 404, audit atomic); booked refuses as before (400). M2 slice 20: book is canonical (appointments.edit plus appointments.create; one transaction: entry locked and scope-checked, a live legacy claim refused, recovery linking, the same capacity engine on the admitted transaction, entry marked booked, every audit row atomic).",
   "branches": {
    "discriminator": "action",
    "values": {
@@ -6339,7 +6339,7 @@
      "need": [
       "appointments.create"
      ],
-     "note": "Creates the appointment from the waiting entry. Not canonical yet (409 on the canonical path)."
+     "note": "Creates the appointment from the waiting entry. Canonical (M2 slice 20)."
     },
     "booked": {
      "need": [],

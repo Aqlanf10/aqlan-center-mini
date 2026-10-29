@@ -4295,7 +4295,12 @@ export async function findAppointmentForWaiting(
   waitingListId: number,
 ): Promise<Appointment | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<AppointmentRow>(
+  return findAppointmentForWaitingWith(getPool(), waitingListId);
+}
+
+/** The recovery read on the caller's client (canonical, M2 slice 20). */
+export async function findAppointmentForWaitingWith(q: Pick<DbClient, "query">, waitingListId: number): Promise<Appointment | null> {
+  const { rows } = await q.query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.waiting_list_id = $1 LIMIT 1`,
     [waitingListId],
   );
@@ -27803,7 +27808,17 @@ export async function markWaitingBooked(
   actor: { actor: string; actorRole?: string | null },
 ): Promise<{ ok: boolean; alreadyBooked?: number }> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  return markWaitingBookedWith(getPool(), id, appointmentId, actor, row => recordAudit(row).catch(() => {}));
+}
+
+/** «حُجز» on the caller's client (canonical, M2 slice 20); the audit writer decides
+ * whether the row is atomic (canonical) or best effort (legacy). */
+export async function markWaitingBookedWith(
+  q: Pick<DbClient, "query">, id: number, appointmentId: number,
+  actor: { actor: string; actorRole?: string | null },
+  audit: (row: AuditInput) => Promise<void>,
+): Promise<{ ok: boolean; alreadyBooked?: number }> {
+  const { rows } = await q.query<{ id: number }>(
     `UPDATE waiting_list
         SET status = 'booked', appointment_id = $2, resolved_at = NOW(), resolved_by = $3,
             booking_claim_at = NULL, booking_claim_by = NULL, updated_at = NOW()
@@ -27812,14 +27827,14 @@ export async function markWaitingBooked(
     [id, appointmentId, actor.actor, OPEN_STATUSES],
   );
   if (!rows[0]) {
-    const current = await getWaitingEntry(id);
+    const current = await getWaitingEntryWith(q, id);
     return { ok: false, alreadyBooked: current?.appointmentId ?? undefined };
   }
-  await recordAudit({
+  await audit({
     action: "waiting_list.book", entity: "waiting_list", entityId: String(id),
     actor: actor.actor, actorRole: actor.actorRole ?? null,
     details: { الموعد: appointmentId },
-  }).catch(() => {});
+  });
   return { ok: true };
 }
 

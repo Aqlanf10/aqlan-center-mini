@@ -105,8 +105,9 @@ describe("entry moves", () => {
     await expect(waiting.readCanonicalWaitingEntry(await fx.session("doctor"), theirsEntry.id)).rejects.toMatchObject({ code: "waiting_not_found" });
     expect(await audits(theirsEntry.id)).toEqual([{ action: "waiting_list.add", actor: "SYN-WL-OTHER" }]);
   });
-  it("book and the free-slot mode wait for the appointment slice; booked never writes manually", () => {
-    expect(() => waiting.parseCanonicalWaitingMove({ action: "book", date: "2026-11-01", time: "10:00" })).toThrow(expect.objectContaining({ code: "waiting_action_not_canonical", status: 409 }));
+  it("book has its own command (slice 20); booked never writes manually", () => {
+    // Booking is its own command since slice 20 (appointments-canonical-waiting-book).
+    expect(() => waiting.parseCanonicalWaitingMove({ action: "book", date: "2026-11-01", time: "10:00" })).toThrow(expect.objectContaining({ code: "invalid_waiting_input", status: 400 }));
     expect(() => waiting.parseCanonicalWaitingMove({ action: "booked" })).toThrow(expect.objectContaining({ code: "invalid_waiting_input", status: 400 }));
     expect(() => waiting.parseCanonicalWaitingMove({ action: "cancelled" })).toThrow(expect.objectContaining({ code: "invalid_waiting_input" }));
     expect(() => waiting.parseCanonicalWaitingMove({ action: "preferences" })).toThrow(expect.objectContaining({ code: "invalid_waiting_input" }));
