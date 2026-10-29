@@ -1,0 +1,87 @@
+Baseline orthodontic read-state comparison
+Source: detached b55401693700d83c063872f957758f249dd1deed
+Built locally with Node 22.23.4. Chromium 151.0.7922.173.
+Fresh synthetic PostgreSQL 18 container booking-baseline-pg18, loopback 54330.
+Harness-owned aqlan_sec_http, loopback server 3220; dropped on completion.
+No booking portal implementation changes in this checkout.
+
+ FAIL  __tests__/security-http/ortho-package-read-state-ui.test.ts > orthodontic agreement read state in the real RTL UI > withholds coverage and editing after a denied 401 read without offering retry
+ FAIL  __tests__/security-http/ortho-package-read-state-ui.test.ts > orthodontic agreement read state in the real RTL UI > withholds coverage and editing after a denied 403 read without offering retry
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ open __tests__/security-http/ortho-package-read-state-ui.test.ts:121:45
+    119|   try {
+    120|     await page.goto(`${baseUrl}/patients/${targetPatientId}?tab=ortho`…
+    121|     await expect.poll(() => pending.length).toBe(1);
+       |                                             ^
+    122|     const panel = page.getByRole("region", { name: "اتفاق التقويم", ex…
+    123|     await page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact:…
+ ❯ __tests__/security-http/ortho-package-read-state-ui.test.ts:223:15
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ open __tests__/security-http/ortho-package-read-state-ui.test.ts:121:5
+ ❯ __tests__/security-http/ortho-package-read-state-ui.test.ts:223:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/security-http/ortho-package-read-state-ui.test.ts > orthodontic agreement read state in the real RTL UI > keeps foreign-patient reads unknown and recovers only after a real successful retry
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ open __tests__/security-http/ortho-package-read-state-ui.test.ts:121:45
+    119|   try {
+    120|     await page.goto(`${baseUrl}/patients/${targetPatientId}?tab=ortho`…
+    121|     await expect.poll(() => pending.length).toBe(1);
+       |                                             ^
+    122|     const panel = page.getByRole("region", { name: "اتفاق التقويم", ex…
+    123|     await page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact:…
+ ❯ __tests__/security-http/ortho-package-read-state-ui.test.ts:237:15
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ open __tests__/security-http/ortho-package-read-state-ui.test.ts:121:5
+ ❯ __tests__/security-http/ortho-package-read-state-ui.test.ts:237:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/security-http/ortho-package-read-state-ui.test.ts > orthodontic agreement read state in the real RTL UI > shows an empty unlinked state only after the real backend confirms an empty list
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ open __tests__/security-http/ortho-package-read-state-ui.test.ts:121:45
+    119|   try {
+    120|     await page.goto(`${baseUrl}/patients/${targetPatientId}?tab=ortho`…
+    121|     await expect.poll(() => pending.length).toBe(1);
+       |                                             ^
+    122|     const panel = page.getByRole("region", { name: "اتفاق التقويم", ex…
+    123|     await page.getByText("رابط خطة أقساط قديم · للتوافق فقط", { exact:…
+ ❯ __tests__/security-http/ortho-package-read-state-ui.test.ts:271:15
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ open __tests__/security-http/ortho-package-read-state-ui.test.ts:121:5
+ ❯ __tests__/security-http/ortho-package-read-state-ui.test.ts:271:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 5 passed (9)
+   Start at  17:03:15
+   Duration  38.13s (transform 98ms, setup 0ms, import 1.30s, tests 26.81s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
