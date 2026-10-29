@@ -100,6 +100,8 @@ export type AuditAction =
   | "ortho.strategy_revision" | "ortho.assessment.append"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
+  /* (M2 slice 21) معالجة طلبات الحجز الإلكتروني بالهوية الموحّدة: التأكيد والرفض. */
+  | "booking_request.confirm" | "booking_request.reject"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
      ومن فعل ولماذا» سؤالُ إدارةٍ لا يُجاب عليه إن اختلط التجاوز بالحجز العادي. */
   | "appointment.capacity_override" | "appointment.reschedule" | "planned_visit.rebook" | "planned_visit.reconcile"
@@ -386,6 +388,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.plan_link": "ربط حالة التقويم باتفاقها المالي",
   "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",
   "appointment.create": "حجز موعد",
+  "booking_request.confirm": "تأكيد طلب حجز إلكتروني",
+  "booking_request.reject": "رفض طلب حجز إلكتروني",
   "appointment.capacity_override": "تجاوز منع السعة",
   "appointment.reschedule": "نقل موعد",
   "planned_visit.reconcile": "تسوية جلسة مخطَّطة أُنجز عملها",

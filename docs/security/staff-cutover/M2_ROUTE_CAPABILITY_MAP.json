@@ -343,8 +343,15 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": "Online booking queue triage."
+  "status": "canonical-done",
+  "note": "Online booking queue triage. M2 slice 21: record read read:booking-requests (appointments.create and the whole appointment scope; own refused) in one owning snapshot.",
+  "projection": {
+   "legacy": "admin and reception read every request (name, phone, reason, preferred date and period); every other role is refused.",
+   "groups": {
+    "identity": "the request as submitted (name, phone, reason, preferred date and period, status) — appointments.create with the whole appointment scope"
+   },
+   "rows": "appointment scope all: every request of the asked status; own: refused (the requester is nobody's patient yet)"
+  }
  },
  {
   "route": "/api/booking-requests/[id]",
@@ -356,8 +363,8 @@
   "need": [],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 21: confirm is one admitted appointments.create transaction through the same capacity-engine door (lib/booking-request-confirm.ts) on the admitted client; a request whose phone matches no patient also needs patients.create; override only with appointments.override-capacity; appointment.create, booking_request.confirm and override rows atomic. reject is one admitted appointments.cancel transaction with booking_request.reject audited. Both need the whole appointment scope (own refused).",
   "branches": {
    "discriminator": "action",
    "values": {

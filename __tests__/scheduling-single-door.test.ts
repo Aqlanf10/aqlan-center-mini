@@ -63,12 +63,16 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
       .map(({ file }) => file).sort();
     // db.ts: أغلفته الداخلية تحت القفل نفسه؛ والبقية مساراتٌ تُثبَت أدناه — ملفٌّ جديد يستدعيهم يسقط هنا.
     expect(callers).toEqual([
-      "app/api/booking-requests/[id]/route.ts",
       "app/api/planned-visits/[id]/schedule/route.ts",
       "app/api/visits/[id]/next/route.ts",
+      // The booking-request confirmation door (M2 slice 21), shared by the legacy and
+      // canonical branches of app/api/booking-requests/[id]/route.ts.
+      "lib/booking-request-confirm.ts",
       "lib/db.ts",
     ]);
-    for (const { file, code } of production.filter(({ file }) => file.startsWith("app/api/") && callers.includes(file))) {
+    const bookingRoute = production.find(({ file }) => file === "app/api/booking-requests/[id]/route.ts")!;
+    expect(calls(bookingRoute.code, "confirmThroughEngine")).toBe(true);
+    for (const { file, code } of production.filter(({ file }) => (file.startsWith("app/api/") || file === "lib/booking-request-confirm.ts") && callers.includes(file))) {
       for (const required of ["judgeBookingInDay", "actorCanOverride", "recordCapacityOverride"]) {
         // استدعاءٌ تنفيذي لا اسمٌ مستورد أو مذكور في تعليق.
         expect({ file, required, called: calls(code, required) }).toEqual({ file, required, called: true });

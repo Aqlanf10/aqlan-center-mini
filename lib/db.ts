@@ -5298,7 +5298,12 @@ export async function createBookingRequest(
 
 export async function listBookingRequests(status: BookingRequestStatus): Promise<BookingRequest[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<BookingRequestRow>(
+  return listBookingRequestsWith(getPool(), status);
+}
+
+/** The queue read on the caller's client (canonical snapshot, M2 slice 21). */
+export async function listBookingRequestsWith(q: Pick<DbClient, "query">, status: BookingRequestStatus): Promise<BookingRequest[]> {
+  const { rows } = await q.query<BookingRequestRow>(
     // الأقدم أولًا: الطلب الذي مضى عليه يومان هو من ينتظر رده، لا الذي وصل قبل دقيقة.
     `SELECT * FROM booking_requests WHERE status = $1 ORDER BY created_at ASC LIMIT 200`,
     [status],
@@ -5308,7 +5313,12 @@ export async function listBookingRequests(status: BookingRequestStatus): Promise
 
 export async function rejectBookingRequest(id: number): Promise<BookingRequest | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<BookingRequestRow>(
+  return rejectBookingRequestWith(getPool(), id);
+}
+
+/** The rejection on the caller's client (canonical, M2 slice 21). */
+export async function rejectBookingRequestWith(q: Pick<DbClient, "query">, id: number): Promise<BookingRequest | null> {
+  const { rows } = await q.query<BookingRequestRow>(
     `UPDATE booking_requests SET status = 'rejected', handled_at = NOW()
       WHERE id = $1 AND status = 'new' RETURNING *`,
     [id],

@@ -13,6 +13,9 @@ export interface CanonicalPage {
  readonly anyOf: readonly StaffCapability[];
  /** The page lists records: shown only when that record scope is not `none`. */
  readonly record?: "patient" | "appointment";
+ /** The page needs the WHOLE record scope (`all`), not `own` (for example the online
+  * booking queue, whose people are not anyone's patients yet). */
+ readonly wholeScope?: boolean;
  /** Only this exact path: nested paths (for example a patient profile) are separate
   * pages that are registered only once their own routes are canonical. */
  readonly exact?: boolean;
@@ -28,6 +31,7 @@ export interface CanonicalRecordScopes {
 export const CANONICAL_PAGES: readonly CanonicalPage[] = Object.freeze([
  { href: "/visits", label: "قائمة اليوم", anyOf: [], record: "patient", exact: true, description: "المنتظرون والكراسي وتسجيل الوصول لمرضى نطاقك اليوم." },
  { href: "/appointments", label: "المواعيد", anyOf: [], record: "appointment", exact: true, description: "مواعيد اليوم ضمن نطاق مواعيدك، وجاهزية أعمال المختبر، وجدولك الشخصي." },
+ { href: "/requests", label: "طلبات الحجز", anyOf: ["appointments.create"], record: "appointment", wholeScope: true, exact: true, description: "طلبات الحجز الإلكتروني: تأكيدها عبر محرّك السعة أو رفضها، الأقدم أولًا." },
  { href: "/waiting-list", label: "قائمة الانتظار", anyOf: [], record: "appointment", exact: true, description: "من لم يجد موعدًا: المكالمات وتفضيلات الموعد والإغلاق ضمن مواعيد نطاقك." },
  { href: "/patients", label: "المرضى", anyOf: [], record: "patient", exact: true, description: "البحث عن المرضى وتصفّح قائمتهم ضمن نطاق مرضاك المسموح." },
  { href: "/patients/[id]", label: "ملف المريض", anyOf: [], record: "patient", pattern: /^\/patients\/[1-9][0-9]{0,9}$/, description: "ملف مريضٍ ضمن نطاق مرضاك." },
@@ -44,8 +48,8 @@ export function canonicalPageAllowed(page: CanonicalPage, capabilities: readonly
  if (isOwner) return true;
  const granted = new Set(capabilities ?? []);
  if (page.anyOf.length > 0 && !page.anyOf.some(capability => granted.has(capability))) return false;
- if (page.record === "patient") return scopes.patientScope === "own" || scopes.patientScope === "all";
- if (page.record === "appointment") return scopes.appointmentScope === "own" || scopes.appointmentScope === "all";
+ if (page.record === "patient") return scopes.patientScope === "all" || (!page.wholeScope && scopes.patientScope === "own");
+ if (page.record === "appointment") return scopes.appointmentScope === "all" || (!page.wholeScope && scopes.appointmentScope === "own");
  return page.anyOf.length > 0;
 }
 /** Navigation entries: allowed pages that are not parameterised. */
