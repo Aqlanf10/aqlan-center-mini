@@ -34,13 +34,13 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 193 |
+| existing | 189 |
 | proposed | 142 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 9 |
+| canonical-done | 13 |
 
 | Record scope | Routes |
 |---|---|
@@ -219,6 +219,12 @@ Evidence:
 
   A hidden group's events are omitted entirely. The legacy path masks amounts but shows the events; the canonical path does not reveal that they exist.
 - **Screen:** the canonical profile shows medical alerts and review state, latest vitals, the problem list and the timeline, each only when its group is projected.
+
+### Slice 4 — diagnoses, intake history, referrals, contact consents
+- **`diagnoses`, `intake-history`, `referrals` (GET)** use `read:patients.clinical`. The diagnoses `orthoCaseId` filter is validated in the canonical branch.
+- **`contact` (GET)** uses `read:patients.record`: consent mode, per-channel state and history for anyone admitted to the record. Whether recording is offered follows `patients.edit`, the write's capability, never a role label.
+- **Screen:** the profile shows the consent state for everyone, and referrals inside the clinical panels.
+- **Not yet migrated:** `family` (GET), because its view is built from the legacy session.
 
 ## 6. Dot review 6480538845: what the map now records
 

@@ -1,3 +1,5 @@
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalReferrals } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -19,6 +21,9 @@ function patientIdOf(raw: string): number | null {
 
 /** (P3-8) إحالات المريض — يراها كل من يملك الوصول إلى ملفه. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 4): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await params).id, readCanonicalReferrals, "تعذّر تحميل الإحالات.");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = patientIdOf((await params).id);

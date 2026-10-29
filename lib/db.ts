@@ -5664,7 +5664,11 @@ export async function recordContactConsent(input: {
 /** سجل موافقات المريض — الأحدث أولًا. */
 export async function listContactConsents(patientId: number): Promise<ContactConsentEvent[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listContactConsentsWith(getPool(), patientId);
+}
+/** listContactConsents over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function listContactConsentsWith(q: Pick<DbClient, "query">, patientId: number): Promise<ContactConsentEvent[]> {
+  const { rows } = await q.query<{
     id: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
     note: string | null; recorded_by: string; recorded_at: Date;
   }>(
@@ -5687,13 +5691,15 @@ export async function patientMessagingConsent(
 }
 
 /** حالة الموافقة لكل قناة لعدة مرضى معًا — آخر قيدٍ لكل (مريض، قناة). */
-export async function contactConsentStates(
-  patientIds: readonly number[],
-): Promise<Map<number, Record<ConsentChannel, ConsentState>>> {
+export async function contactConsentStates(patientIds: readonly number[],): Promise<Map<number, Record<ConsentChannel, ConsentState>>> {
   await ensureSchema();
+  return contactConsentStatesWith(getPool(), patientIds);
+}
+/** contactConsentStates over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function contactConsentStatesWith(q: Pick<DbClient, "query">, patientIds: readonly number[],): Promise<Map<number, Record<ConsentChannel, ConsentState>>> {
   const result = new Map<number, Record<ConsentChannel, ConsentState>>();
   if (patientIds.length === 0) return result;
-  const { rows } = await getPool().query<{ id: number; patient_id: number; channel: ConsentChannel; granted: boolean }>(
+  const { rows } = await q.query<{ id: number; patient_id: number; channel: ConsentChannel; granted: boolean }>(
     `SELECT DISTINCT ON (patient_id, channel) id, patient_id, channel, granted
        FROM patient_contact_consents WHERE patient_id = ANY($1::int[])
       ORDER BY patient_id, channel, id DESC`,
@@ -23826,9 +23832,13 @@ export interface DiagnosisRecord {
 
 /** تاريخ التشخيص — الأحدث أولًا، فالقارئ يبدأ من اليوم ويرجع إلى البداية. */
 export async function listPatientDiagnoses(patientId: number, orthoCaseId?: number): Promise<DiagnosisRecord[]> {
-  if (orthoCaseId !== undefined && !validDiagnosisId(orthoCaseId)) throw new DiagnosisAssociationError();
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listPatientDiagnosesWith(getPool(), patientId, orthoCaseId);
+}
+/** listPatientDiagnoses over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function listPatientDiagnosesWith(q: Pick<DbClient, "query">, patientId: number, orthoCaseId?: number): Promise<DiagnosisRecord[]> {
+  if (orthoCaseId !== undefined && !validDiagnosisId(orthoCaseId)) throw new DiagnosisAssociationError();
+  const { rows } = await q.query<{
     id: number; version: number; content: Record<string, unknown>;
     label: string | null; ortho_case_id: number | null; supersedes: number | null;
     created_by: string; created_at: Date;
@@ -25766,7 +25776,11 @@ function normalizeIntakeAnswers(raw: unknown): IntakeAnswers {
  */
 export async function listIntakeForms(patientId: number, limit = 50): Promise<IntakeFormEntry[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number; created_at: Date; answers: unknown; recorded_by: string | null }>(
+  return listIntakeFormsWith(getPool(), patientId, limit);
+}
+/** listIntakeForms over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function listIntakeFormsWith(q: Pick<DbClient, "query">, patientId: number, limit = 50): Promise<IntakeFormEntry[]> {
+  const { rows } = await q.query<{ id: number; created_at: Date; answers: unknown; recorded_by: string | null }>(
     `SELECT f.id, f.created_at, f.answers,
             (SELECT l.actor FROM audit_log l
               WHERE l.action = 'intake.staff' AND l.entity = 'patient' AND l.entity_id = f.patient_id::text
@@ -27575,7 +27589,11 @@ function toReferral(row: ReferralRow): Referral {
 
 export async function listPatientReferrals(patientId: number): Promise<Referral[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ReferralRow>(
+  return listPatientReferralsWith(getPool(), patientId);
+}
+/** listPatientReferrals over a caller-owned query facade (no ensureSchema, no DDL). */
+export async function listPatientReferralsWith(q: Pick<DbClient, "query">, patientId: number): Promise<Referral[]> {
+  const { rows } = await q.query<ReferralRow>(
     `${REFERRAL_SELECT} WHERE r.patient_id = $1 ORDER BY r.created_at DESC, r.id DESC`, [patientId],
   );
   return rows.map(toReferral);

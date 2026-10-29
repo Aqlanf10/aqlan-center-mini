@@ -2,9 +2,11 @@ import "server-only";
 import {
   browsePatientsWith, computeDebtRowsInSnapshot, getPatientWith, getSettingsWith, listMedicalHistoryWith, listPatientAppointmentsWith,
   listPatientProblemsWith, listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
+  listPatientDiagnosesWith, listIntakeFormsWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
   CLINIC_TIME_ZONE, type PatientListRow,
 } from "./db";
 import { deriveAlerts, reviewDue } from "./medical-history";
+import { parseConsentMode } from "./patient-identity";
 import { clinicDateString } from "./schedule";
 import type { TimelineEvent } from "./workflow";
 import type { CanonicalSnapshotQuery } from "./canonical-read-snapshot";
@@ -232,6 +234,31 @@ export async function readCanonicalTimeline(session: VerifiedDurableSession, pat
         : SCHEDULE_EVENTS.has(event.kind) ? projection.schedule
           : projection.care);
     return { events, canSeeFinancial: projection.balances, projection };
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * More patient file reads (M2 slice 4).
+ * ------------------------------------------------------------------------- */
+export async function readCanonicalDiagnoses(session: VerifiedDurableSession, patientId: number, orthoCaseId: number | null) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query =>
+    ({ diagnoses: await listPatientDiagnosesWith(query, patientId, orthoCaseId ?? undefined) }));
+}
+export async function readCanonicalIntakeHistory(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => ({ forms: await listIntakeFormsWith(query, patientId) }));
+}
+export async function readCanonicalReferrals(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => listPatientReferralsWith(query, patientId));
+}
+/** Contact consents: communication preferences of a patient inside the scope. Whether
+ * the screen offers recording follows the write's capability (`patients.edit`), never a
+ * role label; the write route proves it again. */
+export async function readCanonicalContactConsents(session: VerifiedDurableSession, patientId: number) {
+  return readCanonicalPatientRecord(session, "read:patients.record", patientId, async (query, scope) => {
+    const history = await listContactConsentsWith(query, patientId);
+    const states = await contactConsentStatesWith(query, [patientId]);
+    const settings = await getSettingsWith(query);
+    return { mode: parseConsentMode(settings["messaging.consent_mode"]), states: states.get(patientId), history, canRecord: scope.granted("patients.edit") };
   });
 }
 

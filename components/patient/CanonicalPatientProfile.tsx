@@ -8,6 +8,8 @@ import { clinicDateString, type Appointment } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { PROBLEM_STATUS_LABEL, type ProblemStatus } from "@/lib/cases";
 import { TIMELINE_KIND_LABEL, type TimelineKind } from "@/lib/workflow";
+import { REFERRAL_SPECIALTY_LABEL, REFERRAL_STATUS_LABEL, type ReferralSpecialty, type ReferralStatus } from "@/lib/referrals";
+import { CONSENT_CHANNEL_LABEL, type ConsentChannel, type ConsentState } from "@/lib/patient-identity";
 
 /**
  * ملف المريض في جلسة الهوية الموحّدة (M2).
@@ -141,6 +143,7 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         </section>
       ) : null}
 
+      <ContactConsentPanel patientId={patientId} />
       {projection.care ? <ClinicalPanels patientId={patientId} /> : null}
       <TimelinePanel patientId={patientId} />
 
@@ -193,6 +196,7 @@ function ClinicalPanels({ patientId }: { patientId: string }) {
   const id = encodeURIComponent(patientId);
   const history = usePatientSection<MedicalHistoryView>(`/api/patients/${id}/medical-history`);
   const problems = usePatientSection<ProblemView[]>(`/api/patients/${id}/problems`);
+  const referrals = usePatientSection<ReferralView[]>(`/api/patients/${id}/referrals`);
   const latestVitals = history.data?.vitals[0] ?? null;
   return (
     <>
@@ -231,7 +235,44 @@ function ClinicalPanels({ patientId }: { patientId: string }) {
             </ul>
           )}
       </section>
+      <section aria-labelledby="canonical-patient-referrals" className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h2 id="canonical-patient-referrals" className="mb-2 text-sm font-bold text-navy-900">الإحالات</h2>
+        {referrals.error ? <p role="alert" className="text-sm text-red-700">{referrals.error}</p> : !referrals.data ? <p className="text-sm text-slate-500">جارٍ التحميل…</p>
+          : referrals.data.length === 0 ? <p className="text-sm text-slate-500">لا إحالات.</p> : (
+            <ul className="divide-y divide-slate-100 text-sm">
+              {referrals.data.map(referral => (
+                <li key={referral.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                  <span className="font-semibold text-slate-800 [overflow-wrap:anywhere]">{referral.toName} — {REFERRAL_SPECIALTY_LABEL[referral.toSpecialty] ?? referral.toSpecialty}</span>
+                  <span className="rounded-lg bg-slate-50 px-2 py-0.5 text-xs font-bold text-slate-600">{REFERRAL_STATUS_LABEL[referral.status] ?? referral.status}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+      </section>
     </>
+  );
+}
+
+interface ReferralView { id: number; toName: string; toSpecialty: ReferralSpecialty; status: ReferralStatus }
+interface ConsentView { mode: "opt_in" | "opt_out"; states?: Record<ConsentChannel, ConsentState> }
+const CONSENT_STATE_LABEL: Record<ConsentState, string> = { granted: "موافق", withdrawn: "سحب موافقته", unknown: "غير مسجّل" };
+
+/** موافقات التواصل: لكل من يدخل الملف (الهوية والتواصل). التسجيل يتبع مساره عند نقله. */
+function ContactConsentPanel({ patientId }: { patientId: string }) {
+  const consent = usePatientSection<ConsentView>(`/api/patients/${encodeURIComponent(patientId)}/contact`);
+  return (
+    <section aria-labelledby="canonical-patient-consent" className="rounded-2xl border border-slate-200 bg-white p-4">
+      <h2 id="canonical-patient-consent" className="mb-2 text-sm font-bold text-navy-900">موافقات التواصل</h2>
+      {consent.error ? <p role="alert" className="text-sm text-red-700">{consent.error}</p> : !consent.data ? <p className="text-sm text-slate-500">جارٍ التحميل…</p> : (
+        <ul className="flex flex-wrap gap-1.5 text-xs">
+          {(Object.entries(consent.data.states ?? {}) as [ConsentChannel, ConsentState][]).map(([channel, state]) => (
+            <li key={channel} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-0.5 font-bold text-slate-700">
+              {CONSENT_CHANNEL_LABEL[channel] ?? channel}: {CONSENT_STATE_LABEL[state] ?? state}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

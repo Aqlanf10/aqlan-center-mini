@@ -1,3 +1,5 @@
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalIntakeHistory } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
 import { createIntakeForm, getPatient, listIntakeForms } from "@/lib/db";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -33,6 +35,9 @@ async function guard(context: { params: Promise<{ id: string }> }) {
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 4): owning snapshot, patient inside the scope, projection by grant.
+  const canonical = await canonicalPatientGet((await context.params).id, readCanonicalIntakeHistory, "تعذّر تحميل تاريخ الاستمارات الصحية.");
+  if (canonical) return canonical;
   const checked = await guard(context);
   if ("error" in checked) return checked.error;
   try {

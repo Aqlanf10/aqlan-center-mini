@@ -240,9 +240,12 @@ it("browser: the doctor opens a patient's file from the list; only the canonical
   expect(await profile.getByRole("heading", { name: /المواعيد/ }).count()).toBe(0);
   await profile.getByRole("heading", { name: "التاريخ الطبي والعلامات الحيوية" }).waitFor();
   await profile.getByRole("heading", { name: "قائمة المشاكل" }).waitFor();
+  await profile.getByRole("heading", { name: "الإحالات" }).waitFor();
+  await profile.getByRole("heading", { name: "موافقات التواصل" }).waitFor();
   await profile.getByText("لا أحداث ضمن ما تملك عرضه.").or(profile.locator("ol li").first()).waitFor();
   expect(new Set(apiCalls.filter(path => !/^\/api\/auth\/me$/.test(path)).map(path => path.replace(/\/\d+(\/|$)/, "/:id$1"))))
-    .toEqual(new Set(["/api/patients", "/api/patients/:id", "/api/patients/:id/medical-history", "/api/patients/:id/problems", "/api/patients/:id/timeline"]));
+    .toEqual(new Set(["/api/patients", "/api/patients/:id", "/api/patients/:id/medical-history", "/api/patients/:id/problems",
+      "/api/patients/:id/referrals", "/api/patients/:id/contact", "/api/patients/:id/timeline"]));
   expect(failures).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   // A file outside the scope shows the bounded Arabic refusal, not the legacy file.
@@ -265,10 +268,11 @@ it("browser: without a clinical grant the file never calls clinical reads; the t
   await profile.getByRole("heading", { name: "الخط الزمني" }).waitFor();
   await profile.getByText("لا أحداث ضمن ما تملك عرضه.").waitFor();
   expect(await profile.getByRole("heading", { name: "التاريخ الطبي والعلامات الحيوية" }).count()).toBe(0);
-  expect(apiCalls.some(path => /medical-history|problems|vitals/.test(path))).toBe(false);
+  await profile.getByRole("heading", { name: "موافقات التواصل" }).waitFor();
+  expect(apiCalls.some(path => /medical-history|problems|vitals|referrals|diagnoses|intake-history/.test(path))).toBe(false);
   // Direct calls are refused server-side, whatever the screen shows.
   const reception = await journey.login("reception");
-  for (const section of ["medical-history", "vitals", "problems"]) {
+  for (const section of ["medical-history", "vitals", "problems", "referrals", "diagnoses", "intake-history"]) {
     const response = await journey.api(`/api/patients/${own.id}/${section}`, reception.cookie);
     expect(response.status).toBe(403);
     expect((await response.json()).message).toMatch(ARABIC);

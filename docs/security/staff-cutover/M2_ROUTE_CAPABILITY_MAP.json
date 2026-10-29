@@ -3210,8 +3210,15 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 4: read:patients.record; canRecord from patients.edit.",
+  "projection": {
+   "legacy": "canAccessPatient; canRecord = role in {admin, reception}.",
+   "groups": {
+    "identity": "consent mode, per-channel state and history — every actor admitted to the record"
+   },
+   "fields": "canRecord = patients.edit (the write's capability), never a role label"
+  }
  },
  {
   "route": "/api/patients/[id]/contact",
@@ -3282,10 +3289,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 4: read:patients.clinical.",
+  "projection": {
+   "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients).",
+   "groups": {
+    "clinical": "the whole response — clinical grant (read:patients.clinical)"
+   },
+   "rows": "outside the scope reads like missing (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/diagnoses",
@@ -3513,10 +3531,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 4: read:patients.clinical.",
+  "projection": {
+   "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients).",
+   "groups": {
+    "clinical": "the whole response — clinical grant (read:patients.clinical)"
+   },
+   "rows": "outside the scope reads like missing (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/intake-history",
@@ -3893,10 +3922,21 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 4: read:patients.clinical.",
+  "projection": {
+   "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients).",
+   "groups": {
+    "clinical": "the whole response — clinical grant (read:patients.clinical)"
+   },
+   "rows": "outside the scope reads like missing (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/referrals",

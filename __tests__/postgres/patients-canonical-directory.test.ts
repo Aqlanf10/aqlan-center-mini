@@ -342,3 +342,34 @@ describe("clinical sub-reads and the timeline (slice 3)", () => {
     expect(ownerInvoice.amountMinor).toBe(7000);
   });
 });
+
+describe("more patient file reads (slice 4)", () => {
+  const REFERRAL_SPECIALTY = "oral_surgery";
+  let eta = 0;
+  beforeAll(async () => {
+    eta = (await fx.pool.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id) VALUES('SYN-PA-7','SYN File Eta','0544444444',$1) RETURNING id", [fx.parties.doctorA!])).rows[0].id;
+    await fx.pool.query(`INSERT INTO patient_diagnoses(patient_id,content,created_by) VALUES($1,'{"summary":"Synthetic class II"}'::jsonb,'synthetic')`, [eta]);
+    await fx.pool.query("INSERT INTO patient_referrals(patient_id,to_name,to_specialty,reason,created_by) VALUES($1,'Synthetic surgeon',$2,'Synthetic impacted canine','synthetic')", [eta, REFERRAL_SPECIALTY]);
+    await fx.pool.query("INSERT INTO patient_contact_consents(patient_id,channel,granted,source,recorded_by) VALUES($1,'whatsapp',TRUE,'in_person','synthetic')", [eta]);
+  });
+
+  it("clinical reads: diagnoses, intake history and referrals for a clinical grant inside the scope", async () => {
+    const session = await fx.session("doctorA");
+    expect((await reads.readCanonicalDiagnoses(session, eta, null)).diagnoses.map(d => d.content)).toEqual([{ summary: "Synthetic class II" }]);
+    expect((await reads.readCanonicalIntakeHistory(await fx.session("doctorA"), eta)).forms).toEqual([]);
+    expect((await reads.readCanonicalReferrals(await fx.session("doctorA"), eta)).map(r => r.toName)).toEqual(["Synthetic surgeon"]);
+  });
+
+  it("clinical reads refuse without a clinical grant, and outside the scope read like missing", async () => {
+    await expect(reads.readCanonicalDiagnoses(await fx.session("reception"), eta, null)).rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
+    await expect(reads.readCanonicalReferrals(await fx.session("doctorB"), eta)).rejects.toMatchObject({ code: "patient_not_found" });
+  });
+
+  it("contact consents: any admitted actor reads them; recording follows patients.edit, never a role label", async () => {
+    const reception = await reads.readCanonicalContactConsents(await fx.session("reception"), eta);
+    expect(reception.states).toMatchObject({ whatsapp: "granted" });
+    expect(reception.canRecord).toBe(false); // reception label, no patients.edit
+    expect((await reads.readCanonicalContactConsents(await fx.session("owner"), eta)).canRecord).toBe(true);
+    await expect(reads.readCanonicalContactConsents(await fx.session("doctorB"), eta)).rejects.toMatchObject({ code: "patient_not_found" });
+  });
+});
