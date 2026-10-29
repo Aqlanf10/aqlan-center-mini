@@ -3079,8 +3079,17 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 8: operation patients.edit; patient locked (FOR UPDATE) inside the actor's current scope, else 404 like a missing one; only sent fields are written; audit atomic with the change.",
+  "projection": {
+   "legacy": "canAccessPatient; every admitted role edits every field, including clinical text and flags.",
+   "groups": {
+    "identity": "identity and contact fields — patients.edit",
+    "care": "medical alert, note, referral source/by — patients.edit plus a clinical grant (the read projection's care group)",
+    "flags": "coordination flags — patients.edit plus a clinical grant or patients.operational-summary.view; values from patients.flags"
+   },
+   "fields": "a field outside the actor's groups refuses the whole request (403 patient_field_not_granted, naming the field); unknown fields refuse (400); the response is the read projection of the written record"
+  }
  },
  {
   "route": "/api/patients/[id]/arrival-panel",
@@ -3243,8 +3252,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 8: operation patients.edit; patient inside the actor's current scope, else 404; consent row and its audit in one transaction; recordedBy is the canonical actor."
  },
  {
   "route": "/api/patients/[id]/debt-repayments",

@@ -1,6 +1,7 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { CanonicalPatientReadRefusal } from "./canonical-patient-reads";
+import { CanonicalPatientWriteRefusal } from "./canonical-patient-writes";
 import { staffAdmissionRefusal } from "./staff-capability-editor";
 import { selectRequestStaffEnvelope } from "./staff-session-admission";
 import type { VerifiedDurableSession } from "./staff-durable-session";
@@ -26,6 +27,15 @@ export function canonicalPatientReadFailure(error: unknown, fallback: string): N
     return NextResponse.json({ code: refusal.code, message }, { status: refusal.status, headers: NO_STORE });
   }
   return NextResponse.json({ message: fallback }, { status: 500, headers: NO_STORE });
+}
+
+/** The same mapping for canonical patient writes (M2 slice 8): the refusal names the
+ * field when one is at fault; record-scope refusals read as no access to patients. */
+export function canonicalPatientWriteFailure(error: unknown, fallback: string): NextResponse {
+  if (error instanceof CanonicalPatientWriteRefusal) {
+    return NextResponse.json({ code: error.code, message: error.message, ...(error.field ? { field: error.field } : {}) }, { status: error.status, headers: NO_STORE });
+  }
+  return canonicalPatientReadFailure(error, fallback);
 }
 
 const SESSION_ENDED = "انتهت الجلسة. سجّل الدخول من جديد.";

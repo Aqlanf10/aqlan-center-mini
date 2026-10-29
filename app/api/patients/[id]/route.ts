@@ -19,7 +19,8 @@ import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
-import { canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { NO_STORE, canonicalPatientReadFailure, canonicalPatientWriteFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalPatientUpdate } from "@/lib/canonical-patient-writes";
 import { readCanonicalPatientFile } from "@/lib/canonical-patient-reads";
 
 export const dynamic = "force-dynamic";
@@ -98,6 +99,24 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 8): one admitted `patients.edit` transaction, the patient
+  // inside the current scope, field groups by grant, audit atomic with the change.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    const canonicalId = readId((await context.params).id);
+    if (canonicalId === null) return NextResponse.json({ code: "invalid_patient_input", message: "رقم المريض غير صالح." }, { status: 400, headers: NO_STORE });
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    if (!canonicalBody || typeof canonicalBody !== "object" || Array.isArray(canonicalBody)) return NextResponse.json({ code: "invalid_patient_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    try {
+      return NextResponse.json(await commandCanonicalPatientUpdate(selected.handle, canonicalId, canonicalBody as Record<string, unknown>), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPatientWriteFailure(error, "تعذّر حفظ التعديل. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const { id: rawId } = await context.params;

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
 import type { Visit, VisitStatus } from "@/lib/flow";
@@ -9,7 +10,7 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { PROBLEM_STATUS_LABEL, type ProblemStatus } from "@/lib/cases";
 import { TIMELINE_KIND_LABEL, type TimelineKind } from "@/lib/workflow";
 import { REFERRAL_SPECIALTY_LABEL, REFERRAL_STATUS_LABEL, type ReferralSpecialty, type ReferralStatus } from "@/lib/referrals";
-import { CONSENT_CHANNEL_LABEL, type ConsentChannel, type ConsentState } from "@/lib/patient-identity";
+import { CONSENT_CHANNEL_LABEL, CONSENT_SOURCE_LABEL, MANUAL_CONSENT_SOURCES, type ConsentChannel, type ConsentSource, type ConsentState } from "@/lib/patient-identity";
 
 /**
  * ملف المريض في جلسة الهوية الموحّدة (M2).
@@ -38,8 +39,11 @@ const VISIT_STATUS_LABEL: Record<VisitStatus, string> = { waiting: "في الا�
 const CHANNEL_LABEL: Record<string, string> = { whatsapp: "واتساب", sms: "رسالة نصية", email: "بريد", call: "اتصال" };
 
 export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
+  const session = useSession();
+  const canEdit = session?.isOwner === true || (session?.capabilities ?? []).includes("patients.edit");
   const [file, setFile] = useState<PatientFileView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,8 +106,18 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         </div>
       </header>
 
+      {canEdit && editing ? (
+        <PatientEditForm patient={patient} care={projection.care} patientId={patientId}
+          onCancel={() => setEditing(false)}
+          onSaved={saved => { setFile(current => current ? { ...current, patient: { ...current.patient, ...saved } } : current); setEditing(false); }} />
+      ) : null}
       <section aria-labelledby="canonical-patient-details" className="rounded-2xl border border-slate-200 bg-white p-4">
-        <h2 id="canonical-patient-details" className="mb-2 text-sm font-bold text-navy-900">البيانات الأساسية</h2>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 id="canonical-patient-details" className="text-sm font-bold text-navy-900">البيانات الأساسية</h2>
+          {canEdit && !editing ? (
+            <button type="button" onClick={() => setEditing(true)} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">تعديل البيانات</button>
+          ) : null}
+        </div>
         <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
           <Detail label="العنوان" value={patient.address} />
           <Detail label="وليّ الأمر" value={[patient.guardianName, patient.guardianPhone].filter(Boolean).join(" — ") || null} />
@@ -150,7 +164,7 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         </section>
       ) : null}
 
-      <ContactConsentPanel patientId={patientId} />
+      <ContactConsentPanel patientId={patientId} canRecord={canEdit} />
       {projection.care ? <ClinicalPanels patientId={patientId} /> : null}
       <TimelinePanel patientId={patientId} />
 
@@ -265,8 +279,9 @@ interface ConsentView { mode: "opt_in" | "opt_out"; states?: Record<ConsentChann
 const CONSENT_STATE_LABEL: Record<ConsentState, string> = { granted: "موافق", withdrawn: "سحب موافقته", unknown: "غير مسجّل" };
 
 /** موافقات التواصل: لكل من يدخل الملف (الهوية والتواصل). التسجيل يتبع مساره عند نقله. */
-function ContactConsentPanel({ patientId }: { patientId: string }) {
-  const consent = usePatientSection<ConsentView>(`/api/patients/${encodeURIComponent(patientId)}/contact`);
+function ContactConsentPanel({ patientId, canRecord }: { patientId: string; canRecord: boolean }) {
+  const [version, setVersion] = useState(0);
+  const consent = usePatientSection<ConsentView>(`/api/patients/${encodeURIComponent(patientId)}/contact?v=${version}`);
   return (
     <section aria-labelledby="canonical-patient-consent" className="rounded-2xl border border-slate-200 bg-white p-4">
       <h2 id="canonical-patient-consent" className="mb-2 text-sm font-bold text-navy-900">موافقات التواصل</h2>
@@ -279,6 +294,105 @@ function ContactConsentPanel({ patientId }: { patientId: string }) {
           ))}
         </ul>
       )}
+      {canRecord ? <ConsentRecordForm patientId={patientId} onRecorded={() => setVersion(value => value + 1)} /> : null}
+    </section>
+  );
+}
+
+/** تسجيل موافقة تواصل: صلاحية patients.edit، والخادم يتحقق من النطاق ويدقّق ذرّيًا. */
+function ConsentRecordForm({ patientId, onRecorded }: { patientId: string; onRecorded: () => void }) {
+  const uid = useId();
+  const [channel, setChannel] = useState<ConsentChannel>("whatsapp");
+  const [granted, setGranted] = useState(true);
+  const [source, setSource] = useState<ConsentSource>("in_person");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  async function submit() {
+    setBusy(true); setMessage(null);
+    try {
+      const response = await fetch(`/api/patients/${encodeURIComponent(patientId)}/contact`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channel, granted, source }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { setMessage({ ok: false, text: payload?.message ?? "تعذّر حفظ الموافقة." }); return; }
+      setMessage({ ok: true, text: "سُجّلت الموافقة." });
+      onRecorded();
+    } catch { setMessage({ ok: false, text: "تعذّر الاتصال بالخادم. لم يُعتبر التسجيل محفوظًا." }); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3" data-testid="consent-record-form">
+      <label className="text-xs font-bold text-navy-900" htmlFor={`${uid}-channel`}>القناة
+        <select id={`${uid}-channel`} value={channel} onChange={event => setChannel(event.target.value as ConsentChannel)} className="mt-1 block min-h-11 rounded-xl border border-slate-300 px-2 text-sm">
+          {(Object.keys(CONSENT_CHANNEL_LABEL) as ConsentChannel[]).map(value => <option key={value} value={value}>{CONSENT_CHANNEL_LABEL[value]}</option>)}
+        </select>
+      </label>
+      <label className="text-xs font-bold text-navy-900" htmlFor={`${uid}-granted`}>الموافقة
+        <select id={`${uid}-granted`} value={granted ? "yes" : "no"} onChange={event => setGranted(event.target.value === "yes")} className="mt-1 block min-h-11 rounded-xl border border-slate-300 px-2 text-sm">
+          <option value="yes">موافق</option><option value="no">غير موافق</option>
+        </select>
+      </label>
+      <label className="text-xs font-bold text-navy-900" htmlFor={`${uid}-source`}>كيف أُخذت
+        <select id={`${uid}-source`} value={source} onChange={event => setSource(event.target.value as ConsentSource)} className="mt-1 block min-h-11 rounded-xl border border-slate-300 px-2 text-sm">
+          {MANUAL_CONSENT_SOURCES.map(value => <option key={value} value={value}>{CONSENT_SOURCE_LABEL[value]}</option>)}
+        </select>
+      </label>
+      <button type="button" onClick={() => void submit()} disabled={busy} className="min-h-11 rounded-xl bg-navy-900 px-4 text-sm font-bold text-white disabled:opacity-50">تسجيل الموافقة</button>
+      {message ? <p role={message.ok ? "status" : "alert"} className={`w-full text-xs ${message.ok ? "text-emerald-700" : "text-red-700"}`}>{message.text}</p> : null}
+    </div>
+  );
+}
+
+const EDIT_FIELDS = [
+  ["fullName", "الاسم الكامل", false], ["phone", "الجوال", true], ["altPhone", "رقم بديل", true], ["address", "العنوان", false],
+  ["guardianName", "وليّ الأمر", false], ["guardianPhone", "جوال وليّ الأمر", true], ["nationalId", "رقم الهوية", true], ["email", "البريد", true],
+] as const;
+const CARE_EDIT_FIELDS = [["medicalAlert", "التنبيه الطبي"], ["note", "ملاحظة"]] as const;
+
+/**
+ * تعديل بيانات المريض: تُرسل الحقول التي تغيّرت فقط. الحقول السريرية تظهر لمن يرى
+ * الملخص العلاجي وحده، والخادم يرفض أي حقل خارج صلاحية الحساب ويسمّيه.
+ */
+function PatientEditForm({ patient, care, patientId, onCancel, onSaved }: {
+  patient: CorePatient; care: boolean; patientId: string; onCancel: () => void; onSaved: (saved: Partial<CorePatient>) => void;
+}) {
+  const uid = useId();
+  const fields = [...EDIT_FIELDS.map(([key, label, ltr]) => [key, label, ltr] as const), ...(care ? CARE_EDIT_FIELDS.map(([key, label]) => [key, label, false] as const) : [])];
+  const initial = Object.fromEntries(fields.map(([key]) => [key, String((patient as unknown as Record<string, unknown>)[key] ?? "")]));
+  const [values, setValues] = useState<Record<string, string>>(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const changed = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== initial[key]));
+  async function save() {
+    if (Object.keys(changed).length === 0) { onCancel(); return; }
+    setBusy(true); setError(null);
+    try {
+      const response = await fetch(`/api/patients/${encodeURIComponent(patientId)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changed),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { setError(payload?.message ?? "تعذّر حفظ التعديل."); return; }
+      onSaved(payload as Partial<CorePatient>);
+    } catch { setError("تعذّر الاتصال بالخادم. لم يُعتبر التعديل محفوظًا."); }
+    finally { setBusy(false); }
+  }
+  return (
+    <section aria-labelledby={`${uid}-title`} className="rounded-2xl border border-navy-200 bg-white p-4" data-testid="patient-edit-form">
+      <h2 id={`${uid}-title`} className="mb-2 text-sm font-bold text-navy-900">تعديل بيانات المريض</h2>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {fields.map(([key, label, ltr]) => (
+          <label key={key} htmlFor={`${uid}-${key}`} className="text-xs font-bold text-navy-900">{label}
+            <input id={`${uid}-${key}`} value={values[key]} dir={ltr ? "ltr" : undefined} disabled={busy}
+              onChange={event => setValues(current => ({ ...current, [key]: event.target.value }))}
+              className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm" />
+          </label>
+        ))}
+      </div>
+      {error ? <p role="alert" className="mt-2 text-sm text-red-700">{error}</p> : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" onClick={() => void save()} disabled={busy} className="min-h-11 rounded-xl bg-navy-900 px-4 text-sm font-bold text-white disabled:opacity-50">حفظ التعديل</button>
+        <button type="button" onClick={onCancel} disabled={busy} className="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold text-navy-900">إلغاء</button>
+      </div>
     </section>
   );
 }

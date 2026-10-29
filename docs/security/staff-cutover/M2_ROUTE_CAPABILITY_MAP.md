@@ -34,12 +34,12 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 329 |
+| existing | 324 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 15 |
+| canonical-done | 20 |
 
 | Record scope | Routes |
 |---|---|
@@ -264,6 +264,23 @@ Admitted by `read:patients.record`. `patientWorkflowWith` reads every source thr
   - the expected-version CAS (`setting_conflict`, 409), the in-transaction prefix rule, the writes, and one audit row per changed key with the canonical actor all commit together. An audit failure leaves no setting change (PG test).
 - **Screen:** `/settings` is registered for `settings.view`. Each key is editable only if `__canWrite` lists it; owner-only keys show «للمالك فقط» to delegates; areas not yet canonical (history, users, backup run, announcements, specialised screens) are not linked.
 - **Tests:** PG `settings-canonical` (14), built journey `canonical-settings-journey` (HTTP and browser).
+
+### Slice 8 — patient edit (`PATCH /api/patients/[id]`) and contact consent (`POST /api/patients/[id]/contact`)
+One admitted `patients.edit` transaction each (`lib/canonical-patient-writes.ts`). `patients.edit` is in `CLINIC_RUNTIME_ACTIONS` and the runtime's literal action set.
+- **Record:** the patient is locked (`FOR UPDATE`) inside the actor's current scope. Outside the scope reads exactly like a missing patient (`patient_not_found`, 404, identical body).
+- **Field groups follow the read projection.** Nobody writes what it cannot see:
+
+| Group | Fields | Needs, besides `patients.edit` |
+|---|---|---|
+| identity | name, phones, gender, birth year and date, address, guardian, national ID, email, preferred channel | nothing |
+| care | medical alert, note, referral source, referred by | a clinical grant |
+| flags | coordination flags (values from `patients.flags`) | a clinical grant or `patients.operational-summary.view` |
+
+- A field outside the actor's groups refuses the whole request and names it (`patient_field_not_granted`, 403); unknown fields and empty requests refuse (400). Validation is the creation rule on the merged record.
+- **Only sent fields are written**, so two concurrent edits of different fields both survive. The audit row (canonical actor) commits with the change; an audit failure leaves no change. The response is the read projection of the written record.
+- **Consent:** channel, state, source and note are validated; the consent row and its audit row commit together; `recordedBy` is the canonical actor.
+- **Screen:** the canonical profile offers «تعديل البيانات» (changed fields only; care fields only when the care group is projected) and «تسجيل الموافقة» when the session holds `patients.edit`.
+- **Tests:** PG `patients-canonical-writes` (11): field groups, scope (outside equals missing), admission refusals, revocation, concurrency, audit rollback, consent. Built journey `canonical-patient-writes-journey`.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.

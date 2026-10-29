@@ -1,4 +1,6 @@
-import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { NO_STORE, canonicalPatientGet, canonicalPatientWriteFailure } from "@/lib/canonical-patient-http";
+import { commandCanonicalContactConsent, parseContactConsentInput } from "@/lib/canonical-patient-writes";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { readCanonicalContactConsents } from "@/lib/canonical-patient-reads";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -50,6 +52,23 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  // Canonical identity (M2 slice 8): `patients.edit`, the patient inside the scope, audit atomic.
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    const canonicalId = await patientIdFrom(context);
+    if (!canonicalId) return NextResponse.json({ code: "invalid_patient_input", message: "رقم الملف غير صالح." }, { status: 400, headers: NO_STORE });
+    let raw: unknown;
+    try { raw = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const input = parseContactConsentInput((raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>);
+      return NextResponse.json(await commandCanonicalContactConsent(selected.handle, canonicalId, input), { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalPatientWriteFailure(error, "تعذّر حفظ الموافقة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!RECORDERS.has(session.role)) {

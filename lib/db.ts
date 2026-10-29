@@ -5574,10 +5574,18 @@ export async function updatePatient(
   input: Partial<PatientInput>,
 ): Promise<Patient | null> {
   await ensureSchema();
+  return updatePatientWith(getPool(), id, input);
+}
+/** updatePatient on a caller-owned query facade or transaction (no ensureSchema, no DDL). */
+export async function updatePatientWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+  input: Partial<PatientInput>,
+): Promise<Patient | null> {
   // التحديث الجزئي بعلَم لكل حقل: `COALESCE` وحده لا يفرّق بين «لم يُرسَل» و«أُرسل
   // فارغًا عمدًا»، فمسحُ رقم بديل خاطئ كان مستحيلًا — يبقى إلى الأبد.
   const has = (key: keyof PatientInput) => input[key] !== undefined;
-  const { rows } = await getPool().query<PatientRow>(
+  const { rows } = await q.query<PatientRow>(
     `UPDATE patients SET
        full_name     = COALESCE($2::text, full_name),
        phone         = CASE WHEN $3::boolean  THEN $4::text  ELSE phone         END,
@@ -5668,7 +5676,14 @@ export async function recordContactConsent(input: {
   note: string | null; actor: string;
 }): Promise<ContactConsentEvent | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return recordContactConsentWith(getPool(), input);
+}
+/** recordContactConsent on a caller-owned query facade or transaction (no ensureSchema). */
+export async function recordContactConsentWith(q: Pick<DbClient, "query">, input: {
+  patientId: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
+  note: string | null; actor: string;
+}): Promise<ContactConsentEvent | null> {
+  const { rows } = await q.query<{
     id: number; channel: ConsentChannel; granted: boolean; source: ConsentSource;
     note: string | null; recorded_by: string; recorded_at: Date;
   }>(
