@@ -245,7 +245,9 @@ it("browser: the doctor opens a patient's file from the list; only the canonical
   await profile.getByText("لا أحداث ضمن ما تملك عرضه.").or(profile.locator("ol li").first()).waitFor();
   expect(new Set(apiCalls.filter(path => !/^\/api\/auth\/me$/.test(path)).map(path => path.replace(/\/\d+(\/|$)/, "/:id$1"))))
     .toEqual(new Set(["/api/patients", "/api/patients/:id", "/api/patients/:id/medical-history", "/api/patients/:id/problems",
-      "/api/patients/:id/referrals", "/api/patients/:id/contact", "/api/patients/:id/timeline"]));
+      "/api/patients/:id/referrals", "/api/patients/:id/contact", "/api/patients/:id/timeline",
+      // The planned sessions (M2 slice 22) come from the canonical workflow summary.
+      "/api/patients/:id/workflow"]));
   expect(failures).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   // A file outside the scope shows the bounded Arabic refusal, not the legacy file.

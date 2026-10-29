@@ -4034,8 +4034,8 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 22: read:patients.record snapshot (patient scope); the same resolver (contexts list, or one context with responsible doctor and fingerprint; 409 when unresolved)."
  },
  {
   "route": "/api/patients/[id]/statement",
@@ -4417,8 +4417,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 22: one admitted appointments.create transaction through the same capacity-engine door (lib/planned-visit-schedule.ts) on the admitted client; patient inside the patient scope (outside = missing 404); appointment scope not none, and own books only on its own party (the case's responsible doctor must be the clinician, else 403 and roll back); override only with appointments.override-capacity; appointment.create and override rows atomic."
  },
  {
   "route": "/api/plans",

@@ -22078,15 +22078,19 @@ export async function schedulePlannedVisit(input: {
    */
   judge?: (day: Appointment[], client: DbClient, durationMinutes: number) =>
     Promise<{ ok: true; doctorId?: number | null } | { ok: false; conflict: unknown }>;
+  /** The caller's own transaction (canonical, M2 slice 22): the preview, the day locks,
+   * the judgement and the write run on it, and nothing here begins, commits or rolls
+   * back; a refusal returns before any write and the caller decides. */
+  client?: DbClient;
 }): Promise<
   | { ok: true; appointmentId: number; title: string }
   | { ok: false; reason: "not_found" | "not_schedulable" | "already_scheduled" }
   | { ok: false; reason: "conflict"; conflict: { message: string; suggestion?: string; suggestionMessage?: string } }
 > {
-  await ensureSchema();
+  if (!input.client) await ensureSchema();
 
   // قراءة أولية: المدة والحالة والمريض — ليعرف الحكم مدةً صحيحة.
-  const { rows: previewRows } = await getPool().query<PlannedVisitRow>(
+  const { rows: previewRows } = await (input.client ?? getPool()).query<PlannedVisitRow>(
     `${PLANNED_VISIT_SELECT} WHERE v.id = $1`,
     [input.plannedVisitId],
   );
@@ -22102,6 +22106,7 @@ export async function schedulePlannedVisit(input: {
   let admittedDoctorId: number | null = null;
   try {
     const result = await writeAppointmentInDay({
+      client: input.client,
       date: input.date,
       judge: async (day, client) => {
         if (input.judge) {

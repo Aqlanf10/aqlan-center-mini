@@ -166,9 +166,11 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
 
       <ContactConsentPanel patientId={patientId} canRecord={canEdit} />
       {projection.care ? <ClinicalPanels patientId={patientId} /> : null}
+      {projection.care ? <PlannedVisitsPanel patientId={patientId}
+        canBook={session?.isOwner === true || (session?.capabilities ?? []).includes("appointments.create")} /> : null}
       <TimelinePanel patientId={patientId} />
 
-      <p className="text-xs text-slate-600">بقية أقسام الملف (التقويم والخطط والحساب والمستندات وغيرها) تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
+      <p className="text-xs text-slate-600">بقية أقسام الملف (التقويم والخطط والحساب والمستندات وإعادة حجز الجلسات وغيرها) تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
       <a href="/patients" className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-navy-800">العودة إلى المرضى</a>
     </main>
   );
@@ -421,3 +423,90 @@ function TimelinePanel({ patientId }: { patientId: string }) {
   );
 }
 
+
+interface PlannedVisitItem {
+  id: number; title: string; planTitle: string | null; sequence: number; durationMinutes: number; doctorName: string | null;
+  status: "planned" | "scheduled" | "in_progress" | "completed" | "cancelled"; appointmentId: number | null;
+  appointmentDate: string | null; appointmentTime: string | null; durationWarning?: string | null;
+}
+const PLANNED_STATUS_LABEL: Record<PlannedVisitItem["status"], string> = { planned: "لم تُحجز", scheduled: "محجوزة", in_progress: "قائمة", completed: "منجزة", cancelled: "ملغاة" };
+
+/**
+ * الجلسات المخطَّطة من خطة العلاج (M2 slice 22): تُقرأ من ملخص سير العمل الموحّد، وما لم
+ * يُحجز منها يُحجز بتاريخٍ ووقت فقط عبر محرّك السعة نفسه على طبيب الحالة المسؤول — يُقرأ
+ * سياقه من الخادم لحظة الحجز ولا يُخمَّن. يظهر الحجز لمن يملك appointments.create.
+ */
+function PlannedVisitsPanel({ patientId, canBook }: { patientId: string; canBook: boolean }) {
+  const uid = useId();
+  const [version, setVersion] = useState(0);
+  const { data, error } = usePatientSection<{ plannedVisits?: PlannedVisitItem[] }>(`/api/patients/${encodeURIComponent(patientId)}/workflow?v=${version}`);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [date, setDate] = useState(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
+  const [time, setTime] = useState("10:00");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const visits = (data?.plannedVisits ?? []).filter(visit => visit.status !== "completed" && visit.status !== "cancelled");
+
+  async function book(visit: PlannedVisitItem) {
+    if (visit.durationWarning && !window.confirm(`${visit.durationWarning}\nالمدة الأصلية: ${visit.durationMinutes} دقيقة. هل راجعتها وتريد الحجز بهذه المدة؟`)) return;
+    setBusy(true); setMessage(null);
+    try {
+      // The responsible doctor is read from the server at booking time, never guessed.
+      const contextResponse = await fetch(`/api/patients/${encodeURIComponent(patientId)}/return-booking-context?kind=planned_visit&sourceId=${visit.id}`, { cache: "no-store" });
+      const context = await contextResponse.json().catch(() => null);
+      if (!contextResponse.ok || typeof context?.fingerprint !== "string") { setMessage({ ok: false, text: context?.message ?? "تعذّر التحقق من الطبيب المسؤول عن الحالة." }); return; }
+      const response = await fetch(`/api/planned-visits/${visit.id}/schedule`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, time, returnBookingFingerprint: context.fingerprint }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const reasons: string[] = Array.isArray(payload?.reasons) ? payload.reasons : [];
+        setMessage({ ok: false, text: [payload?.message ?? "تعذّر حجز الجلسة.", ...reasons, payload?.suggestionMessage].filter(Boolean).join(" — ") });
+        return;
+      }
+      setOpenId(null);
+      setMessage({ ok: true, text: `حُجزت الجلسة ${date} الساعة ${time}${typeof payload?.doctorName === "string" ? ` — الطبيب: ${payload.doctorName}` : ""}.` });
+      setVersion(current => current + 1);
+    } catch { setMessage({ ok: false, text: "تعذّر الاتصال بالخادم. لم يُعتبر الحجز تامًّا؛ حدّث الملف قبل إعادة المحاولة." }); }
+    finally { setBusy(false); }
+  }
+
+  const field = "mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm";
+  return (
+    <section aria-labelledby={`${uid}-title`} className="rounded-2xl border border-slate-200 bg-white p-4" data-testid="planned-visits">
+      <h2 id={`${uid}-title`} className="mb-2 text-sm font-bold text-navy-900">الجلسات المخطَّطة</h2>
+      {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
+      {data && visits.length === 0 ? <p className="text-sm text-slate-500">لا جلسات مخطَّطة مفتوحة.</p> : null}
+      <ul className="divide-y divide-slate-100 text-sm">
+        {visits.map(visit => (
+          <li key={visit.id} className="py-2" data-planned-visit={visit.id}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-slate-800">{visit.title}{visit.planTitle ? <span className="text-xs text-slate-500"> — {visit.planTitle}</span> : null}</span>
+              <span className="rounded-lg bg-slate-50 px-2 py-0.5 text-xs font-bold text-slate-600">
+                {PLANNED_STATUS_LABEL[visit.status]}{visit.appointmentDate ? ` · ${visit.appointmentDate} ${visit.appointmentTime ?? ""}` : ""}
+              </span>
+            </div>
+            <p className="text-xs text-slate-600">{visit.durationMinutes} دقيقة{visit.doctorName ? ` · ${visit.doctorName}` : ""}</p>
+            {canBook && visit.status === "planned" && !visit.appointmentId ? (
+              openId === visit.id ? (
+                <div className="mt-2 flex max-w-full flex-wrap items-end gap-2">
+                  <label htmlFor={`${uid}-${visit.id}-date`} className="text-xs font-bold text-navy-900">التاريخ
+                    <input id={`${uid}-${visit.id}-date`} type="date" dir="ltr" value={date} disabled={busy} onChange={event => setDate(event.target.value)} className={field} />
+                  </label>
+                  <label htmlFor={`${uid}-${visit.id}-time`} className="text-xs font-bold text-navy-900">الوقت
+                    <input id={`${uid}-${visit.id}-time`} type="time" dir="ltr" value={time} disabled={busy} onChange={event => setTime(event.target.value)} className={field} />
+                  </label>
+                  <button type="button" disabled={busy} onClick={() => void book(visit)} className="min-h-11 rounded-xl bg-navy-900 px-4 text-xs font-bold text-white disabled:opacity-50">احجز الجلسة</button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => { setOpenId(visit.id); setMessage(null); }} className="mt-2 min-h-11 rounded-xl border border-navy-200 px-3 text-xs font-bold text-navy-800">حدّد موعد الجلسة</button>
+              )
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {message ? <p role={message.ok ? "status" : "alert"} className={`mt-2 text-sm ${message.ok ? "text-emerald-700" : "text-red-700"}`}>{message.text}</p> : null}
+    </section>
+  );
+}
