@@ -4242,9 +4242,15 @@ const APPOINTMENT_SELECT = `
 
 export async function listAppointmentsByDate(date: string): Promise<Appointment[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<AppointmentRow>(
-    `${APPOINTMENT_SELECT} WHERE a.scheduled_date = $1 ORDER BY a.scheduled_time`,
-    [date],
+  return listAppointmentsByDateWith(getPool(), date, null);
+}
+
+/** One day's appointments in the caller's snapshot (canonical, M2 slice 15). A clinician
+ * party keeps the appointments assigned to it (the appointment scope `own`). */
+export async function listAppointmentsByDateWith(q: Pick<DbClient, "query">, date: string, doctorPartyId: number | null): Promise<Appointment[]> {
+  const { rows } = await q.query<AppointmentRow>(
+    `${APPOINTMENT_SELECT} WHERE a.scheduled_date = $1 AND ($2::int IS NULL OR a.doctor_id = $2::int) ORDER BY a.scheduled_time`,
+    [date, doctorPartyId],
   );
   return rows.map(toAppointment);
 }
@@ -4258,7 +4264,12 @@ export async function listAppointmentsByDate(date: string): Promise<Appointment[
 export async function labWorkForPatients(patientIds: readonly number[]): Promise<PatientLabWork[]> {
   if (patientIds.length === 0) return [];
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return labWorkForPatientsWith(getPool(), patientIds);
+}
+
+export async function labWorkForPatientsWith(q: Pick<DbClient, "query">, patientIds: readonly number[]): Promise<PatientLabWork[]> {
+  if (patientIds.length === 0) return [];
+  const { rows } = await q.query<{
     id: number; patient_id: number; work_type: string; lab_name: string; status: string; due_date: string;
   }>(
     `SELECT id, patient_id, work_type, lab_name, status, to_char(due_date, 'YYYY-MM-DD') AS due_date

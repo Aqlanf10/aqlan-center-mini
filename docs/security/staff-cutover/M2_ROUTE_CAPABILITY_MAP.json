@@ -67,8 +67,16 @@
   "need": [],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": "Rows filtered by appointmentScope (own = linked clinician)."
+  "status": "canonical-done",
+  "note": "M2 slice 15: record read read:appointments.day in one owning snapshot; X-Clinic-Time-Zone kept; the canonical response is { appointments, projection }.",
+  "projection": {
+   "legacy": "every admitted role reads the whole day; a doctor without canViewAllAppointments reads its own, its patients' and unassigned appointments; lab readiness for every row.",
+   "groups": {
+    "identity": "the appointment as the schedule shows it — every actor admitted to the day",
+    "operational": "lab readiness (has the work arrived; no cost or price) — a clinical grant or patients.operational-summary.view"
+   },
+   "rows": "appointment scope all: every appointment of the day; own: the appointments assigned to the clinician party (no unassigned ones, no other doctors' appointments of its patients)"
+  }
  },
  {
   "route": "/api/appointments",
@@ -192,8 +200,15 @@
   "need": [],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": "Own clinician appointments; requires a validated clinician link."
+  "status": "canonical-done",
+  "note": "M2 slice 15: record read read:appointments.mine; the actor's own validated clinician party only, never a client-selected doctor; the file link only when the patient is inside the actor's current patient scope.",
+  "projection": {
+   "legacy": "doctor or admin role; partyId from the session user; 403 when any listed patient is not accessible.",
+   "groups": {
+    "identity": "the clinician's own appointments (time, patient name, duration, status, referral flag)"
+   },
+   "fields": "patientHref = the patient inside the current patient scope, else null (never an error)"
+  }
  },
  {
   "route": "/api/audit",

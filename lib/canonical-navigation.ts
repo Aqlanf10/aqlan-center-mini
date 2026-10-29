@@ -27,6 +27,7 @@ export interface CanonicalRecordScopes {
 }
 export const CANONICAL_PAGES: readonly CanonicalPage[] = Object.freeze([
  { href: "/visits", label: "قائمة اليوم", anyOf: [], record: "patient", exact: true, description: "المنتظرون والكراسي وتسجيل الوصول لمرضى نطاقك اليوم." },
+ { href: "/appointments", label: "المواعيد", anyOf: [], record: "appointment", exact: true, description: "مواعيد اليوم ضمن نطاق مواعيدك، وجاهزية أعمال المختبر، وجدولك الشخصي." },
  { href: "/waiting-list", label: "قائمة الانتظار", anyOf: [], record: "appointment", exact: true, description: "من لم يجد موعدًا: المكالمات وتفضيلات الموعد والإغلاق ضمن مواعيد نطاقك." },
  { href: "/patients", label: "المرضى", anyOf: [], record: "patient", exact: true, description: "البحث عن المرضى وتصفّح قائمتهم ضمن نطاق مرضاك المسموح." },
  { href: "/patients/[id]", label: "ملف المريض", anyOf: [], record: "patient", pattern: /^\/patients\/[1-9][0-9]{0,9}$/, description: "ملف مريضٍ ضمن نطاق مرضاك." },

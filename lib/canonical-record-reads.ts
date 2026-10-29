@@ -35,6 +35,10 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   /** GET /api/waiting-list and /api/waiting-list/[id]: entries inside the actor's
    * appointment scope (M2 slice 14). */
   "read:waiting-list": Object.freeze({ record: "appointment", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/appointments?date=: one day's appointments inside the appointment scope (M2 slice 15). */
+  "read:appointments.day": Object.freeze({ record: "appointment", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/appointments/mine: the actor's own clinician schedule (M2 slice 15). */
+  "read:appointments.mine": Object.freeze({ record: "appointment", need: Object.freeze([]), anyOf: Object.freeze([]) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

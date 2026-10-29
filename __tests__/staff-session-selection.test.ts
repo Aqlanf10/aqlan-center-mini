@@ -51,7 +51,7 @@ describe("capability presentation", () => {
  it("navigation is a projection of current grants over accepted canonical pages only", () => {
   expect(canonicalPagesFor([], false)).toEqual([]);
   expect(canonicalPagesFor(["staff.view"], false).map(p => p.href)).toEqual(["/staff-access"]);
-  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/waiting-list", "/patients", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
+  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/appointments", "/waiting-list", "/patients", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
   expect(canonicalPagesFor(["inventory.custody.view"], false).map(p => p.href)).toEqual(["/inventory/custody"]);
   expect(isCanonicalPage("/staff-access")).toBe(true);
   expect(isCanonicalPage("/patients")).toBe(true);
@@ -78,8 +78,8 @@ describe("capability presentation", () => {
   expect(canonicalPageAllowed(file, ["clinical.plans.view"], false, { patientScope: "none" })).toBe(false);
   expect(canonicalPageAllowed(file, [], true)).toBe(true);
   expect(canonicalPagesFor(["staff.view"], false, { patientScope: "all" }).map(p => p.href)).toEqual(["/visits", "/patients", "/staff-access"]);
-  // The appointment scope opens the waiting list, never the patient list.
-  expect(canonicalPagesFor([], false, { appointmentScope: "all" }).map(p => p.href)).toEqual(["/waiting-list"]);
+  // The appointment scope opens the appointments and the waiting list, never the patient list.
+  expect(canonicalPagesFor([], false, { appointmentScope: "all" }).map(p => p.href)).toEqual(["/appointments", "/waiting-list"]);
  });
  it("a nested page never inherits its parent's grant", () => {
   expect(canonicalPageFor("/inventory/procurement/operations")?.anyOf).toEqual(["inventory.orders.view"]);

@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "7a21b4bf3c084fcc14c8370f182ded5741930826450885eabb642c31a960fdb6",
+  "sourceDigest": "dd21caba25ebabcf216429c5b60cf93fb9f5352560474554e53ef60b8c696203",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -321,6 +321,7 @@
     "app/api/waiting-list/route.ts",
     "app/api/webhooks/sms/route.ts",
     "app/api/webhooks/whatsapp/route.ts",
+    "app/appointments/layout.tsx",
     "app/appointments/page.tsx",
     "app/book/layout.tsx",
     "app/book/page.tsx",
@@ -547,11 +548,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 15
+          "line": 32
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 39
         }
       ]
     },
@@ -564,11 +565,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 44
+          "line": 59
         },
         {
           "symbol": "requireSession",
-          "line": 77
+          "line": 92
         },
         {
           "symbol": "findUserByUsername",
@@ -576,11 +577,11 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 56
+          "line": 71
         },
         {
           "symbol": "findUserByUsername",
-          "line": 99
+          "line": 114
         }
       ]
     },
@@ -4480,6 +4481,10 @@
   ],
   "layouts": [
     {
+      "file": "app/appointments/layout.tsx",
+      "directHelperEvidence": []
+    },
+    {
       "file": "app/book/layout.tsx",
       "directHelperEvidence": []
     },
@@ -4659,11 +4664,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 44
+          "line": 59
         },
         {
           "symbol": "requireSession",
-          "line": 77
+          "line": 92
         },
         {
           "symbol": "findUserByUsername",
@@ -4671,11 +4676,11 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 56
+          "line": 71
         },
         {
           "symbol": "findUserByUsername",
-          "line": 99
+          "line": 114
         }
       ]
     },
@@ -4699,11 +4704,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 44
+          "line": 59
         },
         {
           "symbol": "requireSession",
-          "line": 77
+          "line": 92
         },
         {
           "symbol": "findUserByUsername",
@@ -4711,11 +4716,11 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 56
+          "line": 71
         },
         {
           "symbol": "findUserByUsername",
-          "line": 99
+          "line": 114
         }
       ]
     },
@@ -4848,11 +4853,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 15
+          "line": 32
         },
         {
           "symbol": "requireSession",
-          "line": 22
+          "line": 39
         }
       ]
     },

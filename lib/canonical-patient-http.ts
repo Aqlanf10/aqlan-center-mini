@@ -4,6 +4,7 @@ import { CanonicalPatientReadRefusal } from "./canonical-patient-reads";
 import { CanonicalPatientWriteRefusal } from "./canonical-patient-writes";
 import { CanonicalVisitRefusal } from "./canonical-visits";
 import { CanonicalWaitingRefusal } from "./canonical-waiting-list";
+import { CanonicalAppointmentRefusal } from "./canonical-appointments";
 import { staffAdmissionRefusal } from "./staff-capability-editor";
 import { selectRequestStaffEnvelope } from "./staff-session-admission";
 import type { VerifiedDurableSession } from "./staff-durable-session";
@@ -52,7 +53,7 @@ export function canonicalVisitFailure(error: unknown, fallback: string): NextRes
 /** Canonical waiting-list routes (M2 slice 14). Scope refusals read as no access to the
  * schedule, not to patients. */
 export function canonicalWaitingFailure(error: unknown, fallback: string): NextResponse {
-  if (error instanceof CanonicalWaitingRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+  if (error instanceof CanonicalWaitingRefusal || error instanceof CanonicalAppointmentRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
   const refusal = staffAdmissionRefusal(error);
   if (refusal) {
     const message = /RECORD_SCOPE_DENIED$/.test(refusal.code) ? "لا تملك صلاحية على مواعيد المرضى." : refusal.message;

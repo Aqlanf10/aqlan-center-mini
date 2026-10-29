@@ -10,6 +10,9 @@ import type { ReturnBookingSource } from "@/lib/return-booking-context";
 import { bookAppointment } from "@/lib/book-appointment";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { readCanonicalAppointmentDay } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +44,18 @@ async function withLabReadiness(list: Appointment[], date: string): Promise<(App
 }
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    // Canonical identity (M2 slice 15): one day inside the appointment scope; lab
+    // readiness with the operational summary.
+    try {
+      return NextResponse.json(await readCanonicalAppointmentDay(selected.handle, new URL(request.url).searchParams.get("date") ?? ""),
+        { headers: { ...NO_STORE, "X-Clinic-Time-Zone": CLINIC_TIME_ZONE } });
+    } catch (error) {
+      return canonicalWaitingFailure(error, "تعذّر تحميل مواعيد اليوم.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const date = new URL(request.url).searchParams.get("date") ?? "";

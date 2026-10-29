@@ -91,7 +91,9 @@ it("browser: reception opens the waiting list from the shell and records a call;
   expect(wide).toEqual([]);
   expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path) && path !== "/api/waiting-list" && path !== `/api/waiting-list/${entryOther}`)).toEqual([]);
   expect(failures).toEqual([]);
-  expect(await page.locator('a[href="/appointments"]').count()).toBe(0);
+  // The page itself does not send canonical sessions to the booking screen (the shell's
+  // own «المواعيد» entry is the read-only canonical day view).
+  expect(await page.locator('main a[href="/appointments"]').count()).toBe(0);
   await context.close();
   const { rows } = await journey.db.query("SELECT action, actor FROM audit_log WHERE entity='waiting_list' AND entity_id=$1::text ORDER BY id", [entryOther]);
   expect(rows).toEqual([{ action: "waiting_list.contact", actor: "canon-wl-reception" }]);

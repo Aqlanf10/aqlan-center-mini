@@ -34,12 +34,12 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 318 |
+| existing | 316 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 26 |
+| canonical-done | 28 |
 
 | Record scope | Routes |
 |---|---|
@@ -331,6 +331,19 @@ Step 2 of the order (appointments, recall, waiting list). A scheduling record, s
 - **Screen:** `/waiting-list` is registered for an account with an appointment scope. It reuses the existing page, which only calls these routes. Write controls follow `canEdit`; the appointments screen is not linked for canonical sessions.
 - **Screen fix:** the row's action buttons kept their intrinsic width (`shrink-0`) and pushed «إغلاق» off a 390px screen; they now wrap (`max-w-full`), for legacy sessions too.
 - **Tests:** PG `waiting-list-canonical` (7): add with atomic audit, duplicate need, inactive doctor and unknown service, own scope (outside equals missing, own party only), appointment scope rather than patient scope, contact → preferences → cancel with audit, own-scope moves outside equal missing, book/booked refusals, audit rollback, revocation. Legacy waiting-list PG files (6, 29 tests) and HTTP files (7) unchanged and passing. Built journey `canonical-waiting-list-journey` (2): HTTP scope and refusals, mobile browser call recording without horizontal scroll, viewer without write controls.
+
+### Slice 15 — appointment day list (`GET /api/appointments?date=`) and personal schedule (`GET /api/appointments/mine`)
+Read only. Record reads `read:appointments.day` and `read:appointments.mine`, one owning snapshot each (`listAppointmentsByDateWith`, `labWorkForPatientsWith`, `readDoctorDailyScheduleWith`).
+
+| Group | Contents | Shown when |
+|---|---|---|
+| identity | the appointment as the schedule shows it (patient name and phone, time, service, doctor, status, lifecycle stamps, booking note) | every actor admitted to the day |
+| operational | lab readiness («has the work arrived?», no cost or price), computed after the row filter | a clinical grant or `patients.operational-summary.view` |
+
+- **Rows:** appointment scope `all` lists the whole day; `own` lists the appointments assigned to the actor's clinician party, the meaning it has in slice 2. The legacy doctor view also listed unassigned appointments and other doctors' appointments of its patients; the canonical `own` scope does not. A patient scope alone does not open the schedule.
+- **Personal schedule:** the actor's own validated clinician party only (`clinician_link_required`, 403 otherwise), never a client-selected doctor. The file link is offered only when the patient is inside the actor's current patient scope; otherwise it is `null`, not an error.
+- **Screen:** `/appointments` («المواعيد») is registered for an account with an appointment scope: a read-only day view (previous/next day, lab readiness chips), with the existing «جدول مواعيدي» card (it calls only `/api/appointments/mine`) for an `own`-scope clinician. A route layout (`app/appointments/layout.tsx`) renders the canonical view for a canonical session, so the legacy page is never mounted for it; the legacy page itself is unchanged. Booking, rescheduling and cancelling are the next slices.
+- **Tests:** PG `appointments-canonical-day` (5): all versus own rows, lab readiness only with the summary, patient scope alone refused, invalid dates, the personal schedule and its file link by patient scope, no clinician link refused. Built journey `canonical-appointments-journey` (3).
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
