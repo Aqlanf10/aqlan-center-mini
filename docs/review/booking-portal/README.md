@@ -36,7 +36,7 @@ Created a fresh local Docker container `booking-portal-pg18`, labelled `purpose=
 
 ## Release gate
 
-Draft PR: [#492](https://github.com/Aqlanf10/aqlan-center-mini/pull/492). Not ready for release. Complete hosted CI, review and a Staging review are required. No Staging target has yet been identified or tested. PRs #490/#491 and the active identity branch are outside this branch.
+Draft PR: [#492](https://github.com/Aqlanf10/aqlan-center-mini/pull/492). Not ready for release. Complete hosted CI, review and a Staging review are required. Railway metadata identifies `staging-web` in the project's `staging` environment, with two pre-existing staged changes. This branch has not been deployed there; synthetic data provenance and coordination of those changes remain pending. PRs #490/#491 and the active identity branch are outside this branch.
 
 ## Implemented behavior
 
@@ -52,6 +52,8 @@ Draft PR: [#492](https://github.com/Aqlanf10/aqlan-center-mini/pull/492). Not re
 ## Database and concurrency review
 
 `0090_booking_request_preferences.sql` adds three columns and one partial unique index only. Its runtime SQL is byte-identical and checksum registered. The schema contract and reviewed migration inventories include exactly this addition; no guard was disabled. No historical keys are guessed and no financial records or links are rewritten.
+
+The source-only preflight disclosure catalog is regenerated on the isolated PostgreSQL 18 fixture. Its exact delta is three booking-request column identities, the `booking_requests_preferences_not_null` constraint identity and its column/definition text hashes. No existing identity is removed and no internal-trigger disclosure is added. The separate schema-fingerprint tests retain their private-template canary and fail-closed checks.
 
 Reception holds short SHARE locks on settings and existing HR/doctor availability source tables through its write, including inserts of leave/schedules/blocks. Inferred case selection also guards against a concurrently inserted second case. These locks favor a correct decision; Staging must assess contention with real administrative edits. Existing appointments are not retroactively moved when a setting or schedule changes. Ordinary PostgreSQL DDL requires a reviewed deployment window.
 
