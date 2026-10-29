@@ -122,7 +122,7 @@
   "anyOf": [],
   "scope": "appointment",
   "status": "existing",
-  "note": "Capacity override additionally requires appointments.override-capacity.",
+  "note": "M2 slice 17: arrive, reminded, cancel, no_show, close_done and close_no_show are canonical (appointments.edit plus the branch capability; the appointment row locked then checked against the appointment scope, outside = missing 404; domain writers and status log on the admitted transaction; appointment.update audit atomic; the canonical response carries waiting: null). M2 slice 18: reschedule is canonical through the same cross-day capacity engine on the admitted transaction (reason required; own scope keeps its own party; reschedule and override audit atomic). Capacity override additionally requires appointments.override-capacity.",
   "branches": {
    "discriminator": "action",
    "values": {

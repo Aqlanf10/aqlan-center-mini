@@ -13,8 +13,10 @@ import type { LabReadinessItem } from "@/lib/lab-readiness";
  *
  * GET /api/appointments?date= يعيد مواعيد اليوم ضمن نطاق مواعيدك (`all` كلها، و`own` المسندة
  * إليك)، وجاهزية أعمال المختبر لمن يملك الملخص التشغيلي. والحجز (POST /api/appointments) يظهر
- * لمن يملك appointments.create ويمرّ بمحرّك السعة نفسه؛ التعديل والإلغاء في شرائحهما. لا يُستدعى
- * هنا أي مسارٍ قديم.
+ * لمن يملك appointments.create ويمرّ بمحرّك السعة نفسه. وإجراءات الموعد المحجوز (PATCH
+ * /api/appointments/[id], slice 17) تحت appointments.edit: «وصل» بـvisits.manage، والإلغاء وعدم
+ * الحضور بـappointments.cancel، والنقل (slice 18) عبر محرّك السعة نفسه بسببٍ إلزامي. لا يُستدعى هنا
+ * أي مسارٍ قديم.
  */
 interface DayView {
   appointments: (Appointment & { labReadiness?: LabReadinessItem[] })[];
@@ -48,6 +50,9 @@ export function CanonicalAppointmentsDay() {
   const capabilities = new Set(session?.capabilities ?? []);
   const canBook = session?.isOwner === true || capabilities.has("appointments.create");
   const canOverride = session?.isOwner === true || capabilities.has("appointments.override-capacity");
+  const owner = session?.isOwner === true;
+  const canEdit = owner || capabilities.has("appointments.edit");
+  const moves = { arrive: canEdit && (owner || capabilities.has("visits.manage")), close: canEdit && (owner || capabilities.has("appointments.cancel")), reschedule: canEdit, override: canEdit && canOverride };
   const appointments = view?.appointments ?? [];
   const active = appointments.filter(appointment => appointment.status !== "cancelled");
   return (
@@ -88,14 +93,123 @@ export function CanonicalAppointmentsDay() {
                       ))}
                     </ul>
                   ) : null}
+                  {appointment.status === "booked" && (moves.arrive || moves.close || moves.reschedule)
+                    ? <AppointmentActions appointment={appointment} moves={moves} onMoved={() => setVersion(current => current + 1)} />
+                    : null}
                 </li>
               ))}
             </ul>
           )}
         </>
       ) : error ? null : <p role="status" className="text-sm text-slate-600">جارٍ تحميل المواعيد…</p>}
-      <p className="text-xs text-slate-600">تعديل الموعد وإلغاؤه وحجز العودة تُنقل إلى الهوية الموحّدة تباعًا.</p>
+      <p className="text-xs text-slate-600">حذف الموعد وحجز العودة يُنقلان إلى الهوية الموحّدة تباعًا.</p>
     </section>
+  );
+}
+
+/** إجراءات موعدٍ محجوز: كل ردٍّ مرفوض يُعرض نصُّه، ولا يُعتبر الإجراء تامًّا قبل ردٍّ ناجح. */
+type Moves = { arrive: boolean; close: boolean; reschedule: boolean; override: boolean };
+
+function AppointmentActions({ appointment, moves, onMoved }: { appointment: Appointment; moves: Moves; onMoved: () => void }) {
+  const uid = useId();
+  const [cancelling, setCancelling] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  async function move(action: "arrive" | "cancel" | "no_show") {
+    setBusy(true); setMessage(null);
+    try {
+      const response = await fetch(`/api/appointments/${appointment.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(action === "cancel" ? { action, reason: reason.trim() || null } : { action }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) { setMessage(payload?.message ?? "تعذّر تنفيذ الإجراء."); return; }
+      setCancelling(false); setReason("");
+      onMoved();
+    } catch { setMessage("تعذّر الاتصال بالخادم. حدّث القائمة قبل إعادة المحاولة."); }
+    finally { setBusy(false); }
+  }
+  const button = "min-h-11 rounded-xl border px-3 text-xs font-bold disabled:opacity-50";
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="flex max-w-full flex-wrap gap-2">
+        {moves.arrive ? <button type="button" disabled={busy} onClick={() => void move("arrive")} className={`${button} border-emerald-300 text-emerald-800`}>وصل</button> : null}
+        {moves.close ? <button type="button" disabled={busy} onClick={() => void move("no_show")} className={`${button} border-slate-300 text-navy-800`}>لم يحضر</button> : null}
+        {moves.close ? <button type="button" disabled={busy} aria-expanded={cancelling} onClick={() => { setCancelling(current => !current); setMoving(false); }} className={`${button} border-red-200 text-red-800`}>إلغاء الموعد</button> : null}
+        {moves.reschedule ? <button type="button" disabled={busy} aria-expanded={moving} onClick={() => { setMoving(current => !current); setCancelling(false); }} className={`${button} border-navy-200 text-navy-800`}>نقل الموعد</button> : null}
+      </div>
+      {moving ? <RescheduleForm appointment={appointment} canOverride={moves.override} onMoved={() => { setMoving(false); onMoved(); }} /> : null}
+      {cancelling ? (
+        <div className="flex max-w-full flex-wrap items-end gap-2">
+          <label htmlFor={`${uid}-reason`} className="text-xs font-bold text-navy-900">سبب الإلغاء
+            <input id={`${uid}-reason`} value={reason} disabled={busy} onChange={event => setReason(event.target.value)} className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm" />
+          </label>
+          <button type="button" disabled={busy} onClick={() => void move("cancel")} className={`${button} border-red-300 bg-red-50 text-red-800`}>تأكيد الإلغاء</button>
+        </div>
+      ) : null}
+      {message ? <p role="alert" className="text-xs text-red-700">{message}</p> : null}
+    </div>
+  );
+}
+
+/** نقلٌ عبر محرّك السعة: السبب إلزامي، والتعارض يُعرض بأسبابه، والتجاوز بسببٍ لمن يملك منحته. */
+function RescheduleForm({ appointment, canOverride, onMoved }: { appointment: Appointment; canOverride: boolean; onMoved: () => void }) {
+  const uid = useId();
+  const [date, setDate] = useState(appointment.scheduledDate);
+  const [time, setTime] = useState(appointment.scheduledTime.slice(0, 5));
+  const [reason, setReason] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [conflict, setConflict] = useState<Conflict | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit(confirmationToken?: string) {
+    setBusy(true); setMessage(null);
+    try {
+      const response = await fetch(`/api/appointments/${appointment.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reschedule", date, time, reason: reason.trim(), overrideReason: overrideReason.trim() || null, nearbyAppointmentConfirmation: confirmationToken ?? null }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (response.status === 409 && payload?.conflict && Array.isArray(payload.conflict.reasons)) { setConflict(payload.conflict as Conflict); return; }
+      if (!response.ok) { setMessage(payload?.message ?? "تعذّر نقل الموعد."); return; }
+      onMoved();
+    } catch { setMessage("تعذّر الاتصال بالخادم. لم يُعتبر النقل تامًّا؛ حدّث القائمة."); }
+    finally { setBusy(false); }
+  }
+  const field = "mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm";
+  return (
+    <div className="max-w-full rounded-xl border border-navy-200 p-3" data-testid="reschedule-form">
+      <div className="grid gap-2 sm:grid-cols-3">
+        <label htmlFor={`${uid}-date`} className="text-xs font-bold text-navy-900">التاريخ الجديد
+          <input id={`${uid}-date`} type="date" dir="ltr" value={date} disabled={busy} onChange={event => setDate(event.target.value)} className={field} />
+        </label>
+        <label htmlFor={`${uid}-time`} className="text-xs font-bold text-navy-900">الوقت الجديد
+          <input id={`${uid}-time`} type="time" dir="ltr" value={time} disabled={busy} onChange={event => setTime(event.target.value)} className={field} />
+        </label>
+        <label htmlFor={`${uid}-reason`} className="text-xs font-bold text-navy-900">سبب النقل
+          <input id={`${uid}-reason`} value={reason} disabled={busy} onChange={event => setReason(event.target.value)} className={field} />
+        </label>
+      </div>
+      {conflict ? (
+        <div role="alert" className="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="reschedule-conflict">
+          <p className="font-bold">{conflict.message}</p>
+          {conflict.reasons.length ? <ul className="mt-1 list-inside list-disc text-xs">{conflict.reasons.map(item => <li key={item}>{item}</li>)}</ul> : null}
+          {conflict.suggestionMessage ? <p className="mt-1 text-xs">{conflict.suggestionMessage}</p> : null}
+          {conflict.kind === "nearby_patient_appointments" && conflict.confirmationToken ? (
+            <button type="button" disabled={busy} onClick={() => void submit(conflict.confirmationToken)} className="mt-2 min-h-11 rounded-xl border border-amber-400 bg-white px-3 text-xs font-bold">تأكيد النقل رغم ذلك</button>
+          ) : null}
+          {conflict.canOverride && canOverride ? (
+            <label htmlFor={`${uid}-override`} className="mt-2 block text-xs font-bold">سبب تجاوز السعة (يُسجَّل في التدقيق)
+              <input id={`${uid}-override`} value={overrideReason} disabled={busy} onChange={event => setOverrideReason(event.target.value)} className={field} />
+            </label>
+          ) : <p className="mt-1 text-xs">{conflict.overrideHint}</p>}
+        </div>
+      ) : null}
+      <button type="button" disabled={busy || reason.trim().length < 3} onClick={() => void submit()} className="mt-2 min-h-11 rounded-xl bg-navy-900 px-4 text-xs font-bold text-white disabled:opacity-50">تأكيد النقل</button>
+      {message ? <p role="alert" className="mt-1 text-xs text-red-700">{message}</p> : null}
+    </div>
   );
 }
 

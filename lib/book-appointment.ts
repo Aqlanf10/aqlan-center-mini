@@ -17,7 +17,7 @@ import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./or
 import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor } from "./appointment-doctor";
 import type { Role } from "./roles";
 import {
-  getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
+  getAppointment, getAppointmentWith, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
   writeAppointmentAcrossDays, writeAppointmentInDay, type AuditInput, type DbClient,
 } from "./db";
 import {
@@ -590,6 +590,10 @@ export type RescheduleResult =
  */
 export async function rescheduleAppointment(
   input: RescheduleInput, actor: BookingActor,
+  /** The canonical path (M2 slice 18): its admitted transaction, and an atomic audit
+   * writer on it for the reschedule and capacity-override rows. Without them, as
+   * before: the engine owns its transaction and both rows are written after commit. */
+  options: { client?: DbClient; audit?: (input: AuditInput) => Promise<void> } = {},
 ): Promise<RescheduleResult> {
   const id = Number(input.appointmentId);
   if (!Number.isInteger(id) || id <= 0) {
@@ -607,7 +611,7 @@ export async function rescheduleAppointment(
     return { ok: false, status: 400, message: "اكتب سبب نقل الموعد." };
   }
 
-  const current = await getAppointment(id);
+  const current = options.client ? await getAppointmentWith(options.client, id) : await getAppointment(id);
   if (!current) return { ok: false, status: 404, message: "الموعد غير موجود." };
   if (current.status !== "booked") {
     return {
@@ -667,6 +671,7 @@ export async function rescheduleAppointment(
     { verdict: null, overridden: false, doctorRejected: false, returnRejected: null };
 
   const result = await writeAppointmentAcrossDays({
+    client: options.client,
     fromDate: current.scheduledDate,
     toDate: input.date,
     judge: async (targetDay, client) => {
@@ -753,7 +758,7 @@ export async function rescheduleAppointment(
   }
 
   const verdict = state.verdict;
-  await recordAudit({
+  const rescheduled: AuditInput = {
     action: "appointment.reschedule",
     entity: "appointment",
     entityId: String(id),
@@ -771,7 +776,9 @@ export async function rescheduleAppointment(
         "الطبيب الحالي": doctorId, "سياق المسؤولية": input.returnBookingSource } : {}),
       القناة: actor.channel,
     },
-  }).catch(() => {});
+  };
+  if (options.audit) await options.audit(rescheduled);
+  else await recordAudit(rescheduled).catch(() => {});
 
   if (state.overridden && verdict) {
     await recordCapacityOverride({
@@ -779,7 +786,7 @@ export async function rescheduleAppointment(
       reason: overrideReason, serviceName: service?.nameAr,
       actor: actor.username, actorRole: (actor.role ?? null) as string | null,
       channel: actor.channel,
-    });
+    }, options.audit);
   }
 
   return {

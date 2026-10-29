@@ -87,7 +87,11 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
       "lib/canonical-appointments.ts",
       "lib/waiting-list-booking.ts",
     ]);
-    expect(callers("rescheduleAppointment")).toEqual(["app/api/appointments/[id]/route.ts"]);
+    expect(callers("rescheduleAppointment")).toEqual([
+      "app/api/appointments/[id]/route.ts",
+      // The canonical reschedule (M2 slice 18) is the same door on the admitted transaction.
+      "lib/canonical-appointments.ts",
+    ]);
   });
 
   it("إدراجات appointments الخام: في lib/db.ts وحده، وفي كتّاب اليوم المقفل المعروفين فقط", () => {

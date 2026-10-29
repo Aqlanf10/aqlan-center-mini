@@ -10,6 +10,9 @@ import { rescheduleAppointment } from "@/lib/book-appointment";
 import { findUserByUsername } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { CanonicalAppointmentRefusal, CanonicalBookingConflict, commandCanonicalAppointmentMove, commandCanonicalReschedule, parseCanonicalAppointmentMove, parseCanonicalReschedule } from "@/lib/canonical-appointments";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +50,29 @@ async function candidatesForFreedSlot(
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  /* M2 slices 17–18: a canonical envelope moves or reschedules the appointment in one
+     admitted `appointments.edit` transaction; it never falls back to the legacy session. */
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: canonicalId } = await context.params;
+    let canonicalBody: unknown;
+    try { canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; return NextResponse.json({ code: "invalid_booking_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try {
+      if ((canonicalBody as Record<string, unknown> | null)?.action === "reschedule") {
+        const moved = await commandCanonicalReschedule(selected.handle, Number(canonicalId), parseCanonicalReschedule(canonicalBody));
+        return NextResponse.json({ ok: true, appointment: moved.appointment, warning: moved.warning }, { headers: NO_STORE });
+      }
+      return NextResponse.json(await commandCanonicalAppointmentMove(selected.handle, Number(canonicalId), parseCanonicalAppointmentMove(canonicalBody)), { headers: NO_STORE });
+    } catch (error) {
+      // The legacy route's shapes: a capacity conflict with its reasons; an engine code.
+      if (error instanceof CanonicalBookingConflict) return NextResponse.json({ message: error.conflict.message, conflict: error.conflict }, { status: 409, headers: NO_STORE });
+      if (error instanceof CanonicalAppointmentRefusal && error.engineCode) {
+        return NextResponse.json({ code: error.engineCode, message: error.message }, { status: error.status, headers: NO_STORE });
+      }
+      return canonicalWaitingFailure(error, "تعذّر تنفيذ الإجراء. أعد المحاولة.");
+    }
+  }
   /* الفاعل يُحمل إلى سجلّ الانتقالات: «مَن ألغى هذا الموعد» سؤالٌ يُسأل بعد أسبوع،
      ولا يجيبه سجلٌّ يقول «الاستقبال» عن ستّة أشخاص. */
   const session = await requireSession();

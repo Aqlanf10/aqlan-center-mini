@@ -1,6 +1,8 @@
 import "server-only";
-import { CLINIC_TIME_ZONE, getPool, insertAuditRow, labWorkForPatientsWith, listAppointmentsByDateWith, patientInDoctorScopeWith } from "./db";
-import { bookAppointment, type BookAppointmentInput, type BookingConflict } from "./book-appointment";
+import { CLINIC_TIME_ZONE, arriveAppointmentWith, getAppointmentWith, getPool, insertAuditRow, labWorkForPatientsWith, listAppointmentsByDateWith, patientInDoctorScopeWith, transitionAppointmentInTransaction } from "./db";
+import { reasonAcceptable, requiresReason } from "./appointment-lifecycle";
+import { STALE_MANUAL_REMINDER_MESSAGE, readManualReminderSnapshot, recordManualAppointmentReminder } from "./manual-appointment-reminder";
+import { bookAppointment, rescheduleAppointment, type BookAppointmentInput, type BookingConflict, type RescheduleInput } from "./book-appointment";
 import type { ReturnBookingSource } from "./return-booking-context";
 import { staffOperationAppointmentScope, staffOperationCapabilities, staffOperationIdentity, withStaffOperation } from "./staff-operation-runtime";
 import { PATIENT_CARE_CAPABILITIES } from "./canonical-patient-reads";
@@ -34,8 +36,9 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export class CanonicalAppointmentRefusal extends Error {
   constructor(
-    readonly code: "invalid_appointment_query" | "clinician_link_required" | "invalid_booking_input" | "patient_not_found" | "booking_doctor_not_allowed" | "booking_refused",
-    readonly status: 400 | 403 | 404,
+    readonly code: "invalid_appointment_query" | "clinician_link_required" | "invalid_booking_input" | "patient_not_found" | "booking_doctor_not_allowed" | "booking_refused"
+      | "appointment_not_found" | "appointment_move_conflict",
+    readonly status: 400 | 403 | 404 | 409,
     message: string,
     /** The engine's own refusal code (for example return_booking_context_required). */
     readonly engineCode?: string,
@@ -188,6 +191,171 @@ export async function commandCanonicalBooking(session: VerifiedDurableSession, i
       details: { التاريخ: result.appointment.scheduledDate, الوقت: result.appointment.scheduledTime, الطبيب: result.appointment.doctorId ?? "", التجاوز: result.overridden },
       actor: identity.username, actorRole: identity.role,
     });
+    return result;
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * M2 slice 17: appointment moves (PATCH /api/appointments/[id]): arrive, reminded,
+ * cancel, no_show, close_done, close_no_show.
+ *
+ * One admitted `appointments.edit` transaction (the route's requirement), plus each
+ * branch's own capability proved through the same handle: arrive and the past-day
+ * closes need `visits.manage`; cancel and no_show need `appointments.cancel`. The
+ * appointment row is locked first — the order every legacy appointment writer uses —
+ * then checked against the CURRENT appointment scope (`own`: assigned to the clinician
+ * party); a missing appointment and one outside the scope answer identically (404).
+ * The domain writers run on the same transaction (arriveAppointmentWith,
+ * transitionAppointmentInTransaction, the reminder writer) and keep their rules and
+ * status log; an audit row with the canonical actor commits with every move. Any
+ * refusal rolls back. Rescheduling is its own command below (slice 18); the freed-slot
+ * waiting-list suggestion is not canonical yet, and the response carries `waiting: null`.
+ * ------------------------------------------------------------------------- */
+const APPOINTMENT_MOVES = ["arrive", "reminded", "cancel", "no_show", "close_done", "close_no_show"] as const;
+type AppointmentMove = typeof APPOINTMENT_MOVES[number];
+export interface CanonicalAppointmentMoveInput { readonly action: AppointmentMove; readonly reason: string | null; readonly snapshot: unknown }
+
+export function parseCanonicalAppointmentMove(body: unknown): CanonicalAppointmentMoveInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "طلب غير صالح.");
+  const source = body as Record<string, unknown>;
+  if (typeof source.action !== "string" || !(APPOINTMENT_MOVES as readonly string[]).includes(source.action)) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "إجراء غير معروف.");
+  const reason = typeof source.reason === "string" ? source.reason.trim().slice(0, 300) || null : null;
+  return { action: source.action as AppointmentMove, reason, snapshot: source.snapshot };
+}
+
+const MOVE_NEEDS: Record<AppointmentMove, "visits.manage" | "appointments.cancel" | null> = {
+  arrive: "visits.manage", close_done: "visits.manage", close_no_show: "visits.manage",
+  cancel: "appointments.cancel", no_show: "appointments.cancel", reminded: null,
+};
+// A reminder records contact; the status stays as it was.
+const MOVE_STATUS: Partial<Record<AppointmentMove, string>> = {
+  arrive: "arrived", cancel: "cancelled", no_show: "no_show", close_done: "done", close_no_show: "no_show",
+};
+
+export async function commandCanonicalAppointmentMove(session: VerifiedDurableSession, id: number, move: CanonicalAppointmentMoveInput, pool = getPool()): Promise<{ ok: true; waiting: null }> {
+  if (!Number.isSafeInteger(id) || id <= 0) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "رقم الموعد غير صالح.");
+  return withStaffOperation(pool, session, "appointments.edit", async (client, handle) => {
+    const need = MOVE_NEEDS[move.action];
+    if (need && !(await staffOperationCapabilities(client, handle, "appointments.edit", [need])).has(need)) throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
+    const scope = await staffOperationAppointmentScope(client, handle, "appointments.edit");
+    if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+    const { rows: [appointment] } = await client.query<{ patient_id: number; doctor_id: number | null; status: string }>(
+      "SELECT patient_id, doctor_id, status FROM appointments WHERE id = $1 FOR UPDATE", [id]);
+    if (!appointment || (scope.kind === "own" && appointment.doctor_id !== scope.clinicianPartyId)) {
+      throw new CanonicalAppointmentRefusal("appointment_not_found", 404, "لا يوجد موعد بهذا الرقم ضمن مواعيدك.");
+    }
+    const identity = await staffOperationIdentity(client, handle, "appointments.edit");
+    const who = { actor: identity.username, actorRole: identity.role };
+    const conflict = (message: string): never => { throw new CanonicalAppointmentRefusal("appointment_move_conflict", 409, message); };
+    switch (move.action) {
+      case "arrive":
+        if (!await arriveAppointmentWith(client, id, who)) conflict("سُجّل وصوله بالفعل أو تغيّرت حالة الموعد.");
+        break;
+      case "reminded": {
+        const snapshot = readManualReminderSnapshot(move.snapshot);
+        if (!snapshot) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "بيانات التذكير المعروض غير صالحة. حدّث القائمة قبل التأكيد.");
+        if (!await recordManualAppointmentReminder(id, appointment.patient_id, snapshot, client)) conflict(STALE_MANUAL_REMINDER_MESSAGE);
+        break;
+      }
+      case "cancel":
+      case "no_show": {
+        const to = move.action === "cancel" ? "cancelled" : "no_show";
+        const reason = move.reason ?? (to === "cancelled" ? "أُلغي من شاشة اليوم" : null);
+        if (requiresReason(to) && !reasonAcceptable(reason)) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "اكتب سبب الإلغاء.");
+        const result = await transitionAppointmentInTransaction(client, id, to, { ...who, reason });
+        if (!result.ok) conflict("تغيّرت حالة الموعد — حدّث القائمة.");
+        break;
+      }
+      case "close_done":
+      case "close_no_show": {
+        const to = move.action === "close_done" ? "done" : "no_show";
+        if (requiresReason(to) && !reasonAcceptable(move.reason)) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "اكتب سبب الإلغاء.");
+        const result = await transitionAppointmentInTransaction(client, id, to, { ...who, reason: move.reason }, { pastBookingOnly: true });
+        if (!result.ok) conflict("الموعد لم يعد معلّقًا — حدّث القائمة.");
+        break;
+      }
+    }
+    await insertAuditRow(client, {
+      action: "appointment.update", entity: "appointment", entityId: id,
+      details: { الإجراء: move.action, من: appointment.status, إلى: MOVE_STATUS[move.action] ?? appointment.status, السبب: move.reason ?? "" },
+      actor: identity.username, actorRole: identity.role,
+    });
+    return { ok: true, waiting: null };
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * M2 slice 18: rescheduling (PATCH /api/appointments/[id], action "reschedule").
+ *
+ * One admitted `appointments.edit` transaction through THE SAME cross-day capacity
+ * engine (`rescheduleAppointment(..., { client, audit })` → `writeAppointmentAcrossDays`
+ * on the caller's client). Order: the appointment is read without a row lock, checked
+ * against the CURRENT appointment scope (`own`: assigned to the clinician party;
+ * missing and outside answer identically, 404); the engine then takes the sorted day
+ * locks and locks the row, and its UPDATE keeps the read status, date, time and doctor
+ * (`expectedDoctorId`), so a concurrent change between the read and the write is
+ * refused, never overwritten. `own` cannot move the appointment to another doctor; a
+ * responsibility transfer that would land on someone else rolls back. Overriding
+ * capacity needs `appointments.override-capacity`; the reschedule and override audit
+ * rows commit with the move. Every engine refusal rolls back and answers with the
+ * legacy route's status and code.
+ * ------------------------------------------------------------------------- */
+export type CanonicalRescheduleInput = Omit<RescheduleInput, "appointmentId">;
+
+/** The legacy route's body rules for "reschedule" (same bounds). */
+export function parseCanonicalReschedule(body: unknown): CanonicalRescheduleInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "طلب غير صالح.");
+  const source = body as Record<string, unknown>;
+  const optional = (key: string): number | null | undefined => source[key] === undefined ? undefined : (source[key] == null ? null : Number(source[key]));
+  return {
+    date: String(source.date ?? ""),
+    time: String(source.time ?? ""),
+    durationMinutes: source.durationMinutes == null ? null : Number(source.durationMinutes),
+    serviceId: optional("serviceId"),
+    doctorId: optional("doctorId"),
+    chairNo: optional("chairNo"),
+    nearbyAppointmentConfirmation: typeof source.nearbyAppointmentConfirmation === "string" ? source.nearbyAppointmentConfirmation.slice(0, 4096) : null,
+    transferToCurrentResponsibleDoctor: source.transferToCurrentResponsibleDoctor === true,
+    returnBookingSource: source.returnBookingSource as ReturnBookingSource | null | undefined,
+    returnBookingOrigin: source.returnBookingOrigin as ReturnBookingSource | null | undefined,
+    returnBookingFingerprint: typeof source.returnBookingFingerprint === "string" ? source.returnBookingFingerprint.slice(0, 128) : null,
+    reason: typeof source.reason === "string" ? source.reason.trim().slice(0, 300) : "",
+    overrideReason: typeof source.overrideReason === "string" ? source.overrideReason : null,
+  };
+}
+
+export async function commandCanonicalReschedule(session: VerifiedDurableSession, id: number, input: CanonicalRescheduleInput, pool = getPool()) {
+  if (!Number.isSafeInteger(id) || id <= 0) throw new CanonicalAppointmentRefusal("invalid_booking_input", 400, "رقم الموعد غير صالح.");
+  return withStaffOperation(pool, session, "appointments.edit", async (client, handle) => {
+    const scope = await staffOperationAppointmentScope(client, handle, "appointments.edit");
+    if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+    const clinician = scope.kind === "own" ? scope.clinicianPartyId : null;
+    // No row lock here: the engine takes the day locks first (legacy order), then the
+    // row; its guarded UPDATE keeps the doctor read here, so this scope check holds.
+    const current = await getAppointmentWith(client, id);
+    if (!current || (clinician !== null && current.doctorId !== clinician)) {
+      throw new CanonicalAppointmentRefusal("appointment_not_found", 404, "لا يوجد موعد بهذا الرقم ضمن مواعيدك.");
+    }
+    if (clinician !== null && input.doctorId != null && input.doctorId !== clinician) {
+      throw new CanonicalAppointmentRefusal("booking_doctor_not_allowed", 403, "تنقل مواعيدك على اسمك فقط.");
+    }
+    const identity = await staffOperationIdentity(client, handle, "appointments.edit");
+    const held = await staffOperationCapabilities(client, handle, "appointments.edit", ["appointments.override-capacity"]);
+    const audit = (row: Parameters<typeof insertAuditRow>[1]) => insertAuditRow(client, row);
+    // Role "canonical" is a display label the engine never matches: grants decide.
+    const result = await rescheduleAppointment({ ...input, appointmentId: id }, {
+      username: identity.username, userId: identity.userId, role: "canonical", doctorPartyId: null,
+      canOverrideCapacity: held.has("appointments.override-capacity"), channel: "ui",
+    }, { client, audit });
+    if (!result.ok) {
+      if (result.status === 409 && result.conflict) throw new CanonicalBookingConflict(result.conflict);
+      if (result.status === 404) throw new CanonicalAppointmentRefusal("appointment_not_found", 404, "لا يوجد موعد بهذا الرقم ضمن مواعيدك.");
+      if (result.status === 409) throw new CanonicalAppointmentRefusal("appointment_move_conflict", 409, result.message, result.code);
+      throw new CanonicalAppointmentRefusal("booking_refused", 400, result.message, result.code);
+    }
+    if (clinician !== null && result.appointment.doctorId !== clinician) {
+      throw new CanonicalAppointmentRefusal("booking_doctor_not_allowed", 403, "نقل مسؤولية الموعد إلى طبيبٍ آخر لمن يملك نطاق المواعيد كاملًا.");
+    }
     return result;
   });
 }
