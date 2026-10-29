@@ -152,9 +152,9 @@ It is **not** in the catalogue or in `OWNER_ONLY_OPERATIONS`. The owner-only lis
 | # | Status |
 |---|---|
 | H1 | done for the non-empty and identity-bearing refusals (no schema, no data). A hold-commit failure path is covered by the same transaction: any failure before COMMIT replays nothing. |
-| H2 | partial: entry selects canonical while held (no ready identity). Built-app login journey pending. |
-| H3 | done at the library boundary (`readLegacyStaffSchema` refuses while held); built-app legacy cookie journey pending. |
-| H4 | done for previously-ready targets (5.1); source cookie journey pending. |
+| H2 | done: built-app journey `canonical-restore-hold-journey` — password login during the replay (paused on the migration lock right after the hold commits) and after it, before any seal, answers 503 maintenance (Arabic, no cookie); the held target gains no table from any request. |
+| H3 | done at the library boundary and in the built app: a legacy cookie genuinely signed for the target (current credential version of a restored account) is refused on `/api/auth/me` and `/api/patients`, and a legacy writer (`POST /api/patients`) changes nothing, during and after the replay. |
+| H4 | done: previously-ready targets refused (5.1; built app: the source itself, its admitted session valid before and after the refused attempt); a valid canonical cookie from the source is refused by the restored target (401/503, no identity or data) and stays valid on the source. |
 | H5 | done for a new connection and a second restore attempt. |
 | H6 | done (5.5). |
 | H7 | done with the synthetic seal fixture (owner admitted, imported delegate grants inert). |
