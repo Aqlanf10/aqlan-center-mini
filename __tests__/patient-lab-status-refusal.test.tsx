@@ -211,6 +211,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("allows the expanded order actions to wrap within narrow cards", () => {
+  for (const order of originalOrders) {
+    const group = elements(card(order.id)).find((node) => node.type === "div"
+      && elements(node).some((child) => child.type === "button" && contents(child).trim() === "تصحيح الإرسالية")
+      && !elements(node).some((child) => child !== node && child.type === "div"));
+    expect(group).toBeDefined();
+    const classes = String(group!.props.className).split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(["flex-wrap", "min-w-0", "max-w-full"]));
+  }
+});
+
 describe.each(actions)("patient lab status refusal: $id to $status", (action) => {
   it.each([401, 403, 404, 409, 500])("shows a %s refusal without refreshing, changing rows or opening booking", async (status) => {
     write = async () => response(status, { message: `Synthetic refusal ${status}` });

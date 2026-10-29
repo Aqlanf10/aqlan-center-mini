@@ -707,7 +707,7 @@ export function PatientLabOrders({
                     ) : null}
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
                     {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button" onClick={() => setClinicalOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تصحيح الإرسالية</button>}
                     {session && ["admin", "doctor", "reception"].includes(session.role) && <button type="button"
                       onClick={() => setShadeOrder(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold">تعديل ألوان الأسنان</button>}
