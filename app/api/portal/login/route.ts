@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { portalLogin, portalLoginFailures, recordAudit } from "@/lib/db";
 import { consumeLoginAttemptFor } from "@/lib/loginLimit";
@@ -87,6 +87,7 @@ export async function POST(request: Request) {
     });
 
     const token = createPortalToken({
+      sessionId: randomUUID(),
       patientId: result.patient.id,
       patientNumber: result.patient.patientNumber,
       fullName: result.patient.fullName,

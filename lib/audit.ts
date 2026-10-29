@@ -82,7 +82,7 @@ export type AuditAction =
   | "lab_service.create" | "lab_service.update" | "lab_service.delete" | "lab_service.deactivate" | "lab_services.seed"
   | "lab_pricing.create" | "lab_pricing.update" | "lab_pricing.delete"
   | "lab.accounting.update"
-  | "portal.login" | "portal.confirm" | "portal.intake" | "portal.message"
+  | "portal.session_revoked" | "portal.login" | "portal.confirm" | "portal.intake" | "portal.message"
   | "intake.staff"
   | "display.delay_notice"
   | "display.announcement.create" | "display.announcement.update" | "display.announcement.delete"
@@ -294,6 +294,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "lab_order.clinical": "تصحيح بيانات إرسالية المعمل",
   "lab_order.shade": "تعديل ألوان إرسالية المعمل",
   "lab.accounting.update": "تعديل الربط المحاسبي لمختبر",
+  "portal.session_revoked": "إبطال جلسة بوابة المريض",
   "portal.login": "دخول مريض إلى البوابة",
   "portal.confirm": "تأكيد حضور موعد (بوابة)",
   "portal.intake": "استمارة صحية من البوابة",

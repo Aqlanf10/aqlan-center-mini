@@ -28,6 +28,7 @@ export { PORTAL_COOKIE_NAME as PORTAL_COOKIE } from "./sessionCookie";
 export const PORTAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface PortalPayload {
+  sessionId?: string;
   patientId: number;
   patientNumber: string;
   fullName: string;

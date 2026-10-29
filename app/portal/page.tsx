@@ -53,6 +53,7 @@ export default function PortalPage() {
   const [session, setSession] = useState<{ fullName: string; patientNumber: string } | null>(null);
   const [checking, setChecking] = useState(true);
   const [tab, setTab] = useState<Tab>("appointments");
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   const checkSession = useCallback(async () => {
     try {
@@ -90,12 +91,19 @@ export default function PortalPage() {
           <p className="text-xs text-slate-500">ملف رقم {session.patientNumber}</p>
         </div>
         <button
-          onClick={async () => { await fetch("/api/portal/logout", { method: "POST" }); setSession(null); }}
+          onClick={async () => {
+            try {
+              const response = await fetch("/api/portal/logout", { method: "POST" });
+              if (!response.ok) throw new Error("تعذّر تأكيد الخروج. أعد المحاولة.");
+              setLogoutError(null); setSession(null);
+            } catch { setLogoutError("تعذّر تأكيد الخروج. أعد المحاولة."); }
+          }}
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:border-danger-300 hover:text-danger-700">
           خروج
         </button>
       </header>
 
+      {logoutError && <p role="alert" className="mb-3 text-sm text-red-700">{logoutError}</p>}
       <nav className="mb-5 grid grid-cols-4 gap-2">
         {TABS.map((option) => (
           <button key={option.key} onClick={() => setTab(option.key)}
