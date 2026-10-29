@@ -331,7 +331,8 @@ export async function readCanonicalArrivalPanel(session: VerifiedDurableSession,
  * Groups: identity (basic fields, open visit) for every admitted actor; schedule (next
  * appointment); care (medical alert, last visit, plans, planned visits, counts, cases,
  * clinical alerts); balances (financial summary, plan money fields, overdue-installment
- * alerts). Rebooking is not offered until /api/planned-visits/[id]/rebook is canonical.
+ * alerts). Rebooking (slice 23) is offered for display by grant and scope; the rebook
+ * command re-proves it.
  * ------------------------------------------------------------------------- */
 const PLAN_MONEY_FIELDS = ["totalMinor", "doneMinor", "remainingMinor", "overdueMinor", "nextDueDate", "baseCurrency"] as const;
 const FINANCIAL_ALERTS = new Set(["overdue_installment"]);
@@ -360,8 +361,17 @@ export async function readCanonicalPatientWorkflow(session: VerifiedDurableSessi
         activePlans: summary.activePlans.map(plan => projection.balances ? plan
           : Object.fromEntries(Object.entries(plan).filter(([key]) => !(PLAN_MONEY_FIELDS as readonly string[]).includes(key)))),
         plannedVisits: summary.plannedVisits.map(visit => {
-          const { rebookHasReferral: _referral, rebookReferralReceiverId: _receiver, ...visible } = visit as typeof visit & { rebookHasReferral?: unknown; rebookReferralReceiverId?: unknown };
-          return { ...visible, canRebook: false, rebookBlockedReason: visible.canRebook ? "إعادة الحجز لم تُنقل بعد إلى الهوية الموحّدة." : visible.rebookBlockedReason };
+          const { rebookHasReferral: referral, rebookReferralReceiverId: receiver, ...visible } = visit as typeof visit & { rebookHasReferral?: boolean; rebookReferralReceiverId?: number | null };
+          // Display only (slice 23; the rebook command re-proves everything): the grant,
+          // an appointment scope, and for a referral appointment the whole scope or the
+          // receiving clinician. The internal referral hints never leave the server.
+          const clinician = scope.appointmentScope.kind === "own" ? scope.appointmentScope.clinicianPartyId : null;
+          const granted = scope.granted("appointments.create") && scope.appointmentScope.kind !== "none";
+          const referralAllowed = !referral || clinician === null || receiver === clinician;
+          if (!visible.canRebook) return visible;
+          if (!granted) return { ...visible, canRebook: false, rebookBlockedReason: "إعادة الحجز تحتاج صلاحية حجز المواعيد." };
+          if (!referralAllowed) return { ...visible, canRebook: false, rebookBlockedReason: "إعادة حجز الإحالة للطبيب المحال إليه." };
+          return visible;
         }),
         counts: summary.counts, assessmentCases: summary.assessmentCases, legacyCases: summary.legacyCases,
       } : {}),

@@ -4,6 +4,8 @@ import type { BookingActor } from "./book-appointment";
 import type { VerifiedDurableSession } from "./staff-durable-session";
 import { readCanonicalPatientRecord } from "./canonical-patient-reads";
 import { listReturnBookingContexts, readReturnBookingContext, type ReturnBookingSource } from "./return-booking-context";
+import { rebookPlannedVisitWith, type PlannedRebookResult } from "./planned-visit-rebooking";
+import type { PlannedRebookIntent } from "./planned-visit-rebooking-contract";
 import { staffOperationAppointmentScope, staffOperationCapabilities, staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
 
 /**
@@ -93,4 +95,44 @@ export async function readCanonicalReturnBookingContext(session: VerifiedDurable
     const result = await readReturnBookingContext(runner, patientId, source, { origin });
     return { status: result.ok ? 200 as const : 409 as const, body: result };
   });
+}
+
+/**
+ * POST /api/planned-visits/[id]/rebook on the canonical path (M2 slice 23): the same
+ * atomic rebooking writer, with the canonical admitted operation as its authority. One
+ * admitted `appointments.create` transaction (the writer's whole lock order runs inside
+ * it); at the writer's fixed points the identity is the admitted one (its grants are
+ * held FOR SHARE for the whole transaction), patient access is the CURRENT patient
+ * scope, scheduling a referral appointment needs the whole appointment scope or the
+ * receiving clinician, and `own` appointment scope rebooks only on its own party. The
+ * receipt (idempotent replay) is keyed by the canonical user id. Any refusal rolls back.
+ */
+class RebookNotDone extends Error {
+  constructor(readonly result: PlannedRebookResult) { super("planned visit not rebooked"); }
+}
+
+export async function commandCanonicalPlannedVisitRebook(session: VerifiedDurableSession, intent: PlannedRebookIntent, pool = getPool()): Promise<PlannedRebookResult> {
+  try {
+    return await withStaffOperation(pool, session, "appointments.create", async (client, handle) => {
+      const patientScope = await staffOperationPatientScope(client, handle, "appointments.create");
+      const appointmentScope = await staffOperationAppointmentScope(client, handle, "appointments.create");
+      if (patientScope.kind === "none" || appointmentScope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+      const identity = await staffOperationIdentity(client, handle, "appointments.create");
+      const clinician = appointmentScope.kind === "own" ? appointmentScope.clinicianPartyId : null;
+      const actor = { userId: identity.userId, username: identity.username, role: identity.role, partyId: clinician };
+      const result = await rebookPlannedVisitWith(intent, {
+        client,
+        revalidate: async () => actor,
+        canAccessPatient: async (_actor, patientId, q) => patientScope.kind === "all" || patientInDoctorScopeWith(q, patientScope.clinicianPartyId, patientId),
+        canScheduleReferral: (_actor, referral) => clinician === null || referral.to_party_id === clinician,
+        stillValid: () => true,
+        admitsDoctor: doctorId => clinician === null || doctorId === clinician,
+      });
+      if (!result.ok) throw new RebookNotDone(result);
+      return result;
+    });
+  } catch (error) {
+    if (error instanceof RebookNotDone) return error.result;
+    throw error;
+  }
 }

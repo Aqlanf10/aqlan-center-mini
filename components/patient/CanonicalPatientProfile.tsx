@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -170,7 +170,7 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         canBook={session?.isOwner === true || (session?.capabilities ?? []).includes("appointments.create")} /> : null}
       <TimelinePanel patientId={patientId} />
 
-      <p className="text-xs text-slate-600">بقية أقسام الملف (التقويم والخطط والحساب والمستندات وإعادة حجز الجلسات وغيرها) تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
+      <p className="text-xs text-slate-600">بقية أقسام الملف (التقويم والخطط والحساب والمستندات وغيرها) تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
       <a href="/patients" className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-navy-800">العودة إلى المرضى</a>
     </main>
   );
@@ -428,6 +428,7 @@ interface PlannedVisitItem {
   id: number; title: string; planTitle: string | null; sequence: number; durationMinutes: number; doctorName: string | null;
   status: "planned" | "scheduled" | "in_progress" | "completed" | "cancelled"; appointmentId: number | null;
   appointmentDate: string | null; appointmentTime: string | null; durationWarning?: string | null;
+  appointmentStatus?: string | null; canRebook?: boolean; rebookBlockedReason?: string | null; rebookGeneration?: string;
 }
 const PLANNED_STATUS_LABEL: Record<PlannedVisitItem["status"], string> = { planned: "لم تُحجز", scheduled: "محجوزة", in_progress: "قائمة", completed: "منجزة", cancelled: "ملغاة" };
 
@@ -445,10 +446,49 @@ function PlannedVisitsPanel({ patientId, canBook }: { patientId: string; canBook
   const [time, setTime] = useState("10:00");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [reason, setReason] = useState("");
+  /* The engine's nearby-appointment warning: a second, explicit click resends with its token. */
+  const [nearby, setNearby] = useState<{ visitId: number; mode: "book" | "rebook"; token: string } | null>(null);
+  /* One request id per rebooking attempt: a retry after a lost reply sends the SAME id,
+     so the server replays the first result instead of booking twice. */
+  const attempt = useRef<{ visitId: number; body: string } | null>(null);
   const visits = (data?.plannedVisits ?? []).filter(visit => visit.status !== "completed" && visit.status !== "cancelled");
 
-  async function book(visit: PlannedVisitItem) {
-    if (visit.durationWarning && !window.confirm(`${visit.durationWarning}\nالمدة الأصلية: ${visit.durationMinutes} دقيقة. هل راجعتها وتريد الحجز بهذه المدة؟`)) return;
+  async function rebook(visit: PlannedVisitItem, confirmationToken?: string) {
+    if (!visit.appointmentId || !visit.rebookGeneration) return;
+    setBusy(true); setMessage(null);
+    try {
+      if (attempt.current?.visitId !== visit.id) {
+        const contextResponse = await fetch(`/api/patients/${encodeURIComponent(patientId)}/return-booking-context?kind=planned_visit&sourceId=${visit.id}`, { cache: "no-store" });
+        const context = await contextResponse.json().catch(() => null);
+        if (!contextResponse.ok || typeof context?.fingerprint !== "string") { setMessage({ ok: false, text: context?.message ?? "تعذّر التحقق من الطبيب المسؤول عن الحالة." }); return; }
+        attempt.current = { visitId: visit.id, body: JSON.stringify({
+          expectedAppointmentId: visit.appointmentId, expectedGeneration: visit.rebookGeneration, date, time,
+          reason: reason.trim(), requestId: crypto.randomUUID(), returnBookingFingerprint: context.fingerprint,
+        }) };
+      }
+      // The confirmation is not part of the intent: the same request id stays valid.
+      const body = confirmationToken ? JSON.stringify({ ...JSON.parse(attempt.current.body), nearbyAppointmentConfirmation: confirmationToken }) : attempt.current.body;
+      const response = await fetch(`/api/planned-visits/${visit.id}/rebook`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (payload?.conflict?.kind === "nearby_patient_appointments" && typeof payload.conflict.confirmationToken === "string") {
+          setNearby({ visitId: visit.id, mode: "rebook", token: payload.conflict.confirmationToken });
+        } else attempt.current = null;
+        const reasons: string[] = Array.isArray(payload?.conflict?.reasons) ? payload.conflict.reasons : [];
+        setMessage({ ok: false, text: [payload?.message ?? "تعذّر إعادة الحجز.", ...reasons].filter(Boolean).join(" — ") });
+        return;
+      }
+      attempt.current = null;
+      setOpenId(null); setReason(""); setNearby(null);
+      setMessage({ ok: true, text: payload?.replayed ? "أُعيد حجز الجلسة سابقًا بهذا الطلب — لم يُنشأ موعد آخر." : `أُعيد حجز الجلسة ${date} الساعة ${time}.` });
+      setVersion(current => current + 1);
+    } catch { setMessage({ ok: false, text: "انقطع الرد وقد يكون الحجز قد تم. أعد المحاولة نفسها — لن يُنشأ موعد مكرر." }); }
+    finally { setBusy(false); }
+  }
+
+  async function book(visit: PlannedVisitItem, confirmationToken?: string) {
+    if (!confirmationToken && visit.durationWarning && !window.confirm(`${visit.durationWarning}\nالمدة الأصلية: ${visit.durationMinutes} دقيقة. هل راجعتها وتريد الحجز بهذه المدة؟`)) return;
     setBusy(true); setMessage(null);
     try {
       // The responsible doctor is read from the server at booking time, never guessed.
@@ -457,15 +497,16 @@ function PlannedVisitsPanel({ patientId, canBook }: { patientId: string; canBook
       if (!contextResponse.ok || typeof context?.fingerprint !== "string") { setMessage({ ok: false, text: context?.message ?? "تعذّر التحقق من الطبيب المسؤول عن الحالة." }); return; }
       const response = await fetch(`/api/planned-visits/${visit.id}/schedule`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, time, returnBookingFingerprint: context.fingerprint }),
+        body: JSON.stringify({ date, time, returnBookingFingerprint: context.fingerprint, ...(confirmationToken ? { nearbyAppointmentConfirmation: confirmationToken } : {}) }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
+        if (payload?.kind === "nearby_patient_appointments" && typeof payload.confirmationToken === "string") setNearby({ visitId: visit.id, mode: "book", token: payload.confirmationToken });
         const reasons: string[] = Array.isArray(payload?.reasons) ? payload.reasons : [];
         setMessage({ ok: false, text: [payload?.message ?? "تعذّر حجز الجلسة.", ...reasons, payload?.suggestionMessage].filter(Boolean).join(" — ") });
         return;
       }
-      setOpenId(null);
+      setOpenId(null); setNearby(null);
       setMessage({ ok: true, text: `حُجزت الجلسة ${date} الساعة ${time}${typeof payload?.doctorName === "string" ? ` — الطبيب: ${payload.doctorName}` : ""}.` });
       setVersion(current => current + 1);
     } catch { setMessage({ ok: false, text: "تعذّر الاتصال بالخادم. لم يُعتبر الحجز تامًّا؛ حدّث الملف قبل إعادة المحاولة." }); }
@@ -484,10 +525,30 @@ function PlannedVisitsPanel({ patientId, canBook }: { patientId: string; canBook
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-semibold text-slate-800">{visit.title}{visit.planTitle ? <span className="text-xs text-slate-500"> — {visit.planTitle}</span> : null}</span>
               <span className="rounded-lg bg-slate-50 px-2 py-0.5 text-xs font-bold text-slate-600">
-                {PLANNED_STATUS_LABEL[visit.status]}{visit.appointmentDate ? ` · ${visit.appointmentDate} ${visit.appointmentTime ?? ""}` : ""}
+                {PLANNED_STATUS_LABEL[visit.status]}{visit.appointmentDate ? ` · ${visit.appointmentDate} ${visit.appointmentTime ?? ""}` : ""}{visit.appointmentStatus === "no_show" || visit.appointmentStatus === "cancelled" ? ` · ${STATUS_LABEL[visit.appointmentStatus]}` : ""}
               </span>
             </div>
             <p className="text-xs text-slate-600">{visit.durationMinutes} دقيقة{visit.doctorName ? ` · ${visit.doctorName}` : ""}</p>
+            {visit.canRebook ? (
+              openId === visit.id ? (
+                <div className="mt-2 flex max-w-full flex-wrap items-end gap-2">
+                  <label htmlFor={`${uid}-${visit.id}-rdate`} className="text-xs font-bold text-navy-900">التاريخ
+                    <input id={`${uid}-${visit.id}-rdate`} type="date" dir="ltr" value={date} disabled={busy} onChange={event => { attempt.current = null; setDate(event.target.value); }} className={field} />
+                  </label>
+                  <label htmlFor={`${uid}-${visit.id}-rtime`} className="text-xs font-bold text-navy-900">الوقت
+                    <input id={`${uid}-${visit.id}-rtime`} type="time" dir="ltr" value={time} disabled={busy} onChange={event => { attempt.current = null; setTime(event.target.value); }} className={field} />
+                  </label>
+                  <label htmlFor={`${uid}-${visit.id}-reason`} className="text-xs font-bold text-navy-900">سبب إعادة الحجز
+                    <input id={`${uid}-${visit.id}-reason`} value={reason} disabled={busy} onChange={event => { attempt.current = null; setReason(event.target.value); }} className={field} />
+                  </label>
+                  <button type="button" disabled={busy || reason.trim().length < 3} onClick={() => void rebook(visit)} className="min-h-11 rounded-xl bg-navy-900 px-4 text-xs font-bold text-white disabled:opacity-50">أعد الحجز</button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => { setOpenId(visit.id); setMessage(null); attempt.current = null; }} className="mt-2 min-h-11 rounded-xl border border-navy-200 px-3 text-xs font-bold text-navy-800">أعد حجز الجلسة</button>
+              )
+            ) : visit.rebookBlockedReason && (visit.appointmentStatus === "no_show" || visit.appointmentStatus === "cancelled") ? (
+              <p className="mt-1 text-xs text-amber-800">{visit.rebookBlockedReason}</p>
+            ) : null}
             {canBook && visit.status === "planned" && !visit.appointmentId ? (
               openId === visit.id ? (
                 <div className="mt-2 flex max-w-full flex-wrap items-end gap-2">
@@ -507,6 +568,13 @@ function PlannedVisitsPanel({ patientId, canBook }: { patientId: string; canBook
         ))}
       </ul>
       {message ? <p role={message.ok ? "status" : "alert"} className={`mt-2 text-sm ${message.ok ? "text-emerald-700" : "text-red-700"}`}>{message.text}</p> : null}
+      {nearby ? (() => {
+        const target = visits.find(visit => visit.id === nearby.visitId);
+        return target ? (
+          <button type="button" disabled={busy} onClick={() => void (nearby.mode === "book" ? book(target, nearby.token) : rebook(target, nearby.token))}
+            className="mt-2 min-h-11 rounded-xl border border-amber-400 bg-amber-50 px-3 text-xs font-bold text-amber-900">تأكيد الحجز رغم ذلك</button>
+        ) : null;
+      })() : null}
     </section>
   );
 }

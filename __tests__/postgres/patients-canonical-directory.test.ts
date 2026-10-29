@@ -479,7 +479,7 @@ describe("patient workflow summary (slice 6)", () => {
     for (const alert of view.alerts ?? []) expect(alert.kind).toBe("overdue_installment");
   });
 
-  it("clinical-only: plans without money fields, planned visits never rebookable yet", async () => {
+  it("clinical-only: plans without money fields, planned visits not rebookable without appointments.create", async () => {
     const view = await workflow("clinicalAll");
     expect(view).toHaveProperty("lastVisit");
     expect(view).not.toHaveProperty("financial");
