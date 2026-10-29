@@ -34,12 +34,12 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 322 |
+| existing | 321 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 22 |
+| canonical-done | 23 |
 
 | Record scope | Routes |
 |---|---|
@@ -306,6 +306,21 @@ One admitted `visits.manage` transaction per move (`commandCanonicalVisitMove`).
 - **Not canonical yet (409 `visit_action_not_canonical`):** `defer` (a money decision, `finance.payments.collect`), `link` and `open_file` (patient-file slices). The route entry stays `existing` until they move.
 - **Screen:** the canonical queue offers «نداء إلى كرسي N» and «إجلاس» on waiting rows (first free chair), «جلس», «إعادة النداء» and «لم يحضر — للانتظار» on a called chair, «انتهى» on an occupied chair; call and seat go through the readiness gate with the written emergency reason.
 - **Tests:** PG `visits-canonical-moves` (6): the whole journey with audit, own scope (outside equals missing, call included), admission and revocation, concurrent calls to one chair, the gate and emergency bypass, audit rollback; legacy PG files for the moved functions (8 files, 57). Built journey `canonical-today-queue-journey` now 5.
+
+### Slice 13 — chair readiness (`GET /api/visits/readiness`)
+Read only: the record read `read:visits.readiness`, one owning snapshot (`readCanonicalChairReadiness`; `listTodayVisitReadinessFactsWith`, `patientVisitReadinessFactsWith`, `chairReadinessSettingsWith`, balances from `computeDebtRowsInSnapshot`).
+
+| Group | Contents | Shown when |
+|---|---|---|
+| identity | visit, status, chair, times, clearance (who and when) | every actor admitted to the queue |
+| care | the whole checklist, alert texts, history alerts, the editable alert | a clinical grant |
+| operational | the checklist without the medical-history item; the alert item as existence only («تنبيه طبي مسجَّل — راجعه مع الطبيب قبل الكرسي»); flags; today's intake form | `patients.operational-summary.view` (owner decision 1) |
+| balances | due lines per currency (warning thresholds from settings) and the stepper's «paid» step | `finance.patient-ledger.view` |
+
+- **Rows** are the queue read's; `?patientId=` needs the patient inside the scope (outside answers exactly like a missing file, 404) and returns its visit with the stepper.
+- Hidden groups are omitted, never replaced by neutral values (no empty balance list that would read as «no debt»).
+- **Screen:** each waiting row of `/visits` shows the projected checklist and dues, and «أقِرّ الجاهزية» (the slice 12 `clear` move) when `visits.manage` is held; the readiness read failing never hides the queue.
+- **Tests:** PG `visits-canonical-readiness` (7): the four groups (no alert text or medical history in the operational payload), own scope and the patient mode (outside equals missing), the stepper with and without the ledger grant, a canonical clearance shown on the next read. Built journey `canonical-today-queue-journey` now 6.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.

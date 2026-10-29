@@ -30024,6 +30024,45 @@ export async function listTodayVisitReadinessFacts(): Promise<VisitReadinessFact
   return rows.map(toReadinessFacts);
 }
 
+/** Today's readiness facts in the owning snapshot (canonical, M2 slice 13): the queue
+ * read's rows — a clinician scope keeps its assigned visits and its patients' visits. */
+export async function listTodayVisitReadinessFactsWith(q: Pick<DbClient, "query">, doctorPartyId: number | null): Promise<VisitReadinessFacts[]> {
+  const { rows } = await q.query<ReadinessFactsRow>(
+    `${READINESS_FACTS_SELECT}
+      WHERE ${onClinicDaySql("v.arrived_at", "$1", clinicTodaySql("$1"))}
+        AND ($2::int IS NULL OR v.doctor_id = $2 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = v.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")}))
+      ORDER BY v.arrived_at ASC`,
+    [CLINIC_TIME_ZONE, doctorPartyId],
+  );
+  return rows.map(toReadinessFacts);
+}
+
+/** The patient's readiness facts in the owning snapshot (same choice as patientVisitReadinessFacts). */
+export async function patientVisitReadinessFactsWith(q: Pick<DbClient, "query">, patientId: number): Promise<VisitReadinessFacts | null> {
+  const { rows } = await q.query<ReadinessFactsRow>(
+    `${READINESS_FACTS_SELECT}
+      WHERE v.patient_id = $2
+        AND ${onClinicDaySql("v.arrived_at", "$1", clinicTodaySql("$1"))}
+      ORDER BY (v.signed_at IS NOT NULL), (v.status = 'done'), v.arrived_at DESC
+      LIMIT 1`,
+    [CLINIC_TIME_ZONE, patientId],
+  );
+  return rows[0] ? toReadinessFacts(rows[0]) : null;
+}
+
+/** chairReadinessSettings from the same snapshot. */
+export async function chairReadinessSettingsWith(q: Pick<DbClient, "query">): Promise<{
+  requireClearance: boolean; reviewMonths: number; balanceThresholds: BalanceWarningThresholds;
+}> {
+  const settings = await getSettingsWith(q);
+  const parsed = parseBalanceWarning(settings["reception.balance_warning_minor"]);
+  return {
+    requireClearance: settings["ops.require_clearance_before_call"] === "true",
+    reviewMonths: Number(settings["clinical.medical_history_review_months"]) || 6,
+    balanceThresholds: parsed.ok ? parsed.thresholds : {},
+  };
+}
+
 /**
  * زيارة المريض التي تهمّ قمرة الملف — زيارة **اليوم** وحدها: غير الموقّعة أولًا ثم الموقّعة اليوم،
  * فتبقى مرحلة «دفع» مرئيةً بعد التوقيع في اليوم نفسه. زيارةٌ غير موقّعة من يومٍ سابق لا تُلتقط هنا:

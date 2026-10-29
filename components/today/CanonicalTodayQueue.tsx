@@ -5,6 +5,7 @@ import { chairRows, daySummary, firstFreeChair, waitingRows, type Visit, type Wa
 import { useChairCount, useNumberSetting } from "@/components/SettingsProvider";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { sendGatedMove } from "@/components/today/useChairReadiness";
+import { formatMoney, type Currency } from "@/lib/money";
 
 /**
  * قائمة اليوم لجلسة الهوية الموحّدة (M2 slices 11–12).
@@ -15,6 +16,14 @@ import { sendGatedMove } from "@/components/today/useChairReadiness";
  * لا تُستدعى مسارات قديمة (جاهزية الكرسي، التسليم، المواعيد) حتى تُنقل.
  */
 interface QueueView { visits: (Visit & { note?: string | null })[]; projection: { note: boolean }; canManage: boolean }
+interface ReadinessRow {
+  visitId: number;
+  cleared: { at: string; by: string | null } | null;
+  checklist?: { key: string; state: "ok" | "attention" | "info"; label: string }[];
+  attention?: number;
+  balances?: { currency: Currency; dueMinor: number; warn: boolean }[];
+}
+interface ReadinessView { requireClearance: boolean; items: ReadinessRow[] }
 interface PatientMatch { id: number; patientNumber: string; fullName: string; phone: string | null }
 
 const LEVEL_CLASS: Record<WaitLevel, string> = {
@@ -29,12 +38,14 @@ const MOVE_DONE = {
   call_again: (name: string) => `أُعيد النداء على ${name}.`,
   return: (name: string) => `عاد ${name} إلى الانتظار.`,
   finish: (name: string) => `انتهت زيارة ${name}.`,
+  clear: (name: string) => `أُقِرّت جاهزية ${name}.`,
 } as const;
 /** ساعة الوصول بتوقيت العيادة لا بساعة الجهاز. */
 const arrivalTime = (iso: string) => new Date(iso).toLocaleTimeString("ar-YE", { timeZone: CLINIC_ZONE_FALLBACK, hour: "2-digit", minute: "2-digit", hour12: true });
 
 export function CanonicalTodayQueue() {
   const [view, setView] = useState<QueueView | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const chairCount = useChairCount();
@@ -54,6 +65,9 @@ export function CanonicalTodayQueue() {
         setView(payload as QueueView);
         setError(null);
         setNow(new Date());
+        // الجاهزية قراءةٌ ثانية مستقلة: فشلها لا يُسقط القائمة، ويُخفي الشارات فقط.
+        const ready = await fetch("/api/visits/readiness", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+        if (!cancelled) setReadiness(ready as ReadinessView | null);
       } catch { if (!cancelled) setError("تعذّر الاتصال بالخادم. القائمة المعروضة قد لا تكون محدّثة."); }
     })();
     return () => { cancelled = true; };
@@ -71,7 +85,8 @@ export function CanonicalTodayQueue() {
   const [moveMessage, setMoveMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [moving, setMoving] = useState(false);
   /** حركة طابور واحدة: النداء والإجلاس عبر بوابة الجاهزية (سبب طوارئ مكتوب عند المنع). */
-  async function move(visit: Visit, action: "call" | "seat" | "call_again" | "return" | "finish", chair?: number) {
+  const readinessOf = (visitId: number) => readiness?.items.find(item => item.visitId === visitId) ?? null;
+  async function move(visit: Visit, action: "call" | "seat" | "call_again" | "return" | "finish" | "clear", chair?: number) {
     setMoving(true); setMoveMessage(null);
     try {
       const response = action === "call" || action === "seat"
@@ -117,6 +132,10 @@ export function CanonicalTodayQueue() {
                       <span className="text-xs font-semibold text-slate-700">ينتظر منذ {row.waitedMinutes} د — وصل {arrivalTime(row.visit.arrivedAt)}</span>
                     </div>
                     {view.projection.note && row.visit.note ? <p className="mt-1 text-xs text-slate-700">{row.visit.note}</p> : null}
+                    <ReadinessBadge row={readinessOf(row.visit.id)} />
+                    {view.canManage && readiness && !readinessOf(row.visit.id)?.cleared ? (
+                      <div className="mt-2">{actionButton("أقِرّ الجاهزية", () => void move(row.visit, "clear"))}</div>
+                    ) : null}
                     {view.canManage && freeChair !== null ? (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {actionButton(`نداء إلى كرسي ${freeChair}`, () => void move(row.visit, "call", freeChair))}
@@ -150,10 +169,32 @@ export function CanonicalTodayQueue() {
               ))}
             </ul>
           </section>
-          <p className="text-xs text-slate-600">القائمة تتحدّث كل عشرين ثانية. قائمة جاهزية الكرسي تُنقل إلى الهوية الموحّدة في الشريحة التالية.</p>
+          <p className="text-xs text-slate-600">
+            القائمة تتحدّث كل عشرين ثانية.{readiness?.requireClearance ? " إعداد المركز يمنع النداء قبل إقرار الجاهزية إلا طوارئ بسببٍ مكتوب." : ""}
+          </p>
         </>
       ) : error ? null : <p role="status" className="text-sm text-slate-600">جارٍ تحميل قائمة اليوم…</p>}
     </section>
+  );
+}
+
+/** جاهزية الكرسي كما أسقطها الخادم: القائمة لمن يملك الملخص أو الصلاحية السريرية، والرصيد لمن يرى الحساب. */
+function ReadinessBadge({ row }: { row: ReadinessRow | null }) {
+  if (!row) return null;
+  return (
+    <div className="mt-2 space-y-1 text-xs" data-testid={`readiness-${row.visitId}`}>
+      <p className={`font-bold ${row.cleared ? "text-emerald-700" : "text-amber-800"}`}>
+        {row.cleared ? `جاهز — أقرّه ${row.cleared.by ?? ""}` : row.attention ? `يحتاج اطلاعًا (${row.attention})` : "لم تُقَرّ الجاهزية"}
+      </p>
+      {row.checklist?.length ? (
+        <ul className="list-inside list-disc text-slate-700">
+          {row.checklist.map(item => <li key={item.key} className={item.state === "attention" ? "text-amber-800" : ""}>{item.label}</li>)}
+        </ul>
+      ) : null}
+      {row.balances?.length ? (
+        <p className="text-slate-700">المستحق: {row.balances.map(line => <span key={line.currency} className={line.warn ? "font-bold text-red-700" : ""}>{formatMoney(line.dueMinor, line.currency)} </span>)}</p>
+      ) : null}
+    </div>
   );
 }
 

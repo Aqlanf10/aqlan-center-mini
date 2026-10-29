@@ -1,6 +1,11 @@
 import "server-only";
-import { PlannedVisitStartConflict, ActiveVisitExists, addVisitWith, callVisitAgainWith, clearVisitWith, finishVisitWith, gatedVisitMoveWith, getPool, insertAuditRow, listTodayVisitsWith, patientInDoctorScopeWith, returnVisitToWaitingWith, startVisitFromPlannedVisitWith, type DbClient } from "./db";
-import { normalizeEmergencyReason } from "./chair-readiness";
+import {
+  CLINIC_TIME_ZONE, PlannedVisitStartConflict, ActiveVisitExists, addVisitWith, callVisitAgainWith, chairReadinessSettingsWith, clearVisitWith, computeDebtRowsInSnapshot,
+  finishVisitWith, gatedVisitMoveWith, getPool, insertAuditRow, listTodayVisitReadinessFactsWith, listTodayVisitsWith, patientInDoctorScopeWith,
+  patientVisitReadinessFactsWith, returnVisitToWaitingWith, startVisitFromPlannedVisitWith, type DbClient, type VisitReadinessFacts,
+} from "./db";
+import { balanceLines, chairStepper, deriveReadiness, normalizeEmergencyReason, type BalanceLine, type ReadinessItem } from "./chair-readiness";
+import { clinicDateString } from "./schedule";
 import { PATIENT_CARE_CAPABILITIES } from "./canonical-patient-reads";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
 import type { Visit } from "./flow";
@@ -252,4 +257,100 @@ export async function commandCanonicalVisitMove(session: VerifiedDurableSession,
       }
     }
   });
+}
+
+/* ---------------------------------------------------------------------------
+ * M2 slice 13: chair readiness (GET /api/visits/readiness), read only.
+ *
+ * The registered record read `read:visits.readiness`, one owning snapshot. Rows are the
+ * queue read's (`all`, or `own`: the clinician's assigned visits and its patients'
+ * visits); `?patientId=` needs that patient inside the scope (outside = missing, 404).
+ * Details by grant, never by role label:
+ *  - care (a clinical grant): the whole checklist, the alert texts and the editable
+ *    alert — what the clinician reads before the chair;
+ *  - operational summary (`patients.operational-summary.view`, owner decision 1): the
+ *    checklist without the medical-history item, and the alert item as existence only
+ *    (never its text); flags and today's intake form stay;
+ *  - neither: status and clearance only (no checklist);
+ *  - balances (`finance.patient-ledger.view`): the due lines and the stepper's «paid»
+ *    step; without it neither is returned, not even as empty.
+ * Hidden groups are omitted, never replaced by neutral values.
+ * ------------------------------------------------------------------------- */
+const OPERATIONAL_ALERT_LABEL = "تنبيه طبي مسجَّل — راجعه مع الطبيب قبل الكرسي";
+export interface CanonicalReadinessItem {
+  readonly visitId: number; readonly patientId: number | null; readonly status: string; readonly chair: number | null;
+  readonly arrivedAt: string; readonly seatedAt: string | null; readonly signedAt: string | null;
+  readonly cleared: { readonly at: string; readonly by: string | null } | null;
+  readonly checklist?: readonly ReadinessItem[]; readonly attention?: number;
+  readonly alerts?: readonly string[]; readonly historyAlerts?: readonly string[]; readonly editableAlert?: string | null;
+  readonly balances?: readonly BalanceLine[];
+  readonly stepper?: ReturnType<typeof chairStepper>;
+}
+export interface CanonicalReadinessView {
+  readonly requireClearance: boolean;
+  readonly projection: { readonly checklist: "care" | "operational" | "none"; readonly balances: boolean };
+  readonly items?: readonly CanonicalReadinessItem[];
+  readonly visit?: CanonicalReadinessItem | null;
+}
+
+export async function readCanonicalChairReadiness(session: VerifiedDurableSession, patientId: number | null): Promise<CanonicalReadinessView> {
+  if (patientId !== null && (!Number.isSafeInteger(patientId) || patientId <= 0)) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "رقم الملف غير صالح.");
+  return runCanonicalReadSnapshot(session, "read:visits.readiness", async (query, scope) => {
+    if (scope.patientScope.kind !== "own" && scope.patientScope.kind !== "all") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
+    const doctorPartyId = scope.patientScope.kind === "own" ? scope.patientScope.clinicianPartyId : null;
+    const care = PATIENT_CARE_CAPABILITIES.some(capability => scope.granted(capability));
+    const checklistGroup = care ? "care" : scope.granted("patients.operational-summary.view") ? "operational" : "none";
+    const seesBalances = scope.granted("finance.patient-ledger.view");
+    if (patientId !== null) {
+      const { rows } = await query.query("SELECT 1 FROM patients WHERE id = $1", [patientId]);
+      const inside = rows.length === 1 && (doctorPartyId === null || await patientInDoctorScopeWith(query, doctorPartyId, patientId));
+      if (!inside) throw new CanonicalVisitRefusal("patient_not_found", 404, NOT_FOUND);
+    }
+    const settings = await chairReadinessSettingsWith(query);
+    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    const facts: VisitReadinessFacts[] = patientId !== null
+      ? [await patientVisitReadinessFactsWith(query, patientId)].filter((row): row is VisitReadinessFacts => row !== null)
+      : await listTodayVisitReadinessFactsWith(query, doctorPartyId);
+    const dues = new Map<number, { currency: BalanceLine["currency"]; dueMinor: number }[]>();
+    if (seesBalances) {
+      const ids = [...new Set(facts.map(row => row.patientId).filter((id): id is number => id !== null))];
+      if (ids.length > 0) for (const row of await computeDebtRowsInSnapshot(ids, false, query)) {
+        dues.set(row.patientId, [...(dues.get(row.patientId) ?? []), { currency: row.currency, dueMinor: row.dueMinor }]);
+      }
+    }
+    const items = facts.map(row => {
+      const item: Record<string, unknown> = {
+        visitId: row.visitId, patientId: row.patientId, status: row.status, chair: row.chair,
+        arrivedAt: row.arrivedAt, seatedAt: row.seatedAt, signedAt: row.signedAt,
+        cleared: row.clearedAt ? { at: row.clearedAt, by: row.clearedBy } : null,
+      };
+      if (checklistGroup !== "none") {
+        const checklist = deriveReadiness(row, settings.reviewMonths, today);
+        if (checklistGroup === "care") {
+          Object.assign(item, { checklist: checklist.items, attention: checklist.attention, alerts: checklist.alerts, historyAlerts: checklist.historyAlerts, editableAlert: row.medicalAlert });
+        } else {
+          const visible = checklist.items
+            .filter(entry => entry.key !== "medical_history")
+            .map(entry => entry.key === "alerts" && entry.state === "attention" ? { ...entry, label: OPERATIONAL_ALERT_LABEL } : entry);
+          Object.assign(item, { checklist: visible, attention: visible.filter(entry => entry.state === "attention").length });
+        }
+      }
+      const balances = seesBalances && row.patientId !== null ? balanceLines(dues.get(row.patientId) ?? [], settings.balanceThresholds) : null;
+      if (balances !== null) item.balances = balances;
+      if (patientId !== null) {
+        const due = balances === null || row.invoiceCurrency === null ? null : balances.find(line => line.currency === row.invoiceCurrency)?.dueMinor ?? 0;
+        const stepper = chairStepper({ status: row.status, clearedAt: row.clearedAt, seatedAt: row.seatedAt, signedAt: row.signedAt, invoiceNetMinor: row.invoiceNetMinor, dueInInvoiceCurrencyMinor: due, deferred: row.deferred });
+        if (balances !== null) item.stepper = stepper;
+        else {
+          const steps = stepper.steps.filter(step => step.key !== "paid");
+          item.stepper = { steps, current: steps.find(step => !step.done)?.key ?? null };
+        }
+      }
+      return item as unknown as CanonicalReadinessItem;
+    });
+    const projection = { checklist: checklistGroup, balances: seesBalances } as const;
+    return patientId !== null
+      ? { requireClearance: settings.requireClearance, projection, visit: items[0] ?? null }
+      : { requireClearance: settings.requireClearance, projection, items };
+  }, { errorPrefix: "STAFF_READ", maxBytes: VISIT_QUEUE_MAX_BYTES });
 }

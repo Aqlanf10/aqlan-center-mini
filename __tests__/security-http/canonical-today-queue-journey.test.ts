@@ -1,5 +1,5 @@
 /**
- * M2 slices 11–12 — canonical Today queue, arrival and queue moves, built application,
+ * M2 slices 11–13 — canonical Today queue, arrival, queue moves and chair readiness, built application,
  * owned database and server.
  *
  * UI → HTTP → DB with password logins: the queue lists only visits inside the actor's
@@ -95,8 +95,8 @@ it("browser: reception opens the Today queue from the shell, sees the waiting pa
   await form.getByRole("status").filter({ hasText: "سُجّل وصول مراجع بلا ملف." }).waitFor();
   await waiting.getByText("مراجع بلا ملف").waitFor();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  // Only canonical routes: the queue, and the file search (debounced, may not fire).
-  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path)).every(path => path === "/api/visits" || path === "/api/patients")).toBe(true);
+  // Only canonical routes: the queue, its readiness, and the file search (debounced, may not fire).
+  expect(apiCalls.filter(path => !/^\/api\/auth\/(login|me)$/.test(path)).every(path => ["/api/visits", "/api/visits/readiness", "/api/patients"].includes(path))).toBe(true);
   expect(apiCalls).toContain("/api/visits");
   expect(failures).toEqual([]);
   await context.close();
@@ -164,5 +164,29 @@ it("browser: reception calls, seats and finishes a waiting patient from the cano
   expect(rows).toEqual([
     { action: "visit.call", actor: "canon-q-reception" }, { action: "visit.seat", actor: "canon-q-reception" }, { action: "visit.finish", actor: "canon-q-reception" },
   ]);
+  expect(await journey.ddlLog()).toEqual([]);
+});
+
+it("browser: reception reads the readiness checklist and acknowledges it; a viewer without grants sees no checklist", async () => {
+  const context = await journey.browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "ar" });
+  const page = await context.newPage();
+  await journey.browserLogin(page, "reception");
+  await page.goto(`${journey.baseUrl}/visits`);
+  const row = page.getByTestId("waiting-list").getByRole("listitem").filter({ hasText: "مريضة الطبيب التجريبية" });
+  await row.getByText("لا تنبيهات طبية").waitFor();
+  await row.getByRole("button", { name: "أقِرّ الجاهزية" }).click();
+  await page.getByTestId("move-message").filter({ hasText: "أُقِرّت جاهزية مريضة الطبيب التجريبية." }).waitFor();
+  await row.getByText("جاهز — أقرّه canon-q-reception").waitFor();
+  expect(await row.getByRole("button", { name: "أقِرّ الجاهزية" }).count()).toBe(0);
+  await context.close();
+
+  const viewer = await journey.login("viewer");
+  const view = await (await journey.api("/api/visits/readiness", viewer.cookie)).json();
+  expect(view.projection).toEqual({ checklist: "none", balances: false });
+  for (const item of view.items) expect(item).not.toHaveProperty("checklist");
+  const other = await journey.login("other");
+  const outside = await journey.api(`/api/visits/readiness?patientId=${mine}`, other.cookie);
+  expect(outside.status).toBe(404);
+  expect((await outside.json()).message).toMatch(ARABIC);
   expect(await journey.ddlLog()).toEqual([]);
 });

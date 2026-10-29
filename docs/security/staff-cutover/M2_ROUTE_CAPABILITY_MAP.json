@@ -6217,8 +6217,19 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 13: record read read:visits.readiness in one owning snapshot; rows as the queue read; ?patientId= needs the patient inside the scope (outside = missing, 404).",
+  "projection": {
+   "legacy": "isAdmin/reception see every checklist and balance; a doctor sees its own patients' checklists (or all with canViewAllPatients) and balances with canViewPatientPayments; the assistant sees today's checklists without money.",
+   "groups": {
+    "identity": "visit, status, chair, times and clearance — every admitted actor",
+    "care": "the whole checklist, alert texts and the editable alert — a clinical grant",
+    "operational": "the checklist without the medical-history item, the alert as existence only, flags and today's intake — patients.operational-summary.view",
+    "balances": "due lines and the stepper's paid step — finance.patient-ledger.view"
+   },
+   "rows": "all: every visit of the clinic day; own: the clinician's assigned visits and its patients' visits",
+   "omitted": "hidden groups are omitted, never replaced by neutral values"
+  }
  },
  {
   "route": "/api/waiting-list",
