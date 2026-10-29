@@ -1,12 +1,15 @@
 import { afterAll, expect, it } from "vitest";
 import { build } from "esbuild";
-import { chromium, type Browser } from "playwright";
-let browser: Browser;
-afterAll(async () => { await browser?.close(); });
+import { chromium, type BrowserServer } from "playwright";
+let server: BrowserServer | undefined;
+afterAll(async () => { await server?.kill(); });
 
 it("discloses that attendance and leave do not automatically adjust payroll, without writes", async () => {
   const built = await build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {HrPayrollPanel} from './components/hr/PayrollPanel';createRoot(document.getElementById('root')).render(React.createElement(HrPayrollPanel));`, resolveDir: process.cwd(), loader: "jsx" }, bundle: true, write: false, platform: "browser", jsx: "automatic", define: { "process.env.NODE_ENV": '"development"' } });
-  browser = await chromium.launch();
+  // Own a dedicated process so teardown does not depend on Chromium's
+  // graceful-close handshake (which can stall on Windows headless shell).
+  server = await chromium.launchServer({ host: "127.0.0.1" });
+  const browser = await chromium.connect(server.wsEndpoint());
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors: string[] = [];
@@ -30,5 +33,14 @@ it("discloses that attendance and leave do not automatically adjust payroll, wit
     expect(await page.getByText("الخصميات المسجلة", { exact: true }).count()).toBe(1);
     expect(await page.getByText(/الحضور والإجازات لا تعدّل مبلغ المسير تلقائيًا/).count()).toBe(1);
     expect(unexpected).toEqual([]);
-  } finally { await context.close(); }
+  } finally {
+    const process = server.process();
+    const disconnected = browser.isConnected()
+      ? new Promise<void>(resolve => browser.once("disconnected", () => resolve())) : Promise.resolve();
+    await server.kill();
+    await disconnected;
+    server = undefined;
+    expect(process.exitCode !== null || process.signalCode !== null).toBe(true);
+    expect(browser.isConnected()).toBe(false);
+  }
 });
