@@ -72,8 +72,9 @@ function sign(data: string): string {
   return createHmac("sha256", secret()).update(data).digest("base64url");
 }
 
-export function sessionCredentialVersion(passwordHash: string): string {
-  return createHmac("sha256", secret()).update(`credential:${passwordHash}`).digest("base64url");
+export function sessionCredentialVersion(passwordHash: string, sessionVersion = 0): string {
+  const versionSuffix = Number.isInteger(sessionVersion) && sessionVersion > 0 ? `:v${sessionVersion}` : "";
+  return createHmac("sha256", secret()).update(`credential:${passwordHash}${versionSuffix}`).digest("base64url");
 }
 
 /** A permissions edit revokes existing restricted-role sessions immediately. */

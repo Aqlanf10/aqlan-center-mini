@@ -11,7 +11,7 @@
  * 5. التقارير والشهادات الطبية الرسمية (draft_medical_report_form)
  */
 
-import { getPatient, searchPatients, getSettings } from "../db";
+import { getPatient, listLabOrders, searchPatients } from "../db";
 import { CONSENT_TEMPLATES, getConsentTemplate, type ConsentTemplate } from "../consent-templates";
 import { buildInstallmentPlanAgreement, STANDARD_PLAN_TERMS, type Installment } from "../plans";
 import { parseMedicalAlerts } from "../patient";
@@ -378,6 +378,7 @@ export async function draftLabOrderFormAction(
   params: {
     patientName?: string;
     patientId?: number;
+    orderId?: number;
     toothCode?: string;
     restorationType?: string;
     shade?: string;
@@ -389,6 +390,7 @@ export async function draftLabOrderFormAction(
 ): Promise<ToolExecutionResult> {
   let patientName = params.patientName || context.currentPatientName || "المريض";
   let patientId = params.patientId;
+  let savedOrderId: number | null = typeof params.orderId === "number" && params.orderId > 0 ? params.orderId : null;
 
   if (context.isDbConnected && (patientId || params.patientName || context.currentPatientName)) {
     let p = null;
@@ -402,6 +404,12 @@ export async function draftLabOrderFormAction(
     if (p) {
       patientName = p.fullName;
       patientId = p.id;
+      if (!savedOrderId) {
+        const patientOrders = await listLabOrders({ patientId: p.id, limit: 1 }).catch(() => []);
+        if (patientOrders[0]?.id) {
+          savedOrderId = patientOrders[0].id;
+        }
+      }
     }
   }
 
@@ -449,10 +457,16 @@ export async function draftLabOrderFormAction(
     { title: "المختبر", value: labName, tone: "info" },
   ];
 
-  const actions: ActionButton[] = [
-    { label: "🖨️ طباعة أمر عمل المعمل", href: `/print/lab/${patientId || 0}`, actionType: "print" },
-    { label: "فتح شاشة المعمل", href: "/lab", actionType: "navigate" },
-  ];
+  // (CLIN-03) /print/lab/[id] يستقبل معرّف طلب المختبر (orderId) لا معرّف المريض (patientId).
+  const actions: ActionButton[] = savedOrderId
+    ? [
+        { label: "🖨️ طباعة أمر عمل المعمل", href: `/print/lab/${savedOrderId}`, actionType: "print" },
+        { label: "فتح شاشة المعمل", href: "/lab", actionType: "navigate" },
+      ]
+    : [
+        ...(patientId ? [{ label: `فتح ملف ${patientName} لإرسال الأمر للمعمل`, href: `/patients/${patientId}`, actionType: "navigate" as const }] : []),
+        { label: "فتح شاشة المعمل", href: "/lab", actionType: "navigate" },
+      ];
 
   return {
     success: true,
@@ -592,8 +606,9 @@ export async function draftMedicalReportFormAction(
     { title: "حالة التقرير", value: "جاهز للطباعة والختم 🖨️", tone: "good" },
   ];
 
+  // (CLIN-03) المسار الفعلي لطباعة التقرير السريري للمريض هو /print/dossier/[patientId] (لا /print/report المالي).
   const actions: ActionButton[] = [
-    { label: "🖨️ طباعة التقرير الطبي", href: `/print/report?patientId=${patientId || 0}`, actionType: "print" },
+    { label: "🖨️ طباعة التقرير الطبي", href: `/print/dossier/${patientId || 0}`, actionType: "print" },
   ];
 
   if (patientId) {

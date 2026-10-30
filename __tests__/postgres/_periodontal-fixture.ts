@@ -7,6 +7,12 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.at(-1)?.version === "0091") {
+    if (files.at(-2)?.version !== "0089" || files.at(-1)?.filename !== "0091_remediation_security_and_indexes.sql") {
+      throw new Error("Unreviewed 0091 migration suffix.");
+    }
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   if (files.at(-1)?.version === "0089") {
     if (files.at(-2)?.version !== "0087" || files.at(-2)?.filename !== "0087_agreement_reminder_metadata.sql"
       || files.at(-1)?.filename !== "0089_lab_shade_specification.sql") throw new Error("Unreviewed lab shade / reminder migration suffix.");

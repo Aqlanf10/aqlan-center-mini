@@ -15,6 +15,7 @@ import {labVisitSignatureVersion} from "./lab-visit-signature";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
+import { REMEDIATION_SECURITY_AND_INDEXES_SQL } from "./remediation-security-schema";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
@@ -361,7 +362,7 @@ export function getPool(): DbPool {
      محاولة تلقائية للكتابات المالية عمدًا (idempotency مسؤولية الطبقة الأعلى
      بمفاتيح صريحة — انظر recordPayment). */
   const poolMax = clampPoolMax(process.env.DB_POOL_MAX);
-  pool = new Pool({
+  const rawPool = new Pool({
     connectionString,
     ssl: sslForConnection(connectionString),
     max: poolMax,
@@ -370,14 +371,67 @@ export function getPool(): DbPool {
     statement_timeout: 60_000,
     idle_in_transaction_session_timeout: 60_000,
     application_name: "aqlan-center-mini",
-  }) as unknown as DbPool;
+  });
+  // (DATA-02) حارس سلامة اتصالات المجمع: يمنع إعادة اتصال عالق في معاملة أو بعد فشل ROLLBACK إلى المجمع،
+  // ويجعل client.release() آمن التكرار عند تحريره مبكرًا بعد COMMIT قبل استعلامات القراءة اللاحقة.
+  const txGuardSym = Symbol.for("aqlan.poolClientTxGuard");
+  type GuardState = { inTx: boolean; poisoned: boolean; released: boolean };
+  const rawConnect = rawPool.connect.bind(rawPool);
+  (rawPool as unknown as { connect: () => Promise<unknown> }).connect = async () => {
+    const client = await rawConnect();
+    let state = (client as unknown as Record<symbol, GuardState | undefined>)[txGuardSym];
+    if (!state) {
+      state = { inTx: false, poisoned: false, released: false };
+      (client as unknown as Record<symbol, GuardState>)[txGuardSym] = state;
+      const origQuery = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+      const origRelease = client.release.bind(client);
+      (client as unknown as { query: (...args: unknown[]) => Promise<unknown> }).query = async (...args: unknown[]) => {
+        const sqlText = typeof args[0] === "string"
+          ? args[0]
+          : (args[0] && typeof args[0] === "object" && "text" in args[0] && typeof (args[0] as { text?: unknown }).text === "string"
+            ? (args[0] as { text: string }).text
+            : "");
+        const isBegin = /^\s*(?:BEGIN|START\s+TRANSACTION)\b/i.test(sqlText);
+        const isRollback = /^\s*ROLLBACK(?!\s+TO\b)\b/i.test(sqlText);
+        const isCommit = /^\s*(?:COMMIT|END)\b/i.test(sqlText);
+        try {
+          const res = await origQuery(...args);
+          if (isBegin) state!.inTx = true;
+          else if (isCommit || isRollback) state!.inTx = false;
+          return res;
+        } catch (err) {
+          if (isRollback || isCommit) state!.poisoned = true;
+          throw err;
+        }
+      };
+      client.release = (err?: boolean | Error) => {
+        if (state!.released) return;
+        state!.released = true;
+        if (err) {
+          origRelease(err);
+          return;
+        }
+        if (state!.poisoned || state!.inTx) {
+          origRelease(true);
+          return;
+        }
+        origRelease();
+      };
+    } else {
+      state.inTx = false;
+      state.poisoned = false;
+      state.released = false;
+    }
+    return client;
+  };
+  pool = rawPool as unknown as DbPool;
   return pool;
 }
 
-/** سقف الاتصالات: رقم صحيح بين ١ و٢٠ — وكل ما عداه يعود إلى ٣ الافتراضية. */
+/** سقف الاتصالات: رقم صحيح بين ١ و٢٠ — وكل ما عداه يعود إلى ١٠ الافتراضية لمنع الاختناق الذاتي. */
 function clampPoolMax(raw: string | undefined): number {
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1 || value > 20) return 3;
+  if (!Number.isInteger(value) || value < 1 || value > 20) return 10;
   return value;
 }
 
@@ -2142,6 +2196,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), HR_TEMPORAL_RUNTIME_MIGRATIONS);
     await applyOrthoAssessmentRuntime(getPool());
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0091", name: "remediation_security_and_indexes", filename: "0091_remediation_security_and_indexes.sql", sql: REMEDIATION_SECURITY_AND_INDEXES_SQL, checksum: checksumOf(REMEDIATION_SECURITY_AND_INDEXES_SQL) }]);
 
 
 
@@ -2247,12 +2302,12 @@ export function ensureSchema(): Promise<void> {
         const receptionPass = await hashPassword("reception123456");
         const shotsPass = await hashPassword("shots-only-local-1234");
         await getPool().query(
-          `INSERT INTO users (username, display_name, password_hash, role)
+          `INSERT INTO users (username, display_name, password_hash, role, is_owner)
            VALUES 
-             ('admin', 'المدير العام (د. عقلان)', $1, 'admin'),
-             ('doctor', 'د. أروى (أخصائي التقويم)', $2, 'doctor'),
-             ('reception', 'استقبال المركز', $3, 'reception'),
-             ('shots', 'حساب الاختبارات والمحاكاة', $4, 'admin')
+             ('admin', 'المدير العام (د. عقلان)', $1, 'admin', TRUE),
+             ('doctor', 'د. أروى (أخصائي التقويم)', $2, 'doctor', FALSE),
+             ('reception', 'استقبال المركز', $3, 'reception', FALSE),
+             ('shots', 'حساب الاختبارات والمحاكاة', $4, 'admin', FALSE)
            ON CONFLICT (username) DO NOTHING`,
           [adminPass, doctorPass, receptionPass, shotsPass],
         );
@@ -2412,19 +2467,19 @@ export function ensureSchema(): Promise<void> {
         await getPool().query(`
           INSERT INTO expense_categories (key, name, category_group, account_code, monthly_budget_minor, annual_budget_minor, budget_currency, is_active, is_system, auto_post_journal, description, display_order)
           VALUES
-            ('electricity', 'خدمات الكهرباء والماء ومحروقات المولد', 'تشغيلية ومرافق', '5502', 15000000, 180000000, 'YER', TRUE, TRUE, TRUE, 'فواتير الكهرباء الحكومية، استهلاك مياه العيادة، ومحروقات مولد الديزل/البنزين', 1),
-            ('maintenance', 'صيانة الكراسي والأجهزة الطبية', 'صيانة وتجهيزات', '5601', 10000000, 120000000, 'YER', TRUE, TRUE, TRUE, 'صيانة دورية وإصلاح كراسي الأسنان، أجهزة التعقيم الأوتوكلاف، والكمبريسور', 2),
-            ('equipment_parts', 'قطع غيار ومعدات العيادة', 'صيانة وتجهيزات', '5602', 6000000, 72000000, 'YER', TRUE, TRUE, TRUE, 'شراء الرؤوس التوربينية، خراطيم الهواء، والملحقات الفنية للأجهزة', 3),
-            ('internet', 'خدمات الإنترنت والاتصالات', 'تشغيلية ومرافق', '5503', 3500000, 42000000, 'YER', TRUE, TRUE, TRUE, 'اشتراكات الألياف الضوئية، خطوط هاتف المركز، وباقات رسائل التذكير', 4),
-            ('rent', 'إيجار مبنى ومقر المركز', 'تشغيلية ومرافق', '5501', 50000000, 600000000, 'YER', TRUE, TRUE, TRUE, 'الإيجار الشهري لمقر العيادة ومرافق المركز الطبي', 5),
-            ('cleaning_hospitality', 'النظافة والمستلزمات والضيافة', 'إدارية وتشغيلية', '5901', 4000000, 48000000, 'YER', TRUE, TRUE, TRUE, 'أدوات ومواد تنظيف العيادة، ضيافة المراجعين والمرضى، والقرطاسية المكتبية', 6),
-            ('facility_maintenance', 'صيانة المقر والسباكة والإنارة', 'صيانة وتجهيزات', '5504', 3000000, 36000000, 'YER', TRUE, FALSE, TRUE, 'أعمال السباكة، التكييف، التمديدات الكهربائية الإنشائية، وأعمال الدهان', 7),
-            ('marketing', 'التسويق والدعاية والإعلانات', 'إدارية وتسويقية', '5902', 5000000, 60000000, 'YER', TRUE, FALSE, TRUE, 'الحملات الإعلانية الرقمية، بطاقات المواعيد، وتصاميم منصات التواصل', 8),
-            ('materials', 'مواد ومستهلكات طبية عاجلة', 'مواد ومستلزمات', '5201', 40000000, 480000000, 'YER', TRUE, TRUE, TRUE, 'المشتريات النقدية الفورية للمستهلكات الطبية السنية، البنج، والقفازات من الصندوق', 9),
-            ('lab', 'مستحقات وتكاليف المعامل', 'تكاليف مهنية', '5101', 60000000, 720000000, 'YER', TRUE, TRUE, TRUE, 'سداد مستحقات معامل التركيبات والزيركون والتقويم المسددة نقداً من الصندوق', 10),
-            ('salary', 'الرواتب والأجور الشهرية', 'أجور وكادر', '5401', 80000000, 960000000, 'YER', TRUE, TRUE, TRUE, 'الرواتب الشهرية ومكافآت طاقم التمريض والاستقبال وعمال النظافة', 11),
-            ('commission', 'عمولات أطباء الأسنان', 'أجور وكادر', '5301', 70000000, 840000000, 'YER', TRUE, TRUE, TRUE, 'مستحقات ونسب أطباء الأسنان المعالجين المسددة من الصندوق', 12),
-            ('other', 'مصروفات أخرى ونثريات طارئة', 'عامة وطوارئ', '5901', 3000000, 36000000, 'YER', TRUE, TRUE, TRUE, 'نثريات نقدية ومصروفات فورية غير مبوبة', 13)
+            ('electricity', 'خدمات الكهرباء والماء ومحروقات المولد', 'تشغيلية ومرافق', '5502', 150000, 1800000, 'YER', TRUE, TRUE, TRUE, 'فواتير الكهرباء الحكومية، استهلاك مياه العيادة، ومحروقات مولد الديزل/البنزين', 1),
+            ('maintenance', 'صيانة الكراسي والأجهزة الطبية', 'صيانة وتجهيزات', '5601', 100000, 1200000, 'YER', TRUE, TRUE, TRUE, 'صيانة دورية وإصلاح كراسي الأسنان، أجهزة التعقيم الأوتوكلاف، والكمبريسور', 2),
+            ('equipment_parts', 'قطع غيار ومعدات العيادة', 'صيانة وتجهيزات', '5602', 60000, 720000, 'YER', TRUE, TRUE, TRUE, 'شراء الرؤوس التوربينية، خراطيم الهواء، والملحقات الفنية للأجهزة', 3),
+            ('internet', 'خدمات الإنترنت والاتصالات', 'تشغيلية ومرافق', '5503', 35000, 420000, 'YER', TRUE, TRUE, TRUE, 'اشتراكات الألياف الضوئية، خطوط هاتف المركز، وباقات رسائل التذكير', 4),
+            ('rent', 'إيجار مبنى ومقر المركز', 'تشغيلية ومرافق', '5501', 500000, 6000000, 'YER', TRUE, TRUE, TRUE, 'الإيجار الشهري لمقر العيادة ومرافق المركز الطبي', 5),
+            ('cleaning_hospitality', 'النظافة والمستلزمات والضيافة', 'إدارية وتشغيلية', '5901', 40000, 480000, 'YER', TRUE, TRUE, TRUE, 'أدوات ومواد تنظيف العيادة، ضيافة المراجعين والمرضى، والقرطاسية المكتبية', 6),
+            ('facility_maintenance', 'صيانة المقر والسباكة والإنارة', 'صيانة وتجهيزات', '5504', 30000, 360000, 'YER', TRUE, FALSE, TRUE, 'أعمال السباكة، التكييف، التمديدات الكهربائية الإنشائية، وأعمال الدهان', 7),
+            ('marketing', 'التسويق والدعاية والإعلانات', 'إدارية وتسويقية', '5902', 50000, 600000, 'YER', TRUE, FALSE, TRUE, 'الحملات الإعلانية الرقمية، بطاقات المواعيد، وتصاميم منصات التواصل', 8),
+            ('materials', 'مواد ومستهلكات طبية عاجلة', 'مواد ومستلزمات', '5201', 400000, 4800000, 'YER', TRUE, TRUE, TRUE, 'المشتريات النقدية الفورية للمستهلكات الطبية السنية، البنج، والقفازات من الصندوق', 9),
+            ('lab', 'مستحقات وتكاليف المعامل', 'تكاليف مهنية', '5101', 600000, 7200000, 'YER', TRUE, TRUE, TRUE, 'سداد مستحقات معامل التركيبات والزيركون والتقويم المسددة نقداً من الصندوق', 10),
+            ('salary', 'الرواتب والأجور الشهرية', 'أجور وكادر', '5401', 800000, 9600000, 'YER', TRUE, TRUE, TRUE, 'الرواتب الشهرية ومكافآت طاقم التمريض والاستقبال وعمال النظافة', 11),
+            ('commission', 'عمولات أطباء الأسنان', 'أجور وكادر', '5301', 700000, 8400000, 'YER', TRUE, TRUE, TRUE, 'مستحقات ونسب أطباء الأسنان المعالجين المسددة من الصندوق', 12),
+            ('other', 'مصروفات أخرى ونثريات طارئة', 'عامة وطوارئ', '5901', 30000, 360000, 'YER', TRUE, TRUE, TRUE, 'نثريات نقدية ومصروفات فورية غير مبوبة', 13)
           ON CONFLICT (key) DO NOTHING
         `);
       }
@@ -3112,6 +3167,10 @@ export interface StaffUser {
   isActive: boolean;
   /** جهة «طبيب» المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب. */
   partyId: number | null;
+  /** نسخة الجلسة للإبطال الخادمي الفوري عند تسجيل الخروج (SEC-04). */
+  sessionVersion?: number;
+  /** حساب المالك الأساسي للعيادة (SEC-08 / HR-01). */
+  isOwner?: boolean;
   /** التخصص والفرع (صلاحيات الوكيل المساعد): تعريفان يُعرضان في الواجهة. */
   specialty?: string;
   branch?: string;
@@ -3129,6 +3188,8 @@ interface UserRow {
   role: string;
   is_active: boolean;
   party_id: number | null;
+  session_version?: number | null;
+  is_owner?: boolean | null;
   specialty?: string | null;
   branch?: string | null;
   permissions?: string | null;
@@ -3144,11 +3205,23 @@ function toUser(row: UserRow): StaffUser {
     role: row.role,
     isActive: row.is_active,
     partyId: row.party_id ?? null,
+    sessionVersion: Number(row.session_version ?? 0),
+    isOwner: Boolean(row.is_owner),
     specialty: row.specialty ?? undefined,
     branch: row.branch ?? undefined,
     permissions: parseDoctorPermissions(row.permissions, row.role),
     commissionConfig: parseDoctorCommissionConfig(row.commission_config),
   };
+}
+
+/** يرفع نسخة جلسة المستخدم لإبطال كل الجلسات الموقّعة السابقة خادميًا فور الخروج (SEC-04). */
+export async function revokeUserSessions(userId: number): Promise<void> {
+  if (!Number.isInteger(userId) || userId <= 0) return;
+  await ensureSchema();
+  await getPool().query(
+    `UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE id = $1`,
+    [userId],
+  );
 }
 
 /**
@@ -3208,8 +3281,8 @@ export async function createFirstAdmin(input: {
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", ["aqlan.canonical.identity.substrate.v1:public"]);
     if (await readLegacyStaffSchema(client) !== "base") throw new Error("LEGACY_STAFF_BASE_SCHEMA_UNREADABLE");
     const { rows } = await client.query<UserRow>(
-      `INSERT INTO users (username, display_name, password_hash, role)
-       SELECT $1, $2, $3, 'admin' WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING *`,
+      `INSERT INTO users (username, display_name, password_hash, role, is_owner)
+       SELECT $1, $2, $3, 'admin', TRUE WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING *`,
       [input.username, input.displayName, input.passwordHash],
     );
     return rows[0] ? toUser(rows[0]) : null;
@@ -3399,7 +3472,7 @@ const DOCTOR_PATIENT_CONDITION = `EXISTS (
   UNION ALL
   SELECT 1 FROM patients pd WHERE pd.id = patients.id AND pd.primary_doctor_id = :doc
   UNION ALL
-  SELECT 1 FROM appointments a WHERE a.patient_id = patients.id AND a.doctor_id = :doc
+  SELECT 1 FROM appointments a WHERE a.patient_id = patients.id AND a.doctor_id = :doc AND a.status <> 'cancelled'
   UNION ALL
   SELECT 1 FROM clinical_cases cc WHERE cc.patient_id = patients.id AND cc.ortho_case_id IS NULL
     AND cc.responsible_party_id = :doc AND cc.status IN ('active', 'waiting')
@@ -6357,18 +6430,23 @@ export async function listLabOrders(filters?: {
   }
 
   const hasFilters = conditions.length > 0;
-  const whereClause = hasFilters ? `WHERE ${conditions.join(" AND ")}` : "";
-  // النافذة اليومية (بلا فلاتر): المفتوح + ما رُكّب خلال شهر — أداة عمل لا أرشيف.
-  const openWindow = !hasFilters
-    ? `AND (l.status IN ('needed', 'sent', 'in_progress', 'received')
-            OR l.delivered_at > NOW() - INTERVAL '30 days')`
-    : "";
+  // النافذة اليومية (بلا فلاتر): المفتوح (بما فيه الإعادة remake) + ما رُكّب خلال شهر —
+  // شرط داخل WHERE لا ملحق بـ LEFT JOIN، وترتيب النشط أولًا كي لا تختفي الأوامر المفتوحة خلف الأرشيف (CLIN-02).
+  if (!hasFilters) {
+    conditions.push(
+      `(l.status IN ('needed', 'sent', 'in_progress', 'received', 'remake') OR l.delivered_at > NOW() - INTERVAL '30 days')`,
+    );
+  }
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limitClause = `LIMIT ${filters?.limit ? Math.min(filters.limit, 500) : 300}`;
 
   const { rows } = await getPool().query<LabOrderRow>(
     `${LAB_SELECT}
-      ${whereClause} ${openWindow}
-      ORDER BY l.due_date ASC, l.id DESC
+      ${whereClause}
+      ORDER BY
+        CASE WHEN l.status IN ('needed', 'sent', 'in_progress', 'received', 'remake') THEN 0 ELSE 1 END ASC,
+        l.due_date ASC,
+        l.id DESC
       ${limitClause}`,
     params,
   );
@@ -11450,7 +11528,7 @@ export { MINOR_UNITS };
 
 // ─── الجهات والمصروفات ───────────────────────────────────────────────────────
 
-import type { ExpenseCategory, PartyKind } from "./expenses";
+import { defaultAccountsForPartyKind, type ExpenseCategory, type PartyKind } from "./expenses";
 import { partyStatementTotals, type PartyCurrencyTotals } from "./party-statement";
 import { readStatementHistoricalAgreements, StatementHistoricalDetailsError, type HistoricalStatementAgreement } from "./statement-historical-details";
 
@@ -11819,18 +11897,23 @@ export async function createParty(input: {
   await ensureSchema();
   /* (P0-1) الطبيب يولد بسجلٍّ زمني: شروطه الأولى لقطةُ «baseline» في المعاملة
      نفسها — فأول تغييرٍ لنسبته لاحقًا مستقبليٌّ من لحظته. */
+  const defaultAccounts = defaultAccountsForPartyKind(input.kind);
   const { result } = await withDoctorCommissionChange(
     ctx, "party",
     async () => [],
     async (client) => (await client.query<PartyRow>(
-    `INSERT INTO parties (name, kind, phone, whatsapp, address, contact_person, currency, delivery_days, commission_percent, note)
-     VALUES ($1, $2, $3::text, $4::text, $5::text, $6::text, $7::text, $8, $9, $10::text)
+    `INSERT INTO parties (
+       name, kind, phone, whatsapp, address, contact_person, currency, delivery_days,
+       commission_percent, note, expense_account_code, payable_account_code
+     )
+     VALUES ($1, $2, $3::text, $4::text, $5::text, $6::text, $7::text, $8, $9, $10::text, $11::text, $12::text)
      RETURNING ${PARTY_COLUMNS}`,
     [
       input.name, input.kind, input.phone,
       input.whatsapp ?? null, input.address ?? null, input.contactPerson ?? null,
       input.currency ?? "YER", input.deliveryDays ?? 7,
       input.commissionPercent, input.note,
+      defaultAccounts.expenseAccountCode, defaultAccounts.payableAccountCode,
     ],
     )).rows[0],
     async (_client, row) => (row.kind === "doctor" ? [row.id] : []),
@@ -15054,7 +15137,7 @@ export async function partyBalances(): Promise<PartyBalance[]> {
               - ${partyAdvancesBaseSql("t.id")}) AS owed,
             COALESCE((SELECT SUM(base_amount_minor) FROM expenses WHERE party_id = t.id), 0) AS paid
        FROM parties t
-      WHERE t.kind <> 'doctor'
+      WHERE t.kind IN ('lab', 'supplier')
       ORDER BY t.kind, t.name`,
   );
   return rows.map((row) => ({
@@ -15569,6 +15652,8 @@ export interface StaffAccount {
   branch?: string | null;
   permissions?: DoctorPermissions | null;
   commissionConfig?: DoctorCommissionConfig | null;
+  sessionVersion?: number;
+  isOwner?: boolean;
 }
 
 /** حد مشترك بين عمليات الخادم، قبل حساب تجزئة كلمة المرور. */
@@ -15647,10 +15732,12 @@ export async function listUsers(): Promise<StaffAccount[]> {
     party_id: number | null; party_name: string | null;
     specialty: string | null; branch: string | null;
     permissions: string | null; commission_config: string | null;
+    session_version?: number | null; is_owner?: boolean | null;
   }>(
     `SELECT u.id, u.username, u.display_name, u.role, u.is_active, u.created_at,
             u.party_id, p.name AS party_name,
-            u.specialty, u.branch, u.permissions, u.commission_config
+            u.specialty, u.branch, u.permissions, u.commission_config,
+            u.session_version, u.is_owner
        FROM users u LEFT JOIN parties p ON p.id = u.party_id
       ORDER BY u.is_active DESC, u.created_at`,
   );
@@ -15667,6 +15754,8 @@ export async function listUsers(): Promise<StaffAccount[]> {
     branch: row.branch ?? null,
     permissions: parseDoctorPermissions(row.permissions, row.role),
     commissionConfig: parseDoctorCommissionConfig(row.commission_config),
+    sessionVersion: Number(row.session_version ?? 0),
+    isOwner: Boolean(row.is_owner),
   }));
 }
 
@@ -15774,7 +15863,7 @@ export async function doctorOwnsPatient(
     { table: "visits", alias: "v", predicate: "v.patient_id = $2 AND v.doctor_id = $1" },
     { table: "planned_visits", alias: "pv", predicate: "pv.patient_id = $2 AND pv.doctor_id = $1" },
     { table: "patients", alias: "pd", predicate: "pd.id = $2 AND pd.primary_doctor_id = $1" },
-    { table: "appointments", alias: "a", predicate: "a.patient_id = $2 AND a.doctor_id = $1" },
+    { table: "appointments", alias: "a", predicate: "a.patient_id = $2 AND a.doctor_id = $1 AND a.status <> 'cancelled'" },
     // Current care ownership is a positive witness only after all its writers
     // enforce authenticated initial assignment or administrative reassignment.
     // Ortho's canonical row wins; a stale bridge cannot grant its old owner.
@@ -15829,7 +15918,7 @@ export async function doctorOwnedPatientIds(
        UNION ALL
        SELECT pd.id FROM patients pd WHERE pd.primary_doctor_id = $1
        UNION ALL
-       SELECT ap.patient_id FROM appointments ap WHERE ap.doctor_id = $1
+       SELECT ap.patient_id FROM appointments ap WHERE ap.doctor_id = $1 AND ap.status <> 'cancelled'
        UNION ALL
        SELECT cc.patient_id FROM clinical_cases cc WHERE cc.ortho_case_id IS NULL
         AND cc.responsible_party_id = $1 AND cc.status IN ('active', 'waiting')
@@ -15931,6 +16020,7 @@ export async function updateUser(id: number, input: {
     party_id: number | null; party_name: string | null;
     specialty: string | null; branch: string | null;
     permissions: string | null; commission_config: string | null;
+    session_version?: number | null; is_owner?: boolean | null;
   }>(
     `UPDATE users SET
        display_name     = COALESCE($2::text, display_name),
@@ -15943,7 +16033,7 @@ export async function updateUser(id: number, input: {
        commission_config = CASE WHEN $10::boolean THEN NULL ELSE COALESCE($9::text, commission_config) END
      WHERE id = $1
      RETURNING id, username, display_name, role, is_active, created_at, party_id,
-               specialty, branch, permissions, commission_config`,
+               specialty, branch, permissions, commission_config, session_version, is_owner`,
     [
       id, input.displayName ?? null, input.role ?? null, input.isActive ?? null,
       input.passwordHash ?? null, input.specialty ?? null, input.branch ?? null,
@@ -15975,6 +16065,8 @@ export async function updateUser(id: number, input: {
     branch: rows[0].branch ?? null,
     permissions: parseDoctorPermissions(rows[0].permissions, rows[0].role),
     commissionConfig: parseDoctorCommissionConfig(rows[0].commission_config),
+    sessionVersion: Number(rows[0].session_version ?? 0),
+    isOwner: Boolean(rows[0].is_owner),
   };
 }
 
@@ -16666,7 +16758,11 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
 import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
-import { patientNumberSequenceRestoreSql } from "./patient-numbering-backup";
+import {
+  STANDALONE_BACKUP_SEQUENCES,
+  standaloneSequenceRestoreSql,
+  type StandaloneBackupSequence,
+} from "./patient-numbering-backup";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -16886,9 +16982,21 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
-  if (tables.includes("patient_numbering_policy")) {
-    const {rows: [patientSequence]} = await pool.query("SELECT last_value::text, is_called FROM patient_number_seq");
-    yield `${patientNumberSequenceRestoreSql(patientSequence?.last_value, patientSequence?.is_called)}\n`;
+  // (DATA-01) حفظ واستعادة المتسلسلات المستقلة الأربع (ملفات المرضى، الفواتير، السندات) لمنع تصادم الترقيم بعد الاستعادة.
+  const { rows: existingSeqRows } = (await pool.query(
+    `SELECT c.relname
+       FROM pg_catalog.pg_class c
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relname = ANY($1::text[])
+      ORDER BY c.relname`,
+    [[...STANDALONE_BACKUP_SEQUENCES]],
+  )) as { rows: { relname: string }[] };
+  const existingSeqSet = new Set(existingSeqRows.map((r) => r.relname));
+  for (const seqName of STANDALONE_BACKUP_SEQUENCES) {
+    if (!existingSeqSet.has(seqName)) continue;
+    if (seqName === "patient_number_seq" && !tables.includes("patient_numbering_policy")) continue;
+    const { rows: [seqRow] } = await pool.query(`SELECT last_value::text, is_called FROM ${seqName}`);
+    yield `${standaloneSequenceRestoreSql(seqName as StandaloneBackupSequence, seqRow?.last_value, seqRow?.is_called)}\n`;
   }
   yield `COMMIT;\n`;
 }
@@ -22386,6 +22494,7 @@ export async function startVisitFromPlannedVisit(input: {
   plannedVisitId: number;
   actor: string;
   actorRole?: string;
+  admit?: (patientId: number) => Promise<void>;
 }): Promise<PlannedVisitStart> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -23393,6 +23502,39 @@ export async function documentsForArchive(): Promise<{
     kind: row.kind,
     title: row.title,
     takenOn: row.taken_on ? dateText(row.taken_on) : null,
+    uploadedAt: row.uploaded_at,
+    storageKey: row.storage_key,
+  }));
+}
+
+/** (DATA-06) مرفقات سندات الصرف وفواتير الموردين لتضمينها في أرشيف المستندات المنفصل. */
+export async function expenseAttachmentsForArchive(): Promise<{
+  id: number;
+  expenseId: number;
+  voucherNumber: string;
+  title: string;
+  uploadedAt: Date;
+  storageKey: string;
+}[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number;
+    expense_id: number;
+    voucher_number: string | null;
+    title: string;
+    uploaded_at: Date;
+    storage_key: string;
+  }>(
+    `SELECT a.id, a.expense_id, e.voucher_number, a.title, a.uploaded_at, a.storage_key
+       FROM expense_attachments a
+       JOIN expenses e ON e.id = a.expense_id
+      ORDER BY a.id`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    expenseId: row.expense_id,
+    voucherNumber: row.voucher_number ?? `EXP-${row.expense_id}`,
+    title: row.title,
     uploadedAt: row.uploaded_at,
     storageKey: row.storage_key,
   }));

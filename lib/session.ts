@@ -13,7 +13,7 @@ async function currentSession(payload: SessionPayload | null, client?: DbClient)
 function currentSessionForUser(payload: SessionPayload, user: StaffUser | null): SessionPayload | null {
   if (payload.expiresAt <= Date.now()) return null;
   if (!user || !user.isActive || user.id !== payload.userId
-    || payload.credentialVersion !== sessionCredentialVersion(user.passwordHash)) return null;
+    || payload.credentialVersion !== sessionCredentialVersion(user.passwordHash, user.sessionVersion)) return null;
   /* (P2-1) تغيير الدور يُبطل الجلسة: الباب (proxy) يحرس الكاشير والمحاسب بالدور
      الموقَّع في التوكن، فلا يجوز أن يبقى توكنٌ بدورٍ غير دوره في القاعدة — موظفٌ
      نُقل من «استقبال» إلى «كاشير» يدخل من جديد فيحمل دوره الجديد. */

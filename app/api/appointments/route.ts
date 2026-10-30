@@ -130,6 +130,16 @@ export async function POST(request: Request) {
     /* التجاوز يُقرأ من المستخدم في القاعدة لا من الجلسة: الجلسة كوكي، والصلاحية
        قرارٌ يُغيَّر من شاشة المستخدمين فيسري فورًا لا بعد خروجٍ ودخول. */
     const actor = await findUserByUsername(session.username).catch(() => null);
+    const requestedDoctorId = integer("doctorId");
+    const actorDoctorPartyId = actor?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+    if (
+      session.role === "doctor"
+      && !actor?.permissions?.canViewAllAppointments
+      && requestedDoctorId !== null
+      && requestedDoctorId !== actorDoctorPartyId
+    ) {
+      return NextResponse.json({ message: "لا يمكنك حجز موعد باسم طبيب آخر." }, { status: 403 });
+    }
     /* بابٌ واحد للحجز — هو نفسه الذي يمرّ منه الوكيل الذكي. */
     const result = await bookAppointment({
       patientId: Number(source.patientId),
@@ -140,7 +150,7 @@ export async function POST(request: Request) {
       appointmentType: text("appointmentType", 60),
       bookingIntent: source.bookingIntent === "ortho_follow_up" ? "ortho_follow_up" : undefined,
       note: text("note", 300),
-      doctorId: integer("doctorId"),
+      doctorId: requestedDoctorId ?? (session.role === "doctor" ? actorDoctorPartyId : null),
       chairNo: source.chairNo == null || source.chairNo === "" ? null : Number(source.chairNo),
       overrideReason: text("overrideReason", 300),
       nearbyAppointmentConfirmation: text("nearbyAppointmentConfirmation", 4096),

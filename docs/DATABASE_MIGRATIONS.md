@@ -666,3 +666,13 @@ Application shade edits commit their audit record in the same transaction and
 use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
+
+### 0091_remediation_security_and_indexes.sql
+
+Additive security and performance migration (0090 remains permanently retired for
+historical cancelled #492 compatibility without restoring #492 code):
+- Adds `users.session_version`, `users.is_owner`, and `patients.portal_secret_version`.
+- Aligns uncustomized non-lab `parties` GL account defaults with `lib/accounting.ts` (`5201/2105`, `5301/2106`, `5401/2107`).
+- Adds `audit_log_no_truncate` statement guard on `audit_log`.
+- Permits transaction-scoped owner paper-archive `< 7000` collision override while preserving immutable `retired_patient_numbers`.
+- Adds hot foreign-key indexes on `visits`, `payments`, and `invoices`.

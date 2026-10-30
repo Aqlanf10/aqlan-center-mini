@@ -98,6 +98,7 @@ export const MIGRATION_ADVISORY_LOCK_KEY = parseInt(
  */
 export async function applyRuntimeMigrationFiles(pool: DbPool, files: MigrationFile[]): Promise<string[]> {
   const client = await pool.connect();
+  let destroyClient = false;
   try {
     await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
     try {
@@ -114,14 +115,18 @@ export async function applyRuntimeMigrationFiles(pool: DbPool, files: MigrationF
       const appliedNow: string[] = [];
       for (const file of files) {
         if (applied.some(row => row.version === file.version)) continue;
-        await applyMigrationInTransaction(client, file, { adopted: false });
+        await applyMigrationInTransaction(client, file, { adopted: false }, () => { destroyClient = true; });
         appliedNow.push(file.version);
       }
       return appliedNow;
     } finally {
-      await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {});
+      await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {
+        destroyClient = true;
+      });
     }
-  } finally { client.release(); }
+  } finally {
+    (client as { release: (err?: boolean) => void }).release(destroyClient || undefined);
+  }
 }
 
 /** الجداول والأعمدة التي لا يقوم النظام بدونها — قائمة فحص الانحراف الحرج (P1.2). */
@@ -273,9 +278,19 @@ export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Pr
 
   const appliedVersions = new Set(applied.map((row) => row.version));
   const fileVersions = new Map(migrationFiles.map((file) => [file.version, file]));
+  /**
+   * (BR-492-01) الهجرات التاريخية المتقاعدة: الرقم 0090 محجوز كأثر تاريخي لفرع #492 الملغى
+   * بحيث لا يُعاد استخدام الرقم 0090 أبدًا ولا يفشل فحص الاتساق إن وُجد صفّه التاريخي الخامل
+   * في قاعدة سبق تجربتها، دون إعادة أي كود من الميزة الملغاة.
+   */
+  const retiredHistoricalMigrations = new Map<string, string>([
+    ["0090", "booking_request_preferences"],
+  ]);
 
   const pending = migrationFiles.filter((file) => !appliedVersions.has(file.version));
-  const unknownApplied = applied.filter((row) => !fileVersions.has(row.version));
+  const unknownApplied = applied.filter(
+    (row) => !fileVersions.has(row.version) && retiredHistoricalMigrations.get(row.version) !== row.name,
+  );
   const checksumMismatches = [];
   for (const row of applied) {
     const file = fileVersions.get(row.version);
@@ -325,20 +340,21 @@ export async function migrate(
   const apply = options.apply === true;
   const files = options.files ?? (await loadMigrationFiles());
   const client = await pool.connect();
+  let destroyClient = false;
   try {
     // (P1-FIX-2) القفل على هذا الاتصال تحديدًا — كل عمل الrun يجري عليه،
-    // ويفكّ في finally حتى مع الخطأ أو التراجع. قفل الجلسة يُفك تلقائيًّا أيضًا
-    // لو مات الاتصال — لا تعليق دائم للمهاجرين.
+    // ويفكّ في finally حتى مع الخطأ أو التراجع. وإذا تعذّر فكّ القفل يُدمَّر
+    // الاتصال من الحوض حتى لا يعود لحوض الاتصالات وهو يحتفظ بقفل الجلسة.
     await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
     try {
-      return await migrateHoldingLock(client, files, apply);
+      return await migrateHoldingLock(client, files, apply, () => { destroyClient = true; });
     } finally {
       await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {
-        /* الاتصال سيُغلق بعد لحظة في كل الأحوال — فكّ القفل هناك تلقائيًّا. */
+        destroyClient = true;
       });
     }
   } finally {
-    client.release();
+    (client as { release: (err?: boolean) => void }).release(destroyClient || undefined);
   }
 }
 
@@ -346,6 +362,7 @@ async function migrateHoldingLock(
   client: DbClient,
   files: MigrationFile[],
   apply: boolean,
+  onPoisonClient?: () => void,
 ): Promise<MigrationRunResult> {
   let applied = await listAppliedMigrations(client);
   // Validate only the two pinned Ortho contracts before skipping applied files.
@@ -367,7 +384,7 @@ async function migrateHoldingLock(
       // قاعدة جديدة فارغة: DDL كاملًا داخل transaction، ثم تسجيل.
       if (apply) {
         await ensureSchemaMigrationsTable(client);
-        await applyMigrationInTransaction(client, baseline, { adopted: false });
+        await applyMigrationInTransaction(client, baseline, { adopted: false }, onPoisonClient);
       }
       appliedNow.push(BASELINE_VERSION);
     } else {
@@ -410,7 +427,7 @@ async function migrateHoldingLock(
     }
     if (apply) {
       await ensureSchemaMigrationsTable(client);
-      await applyMigrationInTransaction(client, file, { adopted: false });
+      await applyMigrationInTransaction(client, file, { adopted: false }, onPoisonClient);
     }
     appliedNow.push(file.version);
   }
@@ -440,6 +457,7 @@ async function applyMigrationInTransaction(
   client: DbClient,
   file: MigrationFile,
   meta: { adopted: boolean },
+  onPoisonClient?: () => void,
 ): Promise<void> {
   await client.query("BEGIN");
   try {
@@ -456,7 +474,9 @@ async function applyMigrationInTransaction(
     );
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK").catch(() => {
+      onPoisonClient?.();
+    });
     throw error;
   }
 }

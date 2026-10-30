@@ -89,6 +89,7 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
     id: number;
     username: string;
     password_hash: string;
+    session_version?: number | null;
     role: string;
     is_active: boolean;
     party_id: number | null;
@@ -105,12 +106,13 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
       id: number;
       username: string;
       password_hash: string;
+      session_version?: number | null;
       role: string;
       is_active: boolean;
       party_id: number | null;
       permissions: unknown;
     }>(
-      `SELECT id, username, password_hash, role, is_active, party_id, permissions
+      `SELECT *
          FROM users
         WHERE LOWER(username) = LOWER($1)
         LIMIT 1`,
@@ -128,7 +130,7 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
   if(payload.expiresAt<=Date.now())return {ok:false,reason:"no-session"};
   if (!userRow.is_active) return { ok: false, reason: "inactive" };
   if (userRow.id !== payload.userId || userRow.username !== payload.username || userRow.role !== payload.role) return { ok: false, reason: "user-gone" };
-  if (payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash)) {
+  if (payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash, Number(userRow.session_version ?? 0))) {
     return { ok: false, reason: "credential-changed" };
   }
 

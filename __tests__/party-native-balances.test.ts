@@ -29,8 +29,10 @@ describe("native party balance DTO admission", () => {
 
   it("admits explicit successful empty results as whole-party zero only", () => {
     expect([...readPartyNativeBalances(payload([]), catalog)]).toEqual([[1, []], [2, []]]);
+    expect([...readPartyNativeBalances(payload([]), [...catalog, { id: 4, name: "موظف تجريبي", kind: "employee" }])]).toEqual([[1, []], [2, []]]);
     expect([...readPartyNativeBalances(payload([], []), [])]).toEqual([]);
     expect([...readPartyNativeBalances(payload([], []), [catalog[2]])]).toEqual([]);
+    expect([...readPartyNativeBalances(payload([], []), [{ id: 4, name: "موظف تجريبي", kind: "employee" }])]).toEqual([]);
   });
 
   it.each([

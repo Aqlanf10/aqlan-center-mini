@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
-import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
+import {
+  evaluatePrescriptionSafety,
+  type DrugSafetyAlert,
+  type StructuredMedicalSafetyContext,
+} from "@/lib/medication-safety";
 import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
 import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workflow";
 
@@ -116,26 +120,33 @@ export function PrescriptionModal({
     name: string; dose: string; frequency: string; duration: string;
     timesPrescribed: number; lastPrescribedAt: string;
   }[]>([]);
+  const [latestMedicalHistory, setLatestMedicalHistory] = useState<StructuredMedicalSafetyContext>(null);
 
-  /* الاقتراحات تُجلب مرة عند الفتح — من وصفاته الفاعلة لا المبطلة، للطبيب
-     والمدير وحدهما؛ وغيرهم لا يقترح ولا يصير الفشل صامتًا. */
+  /* الاقتراحات وآخر نسخة من التاريخ الطبي المهيكل تُجلب مرة عند الفتح — من وصفاته
+     الفاعلة لا المبطلة، للطبيب والمدير وحدهما؛ وغيرهم لا يقترح ولا يصير الفشل صامتًا. */
   useEffect(() => {
-    if (!isOpen || !patientId) return;
+    if (!isOpen || !patientId) {
+      setLatestMedicalHistory(null);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
         const response = await fetch(`/api/patients/${patientId}/prescriptions`, { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
-        if (!cancelled) setSuggestions(payload?.suggestions ?? []);
+        if (!cancelled) {
+          setSuggestions(payload?.suggestions ?? []);
+          setLatestMedicalHistory(payload?.latestMedicalHistory ?? null);
+        }
       } catch { /* الاقتراحات تحسينٌ لا شرط: فشلها لا يعطّل الوصفة */ }
     })();
     return () => { cancelled = true; };
   }, [isOpen, patientId]);
 
   const safetyAlerts = useMemo(() => {
-    return evaluatePrescriptionSafety(items, medicalAlert);
-  }, [items, medicalAlert]);
+    return evaluatePrescriptionSafety(items, medicalAlert, latestMedicalHistory);
+  }, [items, medicalAlert, latestMedicalHistory]);
 
   const hasCriticalAlert = safetyAlerts.some((a) => a.severity === "critical");
 

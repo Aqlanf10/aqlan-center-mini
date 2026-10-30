@@ -17,10 +17,16 @@ export async function GET(request: Request) {
   if (!session) return denied();
   const kind = new URL(request.url).searchParams.get("kind");
   try {
+    const canSeeEmployees = isAdmin(session.role)
+      || (session.role === "accountant" && session.financeAccess?.viewReports !== false);
+    if (kind === "employee" && !canSeeEmployees) {
+      return NextResponse.json([]);
+    }
     const parties = await listParties(isPartyKind(kind) ? kind : undefined);
+    const visible = canSeeEmployees ? parties : parties.filter((p) => p.kind !== "employee");
     if (!isAdmin(session.role)) {
       return NextResponse.json(
-        parties.map((p) => {
+        visible.map((p) => {
           if (p.kind === "doctor" && p.id !== session.partyId) {
             return { ...p, commissionPercent: 0 };
           }
@@ -28,7 +34,7 @@ export async function GET(request: Request) {
         }),
       );
     }
-    return NextResponse.json(parties);
+    return NextResponse.json(visible);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الجهات." }, { status: 500 });
   }

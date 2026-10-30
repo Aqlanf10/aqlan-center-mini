@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getClinicalVisit, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
+import { getClinicalVisit, getPatient, findUserByUsername, listMedicalHistory, savePrescription } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { checkPrescriptionDraft } from "@/lib/prescription";
@@ -109,12 +109,19 @@ export async function POST(request: Request) {
      أو بوصفةٍ بديلة). والتحذيرات غير الحرجة لا تُحفظ وتُنسى: تُعرض، ويُقرّها
      الطبيب صراحةً، وربطُ الإقرار بالوصفة نفسها **وبالتحذيرات التي رآها**
      برمزٍ خادمي قصير العمر (Blocker B ثم الجولة الثالثة). */
-  const patient = await getPatient(draft.value.patientId).catch(() => null);
-  if (patient) {
-    /* دائمًا يُعاد التقييم من الملف الحالي وقت كل طلب — لا حالة عميل. */
+  const [patient, historyRows] = await Promise.all([
+    getPatient(draft.value.patientId).catch(() => null),
+    typeof listMedicalHistory === "function"
+      ? listMedicalHistory(draft.value.patientId, 1).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  const latestMedicalHistory = historyRows[0] ?? null;
+  if (patient || latestMedicalHistory) {
+    /* دائمًا يُعاد التقييم من الملف والتاريخ الطبي المهيكل الحاليين وقت كل طلب — لا حالة عميل. */
     const alerts = evaluatePrescriptionSafety(
       draft.value.items.map((item) => ({ name: item.name, dose: item.dose })),
-      patient.medicalAlert,
+      patient?.medicalAlert ?? null,
+      latestMedicalHistory,
     );
     const critical = alerts.filter((alert) => alert.severity === "critical");
     if (critical.length > 0) {

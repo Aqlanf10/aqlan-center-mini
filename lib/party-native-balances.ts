@@ -17,7 +17,7 @@ export function partyBalanceIdentities(catalog: readonly PartyBalanceIdentity[])
   for (const party of catalog) {
     if (!object(party) || !validId(party.id) || identities.has(party.id)
       || typeof party.name !== "string" || !party.name.trim()
-      || (party.kind !== "lab" && party.kind !== "supplier" && party.kind !== "doctor")) {
+      || (party.kind !== "lab" && party.kind !== "supplier" && party.kind !== "doctor" && party.kind !== "employee")) {
       throw new Error("Invalid party catalog");
     }
     identities.set(party.id, { id: party.id, name: party.name, kind: party.kind });
@@ -42,11 +42,13 @@ export function readPartyNativeBalances(
   }
   const catalogIdentities = partyBalanceIdentities(catalog);
   const identities = partyBalanceIdentities(value.partyIdentities as PartyBalanceIdentity[]);
-  const expected = [...catalogIdentities.values()].filter((party) => party.kind !== "doctor");
+  const expected = [...catalogIdentities.values()].filter(
+    (party) => party.kind === "lab" || party.kind === "supplier",
+  );
   if (identities.size !== expected.length) throw new Error("Native party balance coverage changed");
   for (const party of identities.values()) {
     const catalogParty = catalogIdentities.get(party.id);
-    if (party.kind === "doctor" || !catalogParty || party.kind !== catalogParty.kind || party.name !== catalogParty.name) {
+    if ((party.kind !== "lab" && party.kind !== "supplier") || !catalogParty || party.kind !== catalogParty.kind || party.name !== catalogParty.name) {
       throw new Error("Native party balance coverage changed");
     }
   }

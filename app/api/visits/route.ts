@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { ActiveVisitExists, addVisit, listTodayVisits, recordAudit, startVisitFromPlannedVisit } from "@/lib/db";
+import { canAccessPatient, canDoctorAccessAllPatients } from "@/lib/patient-access";
 import { listReceptionHandoffs } from "@/lib/reception-handoff-db";
 import { canReadReceptionHandoff, isHandoffDate } from "@/lib/reception-handoff";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
@@ -78,6 +79,9 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
+  if (session.role === "cashier" || session.role === "accountant") {
+    return failed("غير مصرّح للأدوار المالية بفتح الزيارات السريرية.", 403);
+  }
   let body: unknown;
   try {
     body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
@@ -86,6 +90,8 @@ export async function POST(request: Request) {
   }
 
   const source = (body ?? {}) as Record<string, unknown>;
+
+  class VisitPatientScopeDenied extends Error {}
 
   /*
    * بدء الزيارة من زيارةٍ مخطَّطة — الرحلة V2.
@@ -97,11 +103,24 @@ export async function POST(request: Request) {
   const rawPlannedVisitId = Number(source.plannedVisitId);
   if (Number.isInteger(rawPlannedVisitId) && rawPlannedVisitId > 0) {
     try {
-      const started = await startVisitFromPlannedVisit({
-        plannedVisitId: rawPlannedVisitId,
-        actor: session.username,
-        actorRole: session.role,
-      });
+      const started = await startVisitFromPlannedVisit(
+        session.role === "doctor"
+          ? {
+              plannedVisitId: rawPlannedVisitId,
+              actor: session.username,
+              actorRole: session.role,
+              admit: async (plannedPatientId) => {
+                if (!(await canAccessPatient(session, plannedPatientId))) {
+                  throw new VisitPatientScopeDenied();
+                }
+              },
+            }
+          : {
+              plannedVisitId: rawPlannedVisitId,
+              actor: session.username,
+              actorRole: session.role,
+            },
+      );
       if (started && "appointmentConflict" in started) {
         return failed("تغيّر الموعد المرتبط أو أُغلق. أعد الحجز قبل بدء الجلسة.", 409);
       }
@@ -120,7 +139,10 @@ export async function POST(request: Request) {
         actor: session.username, actorRole: session.role,
       });
       return NextResponse.json(started, { status: 201 });
-    } catch {
+    } catch (error) {
+      if (error instanceof VisitPatientScopeDenied) {
+        return failed("هذا الملف ليس من مرضاك ولا توجد إحالة استقبال نشطة لك.", 403);
+      }
       return failed("تعذّر بدء الزيارة من الجلسة المخطَّطة. أعد المحاولة.");
     }
   }
@@ -143,6 +165,19 @@ export async function POST(request: Request) {
     : (session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
       ? session.partyId
       : null);
+
+  // (SEC-01) الطبيب المقيّد بنطاق مرضاه لا يفتح زيارة لمريض غير مسند أو بلا إحالة نشطة ولا باسم طبيب آخر.
+  if (session.role === "doctor") {
+    const allScope = await canDoctorAccessAllPatients(session);
+    if (!allScope) {
+      if (!patientId || !(await canAccessPatient(session, patientId))) {
+        return failed("غير مصرّح بفتح زيارة لمريض غير مسند لك إلا عبر إحالة الاستقبال.", 403);
+      }
+      if (Number.isInteger(rawDoctorId) && rawDoctorId > 0 && rawDoctorId !== session.partyId) {
+        return failed("لا يمكنك فتح زيارة باسم طبيب آخر.", 403);
+      }
+    }
+  }
 
   try {
     const visit = await addVisit({

@@ -89,7 +89,7 @@ export async function POST(request: Request) {
       role: updated.role,
       expiresAt: Date.now() + SESSION_DURATION_MS,
       partyId: updated.partyId,
-      credentialVersion: sessionCredentialVersion(passwordHash),
+      credentialVersion: sessionCredentialVersion(passwordHash, updated.sessionVersion ?? user.sessionVersion ?? 0),
       // Match login issuance, using the current permissions returned by the update.
       ...(updated.role === "cashier" || updated.role === "accountant" ? {
         financeAccess: updated.permissions?.financeAccess,

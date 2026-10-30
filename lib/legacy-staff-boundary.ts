@@ -29,9 +29,9 @@ export async function assertLegacyStaffWrite(source:Query,authorization:LegacySt
  const s=staffIdentitySchemaName(schema);
  await lockLegacyStaffBoundary(source,s);
  const ids=[...new Set([signed.userId,...(targetId===null?[]:[targetId])])].sort((a,b)=>a-b);
- const {rows}=await source.query<{id:number;username:string;role:string;is_active:boolean;password_hash:string;permissions:unknown}>(`SELECT id,username,role,is_active,password_hash,permissions FROM ${s}.users WHERE id=ANY($1::integer[]) ORDER BY id FOR UPDATE`,[ids]);
+ const {rows}=await source.query<{id:number;username:string;role:string;is_active:boolean;password_hash:string;session_version?:number|null;permissions:unknown}>(`SELECT * FROM ${s}.users WHERE id=ANY($1::integer[]) ORDER BY id FOR UPDATE`,[ids]);
  const actor=rows.find(r=>r.id===signed.userId);
- if(!actor || !actor.is_active || actor.username!==signed.username || actor.role!==signed.role || sessionCredentialVersion(actor.password_hash)!==signed.credentialVersion)refuse("ACTOR_REVOKED");
+ if(!actor || !actor.is_active || actor.username!==signed.username || actor.role!==signed.role || sessionCredentialVersion(actor.password_hash,Number(actor.session_version??0))!==signed.credentialVersion)refuse("ACTOR_REVOKED");
  for(const row of rows)assertLegacyPermissionEnvelope(row.permissions);
  if((actor.role==="cashier" || actor.role==="accountant") && signed.permissionVersion!==sessionPermissionVersion(actor.role,parseDoctorPermissions(actor.permissions,actor.role)?.financeAccess))refuse("ACTOR_REVOKED");
  if(authorization.selfPassword){if(action!=="update" || targetId!==actor.id)refuse("SELF_PASSWORD_SCOPE");}

@@ -155,7 +155,7 @@ export async function getClinicStatistics(context: AiToolContext): Promise<ToolE
            UNION ALL
            SELECT 1 FROM patients pd WHERE pd.id = patients.id AND pd.primary_doctor_id = $1
            UNION ALL
-           SELECT 1 FROM appointments a WHERE a.patient_id = patients.id AND a.doctor_id = $1
+           SELECT 1 FROM appointments a WHERE a.patient_id = patients.id AND a.doctor_id = $1 AND a.status <> 'cancelled'
          )`
       : "FROM patients";
     const params = doctorScope ? [doctorScope] : [];

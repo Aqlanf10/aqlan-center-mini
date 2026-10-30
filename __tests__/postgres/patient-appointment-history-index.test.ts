@@ -23,7 +23,7 @@ const rows = async (pool: Pool) => {
 };
 function expectOnlyNumberingVersionAdded(before: Awaited<ReturnType<typeof rows>>, after: Awaited<ReturnType<typeof rows>>) {
   const patientRows = (snapshot: Awaited<ReturnType<typeof rows>>) => snapshot.patients.map(row => JSON.parse((row as { row: string }).row));
-  expect(patientRows(after)).toEqual(patientRows(before).map(row => ({ ...row, patient_number_version: 1 })));
+  expect(patientRows(after)).toEqual(patientRows(before).map(row => ({ ...row, patient_number_version: 1, portal_secret_version: 0 })));
   expect({ ...after, patients: [] }).toEqual({ ...before, patients: [] });
 }
 const registry = async (pool: Pool) => (await pool.query("SELECT version,name,checksum,adopted FROM schema_migrations WHERE version='0067'")).rows;
@@ -97,7 +97,7 @@ it("serializes numbered/runtime racers and retries idempotently on a populated 0
   const competitor = new Pool({ connectionString: pool.options.connectionString!, ssl: false });
   try {
     const [runtime, numbered] = await Promise.all([applyRuntimeMigrationFiles(pool, [index]), migrate(competitor, { apply: true, files })]);
-    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089"]);
+    expect([...runtime, ...numbered.appliedVersions].sort()).toEqual(["0066", "0067", "0068", "0069", "0074", "0078", "0079", "0080", "0081", "0082", "0087", "0089", "0091"]);
   } finally { await competitor.end(); }
   const oid = (await pool.query("SELECT 'appointments_patient_history_idx'::regclass::oid AS oid")).rows;
   expect(await applyRuntimeMigrationFiles(pool, [index])).toEqual([]);

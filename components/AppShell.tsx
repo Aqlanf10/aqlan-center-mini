@@ -292,10 +292,15 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
                 className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700" title="حسابي — تغيير كلمة المرور">
                 <Icon name="user" className="h-4 w-4" />
               </a>
-              <a href="/login" aria-label="شاشة الدخول"
-                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700" title="تبديل الحساب / تسجيل الدخول">
+              <button
+                type="button"
+                onClick={() => { void signOut(); }}
+                aria-label="تسجيل الخروج"
+                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700"
+                title="تسجيل الخروج"
+              >
                 <Icon name="logout" className="h-4 w-4" />
-              </a>
+              </button>
             </div>
           </div>
         ) : null}

@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/auth";
+import { revokeUserSessions } from "@/lib/db";
+import { readSessionPayload } from "@/lib/session";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const payload = await readSessionPayload().catch(() => null);
+  if (payload?.userId) {
+    await revokeUserSessions(payload.userId).catch(() => {});
+  }
   const response = NextResponse.json({ ok: true });
 
   response.cookies.set(SESSION_COOKIE, "", {

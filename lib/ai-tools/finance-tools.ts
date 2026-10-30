@@ -117,9 +117,12 @@ export async function generateInternalReport(
       };
     }
 
+    const reportParams = new URLSearchParams(searchParams);
+    reportParams.set("report", params.reportType);
+    const reportQuery = reportParams.toString();
     const actions: ActionButton[] = [
-      { label: "فتح التقرير الكامل", href: `/reports?report=${params.reportType}`, actionType: "navigate" },
-      { label: "طباعة التقرير", href: `/print/report/${params.reportType}`, actionType: "print" },
+      { label: "فتح التقرير الكامل", href: `/reports?${reportQuery}`, actionType: "navigate" },
+      { label: "طباعة التقرير", href: `/print/report?${reportQuery}`, actionType: "print" },
     ];
 
     const kpiSummary = result.kpis.map((k) => {

@@ -195,7 +195,7 @@ export async function POST(request: Request) {
       expiresAt,
       // جهة الطبيب المرتبطة (§٣٥): بها يعرف الخادم مرضى هذا الحساب فيحجب ما ليس لهم.
       partyId: user.partyId,
-      credentialVersion: sessionCredentialVersion(user.passwordHash),
+      credentialVersion: sessionCredentialVersion(user.passwordHash, user.sessionVersion),
       ...(user.role === "cashier" || user.role === "accountant" ? {
         financeAccess: user.permissions?.financeAccess,
         permissionVersion: sessionPermissionVersion(user.role, user.permissions?.financeAccess),

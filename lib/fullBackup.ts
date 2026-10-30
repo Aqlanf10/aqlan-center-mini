@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { backupSnapshotSqlLines, backupSqlLines, getPool, type Queryable } from "./db";
+import { backupSnapshotSqlLines, ensureSchema, getPool, type Queryable } from "./db";
 import { readIdentityProvenance, type IdentityProvenance } from "./restore/identity-provenance";
 import { readFileByKey } from "./files";
 import { tarEnd, tarHeader, tarPadding } from "./tar";
@@ -191,32 +191,18 @@ async function captureSnapshotFromSource(source: Queryable, stage: string): Prom
 }
 
 /**
- * المسار الافتراضي القديم (بلا مصدر صريح): database.sql من backupSqlLines
- * (فتحها معاملتها الخاصة واستدعاء ensureSchema كما هو) ثم metadata من المجمع.
- * هذا مسار أداة التنزيل الإدارية القائمة — ليس مسار النسخ الإنتاجي.
+ * (DATA-06) المسار الافتراضي (بلا مصدر صريح): يهيّئ المخطط ثم يلتقط SQL وmetadata
+ * وسجل الهوية في معاملة REPEATABLE READ READ ONLY واحدة عبر captureSnapshotFromSource
+ * كي لا تنشأ فجوة زمنية بين database.sql وقائمة المستندات.
  */
 async function captureSnapshotDefault(stage: string): Promise<BackupSnapshot> {
-  const sqlPath = join(stage, "database.sql");
-  const sqlFile = await open(sqlPath, "wx", 0o600);
-  const hash = createHash("sha256");
+  await ensureSchema();
+  const client = await getPool().connect();
   try {
-    for await (const line of backupSqlLines()) {
-      hash.update(line);
-      await sqlFile.writeFile(line);
-    }
+    return await captureSnapshotFromSource(client, stage);
   } finally {
-    await sqlFile.close();
+    client.release();
   }
-
-  const rows = await readDocumentMetadata(getPool());
-  const identityProvenance = await readIdentityProvenance(getPool());
-  return {
-    identityProvenance,
-    sqlPath,
-    sqlSha256: hash.digest("hex"),
-    sqlSize: (await stat(sqlPath)).size,
-    documents: uniqueDocumentsByStorageKey(rows),
-  };
 }
 
 /**

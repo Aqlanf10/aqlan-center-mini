@@ -3,6 +3,7 @@ import "./load-env.mjs";
 import { spawn } from "node:child_process";
 import { mkdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { databaseUrlForProject } from "./database-scope.mjs";
 
 /**
  * نسخة احتياطية من قاعدة البيانات.
@@ -18,11 +19,12 @@ import { resolve } from "node:path";
  *   الاستعادة:  pg_restore --clean --if-exists -d "$DATABASE_URL" الملف.dump
  */
 
-const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? "";
-if (!url.trim()) {
+const rawUrl = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? "";
+if (!rawUrl.trim()) {
   console.error("خطأ: DATABASE_URL غير مضبوط.");
   process.exit(1);
 }
+const url = databaseUrlForProject(rawUrl.trim(), process.env);
 
 const outputDir = resolve(process.argv[2] ?? "backups");
 mkdirSync(outputDir, { recursive: true });
