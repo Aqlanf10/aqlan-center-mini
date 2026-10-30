@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import { hrPayrollWriteAuthorizer } from "@/lib/hr-payroll-authority";
 import { disbursePayrollItem, disburseEntireRun, findDisbursementByRequestId, reversePayrollDisbursement, HrPayrollError, type DisburseInput } from "@/lib/hr-payroll";
 export const dynamic = "force-dynamic";
@@ -32,7 +33,9 @@ export async function POST(request: Request) {
   try {
     if (p.action === "reverse") {
       if (typeof p.reason !== "string" || !(typeof p.disbursementId === "string" || typeof p.disbursementId === "number")) throw new HrPayrollError("invalid_reversal",400,"حدّد حركة الصرف وسبب العكس.");
-      return NextResponse.json({ success: true, disbursement: await reversePayrollDisbursement(p.disbursementId,{ reason:p.reason },session,hrPayrollWriteAuthorizer(session)) });
+      return withHttpIdempotency(request, "hr.payroll.reverse", session.username, { disbursementId: String(p.disbursementId), reason: p.reason }, async () =>
+        NextResponse.json({ success: true, disbursement: await reversePayrollDisbursement(p.disbursementId as string | number,{ reason:p.reason as string },session,hrPayrollWriteAuthorizer(session)) }),
+      );
     }
     if (p.action && p.action !== "disburse") throw new HrPayrollError("invalid_action",400,"العملية غير صالحة.");
     if (typeof p.clientRequestId !== "string" || !p.clientRequestId.trim()) throw new HrPayrollError("request_key_required",400,"مفتاح الطلب الثابت مطلوب للصرف.");

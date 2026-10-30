@@ -17,6 +17,7 @@
 export const RESET_WIPE_TABLES = [
   "approved_agreement_principals",
   // التشغيل اليومي
+  "http_idempotency_keys",
   "ai_confirmation_claims",
   "document_prints",
   "message_reads",

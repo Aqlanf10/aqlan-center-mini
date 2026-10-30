@@ -35,7 +35,7 @@ type QueryRunner = DbClient | DbPool;
 export class HrPayrollError extends Error {
   constructor(public code: string, public status: number, message: string) { super(message); this.name = "HrPayrollError"; }
 }
-const fail = (code: string, message: string, status = 409): never => { throw new HrPayrollError(code, status, message); };
+function fail(code: string, message: string, status = 409): never { throw new HrPayrollError(code, status, message); }
 function assertPayTermsUnblocked(blockers: readonly string[]) {
   if (blockers.length) fail("pay_terms_blocked", `لا يمكن الاعتماد: ${blockers.map(payrollBlockerLabel).join("؛ ")}. يلزم تصحيح التعارض أو قرار معتمد ثم إعادة الاحتساب.`);
 }
@@ -102,7 +102,10 @@ async function ensureStaffParty(client: DbClient, staffId: number, fullName: str
   const { rows } = await client.query(`SELECT b.party_id FROM hr_payroll_items i JOIN payables b ON b.id = i.payable_id
     WHERE i.staff_id = $1 ORDER BY i.id LIMIT 1`, [staffId]);
   if (rows[0]) return Number(rows[0].party_id);
-  const created = await client.query("INSERT INTO parties (name, kind, is_active) VALUES ($1, 'employee', true) RETURNING id", [fullName]);
+  const created = await client.query(
+    "INSERT INTO parties (name, kind, is_active, expense_account_code, payable_account_code) VALUES ($1, 'employee', true, '5401', '2107') RETURNING id",
+    [fullName],
+  );
   return Number(created.rows[0].id);
 }
 function mapPeriodRow(row: Row): HrPayrollPeriodView {
@@ -258,7 +261,7 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
     const existing = await client.query("SELECT * FROM hr_payroll_runs WHERE period_id = $1 AND currency = $2 FOR UPDATE", [period.id, currency]);
     if (existing.rows[0] && existing.rows[0].status !== "draft") fail("approved", "لا يمكن إعادة احتساب مسير معتمد.");
     const runRows = await client.query(`INSERT INTO hr_payroll_runs (period_id, currency, created_by) VALUES ($1,$2,$3)
-      ON CONFLICT (period_id,currency) DO UPDATE SET status = 'draft' RETURNING *`, [period.id, currency, session.username]);
+      ON CONFLICT (period_id,currency) DO UPDATE SET status = 'draft', created_by = EXCLUDED.created_by RETURNING *`, [period.id, currency, session.username]);
     const run = runRows.rows[0];
     const staff = await client.query(`SELECT s.*, s.hire_date::text, s.end_date::text, s.salary_effective_on::text,
       u.party_id AS user_party_id FROM hr_staff s LEFT JOIN users u ON u.id = s.user_id
@@ -300,15 +303,42 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
     return mapRunRow({ ...updated.rows[0], period_key: period.period_key, period_name: period.name });
   });
 }
+async function isPrincipalOwnerAdmin(client: DbClient, userId: number): Promise<boolean> {
+  const res = await client.query<{ is_principal: boolean }>(
+    `SELECT (
+       u.role = 'admin'
+       AND u.is_active = TRUE
+       AND (
+         u.is_owner = TRUE
+         OR (
+           NOT EXISTS (SELECT 1 FROM users WHERE is_owner = TRUE AND is_active = TRUE)
+           AND u.id = (SELECT MIN(id) FROM users WHERE role = 'admin' AND is_active = TRUE)
+         )
+       )
+     ) AS is_principal
+     FROM users u
+     WHERE u.id = $1`,
+    [userId],
+  );
+  return Boolean(res.rows[0]?.is_principal);
+}
+
 export async function approvePayrollRun(runId: number | string, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer): Promise<HrPayrollRunView> {
   manager(session);
   return withPayrollTransaction(session, authorize, async (client) => {
     const run = await lockRun(client, idOf(runId));
     if (run.period_status === "closed") fail("closed", "الفترة مقفلة.");
     if (run.status === "approved") return mapRunRow(run);
-    const { rows: items } = await client.query(`SELECT i.*,s.full_name AS staff_name FROM hr_payroll_items i
+    const isPrincipalOwner = await isPrincipalOwnerAdmin(client, session.userId);
+    if (!isPrincipalOwner && run.created_by && run.created_by === session.username) {
+      fail("self_approval_forbidden", "لا يجوز لغير المالك الأساسي اعتماد مسير رواتب احتسبه بنفسه؛ يتطلب الاعتماد مراجعة المالك أو مدير آخر.", 403);
+    }
+    const { rows: items } = await client.query(`SELECT i.*,s.full_name AS staff_name,s.user_id AS staff_user_id FROM hr_payroll_items i
       JOIN hr_staff s ON s.id=i.staff_id WHERE i.run_id=$1 ORDER BY i.id FOR UPDATE OF i`, [run.id]);
     if (!items.length) fail("empty_run", "لا توجد بنود لاعتمادها.");
+    if (!isPrincipalOwner && items.some((it) => it.staff_user_id != null && Number(it.staff_user_id) === session.userId)) {
+      fail("self_approval_forbidden", "لا يجوز لغير المالك الأساسي اعتماد مسير يتضمن مستحقاته الشخصية.", 403);
+    }
     const rates = ratesFromSettings(await getSettings());
     for (const item of items) {
       const staffRows = await client.query(`SELECT s.*,hire_date::text,end_date::text,salary_effective_on::text,u.party_id AS user_party_id
@@ -338,10 +368,16 @@ export async function approvePayrollRun(runId: number | string, session: Session
       }
       for (const [category, amount, column] of [["salary", Number(item.base_salary_minor), "payable_id"], ["commission", Number(item.commissions_minor), "commission_payable_id"]] as const) {
         if (amount <= 0) continue;
-        const rate = rates[item.currency as Currency] ?? 1;
-        const payable = await client.query(`INSERT INTO payables (party_id,category,description,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,created_by)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, [partyId, category, `مسير ${run.period_key} — ${item.staff_name}`, amount,
-          item.currency, rate, toBaseAmount(amount,item.currency,CLINIC_BASE_CURRENCY,rate),CLINIC_BASE_CURRENCY,session.username]);
+        const itemCurrency = item.currency as Currency;
+        const rate = itemCurrency === CLINIC_BASE_CURRENCY ? 1 : rates[itemCurrency];
+        if (typeof rate !== "number" || !(rate > 0)) {
+          fail("missing_exchange_rate", "حدّد سعر الصرف في الإعدادات المالية قبل اعتماد مسير بعملة أجنبية.", 409);
+        }
+        const expenseAcc = category === "salary" ? "5401" : "5301";
+        const payableAcc = category === "salary" ? "2107" : "2106";
+        const payable = await client.query(`INSERT INTO payables (party_id,category,description,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,expense_account_code,payable_account_code,created_by)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [partyId, category, `مسير ${run.period_key} — ${item.staff_name}`, amount,
+          item.currency, rate, toBaseAmount(amount,itemCurrency,CLINIC_BASE_CURRENCY,rate),CLINIC_BASE_CURRENCY,expenseAcc,payableAcc,session.username]);
         await client.query(`UPDATE hr_payroll_items SET ${column}=$2 WHERE id=$1`, [item.id, payable.rows[0].id]);
       }
       await client.query("UPDATE hr_payroll_items SET commission_basis_at=clock_timestamp() WHERE id=$1", [item.id]);
@@ -356,13 +392,33 @@ const itemBalanceSelect = `i.*,s.full_name AS staff_name,s.job_title AS staff_jo
   CASE WHEN b.id IS NULL THEN i.base_salary_minor ELSE ${payableAmountSql("b")} - ${payableSettledTotalSql("b")} END AS salary_remaining,
   CASE WHEN c.id IS NULL THEN i.commissions_minor ELSE ${payableAmountSql("c")} - ${payableSettledTotalSql("c")} END AS commission_remaining`;
 export async function listPayrollItems(runId: number | string): Promise<HrPayrollItemView[]> {
-  const { rows } = await getPool().query(`SELECT ${itemBalanceSelect} FROM hr_payroll_items i JOIN hr_staff s ON s.id=i.staff_id
+  const pool = getPool();
+  const { rows } = await pool.query(`SELECT ${itemBalanceSelect} FROM hr_payroll_items i JOIN hr_staff s ON s.id=i.staff_id
     LEFT JOIN payables b ON b.id=i.payable_id LEFT JOIN payables c ON c.id=i.commission_payable_id WHERE i.run_id=$1 ORDER BY s.full_name`, [idOf(runId)]);
   const views = rows.map(mapItemRow);
-  for (const view of views) {
-    const disb = await getPool().query("SELECT * FROM hr_payroll_disbursements WHERE item_id=$1 ORDER BY id", [view.id]);
-    view.disbursements = await Promise.all(disb.rows.map((r) => disbursementView(r,getPool())));
+  if (views.length === 0) return views;
+  const itemIds = views.map((v) => v.id);
+  const disbRes = await pool.query("SELECT * FROM hr_payroll_disbursements WHERE item_id = ANY($1::int[]) ORDER BY id", [itemIds]);
+  const disbViews = disbRes.rows.map(mapDisbursementRow);
+  if (disbViews.length > 0) {
+    const disbIds = disbViews.map((d) => d.id);
+    const partsRes = await pool.query("SELECT * FROM hr_payroll_disbursement_parts WHERE disbursement_id = ANY($1::int[]) ORDER BY id", [disbIds]);
+    const partsByDisb = new Map<number, HrPayrollDisbursementView["parts"]>();
+    for (const p of partsRes.rows) {
+      const disbId = Number(p.disbursement_id);
+      const list = partsByDisb.get(disbId) ?? [];
+      list.push({ component: p.component, amountMinor: Number(p.amount_minor), expenseId: Number(p.expense_id), payableId: p.payable_id });
+      partsByDisb.set(disbId, list);
+    }
+    for (const d of disbViews) d.parts = partsByDisb.get(d.id) ?? [];
   }
+  const disbByItem = new Map<number, HrPayrollDisbursementView[]>();
+  for (const d of disbViews) {
+    const list = disbByItem.get(d.itemId) ?? [];
+    list.push(d);
+    disbByItem.set(d.itemId, list);
+  }
+  for (const view of views) view.disbursements = disbByItem.get(view.id) ?? [];
   return views;
 }
 export interface DisburseInput {
@@ -434,7 +490,12 @@ async function disburseInTx(client: DbClient, input: ReturnType<typeof normalize
     const earned = (await commissionReport(run.start_date,run.end_date,undefined,client)).find((c) => c.doctorId===doctorId && c.currency===item.currency);
     if (components.commissionMinor > Math.max(0,earned?.dueMinor ?? 0)) fail("doctor_already_paid", "صُرفت العمولة من كشف الطبيب أو تغيّر استحقاقها؛ لا تُصرف ثانيةً من المسير.");
   }
-  const rates = ratesFromSettings(await getSettings()), rate = rates[item.currency as Currency] ?? 1;
+  const rates = ratesFromSettings(await getSettings());
+  const itemCurrency = item.currency as Currency;
+  const rate = itemCurrency === CLINIC_BASE_CURRENCY ? 1 : rates[itemCurrency];
+  if (typeof rate !== "number" || !(rate > 0)) {
+    fail("missing_exchange_rate", "حدّد سعر الصرف في الإعدادات المالية قبل صرف مسير بعملة أجنبية.", 409);
+  }
   const parts: HrPayrollDisbursementView["parts"] = [];
   for (const [component,amount,payableId] of [["salary",components.salaryMinor,item.payable_id],["commission",components.commissionMinor,item.commission_payable_id]] as const) {
     if (!amount) continue;

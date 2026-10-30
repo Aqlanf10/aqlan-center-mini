@@ -1,4 +1,4 @@
-import { getPatient } from "./db";
+import { getPortalSessionPatient, getSettings } from "./db";
 import { cookies } from "next/headers";
 import { PORTAL_COOKIE, readPortalToken, type PortalPayload } from "./portal";
 
@@ -13,9 +13,14 @@ export async function requirePortalSession(): Promise<PortalPayload | null> {
   const store = await cookies();
   const payload = readPortalToken(store.get(PORTAL_COOKIE)?.value);
   if (!payload) return null;
-  // File-number edits invalidate the old login alias, never transfer an ID/session.
+  // File-number edits, phone changes, and portal toggle invalidate old sessions immediately.
   try {
-    const patient = await getPatient(payload.patientId);
-    return patient?.patientNumber === payload.patientNumber ? payload : null;
+    const settings = await getSettings();
+    if (settings["portal.enabled"] === "false") return null;
+    const patient = await getPortalSessionPatient(payload.patientId);
+    if (!patient || patient.patientNumber !== payload.patientNumber) return null;
+    if ((patient.portalSecretVersion ?? 0) !== (payload.secretVersion ?? 0)) return null;
+    if (!(patient.phone?.trim() || patient.altPhone?.trim())) return null;
+    return payload;
   } catch { return null; }
 }

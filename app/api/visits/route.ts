@@ -50,6 +50,10 @@ export async function GET(request: Request) {
     } catch { return failed("تعذّر تحديث الزيارات الموقّعة. أعد المحاولة."); }
   }
   try {
+    if (session.role === "doctor" && !(await canDoctorAccessAllPatients(session))) {
+      const docScope = typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null;
+      return NextResponse.json(await listTodayVisits(docScope));
+    }
     return NextResponse.json(await listTodayVisits());
   } catch {
     // تفاصيل الاستثناء لا تخرج في الاستجابة — قد تحمل رابط قاعدة البيانات.

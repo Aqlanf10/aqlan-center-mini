@@ -2547,10 +2547,14 @@ export const TODAY_VISITS_SQL = `SELECT * FROM visits
       WHERE ${onClinicDaySql("arrived_at", "$1", clinicTodaySql("$1"))}
       ORDER BY arrived_at ASC`;
 
-export async function listTodayVisits(): Promise<Visit[]> {
+export async function listTodayVisits(doctorPartyId?: number | null): Promise<Visit[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(TODAY_VISITS_SQL, [CLINIC_TIME_ZONE]);
-  return rows.map(toVisit);
+  if (doctorPartyId === undefined) {
+    const { rows } = await getPool().query<VisitRow>(TODAY_VISITS_SQL, [CLINIC_TIME_ZONE]);
+    return rows.map(toVisit);
+  }
+  if (doctorPartyId === null || doctorPartyId <= 0) return [];
+  return listTodayVisitsWith(getPool(), doctorPartyId);
 }
 
 /** Today's visits in the owning snapshot (canonical queue, M2 slice 11). A clinician
@@ -2579,8 +2583,19 @@ export const CLINIC_TIME_ZONE = resolveClinicZone(process.env.CLINIC_TIME_ZONE);
  * بتوقيت الخادم كان سيُسقط زيارات المساء من تقرير اليوم ويضيفها إلى تقرير الغد،
  * فتظهر أيام «هادئة» ليست هادئة.
  */
-export async function listVisitsByDate(date: string): Promise<Visit[]> {
+export async function listVisitsByDate(date: string, doctorPartyId?: number | null): Promise<Visit[]> {
   await ensureSchema();
+  if (doctorPartyId !== undefined && (doctorPartyId === null || doctorPartyId <= 0)) return [];
+  if (typeof doctorPartyId === "number" && doctorPartyId > 0) {
+    const { rows } = await getPool().query<VisitRow>(
+      `SELECT v.* FROM visits v
+        WHERE ${onClinicDaySql("v.arrived_at", "$1", "$2::date")}
+          AND (v.doctor_id = $3 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = v.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3")}))
+        ORDER BY v.arrived_at ASC`,
+      [CLINIC_TIME_ZONE, date, doctorPartyId],
+    );
+    return rows.map(toVisit);
+  }
   const { rows } = await getPool().query<VisitRow>(
     `SELECT * FROM visits
       WHERE ${onClinicDaySql("arrived_at", "$1", "$2::date")}
@@ -4320,9 +4335,10 @@ const APPOINTMENT_SELECT = `
     JOIN patients p ON p.id = a.patient_id
     LEFT JOIN parties doc ON doc.id = a.doctor_id`;
 
-export async function listAppointmentsByDate(date: string): Promise<Appointment[]> {
+export async function listAppointmentsByDate(date: string, doctorPartyId?: number | null): Promise<Appointment[]> {
   await ensureSchema();
-  return listAppointmentsByDateWith(getPool(), date, null);
+  if (doctorPartyId !== undefined && (doctorPartyId === null || doctorPartyId <= 0)) return [];
+  return listAppointmentsByDateWith(getPool(), date, doctorPartyId ?? null);
 }
 
 /** One day's appointments in the caller's snapshot (canonical, M2 slice 15). A clinician
@@ -5628,6 +5644,8 @@ export async function mergeDuplicatePatient(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('patient_import')), pg_advisory_xact_lock(hashtext('patient_numbering'))");
+    await client.query("SET LOCAL aqlan.patient_merge_active = 'on'");
     const { rows: locked } = await client.query<PatientRow>(
       `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
       [[sourceId, targetId]],
@@ -5640,26 +5658,51 @@ export async function mergeDuplicatePatient(
     }
 
     const { rows: [footprint] } = await client.query<{
-      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number; collection_attempts: number;
+      payments: number; invoices: number; movements: number; opening: number;
+      legacy_treatments: number; legacy_payments: number; collection_attempts: number;
+      agreements: number; lab_financial: number;
     }>(
       `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
+              (SELECT COUNT(*)::int FROM invoices WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM invoice_corrections WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM invoice_settlement_reclassifications WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM invoice_archive_events WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM invoice_service_additions WHERE patient_id = $1) AS invoices,
               /* (0068) A retired collection key is permanent proof bound to this patient: it never moves. */
               (SELECT COUNT(*)::int FROM collection_attempt_retirements WHERE patient_id = $1) AS collection_attempts,
               (SELECT COUNT(*)::int FROM inventory_movements
                 WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
-              (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
+              (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM patient_opening_balance_history WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM legacy_balance_arrangements WHERE patient_id = $1) AS opening,
               (SELECT COUNT(*)::int FROM legacy_treatments WHERE patient_id = $1)
-                + (SELECT COUNT(*)::int FROM legacy_treatment_agreements WHERE patient_id = $1) AS legacy_treatments,
-              (SELECT COUNT(*)::int FROM legacy_payments WHERE patient_id = $1) AS legacy_payments`,
+                + (SELECT COUNT(*)::int FROM legacy_treatment_agreements WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM legacy_treatment_documents WHERE patient_id = $1) AS legacy_treatments,
+              (SELECT COUNT(*)::int FROM legacy_payments WHERE patient_id = $1) AS legacy_payments,
+              (SELECT COUNT(*)::int FROM treatment_plans WHERE patient_id = $1 AND consent_at IS NOT NULL)
+                + (SELECT COUNT(*)::int FROM approved_agreement_principals WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM agreement_delta_amendments WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM agreement_delta_attempt_rejections WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM agreement_delta_collection_receipts WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM agreement_reconciliations WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM debt_repayment_arrangements WHERE patient_id = $1) AS agreements,
+              (SELECT COUNT(*)::int FROM lab_work_intents WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM lab_orders WHERE patient_id = $1
+                    AND (payable_id IS NOT NULL OR cost_minor IS NOT NULL OR lab_work_intent_id IS NOT NULL
+                         OR EXISTS (SELECT 1 FROM payables pay WHERE pay.lab_order_id = lab_orders.id))) AS lab_financial`,
       [sourceId],
     );
-    if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0
-      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0 || footprint.collection_attempts > 0) {
+    if (footprint.payments > 0 || footprint.invoices > 0 || footprint.movements > 0 || footprint.opening > 0
+      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0 || footprint.collection_attempts > 0
+      || footprint.agreements > 0 || footprint.lab_financial > 0) {
       await client.query("ROLLBACK");
       return {
         ok: false, reason: "source_has_financial_history",
         counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
           legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments,
+          ...(footprint.invoices > 0 ? { invoices: footprint.invoices } : {}),
+          ...(footprint.agreements > 0 ? { agreements: footprint.agreements } : {}),
+          ...(footprint.lab_financial > 0 ? { labFinancial: footprint.lab_financial } : {}),
           ...(footprint.collection_attempts > 0 ? { collectionAttempts: footprint.collection_attempts } : {}) },
       };
     }
@@ -5800,7 +5843,13 @@ export async function updatePatientWith(
        referred_by     = CASE WHEN $26::boolean THEN $27::text ELSE referred_by     END,
        email             = CASE WHEN $28::boolean THEN $29::text ELSE email             END,
        preferred_channel = CASE WHEN $30::boolean THEN $31::text ELSE preferred_channel END,
-       flags             = CASE WHEN $32::boolean THEN COALESCE($33::text[], '{}') ELSE flags END
+       flags             = CASE WHEN $32::boolean THEN COALESCE($33::text[], '{}') ELSE flags END,
+       portal_secret_version = CASE
+         WHEN ($3::boolean AND phone IS DISTINCT FROM $4::text)
+           OR ($5::boolean AND alt_phone IS DISTINCT FROM $6::text)
+         THEN portal_secret_version + 1
+         ELSE portal_secret_version
+       END
      WHERE id = $1
      RETURNING ${PATIENT_COLUMNS}`,
     [
@@ -5974,6 +6023,7 @@ export async function deletePatientCascade(
   let snapshot: Record<string, unknown> | null = null;
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('patient_import')), pg_advisory_xact_lock(hashtext('patient_numbering'))");
 
     const { rows: patientRows } = await client.query<PatientRow>(
       `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = $1 FOR UPDATE`,
@@ -6037,11 +6087,20 @@ export async function deletePatientCascade(
          /* (0068) Retired collection keys are permanent proof for this patient, like receipts. */
          (SELECT COUNT(*) FROM payments WHERE patient_id = $1)
            + (SELECT COUNT(*) FROM collection_attempt_retirements WHERE patient_id = $1) AS payments,
-         (SELECT COUNT(*) FROM invoices WHERE patient_id = $1) AS invoices,
+         (SELECT COUNT(*) FROM invoices WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM debt_repayment_arrangements WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM approved_agreement_principals WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM agreement_delta_amendments WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM agreement_reconciliations WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM invoice_archive_events WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM invoice_service_additions WHERE patient_id = $1) AS invoices,
          /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
          (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM patient_opening_balance_history WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM legacy_balance_arrangements WHERE patient_id = $1)
            + (SELECT COUNT(*) FROM legacy_treatments WHERE patient_id = $1)
            + (SELECT COUNT(*) FROM legacy_payments WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM legacy_treatment_documents WHERE patient_id = $1)
            /* (INV-LEGACY) الاتفاق التاريخي لعلاجٍ بدأ قبل النظام شاهدٌ ماليّ كذلك. */
            + (SELECT COUNT(*) FROM legacy_treatment_agreements WHERE patient_id = $1) AS opening_balances,
          (SELECT COUNT(*) FROM inventory_movements
@@ -6110,7 +6169,13 @@ export async function deletePatientCascade(
          (SELECT COUNT(*) FROM patient_referrals WHERE patient_id = $1) AS referrals,
          /* (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية سجلٌّ طبيٌّ كذلك. */
          (SELECT COUNT(*) FROM patient_medical_history WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM patient_vitals WHERE patient_id = $1) AS medical_history`,
+           + (SELECT COUNT(*) FROM patient_vitals WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM endo_treatments WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM patient_problems WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM clinical_cases WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM lab_work_intents WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM ortho_strategy_revisions WHERE patient_id = $1)
+           + (SELECT COUNT(*) FROM ortho_assessment_revisions WHERE patient_id = $1) AS medical_history`,
       [id],
     );
     const clinical = {
@@ -6403,6 +6468,7 @@ export async function listLabOrders(filters?: {
   patientId?: number;
   doctorId?: number;
   partyId?: number;
+  scopedDoctorPartyId?: number;
   limit?: number;
 }): Promise<LabOrder[]> {
   await ensureSchema();
@@ -6430,6 +6496,13 @@ export async function listLabOrders(filters?: {
   }
 
   const hasFilters = conditions.length > 0;
+  if (filters?.scopedDoctorPartyId && filters.scopedDoctorPartyId > 0) {
+    const docParam = `$${idx++}`;
+    params.push(filters.scopedDoctorPartyId);
+    conditions.push(
+      `(l.doctor_id = ${docParam} OR EXISTS (SELECT 1 FROM patients WHERE patients.id = l.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", docParam)}))`,
+    );
+  }
   // النافذة اليومية (بلا فلاتر): المفتوح (بما فيه الإعادة remake) + ما رُكّب خلال شهر —
   // شرط داخل WHERE لا ملحق بـ LEFT JOIN، وترتيب النشط أولًا كي لا تختفي الأوامر المفتوحة خلف الأرشيف (CLIN-02).
   if (!hasFilters) {
@@ -7012,7 +7085,11 @@ export async function createLabOrder(input: {
     let resolvedCurrency = input.costCurrency ?? null;
     let resolvedExchangeRate = input.exchangeRate;
     let automaticBaseAmount: number | null = null;
-    if (resolvedCost == null && resolvedPartyId && input.labServiceId && input.status !== "needed") {
+    const effectiveStatus =
+      input.status === "needed" || (!resolvedPartyId && (!input.labName?.trim() || input.labName === PENDING_LAB_NAME))
+        ? "needed"
+        : "sent";
+    if (resolvedCost == null && resolvedPartyId && input.labServiceId && effectiveStatus !== "needed") {
       const priceRes = await client.query<{
         cost_minor: string | number;
         cost_currency: string;
@@ -7092,7 +7169,7 @@ export async function createLabOrder(input: {
         input.details, input.sentDate, input.dueDate, input.note,
         resolvedPartyId, resolvedCost, resolvedCurrency,
         input.visitId ?? null, input.toothCode ?? null, input.source === "auto" ? "auto" : "manual",
-        input.status === "needed" ? "needed" : "sent",
+        effectiveStatus,
         input.labServiceId ?? null, input.doctorId ?? null,
         input.toothNumbers ?? null, input.shade ?? null, input.stumpShade ?? null,
         input.priority ?? "normal", input.impressionType ?? "physical",
@@ -7112,7 +7189,7 @@ export async function createLabOrder(input: {
     await client.query(
       `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
        VALUES ($1, 'create', NULL, $2, $3, $4, $5)`,
-      [orderId, input.status === "needed" ? "needed" : "sent", input.workType,
+      [orderId, effectiveStatus, input.workType,
        input.createdBy, input.actorRole ?? null],
     );
 
@@ -7120,7 +7197,7 @@ export async function createLabOrder(input: {
     // ويُربط الالتزام بالطلب ربطًا صريحًا — أمرٌ بلا أثرٍ مالي يعني مختبرًا يأتي بحسابه
     // آخر الشهر فلا يقابله شيء يُراجَع. الطلب غير المُرسل بعد (needed) بلا تكلفةٍ مسجلة.
     // والالتزام يرث بند المصروف وحسابَيه وحالة الترحيل (مبدأ الطلب).
-    if (resolvedPartyId && resolvedCost && resolvedCurrency && input.status !== "needed") {
+    if (resolvedPartyId && resolvedCost && resolvedCurrency && effectiveStatus !== "needed") {
       const { rows: payRows } = await client.query<{ id: number }>(
         `INSERT INTO payables (party_id, category, description, amount_minor, currency,
                                exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by,
@@ -7616,12 +7693,12 @@ export async function setLabOrderStatus(
     // قفل الصف أولًا: قراءة الحالة والمال معًا بلا سباق — ضغطتان متزامنتان
     // لن تمرّا كلتاهما من بوابة الحالة، والالتزام لا يُولد مرتين.
     const { rows: currentRows } = await client.query<{
-      status: string; party_id: number | null; cost_minor: string | null;
+      status: string; party_id: number | null; lab_name: string | null; cost_minor: string | null;
       cost_currency: string | null; base_amount_minor: string | null;
       payable_id: number | null; work_type: string; details: string | null;
       due_date: Date; patient_id: number; exchange_rate: string | null; lab_work_intent_id: string | null;
     }>(
-      `SELECT status, party_id, cost_minor, cost_currency, base_amount_minor, payable_id,
+      `SELECT status, party_id, lab_name, cost_minor, cost_currency, base_amount_minor, payable_id,
               work_type, details, due_date, patient_id, exchange_rate, lab_work_intent_id
          FROM lab_orders WHERE id = $1 FOR UPDATE`,
       [id],
@@ -7637,6 +7714,9 @@ export async function setLabOrderStatus(
     }
     if (status === "sent" && current.status === "needed") {
       throw new LabFinancialBoundaryError("lab_prescription_required", "استكمل مواصفات الإرسالية وراجعها قبل تسجيل الإرسال.");
+    }
+    if (status === "sent" && !current.party_id && (!current.lab_name || current.lab_name === PENDING_LAB_NAME)) {
+      throw new LabFinancialBoundaryError("lab_party_required", "اختر مختبرًا مسجلًا قبل تسجيل إرسال الطلب.");
     }
     if (status === "cancelled" && activeSession && current.status !== "needed" && activeSession.role !== "admin") {
       throw new LabFinancialBoundaryError("lab_cancel_forbidden", "إلغاء إرسالية أُرسلت للمختبر للمدير وحده.");
@@ -7711,7 +7791,7 @@ export async function setLabOrderStatus(
       (status === "received" || status === "delivered") &&
       !current.payable_id &&
       current.party_id &&
-      current.cost_minor != null && Number(current.cost_minor) !== 0
+      current.cost_minor != null && Number(current.cost_minor) > 0
     ) {
       const savedMoney = savedLabPayableSnapshot(current);
       const { costMinor, currency: costCurrency, baseAmountMinor: baseAmount, exchangeRate } = savedMoney;
@@ -7866,7 +7946,7 @@ export async function createLabOrderRemake(
         original.visitId,
         original.partyId,
         original.labServiceId,
-        original.costCurrency || "YER",
+        CLINIC_BASE_CURRENCY,
         originalId,
         input.remakeReason,
         original.shadeSpecification == null ? null : JSON.stringify(original.shadeSpecification),
@@ -8066,8 +8146,10 @@ import { FOLLOW_UP_LOOKBACK_DAYS, daysBetween, type OpenPastAppointment, type Re
  * موعد فائت بلا مكالمة هو المريض الذي يفهم أن العيادة لم تلاحظ غيابه. والمدى محدود
  * بشهر: الاتصال بمن تغيّب قبل ثلاثة أشهر ليس متابعة غياب — إنه استدعاء، وله قائمته.
  */
-export async function listMissedAppointments(): Promise<RecallRow[]> {
+export async function listMissedAppointments(scopedDoctorPartyId?: number | null): Promise<RecallRow[]> {
   await ensureSchema();
+  if (scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0)) return [];
+  const hasDoc = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
   const { rows } = await getPool().query<{
     id: number; patient_id: number; full_name: string; phone: string | null;
     scheduled_date: Date; note: string | null;
@@ -8077,9 +8159,12 @@ export async function listMissedAppointments(): Promise<RecallRow[]> {
       WHERE a.status = 'no_show'
         AND a.follow_up_at IS NULL
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
+        ${hasDoc ? `AND (a.doctor_id = $3 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = a.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3")}))` : ""}
       ORDER BY a.scheduled_date ASC
       LIMIT 100`,
-    [CLINIC_TIME_ZONE, await followUpLookbackDays()],
+    hasDoc
+      ? [CLINIC_TIME_ZONE, await followUpLookbackDays(), scopedDoctorPartyId]
+      : [CLINIC_TIME_ZONE, await followUpLookbackDays()],
   );
   return rows.map((row) => ({
     kind: "missed" as const,
@@ -8116,8 +8201,10 @@ async function followUpLookbackDays(): Promise<number> {
  * قائمته. واليوم بتوقيت العيادة لا بتوقيت الخادم — خادمٌ على UTC يعدّ موعدَ أمسِ
  * العيادة «اليوم» ثلاثَ ساعاتٍ بعد منتصف الليل.
  */
-export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]> {
+export async function listOpenPastAppointments(scopedDoctorPartyId?: number | null): Promise<OpenPastAppointment[]> {
   await ensureSchema();
+  if (scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0)) return [];
+  const hasDoc = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
   const { rows } = await getPool().query<{
     id: number; patient_id: number; full_name: string; phone: string | null;
     scheduled_date: Date; scheduled_time: string; note: string | null;
@@ -8135,9 +8222,12 @@ export async function listOpenPastAppointments(): Promise<OpenPastAppointment[]>
            هذا اليومَ الثلاثين وذاك استثناه، لصار موعدٌ عمره ثلاثون يومًا يظهر
            هنا، وحين يُقال «لم يحضر» يخرج من هنا ولا يدخل هناك — فيختفي المريض. */
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
+        ${hasDoc ? `AND (a.doctor_id = $3 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = a.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3")}))` : ""}
       ORDER BY a.scheduled_date ASC, a.scheduled_time ASC
       LIMIT 200`,
-    [CLINIC_TIME_ZONE, await followUpLookbackDays()],
+    hasDoc
+      ? [CLINIC_TIME_ZONE, await followUpLookbackDays(), scopedDoctorPartyId]
+      : [CLINIC_TIME_ZONE, await followUpLookbackDays()],
   );
   return rows.map((row) => {
     const date = row.scheduled_date;
@@ -8205,8 +8295,10 @@ export async function closeBookedAppointment(
  *
  * ومن استُدعي في آخر ثلاثين يومًا يخرج مؤقتًا: مكالمتان في أسبوع إلحاحٌ لا اهتمام.
  */
-export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
+export async function listLapsedPatients(weeks: number, scopedDoctorPartyId?: number | null): Promise<RecallRow[]> {
   await ensureSchema();
+  if (scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0)) return [];
+  const hasDoc = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
   const days = Math.max(1, Math.round(weeks * 7));
   const { rows } = await getPool().query<{
     id: number; full_name: string; phone: string | null; last_activity: Date; note: string | null;
@@ -8225,6 +8317,7 @@ export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
                    AND f.scheduled_date >= CURRENT_DATE
                    AND f.status IN ('booked', 'arrived')
               )
+          ${hasDoc ? `AND EXISTS (SELECT 1 FROM patients WHERE patients.id = p.id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")})` : ""}
      )
      SELECT id, full_name, phone, note, last_activity
        FROM activity
@@ -8232,7 +8325,7 @@ export async function listLapsedPatients(weeks: number): Promise<RecallRow[]> {
         AND (recalled_at IS NULL OR recalled_at < NOW() - INTERVAL '30 days')
       ORDER BY last_activity ASC
       LIMIT 100`,
-    [days],
+    hasDoc ? [days, scopedDoctorPartyId] : [days],
   );
   return rows.map((row) => ({
     kind: "lapsed" as const,
@@ -12407,9 +12500,18 @@ export async function listExpenseCategories(options?: {
     [CLINIC_TIME_ZONE, targetMonth],
   );
 
+  const rates = ratesFromSettings(await getSettings());
   const categories: ExpenseCategoryDTO[] = rows.map((r) => {
-    const monthlyBudget = toMinor(r.monthly_budget_minor);
-    const annualBudget = toMinor(r.annual_budget_minor);
+    const budgetCurrency = ((r.budget_currency as Currency) || CLINIC_BASE_CURRENCY);
+    const rawMonthly = toMinor(r.monthly_budget_minor);
+    const rawAnnual = toMinor(r.annual_budget_minor);
+    const rate = budgetCurrency === CLINIC_BASE_CURRENCY ? 1 : (rates[budgetCurrency] ?? 0);
+    const monthlyBudget = budgetCurrency === CLINIC_BASE_CURRENCY
+      ? rawMonthly
+      : (rate > 0 ? toBaseAmount(rawMonthly, budgetCurrency, CLINIC_BASE_CURRENCY, rate) : rawMonthly);
+    const annualBudget = budgetCurrency === CLINIC_BASE_CURRENCY
+      ? rawAnnual
+      : (rate > 0 ? toBaseAmount(rawAnnual, budgetCurrency, CLINIC_BASE_CURRENCY, rate) : rawAnnual);
     const actualSpent = toMinor(r.actual_spent_minor);
     const count = Number(r.expenses_count) || 0;
     const variance = monthlyBudget - actualSpent;
@@ -15087,6 +15189,9 @@ export async function createPayableInTransaction(client: DbClient, input: Create
     throw error;
   }
   await client.query("RELEASE SAVEPOINT payable_writer_transaction_check");
+  if (input.currency !== input.baseCurrency && !(input.exchangeRate > 0)) {
+    throw Object.assign(new Error("Foreign-currency payable requires a positive exchange rate"), { code: "invalid_exchange_rate" });
+  }
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
   );
@@ -18710,6 +18815,15 @@ export const PLAN_ITEM_LEGACY_CONTEXT_SQL = LEGACY_ITEM_COVERAGE_CONTEXT_SQL;
 export const PLAN_ITEM_FINANCIAL_LINEAGE_SQL =
   `(${PLAN_ITEM_INVOICE_LINEAGE_SQL} OR ${PLAN_ITEM_LEGACY_LINEAGE_SQL})`;
 
+/** (CLIN-04) بند خطة فُوترت إحدى جلساته عبر visit_procedures دون تعديل PLAN_ITEM_INVOICE_LINEAGE_SQL (حفاظًا على PLAN_ITEM_FINANCIAL_REVIEW_SQL). */
+export const PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL =
+  `EXISTS (
+    SELECT 1 FROM visit_procedures vp
+    JOIN invoice_items hi ON hi.source_type = 'visit_procedure' AND hi.source_id = vp.id
+    JOIN invoices hv ON hv.id = hi.invoice_id
+    WHERE vp.plan_item_id = i.id AND hv.status <> 'cancelled'
+  )`;
+
 /** Only a live, unchanged legacy identity supplies coverage; it never supplies invoice/provider provenance. */
 export const PLAN_ITEM_LEGACY_COVERED_SQL =
   `(i.billing_status = 'included_in_package' AND EXISTS (
@@ -21094,6 +21208,12 @@ export async function listPendingProposals(options: { includeMoney: boolean }): 
        JOIN patients p ON p.id = t.patient_id
        LEFT JOIN parties d ON d.id = t.primary_doctor_id
       WHERE t.status = 'active' AND t.consent_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM invoices inv WHERE inv.plan_id = t.id AND inv.status <> 'cancelled')
+        AND NOT EXISTS (
+          SELECT 1 FROM plan_items i
+          WHERE i.plan_id = t.id
+            AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL})
+        )
       ORDER BY t.created_at ASC
       LIMIT 300`,
     [CLINIC_TIME_ZONE],
@@ -21248,7 +21368,7 @@ export async function updatePlanItem(input: {
     );
     if (!before) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
     const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-      AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} LIMIT 1`, [input.itemId]);
+      AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL}) LIMIT 1`, [input.itemId]);
     if (financial && ((input.doctorId !== undefined && input.doctorId !== before.doctor_id)
       || (input.billingRule !== undefined && input.billingRule !== before.billing_rule)
       || (input.sessionCount !== undefined && input.sessionCount !== before.session_count))) {
@@ -21447,6 +21567,21 @@ export async function addPlanItem(input: {
     const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
     if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
 
+    const { rows: [planFinancial] } = await client.query(
+      `SELECT 1
+       WHERE EXISTS (SELECT 1 FROM invoices inv WHERE inv.plan_id = $1 AND inv.status <> 'cancelled')
+          OR EXISTS (
+            SELECT 1 FROM plan_items i
+            WHERE i.plan_id = $1
+              AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL})
+          )`,
+      [input.planId],
+    );
+    if (planFinancial) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الخطة مرتبطة بفاتورة نشطة أو بنود مفوترة؛ استخدم ملحق الاتفاق المالي لإضافة بنود جديدة." };
+    }
+
     if (input.toothCode !== null && !isValidTooth(input.toothCode)) {
       await client.query("ROLLBACK");
       return { ok: false, message: "رقم سنّ غير صحيح بالترقيم الدولي." };
@@ -21512,8 +21647,17 @@ export async function removePlanItem(
     const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
     if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
 
+    const { rows: [planInvoice] } = await client.query(
+      `SELECT 1 FROM invoices inv WHERE inv.plan_id = $1 AND inv.status <> 'cancelled' LIMIT 1`,
+      [planId],
+    );
+    if (planInvoice) {
+      await client.query("ROLLBACK");
+      return { ok: false, message: "الخطة مرتبطة بفاتورة نشطة؛ استخدم ملحق الاتفاق المالي بدل الحذف المباشر." };
+    }
+
     const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-      AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId]);
+      AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL})`, [itemId]);
     if (financial) { await client.query("ROLLBACK"); return { ok: false, message: "البند له سجل مالي أو اتفاق تاريخي محفوظ؛ لا يُحذف." }; }
     const { rows: [removed] } = await client.query<PlanItemAuditRow>(
       `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
@@ -26160,12 +26304,12 @@ import {
 export async function portalLogin(
   phone: string,
   patientNumber: string,
-): Promise<{ patient: { id: number; patientNumber: string; fullName: string } } | null> {
+): Promise<{ patient: { id: number; patientNumber: string; fullName: string; portalSecretVersion: number } } | null> {
   await ensureSchema();
   const { rows } = await getPool().query<{
-    id: number; patient_number: string; full_name: string; phone: string | null; alt_phone: string | null;
+    id: number; patient_number: string; full_name: string; phone: string | null; alt_phone: string | null; portal_secret_version?: number | null;
   }>(
-    `SELECT id, patient_number, full_name, phone, alt_phone FROM patients
+    `SELECT * FROM patients
       WHERE UPPER(TRIM(patient_number)) = UPPER(TRIM($1))
       LIMIT 1`,
     [patientNumber],
@@ -26174,7 +26318,38 @@ export async function portalLogin(
   if (!row) return null;
   const patient = { patientNumber: row.patient_number, phone: row.phone, altPhone: row.alt_phone };
   if (!portalCredentialsMatch(patient, phone, patientNumber)) return null;
-  return { patient: { id: row.id, patientNumber: row.patient_number, fullName: row.full_name } };
+  return {
+    patient: {
+      id: row.id,
+      patientNumber: row.patient_number,
+      fullName: row.full_name,
+      portalSecretVersion: Number(row.portal_secret_version ?? 0),
+    },
+  };
+}
+
+export async function getPortalSessionPatient(patientId: number): Promise<{
+  id: number;
+  patientNumber: string;
+  fullName: string;
+  phone: string | null;
+  altPhone: string | null;
+  portalSecretVersion: number;
+} | null> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{
+    id: number; patient_number: string; full_name: string; phone: string | null; alt_phone: string | null; portal_secret_version?: number | null;
+  }>(`SELECT * FROM patients WHERE id = $1 LIMIT 1`, [patientId]);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    patientNumber: row.patient_number,
+    fullName: row.full_name,
+    phone: row.phone ?? null,
+    altPhone: row.alt_phone ?? null,
+    portalSecretVersion: Number(row.portal_secret_version ?? 0),
+  };
 }
 
 /**
@@ -26923,13 +27098,21 @@ export interface BroadcastSummary {
  * غير المقروء يحسب من سطور القراءة لا من عمود على الرسالة: قراءةُ صندوق
  * المرضى شخصية لكل عضو، وقراءةُ المحادثة المباشرة كذلك.
  */
-export async function staffConversationList(userId: number): Promise<{
+export async function staffConversationList(userId: number, scopedDoctorPartyId?: number | null): Promise<{
   staff: StaffConversationItem[];
   patients: PatientConversationItem[];
   broadcast: BroadcastSummary;
 }> {
   await ensureSchema();
   const pool = getPool();
+  const hideAllPatients = scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0);
+  const hasDocScope = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
+  const docPatientFilterOnP = hasDocScope
+    ? `WHERE EXISTS (SELECT 1 FROM patients WHERE patients.id = p.id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")})`
+    : "";
+  const docPatientFilterOnSender = hasDocScope
+    ? `AND EXISTS (SELECT 1 FROM patients WHERE patients.id = m.sender_patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")})`
+    : "";
 
   const [usersRes, dmLastRes, dmUnreadRes, patientLastRes, patientUnreadRes, patientUrgentRes, broadcastRes, broadcastUnreadRes] = await Promise.all([
     pool.query<{ id: number; username: string; display_name: string; role: string }>(
@@ -26963,41 +27146,56 @@ export async function staffConversationList(userId: number): Promise<{
        GROUP BY m.sender_user_id`,
       [userId],
     ),
-    pool.query<{
-      patient_id: number; patient_name: string; patient_number: string; phone: string | null;
-      id: number; kind: "text" | "voice" | "file"; body: string | null;
-      voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
-      deleted_at: Date | null; is_urgent: boolean;
-    }>(
-      `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
-         id, kind, body, voice_ms, file_name, created_at, sender_type, deleted_at, is_urgent
-       FROM (
-         SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at, m.sender_type,
-           m.deleted_at, m.is_urgent,
-           p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
-         FROM messages m
-         JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
-                        OR (m.recipient_type = 'patient' AND m.recipient_patient_id = p.id)
-       ) thread
-       ORDER BY patient_id, id DESC`,
-    ),
-    pool.query<{ patient_id: number; unread: number }>(
-      `SELECT m.sender_patient_id AS patient_id, count(*)::int AS unread
-       FROM messages m
-       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient' AND m.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
-       GROUP BY m.sender_patient_id`,
-      [userId],
-    ),
-    pool.query<{ patient_id: number; urgent: number }>(
-      `SELECT m.sender_patient_id AS patient_id, count(*)::int AS urgent
-       FROM messages m
-       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
-         AND m.is_urgent AND m.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
-       GROUP BY m.sender_patient_id`,
-      [userId],
-    ),
+    hideAllPatients
+      ? Promise.resolve({ rows: [] as Array<{
+          patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+          id: number; kind: "text" | "voice" | "file"; body: string | null;
+          voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
+          deleted_at: Date | null; is_urgent: boolean;
+        }> })
+      : pool.query<{
+          patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+          id: number; kind: "text" | "voice" | "file"; body: string | null;
+          voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
+          deleted_at: Date | null; is_urgent: boolean;
+        }>(
+          `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
+             id, kind, body, voice_ms, file_name, created_at, sender_type, deleted_at, is_urgent
+           FROM (
+             SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at, m.sender_type,
+               m.deleted_at, m.is_urgent,
+               p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
+             FROM messages m
+             JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
+                            OR (m.recipient_type = 'patient' AND m.recipient_patient_id = p.id)
+             ${docPatientFilterOnP}
+           ) thread
+           ORDER BY patient_id, id DESC`,
+          hasDocScope ? [scopedDoctorPartyId] : [],
+        ),
+    hideAllPatients
+      ? Promise.resolve({ rows: [] as Array<{ patient_id: number; unread: number }> })
+      : pool.query<{ patient_id: number; unread: number }>(
+          `SELECT m.sender_patient_id AS patient_id, count(*)::int AS unread
+           FROM messages m
+           WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient' AND m.deleted_at IS NULL
+             ${docPatientFilterOnSender}
+             AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+           GROUP BY m.sender_patient_id`,
+          hasDocScope ? [userId, scopedDoctorPartyId] : [userId],
+        ),
+    hideAllPatients
+      ? Promise.resolve({ rows: [] as Array<{ patient_id: number; urgent: number }> })
+      : pool.query<{ patient_id: number; urgent: number }>(
+          `SELECT m.sender_patient_id AS patient_id, count(*)::int AS urgent
+           FROM messages m
+           WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
+             AND m.is_urgent AND m.deleted_at IS NULL
+             ${docPatientFilterOnSender}
+             AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+           GROUP BY m.sender_patient_id`,
+          hasDocScope ? [userId, scopedDoctorPartyId] : [userId],
+        ),
     pool.query<{
       id: number; kind: "text" | "voice" | "file"; body: string | null;
       voice_ms: number | null; file_name: string | null; created_at: Date;
@@ -27088,19 +27286,26 @@ export async function staffConversationList(userId: number): Promise<{
 }
 
 /** إجمالي غير المقروء عند مستخدم طاقم — لشارة القشرة. المحذوف لا يُعدّ. */
-export async function unreadMessageCount(userId: number): Promise<number> {
+export async function unreadMessageCount(userId: number, scopedDoctorPartyId?: number | null): Promise<number> {
   await ensureSchema();
+  const hideAllPatients = scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0);
+  const hasDocScope = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
+  const staffAllCondition = hideAllPatients
+    ? `(m.recipient_type = 'staff_all' AND m.sender_type = 'user' AND m.sender_user_id <> $1)`
+    : hasDocScope
+      ? `(m.recipient_type = 'staff_all' AND ((m.sender_type = 'user' AND m.sender_user_id <> $1) OR (m.sender_type = 'patient' AND EXISTS (SELECT 1 FROM patients WHERE patients.id = m.sender_patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")}))))`
+      : `(m.recipient_type = 'staff_all' AND (m.sender_type <> 'user' OR m.sender_user_id <> $1))`;
   const { rows } = await getPool().query<{ c: number }>(
     `SELECT count(*)::int AS c FROM messages m
      WHERE (
              (m.recipient_type = 'user' AND m.recipient_user_id = $1 AND m.sender_type = 'user')
-          OR m.recipient_type = 'staff_all'
+          OR ${staffAllCondition}
            )
        AND m.deleted_at IS NULL
        AND NOT EXISTS (
          SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1
        )`,
-    [userId],
+    hasDocScope ? [userId, scopedDoctorPartyId] : [userId],
   );
   return Number(rows[0]?.c ?? 0);
 }
@@ -27111,16 +27316,21 @@ export async function unreadMessageCount(userId: number): Promise<number> {
  * العدّ شخصي كعدّ غير المقروء: ما فتحه زميلي مرّت عليه عين الطاقم، وتبقى
  * عاجلةً عندي حتى أفتحها أنا. والبانر يظهر ما دام العدد فوق الصفر.
  */
-export async function urgentUnreadMessageCount(userId: number): Promise<number> {
+export async function urgentUnreadMessageCount(userId: number, scopedDoctorPartyId?: number | null): Promise<number> {
   await ensureSchema();
+  if (scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0)) {
+    return 0;
+  }
+  const hasDocScope = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
   const { rows } = await getPool().query<{ c: number }>(
     `SELECT count(*)::int AS c FROM messages m
      WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
        AND m.is_urgent AND m.deleted_at IS NULL
+       ${hasDocScope ? `AND EXISTS (SELECT 1 FROM patients WHERE patients.id = m.sender_patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")})` : ""}
        AND NOT EXISTS (
          SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1
        )`,
-    [userId],
+    hasDocScope ? [userId, scopedDoctorPartyId] : [userId],
   );
   return Number(rows[0]?.c ?? 0);
 }

@@ -13,6 +13,7 @@ vi.mock("@/lib/db", () => ({
   deleteLabOrder: boundary.deleteLabOrder, getLabOrderById: boundary.getLabOrderById,
   labOrderEvents: boundary.labOrderEvents, recordAudit: boundary.recordAudit,
   setLabOrderDueDate: boundary.setLabOrderDueDate, setLabOrderStatus: boundary.setLabOrderStatus,
+  createLabOrderRemake: vi.fn(), findUserByUsername: vi.fn(), doctorOwnsPatient: vi.fn(), patientHasVisitToday: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
 import { PATCH } from "../app/api/lab/[id]/route";

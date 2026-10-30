@@ -29,9 +29,9 @@ export function normalizedSql(expression: string): string {
   return `lower(translate(regexp_replace(${expression}, '[${MARKS}]', '', 'g'), '${FROM}', '${TO}'))`;
 }
 
-/** كل ما يُبحث فيه عن المريض — مطبَّعًا ومضمومًا. */
+/** كل ما يُبحث فيه عن المريض — مطبَّعًا ومضمومًا (بما في ذلك أرقام ملفاته الورقية/المتقاعدة السابقة). */
 export const PATIENT_HAYSTACK_SQL = normalizedSql(
-  "concat_ws(' ', full_name, patient_number, phone, alt_phone, guardian_name, guardian_phone, national_id)",
+  "concat_ws(' ', full_name, patient_number, phone, alt_phone, guardian_name, guardian_phone, national_id, COALESCE((SELECT string_agg(rpn.patient_number, ' ') FROM retired_patient_numbers rpn WHERE rpn.patient_id = patients.id), ''))",
 );
 
 /**

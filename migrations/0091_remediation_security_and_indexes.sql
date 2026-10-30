@@ -1,4 +1,4 @@
--- 0091: Remediation security columns, owner paper-archive override guard, audit TRUNCATE guard, GL party defaults, and hot FK indexes.
+-- 0091: Remediation security columns, owner paper-archive override guard, audit TRUNCATE guard, GL party defaults, HTTP idempotency table, and hot FK indexes.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0 CHECK (session_version >= 0);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_owner BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_secret_version INTEGER NOT NULL DEFAULT 0 CHECK (portal_secret_version >= 0);
@@ -25,9 +25,45 @@ WHERE kind IN ('supplier', 'doctor', 'employee')
   AND expense_account_code = '5101'
   AND payable_account_code = '2101';
 
+CREATE TABLE IF NOT EXISTS http_idempotency_keys (
+  id BIGSERIAL PRIMARY KEY,
+  scope TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL CHECK (idempotency_key ~ '^[A-Za-z0-9._:-]{8,128}$'),
+  request_hash TEXT NOT NULL CHECK (request_hash ~ '^[a-f0-9]{64}$'),
+  state TEXT NOT NULL DEFAULT 'in_progress' CHECK (state IN ('in_progress', 'completed')),
+  status_code INTEGER,
+  response_body JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ,
+  UNIQUE (scope, actor, idempotency_key)
+);
+
 DROP TRIGGER IF EXISTS audit_log_no_truncate ON audit_log;
 CREATE TRIGGER audit_log_no_truncate BEFORE TRUNCATE ON audit_log
   FOR EACH STATEMENT EXECUTE FUNCTION audit_log_is_append_only();
+
+CREATE OR REPLACE FUNCTION reject_ortho_strategy_revision_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND coalesce(current_setting('aqlan.patient_merge_active', true), '') = 'on'
+     AND (to_jsonb(NEW) - 'patient_id') = (to_jsonb(OLD) - 'patient_id') THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'ortho_strategy_revisions are immutable';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION reject_ortho_assessment_revision_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND coalesce(current_setting('aqlan.patient_merge_active', true), '') = 'on'
+     AND (to_jsonb(NEW) - 'patient_id') = (to_jsonb(OLD) - 'patient_id') THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'ortho_assessment_revisions are immutable';
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION aqlan_patient_number_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

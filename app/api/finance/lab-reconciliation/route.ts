@@ -77,9 +77,9 @@ export async function GET(request: Request) {
         return NextResponse.json({ message: "المختبر غير موجود." }, { status: 404 });
       }
 
-      // الأوامر الخاصة بهذا المختبر غير المسددة أو المستلمة حديثاً
+      // الأوامر الخاصة بهذا المختبر غير المسددة أو المستلمة حديثاً (مع استبعاد المسودات غير المرحّلة FIN-04)
       const partyOrders = allOrders.filter(
-        (o) => o.partyId === targetPartyId || o.labName === party.name,
+        (o) => (o.partyId === targetPartyId || o.labName === party.name) && o.isPosted !== false,
       );
 
       const reconcileItems: ReconcileOrderItem[] = partyOrders.map((o) => ({
@@ -108,7 +108,7 @@ export async function GET(request: Request) {
     // إحصائيات عامة لكافة المختبرات
     const labStats = labParties.map((party) => {
       const partyOrders = allOrders.filter(
-        (o) => o.partyId === party.id || o.labName === party.name,
+        (o) => (o.partyId === party.id || o.labName === party.name) && o.isPosted !== false,
       );
       const unsettled = partyOrders.filter((o) => o.financialStatus !== "paid");
 

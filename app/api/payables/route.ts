@@ -5,6 +5,7 @@ import { createPayable, getParty, getSettings, partyBalances, partyNativeBalance
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -98,31 +99,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "سعر الصرف غير مضبوط في الإعدادات." }, { status: 409 });
   }
 
-  try {
-    const party = await getParty(partyId);
-    if (!party) return NextResponse.json({ message: "الجهة غير موجودة." }, { status: 404 });
-    // The manual form omits category. Resolve its default from the stored party,
-    // while retaining explicit categories and the existing non-lab fallback.
-    const category = requestedCategory ?? (party.kind === "lab" ? "lab" : "supplier");
-    const payable = await createPayable({
-      partyId, category, description, amountMinor, currency,
-      baseCurrency: base, exchangeRate, labOrderId: null, dueDate,
-      createdBy: session.username,
-    });
-    if (!payable) return NextResponse.json({ message: "تعذّر حفظ الالتزام." }, { status: 500 });
-    /* (P0-2) الالتزام أصل رصيد المورد وحارس سداده — تسجيله يُدقَّق. */
-    await recordAudit({
-      action: "payable.create",
-      entity: "payable", entityId: payable.id, entityLabel: payable.description,
-      details: {
-        الجهة: payable.partyName, البيان: payable.description, المبلغ: payable.amountMinor,
-        العملة: payable.currency, سعر_الصرف: payable.exchangeRate,
-        المكافئ: payable.baseAmountMinor, الاستحقاق: payable.dueDate, التصنيف: payable.category,
-      },
-      actor: session.username, actorRole: session.role,
-    });
-    return NextResponse.json(payable, { status: 201 });
-  } catch {
-    return NextResponse.json({ message: "تعذّر حفظ الالتزام. تأكد من الجهة." }, { status: 500 });
-  }
+  return withHttpIdempotency(request, "payables.create", session.username, source, async () => {
+    try {
+      const party = await getParty(partyId);
+      if (!party) return NextResponse.json({ message: "الجهة غير موجودة." }, { status: 404 });
+      // The manual form omits category. Resolve its default from the stored party,
+      // while retaining explicit categories and the existing non-lab fallback.
+      const category = requestedCategory ?? (party.kind === "lab" ? "lab" : "supplier");
+      const payable = await createPayable({
+        partyId, category, description, amountMinor, currency,
+        baseCurrency: base, exchangeRate, labOrderId: null, dueDate,
+        createdBy: session.username,
+      });
+      if (!payable) return NextResponse.json({ message: "تعذّر حفظ الالتزام." }, { status: 500 });
+      /* (P0-2) الالتزام أصل رصيد المورد وحارس سداده — تسجيله يُدقَّق. */
+      await recordAudit({
+        action: "payable.create",
+        entity: "payable", entityId: payable.id, entityLabel: payable.description,
+        details: {
+          الجهة: payable.partyName, البيان: payable.description, المبلغ: payable.amountMinor,
+          العملة: payable.currency, سعر_الصرف: payable.exchangeRate,
+          المكافئ: payable.baseAmountMinor, الاستحقاق: payable.dueDate, التصنيف: payable.category,
+        },
+        actor: session.username, actorRole: session.role,
+      });
+      return NextResponse.json(payable, { status: 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر حفظ الالتزام. تأكد من الجهة." }, { status: 500 });
+    }
+  });
 }

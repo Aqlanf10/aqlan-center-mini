@@ -10,7 +10,7 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
   const session = useSession();
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false);
   const [snapshot, setSnapshot] = useState<PatientNumberSnapshot | null>(null);
-  const [number, setNumber] = useState(""), [reason, setReason] = useState(""), [confirm, setConfirm] = useState("");
+  const [number, setNumber] = useState(""), [reason, setReason] = useState(""), [confirm, setConfirm] = useState(""), [paperOverride, setPaperOverride] = useState(false);
   const [error, setError] = useState(""), [success, setSuccess] = useState("");
   const generation = useRef(0), saving = useRef(false);
   useEffect(() => { generation.current++; setOpen(false); setSnapshot(null); setError(""); setSuccess(""); saving.current=false; setBusy(false); }, [patientId]);
@@ -26,7 +26,7 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
       if (!response.ok) throw new Error(data.message || "تعذّر تحميل الرقم الحالي.");
       const accepted = readPatientNumberSnapshot(data, patientId);
       if (!accepted) throw new Error("تعذّر التحقق من رقم هذا الملف؛ أعد التحميل.");
-      setSnapshot(accepted); setNumber(""); setReason(""); setConfirm("");
+      setSnapshot(accepted); setNumber(""); setReason(""); setConfirm(""); setPaperOverride(false);
     } catch (cause) { if (token === generation.current) setError(cause instanceof Error ? cause.message : "تعذّر تحميل الرقم الحالي."); }
     finally { if (token === generation.current) setBusy(false); }
   }
@@ -39,7 +39,7 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
     saving.current=true; setBusy(true); setError("");
     try {
       const response = await fetch(`/api/patients/${patientId}/number`, {method: "PATCH", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({patientNumber: newNumber, expectedVersion: snapshot.version, expectedPatientNumber: snapshot.patientNumber, reason})});
+        body: JSON.stringify({patientNumber: newNumber, expectedVersion: snapshot.version, expectedPatientNumber: snapshot.patientNumber, reason, ...(paperOverride ? {allowPaperArchiveOverride: true} : {})})});
       const data = await response.json();
       if (token !== generation.current) return;
       if (!response.ok) { if (data.code === "stale") setSnapshot(null); throw new Error(data.message || "تعذّر تعديل الرقم."); }
@@ -61,6 +61,12 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
         <p>رقم الملف الحالي: <b dir="ltr">{snapshot.patientNumber}</b></p>
         <label className="block">رقم الملف الجديد<input className="input mt-1 block w-full" dir="ltr" inputMode="numeric" value={number} onChange={e=>setNumber(e.target.value)} maxLength={21} disabled={busy} required /></label>
         {parsePatientNumber(number) && <p className="text-sm">سيُحفظ بالشكل: <b dir="ltr">{parsePatientNumber(number)}</b></p>}
+        {(() => { const p = parsePatientNumber(number); const n = p ? Number(p.replace(/^P-0*/, "") || "0") : 0; return n >= 1 && n < 7000; })() && (
+          <label className="flex items-center gap-2 text-sm text-amber-900">
+            <input type="checkbox" checked={paperOverride} onChange={e=>setPaperOverride(e.target.checked)} disabled={busy} />
+            تجاوز الأرشيف الورقي (للمالك الأساسي فقط — إعادة إسناد رقم ورقي متقاعد أقل من 7000)
+          </label>
+        )}
         <label className="block">سبب التعديل<textarea className="input mt-1 block w-full" value={reason} onChange={e=>setReason(e.target.value)} minLength={3} maxLength={300} disabled={busy} required /></label>
         <label className="block">اكتب الرقم الحالي للتأكيد<input className="input mt-1 block w-full" dir="ltr" value={confirm} onChange={e=>setConfirm(e.target.value)} disabled={busy} autoComplete="off" required /></label>
         <button className="btn btn-primary min-h-11" disabled={busy || !parsePatientNumber(number) || !numberingReason(reason) || confirm !== snapshot.patientNumber}>{busy ? "جارٍ الحفظ…" : "حفظ رقم الملف الجديد"}</button>

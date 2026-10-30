@@ -88,7 +88,8 @@ export function LabAccountingAuditReportModal({
   // Generate QR Code for report authentication
   useEffect(() => {
     const payload = JSON.stringify({
-      doc: "تقرير تدقيق حسابات المختبرات",
+      doc: "كشف داخلي لحسابات المختبرات",
+      unsigned: true,
       ref: auditDocRef,
       clinic: resolvedName,
       date: `${today} ${reportTime}`,

@@ -221,8 +221,8 @@ describe("(FIA-1) Scenario C — legacy lab/supplier debts before go-live", () =
     expect((await totalsOf(supplierB)).find((row) => row.currency === "SAR")).toMatchObject({ openingAdvanceMinor: 20_000 });
     const entry = (await journalEntries(AS_OF, AS_OF)).find((row) => row.reference === `OA-${advance.value.id}`)!;
     expect(entry.lines).toEqual([
-      // (TD-REG-028) بعملة الرصيد المقدَّم نفسها — 200.00 ر.س لا مكافئها اليمني.
-      { accountCode: "2101", currency: "SAR", amountMinor: 20_000, side: "debit" },
+      // (TD-REG-028 / FIN-02) بعملة الرصيد المقدَّم نفسها وعلى حساب ذمم الموردين 2105.
+      { accountCode: "2105", currency: "SAR", amountMinor: 20_000, side: "debit" },
       { accountCode: "3101", currency: "SAR", amountMinor: 20_000, side: "credit" },
     ]);
 

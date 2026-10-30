@@ -85,7 +85,10 @@ export type SettingKey =
   | "scheduling.new_patient_daily_limit"
   /* (CHAIR-1) الجاهزية للكرسي: بوابة النداء (افتراضيًّا تحذير لا منع)، وتنبيه الرصيد عند الوصول. */
   | "ops.require_clearance_before_call"
-  | "reception.balance_warning_minor";
+  | "reception.balance_warning_minor"
+  /* (SEC-05) أعلام تشغيل الواجهات العامة بقرار المالك. */
+  | "portal.enabled"
+  | "booking.public_enabled";
 
 /**
  * القيم الافتراضية.
@@ -219,6 +222,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* (CHAIR-1) عتبة تلوين الرصيد عند الوصول لكل عملة بوحداتها الصغرى (JSON). فارغٌ = مغلق.
      معلومةٌ لا منع: لا توقف علاجًا ولا تحوّل دفعةً مقدَّمة إلى إيراد. */
   "reception.balance_warning_minor": "",
+  "portal.enabled": "true",
+  "booking.public_enabled": "true",
 };
 
 export type SettingsMap = Record<SettingKey, string>;
@@ -251,6 +256,8 @@ export const PUBLIC_SETTING_KEYS: SettingKey[] = [
   "clinical.phrases_exam",
   "clinical.phrases_diagnosis",
   "clinical.phrases_next",
+  "portal.enabled",
+  "booking.public_enabled",
 ];
 
 export function withDefaults(stored: Partial<Record<string, string>>): SettingsMap {
@@ -427,7 +434,7 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "reminders.auto_language") {
     if (!/^[a-z]{2}(_[A-Z]{2})?$/.test(trimmed)) return "رمز لغة القالب مثل ar أو en_US.";
   }
-  if (key === "ai.clinical_external") {
+  if (key === "ai.clinical_external" || key === "portal.enabled" || key === "booking.public_enabled") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
   if (key === "backup.schedule_time") {

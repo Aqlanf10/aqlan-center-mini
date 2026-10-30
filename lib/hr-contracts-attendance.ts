@@ -399,6 +399,26 @@ function assertContractPayComplete(current:Record<string,any>):void{
     if(missing.length)throw new HrContractMutationError(`شروط الأجر غير مكتملة: ${missing.join("، ")}. أكمل المسودة قبل الاعتماد.`,409);
 }
 
+async function isPrincipalOwnerAdmin(client: DbClient, userId: number): Promise<boolean> {
+  const res = await client.query<{ is_principal: boolean }>(
+    `SELECT (
+       u.role = 'admin'
+       AND u.is_active = TRUE
+       AND (
+         u.is_owner = TRUE
+         OR (
+           NOT EXISTS (SELECT 1 FROM users WHERE is_owner = TRUE AND is_active = TRUE)
+           AND u.id = (SELECT MIN(id) FROM users WHERE role = 'admin' AND is_active = TRUE)
+         )
+       )
+     ) AS is_principal
+     FROM users u
+     WHERE u.id = $1`,
+    [userId],
+  );
+  return Boolean(res.rows[0]?.is_principal);
+}
+
 export async function approveContract(
   contractId: number | string,
   session: SessionPayload,
@@ -418,6 +438,20 @@ export async function approveContract(
       return mapContractRow(current);
     }
     if(!hrContractNextStatuses(lifecycleOf(current)).includes("approved"))throw new HrContractMutationError("لا يمكن اعتماد العقد من حالته الحالية؛ العقد المعتمد يُعدّل بملحق.",409);
+
+    const isPrincipalOwner = await isPrincipalOwnerAdmin(client, session.userId);
+    if (!isPrincipalOwner) {
+      const { rows: staffRows } = await client.query<{ user_id: number | null }>(
+        `SELECT user_id FROM hr_staff WHERE id = $1`,
+        [staffId],
+      );
+      if (staffRows[0]?.user_id != null && Number(staffRows[0].user_id) === session.userId) {
+        throw new HrContractMutationError("لا يجوز للموظف أو المدير غير المالك اعتماد عقده الشخصي بنفسه.", 403);
+      }
+      if (current.created_by && current.created_by === session.username) {
+        throw new HrContractMutationError("لا يجوز لغير المالك الأساسي اعتماد عقد أنشأه بنفسه؛ يتطلب الاعتماد مراجعة المالك أو مدير آخر.", 403);
+      }
+    }
 
     assertContractPayComplete(current);
 

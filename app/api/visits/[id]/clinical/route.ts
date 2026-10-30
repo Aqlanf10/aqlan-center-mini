@@ -16,6 +16,7 @@ import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { assistantProcedureChange } from "@/lib/clinical-finalizer";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +96,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const text = (value: unknown, max = 2000) =>
     typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 
+  const runClinicalAction = async (): Promise<NextResponse> => {
   try {
     const visit = await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null });
     if (!visit) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
@@ -360,4 +362,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     return NextResponse.json({ message: "تعذّر حفظ الزيارة." }, { status: 500 });
   }
+  };
+  return action === "sign" || action === "addendum"
+    ? withHttpIdempotency(request, `visits.clinical.${action}:${visitId}`, session.username, source, runClinicalAction)
+    : runClinicalAction();
 }

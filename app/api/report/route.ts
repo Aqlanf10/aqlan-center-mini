@@ -10,6 +10,7 @@ import {
 } from "@/lib/db";
 import { dayReport, tomorrowLoad } from "@/lib/report";
 import { addDays, clinicDateString } from "@/lib/schedule";
+import { canDoctorAccessAllPatients } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -27,24 +28,32 @@ export async function GET(request: Request) {
   const next = addDays(date, 1);
 
   try {
+    const restrictedDoctor = session.role === "doctor" && !(await canDoctorAccessAllPatients(session));
+    const docPartyId = typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null;
     const settings = await getSettings();
     const chairs = chairCount(settings);
     const [visits, appointments, nextDay, lab, plannedToday] = await Promise.all([
-      listVisitsByDate(date),
-      listAppointmentsByDate(date),
-      listAppointmentsByDate(next),
+      restrictedDoctor
+        ? (docPartyId ? listVisitsByDate(date, docPartyId) : Promise.resolve([]))
+        : listVisitsByDate(date),
+      restrictedDoctor
+        ? (docPartyId ? listAppointmentsByDate(date, docPartyId) : Promise.resolve([]))
+        : listAppointmentsByDate(date),
+      restrictedDoctor
+        ? (docPartyId ? listAppointmentsByDate(next, docPartyId) : Promise.resolve([]))
+        : listAppointmentsByDate(next),
       labCounts({ mode: "workflow", today }),
       /*
        * لوحة اليوم (§٢٦): ما المخطَّط لهذا اليوم — زيارات مخطَّطة مجدولة، وبنود
        * «مخطَّط لليوم» من الخطط النشطة. مدخلٌ واحد يفتح منه الطبيب عمل يومه.
-       * والطبيب المربوط يرى لوحته هو (§٣٩).
+       * والطبيب المربوط يرى لوحته هو (§٣٩)، وغير المربوط المقيّد يُغلق بأمان (Fail-Closed).
        */
-      todayPlannedVisits(
-        date,
-        session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
-          ? session.partyId
-          : null,
-      ),
+      restrictedDoctor && !docPartyId
+        ? Promise.resolve({ scheduledVisits: [], unscheduledToday: [] })
+        : todayPlannedVisits(
+            date,
+            session.role === "doctor" && docPartyId ? docPartyId : null,
+          ),
     ]);
 
     return NextResponse.json({

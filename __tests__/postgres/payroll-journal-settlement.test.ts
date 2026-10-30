@@ -113,27 +113,26 @@ describe("payroll disbursement journals use their actual payable links", () => {
   it("accrues 100 once, settles 40 then 60, reverses 60 and replays without duplicate expense or cash", async () => {
     const { run, item } = await approve(await staff("salary"));
     let entries = await journal();
-    // Existing HR accrual retains its configured/default 5101 expense account.
-    // This repair must preserve that single cost, not remap the HR account catalog.
-    expectLines(entry(entries, `PB-${item.payableId}`), [line("5101", 100, "debit"), line("2101", 100, "credit")]);
-    expect(net(entries, "5101")).toBe(100);
-    expect(net(entries, "2101")).toBe(-100);
+    // HR salary accrual uses employee salary accounts (5401 / 2107 — FIN-02).
+    expectLines(entry(entries, `PB-${item.payableId}`), [line("5401", 100, "debit"), line("2107", 100, "credit")]);
+    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "2107")).toBe(-100);
     expect(net(entries, cash.YER)).toBe(0);
 
     const first = await payroll.disbursePayrollItem(item.id, { amountMinor: 40, clientRequestId: "journal-salary-40" }, admin);
     entries = await journal();
-    expectLines(entry(entries, await expenseReference(first.parts[0].expenseId)), [line("2101", 40, "debit"), line(cash.YER, 40, "credit")]);
-    expect(net(entries, "5101")).toBe(100);
-    expect(net(entries, "2101")).toBe(-60);
+    expectLines(entry(entries, await expenseReference(first.parts[0].expenseId)), [line("2107", 40, "debit"), line(cash.YER, 40, "credit")]);
+    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "2107")).toBe(-60);
     expect(net(entries, cash.YER)).toBe(-40);
     expect(await remaining(item.payableId!)).toBe(60);
 
     const second = await payroll.disbursePayrollItem(item.id, { amountMinor: 60, clientRequestId: "journal-salary-60" }, admin);
     entries = await journal();
     const original = entry(entries, await expenseReference(second.parts[0].expenseId));
-    expectLines(original, [line("2101", 60, "debit"), line(cash.YER, 60, "credit")]);
-    expect(net(entries, "5101")).toBe(100);
-    expect(net(entries, "2101")).toBe(0);
+    expectLines(original, [line("2107", 60, "debit"), line(cash.YER, 60, "credit")]);
+    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "2107")).toBe(0);
     expect(net(entries, cash.YER)).toBe(-100);
     expect(await remaining(item.payableId!)).toBe(0);
 
@@ -141,10 +140,10 @@ describe("payroll disbursement journals use their actual payable links", () => {
     const [reversal] = await q<{ id: number; voucher_number: string }>("SELECT id,voucher_number FROM expenses WHERE reversal_of_id=$1", [second.parts[0].expenseId]);
     entries = await journal();
     expect(entry(entries, reversal.voucher_number).source).toBe("expense_void");
-    expectLines(entry(entries, reversal.voucher_number), [line("2101", 60, "credit"), line(cash.YER, 60, "debit")]);
+    expectLines(entry(entries, reversal.voucher_number), [line("2107", 60, "credit"), line(cash.YER, 60, "debit")]);
     expect(entry(entries, original.reference)).toEqual(original);
-    expect(net(entries, "5101")).toBe(100);
-    expect(net(entries, "2101")).toBe(-60);
+    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "2107")).toBe(-60);
     expect(net(entries, cash.YER)).toBe(-40);
     expect(await remaining(item.payableId!)).toBe(60);
     expect((await payroll.listPayrollItems(run.id))[0]).toMatchObject({ paidMinor: 40, remainingMinor: 60 });
@@ -157,8 +156,8 @@ describe("payroll disbursement journals use their actual payable links", () => {
     expect(await q("SELECT id FROM expenses")).toHaveLength(3);
     await payroll.disbursePayrollItem(item.id, { amountMinor: 60, clientRequestId: "journal-salary-60-new" }, admin);
     entries = await journal();
-    expect(net(entries, "5101")).toBe(100);
-    expect(net(entries, "2101")).toBe(0);
+    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "2107")).toBe(0);
     expect(net(entries, cash.YER)).toBe(-100);
     expect(await remaining(item.payableId!)).toBe(0);
   });
@@ -177,19 +176,24 @@ describe("payroll disbursement journals use their actual payable links", () => {
     const paid = await payroll.disbursePayrollItem(item.id, { amountMinor: 220, clientRequestId: "journal-doctor-full" }, admin);
     expect(paid.parts.map(part => [part.component, part.amountMinor]).sort()).toEqual([["commission", 120], ["salary", 100]]);
     const entries = await journal();
-    expectLines(entry(entries, `PB-${item.payableId}`), [line("5101", 100, "debit"), line("2101", 100, "credit")]);
-    expectLines(entry(entries, `PB-${item.commissionPayableId}`), [line("5101", 120, "debit"), line("2101", 120, "credit")]);
+    expectLines(entry(entries, `PB-${item.payableId}`), [line("5401", 100, "debit"), line("2107", 100, "credit")]);
+    expectLines(entry(entries, `PB-${item.commissionPayableId}`), [line("5301", 120, "debit"), line("2106", 120, "credit")]);
     for (const part of paid.parts) {
-      expectLines(entry(entries, await expenseReference(part.expenseId)), [line("2101", part.amountMinor, "debit"), line(cash.YER, part.amountMinor, "credit")]);
+      const expectedAp = part.component === "salary" ? "2107" : "2106";
+      expectLines(entry(entries, await expenseReference(part.expenseId)), [line(expectedAp, part.amountMinor, "debit"), line(cash.YER, part.amountMinor, "credit")]);
       expect(await remaining(part.payableId!)).toBe(0);
     }
-    expect(net(entries, "5101")).toBe(220);
-    expect(net(entries, "2101")).toBe(0);
+    expect(net(entries, "5401")).toBe(100);
+    expect(net(entries, "5301")).toBe(120);
+    expect(net(entries, "2107")).toBe(0);
+    expect(net(entries, "2106")).toBe(0);
     expect(net(entries.filter(value => ["expense", "expense_void"].includes(value.source)), cash.YER)).toBe(-220);
     await payroll.reversePayrollDisbursement(paid.id, { reason: "Synthetic doctor reversal" }, admin);
     const reversed = await journal();
-    expect(net(reversed, "5101")).toBe(220);
-    expect(net(reversed, "2101")).toBe(-220);
+    expect(net(reversed, "5401")).toBe(100);
+    expect(net(reversed, "5301")).toBe(120);
+    expect(net(reversed, "2107")).toBe(-100);
+    expect(net(reversed, "2106")).toBe(-120);
     expect(net(reversed.filter(value => ["expense", "expense_void"].includes(value.source)), cash.YER)).toBe(0);
   });
 });

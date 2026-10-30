@@ -410,6 +410,43 @@ export function PatientLabOrders({
     }
   };
 
+  const requestRemake = async (order: LabOrder) => {
+    if (!owner.active || busy || mutationPending.current) return;
+    const reason = window.prompt(`سبب طلب إعادة تصنيع «${order.workType}» لدى «${order.labName}»:`, "عدم مطابقة الإطباق أو الحواف");
+    if (!reason || reason.trim().length < 2) return;
+    const nextDue = window.prompt("موعد التسليم المتوقع للإعادة (YYYY-MM-DD):", initialDueDate()) ?? "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDue.trim())) {
+      setError("حدد تاريخ تسليم صحيح بصيغة YYYY-MM-DD.");
+      return;
+    }
+    mutationPending.current = true;
+    setBusy(true);
+    setStatusError(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/lab/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remake", remakeReason: reason.trim(), newDueDate: nextDue.trim() }),
+      });
+      if (!owner.active) return;
+      const data = await res.json().catch(() => null);
+      if (!owner.active) return;
+      if (!res.ok) {
+        setError(data?.message ?? "تعذّر إنشاء طلب إعادة التصنيع.");
+        return;
+      }
+      await load();
+    } catch {
+      if (owner.active) setError("تعذّر الاتصال بالخادم.");
+    } finally {
+      if (owner.active) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -704,7 +741,7 @@ export function PatientLabOrders({
 
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5 text-xs">
                   <div>
-                    {order.baseAmountMinor ? (
+                    {typeof order.baseAmountMinor === "number" && order.baseAmountMinor > 0 ? (
                       <span className="text-[11px] font-bold text-slate-500">
                         التكلفة: {formatMoney(order.baseAmountMinor, base)}
                       </span>
@@ -771,6 +808,19 @@ export function PatientLabOrders({
                           ✓ تسليم وتركيب للمريض
                         </button>
                       </>
+                    ) : null}
+
+                    {(order.status === "received" || order.status === "delivered")
+                      && session && ["admin", "doctor", "reception"].includes(session.role) ? (
+                      <button
+                        type="button"
+                        onClick={() => void requestRemake(order)}
+                        disabled={busy}
+                        className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800 hover:bg-amber-100"
+                        title="إنشاء طلب إعادة تصنيع مرتبط بهذا العمل بلا تكلفة إضافية على العيادة"
+                      >
+                        🔄 إعادة تصنيع
+                      </button>
                     ) : null}
 
                     <a

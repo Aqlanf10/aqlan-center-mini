@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
+import { createLabOrder, doctorOwnedPatientIds, doctorOwnsPatient, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
 import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME, labToothInputProblem, parseLabTeeth } from "@/lib/lab";
 import { LabOrderPricingConflict } from "@/lib/lab-order-pricing";
 import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
+import { canAccessPatient } from "@/lib/patient-access";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { rateFromSettings } from "@/lib/settings";
@@ -36,26 +37,57 @@ export async function GET(request: Request) {
   const withServices = url.searchParams.get("services") === "1";
 
   /* صلاحيات الوكيل المساعد: أسعار تكلفة المعامل من «المالية المخفية» — تُحجب
-     عن الطبيب ما لم يصرّح المدير. الطلب نفسه يبقى مرئيًا: مسار العمل سريري. */
+     عن الطبيب ما لم يصرّح المدير، وكذلك يُقيَّد العرض بمرضى الطبيب ما لم يُمنح رؤية الجميع. */
   let hideCosts = false;
+  let restrictDoctorPatients = false;
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
     if (!canDoctorViewCostPrices(user?.permissions, session.role)) hideCosts = true;
+    if (!user?.permissions?.canViewAllPatients) restrictDoctorPatients = true;
   }
 
   try {
     if (summaryOnly) {
       return NextResponse.json(await labCounts());
     }
-    const [rawOrders, labs, labServices] = await Promise.all([
-      patientOutOfRange
+    const doctorPartyId = session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
+      ? session.partyId
+      : null;
+    if (restrictDoctorPatients && patientFilter !== null && !patientOutOfRange && patientFilter > 0) {
+      if (!doctorPartyId || !(await doctorOwnsPatient(doctorPartyId, patientFilter))) {
+        return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على أعمال المعمل لهذا المريض." }, { status: 403 });
+      }
+    }
+    const [fetchedOrders, labs, labServices] = await Promise.all([
+      patientOutOfRange || (restrictDoctorPatients && !doctorPartyId)
         ? Promise.resolve([])
-        : listLabOrders(patientFilter !== null ? { patientId: patientFilter } : undefined),
+        : listLabOrders(
+            patientFilter !== null
+              ? { patientId: patientFilter }
+              : restrictDoctorPatients && doctorPartyId
+                ? { scopedDoctorPartyId: doctorPartyId }
+                : undefined,
+          ),
       listLabNames(),
       withServices ? listLabServices() : Promise.resolve([]),
     ]);
+    let rawOrders = fetchedOrders;
+    if (restrictDoctorPatients && doctorPartyId && patientFilter === null && rawOrders.length > 0) {
+      const candidateIds = [...new Set(rawOrders.map((o) => o.patientId).filter((id) => Number.isInteger(id) && id > 0))];
+      const owned = await doctorOwnedPatientIds(doctorPartyId, candidateIds);
+      if (owned instanceof Set) {
+        rawOrders = rawOrders.filter((o) => owned.has(o.patientId) || o.doctorId === doctorPartyId);
+      }
+    }
     const orders = hideCosts
-      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
+      ? rawOrders.map((o) => ({
+          ...o,
+          costMinor: null,
+          costCurrency: null,
+          baseAmountMinor: null,
+          exchangeRate: null,
+          payableId: null,
+        }))
       : rawOrders;
     return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {
@@ -75,6 +107,9 @@ export async function POST(request: Request) {
   const patientId = Number(source.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
+  }
+  if (!(await canAccessPatient(session, patientId))) {
+    return NextResponse.json({ message: "غير مصرّح لك بإضافة طلب معمل لهذا المريض." }, { status: 403 });
   }
 
   /*

@@ -10,6 +10,7 @@ import {
   recordAudit,
 } from "@/lib/db";
 import { LAPSE_OPTIONS } from "@/lib/recall";
+import { canDoctorAccessAllPatients } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -18,19 +19,24 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
-  if (!(await requireSession())) return denied();
+  const session = await requireSession();
+  if (!session) return denied();
   const requested = Number(new URL(request.url).searchParams.get("weeks") ?? 6);
   // المدة من قائمة مغلقة لا من الطلب مباشرة: رقمٌ ضخم يجعل الاستعلام يمسح الجدول كله.
   const weeks = (LAPSE_OPTIONS as readonly number[]).includes(requested) ? requested : 6;
 
   try {
+    const restrictedDoctor = session.role === "doctor" && !(await canDoctorAccessAllPatients(session));
+    const docScope = restrictedDoctor
+      ? (typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null)
+      : undefined;
     /* المعلّقة أوّلًا في الشاشة لأنها أوّل المسار: موعدٌ يُغلق بـ«لم يحضر» يصير
        متغيّبًا فيُتصل به. وتُحمَّل معهما في طلبٍ واحد — شاشةُ متابعةٍ تحتاج ثلاثة
        طلبات لتكتمل تُقرأ ناقصةً في أثناء التحميل. */
     const [openPast, missed, lapsed] = await Promise.all([
-      listOpenPastAppointments(),
-      listMissedAppointments(),
-      listLapsedPatients(weeks),
+      docScope === undefined ? listOpenPastAppointments() : listOpenPastAppointments(docScope),
+      docScope === undefined ? listMissedAppointments() : listMissedAppointments(docScope),
+      docScope === undefined ? listLapsedPatients(weeks) : listLapsedPatients(weeks, docScope),
     ]);
     return NextResponse.json({ openPast, missed, lapsed, weeks });
   } catch {

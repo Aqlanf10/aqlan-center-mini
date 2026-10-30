@@ -5,7 +5,9 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
+  createLabOrderRemake,
   deleteLabOrder,
+  findUserByUsername,
   getLabOrderById,
   getSettings,
   labOrderEvents,
@@ -16,6 +18,8 @@ import {
   updateLabOrderShades,
   updateLabOrderClinical,
 } from "@/lib/db";
+import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
+import { canAccessPatient } from "@/lib/patient-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -95,8 +99,66 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     /* سجل أحداث الطلب (المختبرات V2) — قبل أي تغيير أو بدونه عند الطلب المجرد. */
     if (source.action === "events") {
+      if (session.role === "doctor") {
+        const existing = await getLabOrderById(id);
+        if (!existing) return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+        if (!(await canAccessPatient(session, existing.patientId))) {
+          return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+        }
+      }
       const events = await labOrderEvents(id);
       return NextResponse.json({ events });
+    }
+
+    /* (CLIN-05) طلب إعادة تصنيع (Remake) مرتبط بالإرسالية الأصلية بلا تكلفة إضافية. */
+    if (source.action === "remake") {
+      if (!["admin", "doctor", "reception"].includes(session.role)) {
+        return NextResponse.json({ message: "غير مصرح بطلب إعادة تصنيع." }, { status: 403 });
+      }
+      const remakeReason = typeof source.remakeReason === "string" ? source.remakeReason.trim().slice(0, 300) : "";
+      const newDueDate = typeof source.newDueDate === "string" ? source.newDueDate.trim() : "";
+      if (remakeReason.length < 2) {
+        return NextResponse.json({ message: "اكتب سبب إعادة التصنيع بوضوح." }, { status: 400 });
+      }
+      if (!DATE_PATTERN.test(newDueDate)) {
+        return NextResponse.json({ message: "حدد موعد تسليم صحيح للإعادة." }, { status: 400 });
+      }
+      const existing = await getLabOrderById(id);
+      if (!existing) {
+        return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+      }
+      if (!(await canAccessPatient(session, existing.patientId))) {
+        return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+      }
+      if (existing.status !== "received" && existing.status !== "delivered") {
+        return NextResponse.json({ message: "إعادة التصنيع متاحة للأعمال المستلمة أو المسلمة فقط." }, { status: 409 });
+      }
+      const remake = await createLabOrderRemake(id, {
+        remakeReason,
+        newDueDate,
+        details: typeof source.details === "string" && source.details.trim() ? source.details.trim().slice(0, 300) : null,
+        shade: typeof source.shade === "string" && source.shade.trim() ? source.shade.trim().slice(0, 30) : null,
+        stumpShade: typeof source.stumpShade === "string" && source.stumpShade.trim() ? source.stumpShade.trim().slice(0, 30) : null,
+        actor: session.username,
+        actorRole: session.role,
+      });
+      if (!remake) {
+        return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+      }
+      await recordAudit({
+        action: "lab_order.create",
+        entity: "lab_order",
+        entityId: String(remake.id),
+        entityLabel: `إعادة تصنيع معمل: ${remake.patientName} (${remake.labName})`,
+        details: { الأصل: id, السبب: remakeReason, التسليم: newDueDate },
+        actor: session.username,
+        actorRole: session.role,
+      });
+      const hideRemakeCosts = session.role === "doctor"
+        && !canDoctorViewCostPrices((await findUserByUsername(session.username).catch(() => null))?.permissions, session.role);
+      return NextResponse.json(hideRemakeCosts
+        ? { ...remake, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null, payableId: null }
+        : remake);
     }
 
     /* إجراءات الربط المحاسبي والترحيل النهائي (بنود المصروفات): تحديث البند
@@ -186,9 +248,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json(updated);
     }
 
+    const maskLabCostsIfNeeded = async <T extends { costMinor?: number | null; costCurrency?: Currency | null; baseAmountMinor?: number | null; exchangeRate?: number | null; payableId?: number | null }>(order: T): Promise<T> => {
+      if (session.role !== "doctor") return order;
+      const user = await findUserByUsername(session.username).catch(() => null);
+      if (canDoctorViewCostPrices(user?.permissions, session.role)) return order;
+      return { ...order, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null, payableId: null };
+    };
+
     if (typeof source.dueDate === "string") {
       if (!DATE_PATTERN.test(source.dueDate)) {
         return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
+      }
+      if (session.role === "doctor") {
+        const existing = await getLabOrderById(id);
+        if (!existing) return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
+        if (!(await canAccessPatient(session, existing.patientId))) {
+          return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+        }
       }
       const updated = await setLabOrderDueDate(id, source.dueDate);
       if (!updated) {
@@ -197,12 +273,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           { status: 409 },
         );
       }
-      return NextResponse.json(updated);
+      return NextResponse.json(await maskLabCostsIfNeeded(updated));
     }
 
     const status = typeof source.status === "string" ? source.status : "";
     if (!STATUSES.includes(status as LabOrderStatus)) {
       return NextResponse.json({ message: "حالة غير معروفة." }, { status: 400 });
+    }
+    if (session.role === "doctor") {
+      const existingForScope = await getLabOrderById(id);
+      if (existingForScope && !(await canAccessPatient(session, existingForScope.patientId))) {
+        return NextResponse.json({ message: "غير مصرح لهذا المريض." }, { status: 403 });
+      }
     }
     /* إلغاء الإرسالية قرار إداري لا تشغيلي: يمسّ المال (يعكس الالتزام غير
      * المسدَّد) ويوقف عملًا قائمًا عند المختبر — للمدير وحده. طلب «لم يُرسل بعد»
@@ -252,7 +334,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actorRole: session.role,
       });
     }
-    return NextResponse.json(updated);
+    return NextResponse.json(await maskLabCostsIfNeeded(updated));
   } catch (error) {
     if ((error as { code?: string }).code === "55P03") return NextResponse.json({ code: "lab_status_busy", message: "يوجد تحديث جارٍ؛ حدّث الإرسالية وأعد المحاولة." }, { status: 409 });
     if (error instanceof LabFinancialBoundaryError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status });

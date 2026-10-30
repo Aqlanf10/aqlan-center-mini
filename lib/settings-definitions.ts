@@ -556,6 +556,20 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     defaultValue: "30", order: 20, scope: "clinic", sensitivity: "normal",
     permission: "settings.manage",
     description: "قبلها بهذه المدّة يُعدّ صنف المخزون «يقارب الانتهاء»." }),
+  def({ key: "portal.enabled", keywords: ["بوابة", "مريض", "portal", "patient"],
+    category: "feature_flags",
+    label: "تفعيل بوابة المريض (/portal)", type: "BOOLEAN",
+    defaultValue: "true", order: 10, scope: "clinic", sensitivity: "normal",
+    permission: "settings.manage_permissions",
+    description: "يتحكّم في إتاحة دخول المرضى إلى بوابة مواعيدهم وكشف حسابهم واستمارتهم.",
+    impact: "إيقافها يغلق الدخول والجلسات الحالية للبوابة فورًا من الخادم." }),
+  def({ key: "booking.public_enabled", keywords: ["حجز", "طلب", "موعد", "عام", "booking", "public"],
+    category: "feature_flags",
+    label: "تفعيل نموذج طلب الحجز العام (/book)", type: "BOOLEAN",
+    defaultValue: "true", order: 20, scope: "clinic", sensitivity: "normal",
+    permission: "settings.manage_permissions",
+    description: "يتحكّم في استقبال طلبات المواعيد من الصفحة العامة خارج العيادة.",
+    impact: "إيقافه يرفض أي طلب حجز خارجي جديد مع توجيه المريض للاتصال بالمركز." }),
 ] as const;
 
 const BY_KEY = new Map<string, SettingDefinition>(

@@ -36,7 +36,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   /*
    * ربط حساب الطبيب بجهته (§٣٥/٣٧): به يعرف الخادم مرضى هذا الحساب فيحجب ما ليس
-   * لهم. والفكّ (null) يعيده إلى السلوك القديم — يرى الكل — حتى يُربط من جديد.
+   * لهم. والفكّ (null) يُغلق نطاق الطبيب المقيّد بأمان (Fail-Closed) حتى يُربط من جديد.
    */
   if (source.action === "link_doctor") {
     const rawParty = Number(source.partyId);

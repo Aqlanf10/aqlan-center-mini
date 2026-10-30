@@ -81,6 +81,9 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   // Authority semantics: the value decides who may do what.
   "workflow.doctor_financial_view": k("authority"),
   "finance.reception_adds_opening_balance": k("authority"),
+  "portal.enabled": k("authority"),
+  "booking.public_enabled": k("authority"),
+  "lab.patient_identity_mode": k("authority"),
   // Integrations: the value sends data out of the clinic.
   "reminders.auto_enabled": k("integration"), "messaging.consent_mode": k("integration"),
   "reminders.auto_template": k("integration"), "reminders.auto_language": k("integration"),

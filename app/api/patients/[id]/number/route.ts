@@ -25,6 +25,7 @@ export async function PATCH(request: Request, context: Context) {
     return NextResponse.json(await changePatientNumber(session, Number((await context.params).id), {
       patientNumber: input.patientNumber, expectedPatientNumber: input.expectedPatientNumber,
       expectedVersion: input.expectedVersion, reason: input.reason,
+      ...(input.allowPaperArchiveOverride === true ? { allowPaperArchiveOverride: true } : {}),
     }));
   } catch (error) { return bodyErrorResponse(error) ?? patientNumberingErrorResponse(error); }
 }

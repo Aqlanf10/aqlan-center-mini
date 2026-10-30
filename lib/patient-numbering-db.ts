@@ -82,6 +82,7 @@ export function readPatientNumber(session: SessionPayload, patientId: number) {
 }
 export async function changePatientNumber(session: SessionPayload, patientId: number, input: {
   patientNumber: unknown; expectedVersion: unknown; expectedPatientNumber: unknown; reason: unknown;
+  allowPaperArchiveOverride?: boolean;
 }): Promise<PatientNumberSnapshot> {
   validId(patientId);
   const number = parsePatientNumber(input.patientNumber), version = parseNumberingVersion(input.expectedVersion), reason = numberingReason(input.reason);
@@ -91,11 +92,34 @@ export async function changePatientNumber(session: SessionPayload, patientId: nu
     await authorize(client, session); // expiry while waiting on the exact patient row
     if (before.version !== version || before.patientNumber !== input.expectedPatientNumber) throw new PatientNumberingError("stale", "تغيّر رقم الملف منذ فتحه؛ حدّث الصفحة قبل المحاولة.");
     if (before.patientNumber === number) throw new PatientNumberingError("invalid", "رقم الملف الجديد مطابق للحالي.");
+    const paperOverride = input.allowPaperArchiveOverride === true;
+    if (paperOverride) {
+      const numeric = Number(number.replace(/^P-0*/, "") || "0");
+      if (!Number.isFinite(numeric) || numeric < 1 || numeric >= 7000) {
+        throw new PatientNumberingError("invalid", "تجاوز الأرقام المتقاعدة مسموح لأرقام الأرشيف الورقي الأقل من 7000 فقط.");
+      }
+      const { rows: [ownerRow] } = await client.query<{ is_principal: boolean }>(
+        `SELECT (
+           u.role = 'admin' AND u.is_active = TRUE AND (
+             u.is_owner = TRUE OR (
+               NOT EXISTS (SELECT 1 FROM users WHERE is_owner = TRUE AND is_active = TRUE)
+               AND u.id = (SELECT MIN(id) FROM users WHERE role = 'admin' AND is_active = TRUE)
+             )
+           )
+         ) AS is_principal FROM users u WHERE u.id = $1`,
+        [session.userId],
+      );
+      if (!ownerRow?.is_principal) {
+        throw new PatientNumberingError("forbidden", "إعادة استخدام رقم أرشيف ورقي متقاعد (< 7000) متاحة للمالك الأساسي فقط.");
+      }
+      await client.query("SET LOCAL aqlan.owner_paper_override = 'on'");
+    }
     await client.query("UPDATE patients SET patient_number=$2 WHERE id=$1", [patientId, number]);
     const after = await snapshot(client, patientId);
     await insertAuditRow(client, {action: "patient.number.change", entity: "patient", entityId: patientId,
       actor: session.username, actorRole: session.role, details: {before, after, reason,
-        internalPatientIdUnchanged: true, oldNumberRetired: true}});
+        internalPatientIdUnchanged: true, oldNumberRetired: true,
+        ...(paperOverride ? { paperArchiveOverride: true } : {})}});
     return after;
   });
 }

@@ -1,4 +1,5 @@
 import { JournalReadIntegrityError, JOURNAL_REVIEW_RESPONSE } from "@/lib/journal-read-integrity";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -138,28 +139,30 @@ export async function POST(request: Request) {
     lines.push({ accountCode, currency, amountMinor, side });
   }
 
-  try {
-    // الفحص الحاسم (التوازن داخل كل عملة) داخل createManualEntry نفسها — لا يتجاوزه مسارٌ آخر.
-    const id = await createManualEntry({ date, description, lines, createdBy: session.username });
-    await recordAudit({
-      action: "journal.manual", entity: "journal", entityId: id,
-      entityLabel: description,
-      details: {
-        التاريخ: date,
-        البيان: description,
-        الأسطر: lines.map((line) => `${line.side === "debit" ? "مدين" : "دائن"} ${line.accountCode} ${line.amountMinor} ${line.currency}`).join(" | "),
-      },
-      actor: session.username, actorRole: session.role,
-    });
-    return NextResponse.json({ id }, { status: 201 });
-  } catch (error) {
-    if (error instanceof ManualCashEntryConflictError) {
-      return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
+  return withHttpIdempotency(request, "accounting.manual_entry", session.username, source, async () => {
+    try {
+      // الفحص الحاسم (التوازن داخل كل عملة) داخل createManualEntry نفسها — لا يتجاوزه مسارٌ آخر.
+      const id = await createManualEntry({ date, description, lines, createdBy: session.username });
+      await recordAudit({
+        action: "journal.manual", entity: "journal", entityId: id,
+        entityLabel: description,
+        details: {
+          التاريخ: date,
+          البيان: description,
+          الأسطر: lines.map((line) => `${line.side === "debit" ? "مدين" : "دائن"} ${line.accountCode} ${line.amountMinor} ${line.currency}`).join(" | "),
+        },
+        actor: session.username, actorRole: session.role,
+      });
+      return NextResponse.json({ id }, { status: 201 });
+    } catch (error) {
+      if (error instanceof ManualCashEntryConflictError) {
+        return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
+      }
+      if (error instanceof ManualEntryInvalidError) {
+        // القيد غير المتوازن (داخل كل عملة) يُرفض عند الإدخال لا يُكتشف بعد شهور في ميزان لا يقفل.
+        return NextResponse.json({ message: error.message }, { status: 400 });
+      }
+      return NextResponse.json({ message: "تعذّر حفظ القيد." }, { status: 500 });
     }
-    if (error instanceof ManualEntryInvalidError) {
-      // القيد غير المتوازن (داخل كل عملة) يُرفض عند الإدخال لا يُكتشف بعد شهور في ميزان لا يقفل.
-      return NextResponse.json({ message: error.message }, { status: 400 });
-    }
-    return NextResponse.json({ message: "تعذّر حفظ القيد." }, { status: 500 });
-  }
+  });
 }

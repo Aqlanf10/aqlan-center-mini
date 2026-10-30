@@ -28,6 +28,7 @@ function labelFor(date: string): string {
 
 export default function BookPage() {
   const clinicName = useClinicName();
+  const bookingEnabled = useSetting("booking.public_enabled");
   const doctor = useSetting("clinic.lead_doctor");
   const doctorTitle = useSetting("clinic.lead_doctor_title");
   const clinicPhone = useSetting("clinic.phone");
@@ -73,6 +74,25 @@ export default function BookPage() {
       setBusy(false);
     }
   };
+
+  if (bookingEnabled === "false") {
+    return (
+      <main className="mx-auto max-w-lg p-6">
+        <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-card">
+          <Logo className="mx-auto h-14 w-14" />
+          <h1 className="mt-4 text-lg font-bold text-navy-900">{clinicName}</h1>
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            استقبال طلبات المواعيد عبر الموقع متوقف حاليًا. يرجى التواصل مع المركز هاتفيًا لحجز موعدكم.
+          </p>
+          {clinicPhone ? (
+            <p className="mt-4 text-xs font-semibold text-slate-500">
+              للتواصل: <span className="ltr-nums">{clinicPhone}</span>
+            </p>
+          ) : null}
+        </div>
+      </main>
+    );
+  }
 
   if (sent) {
     return (

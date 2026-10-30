@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/session";
 import { checkPrescriptionDraft } from "@/lib/prescription";
 import { evaluatePrescriptionSafety } from "@/lib/medication-safety";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import {
   buildSafetyAcknowledgementToken,
   verifySafetyAcknowledgementToken,
@@ -202,22 +203,26 @@ export async function POST(request: Request) {
         );
       }
       /* الإقرار صالح ومطابق: تُحفظ الوصفة وتُعاد التحذيرات معها للاطلاع. */
-      try {
-        const record = await savePrescription(draft.value, session.username, doctorPartyId);
-        return NextResponse.json(
-          { id: record.id, createdAt: record.createdAt, safetyWarnings: warnings, acknowledged: true },
-          { status: 201 },
-        );
-      } catch {
-        return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
-      }
+      return withHttpIdempotency(request, "prescriptions.create", session.username, draft.value, async () => {
+        try {
+          const record = await savePrescription(draft.value, session.username, doctorPartyId);
+          return NextResponse.json(
+            { id: record.id, createdAt: record.createdAt, safetyWarnings: warnings, acknowledged: true },
+            { status: 201 },
+          );
+        } catch {
+          return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
+        }
+      });
     }
   }
 
-  try {
-    const record = await savePrescription(draft.value, session.username, doctorPartyId);
-    return NextResponse.json({ id: record.id, createdAt: record.createdAt }, { status: 201 });
-  } catch {
-    return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
-  }
+  return withHttpIdempotency(request, "prescriptions.create", session.username, draft.value, async () => {
+    try {
+      const record = await savePrescription(draft.value, session.username, doctorPartyId);
+      return NextResponse.json({ id: record.id, createdAt: record.createdAt }, { status: 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
+    }
+  });
 }

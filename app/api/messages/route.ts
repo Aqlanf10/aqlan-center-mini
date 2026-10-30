@@ -20,7 +20,7 @@ import {
   validateOutgoingMessage,
 } from "@/lib/messages";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, canDoctorAccessAllPatients } from "@/lib/patient-access";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES, MESSAGES_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 
@@ -43,18 +43,26 @@ export async function GET(request: Request) {
 
   try {
     if (url.searchParams.get("conversations") === "1") {
+      const restrictedDoctor = session.role === "doctor" && !(await canDoctorAccessAllPatients(session));
+      const docScope = restrictedDoctor
+        ? (typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null)
+        : undefined;
       const [list, unread, urgent] = await Promise.all([
-        staffConversationList(session.userId),
-        unreadMessageCount(session.userId),
-        urgentUnreadMessageCount(session.userId),
+        docScope === undefined ? staffConversationList(session.userId) : staffConversationList(session.userId, docScope),
+        docScope === undefined ? unreadMessageCount(session.userId) : unreadMessageCount(session.userId, docScope),
+        docScope === undefined ? urgentUnreadMessageCount(session.userId) : urgentUnreadMessageCount(session.userId, docScope),
       ]);
       return NextResponse.json({ ...list, unread, urgent, meUserId: session.userId });
     }
 
     if (url.searchParams.get("unread") === "1") {
+      const restrictedDoctor = session.role === "doctor" && !(await canDoctorAccessAllPatients(session));
+      const docScope = restrictedDoctor
+        ? (typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null)
+        : undefined;
       const [unread, urgent] = await Promise.all([
-        unreadMessageCount(session.userId),
-        urgentUnreadMessageCount(session.userId),
+        docScope === undefined ? unreadMessageCount(session.userId) : unreadMessageCount(session.userId, docScope),
+        docScope === undefined ? urgentUnreadMessageCount(session.userId) : urgentUnreadMessageCount(session.userId, docScope),
       ]);
       return NextResponse.json({ unread, urgent });
     }

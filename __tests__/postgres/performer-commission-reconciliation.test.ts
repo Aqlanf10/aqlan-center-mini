@@ -54,6 +54,8 @@ beforeAll(async () => {
   admin = { userId: actorId, username: "performer-admin", role: "admin", expiresAt: Date.now() + 3600000,
     credentialVersion: sessionCredentialVersion("synthetic-performer-hash") };
   await id("INSERT INTO cashier_shifts(opened_by) VALUES($1) RETURNING id", [admin.username]);
+  await q(`INSERT INTO settings(key,value) VALUES('finance.rate.USD','500'),('finance.rate.SAR','140')
+    ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`);
 });
 afterAll(async () => { await db.resetPoolForTesting(); });
 
@@ -168,7 +170,7 @@ describe("doctor report versus payroll settlement", () => {
       const cashEntry = entries.find(entry => entry.reference === settlement.voucher_number)!;
       expect(isBalanced(cashEntry)).toBe(true);
       expect(cashEntry.lines).toEqual(expect.arrayContaining([
-        { accountCode: "2101", currency, amountMinor: 1200, side: "debit" },
+        { accountCode: "2106", currency, amountMinor: 1200, side: "debit" },
         { accountCode: currency === "YER" ? "1101" : "1103", currency, amountMinor: 1200, side: "credit" },
       ]));
       const before = await q("SELECT id FROM expenses WHERE party_id=$1", [d.id]);

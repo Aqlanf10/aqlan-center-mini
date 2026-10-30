@@ -32,6 +32,7 @@ export interface PortalPayload {
   patientNumber: string;
   fullName: string;
   expiresAt: number;
+  secretVersion?: number;
 }
 
 function portalSecret(): string {

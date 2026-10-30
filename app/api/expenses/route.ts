@@ -8,6 +8,7 @@ import { refusalMessage } from "@/lib/supplier-payments";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
+import { withHttpIdempotency } from "@/lib/http-idempotency";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -64,27 +65,29 @@ export async function POST(request: Request) {
   if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: parsed.status });
   const request_ = parsed.value;
 
-  try {
-    const { expense, reason, quote } = await recordExpense({
-      category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
-      amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
-      exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
-      createdBy: session.username, actorRole: session.role, rates: settingsRates,
-      payableExchangeRate: request_.payableExchangeRate,
-      rateOverrideReason: request_.rateOverrideReason,
-      prepaymentReason: request_.prepaymentReason,
-      expectedQuote: request_.expectedQuote,
-    });
-    if (reason) {
-      return NextResponse.json(
-        { message: refusalMessage(reason, quote), code: reason, quote },
-        { status: refusalStatus(reason) },
-      );
+  return withHttpIdempotency(request, "expenses.create", session.username, source, async () => {
+    try {
+      const { expense, reason, quote } = await recordExpense({
+        category: request_.category, partyId: request_.partyId, payeeText: request_.payeeText,
+        amountMinor: request_.amountMinor, currency: request_.currency, baseCurrency: base,
+        exchangeRate: request_.exchangeRate, payableId: request_.payableId, note: request_.note,
+        createdBy: session.username, actorRole: session.role, rates: settingsRates,
+        payableExchangeRate: request_.payableExchangeRate,
+        rateOverrideReason: request_.rateOverrideReason,
+        prepaymentReason: request_.prepaymentReason,
+        expectedQuote: request_.expectedQuote,
+      });
+      if (reason) {
+        return NextResponse.json(
+          { message: refusalMessage(reason, quote), code: reason, quote },
+          { status: refusalStatus(reason) },
+        );
+      }
+      return NextResponse.json(expense, { status: 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر تسجيل الصرف. أعد المحاولة." }, { status: 500 });
     }
-    return NextResponse.json(expense, { status: 201 });
-  } catch {
-    return NextResponse.json({ message: "تعذّر تسجيل الصرف. أعد المحاولة." }, { status: 500 });
-  }
+  });
 }
 
 /* حذف سند صرف — المدير وحده، وضمن ورديةٍ مفتوحة، ولا لسند يسدّد التزامًا. */
