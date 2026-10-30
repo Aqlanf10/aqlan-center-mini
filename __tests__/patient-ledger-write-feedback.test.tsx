@@ -233,3 +233,18 @@ describe("PatientLedger manual row provenance", () => {
     }
   });
 });
+
+
+it.each([["Asia/Aden", "الجمعة 30/10/2026"], ["UTC", "الخميس 29/10/2026"]])("shows both financial rows in configured %s after UTC 23:31", async (clinicTimeZone, expected) => {
+  const createdAt = "2026-10-29T23:31:00Z";
+  const invoice = await (await write()).json();
+  const synthetic = { ...ledger, clinicTimeZone,
+    invoices: [{ ...invoice, createdAt }],
+    payments: [{ id: 21, invoiceId: null, note: null, receiptNumber: "SYN-R-21", kind: "payment", amountMinor: 2000,
+      baseAmountMinor: 2000, exchangeRate: 1, currency: "YER", method: "cash", createdAt }] };
+  const before = structuredClone(synthetic);
+  fetchMock.mockImplementation((url: string) => Promise.resolve(json(url.endsWith("/ledger") ? synthetic : [])));
+  render(); await settle();
+  expect(text(render()).split(expected)).toHaveLength(3);
+  expect(synthetic).toEqual(before);
+});

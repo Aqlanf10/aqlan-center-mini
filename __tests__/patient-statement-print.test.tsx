@@ -266,3 +266,25 @@ describe("current patient statement explains stored treatment and discounts", ()
     expect(html).toContain(formatMoney(17000, "SAR"));
   });
 });
+
+
+describe("clinic calendar date of stored financial instants", () => {
+  it.each([
+    ["2026-10-29T23:31:00Z", "2026-10-30"],
+    ["2026-10-29T20:59:59Z", "2026-10-29"],
+    ["2026-10-29T21:00:00Z", "2026-10-30"],
+    ["2026-12-31T23:31:00Z", "2027-01-01"],
+    ["2024-02-28T23:31:00Z", "2024-02-29"],
+    ["2024-02-29T23:31:00Z", "2024-03-01"],
+  ])("renders invoice and payment %s as %s without mutating ledger", async (createdAt, date) => {
+    const ledger = { invoices: [statementInvoice({ createdAt })], payments: [statementPayment({ createdAt })], openings: [] };
+    const before = structuredClone(ledger);
+    mocks.patientLedger.mockResolvedValue(ledger);
+    const html = renderToStaticMarkup(await run());
+    const expected = friendlyDateLong(date);
+    expect(html).toContain(`<td>${expected}</td>`);
+    expect(html).toContain(` — ${expected} — `);
+    expect(ledger).toEqual(before);
+  });
+});
+import { friendlyDateLong } from "../lib/reminders";
