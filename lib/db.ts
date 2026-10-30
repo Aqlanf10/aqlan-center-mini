@@ -1,5 +1,5 @@
 import { encodePrescriptionPrintCursor, type PrescriptionPrintCursor } from "./prescription-print-pagination";
-import { PRESCRIBING_DOCTOR_SNAPSHOT_SQL, PRESCRIBING_DOCTOR_IDENTITY_SQL } from "./prescribing-doctor-schema";
+import { PRESCRIPTION_LINEAGE_MIGRATIONS } from "./prescription-migration-lineage";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
@@ -2110,8 +2110,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
-    await applyRuntimeMigrationFiles(getPool(), [{ version: "0090", name: "prescribing_doctor_snapshot", filename: "0090_prescribing_doctor_snapshot.sql", sql: PRESCRIBING_DOCTOR_SNAPSHOT_SQL, checksum: checksumOf(PRESCRIBING_DOCTOR_SNAPSHOT_SQL) }]);
-    await applyRuntimeMigrationFiles(getPool(), [{ version: "0091", name: "prescribing_doctor_identity", filename: "0091_prescribing_doctor_identity.sql", sql: PRESCRIBING_DOCTOR_IDENTITY_SQL, checksum: checksumOf(PRESCRIBING_DOCTOR_IDENTITY_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);

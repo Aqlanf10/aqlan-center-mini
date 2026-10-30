@@ -34,7 +34,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = fixture.source.options.connectionString!;
   process.env.SKIP_SEED = 'true';
   db = await import('../../lib/db'); await db.resetPoolForTesting(); await db.ensureSchema();
-  expect((await fixture.source.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091']);
+  expect((await fixture.source.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092']);
   await fixture.source.query("INSERT INTO users(id,username,display_name,password_hash,role) VALUES(710,'composed-admin','Synthetic administrator','synthetic-hash','admin')");
   await fixture.source.query("INSERT INTO hr_staff(id,full_name,created_by,contract_kind,salary_amount_minor,salary_currency,salary_period,salary_effective_on,hire_date) VALUES(810,'Synthetic receptionist','test','salary',90000,'YER','monthly','2020-01-01','2020-01-01')");
   // A real financial DATE must survive both supported restore entry points too.
@@ -72,7 +72,7 @@ it('SQL backup restores every application table, explicit identities, revision o
   // Exercise the supported SQL restore CLI against a runtime-owned target registry.
   const restored = await promisify(execFile)(process.execPath, ['scripts/restore.mjs', join(directory, 'synthetic-backup.sql')], { env: { ...process.env } });
   expect(restored.stdout).toContain('تمت الاستعادة');
-  expect((await fixture.sqlTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091']);
+  expect((await fixture.sqlTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091', '0092']);
   expect(await rows(fixture.sqlTarget)).toEqual(await rows(fixture.source));
   expect(await recordHrHistory(db.getPool(),hrTemporalAuthority(actor),originalCommand)).toEqual(originalReceipt);
   expect((await fixture.sqlTarget.query('SELECT count(*)::int AS n FROM hr_effective_revisions')).rows[0].n).toBe(2);
