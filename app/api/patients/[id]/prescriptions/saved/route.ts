@@ -1,3 +1,4 @@
+import { decodePrescriptionPrintCursor } from "@/lib/prescription-print-pagination";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -19,7 +20,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!await getPatient(patientId)) return NextResponse.json({ message: "الملف غير موجود." }, { status: 404 });
     if (visitId !== null && (await getClinicalVisit(visitId))?.patientId !== patientId)
       return NextResponse.json({ message: "الزيارة لا تطابق المريض." }, { status: 404 });
-    const prescriptions = await listSavedPrescriptionPrints(patientId, visitId);
-    return NextResponse.json({ prescriptions }, { headers: { "Cache-Control": "no-store" } });
+    let cursor;
+    try { cursor = decodePrescriptionPrintCursor(new URL(request.url).searchParams.get("cursor"), patientId, visitId); }
+    catch { return NextResponse.json({ message: "مؤشر الصفحة غير صالح؛ حدّث القائمة." }, { status: 400 }); }
+    const page = await listSavedPrescriptionPrints(patientId, visitId, cursor);
+    return NextResponse.json(page, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ message: "تعذرت قراءة الوصفات المحفوظة." }, { status: 500 }); }
 }

@@ -34,7 +34,7 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     const listPath = `/api/patients/${patient.id}/prescriptions/saved?visitId=${visit.id}`;
     const listed = await read(listPath); expect(listed.status).toBe(200);
     const payload = await listed.json(); expect(payload.prescriptions).toEqual([expect.objectContaining({ id, visitId: visit.id, prescribingDoctorName: before.prescribing_doctor_name })]);
-    expect(Object.keys(payload)).toEqual(["prescriptions"]);
+    expect(Object.keys(payload)).toEqual(["prescriptions", "nextCursor"]); expect(payload.nextCursor).toBeNull();
     expect(Object.keys(payload.prescriptions[0]).sort()).toEqual(["createdAt", "id", "prescribingDoctorName", "visitId"].sort());
     expect((await read(`/api/patients/${patient.id}/prescriptions`)).status).toBe(403);
     expect((await read(`/api/patients/${patient.id}/prescriptions/saved?visitId=${h.seeded.visitId}`)).status).toBe(404);
@@ -84,7 +84,7 @@ it("finds an older visit prescription beyond 50 newer records without crossing p
   const oldVisit = (await db.query("INSERT INTO visits(patient_id,patient_name,doctor_id) VALUES($1,'Old visit',$2) RETURNING id", [patient, doctor.party_id])).rows[0].id;
   const newerVisit = (await db.query("INSERT INTO visits(patient_id,patient_name,doctor_id) VALUES($1,'Newer visit',$2) RETURNING id", [patient, doctor.party_id])).rows[0].id;
   const oldRx = (await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,prescribing_doctor_name,created_at) VALUES($1,$2,'[]','synthetic-fixture','Original old doctor','2020-01-01T00:00:00Z') RETURNING id", [patient, oldVisit])).rows[0].id;
-  await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,created_at) SELECT $1,$2,'[]','synthetic-fixture','2026-01-01'::timestamptz + n * interval '1 second' FROM generate_series(1,60) n", [patient, newerVisit]);
+  await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,created_at) SELECT $1,$2,'[]','synthetic-fixture','2026-01-01T00:00:00.000123Z'::timestamptz FROM generate_series(1,60) n", [patient, newerVisit]);
   await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,status) VALUES($1,$2,'[]','synthetic-void','void'),($3,$4,'[]','synthetic-other','active')", [patient, oldVisit, h.seeded.patientBId, h.seeded.visitId]);
   try {
     // Synthetic fixture grant only; restore exact prior value in finally.
@@ -94,9 +94,43 @@ it("finds an older visit prescription beyond 50 newer records without crossing p
     const newest = await (await read(`/api/patients/${patient}/prescriptions/saved?visitId=${newerVisit}`)).json();
     expect(newest.prescriptions).toHaveLength(50); expect(newest.prescriptions.every((rx: { visitId: number }) => rx.visitId === newerVisit)).toBe(true);
     expect((await read(`/api/patients/${h.seeded.patientBId}/prescriptions/saved?visitId=${oldVisit}`)).status).toBe(404);
-    expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescriptions WHERE patient_id=$1", [patient])).rows[0].n)).toBe(62);
+    const firstPage = await (await read(`/api/patients/${patient}/prescriptions/saved`)).json();
+    expect(firstPage.prescriptions).toHaveLength(50); expect(firstPage.nextCursor).toEqual(expect.any(String));
+    // Newer inserts do not shift the keyset or duplicate rows on the next page.
+    const inserted = (await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,created_at) VALUES($1,$2,'[]','synthetic-new','2026-10-30T10:00:00Z') RETURNING id", [patient, newerVisit])).rows[0].id;
+    const nextUrl = `/api/patients/${patient}/prescriptions/saved?cursor=${firstPage.nextCursor}`;
+    const secondPage = await (await read(nextUrl)).json();
+    expect(secondPage.prescriptions).toHaveLength(11); expect(secondPage.nextCursor).toBeNull();
+    const ids = [...firstPage.prescriptions, ...secondPage.prescriptions].map((rx: { id: number }) => rx.id);
+    expect(new Set(ids).size).toBe(61); expect(ids).toContain(oldRx); expect(ids).not.toContain(inserted);
+    expect((await read(nextUrl, "doctorB")).status).toBe(403);
+    expect((await read(`/api/patients/${h.seeded.patientBId}/prescriptions/saved?cursor=${firstPage.nextCursor}`)).status).toBe(400);
+    expect((await read(`/api/patients/${patient}/prescriptions/saved?visitId=${newerVisit}&cursor=${firstPage.nextCursor}`)).status).toBe(400);
+    expect((await read(`/api/patients/${patient}/prescriptions/saved?cursor=invalid`)).status).toBe(400);
+    await db.query("UPDATE users SET permissions=$1 WHERE id=$2", [{ ...(reception.permissions ?? {}), canPrintSavedPrescriptions: false }, reception.id]);
+    expect((await read(nextUrl)).status).toBe(403);
+    await db.query("UPDATE users SET permissions=$1 WHERE id=$2", [{ ...(reception.permissions ?? {}), canPrintSavedPrescriptions: true }, reception.id]);
+    const context = await browser.newContext();
+    try {
+      const pair = h.sessions.reception.cookie.split(";")[0], split = pair.indexOf("=");
+      await context.addCookies([{ name: pair.slice(0, split), value: pair.slice(split + 1), url: baseUrl }]);
+      const page = await context.newPage(); await page.goto(`${baseUrl}/patients/${patient}`);
+      const picker = page.locator("details").filter({ has: page.locator("summary", { hasText: "الوصفات المحفوظة" }) });
+      await picker.locator("summary").click();
+      await expect.poll(() => picker.getByRole("link", { name: "فتح الوصفة للطباعة" }).count()).toBe(50);
+      await page.route("**/prescriptions/saved?cursor=*", route => route.abort("failed"), { times: 1 });
+      await picker.getByRole("button", { name: "تحميل المزيد من الوصفات" }).click();
+      await picker.getByRole("alert").waitFor();
+      expect(await picker.getByRole("link", { name: "فتح الوصفة للطباعة" }).count()).toBe(50);
+      await expect.poll(() => picker.getByRole("button", { name: "تحميل المزيد من الوصفات" }).isEnabled()).toBe(true);
+      await picker.getByRole("button", { name: "تحميل المزيد من الوصفات" }).click();
+      await expect.poll(() => picker.getByRole("link", { name: "فتح الوصفة للطباعة" }).count()).toBe(62);
+      expect(await picker.getByRole("link", { name: "فتح الوصفة للطباعة" }).last().getAttribute("href")).toBe(`/print/prescription/${patient}?rx=${oldRx}`);
+      expect(await picker.getByRole("button", { name: "تحميل المزيد من الوصفات" }).count()).toBe(0);
+    } finally { await context.close(); }
+    expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescriptions WHERE patient_id=$1", [patient])).rows[0].n)).toBe(63);
   } finally { await db.query("UPDATE users SET permissions=$1 WHERE id=$2", [reception.permissions, reception.id]); }
-});
+}, 120_000);
 
 it("actual PG catalogue detector keeps unrelated binding artifacts legacy and quarantines any canonical footprint", async () => {
   const { readStaffEntryMode } = await import("../../lib/legacy-staff-schema.mjs");

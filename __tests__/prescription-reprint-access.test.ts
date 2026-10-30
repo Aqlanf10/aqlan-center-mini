@@ -17,7 +17,7 @@ const page = (query: object = { rx: "81" }) => Page({ params: Promise.resolve({ 
 beforeEach(() => {
   vi.clearAllMocks(); m.session.mockResolvedValue(session); m.user.mockResolvedValue({ ...session, id: 3, isActive: true, permissions: { canPrintSavedPrescriptions: true } });
   m.access.mockResolvedValue(true); m.patient.mockResolvedValue({ id: 7, fullName: "Synthetic", patientNumber: "S-7", birthYear: 2000, gender: "male" });
-  m.visit.mockResolvedValue({ id: 9, patientId: 7 }); m.list.mockImplementation(async (_patientId: number, visitId: number | null) => visitId === null || visitId === 9 ? [{ id: rx.id, visitId: rx.visitId, createdAt: rx.createdAt, prescribingDoctorName: rx.prescribingDoctorName }] : []); m.rx.mockResolvedValue(rx); m.print.mockResolvedValue(0); m.settings.mockResolvedValue({});
+  m.visit.mockResolvedValue({ id: 9, patientId: 7 }); m.list.mockImplementation(async (_patientId: number, visitId: number | null) => ({ nextCursor: null, prescriptions: visitId === null || visitId === 9 ? [{ id: rx.id, visitId: rx.visitId, createdAt: rx.createdAt, prescribingDoctorName: rx.prescribingDoctorName }] : [] })); m.rx.mockResolvedValue(rx); m.print.mockResolvedValue(0); m.settings.mockResolvedValue({});
 });
 describe("saved prescription reprint access", () => {
   it("is opt-in for reception using existing permission parsing", () => {
@@ -27,10 +27,10 @@ describe("saved prescription reprint access", () => {
   });
   it("returns only active minimal metadata and filters the actual visit", async () => {
     const response = await list("?visitId=9"); expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ prescriptions: [{ id: 81, visitId: 9, createdAt: rx.createdAt, prescribingDoctorName: rx.prescribingDoctorName }] });
+    expect(await response.json()).toEqual({ nextCursor: null, prescriptions: [{ id: 81, visitId: 9, createdAt: rx.createdAt, prescribingDoctorName: rx.prescribingDoctorName }] });
     expect(m.access).toHaveBeenCalledWith(session, 7);
-    expect(m.list).toHaveBeenCalledWith(7, 9);
-    expect(await (await list("?visitId=10")).json()).toEqual({ prescriptions: [] });
+    expect(m.list).toHaveBeenCalledWith(7, 9, null);
+    expect(await (await list("?visitId=10")).json()).toEqual({ nextCursor: null, prescriptions: [] });
   });
   it.each([false, undefined, "true"])("rejects reception without explicit true grant (%s)", async grant => {
     m.user.mockResolvedValue({ ...session, id: 3, isActive: true, permissions: { canPrintSavedPrescriptions: grant } });

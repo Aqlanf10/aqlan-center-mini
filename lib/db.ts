@@ -1,3 +1,4 @@
+import { encodePrescriptionPrintCursor, type PrescriptionPrintCursor } from "./prescription-print-pagination";
 import { PRESCRIBING_DOCTOR_SNAPSHOT_SQL, PRESCRIBING_DOCTOR_IDENTITY_SQL } from "./prescribing-doctor-schema";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
@@ -24042,17 +24043,24 @@ export async function listPatientPrescriptions(
   return rows.map(toPrescription);
 }
 
-/** Minimal saved-print picker. Scope and active status are filtered BEFORE limit. */
-export async function listSavedPrescriptionPrints(patientId: number, visitId: number | null = null): Promise<{
-  id: number; visitId: number | null; createdAt: string; prescribingDoctorName: string | null;
-}[]> {
+/** Minimal print picker; scope/status and exact microsecond keyset precede limit. */
+export async function listSavedPrescriptionPrints(patientId: number, visitId: number | null = null, cursor: PrescriptionPrintCursor | null = null): Promise<{
+  prescriptions: { id: number; visitId: number | null; createdAt: string; prescribingDoctorName: string | null }[];
+  nextCursor: string | null;
+}> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number; visit_id: number | null; created_at: Date; prescribing_doctor_name: string | null }>(
-    `SELECT id, visit_id, created_at, prescribing_doctor_name FROM prescriptions
-      WHERE patient_id=$1 AND status='active' AND ($2::int IS NULL OR visit_id=$2::int)
-      ORDER BY created_at DESC, id DESC LIMIT 50`, [patientId, visitId],
+  const { rows } = await getPool().query<{ id: number; visit_id: number | null; created_at: Date; cursor_created_at: string; prescribing_doctor_name: string | null }>(
+    `SELECT id, visit_id, created_at, prescribing_doctor_name,
+      to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at
+      FROM prescriptions WHERE patient_id=$1 AND status='active' AND ($2::int IS NULL OR visit_id=$2::int)
+      AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::int))
+      ORDER BY created_at DESC, id DESC LIMIT 51`, [patientId, visitId, cursor?.createdAt ?? null, cursor?.id ?? null],
   );
-  return rows.map(row => ({ id: row.id, visitId: row.visit_id, createdAt: row.created_at.toISOString(), prescribingDoctorName: row.prescribing_doctor_name }));
+  const page = rows.slice(0, 50), last = page.at(-1);
+  return {
+    prescriptions: page.map(row => ({ id: row.id, visitId: row.visit_id, createdAt: row.created_at.toISOString(), prescribingDoctorName: row.prescribing_doctor_name })),
+    nextCursor: rows.length > 50 && last ? encodePrescriptionPrintCursor({ patientId, visitId, id: last.id, createdAt: last.cursor_created_at }) : null,
+  };
 }
 
 /**
