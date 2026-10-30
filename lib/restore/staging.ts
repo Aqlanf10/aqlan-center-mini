@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { Client } from "pg";
@@ -6,7 +6,7 @@ import { loadMigrationFiles, migrate, migrationStatus } from "../migrations";
 import { parseDatabaseHost } from "../db-tls";
 import { restoreClientConfigFor } from "./client-config";
 import { readTarGzEntries } from "./archive";
-import { validateBackupArchive, type ValidationOk } from "./validate";
+import { validateBackupArchive } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
 
 /**
@@ -154,6 +154,19 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     return result; // لا استعادة قاعدة أصلًا (P1.12)
   }
 
+  // Check archived provenance before any connection, target migration or asset write.
+  // Known historical subsets/gaps remain valid; unknown/different SQL cannot be
+  // silently discarded when reconstructing a target from this candidate's files.
+  let migrationFiles: Awaited<ReturnType<typeof loadMigrationFiles>>;
+  let prepared: ReturnType<typeof prepareBackupSql>;
+  try {
+    migrationFiles = await loadMigrationFiles();
+    prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), {migrationFiles});
+  } catch (error) {
+    result.errors.push(error instanceof Error ? error.message : "Archived migration provenance refused.");
+    return result;
+  }
+
   const client = new Client(restoreClientConfigFor(options.targetUrl));
   try {
     await client.connect();
@@ -171,7 +184,6 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     // ── الخطوة ٣: المخطط من نظام الهجرات (بلا بذور أبدًا) — قاعدة فارغة.
     // كل فشل من هنا فصاعدًا يُبلَّغ نتيجةً (ok=false + errors) لا استثناءً يُرمى —
     // فالسطر الذي يُفشله يهمّ من يشغّل الاستعادة، والهدف المعزول يُتخلّص منه بأمان.
-    const migrationFiles = await loadMigrationFiles();
     const migrationPool = clientAsPool(client);
     try {
       const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles });
@@ -180,8 +192,6 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     // ── الخطوة ٤: بيانات SQL — مع استبعاد صفوف تسجيل الهجرات نفسها:
     // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا
     // بلقطة النسخة — فتُستعاد نسخة قديمة على كود أحدث فتظل حالة المخطط صحيحة.
-    const sqlText = Buffer.from(validated.sql).toString("utf8");
-      const prepared = prepareBackupSql(sqlText);
       result.skippedMigrationRecordLines = prepared.skippedMigrationRecordLines;
       result.sqlRowsStatementLines = prepared.sqlRowsStatementLines;
       const dataSql = prepared.dataSql;

@@ -153,3 +153,23 @@ high-water replay with both called states and repeated replay before allocation.
 These local synthetic checks do not establish protected live-backup availability,
 a pinned rollback application artifact, Stage compatibility or owner acceptance.
 All deployment/rollback gates above remain in force.
+
+## Archive provenance refusal
+
+A synthetic baseline reproduction established that a historical0090 application
+archive with booking rows failed against the candidate's absent columns, whereas
+an empty booking table could report successful cutover while losing0090 schema
+and registry provenance. Therefore both official SQL and staged full-archive
+restore now validate recorded source migration versions and exact SQL checksums
+against candidate files **before connecting or mutating the target**. Unknown
+versions, checksum collisions, duplicate or unparseable registry records refuse
+recovery; no history is adopted, rewritten, or whitelisted. In particular, an Rx
+migration reusing0090 with different SQL must not count as compatible history.
+
+Known historical subsets/gaps and legacy backups without a registry remain
+accepted; this is compatibility with existing backup formats, not proof of full
+schema equivalence. Historical name/timestamp/adoption metadata is not substituted
+into the target ledger. Full native schema+data backup plus assets and a compatible
+recovery artifact remain required for a target carrying cancelled0090 residue.
+This guard deliberately refuses such application archives rather than claiming to
+restore unknown schema. It does not authorize any live restore or schema change.
