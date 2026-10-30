@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApprovedAgreementPanel } from "../components/ApprovedAgreementPanel";
 import { PatientPlans } from "../components/PatientPlans";
 import { LegacyOrthoPlanContext } from "../components/LegacyOrthoPlanContext";
 import type { FinancialCommand, FinancialCommandScope, FinancialJournal } from "../lib/financial-command-journal";
@@ -459,4 +460,54 @@ it("uses net invoice principal in the financial summary without rewriting the cl
   const summary = text(find(node => node.props["data-testid"] === "plan-amount-summary"));
   expect(summary).toContain("450,000");expect(summary).toContain("180,000");expect(summary).toContain("270,000");
   expect(summary).not.toContain("500,000");
+});
+
+
+describe("historical plan principal entry", () => {
+  it.each(["live", "void", "unknown"])("does not offer a second principal for %s historical source", async status => {
+    hooks.session = { username: "synthetic-admin", role: "admin" };
+    const body = payload();
+    const row = body.plans[0] as Record<string, unknown>;
+    row.consentAt = "2026-10-04";
+    row.items = [{ id: 601, legacyAgreementId: 701, legacyAgreementStatus: status,
+      legacyCoverageState: status === "live" ? "verified" : "unknown", billingStatus: "included_in_package",
+      legacyCoverageSite: { mode: "arch", toothCode: null, surfaces: null, episodeTeeth: null, scope: "both" } }];
+    read = async () => response(body); await mount();
+    expect(elements(render()).filter(node => node.type === ApprovedAgreementPanel)).toHaveLength(0);
+    expect(text(render())).toContain("لا تعتمد قيمة الخطة كالتزام جديد");
+    if (status !== "live") expect(text(render())).toContain("مراجعة المصدر التاريخي");
+    else expect(text(render())).toContain("مصدر العلاج اتفاق تاريخي قائم");
+    expect(writes()).toEqual([]);
+  });
+  it("keeps the ordinary plan approval entry available independently of other patient plans", async () => {
+    hooks.session = { username: "synthetic-admin", role: "admin" };
+    const body = payload(); (body.plans[0] as Record<string, unknown>).consentAt = "2026-10-04";
+    read = async () => response(body); await mount();
+    const panels = elements(render()).filter(node => node.type === ApprovedAgreementPanel);
+    expect(panels).toHaveLength(1); expect(panels[0].props.canApprove).toBe(true);
+    expect(writes()).toEqual([]);
+  });
+});
+
+
+it("preserves existing approved-principal amendment controls on a historical plan", async () => {
+  hooks.session = { username: "synthetic-admin", role: "admin" };
+  const body = payload(); const row = body.plans[0] as Record<string, unknown>;
+  row.items = [{ id: 601, legacyAgreementId: 701 }];
+  row.approvedAgreement = { available: false, currency: "SAR" };
+  read = async () => response(body); await mount();
+  const panels = elements(render()).filter(node => node.type === ApprovedAgreementPanel);
+  expect(panels).toHaveLength(1); expect(panels[0].props.position).toEqual(row.approvedAgreement);
+  expect(panels[0].props.isAdmin).toBe(true); expect(writes()).toEqual([]);
+});
+
+it("does not expose the historical financial notice when financial visibility is denied", async () => {
+  const body = payload(false); const row = body.plans[0] as Record<string, unknown>;
+  row.items = [{ id: 601, legacyAgreementId: 701, legacyAgreementStatus: "live" }];
+  read = async () => response(body); await mount();
+  expect(elements(render()).filter(node => node.type === ApprovedAgreementPanel)).toHaveLength(0);
+  expect(find(node => node.props["data-testid"] === "historical-plan-principal")).toBeUndefined();
+  expect(text(render())).not.toContain("لا تعتمد قيمة الخطة كالتزام جديد");
+  expect(text(render())).not.toContain("مراجعة الاتفاق التاريخي في الحساب");
+  expect(writes()).toEqual([]);
 });

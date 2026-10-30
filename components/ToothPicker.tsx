@@ -1,5 +1,7 @@
 "use client";
 
+import { DentalArchRow } from "./dental/DentalArchRow";
+
 import { useState, type ReactNode } from "react";
 import { MAX_SELECTED_TEETH, PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER, toothName } from "@/lib/dental";
 
@@ -53,9 +55,8 @@ export function ToothPicker({ value, onChange, single = false }: {
   const [showPrimary, setShowPrimary] = useState(() => value.some((tooth) => tooth >= 51));
 
   const row = (teeth: number[], label: string) => (
-    <div dir="ltr" role="group" aria-label={label}
-      className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${teeth.length}, minmax(0, 1fr))` }}>
-      {teeth.map((tooth, index) => {
+    <DentalArchRow teeth={teeth} label={label}
+      className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${teeth.length}, minmax(0, 1fr))` }} renderTooth={(tooth, index) => {
         const on = value.includes(tooth);
         const midline = index === teeth.length / 2;
         return (
@@ -67,8 +68,7 @@ export function ToothPicker({ value, onChange, single = false }: {
             {tooth}
           </button>
         );
-      })}
-    </div>
+      }} />
   );
 
   const archButton = (arch: Arch, label: string) => (

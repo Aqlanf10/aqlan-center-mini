@@ -606,9 +606,9 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     // verify:full is serial; hosted CI intentionally isolates quality, PostgreSQL,
     // and HTTP into separate jobs. Check ordering *within* each job, not a fake
     // cross-job textual ordering, and enforce the fail-closed dependency DAG.
-    const jobMarkers = [...ciYaml.matchAll(/^ {2}(quality|postgres_integration|security_http|required_completion):\s*$/gm)];
+    const jobMarkers = [...ciYaml.matchAll(/^ {2}(quality|postgres_integration|security_http|contract_print_visual|required_completion):\s*$/gm)];
     expect(jobMarkers.map(match => match[1])).toEqual([
-      "quality", "postgres_integration", "security_http", "required_completion",
+      "quality", "postgres_integration", "security_http", "contract_print_visual", "required_completion",
     ]);
     const jobSource = new Map(jobMarkers.map((match, index) => [
       match[1], ciYaml.slice(match.index!, jobMarkers[index + 1]?.index ?? ciYaml.length),
@@ -620,6 +620,7 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
         "npm run schema:contract:verify", "npm run schema:ownership:verify",
         "npm run verify:ci", "npm run db:baseline:manifest", "npm run db:baseline:manifest:verify"],
       security_http: ["npm run test:security-http"],
+      contract_print_visual: ["npm run test:contract-print"],
     };
     expect(Object.values(jobGates).flat().sort()).toEqual([...REQUIRED_CI_GATES].sort());
     let previousStepIndex = -1;
@@ -643,10 +644,10 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     const final = jobSource.get("required_completion")!;
     expect(http).toMatch(/needs:\s*\[quality\]/);
     expect(final).toMatch(/if:\s*always\(\)/);
-    expect(final).toMatch(/needs:\s*\[quality,\s*postgres_integration,\s*security_http\]/);
+    expect(final).toMatch(/needs:\s*\[quality,\s*postgres_integration,\s*security_http,\s*contract_print_visual\]/);
     for (const [job, result] of [
       ["quality", "QUALITY_RESULT"], ["postgres_integration", "POSTGRES_RESULT"],
-      ["security_http", "HTTP_RESULT"],
+      ["security_http", "HTTP_RESULT"], ["contract_print_visual", "PRINT_RESULT"],
     ] as const) {
       expect(final).toContain(`needs.${job}.result`);
       expect(final).toContain(`"$${result}" != "success"`);
@@ -699,9 +700,10 @@ describe("التصحيح النهائي — بوابة انحراف عقد ال�
     expect(verifySchema).not.toContain("SCHEMA_CONTRACT_DRIFT");
   });
 
-  it("البوابة الكاملة: 17 خطوة تشمل أداة المخطط للقراءة فقط — والانحراف والتوصيف قبل الرحلات", async () => {
+  it("البوابة الكاملة: 18 خطوة تشمل فحص طباعة العقد وأداة المخطط للقراءة فقط — والانحراف والتوصيف قبل الرحلات", async () => {
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
-    expect(FULL_GATE_STEPS).toHaveLength(17);
+    expect(FULL_GATE_STEPS).toHaveLength(18);
+    expect(REQUIRED_CI_GATES).toContain("npm run test:contract-print");
     // (P-01) حارس تجميع المال خطوةٌ إلزامية بعد التنقيط — كما في CI.
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
     expect(REQUIRED_CI_GATES).toContain("npm run build:preflight");

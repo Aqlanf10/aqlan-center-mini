@@ -23,6 +23,8 @@ describe("patient appointment history index provenance", () => {
       "0080_patient_numbering.sql",
       "0081_invoice_archive.sql",
       "0082_invoice_service_additions.sql",
+      "0087_agreement_reminder_metadata.sql",
+      "0089_lab_shade_specification.sql",
     ]);
   });
 

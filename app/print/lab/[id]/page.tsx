@@ -1,4 +1,6 @@
-import { LabDispatchDentalChart } from "@/components/LabDentalChart";
+import styles from "./lab-dispatch.module.css";
+import { DentalArchRow } from "@/components/dental/DentalArchRow";
+import { PERMANENT_UPPER, PERMANENT_LOWER, PRIMARY_UPPER, PRIMARY_LOWER } from "@/lib/dental";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { getLabOrderById, getSettingsSafe } from "@/lib/db";
@@ -12,6 +14,7 @@ import {
   LAB_TOOTH_ROLE_META,
   toLabDispatchExternal,
   labDispatchQrPayload,
+  labDispatchShadeLines,
 } from "@/lib/lab";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +46,7 @@ export default async function LabOrderPrintPage({
 
 
   const settings = await getSettingsSafe();
-  const order = toLabDispatchExternal(internalOrder);
+  const order = toLabDispatchExternal(internalOrder, settings);
   const toothMap = Object.fromEntries(order.teeth.map(({ code, role }) => [code, role]));
   const selectedTeethCodes = order.teeth.map(({ code }) => code);
   const qrPayload = labDispatchQrPayload(order);
@@ -63,12 +66,20 @@ export default async function LabOrderPrintPage({
   const priorityInfo = order.priority ? LAB_PRIORITY_LABEL[order.priority] : { label: "غير محدد" };
   const impressionLabel = order.impressionType ? LAB_IMPRESSION_LABEL[order.impressionType] : "غير محدد";
 
+  const upperTeeth = PERMANENT_UPPER;
+  const lowerTeeth = PERMANENT_LOWER;
+
+  const primaryArches = [
+    { label: "الأسنان اللبنية — الفك العلوي", teeth: PRIMARY_UPPER },
+    { label: "الأسنان اللبنية — الفك السفلي", teeth: PRIMARY_LOWER },
+  ];
+  const hasPrimaryTeeth = primaryArches.some((arch) => arch.teeth.some((code) => selectedTeethCodes.includes(code)));
+
   return (
     <>
       <PrintButton />
       <div
-        className="sheet sheet-a4"
-        style={{ padding: "10mm 12mm", fontSize: "9.5pt", lineHeight: "1.4" }}
+        className={`sheet sheet-a4 ${styles.sheet}`} dir="rtl"
       >
         <PrintHeader
           settings={settings}
@@ -96,6 +107,7 @@ export default async function LabOrderPrintPage({
             <span style={{ color: "#64748b", fontWeight: "bold" }}>مرجع الطلب:</span>
             <strong dir="ltr" style={{ fontSize: "14pt", color: "#0f172a" }}>{order.reference}</strong>
             <span>تُطابق الإرسالية داخل العيادة بهذا المرجع.</span>
+            {order.patientName ? <div><span>اسم المريض: </span><strong>{order.patientName}</strong></div> : null}
           </div>
 
           {/* بيانات الطلب والمختبر */}
@@ -109,14 +121,14 @@ export default async function LabOrderPrintPage({
               <span style={{ color: "#64748b" }}>الطبيب المعالج: </span>
               <strong style={{ color: "#334155" }}>{order.doctorName || "غير محدد"}</strong>
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "3mm", alignItems: "center" }}>
+            <div className={styles.metadataDates}>
               <div>
                 <span style={{ color: "#64748b" }}>تاريخ الإرسال: </span>
-                <strong dir="ltr" style={{ color: "#0f172a", display: "inline-block", whiteSpace: "nowrap" }}>{order.sentDate}</strong>
+                <strong dir="ltr" className={styles.date} style={{ color: "#0f172a" }}>{order.sentDate}</strong>
               </div>
               <div>
                 <span style={{ color: "#64748b" }}>التسليم المطلوب: </span>
-                <strong dir="ltr" style={{ color: "#b91c1c", display: "inline-block", whiteSpace: "nowrap" }}>{order.dueDate}</strong>
+                <strong dir="ltr" className={styles.date} style={{ color: "#b91c1c" }}>{order.dueDate}</strong>
               </div>
             </div>
           </div>
@@ -181,7 +193,7 @@ export default async function LabOrderPrintPage({
               </tr>
               <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
                 <td style={{ padding: "2.5mm 3mm", fontWeight: "bold", color: "#475569" }}>
-                  لون الخزف (Body Shade):
+                  اللون العام (Shade):
                 </td>
                 <td style={{ padding: "2.5mm 3mm", fontWeight: "900", fontSize: "11pt", color: "#0f172a" }}>
                   {order.shade ? (
@@ -243,8 +255,109 @@ export default async function LabOrderPrintPage({
           </table>
         </div>
 
-        <LabDispatchDentalChart teeth={order.teeth} />
+        {order.shadeSpecification?.teeth.length ? <section className={styles.shades} aria-label="ألوان مناطق الأسنان">
+          <h3>ألوان مناطق الأسنان — حسب الدليل الفعلي</h3>
+          {labDispatchShadeLines(order).map((line, index) => <p key={index}>{line}</p>)}
+        </section> : null}
 
+        {/* المخطط السني المرئي المبسط للطباعة */}
+        <div
+          style={{
+            marginTop: "4mm",
+            padding: "3mm",
+            border: "1px solid #cbd5e1",
+            borderRadius: "3mm",
+            backgroundColor: "#f8fafc",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2mm" }}>
+            <span style={{ fontWeight: "bold", fontSize: "8.5pt", color: "#334155" }}>
+              مخطط الأسنان السريري لترتيب الجسور والتيجان (FDI Two-Digit Chart)
+            </span>
+            <span style={{ fontSize: "7.5pt", color: "#64748b" }}>
+              الأسنان المحددة موضحة بلون مميز
+            </span>
+          </div>
+
+          {/* الفك العلوي */}
+          <DentalArchRow teeth={upperTeeth} style={{ display: "flex", justifyContent: "center", gap: "1mm", marginBottom: "1.5mm" }} renderTooth={(tooth) => {
+              const isSelected = selectedTeethCodes.includes(tooth);
+              return (
+                <div
+                  key={tooth}
+                  style={{
+                    width: "20px",
+                    height: "22px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "7.5pt",
+                    fontWeight: isSelected ? "900" : "500",
+                    backgroundColor: isSelected ? "#0284c7" : "#ffffff",
+                    color: isSelected ? "#ffffff" : "#64748b",
+                    border: isSelected ? "1.5px solid #0369a1" : "1px solid #cbd5e1",
+                    borderRadius: "3px",
+                  }}
+                >
+                  {tooth}
+                </div>
+              );
+            }} />
+
+          {/* خط منتصف الإطباق */}
+          <div style={{ height: "1px", backgroundColor: "#cbd5e1", margin: "1mm auto", width: "90%" }} />
+
+          {/* الفك السفلي */}
+          <DentalArchRow teeth={lowerTeeth} style={{ display: "flex", justifyContent: "center", gap: "1mm", marginTop: "1.5mm" }} renderTooth={(tooth) => {
+              const isSelected = selectedTeethCodes.includes(tooth);
+              return (
+                <div
+                  key={tooth}
+                  style={{
+                    width: "20px",
+                    height: "22px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "7.5pt",
+                    fontWeight: isSelected ? "900" : "500",
+                    backgroundColor: isSelected ? "#0284c7" : "#ffffff",
+                    color: isSelected ? "#ffffff" : "#64748b",
+                    border: isSelected ? "1.5px solid #0369a1" : "1px solid #cbd5e1",
+                    borderRadius: "3px",
+                  }}
+                >
+                  {tooth}
+                </div>
+              );
+            }} />
+          {hasPrimaryTeeth && primaryArches.map((arch) => (
+            <section key={arch.label} aria-label={arch.label} style={{ marginTop: "2mm", breakInside: "avoid" }}>
+              <div style={{ textAlign: "center", fontSize: "8pt", color: "#475569", marginBottom: "1mm" }}>{arch.label}</div>
+              <DentalArchRow teeth={arch.teeth} label={arch.label} style={{ display: "flex", justifyContent: "center", gap: "1mm" }} renderTooth={(tooth) => {
+                  const isSelected = selectedTeethCodes.includes(tooth);
+                  return (
+                    <div
+                      key={tooth}
+                      data-primary-tooth={tooth}
+                      data-selected={isSelected}
+                      style={{
+                        width: "20px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "7.5pt", fontWeight: isSelected ? "900" : "500",
+                        backgroundColor: isSelected ? "#0284c7" : "#ffffff",
+                        color: isSelected ? "#ffffff" : "#64748b",
+                        border: isSelected ? "1.5px solid #0369a1" : "1px solid #cbd5e1", borderRadius: "3px",
+                      }}
+                    >
+                      {tooth}
+                    </div>
+                  );
+                }} />
+            </section>
+          ))}
+        </div>
+
+        <section className={styles.closing}>
         {/* توقيعات الطبيب ومندوب المعمل */}
         <div
           style={{
@@ -270,7 +383,7 @@ export default async function LabOrderPrintPage({
             </p>
             <div style={{ height: "14mm" }} />
             <div style={{ borderTop: "1px solid #cbd5e1", paddingTop: "1mm", fontSize: "8pt", color: "#64748b" }}>
-              {order.doctorName || "غير محدد"} · التاريخ: {order.sentDate}
+              {order.doctorName || "غير محدد"} · التاريخ: <span dir="ltr" className={styles.date}>{order.sentDate}</span>
             </div>
           </div>
 
@@ -298,6 +411,7 @@ export default async function LabOrderPrintPage({
         </div>
 
         <PrintFooter settings={settings} />
+        </section>
       </div>
     </>
   );

@@ -204,7 +204,9 @@ beforeEach(() => {
     const item = request(url, init);
     if (init?.method) writes.push(item);
     else if (url.startsWith("/api/lab?patientId=")) reads.push(item);
-    else if (url === "/api/laboratories") {
+    else if (url === "/api/parties?kind=doctor") {
+      headers(item); item.body.resolve([{ id: 7001, name: "Synthetic doctor", kind: "doctor", isActive: true }]);
+    } else if (url === "/api/laboratories") {
       laboratories.push(item);
       if (autoLaboratories) {
         headers(item);
@@ -389,6 +391,7 @@ it.each(["create", "cancel", "status"])("an unrelated read success does not clea
   if (command === "create") {
     click("+ طلب معمل جديد");
     (node((item) => item.type === "input" && item.props.list === "patient-labs-list").props.onChange as (event: unknown) => void)({ target: { value: "Synthetic lab" } });
+    (node((item) => item.type === "select" && item.props["aria-label"] === "الطبيب المعالج").props.onChange as (event: unknown) => void)({ target: { value: "7001" } });
     const submit = node((item) => item.type === "form").props.onSubmit as (event: unknown) => void;
     refresh(); submit({ preventDefault() {} });
   } else {

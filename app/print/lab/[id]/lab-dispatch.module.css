@@ -1,0 +1,43 @@
+.sheet {
+  padding: 7mm 9mm;
+  font-size: 9pt;
+  line-height: 1.35;
+}
+.metadataDates {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1mm;
+}
+.date {
+  direction: ltr;
+  unicode-bidi: isolate;
+  white-space: nowrap;
+  display: inline-block;
+}
+.closing {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+@page lab-dispatch {
+  size: A4 portrait;
+  margin: 8mm;
+}
+@media print {
+  .sheet {
+    page: lab-dispatch;
+    padding: 0;
+    width: auto;
+    min-height: 0;
+    background: white;
+  }
+  .sheet header {
+    break-inside: avoid;
+  }
+  .sheet table tr {
+    break-inside: avoid;
+  }
+}
+
+.shades { margin-top: 3mm; font-size: 8pt; border: 1px solid #cbd5e1; padding: 2mm; }
+.shades h3 { margin: 0 0 1mm; break-after: avoid; }
+.shades p { margin: 1mm 0; break-inside: avoid; }

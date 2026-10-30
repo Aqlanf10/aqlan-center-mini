@@ -196,3 +196,18 @@ describe("lab currency and FX are not guessed", () => {
     expect(boundary.updateLabOrderAccounting).not.toHaveBeenCalled();
   });
 });
+
+describe("lab accounting protected evidence conflicts", () => {
+  it.each(["settled", "period_locked", "busy", "link_invalid"])("maps %s to a specific conflict without success", async suffix => {
+    const code = `lab_order_accounting_${suffix}`;
+    boundary.updateLabOrderAccounting.mockRejectedValue(new Error(code));
+    const response = await patch({ action: "update_accounting", cost: "30", costCurrency: "USD" });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code, message: expect.any(String) });
+  });
+});
+
+it("maps invalid direct debt change to 400", async () => {
+  boundary.updateLabOrderAccounting.mockRejectedValue(new Error("lab_order_accounting_price_invalid"));
+  expect((await patch({ action: "update_accounting", cost: "30", costCurrency: "USD" })).status).toBe(400);
+});

@@ -60,17 +60,21 @@ async function fixture(): Promise<Fixture> {
     "INSERT INTO patients(patient_number,full_name) VALUES($1,'SYNTHETIC LAB ACCOUNTING') RETURNING id", [run]);
   const { rows: [party] } = await db.query<{ id: number }>(
     "INSERT INTO parties(name,kind,currency) VALUES($1,'lab','USD') RETURNING id", [run]);
+  const { rows: [doctor] } = await db.query<{ id: number; kind: string; is_active: boolean }>(
+    "INSERT INTO parties(name,kind,is_active) VALUES($1,'doctor',TRUE) RETURNING id,kind,is_active", [`${run}-doctor`]);
+  expect(doctor).toMatchObject({ kind: "doctor", is_active: true });
+  expect(Number.isSafeInteger(doctor.id) && doctor.id > 0).toBe(true);
   const { rows: [category] } = await db.query<{ id: number }>(`INSERT INTO expense_categories
     (key,name,category_group,account_code) VALUES($1,'بند مختبر تجريبي','معامل','5102') RETURNING id`, [run]);
   const response = await authedMutation("/api/lab", h.sessions.admin, "POST", JSON.stringify({
-    patientId: patient.id, partyId: party.id, labName: run, workType: "Synthetic crown",
+    patientId: patient.id, doctorId: doctor.id, partyId: party.id, labName: run, workType: "Synthetic crown",
     sentDate: "2026-10-05", dueDate: "2026-10-12", toothNumbers: "16",
     cost: "25", costCurrency: "USD", isPosted: false,
     expenseAccountCode: "5101", payableAccountCode: "2101",
   }));
   expect(response.status).toBe(201);
   const order = await response.json() as LabOrder;
-  expect(order).toMatchObject({ patientId: patient.id, costMinor: 2500, costCurrency: "USD",
+  expect(order).toMatchObject({ patientId: patient.id, doctorId: doctor.id, costMinor: 2500, costCurrency: "USD",
     exchangeRate: 531.125, isPosted: false });
   expect(order.payableId).toBeGreaterThan(0);
   // Reproduce independent historical snapshots in just this newly-created pair,

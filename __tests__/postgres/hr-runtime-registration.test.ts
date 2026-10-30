@@ -3,6 +3,8 @@ import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "../../lib/ortho-followup-coverage-s
 import { PATIENT_NUMBERING_SQL } from "../../lib/patient-numbering-schema";
 import { INVOICE_ARCHIVE_SQL } from "../../lib/invoice-archive-schema";
 import { INVOICE_SERVICE_ADDITIONS_SQL } from "../../lib/invoice-service-additions-schema";
+import { LAB_SHADE_SPECIFICATION_SQL } from "../../lib/lab-shade-schema";
+import { AGREEMENT_REMINDER_GUARD_SQL } from "../../lib/agreement-reminder-guard-schema";
 import { AGREEMENT_RECONCILIATION_SQL } from "../../lib/agreement-reconciliation-schema";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../../lib/patient-appointment-history-schema";
 import {APPROVED_AGREEMENT_SQL} from "../../lib/approved-agreement-schema";
@@ -52,6 +54,8 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0080", name: "patient_numbering", checksum: createHash("sha256").update(PATIENT_NUMBERING_SQL).digest("hex") },
     { version: "0081", name: "invoice_archive", checksum: createHash("sha256").update(INVOICE_ARCHIVE_SQL).digest("hex") },
     { version: "0082", name: "invoice_service_additions", checksum: createHash("sha256").update(INVOICE_SERVICE_ADDITIONS_SQL).digest("hex") },
+    { version: "0087", name: "agreement_reminder_metadata", checksum: createHash("sha256").update(AGREEMENT_REMINDER_GUARD_SQL).digest("hex") },
+    { version: "0089", name: "lab_shade_specification", checksum: createHash("sha256").update(LAB_SHADE_SPECIFICATION_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

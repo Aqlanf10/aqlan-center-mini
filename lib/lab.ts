@@ -1,5 +1,8 @@
+import { labPatientIdentityMode, type SettingsMap } from "./settings";
+import { LAB_SHADE_CODES, LAB_SHADE_GUIDE_LABELS, LAB_SHADE_ZONES, LAB_SHADE_ZONE_LABELS, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { addDays } from "./schedule";
 import type { Currency } from "./money";
+import { PERMANENT_UPPER, PERMANENT_LOWER, PRIMARY_UPPER, PRIMARY_LOWER, isValidTooth } from "./dental";
 
 /**
  * أعمال المختبرات السنية (Dental Laboratory Management V2) — المنطق الخالص.
@@ -87,6 +90,8 @@ export interface LabOrderClinicalDTO {
   details: string | null;
   toothNumbers: string | null;
   shade: string | null;
+  shadeSpecification?: import("./lab-shades").LabShadeSpecification | null;
+  shadeSpecificationWarning?: string | null;
   stumpShade: string | null;
   priority: LabOrderPriority;
   impressionType: LabImpressionType;
@@ -193,7 +198,9 @@ export const VITA_CLASSICAL_SHADES = [
   "D2", "D3", "D4",
 ];
 
-export const VITA_BLEACH_SHADES = ["OM1", "OM2", "OM3", "BL1", "BL2", "BL3", "BL4"];
+export const VITA_BLEACH_SHADES = ["0M1", "0M2", "0M3"];
+/** Historical codes remain readable verbatim; never present them as new VITA choices. */
+const LEGACY_LAB_BLEACH_CODES = ["OM1", "OM2", "OM3", "BL1", "BL2", "BL3", "BL4"];
 
 export const VITA_3D_MASTER_SHADES = [
   "1M1", "1M2", "2L1.5", "2L2.5", "2M1", "2M2", "2M3", "2R1.5", "2R2.5",
@@ -206,21 +213,37 @@ export const STUMP_SHADES_ND = ["ND1", "ND2", "ND3", "ND4", "ND5", "ND6", "ND7",
 
 /** أرقام الأسنان الدائمة واللبنية بنظام FDI العالمي (11-48, 51-85) */
 export const ADULT_FDI_TEETH = {
-  upperRight: [18, 17, 16, 15, 14, 13, 12, 11],
-  upperLeft: [21, 22, 23, 24, 25, 26, 27, 28],
-  lowerLeft: [31, 32, 33, 34, 35, 36, 37, 38],
-  lowerRight: [48, 47, 46, 45, 44, 43, 42, 41],
+  upperRight: PERMANENT_UPPER.slice(0, 8),
+  upperLeft: PERMANENT_UPPER.slice(8),
+  lowerLeft: PERMANENT_LOWER.slice(8),
+  lowerRight: PERMANENT_LOWER.slice(0, 8),
 };
 
 export const PRIMARY_FDI_TEETH = {
-  upperRight: [55, 54, 53, 52, 51],
-  upperLeft: [61, 62, 63, 64, 65],
-  lowerLeft: [71, 72, 73, 74, 75],
-  lowerRight: [85, 84, 83, 82, 81],
+  upperRight: PRIMARY_UPPER.slice(0, 5),
+  upperLeft: PRIMARY_UPPER.slice(5),
+  lowerLeft: PRIMARY_LOWER.slice(5),
+  lowerRight: PRIMARY_LOWER.slice(0, 5),
 };
 
+/**
+ * Inclusive bridge span in anatomical (patient-right → patient-left) order.
+ * FDI codes are identifiers, not consecutive positions: 11 and 21 are adjacent.
+ * Never bridge across jaws or between permanent and primary dentitions.
+ * A fresh array preserves the canonical chart and all persisted tooth IDs.
+ */
+export function getLabBridgeTeeth(start: number, end: number): number[] | null {
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+  const arch = [PERMANENT_UPPER, PERMANENT_LOWER, PRIMARY_UPPER, PRIMARY_LOWER]
+    .find((teeth) => teeth.includes(start) && teeth.includes(end));
+  if (!arch) return null;
+  const startIndex = arch.indexOf(start);
+  const endIndex = arch.indexOf(end);
+  return arch.slice(Math.min(startIndex, endIndex), Math.max(startIndex, endIndex) + 1);
+}
+
 /** أدوار السن في طلبات ووصفات المختبر (Prosthodontic Roles) */
-export type LabToothRole = "crown" | "abutment" | "pontic" | "veneer" | "inlay_onlay" | "implant_crown";
+export type LabToothRole = "crown" | "abutment" | "pontic" | "veneer" | "inlay_onlay" | "implant_crown" | "denture_tooth" | "clasp_abutment";
 
 export interface LabToothRoleMeta {
   role: LabToothRole;
@@ -329,9 +352,37 @@ export const LAB_TOOTH_ROLE_META: Record<LabToothRole, LabToothRoleMeta> = {
     fillHex: "#059669",
     desc: "تركيبة فوق دعامة زرعة سنية مثبتة بمسمار أو إسمنت",
   },
+  denture_tooth: { role: "denture_tooth", label: "سن تعويضي للطقم", shortLabel: "سن تعويضي للطقم", englishLabel: "Denture Tooth", code: "DNT", icon: "🦷", color: "slate", bgClass: "bg-slate-600 text-white", badgeClass: "bg-slate-100 text-slate-800 border-slate-300", textClass: "text-slate-800", borderClass: "border-slate-500", fillHex: "#475569", desc: "سن تعويضي للطقم" },
+  clasp_abutment: { role: "clasp_abutment", label: "سن داعم لمشبك الطقم", shortLabel: "سن داعم لمشبك الطقم", englishLabel: "Clasp Abutment", code: "CLP", icon: "🪝", color: "slate", bgClass: "bg-slate-600 text-white", badgeClass: "bg-slate-100 text-slate-800 border-slate-300", textClass: "text-slate-800", borderClass: "border-slate-500", fillHex: "#475569", desc: "سن داعم لمشبك الطقم" },
 };
 
 export type LabToothMap = Record<number, LabToothRole>;
+
+/** New input validation only. Old records are never reinterpreted or rewritten. */
+export function labToothInputProblem(raw: string | null | undefined, workType: string, serviceCode?: string | null): string | null {
+  if (!raw?.trim()) return null;
+  if (raw.length > 4096) return "بيانات الأسنان أطول من الحد المسموح؛ راجع الاختيار.";
+  const seen = new Set<number>();
+  const roles: Array<LabToothRole | null> = [];
+  for (const part of raw.split(/[,،;|\n]+/).filter(part => part.trim())) {
+    const match = part.trim().match(/^(\d{2})(?:\s*\(([^)]+)\))?$/);
+    const code = Number(match?.[1]);
+    if (!match || !isValidTooth(code) || seen.has(code)) return "أرقام الأسنان غير معيارية أو مكررة؛ اخترها من المخطط بأرقام FDI الصحيحة.";
+    seen.add(code);
+    const text = match[2]?.trim().toLowerCase();
+    const role = text ? (Object.keys(LAB_TOOTH_ROLE_META) as LabToothRole[]).find(key => {
+      const meta = LAB_TOOTH_ROLE_META[key];
+      return [key, meta.englishLabel.toLowerCase(), meta.label, meta.shortLabel].includes(text);
+    }) : null;
+    if (text && !role) return "دور السن غير معروف؛ اختر الدور من أدوات المخطط.";
+    roles.push(role ?? null);
+  }
+  const denture = serviceCode?.startsWith("DNT_") || /طقم|denture/i.test(workType);
+  const dentureRole = (role: LabToothRole | null) => role === "denture_tooth" || role === "clasp_abutment";
+  if (denture && roles.some(role => !dentureRole(role))) return "العمل طقم أسنان: حدّد دور كل سن صراحةً (سن تعويضي للطقم أو سن داعم لمشبك الطقم)، وليس تاجًا أو جسرًا.";
+  if (!denture && roles.some(dentureRole)) return "أدوار الطقم لا تتوافق مع نوع العمل المختار؛ راجع نوع العمل أو أدوار الأسنان.";
+  return null;
+}
 
 export interface LabToothSummary {
   totalUnits: number;
@@ -390,9 +441,14 @@ export function parseLabTeeth(raw: string | null | undefined, defaultRole: LabTo
     if (matchWithParen) {
       const code = parseInt(matchWithParen[1], 10);
       const roleText = matchWithParen[2].toLowerCase().trim();
-      let role: LabToothRole = defaultRole;
+      const exactRole = (Object.keys(LAB_TOOTH_ROLE_META) as LabToothRole[]).find(key => {
+        const meta = LAB_TOOTH_ROLE_META[key];
+        return [key, meta.englishLabel.toLowerCase(), meta.label, meta.shortLabel].includes(roleText);
+      });
+      let role: LabToothRole = exactRole ?? defaultRole;
 
-      if (roleText.includes("abut") || roleText.includes("دعام")) role = "abutment";
+      if (exactRole) role = exactRole;
+      else if (roleText.includes("abut") || roleText.includes("دعام")) role = "abutment";
       else if (roleText.includes("pont") || roleText.includes("دمي")) role = "pontic";
       else if (roleText.includes("ven") || roleText.includes("فين")) role = "veneer";
       else if (roleText.includes("inlay") || roleText.includes("onlay") || roleText.includes("انلاي") || roleText.includes("أونلاي")) role = "inlay_onlay";
@@ -950,9 +1006,12 @@ export function labSummaryV2(orders: (LabOrder | LabOrderClinicalDTO)[], today: 
  * External lab dispatch is a positive projection, not the internal clinical DTO.
  * RX is the existing unique order reference, never a patient ID or access token.
  * Patient linkage, free text and finance remain inside the authorized clinic UI.
+ * A patient name is opt-in via the trusted clinic setting, never via URL parameters.
  */
 export interface LabDispatchExternalDTO {
   reference: string;
+  patientName: string | null;
+  shadeSpecification: LabShadeSpecification | null;
   labName: string;
   labPhone: string | null;
   doctorName: string | null;
@@ -968,7 +1027,7 @@ export interface LabDispatchExternalDTO {
   reviewWarnings: string[];
 }
 
-export function toLabDispatchExternal(order: LabOrderClinicalDTO): LabDispatchExternalDTO {
+export function toLabDispatchExternal(order: LabOrderClinicalDTO, settings: Readonly<Partial<SettingsMap>> = {}): LabDispatchExternalDTO {
   if (!Number.isSafeInteger(order.id) || order.id <= 0) throw new Error("Invalid lab order reference");
   const reviewWarnings = ["لا تتضمن هذه الإرسالية الملاحظات الداخلية أو النصوص الحرة؛ راجع المتطلبات الفنية قبل الإرسال."];
   if (order.details?.trim() || order.note?.trim()) reviewWarnings.push("توجد تعليمات داخلية غير مرفقة؛ راجعها داخل العيادة واستكمل ما يلزم للمعمل قبل التنفيذ.");
@@ -979,12 +1038,13 @@ export function toLabDispatchExternal(order: LabOrderClinicalDTO): LabDispatchEx
   const legacyWork = savedWork.replace(/(?: \(إعادة\))+$/, "");
   const catalogueWork = order.labServiceId ? order.serviceName?.trim() : null;
   const catalogueMismatch = !!catalogueWork && catalogueWork !== legacyWork;
-  const recognizedWork = catalogueWork
-    ? !catalogueMismatch
-    : knownWorkTypes.includes(legacyWork);
+  const recognizedWork = knownWorkTypes.includes(legacyWork) || (!!catalogueWork && !catalogueMismatch);
   const remake = !!order.remakeOriginalId || order.status === "remake";
   const workType = recognizedWork ? `${legacyWork}${remake ? " (إعادة)" : ""}` : "غير محدد في دليل المعمل";
-  if (catalogueMismatch) reviewWarnings.push("اسم الخدمة الحالي لا يطابق نوع العمل المحفوظ؛ يلزم مراجعة النوع قبل الإرسال.");
+  if (catalogueMismatch) {
+    reviewWarnings.push("اسم الخدمة الحالي لا يطابق نوع العمل المحفوظ؛ يلزم مراجعة النوع قبل الإرسال.");
+    if (recognizedWork) reviewWarnings.push(`الخدمة الحالية في دليل المعمل (مرجع منفصل): ${catalogueWork}. نوع العمل السريري الموضح منفصل عنها ولا يغيّر التسعير المحفوظ.`);
+  }
   if (savedWork !== legacyWork && !remake) reviewWarnings.push("وصف العمل يشير إلى إعادة غير مرتبطة بمرجع إعادة؛ يلزم التحقق.");
   if (!recognizedWork || legacyWork === "أخرى (مخصص)") {
     reviewWarnings.push("نوع العمل يحتاج مراجعة؛ الوصف الحر الداخلي غير مرفق.");
@@ -1013,7 +1073,10 @@ export function toLabDispatchExternal(order: LabOrderClinicalDTO): LabDispatchEx
   if (unrecognizedTeeth) reviewWarnings.push("بعض بيانات الأسنان غير معيارية ولم تُرفق؛ راجع أرقام الأسنان وأدوارها.");
   if (!teeth.length) reviewWarnings.push("الأسنان أو نطاق العمل غير محدد في هذه الإرسالية؛ يلزم التحقق قبل التنفيذ.");
   else if (teeth.some((tooth) => !tooth.role)) reviewWarnings.push("أدوار بعض الأسنان غير محددة؛ لا يُفترض أنها تيجان أو دعامات.");
-  const shades = [...VITA_CLASSICAL_SHADES, ...VITA_BLEACH_SHADES, ...VITA_3D_MASTER_SHADES];
+  const shades = [...VITA_CLASSICAL_SHADES, ...VITA_BLEACH_SHADES, ...LEGACY_LAB_BLEACH_CODES, ...VITA_3D_MASTER_SHADES, ...LAB_SHADE_CODES.vita_3d_master];
+  const structuredShade = readLabShadeSpecification(order.shadeSpecification, teeth.map(tooth => tooth.code));
+  if (structuredShade.reviewWarning || order.shadeSpecificationWarning) reviewWarnings.push("مواصفات اللون التفصيلية غير صالحة ولم تُرفق؛ راجعها داخل العيادة قبل التنفيذ.");
+  if (labToothInputProblem(order.toothNumbers, legacyWork)) reviewWarnings.push("أدوار الأسنان المحفوظة تحتاج مراجعة مع نوع العمل؛ لم تُغيّر تلقائيًا.");
   const shade = order.shade && shades.includes(order.shade.trim()) ? order.shade.trim() : null;
   const stumpShade = order.stumpShade && [...shades, ...STUMP_SHADES_ND].includes(order.stumpShade.trim()) ? order.stumpShade.trim() : null;
   if (!shade) reviewWarnings.push("لون السن غير محدد بقيمة معيارية؛ تحقّق من الحاجة إليه قبل التنفيذ.");
@@ -1025,6 +1088,8 @@ export function toLabDispatchExternal(order: LabOrderClinicalDTO): LabDispatchEx
   const date = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "غير محدد";
   return {
     reference: `RX-${order.id}`,
+    patientName: labPatientIdentityMode(settings) === "name" ? order.patientName?.trim() || null : null,
+    shadeSpecification: structuredShade.value,
     labName: order.labName,
     labPhone: order.labPhone,
     doctorName: order.doctorName || null,
@@ -1049,9 +1114,9 @@ export function labDispatchQrPayload(order: LabDispatchExternalDTO): string {
 /**
  * رسالة المتابعة والاستعجال للمختبر عبر واتساب — تركيز سريري وتاريخ استحقاق بلا أي معلومات مالية.
  */
-export function labFollowUpText(internalOrder: LabOrderClinicalDTO | LabOrder, today: string, clinicName: string): string {
+export function labFollowUpText(internalOrder: LabOrderClinicalDTO | LabOrder, today: string, clinicName: string, settings: Readonly<Partial<SettingsMap>> = {}): string {
   const late = daysLate(internalOrder, today);
-  const order = toLabDispatchExternal(internalOrder);
+  const order = toLabDispatchExternal(internalOrder, settings);
   const toothInfo = order.toothNumbers ? ` [الأسنان: ${order.toothNumbers}]` : "";
   const shadeInfo = order.shade ? ` [اللون: ${order.shade}]` : "";
   const lines = [
@@ -1059,6 +1124,7 @@ export function labFollowUpText(internalOrder: LabOrderClinicalDTO | LabOrder, t
     ``,
     `متابعة عمل من ${clinicName}:`,
     `مرجع الطلب: ${order.reference}`,
+    ...(order.patientName ? [`اسم المريض: ${order.patientName}`] : []),
     `العمل: ${order.workType}${toothInfo}${shadeInfo}`,
     `أُرسل: ${order.sentDate} · الموعد المتفق: ${order.dueDate}`,
   ];
@@ -1072,6 +1138,7 @@ export function labFollowUpText(internalOrder: LabOrderClinicalDTO | LabOrder, t
       ? `مضى على الموعد ${late} ${late === 1 ? "يوم" : "أيام"}. نرجو إفادتنا بموعد التسليم — المريض بانتظاره.`
       : `نرجو تأكيد الجاهزية في موعدها.`,
   );
+  lines.push(...labDispatchShadeLines(order));
   lines.push("تنبيه مراجعة فنية:", ...order.reviewWarnings);
   return lines.join("\n");
 }
@@ -1100,19 +1167,21 @@ export function formatLabPrescriptionText(
   internalOrder: LabOrderClinicalDTO | LabOrder,
   clinicName: string,
   clinicPhone?: string,
+  settings: Readonly<Partial<SettingsMap>> = {},
 ): string {
-  const order = toLabDispatchExternal(internalOrder);
+  const order = toLabDispatchExternal(internalOrder, settings);
   const parts = [
     `══════════════════════════════════════`,
     `      طلب عمل مخبري سني (LAB PRESCRIPTION)      `,
     `          ${clinicName}          `,
     `══════════════════════════════════════`,
     `مرجع الطلب: ${order.reference}`,
+    ...(order.patientName ? [`اسم المريض: ${order.patientName}`] : []),
     `التاريخ: ${order.sentDate}`,
     `موعد التسليم المطلوب: ${order.dueDate}`,
     `درجة الاستعجال: ${order.priority ? LAB_PRIORITY_LABEL[order.priority].label : "غير محدد"}`,
     `──────────────────────────────────────`,
-    `• الطبيب المعالج: ${order.doctorName || "عيادة المركز"}`,
+    `• الطبيب المعالج: ${order.doctorName || "غير محدد"}`,
     `• المختبر: ${order.labName}`,
     `──────────────────────────────────────`,
     `المواصفات السريرية والسنية:`,
@@ -1121,13 +1190,19 @@ export function formatLabPrescriptionText(
     `• لون السن (Shade): ${order.shade || "—"}`,
     `• لون الجذع المحضر (Stump Shade): ${order.stumpShade || "—"}`,
     `• نوع الطبعة: ${order.impressionType ? LAB_IMPRESSION_LABEL[order.impressionType] : "غير محدد"}`,
+    ...labDispatchShadeLines(order),
     `تنبيه: مراجعة فنية مطلوبة قبل الإرسال والتنفيذ.`,
     ...order.reviewWarnings,
     `──────────────────────────────────────`,
-    `تُطابق الإرسالية داخل العيادة بمرجع الطلب؛ هوية المريض وبياناته المالية غير مرفقة.`,
+    order.patientName ? `أُرفق اسم المريض وفق إعدادات العيادة؛ البيانات المالية غير مرفقة.` : `تُطابق الإرسالية داخل العيادة بمرجع الطلب؛ هوية المريض وبياناته المالية غير مرفقة.`,
     clinicPhone ? `هاتف العيادة: ${clinicPhone}` : "",
     `══════════════════════════════════════`,
   ];
   return parts.filter(Boolean).join("\n");
 }
 
+
+/** Only validated structured shade values cross the external document boundary. */
+export function labDispatchShadeLines(order: LabDispatchExternalDTO): string[] {
+  return (order.shadeSpecification?.teeth ?? []).map(tooth => `سن ${tooth.toothCode}: ${LAB_SHADE_ZONES.map(zone => `${LAB_SHADE_ZONE_LABELS[zone]}: ${tooth[zone] ? `${LAB_SHADE_GUIDE_LABELS[tooth[zone].guide]} ${tooth[zone].code}` : "غير محدد"}`).join(" · ")}`);
+}

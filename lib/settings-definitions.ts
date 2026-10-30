@@ -277,6 +277,14 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     impact: "يغيّر بادئة المستندات الجديدة فقط؛ المطبوع سابقًا يبقى برقمه، والعدّاد يتابع بلا تكرار." }),
 
   // ── التشغيل ──────────────────────────────────────────────────────────────
+  def({ key: "lab.patient_identity_mode", keywords: ["معمل", "مختبر", "إرسالية", "اسم المريض", "ترميز", "خصوصية", "lab"],
+    category: "branding", label: "هوية المريض في إرسالية المعمل", type: "ENUM",
+    options: ["code", "name"], defaultValue: SETTING_DEFAULTS["lab.patient_identity_mode"],
+    order: 45, scope: "clinic", sensitivity: "normal", permission: "settings.manage",
+    requiresReason: true,
+    description: "اختر عرض رمز المريض أو اسمه في النسخة الخارجية لإرسالية المعمل.",
+    help: "الترميز هو الافتراضي لحماية الخصوصية. اختيار الاسم يجعله ظاهرًا للمعمل في الطباعة والمشاركة الخارجية.",
+    impact: "يسري على الإرساليات التي تُعرض أو تُطبع أو تُشارك بعد الحفظ، ولا يغيّر النسخ التي أُرسلت سابقًا. لا يضيف رقم الهاتف أو معلومات طبية خاصة." }),
   def({ key: "lab.default_days", keywords: ["مختبر", "معمل", "تراكيب", "lab"],
     category: "scheduling", label: "مهلة المختبر الافتراضية",
     type: "DURATION_DAYS", min: 1, max: 120, unit: "يوم",

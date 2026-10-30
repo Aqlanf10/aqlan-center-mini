@@ -4,6 +4,8 @@ import { AUDIT_VALUE_MAX } from "./settings-audit";
 export type SettingControlKind = "toggle" | "number" | "select" | "time" | "date" | "textarea" | "text";
 
 const ENUM_LABELS: Record<string, string> = {
+  code: "ترميز المريض (الافتراضي — أكثر خصوصية)",
+  name: "اسم المريض (ظاهر للمعمل)",
   true: "مفعّل",
   false: "متوقف",
   on: "مفعّل",

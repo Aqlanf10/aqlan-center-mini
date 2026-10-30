@@ -42,6 +42,7 @@
     "test": "vitest run",
     "test:postgres": "vitest run --config vitest.config.postgres.mts",
     "test:security-http": "vitest run --config vitest.config.security.mts",
+    "test:contract-print": "vitest run --config vitest.config.print-visual.mts",
     "typecheck": "tsc --noEmit",
     "verify:announcements": "tsx scripts/verify-announcements.mjs",
     "verify:appointments": "tsx scripts/verify-appointments.mjs",
