@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatClinicTimestamp } from "../lib/clinic-clock";
+import { formatClinicDate, formatClinicTimestamp } from "../lib/clinic-clock";
 
 afterEach(() => { vi.unstubAllEnvs(); });
 
@@ -27,5 +27,20 @@ describe("stored financial instants in the resolved clinic zone", () => {
   it("does not invent the current time for an invalid stored instant", () => {
     expect(formatClinicTimestamp("", "Asia/Aden")).toBe("—");
     expect(formatClinicTimestamp("not-an-instant", "Asia/Aden")).toBe("—");
+  });
+});
+
+
+describe("financial date labels", () => {
+  it.each(["UTC", "Asia/Aden", "Pacific/Honolulu"])("is independent of host %s", host => {
+    vi.stubEnv("TZ", host);
+    expect(formatClinicDate("2026-10-29T23:31:00Z", "Asia/Aden")).toBe("الجمعة 30/10/2026");
+    expect(formatClinicDate("2026-10-29T23:31:00Z", "UTC")).toBe("الخميس 29/10/2026");
+    expect(formatClinicTimestamp("2026-10-29T23:31:00Z", "Asia/Aden")).toBe("الجمعة 30/10/2026 · 2:31 صباحًا");
+    for (const zone of ["UTC", "Asia/Aden", "America/New_York"])
+      expect(formatClinicDate("2026-10-29", zone)).toBe("الخميس 29/10/2026");
+  });
+  it("does not fabricate missing or invalid dates", () => {
+    for (const value of ["", "bad"]) expect(formatClinicDate(value, "Asia/Aden")).toBe("—");
   });
 });

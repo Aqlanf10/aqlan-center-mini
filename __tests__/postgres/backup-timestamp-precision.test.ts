@@ -10,6 +10,9 @@ import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
 // Deliberately small synthetic clinical/audit shapes. No app migration or
 // periodontal candidate is registered, applied or needed for this regression.
 const SCHEMA = `
+  -- Full backup also snapshots optional branding-photo settings. Keep this
+  -- empty fixture table: no photo, no application migrations or live settings.
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT now());
   CREATE TABLE clinical_records (
     id SERIAL PRIMARY KEY,
     recorded_at TIMESTAMPTZ,

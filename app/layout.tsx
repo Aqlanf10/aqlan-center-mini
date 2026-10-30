@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import localFont from "next/font/local";
 import "./globals.css";
 import "@/components/print-document.css";
-import { CLINIC_TIME_ZONE, findUserByUsername, getSettingsSafe } from "@/lib/db";
+import { CLINIC_TIME_ZONE, findUserByUsername, getSettingsSafe, readStoredSettings } from "@/lib/db";
 import { publicSubset } from "@/lib/settings";
 import { SettingsProvider } from "@/components/SettingsProvider";
 import { SessionProvider } from "@/components/SessionProvider";
@@ -75,6 +75,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     selected.kind === "canonical" ? admitCanonicalStaffSession(selected.handle).catch(() => null) : Promise.resolve(null),
   ]);
 
+  const publicSettings = publicSubset(settings);
+  if (!publicDisplay && !session && !canonicalView) {
+    // Publication/hiding must be reflected on the next public navigation, even
+    // when another server bundle still holds the ordinary five-second cache.
+    // Only this non-sensitive display flag is overlaid; image bytes remain
+    // independently authorized from fresh DB state by the fixed public endpoint.
+    try {
+      const stored = await readStoredSettings();
+      publicSettings["clinic.login_photo_visible"] = stored.get("clinic.login_photo_visible")?.value === "true" ? "true" : "false";
+    } catch { publicSettings["clinic.login_photo_visible"] = "false"; }
+  }
+
   let user = null;
   if (session) {
     user = await findUserByUsername(session.username).catch(() => null);
@@ -104,7 +116,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="ar" dir="rtl" className={arabic.variable}>
       <body className="min-h-full bg-canvas font-sans text-navy-900 antialiased">
         {!publicDisplay && <PrintDocumentWatermark />}
-        <SettingsProvider value={publicDisplay ? { "clinic.name": settings["clinic.name"] } : publicSubset(settings)}>
+        <SettingsProvider value={publicDisplay ? { "clinic.name": settings["clinic.name"] } : publicSettings}>
           {publicDisplay ? children : <SessionProvider
             value={sessionValue}
           >

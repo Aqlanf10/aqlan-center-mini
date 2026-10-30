@@ -16,3 +16,11 @@ export function formatClinicTimestamp(iso: string, timeZone: string): string {
   }).format(stamp);
   return `${friendlyDateLong(date)} · ${friendlyTime(time)}`;
 }
+
+/** Date label for a stored instant. Calendar business dates remain literal dates. */
+export function formatClinicDate(value: string, timeZone: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return friendlyDateLong(value);
+  const stamp = new Date(value);
+  if (!Number.isFinite(stamp.getTime())) return "—";
+  return friendlyDateLong(clinicDateString(stamp, resolveClinicZone(timeZone)));
+}

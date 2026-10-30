@@ -10,6 +10,7 @@ import {
   type StructuredMedicalSafetyContext,
 } from "@/lib/medication-safety";
 import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
+import { sanitizeRxItems } from "@/lib/prescription";
 import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workflow";
 
 /**
@@ -202,7 +203,16 @@ export function PrescriptionModal({
     setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const validatePrintableItems = () => {
+    if (sanitizeRxItems(items).length === 0) {
+      setPreserveError("أضف دواءً واحدًا على الأقل باسم مكتوب بالإنجليزية قبل طباعة الوصفة أو معاينة المسودة.");
+      return false;
+    }
+    return true;
+  };
+
   const buildPrintUrl = () => {
+    if (!validatePrintableItems()) return null;
     /* معاينة مسودة معلنة (P0.9): تُطبع بعلامة «مسودة غير معتمدة» وباسم الطبيب
      * من الجلسة — لا من الرابط. الوثيقة الرسمية وحدها (rx) تُطبع كوصفة صرف. */
     const params = new URLSearchParams();
@@ -243,6 +253,7 @@ export function PrescriptionModal({
   };
 
   const handlePrint = async () => {
+    if (!validatePrintableItems()) return;
     // Printing claims this diagnosis for the prescription being submitted.
     // Later visit-note updates cannot silently change its display or the
     // canonical content while save/safety acknowledgement is in progress.
@@ -256,7 +267,7 @@ export function PrescriptionModal({
     setCriticalBlock(null);
     setSafetyPreview(null);
     setAckInvalidMessage(null);
-    if (patientId && items.some((item) => /[A-Za-z]/.test(item.name))) {
+    if (patientId) {
       setPreserving(true);
       setPreserveError(null);
       try {
@@ -291,7 +302,7 @@ export function PrescriptionModal({
       }
     }
     const url = buildPrintUrl();
-    window.open(url, "_blank");
+    if (url) window.open(url, "_blank");
   };
 
   /** إقرار الطبيب قراءة التحذيرات غير الحرجة ثم الحفظ والطباعة الرسمية —
@@ -299,6 +310,7 @@ export function PrescriptionModal({
    * رفضه الخادم وأُعيد العرض. */
   const handleAcknowledgeAndPrint = async () => {
     if (!safetyPreview?.token || !patientId) return;
+    if (!validatePrintableItems()) return;
     setPreserving(true);
     setAckInvalidMessage(null);
     try {
@@ -331,7 +343,7 @@ export function PrescriptionModal({
       setSafetyPreview(null);
       setPreserveError(outcome.reason);
       const url = buildPrintUrl();
-      window.open(url, "_blank");
+      if (url) window.open(url, "_blank");
     } catch {
       setAckInvalidMessage("تعذّر الاتصال بالخادم — حاول الإقرار من جديد.");
     } finally {
@@ -556,7 +568,7 @@ export function PrescriptionModal({
           ) : null}
 
           {preserveError ? (
-            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
+            <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
               {preserveError}
             </p>
           ) : null}
@@ -586,7 +598,10 @@ export function PrescriptionModal({
               </p>
               <button
                 type="button"
-                onClick={() => window.open(buildPrintUrl(), "_blank")}
+                onClick={() => {
+                  const url = buildPrintUrl();
+                  if (url) window.open(url, "_blank");
+                }}
                 className="rounded-xl border border-red-300 bg-white px-4 py-2 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors"
               >
                 عرض مسودة غير معتمدة (لا تُصرف كوصفة)

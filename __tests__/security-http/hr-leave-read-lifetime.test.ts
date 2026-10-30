@@ -37,6 +37,22 @@ async function fixture(width = 390) {
 async function mount(page: Page, owner = "owner-a", view = "leaves") {
   await page.evaluate(({ owner, view }) => (window as unknown as { mount(owner: string, view: string): void }).mount(owner, view), { owner, view });
 }
+it("preserves the numeric leave allocation entered in the form", async () => {
+  const f = await fixture();
+  try {
+    await mount(f.page);
+    await f.page.getByRole("button", { name: "قبول", exact: true }).waitFor();
+    await f.page.getByRole("button", { name: "تعديل رصيد", exact: true }).click();
+    const form = f.page.locator("form");
+    await form.locator("select").nth(0).selectOption("1");
+    await form.locator("select").nth(1).selectOption("annual");
+    await form.locator('input[type="number"]').fill("1e2");
+    const sent = f.page.waitForRequest(request => request.method() === "POST" && request.url().endsWith("/api/hr/leaves/balances"));
+    await form.locator('button[type="submit"]').click();
+    expect((await sent).postDataJSON().allocatedDays).toBe(100);
+    expect(f.outside).toEqual([]);
+  } finally { await f.context.close(); }
+});
 for (const width of [390, 1280]) it(`canceling a leave or attendance decision sends no mutation at ${width}`, async () => {
   const f = await fixture(width);
   try {

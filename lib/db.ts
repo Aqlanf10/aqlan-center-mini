@@ -8767,6 +8767,8 @@ export async function saveSettingsAudited(input: SettingsWriteInput & {
   actor: string;
   actorRole?: string | null;
   mode?: "update" | "reset";
+  /** Opt-in for public branding publication: audit failure rolls back settings. */
+  transactionalAudit?: boolean;
 }): Promise<SettingsWriteResult> {
   await ensureSchema();
   const keys = Object.keys(input.values);
@@ -8780,11 +8782,20 @@ export async function saveSettingsAudited(input: SettingsWriteInput & {
       await client.query("ROLLBACK");
       return result;
     }
+    if (input.transactionalAudit) {
+      for (const entry of result.audits) {
+        await insertAuditRow(client, {
+          action: input.mode === "reset" ? SETTINGS_AUDIT_RESET : SETTINGS_AUDIT_UPDATE,
+          entity: SETTINGS_AUDIT_ENTITY, entityId: entry.key, details: entry.details,
+          actor: input.actor, actorRole: input.actorRole ?? null,
+        });
+      }
+    }
     await client.query("COMMIT");
 
     invalidateSettingsCache();
     /* التدقيق بعد الإتمام: صفُّ تدقيقٍ لتغييرٍ تراجع أسوأ من غياب الصفّ. */
-    for (const entry of result.audits) {
+    for (const entry of input.transactionalAudit ? [] : result.audits) {
       await recordAudit({
         action: input.mode === "reset" ? SETTINGS_AUDIT_RESET : SETTINGS_AUDIT_UPDATE,
         entity: SETTINGS_AUDIT_ENTITY,

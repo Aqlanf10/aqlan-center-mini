@@ -87,6 +87,11 @@ The existing `/api/auth/login` and SessionProvider own authentication. The form 
 
 Component interaction tests cover auth/storage/keyboard contracts. Responsive visual verification remains a separate real-browser gate; static or hook tests are not visual acceptance.
 
+### Optional owner-configured login photograph
+
+The owner uploads a JPEG/PNG from Settings → clinic identity, never by committing a personal photo to source control. A replacement is saved hidden; publishing requires the explicit “إظهار الصورة للزوار” action. Hiding retains the immutable file and backups. The settings card explains that publication is public before login and original embedded metadata is not stripped. Original clinic colors and the existing logo fallback remain unchanged.
+
+Only the fixed public image endpoint can expose the currently configured, visible, verified asset. Metadata is private, paths are content-derived in a reserved namespace, and upload/visibility mutations require branding permission and both current version stamps. Settings and audit records commit in one transaction. Invalid, missing or hidden images return no-store 404; clients fall back to the clinic logo. Byte checks bound size, dimensions, PNG chunks and JPEG markers/scans; they are not a full pixel decoder or re-encoding claim. Replaced/orphan files are not deleted. Full backups retain the configured asset even when hidden and validate it against the same database snapshot before restore activation.
 ## Unified printed documents
 
 The owner's approved installment contract is the print reference, not an invitation to redesign clinical graphics. `components/PrintHeader.tsx` owns the configured clinic identity and contact footer; `ReportPrintHeader.tsx` is its client adapter. The approved agreement layout, six columns and three paired identity rows remain the reference. The owner later requested a fixed-size page-centered watermark instead of sizing it from the installment table; opacity remains 15%.

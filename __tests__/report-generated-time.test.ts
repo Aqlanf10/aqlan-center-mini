@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReportView } from "../components/reports/ReportView";
-import { PrintFrame } from "../components/reports/shared";
+import { PrintFrame, PrintFrameFooter } from "../components/reports/shared";
 import { EMPTY_REPORT_VIEW } from "../lib/report-view";
 import { formatReportGeneratedAt } from "../lib/report-generated-time";
 import type { ReportResult } from "../lib/reports-types";
@@ -35,12 +35,20 @@ describe.each(["UTC", "Pacific/Honolulu"])("report generation metadata with host
       printHref: "/print/report?report=daily", view: EMPTY_REPORT_VIEW,
       onViewChange: () => {}, onPatientClick: () => {},
     }));
-    // ReportView includes the real PrintFrame: two displays, one unchanged instant.
+    // ReportView includes the real print footer: two displays, one unchanged instant.
     expect(html.split(`أُنشئ في ${expected} بواسطة synthetic author`)).toHaveLength(3);
-    const print = renderToStaticMarkup(createElement(PrintFrame, {
-      result, clinicName: "Synthetic clinic", generated,
-    }));
+    const print = renderToStaticMarkup(createElement(PrintFrameFooter, { generated }));
     expect(print).toContain(`أُنشئ في ${expected} بواسطة synthetic author`);
+    expect(print.split(`أُنشئ في ${expected} بواسطة synthetic author`)).toHaveLength(2);
+    expect(print).toContain('class="report-print-footer hidden print:block"');
+    // The standalone owner must be exactly the footer composed into the real
+    // document, once only; its heading must not duplicate the attribution.
+    expect(html.split(print)).toHaveLength(2);
+    const heading = renderToStaticMarkup(createElement(PrintFrame, {
+      result, clinicName: "Synthetic clinic",
+    }));
+    expect(heading).not.toContain("أُنشئ في");
+    expect(heading).toContain(result.periodLabel);
     expect(generated.at).toBe(at);
     expect(result.from).toBe("2000-02-01");
     expect(result.to).toBe("2000-02-02");

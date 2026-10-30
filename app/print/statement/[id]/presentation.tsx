@@ -1,6 +1,8 @@
 import { PrintTableFrame } from "@/components/PrintDocument";
 import type { Invoice } from "@/lib/db";
 import { CURRENCY_LABEL, formatMoney, invoiceNet } from "@/lib/money";
+import { formatClinicDate } from "@/lib/clinic-clock";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { friendlyDateLong } from "@/lib/reminders";
 import { currentStatementInvoices } from "@/lib/statement-lines";
 import type { HistoricalOpeningBucket } from "@/lib/statement-historical-details";
@@ -8,7 +10,7 @@ import type { HistoricalOpeningBucket } from "@/lib/statement-historical-details
 export { currentStatementInvoices, statementAgreements, statementPaymentLabel } from "@/lib/statement-lines";
 
 /** Stored invoice evidence, not a repricing of treatment against today's catalogue. */
-export function StatementInvoiceDetails({ invoices }: { invoices: readonly Invoice[] }) {
+export function StatementInvoiceDetails({ invoices, timeZone = CLINIC_ZONE_FALLBACK }: { invoices: readonly Invoice[]; timeZone?: string }) {
   const current = currentStatementInvoices(invoices);
   return <section className="statement-invoices" aria-label="تفاصيل الفواتير الصحيحة">
     <h2 style={{ fontSize: "10pt", margin: "2mm 0" }}>الفواتير وتفاصيل العلاج</h2>
@@ -19,7 +21,7 @@ export function StatementInvoiceDetails({ invoices }: { invoices: readonly Invoi
       <thead>
         <tr><th colSpan={4}>
           فاتورة <bdi dir="ltr">{invoice.invoiceNumber}</bdi>
-          {" — "}{friendlyDateLong(invoice.createdAt.slice(0, 10))}
+          {" — "}{formatClinicDate(invoice.createdAt, timeZone)}
           {" — "}{invoice.status === "paid" ? "مسدّدة" : "مفتوحة"}
         </th></tr>
         <tr><th>العلاج / البيان</th><th className="num">الكمية</th>

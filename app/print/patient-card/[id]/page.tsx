@@ -1,4 +1,3 @@
-import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import {
   CLINIC_TIME_ZONE, getPatient, getSettingsSafe, patientAppointmentsFrom,
@@ -56,7 +55,7 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
           عاديٌّ يوميّ، ووسمُها بعلامةٍ معناها «احذر، صدرت من قبل» يُفرغ العلامة
           من معناها في الأوراق المالية التي وُضعت لها. */}
       <PrintButton />
-      <div className="sheet sheet-a6">
+      <div className="sheet sheet-a6 patient-card-sheet">
         <PrintHeader settings={settings} title="بطاقة المريض" compact />
 
         <p className="amount-box" dir="ltr">{patient.patientNumber}</p>
@@ -65,7 +64,7 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
         </p>
 
         <div className="rule-light" />
-        <PrintMetadata><div className="line">
+        <div className="line">
           <span>الهاتف</span>
           <span className="num" dir="ltr">{patient.phone ?? "—"}</span>
         </div>
@@ -75,7 +74,7 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
               وقصُّ عشرة أحرفٍ منه يعطي اليوم السابق لمن سُجّل بين منتصف الليل
               والثالثة فجرًا. */}
           <span>{friendlyDateLong(clinicDateString(new Date(patient.createdAt), CLINIC_TIME_ZONE))}</span>
-        </div></PrintMetadata>
+        </div>
 
         <div className="rule-light" />
         <p style={{ fontWeight: 800, fontSize: "10pt", margin: "2mm 0 1mm" }}>مواعيدك القادمة</p>

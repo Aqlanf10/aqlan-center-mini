@@ -9,7 +9,7 @@ import {
   type Balance, type Currency,
 } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { friendlyDateLong } from "@/lib/reminders";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { PatientStatementDocument } from "@/components/PatientStatementDocument";
@@ -137,7 +137,7 @@ export default async function StatementPage({ params, searchParams }: {
 
         <StatementHistoricalDetails buckets={historicalBuckets} />
 
-        {showInvoiceDetails ? <StatementInvoiceDetails invoices={ledger.invoices} /> : null}
+        {showInvoiceDetails ? <StatementInvoiceDetails invoices={ledger.invoices} timeZone={CLINIC_TIME_ZONE} /> : null}
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "5mm 0 2mm" }}>الدفعات</p>
         <PrintTableFrame><table className="items">
@@ -152,7 +152,7 @@ export default async function StatementPage({ params, searchParams }: {
             ) : patientView.payments.map((payment) => (
               <tr key={payment.receiptNumber}>
                 <td dir="ltr">{payment.receiptNumber}</td>
-                <td>{friendlyDateLong(payment.createdAt.slice(0, 10))}</td>
+                <td>{formatClinicDate(payment.createdAt, CLINIC_TIME_ZONE)}</td>
                 <td>
                   {payment.label}{" — "}
                   {formatMoney(payment.amountMinor, payment.currency)}
