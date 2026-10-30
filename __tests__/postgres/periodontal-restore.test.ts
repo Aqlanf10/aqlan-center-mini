@@ -302,11 +302,18 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
   it("refuses a nonempty target by default without changing records, audit or files", async () => {
     const before = await state();
     const documentBefore = await readFile(path.join(stagingDir, DOCUMENT_KEY));
+    const registryBefore = (await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows;
+    const relationsBefore = await publicRelations();
+    const provenanceReadsBefore = vi.mocked(loadMigrationFiles).mock.calls.length;
     const result = await stagedRestore({ archivePath, targetUrl: fixture!.url, stagingDir });
     expect(result).toMatchObject({ ok: false, readyForCutover: false, validationErrors: [], migrationsApplied: [], documentsRestored: 0 });
     expect(result.errors.join(" ")).toContain("الهدف ليس فارغًا");
     expect(await state()).toEqual(before);
     expect(await readFile(path.join(stagingDir, DOCUMENT_KEY))).toEqual(documentBefore);
-    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(1);
+    expect((await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
+    expect(await publicRelations()).toBe(relationsBefore);
+    // Filesystem-only provenance is checked before connecting, even when the
+    // destination will subsequently be refused as nonempty. No migration runs.
+    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(provenanceReadsBefore + 1);
   });
 });
