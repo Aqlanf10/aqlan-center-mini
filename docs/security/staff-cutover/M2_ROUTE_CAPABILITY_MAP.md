@@ -30,21 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 held routes)
+### Counts (383 held route/method entries, verified at WORK `1ccb30c2`)
 
 | Status | Routes |
 |---|---|
-| existing | 315 |
+| existing | 303 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 29 |
+| canonical-done | 41 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
-| appointment | 11 |
+| appointment | 13 |
+
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 416 route/method entries and 97 pages; it remains `NOT_READY`.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 

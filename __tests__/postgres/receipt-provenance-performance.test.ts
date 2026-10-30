@@ -5,7 +5,7 @@ import { validatePostgresTestTarget } from "./_safe-target";
 import { captureReceiptQueries, evidenceFrames, explainCapturedQueries, safeRunProvenance, sha256 } from "./_receipt-query-evidence";
 import { unavailableReceiptProvenance, type ReceiptProvenance } from "../../lib/receipt-provenance";
 
-// Authored SOURCE ONLY. Execute later only in the existing disposable PG18 job.
+// Synthetic proof only: local disposable PostgreSQL 18 or the existing CI job.
 // Guard BEFORE stubPostgresEnv removes deployment markers and before app import.
 validatePostgresTestTarget(process.env, { allowDatabaseUrlFallback: true });
 assertRealPostgresUrl();
@@ -14,9 +14,11 @@ const { ensureSchema, getPool, resetPoolForTesting, openShift, recordPayment, co
 const { readReceiptProvenance, RECEIPT_PROVENANCE_CONTEXT_LIMIT, RECEIPT_PROVENANCE_REQUEST_LIMIT } =
   await import("../../lib/receipt-provenance-db");
 
-const BASE = "b18f762486d8f7b1a84bb855cb454b7a48f28217";
+// Exact WORK source after f40cd1fb extracted the query helpers. Keep literal
+// fingerprints: another reader change must fail until reviewed and remeasured.
+const BASE = "1ccb30c2ee443ad8b0c5af0c9b0f5b261ba78ec2";
 const SOURCE_HASHES = {
-  "lib/receipt-provenance-db.ts": "4dd0c716013b25df510d36570e27181e4d680a9dd4daa7da2d68809367db187b",
+  "lib/receipt-provenance-db.ts": "2a508954ec1267340d5a7f27b76c172b15c0a328314b943f935f45d869c0a2ee",
   "lib/receipt-provenance.ts": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b",
 };
 const UNRELATED_ROWS = 8_000;
@@ -85,7 +87,7 @@ function assertChain(result: Record<string, ReceiptProvenance>, fixture: Chain, 
 }
 
 beforeAll(async () => {
-  // Source fingerprints bind evidence to the immutable accepted production reader.
+  // Evidence describes these exact reader bytes, not a production acceptance.
   for (const [path, digest] of Object.entries(SOURCE_HASHES)) expect(sha256(readFileSync(path))).toBe(digest);
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
@@ -175,8 +177,9 @@ describe("actual receipt provenance SELECT plans at bounded scale", () => {
       "__tests__/postgres/_receipt-query-evidence.ts", "__tests__/receipt-query-evidence.test.ts"];
     const evidence = { schema: "receipt-query-plan-v1", synthetic: true, allCasesPassed: true,
       repository: "Aqlanf10/aqlan-center-mini", baseSha: BASE,
-      acceptedManifestSha256: "1477b771268f3ba7a3ac1547ff93d2965b2e32f18cb097169e3c4a6ca22344c9",
-      acceptedDiffSha256: "06f3a940c7a55bde0b51fee503c6050ee13e115b31622211ff683ac6fc2e0b46",
+      historicalAcceptance: { baseSha: "b18f762486d8f7b1a84bb855cb454b7a48f28217",
+        manifestSha256: "1477b771268f3ba7a3ac1547ff93d2965b2e32f18cb097169e3c4a6ca22344c9",
+        diffSha256: "06f3a940c7a55bde0b51fee503c6050ee13e115b31622211ff683ac6fc2e0b46" },
       run: safeRunProvenance(process.env), serverVersionNum: serverVersion,
       sources: sourceFiles.map(path => ({ path, sha256: sha256(readFileSync(path)) })), fixtureCounts,
       fixtureStatistics: "ANALYZE payments; ANALYZE audit_log; before capture", plannerSettingsForced: false,

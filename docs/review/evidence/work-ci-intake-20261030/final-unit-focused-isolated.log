@@ -1,0 +1,8 @@
+
+ RUN  v4.1.12 /tmp/aqlan-work-intake-20261030
+
+
+ Test Files  6 passed (6)
+      Tests  104 passed (104)
+   Start at  00:46:12
+   Duration  14.61s (transform 392ms, setup 0ms, import 4.06s, tests 9.42s, environment 1ms)
