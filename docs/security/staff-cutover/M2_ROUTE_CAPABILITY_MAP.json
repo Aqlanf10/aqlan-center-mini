@@ -2660,8 +2660,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 29: read:ortho.cases requires clinical.ortho.view and patient scope in one owning read-only RR snapshot. The canonical response is an explicit case-summary allowlist (cases/today/projection/hasMore), no funding, plans, notes, adjustment or imaging history. Own scope uses the central patient predicate before the 300-row bound. Optional patientId proves membership (outside=missing 404); filtered history retains closed cases. On-demand panel in the canonical patient profile; legacy full readers and all writers unchanged."
  },
  {
   "route": "/api/ortho",

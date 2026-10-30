@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { CanonicalNextSession } from "./CanonicalNextSession";
+import { CanonicalOrthoCases } from "./CanonicalOrthoCases";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -167,12 +168,14 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
       ) : null}
 
       <ContactConsentPanel patientId={patientId} canRecord={canEdit} />
+      {session?.isOwner === true || (session?.capabilities?.includes("clinical.ortho.view") && (session.patientScope === "own" || session.patientScope === "all"))
+        ? <CanonicalOrthoCases key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
       {projection.care ? <ClinicalPanels patientId={patientId} /> : null}
       {projection.care ? <PlannedVisitsPanel patientId={patientId}
         canBook={session?.isOwner === true || (session?.capabilities ?? []).includes("appointments.create")} /> : null}
       <TimelinePanel patientId={patientId} />
 
-      <p className="text-xs text-slate-600">بقية أقسام الملف (التقويم والخطط والحساب والمستندات وغيرها) تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
+      <p className="text-xs text-slate-600">بقية تفاصيل الملف والخطط والحساب والمستندات تظهر هنا حين تُنقل إلى الهوية الموحّدة.</p>
       <a href="/patients" className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-navy-800">العودة إلى المرضى</a>
     </main>
   );

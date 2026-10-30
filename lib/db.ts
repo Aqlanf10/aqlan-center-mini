@@ -23335,6 +23335,7 @@ import {
   canComplete, caseProgress, nextWire,
   type Appliance, type Arches, type CaseProgress, type CaseStatus,
   type ElasticClass, type OrthoPhase, type RetainerType, type SlotSize,
+  type OrthoCaseSummary,
 } from "./ortho";
 import { checkOrthoSessionDraft, resolveOrthoWire, isLegacyFinancialMode, type BaselineDraft, type LegacyFinancialMode, type OrthoSessionDraft } from "./ortho-baseline";
 
@@ -23537,6 +23538,41 @@ export async function listOrthoCases(today: string, status?: CaseStatus): Promis
     status ? [status] : [],
   );
   return hydrateCases(rows, today);
+}
+
+/** M2 slice 29. SELECT-only, on the owning snapshot. Patient scope is applied BEFORE
+ * the existing 300-case list bound; the extra row proves truncation without disclosing
+ * counts outside the scope. Per-patient reads include closed history, as in legacy.
+ * Explicit summary columns: no plan/funding, notes, adjustment or document payload. */
+export async function listOrthoCaseSummariesWith(
+  q: Pick<DbClient, "query">, patientId: number | null, clinicianPartyId: number | null,
+): Promise<{ cases: OrthoCaseSummary[]; hasMore: boolean }> {
+  const params: number[] = [];
+  const where: string[] = [];
+  if (patientId !== null) { params.push(patientId); where.push(`c.patient_id=$${params.length}`); }
+  else where.push("c.status IN ('active','retention')");
+  if (clinicianPartyId !== null) {
+    params.push(clinicianPartyId);
+    where.push(`EXISTS (SELECT 1 FROM patients WHERE patients.id=c.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${params.length}`)})`);
+  }
+  const { rows } = await q.query<Pick<CaseRow, "id" | "patient_id" | "full_name" | "appliance" | "arches" | "status" | "phase" | "start_date" | "planned_months" | "upper_wire" | "lower_wire" | "responsible_doctor_id" | "responsible_doctor_name" | "baseline_kind">>(
+    `SELECT c.id,c.patient_id,p.full_name,c.appliance,c.arches,c.status,c.phase,c.start_date,
+      c.planned_months,c.upper_wire,c.lower_wire,c.responsible_doctor_id,
+      rd.name AS responsible_doctor_name,c.baseline_kind
+     FROM ortho_cases c JOIN patients p ON p.id=c.patient_id
+     LEFT JOIN parties rd ON rd.id=c.responsible_doctor_id
+     WHERE ${where.join(" AND ")}
+     ORDER BY ${patientId === null ? "c.start_date" : "c.created_at"} DESC,c.id DESC LIMIT 301`, params,
+  );
+  return { hasMore: rows.length > 300, cases: rows.slice(0, 300).map(row => ({
+    id: row.id, patientId: row.patient_id, patientName: row.full_name,
+    appliance: row.appliance as Appliance, arches: row.arches as Arches,
+    status: row.status as CaseStatus, phase: row.phase as OrthoPhase,
+    startDate: dateText(row.start_date), plannedMonths: row.planned_months,
+    upperWire: row.upper_wire, lowerWire: row.lower_wire,
+    responsibleDoctorId: row.responsible_doctor_id, responsibleDoctorName: row.responsible_doctor_name,
+    baselineKind: row.baseline_kind === "legacy" ? "legacy" : null,
+  })) };
 }
 
 /**

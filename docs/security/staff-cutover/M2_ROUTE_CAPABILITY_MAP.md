@@ -461,6 +461,15 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - Canonical UI: patient's recent visits and completed visits in the internal queue; scheduler can book without queue-management or clinical-detail grants. Lost/5xx/unverified success never auto-retries (tab-local recovery marker survives reload; no name, phone or token): read scoped appointments, show a matching booking if found, otherwise require separate new intent. This is not an exactly-once promise across cancellation, a new browser session, unavailable browser storage or a new proposal.
 - Evidence: `docs/review/work-next-session-slice28-20261030.md`; built journey portOffset 37. Map status records source migration, not deployment or overall acceptance.
 
+### Slice 29 — orthodontic case summaries (`GET /api/ortho`)
+
+- `read:ortho.cases` requires `clinical.ortho.view` and a non-none patient scope. One owning RR READ ONLY snapshot proves the session, grant and patient relationship and reads every summary; no legacy fallback or `ensureSchema` inside it.
+- Optional `patientId`: existence and current membership use the standard per-patient reader; outside and missing share the same 404. With no filter, open cases only; a patient filter retains closed history. Own scope uses `DOCTOR_PATIENT_CONDITION` in SQL before the 300-row limit. A 301st allowed row sets `hasMore`; foreign rows never affect it.
+- Explicit summary projection: case/patient identity, appliance/arches, recorded status/phase, start and planned duration, current recorded wires, responsible doctor and historical-baseline marker. No plan/funding, clinical notes, adjustment history, images or diagnosis payload; this is not a complete case record. Owner uses the same summary representation, without changing their underlying grants.
+- The on-demand section in `CanonicalPatientProfile` requires the grant and patient scope; no registration of the legacy `/ortho` follow-up board. Reads clear old data on refresh, focus/visibility change, failure or timeout; responses superseded by a newer request are ignored. No editor, booking or legacy endpoint mounts.
+- Source boundary: one GET only. Existing writers, clinical/financial relationships, full legacy case readers, ceph and plans remain untouched. This is a read: no new mutation/audit policy or idempotency claim.
+- Evidence: `__tests__/postgres/ortho-canonical-cases.test.ts` and built `canonical-ortho-cases-journey` (portOffset 39); delivery report `docs/review/work-ortho-cases-slice29-20261030.md`.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 
