@@ -1,7 +1,7 @@
 # ملف التسليم — مشروع الهوية الموحّدة (M0–M5) لنظام مركز د. عقلان
 
 > **الغرض:** يكمل أي وكيل آخر العمل من النقطة نفسها وبالجودة نفسها، دون أن يسأل المالك عن شيء مما يلي.
-> **آخر تحديث:** 2026-10-30 — استلام مصدر WORK عند `1ccb30c2ee443ad8b0c5af0c9b0f5b261ba78ec2`: الشرائح حتى 25 مدفوعة، و26 تمهيد فقط (`f40cd1fb`). فشل CI لهذا الرأس في جرد المصدر وبصمة اختبار أداء السندات؛ آخر CI كامل ناجح قبل الإصلاح كان على `81472602`. جُهز إصلاح CI في `feat/work-ci-intake-20261030`، وبتوجيه المالك المحدث يستكمل على WORK نفسه بدفع عادي مع حفظ التاريخ والتحقق من الرأس؛ لا تفعيل ولا استكمال للشريحة 26 ضمن هذه الجولة. دليل التحقق: `docs/review/work-ci-intake-20261030.md`.
+> **آخر تحديث:** 2026-10-30 — إصلاح CI دُفع إلى WORK عند `8e477eb8c15323567fdb6f75496a6f5925dee9fd` ونجحت وظائف التشغيل الأربع [40982442019](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/40982442019). الجولة التالية المأذونة هي شريحة الورديات 26 فقط. أُنجز فرعا الفتح والإقفال واختباراتهما؛ قراءة GET والواجهة القانونية متوقفتان على قرار نطاق تفاصيل المرضى والمصروفات (§5.2). الشريحة لم تُقبل كاملةً ولم تُفعّل. تقرير هذه الدفعة: `docs/review/work-shifts-slice26-writes-20261030.md`؛ الدليل السابق: `docs/review/work-ci-intake-20261030.md`.
 > **نسخة من هذا الملف** محفوظة في الفرع: `docs/security/staff-cutover/HANDOFF.md`.
 
 ---
@@ -13,7 +13,7 @@
 | المستودع | `Aqlanf10/aqlan-center-mini` (وليس `aqlan-dental`) |
 | الفرع | `feat/work-recovery-followup-20261027` |
 | مكان التقارير | **#483** هو مركز REVIEW والتقارير (مسودة)، **وليس PR فرع WORK**. فرع WORK بلا PR خاص؛ تُكتب التقارير بالعربية في #483. |
-| شجرة العمل المحلية في الجلسة الحالية | `/tmp/claude-0/wtwork`. الجلسة الجديدة تستنسخ الفرع من جديد. |
+| شجرة العمل المحلية في الجلسة الحالية | استلام Codex في `/tmp/aqlan-work-intake-20261030`؛ شجرة Claude السابقة `/tmp/claude-0/wtwork`. الجلسة الجديدة تتحقق من الرأس وتستنسخ الفرع من جديد. |
 | main الحالي | `b5540169` (#488/#489). لم يُدمج في الفرع بعد (انظر §5). |
 
 ---
@@ -317,10 +317,12 @@ node scripts/audits/m2-route-scan.mjs --write
 8. ✅ `planned-visits/[id]/schedule` (الشريحة 22) و`rebook` (الشريحة 23).
 9. ✅ `recall` — الشريحة 24 (مثال `canonical-entry-journey` صار `/lab`؛ عند تحويل المختبر غيّره إلى مسار آخر غير قانوني).
 10. ✅ `provider-blocks` — الشريحة 25. المتبقي: `shifts`، `display` (شاشة النداء)، `visits/[id]/next`.
-11. **جارٍ: الشريحة 26 `shifts`** — التمهيد مدفوع (`f40cd1fb`): `getOpenShiftWith`/`openShiftWith`/`closeShiftWith`/`listShiftsWith`/`listShiftPaymentsWith`/`listShiftExpensesWith` و`readReceiptProvenanceWith` (بنقطة حفظ داخل اللقطة). المتبقي:
-    - `lib/canonical-shifts.ts`: قراءة `runCanonicalReadSnapshot` بإجراء `finance.shifts.view`، وفتح/إغلاق بـ`withStaffOperation` تحت `finance.shifts.operate`. يجب إضافة `finance.shifts.operate` إلى `CLINIC_RUNTIME_ACTIONS` في `lib/staff-operation-runtime.ts` (الثابت والمجموعة) و`scripts/audits/staff-cutover-readiness.test.mjs`، وإضافة `finance.shifts.view` قراءةً مسجلة أو إجراءً.
-    - تدقيق `shift.open`/`shift.close` ذري (القديم بعد الالتزام).
-    - الفروع القانونية في `app/api/shifts/route.ts`، اختبارات PG، رحلة (portOffset 33)، الخريطة.
+11. **جارٍ: الشريحة 26 `shifts` — الفتح والإقفال فقط في هذه الدفعة**:
+    - `lib/canonical-shifts.ts`: `withStaffOperation` تحت `finance.shifts.operate`، بقفل دورة الوردية ثم قفل الصف المشترك مع كتّاب المال، وإثبات السلطة بعد الانتظار. `shift.open`/`shift.close` ذريان مع الأثر. أضيف إجراءا العرض والتشغيل إلى runtime وحارس الجرد. المسار القديم محفوظ.
+    - `POST/PATCH /api/shifts` مفرعان قانونيًا؛ PG `shifts-canonical` (12)، ورحلة HTTP `canonical-shifts-journey` (2، portOffset 33). الاختبارات تشمل الأدوار والرفض والعملات والتكرار والتزامن مع كاتب قبض حقيقي وانتهاء الجلسة خلف القفل وفشل التدقيق.
+    - **قرار مطلوب قبل GET/الواجهة:** هل `finance.shifts.view` يمنح أسماء المرضى وسنداتهم وتفاصيل المصروفات، أم تتطلب التفاصيل قدراتها ونطاق المريض مع إبقاء إجمالي الصندوق كاملًا؟ خريطة GET الحالية `scope=null` لا تحسم إسقاط هذه التفاصيل. لا تحسب إجمالي الصندوق من قائمة سندات مصفّاة.
+    - `readReceiptProvenanceWith` الممهّد في `f40cd1fb` يستخدم SAVEPOINT الذي يمنعه حارس اللقطة القانونية. استخدم `readReceiptProvenanceInSnapshot` الجديد (SELECT فقط، نفس الاستعلامات والحدود، والخطأ يُسقط اللقطة كلها) عند استكمال GET. لا تخفف الحارس. اختبارات PG والأداء تثبت المطابقة؛ المساران السابقان محفوظان.
+    - المتبقي بعد الحسم: قراءة RR واحدة، واجهة `/finance` القانونية المحدودة وتسجيلها، اختبارات الإسقاط والنطاق واتساق اللقطة والمتصفح، ثم قبول الشريحة. مدخلات الخريطة الثلاثة تبقى `existing` إلى ذلك الحين، والجرد `NOT_READY`. لا تبدأ الشريحة التالية.
 
 ### 5.3 بقية خريطة M2 (المتبقي حسب المنطقة)
 

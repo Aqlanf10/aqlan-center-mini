@@ -1,0 +1,19 @@
+
+ RUN  v4.1.12 <worktree>
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > keeps unknown through initial failure then recovers from the visible retry, network=false 1633ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > keeps unknown through initial failure then recovers from the visible retry, network=true 1118ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built finance shift read state > preserves accountant read-only controls after a confirmed open read 914ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > keeps unknown through initial failure then recovers from the visible retry, network=false 970ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > keeps unknown through initial failure then recovers from the visible retry, network=true 953ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > preserves accountant read-only controls after a confirmed open read 760ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built cash form draft identity across real GET refreshes > keeps opening balances mounted, hidden and unfocusable until the same confirmed-closed snapshot recovers 1194ms
+ ✓ __tests__/security-http/finance-shift-read-state-ui.test.ts > built cash form draft identity across real GET refreshes > preserves same-shift expense/count drafts and resets them only when a different shift is confirmed 2172ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  02:27:44
+   Duration  17.94s (transform 31ms, setup 0ms, import 485ms, tests 11.41s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

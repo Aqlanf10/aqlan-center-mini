@@ -7,11 +7,39 @@ import { CURRENCIES, formatMoney, parseAmount, shiftTotals, type Currency } from
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalErrorResponse, NO_STORE } from "@/lib/canonical-route";
+import { CanonicalShiftRefusal, commandCanonicalShiftClose, commandCanonicalShiftOpen } from "@/lib/canonical-shifts";
 
 export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+
+/** A canonical failure never falls through to a legacy role/session. The domain
+ * command owns admission, its transaction, the actual shift write and its audit. */
+async function canonicalShiftWrite(request: Request, action: "open" | "close") {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "legacy" || selected.kind === "none") return null;
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+    const response = bodyErrorResponse(error) ?? NextResponse.json({ code: "invalid_shift", message: "طلب غير صالح." }, { status: 400 });
+    response.headers.set("Cache-Control", NO_STORE["Cache-Control"]);
+    return response;
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ code: "invalid_shift", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+  try {
+    const result = action === "open"
+      ? await commandCanonicalShiftOpen(selected.handle, body as Record<string, unknown>)
+      : await commandCanonicalShiftClose(selected.handle, body as Record<string, unknown>);
+    return NextResponse.json(result, { status: action === "open" ? 201 : 200, headers: NO_STORE });
+  } catch (error) {
+    if (error instanceof CanonicalShiftRefusal) return NextResponse.json({ code: error.code, message: error.message,
+      ...(error.difference ? { difference: error.difference, expected: error.expected } : {}) }, { status: error.status, headers: NO_STORE });
+    return canonicalErrorResponse(error);
+  }
+}
 
 /** يقرأ ثلاثة مبالغ — واحدًا لكل عملة — ويرفض ما لا يُقرأ رقمًا. */
 function readAmounts(source: Record<string, unknown>, key: string): Record<Currency, number> | null {
@@ -70,6 +98,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const canonical = await canonicalShiftWrite(request, "open");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.operateShift)) {
@@ -104,6 +134,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const canonical = await canonicalShiftWrite(request, "close");
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.operateShift)) {

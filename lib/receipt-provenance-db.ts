@@ -55,6 +55,21 @@ export async function readReceiptProvenance(paymentIds: readonly number[]): Prom
 }
 
 type Runner = Pick<DbClient, "query">;
+/** SELECT-only variant for the owning canonical snapshot facade. Its owner alone
+ * controls transactions and discards the lease on a query failure; no savepoint,
+ * swallowed SQL error, pool fallback or separate snapshot is permitted here.
+ * IDs still come only from an already-authorized server-side financial read. */
+export async function readReceiptProvenanceInSnapshot(runner: Runner, paymentIds: readonly number[]): Promise<Record<string, ReceiptProvenance>> {
+  const ids = [...new Set(paymentIds.filter(id => receiptId(id) !== null))];
+  if (ids.length === 0) return {};
+  const unavailable = () => Object.fromEntries(ids.map(id => [id, unavailableReceiptProvenance()]));
+  if (ids.length > RECEIPT_PROVENANCE_REQUEST_LIMIT) return unavailable();
+  const payments = (await provenanceContext(runner, ids)).rows;
+  if (payments.length > RECEIPT_PROVENANCE_CONTEXT_LIMIT) return unavailable();
+  const audits = await provenanceAudits(runner, originalReceiptIds(payments));
+  return projectReceiptProvenance(ids, payments, audits.rows, { payments: true, audits: audits.rows.length <= RECEIPT_PROVENANCE_AUDIT_LIMIT });
+}
+
 /** The bounded patient context (limit+1 sentinel) for the requested receipts. */
 async function provenanceContext(runner: Runner, ids: readonly number[]) {
   return runner.query<ReceiptProvenancePayment>(

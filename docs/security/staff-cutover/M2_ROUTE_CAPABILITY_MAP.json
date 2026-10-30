@@ -5683,7 +5683,7 @@
   "anyOf": [],
   "scope": null,
   "status": "existing",
-  "note": ""
+  "note": "Slice 26 held: patient receipt/expense detail projection needs an explicit scope decision; full drawer totals must remain unchanged."
  },
  {
   "route": "/api/shifts",
@@ -5699,7 +5699,7 @@
   "anyOf": [],
   "scope": null,
   "status": "existing",
-  "note": ""
+  "note": "Slice 26 partial: canonical close command and atomic audit implemented; whole shift slice remains held for GET projection and UI acceptance."
  },
  {
   "route": "/api/shifts",
@@ -5715,7 +5715,7 @@
   "anyOf": [],
   "scope": null,
   "status": "existing",
-  "note": ""
+  "note": "Slice 26 partial: canonical open command and atomic audit implemented; whole shift slice remains held for GET projection and UI acceptance."
  },
  {
   "route": "/api/tasks",

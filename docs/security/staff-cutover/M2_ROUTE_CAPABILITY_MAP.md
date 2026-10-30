@@ -443,6 +443,14 @@ The queue holds people who are not patients yet (name and phone), so on the cano
   - Unit `provider-blocks-panel-time` (clinic wall time).
   - Built journey `canonical-provider-blocks-journey` (2, portOffset 31). The appointments journey's API allowlists now include `/api/provider-blocks`.
 
+### Slice 26 — shifts, partial command implementation; read projection decision pending
+- **Not accepted as a complete slice:** all three map rows remain `existing`. No canonical finance page or GET projection is registered yet.
+- **Commands:** `POST/PATCH /api/shifts` use `finance.shifts.operate` (with the existing view prerequisite), regardless of role label. The clinic still has one global drawer. A canonical lifecycle advisory lock precedes the existing shift row lock; current session/authority is proved again after each wait. The existing same-client writers and drawer equation are reused; `shift.open`/`shift.close` audit and effect commit or roll back together.
+- **Retries:** opening while another shift is open and closing an already closed shift return 409 without a second effect/audit. There is no new persisted idempotency key or automatic retry of an ambiguous write. The future screen must refresh after an uncertain outcome before a new human intent.
+- **Read decision:** does `finance.shifts.view` alone expose all patient receipt and expense details, or must those details also satisfy their capabilities and patient scope? Preserve full drawer totals in either case. GET and the canonical screen are held until this policy is settled.
+- **Snapshot composition:** the old `readReceiptProvenanceWith` sends SAVEPOINT, which the canonical facade correctly forbids. `readReceiptProvenanceInSnapshot` uses SELECTs only, with identical SQL/parameters, projection and bounds; an SQL error aborts the whole owning snapshot. The facade guard and old helpers are unchanged.
+- **Evidence:** PG `shifts-canonical` (12), built HTTP `canonical-shifts-journey` (2, portOffset 33), and legacy regression/performance evidence are recorded in `docs/review/work-shifts-slice26-writes-20261030.md`. Canonical read/UI scope and browser acceptance are still pending.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 
