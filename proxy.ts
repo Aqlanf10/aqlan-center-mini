@@ -264,10 +264,12 @@ function securedNext(request: NextRequest): NextResponse {
   // أيضًا باسم صريح يقرؤه الخادم عند الحاجة.
   requestHeaders.set("Content-Security-Policy", csp);
   requestHeaders.set("x-nonce", nonce);
+  // Overwrite client input: the public display must never serialize staff context.
+  requestHeaders.set("x-aqlan-public-display", pathname === "/display" ? "1" : "0");
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);
-  if (pathname.startsWith("/api/") || pathname.startsWith("/portal/") || pathname.startsWith("/print/")) {
+  if (pathname === "/display" || pathname.startsWith("/api/") || pathname.startsWith("/portal/") || pathname.startsWith("/print/")) {
     response.headers.set("Cache-Control", "private, no-store");
   }
   return response;

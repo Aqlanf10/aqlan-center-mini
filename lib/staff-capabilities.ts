@@ -204,3 +204,39 @@ export function validateStaffMaintenance(actor: ResolvedStaffAccess, target: Res
   if (!withinDelegableAuthority(actor, targetState.document)) return refused("outside-delegable-authority");
   return { ok: true };
 }
+
+/** One account save (review 6507696166 item 2) maps to these operations; each needs its own authority. */
+export type StaffAccountOperation = "profile.edit" | "accounts.disable" | "staff.role.change" | "staff.clinician-link.change" | "staff.credentials.reset";
+export interface StaffAccountTarget {
+  readonly userId: number;
+  /** From the same locked control row as the actor's proof. */
+  readonly ownerUserId: number;
+  readonly isOwner: boolean;
+  /** Stored document; read for the delegation bound only. An administrative target grants nothing. */
+  readonly document: StaffCapabilityDocument;
+}
+/**
+ * Pure preflight for an account save against an ADMINISTRATIVE target, which may be
+ * inactive and is therefore never a ResolvedStaffAccess. The batch rule: every
+ * operation must be allowed or the whole save is refused. The protected owner is never a
+ * target; an actor never changes its own account here (no self-deactivation, no
+ * self-reset, no self-link); a delegate stays within its own authority; the role label,
+ * the clinician link and credentials are the owner's operations. A role label never
+ * grants (resolveStaffCapabilities ignores it).
+ */
+export function validateStaffAccountChange(actor: ResolvedStaffAccess, target: StaffAccountTarget, operations: readonly StaffAccountOperation[]): StaffChangeDecision {
+  const actorState = accessStates.get(actor);
+  if (!actorState || actor.status !== "allowed" || !validId(target?.userId)) return refused("invalid-access");
+  if (!actorState.owner) return refused("owner-context-missing");
+  if (actorState.owner.ownerUserId !== target.ownerUserId) return refused("owner-context-mismatch");
+  if (operations.length === 0) return refused("no-account-change");
+  if (actor.userId === target.userId) return refused("self-staff-maintenance");
+  if (target.isOwner || target.userId === actorState.owner.ownerUserId) return refused("protected-owner");
+  for (const operation of operations) {
+    if (operation === "profile.edit" || operation === "accounts.disable") {
+      if (!hasStaffCapability(actor, `staff.${operation}`)) return refused("maintenance-denied");
+    } else if (!canPerformOwnerOperation(actor, operation)) return refused("owner-operation-required");
+  }
+  if (!withinDelegableAuthority(actor, target.document)) return refused("outside-delegable-authority");
+  return { ok: true };
+}

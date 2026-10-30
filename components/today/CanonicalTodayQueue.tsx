@@ -6,6 +6,9 @@ import { useChairCount, useNumberSetting } from "@/components/SettingsProvider";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { sendGatedMove } from "@/components/today/useChairReadiness";
 import { formatMoney, type Currency } from "@/lib/money";
+import { CanonicalDisplayNotice } from "./CanonicalDisplayNotice";
+import { CanonicalNextSession } from "../patient/CanonicalNextSession";
+import { useSession } from "../SessionProvider";
 
 /**
  * قائمة اليوم لجلسة الهوية الموحّدة (M2 slices 11–12).
@@ -44,6 +47,9 @@ const MOVE_DONE = {
 const arrivalTime = (iso: string) => new Date(iso).toLocaleTimeString("ar-YE", { timeZone: CLINIC_ZONE_FALLBACK, hour: "2-digit", minute: "2-digit", hour12: true });
 
 export function CanonicalTodayQueue() {
+  const session = useSession();
+  const canBook = session?.isOwner === true || session?.capabilities?.includes("appointments.create") === true
+    && session.patientScope !== "none" && session.appointmentScope !== "none";
   const [view, setView] = useState<QueueView | null>(null);
   const [readiness, setReadiness] = useState<ReadinessView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +114,7 @@ export function CanonicalTodayQueue() {
         <h1 id="today-queue-title" className="text-lg font-black text-navy-900">قائمة اليوم</h1>
         <button type="button" onClick={reload} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">تحديث</button>
       </header>
+      <CanonicalDisplayNotice />
       {error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
       {view ? (
         <>
@@ -169,6 +176,13 @@ export function CanonicalTodayQueue() {
               ))}
             </ul>
           </section>
+          {canBook && visits.some(visit => visit.status === "done" && visit.patientId) ? <section aria-label="حجز العودة بعد الزيارة" className="space-y-2">
+            <h2 className="text-sm font-bold text-navy-900">الجلسة القادمة بعد الزيارة</h2>
+            {visits.filter(visit => visit.status === "done" && visit.patientId).map(visit => <div key={visit.id} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3">
+              <p className="mb-2 text-sm font-bold text-navy-900">{visit.patientName}</p>
+              <CanonicalNextSession visitId={visit.id} patientId={visit.patientId!} />
+            </div>)}
+          </section> : null}
           <p className="text-xs text-slate-600">
             القائمة تتحدّث كل عشرين ثانية.{readiness?.requireClearance ? " إعداد المركز يمنع النداء قبل إقرار الجاهزية إلا طوارئ بسببٍ مكتوب." : ""}
           </p>

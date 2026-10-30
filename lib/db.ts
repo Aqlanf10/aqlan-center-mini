@@ -3067,6 +3067,7 @@ async function resolveVisitPatientDetailed(
   visit: { id: number; patient_name: string; patient_phone: string | null; patient_id: number | null },
   overridePhone?: string | null,
   lockedPatientId?: number | null,
+  admit?: (patientId: number | null) => Promise<void>,
 ): Promise<{ patientId: number; created: boolean }> {
   let created = false;
   const rawPhone = overridePhone ?? visit.patient_phone;
@@ -3087,6 +3088,9 @@ async function resolveVisitPatientDetailed(
     // Refuse before updating that patient; retry can acquire patient → visit in the proper order.
     throw new ClinicalPlanConflict("تغير ربط ملف المريض أثناء الحفظ. حدّث الزيارة وأعد المحاولة.");
   }
+  // Canonical composition checks the resolved existing file BEFORE any link can
+  // manufacture a patient relationship. null denotes the actual creation branch.
+  await admit?.(patientId);
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows } = await client.query(
@@ -3117,12 +3121,13 @@ async function resolveVisitPatientDetailed(
  * This closes the walk-in (patient_id NULL, existing phone) warning bypass. */
 export async function prepareNextSessionPatient(
   client: DbClient, input: { visitId: number; phone: string | null },
+  admit?: (patientId: number | null) => Promise<void>,
 ): Promise<number | null> {
   const { rows } = await client.query<{
     id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
   }>(`SELECT id, patient_name, patient_phone, patient_id FROM visits WHERE id = $1 FOR UPDATE`, [input.visitId]);
   if (!rows[0]) return null;
-  return resolveVisitPatient(client, rows[0], input.phone ?? rows[0].patient_phone);
+  return (await resolveVisitPatientDetailed(client, rows[0], input.phone ?? rows[0].patient_phone, undefined, admit)).patientId;
 }
 
 export async function createNextSession(
@@ -3138,22 +3143,33 @@ export async function createNextSession(
   runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
   await ensureSchema();
-  if (!runOn) {
-    const outer = await getPool().connect();
-    try {
-      await outer.query("BEGIN");
-      const done = await createNextSession(input, outer);
-      if (done === null) { await outer.query("ROLLBACK"); return null; }
-      await outer.query("COMMIT");
-      return done;
-    } catch (error) {
-      await outer.query("ROLLBACK").catch(() => {});
-      throw error;
-    } finally {
-      outer.release();
-    }
-  }
-  const client = runOn;
+  if (runOn) return createNextSessionWith(runOn, input);
+  const outer = await getPool().connect();
+  try {
+    await outer.query("BEGIN");
+    const done = await createNextSessionWith(outer, input);
+    await outer.query(done === null ? "ROLLBACK" : "COMMIT");
+    return done;
+  } catch (error) {
+    await outer.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally { outer.release(); }
+}
+
+/** Same writer on the admitted transaction; no schema initialization or second
+ * connection. Caller owns day locks, patient admission and capacity judgement. */
+export async function createNextSessionWith(
+  client: DbClient,
+  input: {
+    visitId: number;
+    date: string;
+    time: string;
+    durationMinutes: number;
+    phone: string | null;
+    note: string | null;
+    doctorId?: number | null;
+  },
+): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
   const { rows: visits } = await client.query<{
     id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
   }>(
@@ -5336,6 +5352,17 @@ export async function callVisitAgainWith(client: DbClient, id: number, actor?: V
   if (!rows[0]) return null;
   await auditVisitStep(client, rows[0], "visit.call_again", actor, before?.status ?? null, rows[0].chair ?? null);
   return toVisit(rows[0]);
+}
+
+/** Current call only, on the caller's public snapshot. No IDs, notes, phone,
+ * status history, chair occupancy or work totals are even selected. */
+export async function currentPublicDisplayCallWith(q: Pick<DbClient, "query">): Promise<import("./waiting-room").PublicDisplayCallSource[]> {
+  const { rows } = await q.query<{ patient_name: string; called_at: Date | null; chair: number | null }>(
+    `SELECT patient_name, called_at, chair FROM visits
+      WHERE ${onClinicDaySql("arrived_at", "$1", clinicTodaySql("$1"))} AND status = 'called'
+      ORDER BY called_at DESC NULLS LAST, arrived_at ASC, id ASC LIMIT 1`, [CLINIC_TIME_ZONE],
+  );
+  return rows.map(row => ({ patientName: row.patient_name, calledAt: row.called_at?.toISOString() ?? null, chair: row.chair }));
 }
 
 /**
@@ -8181,11 +8208,21 @@ import { FOLLOW_UP_LOOKBACK_DAYS, daysBetween, type OpenPastAppointment, type Re
  * موعد فائت بلا مكالمة هو المريض الذي يفهم أن العيادة لم تلاحظ غيابه. والمدى محدود
  * بشهر: الاتصال بمن تغيّب قبل ثلاثة أشهر ليس متابعة غياب — إنه استدعاء، وله قائمته.
  */
+/** Patients inside a clinician's scope for the recall lists (M2 slice 24): the patient
+ * list's own condition, as a filter on the row's patient (`p`); `$n` is the party. */
+function recallScopeFilter(param: number): string {
+  return `AND EXISTS (SELECT 1 FROM patients WHERE patients.id = p.id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${param}`)})`;
+}
+
 export async function listMissedAppointments(scopedDoctorPartyId?: number | null): Promise<RecallRow[]> {
   await ensureSchema();
   if (scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0)) return [];
-  const hasDoc = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
-  const { rows } = await getPool().query<{
+  return listMissedAppointmentsWith(getPool(), typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0 ? scopedDoctorPartyId : null);
+}
+
+/** The missed list on the caller's client; `doctorPartyId` keeps the clinician's patients only. */
+export async function listMissedAppointmentsWith(q: Pick<DbClient, "query">, doctorPartyId: number | null): Promise<RecallRow[]> {
+  const { rows } = await q.query<{
     id: number; patient_id: number; full_name: string; phone: string | null;
     scheduled_date: Date; note: string | null;
   }>(
@@ -8194,12 +8231,10 @@ export async function listMissedAppointments(scopedDoctorPartyId?: number | null
       WHERE a.status = 'no_show'
         AND a.follow_up_at IS NULL
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
-        ${hasDoc ? `AND (a.doctor_id = $3 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = a.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3")}))` : ""}
+        ${doctorPartyId === null ? "" : recallScopeFilter(3)}
       ORDER BY a.scheduled_date ASC
       LIMIT 100`,
-    hasDoc
-      ? [CLINIC_TIME_ZONE, await followUpLookbackDays(), scopedDoctorPartyId]
-      : [CLINIC_TIME_ZONE, await followUpLookbackDays()],
+    [CLINIC_TIME_ZONE, await followUpLookbackDays(q), ...(doctorPartyId === null ? [] : [doctorPartyId])],
   );
   return rows.map((row) => ({
     kind: "missed" as const,
@@ -8218,8 +8253,8 @@ export async function listMissedAppointments(scopedDoctorPartyId?: number | null
  * تقرؤه القائمتان معًا (المعلّقة والمتغيّبون) من هذه الدالّة الواحدة، فيستحيل أن
  * يختلف حدّاهما ويضيع مريضٌ بينهما — وهي العلّة التي أثبتتها رحلة المواعيد.
  */
-async function followUpLookbackDays(): Promise<number> {
-  const settings = await getSettings();
+async function followUpLookbackDays(q?: Pick<DbClient, "query">): Promise<number> {
+  const settings = q ? await getSettingsWith(q) : await getSettings();
   const value = Number(settings["ops.follow_up_lookback_days"]);
   return Number.isInteger(value) && value > 0 ? value : FOLLOW_UP_LOOKBACK_DAYS;
 }
@@ -8239,8 +8274,12 @@ async function followUpLookbackDays(): Promise<number> {
 export async function listOpenPastAppointments(scopedDoctorPartyId?: number | null): Promise<OpenPastAppointment[]> {
   await ensureSchema();
   if (scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0)) return [];
-  const hasDoc = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
-  const { rows } = await getPool().query<{
+  return listOpenPastAppointmentsWith(getPool(), typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0 ? scopedDoctorPartyId : null);
+}
+
+/** The open-past list on the caller's client; `doctorPartyId` keeps the clinician's patients only. */
+export async function listOpenPastAppointmentsWith(q: Pick<DbClient, "query">, doctorPartyId: number | null): Promise<OpenPastAppointment[]> {
+  const { rows } = await q.query<{
     id: number; patient_id: number; full_name: string; phone: string | null;
     scheduled_date: Date; scheduled_time: string; note: string | null;
     doctor_name: string | null; today: string;
@@ -8257,12 +8296,10 @@ export async function listOpenPastAppointments(scopedDoctorPartyId?: number | nu
            هذا اليومَ الثلاثين وذاك استثناه، لصار موعدٌ عمره ثلاثون يومًا يظهر
            هنا، وحين يُقال «لم يحضر» يخرج من هنا ولا يدخل هناك — فيختفي المريض. */
         AND a.scheduled_date > (NOW() AT TIME ZONE $1)::date - ($2::int * INTERVAL '1 day')
-        ${hasDoc ? `AND (a.doctor_id = $3 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = a.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3")}))` : ""}
+        ${doctorPartyId === null ? "" : recallScopeFilter(3)}
       ORDER BY a.scheduled_date ASC, a.scheduled_time ASC
       LIMIT 200`,
-    hasDoc
-      ? [CLINIC_TIME_ZONE, await followUpLookbackDays(), scopedDoctorPartyId]
-      : [CLINIC_TIME_ZONE, await followUpLookbackDays()],
+    [CLINIC_TIME_ZONE, await followUpLookbackDays(q), ...(doctorPartyId === null ? [] : [doctorPartyId])],
   );
   return rows.map((row) => {
     const date = row.scheduled_date;
@@ -8333,9 +8370,13 @@ export async function closeBookedAppointment(
 export async function listLapsedPatients(weeks: number, scopedDoctorPartyId?: number | null): Promise<RecallRow[]> {
   await ensureSchema();
   if (scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0)) return [];
-  const hasDoc = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
+  return listLapsedPatientsWith(getPool(), weeks, typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0 ? scopedDoctorPartyId : null);
+}
+
+/** The lapsed list on the caller's client; `doctorPartyId` keeps the clinician's patients only. */
+export async function listLapsedPatientsWith(q: Pick<DbClient, "query">, weeks: number, doctorPartyId: number | null): Promise<RecallRow[]> {
   const days = Math.max(1, Math.round(weeks * 7));
-  const { rows } = await getPool().query<{
+  const { rows } = await q.query<{
     id: number; full_name: string; phone: string | null; last_activity: Date; note: string | null;
   }>(
     `WITH activity AS (
@@ -8352,7 +8393,7 @@ export async function listLapsedPatients(weeks: number, scopedDoctorPartyId?: nu
                    AND f.scheduled_date >= CURRENT_DATE
                    AND f.status IN ('booked', 'arrived')
               )
-          ${hasDoc ? `AND EXISTS (SELECT 1 FROM patients WHERE patients.id = p.id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")})` : ""}
+          ${doctorPartyId === null ? "" : recallScopeFilter(2)}
      )
      SELECT id, full_name, phone, note, last_activity
        FROM activity
@@ -8360,7 +8401,7 @@ export async function listLapsedPatients(weeks: number, scopedDoctorPartyId?: nu
         AND (recalled_at IS NULL OR recalled_at < NOW() - INTERVAL '30 days')
       ORDER BY last_activity ASC
       LIMIT 100`,
-    hasDoc ? [days, scopedDoctorPartyId] : [days],
+    [days, ...(doctorPartyId === null ? [] : [doctorPartyId])],
   );
   return rows.map((row) => ({
     kind: "lapsed" as const,
@@ -8382,7 +8423,11 @@ export async function listLapsedPatients(weeks: number, scopedDoctorPartyId?: nu
  */
 export async function markAppointmentFollowedUp(id: number): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
+  return markAppointmentFollowedUpWith(getPool(), id);
+}
+
+export async function markAppointmentFollowedUpWith(q: Pick<DbClient, "query">, id: number): Promise<boolean> {
+  const { rowCount } = await q.query(
     `UPDATE appointments SET follow_up_at = COALESCE(follow_up_at, NOW())
       WHERE id = $1 AND status = 'no_show'`,
     [id],
@@ -8396,7 +8441,11 @@ export async function markAppointmentFollowedUp(id: number): Promise<boolean> {
  */
 export async function markPatientRecalled(id: number): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
+  return markPatientRecalledWith(getPool(), id);
+}
+
+export async function markPatientRecalledWith(q: Pick<DbClient, "query">, id: number): Promise<boolean> {
+  const { rowCount } = await q.query(
     `UPDATE patients SET recalled_at = NOW() WHERE id = $1`, [id],
   );
   return (rowCount ?? 0) > 0;
@@ -9016,6 +9065,15 @@ export async function activeAnnouncementsForScreen(): Promise<Announcement[]> {
   return parseAnnouncements(settings["display.announcements"]);
 }
 
+/** Same public projection on the caller's snapshot. No migration, initialization,
+ * cache or second connection; missing schema/SQL errors fail the whole read. */
+export async function activeAnnouncementsForScreenWith(q: Pick<DbClient, "query">, settings: SettingsMap): Promise<Announcement[]> {
+  const { rows } = await q.query<{ title: string; body: string }>(
+    "SELECT title, body FROM display_announcements WHERE is_active ORDER BY sort_order, id",
+  );
+  return rows.length ? rows.map(row => ({ title: row.title, body: row.body })) : parseAnnouncements(settings["display.announcements"]);
+}
+
 /**
  * إعلان جديد — آخر الترتيب.
  *
@@ -9589,8 +9647,11 @@ function shiftExpectation(row: ShiftRow): Pick<CashierShift, "expected" | "expec
 
 export async function getOpenShift(): Promise<CashierShift | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(
-    `${SHIFT_SELECT} WHERE s.status = 'open' LIMIT 1`,
+  return getOpenShiftWith(getPool());
+}
+export async function getOpenShiftWith(q: Pick<DbClient, "query">, lock = false): Promise<CashierShift | null> {
+  const { rows } = await q.query<ShiftRow>(
+    `${SHIFT_SELECT} WHERE s.status = 'open' LIMIT 1${lock ? " FOR UPDATE OF s" : ""}`,
   );
   return rows[0] ? toShift(rows[0]) : null;
 }
@@ -9606,33 +9667,41 @@ export async function openShift(input: {
   openedBy: string; opening: Record<Currency, number>;
 }): Promise<CashierShift | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(
+  return openShiftWith(getPool(), input);
+}
+/** The guarded open on the caller's runner (the unique open-shift index backs it). */
+export async function openShiftWith(q: Pick<DbClient, "query">, input: {
+  openedBy: string; opening: Record<Currency, number>;
+}): Promise<CashierShift | null> {
+  const { rows } = await q.query<ShiftRow>(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
      SELECT $1, $2, $3, $4
       WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')
      RETURNING id`,
     [input.openedBy, input.opening.YER, input.opening.SAR, input.opening.USD],
   );
-  return rows[0] ? getShift(rows[0].id) : null;
+  return rows[0] ? getShiftWith(q, rows[0].id) : null;
 }
 
 export async function getShift(id: number): Promise<CashierShift | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(`${SHIFT_SELECT} WHERE s.id = $1`, [id]);
+  return getShiftWith(getPool(), id);
+}
+export async function getShiftWith(q: Pick<DbClient, "query">, id: number): Promise<CashierShift | null> {
+  const { rows } = await q.query<ShiftRow>(`${SHIFT_SELECT} WHERE s.id = $1`, [id]);
   return rows[0] ? toShift(rows[0]) : null;
 }
 
 /** (P1-3) تفصيل الدرج لوردية: الافتتاحي، النقد الداخل والمردود، غير النقدي، المصروف، والمتوقَّع. */
-export async function shiftDrawerBreakdown(shift: CashierShift, client?: DbClient): Promise<DrawerBreakdown> {
+export async function shiftDrawerBreakdown(shift: CashierShift, client?: Pick<DbClient, "query">): Promise<DrawerBreakdown> {
   const runner = client ?? getPool();
-  const [{ rows: payments }, { rows: expenses }] = await Promise.all([
-    runner.query<{ kind: string; currency: string; amount_minor: string; method: string | null }>(
-      `SELECT kind, currency, amount_minor, method FROM payments WHERE shift_id = $1`, [shift.id],
-    ),
-    runner.query<{ currency: string; amount_minor: string }>(
-      `SELECT currency, amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
-    ),
-  ]);
+  // In order: a transaction's client runs one statement at a time.
+  const { rows: payments } = await runner.query<{ kind: string; currency: string; amount_minor: string; method: string | null }>(
+    `SELECT kind, currency, amount_minor, method FROM payments WHERE shift_id = $1`, [shift.id],
+  );
+  const { rows: expenses } = await runner.query<{ currency: string; amount_minor: string }>(
+    `SELECT currency, amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
+  );
   return drawerBreakdown(
     shift.opening,
     payments.map((row) => ({
@@ -9671,37 +9740,9 @@ export async function closeShift(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: locked } = await client.query<ShiftRow>(
-      `${SHIFT_SELECT} WHERE s.id = $1 AND s.status = 'open' FOR UPDATE OF s`, [input.id],
-    );
-    if (!locked[0]) {
-      await client.query("ROLLBACK");
-      return { shift: null, reason: "not_open", breakdown: null, difference: null };
-    }
-    const breakdown = await shiftDrawerBreakdown(toShift(locked[0]), client);
-    const difference = drawerDifference(breakdown.expected, input.counted);
-    const reason = input.differenceReason?.trim() || null;
-    if (hasDifference(difference) && !reason) {
-      await client.query("ROLLBACK");
-      return { shift: null, reason: "difference_reason_required", breakdown, difference };
-    }
-    await client.query(
-      `UPDATE cashier_shifts SET
-         status = 'closed', closed_by = $2, closed_at = NOW(),
-         counted_yer = $3, counted_sar = $4, counted_usd = $5, note = $6::text,
-         expected_yer = $7, expected_sar = $8, expected_usd = $9,
-         difference_yer = $10, difference_sar = $11, difference_usd = $12,
-         difference_reason = $13::text
-       WHERE id = $1`,
-      [
-        input.id, input.closedBy, input.counted.YER, input.counted.SAR, input.counted.USD, input.note,
-        breakdown.expected.YER, breakdown.expected.SAR, breakdown.expected.USD,
-        difference.YER, difference.SAR, difference.USD,
-        hasDifference(difference) ? reason : null,
-      ],
-    );
-    await client.query("COMMIT");
-    return { shift: await getShift(input.id), reason: null, breakdown, difference };
+    const result = await closeShiftWith(client, input);
+    await client.query(result.reason ? "ROLLBACK" : "COMMIT");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -9710,9 +9751,47 @@ export async function closeShift(input: {
   }
 }
 
+/** The blind count close inside the caller's transaction: the open shift row locked,
+ * the expected drawer computed under that lock, a difference needs its reason. On a
+ * refusal nothing was written (the caller may roll back or simply commit nothing). */
+export async function closeShiftWith(client: Pick<DbClient, "query">, input: {
+  id: number; closedBy: string; counted: Record<Currency, number>; note: string | null;
+  differenceReason?: string | null;
+}): Promise<CloseShiftResult> {
+  const { rows: locked } = await client.query<ShiftRow>(
+    `${SHIFT_SELECT} WHERE s.id = $1 AND s.status = 'open' FOR UPDATE OF s`, [input.id],
+  );
+  if (!locked[0]) return { shift: null, reason: "not_open", breakdown: null, difference: null };
+  const breakdown = await shiftDrawerBreakdown(toShift(locked[0]), client);
+  const difference = drawerDifference(breakdown.expected, input.counted);
+  const reason = input.differenceReason?.trim() || null;
+  if (hasDifference(difference) && !reason) {
+    return { shift: null, reason: "difference_reason_required", breakdown, difference };
+  }
+  await client.query(
+    `UPDATE cashier_shifts SET
+       status = 'closed', closed_by = $2, closed_at = NOW(),
+       counted_yer = $3, counted_sar = $4, counted_usd = $5, note = $6::text,
+       expected_yer = $7, expected_sar = $8, expected_usd = $9,
+       difference_yer = $10, difference_sar = $11, difference_usd = $12,
+       difference_reason = $13::text
+     WHERE id = $1`,
+    [
+      input.id, input.closedBy, input.counted.YER, input.counted.SAR, input.counted.USD, input.note,
+      breakdown.expected.YER, breakdown.expected.SAR, breakdown.expected.USD,
+      difference.YER, difference.SAR, difference.USD,
+      hasDifference(difference) ? reason : null,
+    ],
+  );
+  return { shift: await getShiftWith(client, input.id), reason: null, breakdown, difference };
+}
+
 export async function listShifts(limit = 30): Promise<CashierShift[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ShiftRow>(
+  return listShiftsWith(getPool(), limit);
+}
+export async function listShiftsWith(q: Pick<DbClient, "query">, limit = 30): Promise<CashierShift[]> {
+  const { rows } = await q.query<ShiftRow>(
     `${SHIFT_SELECT} ORDER BY s.opened_at DESC LIMIT $1`, [limit],
   );
   return rows.map(toShift);
@@ -10288,8 +10367,17 @@ export async function getPaymentByIdempotencyKey(key:string):Promise<Payment|nul
 
 export async function listShiftPayments(shiftId: number): Promise<Payment[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(
-    `${PAYMENT_SELECT} WHERE y.shift_id = $1 ORDER BY y.created_at DESC`, [shiftId],
+  return listShiftPaymentsWith(getPool(), shiftId);
+}
+export async function listShiftPaymentsWith(q: Pick<DbClient, "query">, shiftId: number,
+  scope?: { doctorPartyId: number | null; limit: number }): Promise<Payment[]> {
+  const { rows } = await q.query<PaymentRow>(
+    scope ? `${PAYMENT_SELECT} WHERE y.shift_id = $1
+      AND ($2::int IS NULL OR EXISTS (SELECT 1 FROM patients WHERE patients.id = y.patient_id
+        AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")}))
+      ORDER BY y.created_at DESC, y.id DESC LIMIT $3`
+      : `${PAYMENT_SELECT} WHERE y.shift_id = $1 ORDER BY y.created_at DESC`,
+    scope ? [shiftId, scope.doctorPartyId, scope.limit] : [shiftId],
   );
   return rows.map(toPayment);
 }
@@ -11901,7 +11989,28 @@ async function withDoctorCommissionChange<T>(
   partiesAfter?: (client: DbClient, result: T) => Promise<Array<number | null | undefined>>,
   beforeCommit?: (client: DbClient) => Promise<void>,
 ): Promise<{ result: T; changes: CommissionChange[] }> {
-  const outcome = await withTransaction(getPool(), async (client) => {
+  const outcome = await withTransaction(getPool(), client =>
+    doctorCommissionChangeOn(client, ctx, source, partiesOf, mutate, partiesAfter, beforeCommit));
+  for (const change of outcome.changes) await recordAudit(doctorCommissionAuditInput(change, ctx));
+  return outcome;
+}
+
+/**
+ * The same commission change on a transaction the CALLER owns (the canonical account
+ * editor): parties locked in id order, baselines before the write, the new snapshot
+ * after it. The caller writes `doctorCommissionAuditInput` rows in that transaction.
+ * Tables resolve through the connection's search path, exactly as the legacy writer.
+ */
+export async function doctorCommissionChangeOn<T>(
+  client: DbClient,
+  ctx: CommissionChangeContext,
+  source: "party" | "advanced",
+  partiesOf: (client: DbClient) => Promise<Array<number | null | undefined>>,
+  mutate: (client: DbClient) => Promise<T>,
+  partiesAfter?: (client: DbClient, result: T) => Promise<Array<number | null | undefined>>,
+  beforeCommit?: (client: DbClient) => Promise<void>,
+): Promise<{ result: T; changes: CommissionChange[] }> {
+  {
     const initial = [...new Set((await partiesOf(client)).filter((id): id is number => typeof id === "number" && id > 0))]
       .sort((a, b) => a - b);
     for (const partyId of initial) {
@@ -11924,29 +12033,29 @@ async function withDoctorCommissionChange<T>(
     }
     if (beforeCommit) await beforeCommit(client);
     return { result, changes };
-  });
-  for (const change of outcome.changes) {
-    await recordAudit({
-      action: "doctor.commission.update",
-      entity: "party",
-      entityId: change.partyId,
-      entityLabel: change.partyName,
-      details: {
-        الطبيب: change.partyName,
-        المصدر: change.source === "party" ? "نسبة الجهة" : "الإعداد المتقدّم",
-        قبل: describeCommissionSnapshot(change.before),
-        بعد: describeCommissionSnapshot(change.after),
-        قبل_القيمة: change.before,
-        بعد_القيمة: change.after,
-        نافذ_من: change.effectiveFrom,
-        السبب: ctx.reason ?? null,
-        سجل_العمولة: change.historyId,
-      },
-      actor: ctx.actor,
-      actorRole: ctx.actorRole ?? null,
-    });
   }
-  return outcome;
+}
+
+export function doctorCommissionAuditInput(change: CommissionChange, ctx: CommissionChangeContext): AuditInput {
+  return {
+    action: "doctor.commission.update",
+    entity: "party",
+    entityId: change.partyId,
+    entityLabel: change.partyName,
+    details: {
+      الطبيب: change.partyName,
+      المصدر: change.source === "party" ? "نسبة الجهة" : "الإعداد المتقدّم",
+      قبل: describeCommissionSnapshot(change.before),
+      بعد: describeCommissionSnapshot(change.after),
+      قبل_القيمة: change.before,
+      بعد_القيمة: change.after,
+      نافذ_من: change.effectiveFrom,
+      السبب: ctx.reason ?? null,
+      سجل_العمولة: change.historyId,
+    },
+    actor: ctx.actor,
+    actorRole: ctx.actorRole ?? null,
+  };
 }
 
 function describeCommissionSnapshot(value: CommissionSnapshotValue | null): string {
@@ -13042,8 +13151,12 @@ export async function getExpenseAttachment(id: number): Promise<{ attachment: Ex
 
 export async function listShiftExpenses(shiftId: number): Promise<Expense[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ExpenseRow>(
-    `${EXPENSE_SELECT} WHERE e.shift_id = $1 ORDER BY e.created_at DESC`, [shiftId],
+  return listShiftExpensesWith(getPool(), shiftId);
+}
+export async function listShiftExpensesWith(q: Pick<DbClient, "query">, shiftId: number, limit?: number): Promise<Expense[]> {
+  const { rows } = await q.query<ExpenseRow>(
+    `${EXPENSE_SELECT} WHERE e.shift_id = $1 ORDER BY e.created_at DESC${limit === undefined ? "" : ", e.id DESC LIMIT $2"}`,
+    limit === undefined ? [shiftId] : [shiftId, limit],
   );
   return rows.map(toExpense);
 }
@@ -27875,7 +27988,12 @@ export async function lockAppointmentServiceForBooking(client: DbClient, id: num
  */
 export async function resolveServiceByLegacyType(type: string): Promise<AppointmentService | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<AppointmentServiceRow>(
+  return resolveServiceByLegacyTypeWith(getPool(), type);
+}
+
+/** Same lookup on the admitted booking transaction. */
+export async function resolveServiceByLegacyTypeWith(client: Pick<DbClient, "query">, type: string): Promise<AppointmentService | null> {
+  const { rows } = await client.query<AppointmentServiceRow>(
     `${SERVICE_SELECT} WHERE legacy_type = $1 OR code = $1 ORDER BY is_active DESC, id LIMIT 1`,
     [type],
   );
@@ -28015,7 +28133,7 @@ export interface ProviderBlock {
 }
 
 export async function listProviderBlocks(
-  providerId: number, date: string, client?: DbClient,
+  providerId: number, date: string, client?: Pick<DbClient, "query">,
 ): Promise<ProviderBlock[]> {
   /* على اتصال المعاملة حين يُمرَّر: قراءةُ الحجب أثناء قفل اليوم يجب ألّا تطلب
      اتصالًا ثانيًا من المسبح — وإلا تعلّقت المعاملات المتنافسة كلُّها تنتظر
@@ -28098,26 +28216,35 @@ export async function cancelProviderBlock(
   id: string, actor: { actor: string; actorRole?: string | null },
 ): Promise<{ ok: boolean; reason?: "not_found" | "already_cancelled" }> {
   await ensureSchema();
+  const result = await cancelProviderBlockWith(getPool(), id, actor);
+  if (!result.ok) return { ok: false, reason: result.reason };
+  await recordAudit(result.audit).catch(() => {});
+  return { ok: true };
+}
+
+/** The guarded cancel on the caller's runner; the caller writes `audit`. */
+export async function cancelProviderBlockWith(
+  runner: Pick<DbClient, "query">, id: string, actor: { actor: string; actorRole?: string | null },
+): Promise<{ ok: true; providerId: number; audit: AuditInput } | { ok: false; reason: "not_found" | "already_cancelled" }> {
   /* الحارس داخل الجملة لا في فحصٍ قبلها: ضغطتان معًا على «إلغاء» — واحدةٌ تنجح
      والأخرى تعرف أنها لم تفعل شيئًا، بدل أن تكتبا ختمين ويضيع الأول. */
-  const { rows } = await getPool().query<{ id: string }>(
+  const { rows } = await runner.query<{ id: string; provider_id: number }>(
     `UPDATE provider_blocks
         SET cancelled_at = NOW(), cancelled_by = $2
       WHERE id = $1::bigint AND cancelled_at IS NULL
-      RETURNING id::text`,
+      RETURNING id::text, provider_id`,
     [id, actor.actor],
   );
   if (rows.length === 0) {
-    const { rows: existing } = await getPool().query<{ id: string }>(
+    const { rows: existing } = await runner.query<{ id: string }>(
       `SELECT id::text FROM provider_blocks WHERE id = $1::bigint`, [id],
     );
     return { ok: false, reason: existing.length ? "already_cancelled" : "not_found" };
   }
-  await recordAudit({
-    action: "provider_block.cancel", entity: "provider_block", entityId: id,
-    actor: actor.actor, actorRole: actor.actorRole ?? null, details: {},
-  }).catch(() => {});
-  return { ok: true };
+  return {
+    ok: true, providerId: rows[0].provider_id,
+    audit: { action: "provider_block.cancel", entity: "provider_block", entityId: id, actor: actor.actor, actorRole: actor.actorRole ?? null, details: {} },
+  };
 }
 
 export async function createProviderBlock(input: {
@@ -28125,21 +28252,36 @@ export async function createProviderBlock(input: {
   actor: string; actorRole?: string | null;
 }): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
   await ensureSchema();
+  const result = await createProviderBlockWith(getPool(), input);
+  if (!result.ok) return result;
+  await recordAudit(result.audit).catch(() => {});
+  return { ok: true, id: result.id };
+}
+
+/** The block insert on the caller's runner (legacy pool or an admitted transaction);
+ * the caller writes `audit` (legacy: after the insert, best effort; canonical: in the
+ * same transaction). */
+export async function createProviderBlockWith(runner: Pick<DbClient, "query">, input: {
+  providerId: number; startsAt: string; endsAt: string; reason: string;
+  actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; id: string; audit: AuditInput } | { ok: false; message: string }> {
   if (!(input.reason ?? "").trim()) return { ok: false, message: "اكتب سبب الحجب." };
   if (new Date(input.endsAt).getTime() <= new Date(input.startsAt).getTime()) {
     return { ok: false, message: "نهاية الحجب يجب أن تكون بعد بدايته." };
   }
-  const { rows } = await getPool().query<{ id: string }>(
+  const { rows } = await runner.query<{ id: string }>(
     `INSERT INTO provider_blocks (provider_id, starts_at, ends_at, reason, created_by)
      VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
     [input.providerId, input.startsAt, input.endsAt, input.reason.trim().slice(0, 300), input.actor],
   );
-  await recordAudit({
-    action: "provider_block.create", entity: "provider_block", entityId: rows[0].id,
-    actor: input.actor, actorRole: input.actorRole ?? null,
-    details: { الطبيب: String(input.providerId), من: input.startsAt, إلى: input.endsAt, السبب: input.reason },
-  }).catch(() => {});
-  return { ok: true, id: rows[0].id };
+  return {
+    ok: true, id: rows[0].id,
+    audit: {
+      action: "provider_block.create", entity: "provider_block", entityId: rows[0].id,
+      actor: input.actor, actorRole: input.actorRole ?? null,
+      details: { الطبيب: String(input.providerId), من: input.startsAt, إلى: input.endsAt, السبب: input.reason },
+    },
+  };
 }
 
 /* ═══ (المرحلة ٥) قائمة الانتظار ══════════════════════════════════════════ */

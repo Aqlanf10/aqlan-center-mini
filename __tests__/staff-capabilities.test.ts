@@ -3,7 +3,7 @@ import {
   appointmentCapabilityConstraint, canPerformOwnerOperation, hasStaffCapability,
   ownerContextFromTrustedBinding, parseStaffCapabilityDocument, patientCapabilityConstraint,
   resolveStaffCapabilities, staffAuthorizationFingerprint, validateStaffCapabilityChange,
-  validateStaffMaintenance, type ResolvedStaffAccess, type StaffSubject, type TrustedOwnerContext,
+  validateStaffAccountChange, validateStaffMaintenance, type ResolvedStaffAccess, type StaffSubject, type TrustedOwnerContext,
 } from "../lib/staff-capabilities";
 import { STAFF_CAPABILITIES, OWNER_ONLY_OPERATIONS, type StaffCapabilityDocument } from "../lib/staff-capability-catalogue";
 import { reviewLegacyStaffCapabilities } from "../lib/staff-capabilities-legacy";
@@ -273,6 +273,42 @@ describe("safe scoped delegation and maintenance preflight", () => {
     expect(canPerformOwnerOperation(manager, "staff.credentials.reset")).toBe(false);
     const basic = resolve(document({ grants: { "staff.view": true, "staff.profile.edit": true } }), subject(), ownerContext);
     expect(validate(document({ revision: 2 }), basic).ok).toBe(false);
+  });
+});
+
+describe("account changes against an administrative target (review 6507696166 item 2)", () => {
+  const ownerContext = ownerContextFromTrustedBinding({ ownerUserId: 99, bindingVersion: "test-1" });
+  const owner = resolve(document(), subject({ userId: 99 }), ownerContext);
+  const manager = resolve(document({ patientScope: "all", appointmentScope: "all", grants: {
+    "staff.view": true, "staff.profile.edit": true, "staff.accounts.disable": true, "appointments.create": true } }), subject({ userId: 10, role: "reception" }), ownerContext);
+  const target = (overrides: Partial<{ userId: number; ownerUserId: number; isOwner: boolean; document: StaffCapabilityDocument }> = {}) =>
+    ({ userId: 20, ownerUserId: 99, isOwner: false, document: document({ grants: { "appointments.create": true } }), ...overrides });
+  it("needs every operation in the batch; owner operations stay the owner's", () => {
+    expect(validateStaffAccountChange(manager, target(), ["profile.edit", "accounts.disable"])).toEqual({ ok: true });
+    for (const operation of ["staff.role.change", "staff.clinician-link.change", "staff.credentials.reset"] as const) {
+      expect(validateStaffAccountChange(manager, target(), ["accounts.disable", operation])).toEqual({ ok: false, reason: "owner-operation-required" });
+      expect(validateStaffAccountChange(owner, target(), [operation])).toEqual({ ok: true });
+    }
+    expect(validateStaffAccountChange(manager, target(), [])).toEqual({ ok: false, reason: "no-account-change" });
+  });
+  it("never targets the owner or the actor itself, and keeps a delegate within its authority", () => {
+    expect(validateStaffAccountChange(manager, target({ userId: 99, isOwner: true }), ["accounts.disable"])).toEqual({ ok: false, reason: "protected-owner" });
+    // The owner flag is not the only witness: the actor's own binding names the owner.
+    expect(validateStaffAccountChange(manager, target({ userId: 99 }), ["accounts.disable"])).toEqual({ ok: false, reason: "protected-owner" });
+    expect(validateStaffAccountChange(manager, target({ userId: 10 }), ["accounts.disable"])).toEqual({ ok: false, reason: "self-staff-maintenance" });
+    expect(validateStaffAccountChange(owner, target({ userId: 99, isOwner: true }), ["profile.edit"])).toEqual({ ok: false, reason: "self-staff-maintenance" });
+    expect(validateStaffAccountChange(manager, target({ document: document({ grants: { "finance.invoices.view": true } }) }), ["accounts.disable"]))
+      .toEqual({ ok: false, reason: "outside-delegable-authority" });
+    expect(validateStaffAccountChange(manager, target({ document: document({ grants: { "staff.view": true, "staff.permissions.edit": true } }) }), ["profile.edit"]))
+      .toEqual({ ok: false, reason: "outside-delegable-authority" });
+  });
+  it("refuses without a trusted owner binding or with a different owner", () => {
+    const unbound = resolve(document({ grants: { "staff.view": true, "staff.accounts.disable": true } }), subject({ userId: 10 }));
+    expect(validateStaffAccountChange(unbound, target(), ["accounts.disable"])).toEqual({ ok: false, reason: "owner-context-missing" });
+    expect(validateStaffAccountChange(manager, target({ ownerUserId: 98 }), ["accounts.disable"])).toEqual({ ok: false, reason: "owner-context-mismatch" });
+    const viewer = resolve(document({ grants: { "staff.view": true } }), subject({ userId: 11 }), ownerContext);
+    expect(validateStaffAccountChange(viewer, target(), ["profile.edit"])).toEqual({ ok: false, reason: "maintenance-denied" });
+    expect(validateStaffAccountChange({ ...manager }, target(), ["profile.edit"])).toEqual({ ok: false, reason: "invalid-access" });
   });
 });
 

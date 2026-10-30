@@ -152,16 +152,39 @@ It is **not** in the catalogue or in `OWNER_ONLY_OPERATIONS`. The owner-only lis
 | # | Status |
 |---|---|
 | H1 | done for the non-empty and identity-bearing refusals (no schema, no data). A hold-commit failure path is covered by the same transaction: any failure before COMMIT replays nothing. |
-| H2 | partial: entry selects canonical while held (no ready identity). Built-app login journey pending. |
-| H3 | done at the library boundary (`readLegacyStaffSchema` refuses while held); built-app legacy cookie journey pending. |
-| H4 | done for previously-ready targets (5.1); source cookie journey pending. |
+| H2 | done: built-app journey `canonical-restore-hold-journey` — password login during the replay (paused on the migration lock right after the hold commits) and after it, before any seal, answers 503 maintenance (Arabic, no cookie); the held target gains no table from any request. |
+| H3 | done at the library boundary and in the built app: a legacy cookie genuinely signed for the target (current credential version of a restored account) is refused on `/api/auth/me` and `/api/patients`, and a legacy writer (`POST /api/patients`) changes nothing, during and after the replay. |
+| H4 | done: previously-ready targets refused (5.1; built app: the source itself, its admitted session valid before and after the refused attempt); a valid canonical cookie from the source is refused by the restored target (401/503, no identity or data) and stays valid on the source. |
 | H5 | done for a new connection and a second restore attempt. |
 | H6 | done (5.5). |
 | H7 | done with the synthetic seal fixture (owner admitted, imported delegate grants inert). |
 | P1 | done: every business table row for row with posted, cancelled and pending supplier history; documents equal except `confirmation`. |
 | P2 | done: canonical supplier-finance reads after the synthetic seal and the owner's confirmation of each account. |
 | R4 | done: pending source intent refused (`supplier_saved_authority_mismatch`); same-invoice nonce durably refused; independent invoice posted. |
-| O1–O7 | pending, as design and refusal tests only (5.4). |
+| O1–O7 | design in 5.8 (review 6507696166 item 4). Refusal test in `restore-canonical-roundtrip` ("R5 refusal"): neither the delegate holding `inventory.supplier-invoices.cancel` nor the owner can execute or retire the held source intent; no binding, retirement, intent, rejection or audit row changes; `inventory.supplier-intent.recover` is in neither the catalogue nor the owner-only list, and no transport export recovers. O1 and O3–O7 positive and race proofs wait for approval of the operation. |
+
+### 5.8 R5 design (review 6507696166 item 4): design and refusal tests only
+
+Nothing below exists in the live catalogue. There is no `recover` code path and no new owner
+authority until the owner approves the operation. One transaction (READ COMMITTED, owned by the
+recovery writer) is designed for each request `{ commandKey, requestId, reason }`:
+
+1. **Lifecycle fence SHARED** (an ordinary admitted operation; nothing here changes authority documents). Then the session proof of the **releasing** actor, which needs the owner binding: `canPerformOwnerOperation(access, "inventory.supplier-intent.recover")` once the operation is approved.
+2. **Original operation lock:** the exact advisory or row lock that the original command takes for `commandKey` (the same key derivation as `createInventoryCommandLifecycle`). The recovery waits there for any in-flight execution of the same command.
+3. **Re-prove the owner after the wait**, with the same session and anchors (O3). Ownership or session drift while waiting refuses.
+4. **Source evidence unchanged.** The intent row, with its source realm, subject and generation and its stored actor snapshot, is read FOR UPDATE.
+   - It must belong to a different realm or generation from the target's. A same-epoch intent goes through the normal retirement path, not recovery.
+   - Nothing in the row is rewritten or re-keyed.
+5. **No committed result.** For the intent's invoice there is no posted or cancelled revision, number claim, ledger posting or binding with a result in the restored data (O6).
+6. **Append-only retirement** for the original `commandKey` (`inventory_command_retirements`), with a bounded reason code and free text of at most 200 characters. The unique key on `commandKey` makes a duplicate or racing request (O4, O5) find the existing row. It then answers the same result with `idempotent: true` and writes no second row.
+7. **Independent audit row**, `inventory.supplier_intent.recover`:
+   - the releasing canonical actor (user, subject, realm);
+   - next to it, the stored source actor snapshot, copied and not reinterpreted;
+   - the reason and `requestId`.
+   It is written in the same transaction (O7: an audit failure rolls back everything).
+8. A lost response is retried with the same `requestId`. The retry finds the retirement (step 6) and the same audit `requestId`, and returns the stored result.
+
+After recovery, the same invoice can be admitted again exactly once (O1): the durable "intent pending" refusal for that invoice is released by the retirement only. The source intent itself is never executed.
 
 ### 5.7 Replacement of the retired suite
 `inventory-authority-restore` exercised the retired parallel schema: same-realm epoch rotation and a signed `authority` session. As §4 states, it is replaced by `restore-canonical-hold` (B1/B2, R1, H cases) and `restore-canonical-roundtrip`:

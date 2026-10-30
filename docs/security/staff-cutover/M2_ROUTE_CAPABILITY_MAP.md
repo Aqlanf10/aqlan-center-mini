@@ -30,21 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 held routes)
+### Counts (383 mapped route/method entries, after slice 26 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 315 |
+| existing | 300 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 29 |
+| canonical-done | 44 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
-| appointment | 11 |
+| appointment | 13 |
+
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 416 route/method entries and 97 pages; it remains `NOT_READY`.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -348,7 +350,7 @@ Read only. Record reads `read:appointments.day` and `read:appointments.mine`, on
 ### Slice 16 — booking (`POST /api/appointments`)
 One admitted `appointments.create` transaction through **the same capacity engine** (`commandCanonicalBooking` → `bookAppointment(..., { client, audit })`). `writeAppointmentInDay` gains an optional caller transaction: with it, the day locks, the judgement and the insert run on the admitted transaction and the writer neither begins, commits nor rolls back; without it nothing changes. `appointments.create` joins `CLINIC_RUNTIME_ACTIONS`.
 - **Atomic audit:** the booking, its `appointment.create` row and any `appointment.capacity_override` row commit or roll back together (the legacy route writes no creation row and its override row after the commit; both unchanged).
-- **Patient:** appointment scope `all` books any patient; `own` books only the clinician's own patients (the patient list's condition), so a booking never pulls a new patient into the clinician's scope. Outside answers like a missing patient (404).
+- **Patient:** appointment scope `all` can schedule any patient; `own` books only the clinician's own patients (outside = missing, 404). The 2026-10-30 compound-scope follow-up additionally prevents an actor with patient scope `own` from assigning an outside patient to themselves, even with appointment scope `all` (403). The final resolved clinician is checked after day/doctor locks and before insertion on the admitted transaction. Other-doctor/unassigned scheduling and whole-patient/owner authority retain their rules.
 - **Doctor:** `own` books on its own clinician party only (default); another doctor is refused (403 `booking_doctor_not_allowed`), and a return booking whose case clinician is someone else rolls back.
 - **Capacity override:** only with `appointments.override-capacity`. The engine receives the display label `canonical`, so neither the legacy admin override nor the doctor self-assignment by role ever applies.
 - **Refusals:** every engine refusal rolls the transaction back and answers as the legacy route does: 400 with the engine's code (for example `return_booking_context_required`), or 409 with the conflict (reasons, suggestion, `canOverride`, and the nearby-appointment confirmation token).
@@ -388,6 +390,7 @@ The legacy door claims the entry, books, then marks it booked in three transacti
 5. `markWaitingBookedWith` closes the entry in the same transaction; `appointment.create`, any `appointment.capacity_override` and `waiting_list.book` rows are atomic. Any refusal rolls everything back — no claim is ever left behind.
 - **Writers:** `findAppointmentForWaitingWith` and `markWaitingBookedWith` (the legacy functions wrap them unchanged; the legacy `waiting_list.book` row stays best effort).
 - **Screen:** «احجز له» on each freed-slot candidate in the canonical day view (with `appointments.create`); a conflict shows its reasons.
+- **Assignment boundary (2026-10-30):** new appointments from waiting entries use the same post-lock, pre-insert self-assignment guard as direct booking. A refused assignment rolls back the appointment, claim/link and audit together; existing recovery links do not create a patient relationship.
 - **Tests:** PG `appointments-canonical-waiting-book` (9): book + link + close with every audit row and the idempotent second press; a full chair leaves no appointment and no claim, override audited; recovery linking; closed entry and live legacy claim refused (an expired claim books); two concurrent presses → one appointment; input validation; own scope (outside equals missing, own party only); capability, scope and revocation; audit failure leaves the entry open. `waiting-list-canonical` updated (book is its own command). Built journeys: `canonical-appointments-journey` books a candidate from the freed slot (audit and link checked); `canonical-waiting-list-journey` checks that book without `appointments.create` refuses (403).
 
 ### Slice 21 — online booking requests (`GET /api/booking-requests`, `PATCH /api/booking-requests/[id]`)
@@ -410,6 +413,53 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - **Projection:** the canonical workflow summary now offers `canRebook` for display by grant (`appointments.create`), appointment scope and the referral rule; the command re-proves everything.
 - **Screen:** «أعد حجز الجلسة» (date, time, required reason) for a missed or cancelled session in the canonical patient file; one request id per attempt (a retry after a lost reply replays instead of booking twice); the engine's nearby-appointment warning is confirmed by a second, explicit click («تأكيد الحجز رغم ذلك», also for first-time scheduling).
 - **Tests:** PG `planned-visits-canonical-rebook` (5): replacement on the responsible doctor with old attendance kept, audit and replay, another actor never replays a receipt; stale expectation and past time; own patient scope; own appointment scope on another doctor; capability, scope and revocation. `patients-canonical-directory` updated (no rebook without the grant). Built journey `canonical-planned-visits-journey` now 3 (rebook a missed session with the nearby confirmation).
+
+### Slice 24 — recall (`GET/POST /api/recall`)
+- **Read:** record read `read:recall`, one owning snapshot. The three lists (open past bookings, missed appointments, lapsed patients) take the CURRENT patient scope inside their SQL (`listOpenPastAppointmentsWith`, `listMissedAppointmentsWith`, `listLapsedPatientsWith` with the patient list's own condition), so an `own` clinician's list is never cut short by the limits on other doctors' rows. The legacy route listed every patient to every admitted role. `canRecord` = `appointments.create` (display only).
+- **Record a follow-up:** one admitted `appointments.create` transaction (the map's requirement); the appointment or patient row is locked and its patient checked against the scope (outside = missing, 404); the first follow-up time is kept; `recall.contact` is audited atomically.
+- **Screen:** `/recall` («المتابعة») registered for a patient scope. Closing a past booking uses the canonical appointment move (slice 17); «حجز موعد» opens the canonical day view's booking form with the patient chosen (`/appointments?bookPatient=`); the legacy proposals panel and quick-booking modal are not mounted for a canonical session. `canonical-entry-journey` now uses `/lab` as its not-yet-canonical example.
+- **Tests:** PG `recall-canonical` (5): all versus own lists (and parity with the legacy lists for the whole scope), appointment scope alone refused, closed weeks; follow-up marks (first time kept, audit), own scope 404 parity, conflicts, capability, scope, revocation and audit rollback. Built journey `canonical-recall-journey` (2, portOffset 23).
+
+### Slice 25 — provider blocks (`GET/POST /api/provider-blocks`, `DELETE /api/provider-blocks/[id]`)
+- **Read:** record read `read:provider-blocks` in one owning snapshot.
+  - **With `providerId`:** that doctor's blocks on the day, when the doctor is inside the appointment scope. With `own` scope that means the actor's own party; another doctor answers like a doctor without blocks, which is how the legacy route answers an unknown id.
+  - **Without `providerId`:** the day panel, meaning every in-scope active doctor and its blocks.
+  - `canManage` = `appointments.schedule.manage`, for display only.
+- **Create:** one admitted `appointments.schedule.manage` transaction. `appointments.schedule.manage` is now in `CLINIC_RUNTIME_ACTIONS`. The legacy route allowed the admin role label.
+  - **Scope:** the appointment scope bounds the doctor: `all` allows any active doctor, `own` only the actor's party, and `none` is refused.
+  - **Day locks:** it takes the booking engine's `appointments-day:` locks for every clinic day the block touches, in ascending order as bookings do. A booking and a block for the same day therefore serialize instead of crossing.
+  - **Validation:** a reason is required (at most 300 characters) and a block lasts at most 92 days.
+  - **Overlap:** the answer reports how many booked or arrived appointments of that doctor overlap the block, as a warning; they are not moved.
+  - **Audit:** `provider_block.create` (with the overlap count) is audited atomically.
+- **Cancel:** the block is locked. For `own` scope, another doctor's block reads like a missing one (404). A second cancel is 409. `provider_block.cancel` is audited atomically.
+- **Shared writers:** `createProviderBlockWith` and `cancelProviderBlockWith` serve both branches; the legacy path keeps its post-write audit.
+- **Screen:** the panel «حجب أوقات الأطباء» in the canonical appointments day view. The legacy app had no screen for blocks. It offers the doctor, the reason, a start time, and an end date and time, all in clinic time; cancelling is one button.
+- **Tests:**
+  - PG `provider-blocks-canonical` (8):
+    - create with overlap and atomic audit, own-scope bound, and refusals that write nothing;
+    - waiting on the day lock;
+    - all and own reads, plus the day panel;
+    - cancel parity and the second cancel;
+    - audit rollback.
+  - Unit `provider-blocks-panel-time` (clinic wall time).
+  - Built journey `canonical-provider-blocks-journey` (2, portOffset 31). The appointments journey's API allowlists now include `/api/provider-blocks`.
+
+### Slice 26 — shifts (`GET/POST/PATCH /api/shifts`, `/finance`)
+- **Owner decision, 2026-10-30:** `finance.shifts.view` exposes complete per-currency drawer aggregates and recent shift summaries. Receipt details additionally require `finance.payments.view` AND the current patient scope; expenses require `finance.expenses.view`. The protected owner retains all details. Unattributed shift notes/difference reasons require both detail grants and the whole patient scope. No category, party or hidden-patient subtotals/counts are exposed.
+- **Read:** `readCanonicalShifts` uses one owning RR read-only snapshot for current authority, scope, shifts, full drawer, filtered details and provenance. `own` reuses the central patient condition in SQL before limiting; `none` omits receipt keys. Each detail list is bounded to 1000 visible rows plus a scoped truncation flag; full totals are unaffected. `readReceiptProvenanceInSnapshot` remains SELECT-only, with its previous guards/bounds; SQL failure aborts the whole snapshot. No helper falls back to a second lease.
+- **Commands:** unchanged from the reviewed `780448b9` batch. Exact operate grant, lifecycle lock then existing shared shift row lock, proof after waits, existing currency/drawer rules and atomic effect/audit. No collection, expense, payroll or migration changes.
+- **Screen:** `app/finance/layout.tsx` chooses the canonical component, preserving the legacy page and avoiding its unrelated API calls. `/finance` is registered exactly under shifts.view, even without patient scope; nested finance pages remain held. It renders only server-projected details, never print/export links. Refresh/focus/visibility and a 30-second visible-tab reread clear stale data before reading and after refusal; authority is always proved on the server.
+- **Uncertain writes:** state guards are NOT a durable request key. A late open retry after the original shift closed could open another shift. Exactly one POST/PATCH per explicit submission; on lost/5xx/malformed replies, a tab-local sessionStorage marker blocks commands across reload/navigation. GET verifies current state; a separate explicit new-intent acknowledgement and fresh read unlock a new form submission. No automatic retry.
+- **Evidence:** PG commands 12 + reads 9; canonical built HTTP/browser journey 10 after the compound-scope follow-up (portOffset 33; the initial read/UI batch had 9), including 390/1280px, scope projection, revoked permissions, safe read failures, legacy print/export refusal, and a committed open whose response is lost after external close. Existing command/financial regression and receipt performance guards remain. See `docs/review/work-shifts-slice26-complete-20261030.md` for actual runs and limitations. Three map rows are `canonical-done` as source migration status; cutover remains `NOT_READY` and parent acceptance is pending.
+- **Compound-scope boundary, 2026-10-30:** a synthetic reproduction on `78758658` proved that own-patient/all-appointment self-booking exposed an outside receipt without changing the drawer. Direct and waiting-list canonical booking now reject that self-assignment before insertion and after lock waits, using current patient scope on the admitted client. Central `DOCTOR_PATIENT_CONDITION`, existing relationships, legitimate other-doctor/unassigned scheduling and owner authority remain unchanged. Six new PG regressions plus the built HTTP/browser chain cover the boundary. Reschedule and online confirmation already require current clinical responsibility for clinician reassignment; their regressions were rerun. See `docs/review/work-shifts-scope-boundary-20261030.md`. This closes the reproduced prospective path; it does not establish a production incident, retrospectively clean relationships, or authorize activation. Parent review and final-head CI remain required.
+
+### Slice 28 — next session (`POST /api/visits/[id]/next`)
+- `appointments.create`, current patient scope (outside = missing), non-none appointment scope; own appointment scope books only on the actor's clinician, who must be the source's current responsible doctor. Client doctor overrides are ignored as on the legacy route.
+- One `withStaffOperation` transaction: day-window locks → visit → patient/scope/responsibility witnesses (NOWAIT against inverse clinical ordering); reproof after waits and before commit. Resolve an existing phone-matched patient's scope **before** linking it to the actor's walk-in visit. No self-booking can create its own authorization.
+- `createNextSessionWith` shares the exact old writer. Settings, service resolution, provider blocks, capacity judgement and writes use the admitted client. Every refusal rolls back file/link/phone changes; appointment and override audit commit atomically. Actual new-file creation needs `patients.create`, following slice 21; a missing clinical source still refuses and rolls it back.
+- Existing source fingerprints, active responsible doctor, overlap, nearby confirmation, capacity and override grant/reason remain. No financial policy, migration or durable request receipt added.
+- Canonical UI: patient's recent visits and completed visits in the internal queue; scheduler can book without queue-management or clinical-detail grants. Lost/5xx/unverified success never auto-retries (tab-local recovery marker survives reload; no name, phone or token): read scoped appointments, show a matching booking if found, otherwise require separate new intent. This is not an exactly-once promise across cancellation, a new browser session, unavailable browser storage or a new proposal.
+- Evidence: `docs/review/work-next-session-slice28-20261030.md`; built journey portOffset 37. Map status records source migration, not deployment or overall acceptance.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.

@@ -1,0 +1,45 @@
+{
+  "kind": "local-synthetic-validation",
+  "baseSha": "1ccb30c2ee443ad8b0c5af0c9b0f5b261ba78ec2",
+  "node": "22.23.3",
+  "postgres": "18.4",
+  "fixtureOnly": true,
+  "files": [
+    {
+      "path": "baseline-unit.log",
+      "bytes": 3821,
+      "sha256": "249b8f233a0409ac99c5b80082eade503d58ba378b9f78986b2cc0105b796830"
+    },
+    {
+      "path": "baseline-postgres.log",
+      "bytes": 1475,
+      "sha256": "4d7edfa0a77e9648f11518ad31e1816ac503e46ea1c5ed986beeddce86df0390"
+    },
+    {
+      "path": "receipt-intake-proof.log",
+      "bytes": 327,
+      "sha256": "9b3d79ad52f1662195a65277356668fd9d85ffb1c91defb2c8440fb77937cd70"
+    },
+    {
+      "path": "final-postgres.log",
+      "bytes": 329,
+      "sha256": "e81f540f39895674038debd1ac406ff800d3d9fb3855b67a6e2758eb4fabc258"
+    },
+    {
+      "path": "final-unit-focused.log",
+      "bytes": 1213,
+      "sha256": "ec450931160b2f10cee64ca3cf85093eba32a18d46f44ee55bc9857089e30dbb"
+    },
+    {
+      "path": "final-unit-focused-isolated.log",
+      "bytes": 220,
+      "sha256": "9da2fa47e6263a0f6c4b8caae7a54f51df1723d5bb3b8d1470fd92d32e53d2ab"
+    },
+    {
+      "path": "receipt-query-plan.pg18.json",
+      "bytes": 107057,
+      "sha256": "6afcb32a29438499f856c5310cbb01d746c552fe33a0c61267e244e34c2e7d6e"
+    }
+  ],
+  "logNormalization": "Trailing blank lines removed from copied logs; decoded JSON payload unchanged."
+}

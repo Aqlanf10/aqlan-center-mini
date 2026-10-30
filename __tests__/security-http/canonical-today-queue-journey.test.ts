@@ -31,7 +31,9 @@ beforeAll(async () => {
         (await db.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id) VALUES($1,$2,'0500000000',$3) RETURNING id", [number, name, doctor])).rows[0].id;
       mine = await patient("SYN-QJ-1", "مريضة الطبيب التجريبية", parties.doctor!);
       theirs = await patient("SYN-QJ-2", "مريض الطبيب الآخر", parties.other!);
-      await db.query("INSERT INTO visits(patient_name,note,patient_id,doctor_id,arrived_at) VALUES('مريض الطبيب الآخر','ملاحظة وصول تجريبية',$1,$2,NOW() - interval '40 minutes')", [theirs, parties.other!]);
+      await db.query("INSERT INTO visits(patient_name,note,patient_id,doctor_id,arrived_at) VALUES('مريض الطبيب الآخر','ملاحظة وصول تجريبية',$1,$2,GREATEST(NOW() - interval '40 minutes', (date_trunc('day', NOW() AT TIME ZONE 'Asia/Aden') AT TIME ZONE 'Asia/Aden')))", [theirs, parties.other!]);
+      // Forty minutes ago, but never before the clinic's midnight: just after midnight in
+      // Aden "forty minutes ago" is yesterday, and the Today queue rightly omits it.
     },
   });
 }, 300_000);

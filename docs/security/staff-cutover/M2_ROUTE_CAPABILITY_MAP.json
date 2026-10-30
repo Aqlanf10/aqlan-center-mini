@@ -92,7 +92,7 @@
   "anyOf": [],
   "scope": "appointment",
   "status": "canonical-done",
-  "note": "M2 slice 16: operation appointments.create through the same capacity engine on the admitted transaction (writeAppointmentInDay with the caller's client); appointment.create and capacity-override audit rows atomic; own scope books its own patients on its own party; override by appointments.override-capacity only; engine refusals roll back with the legacy codes."
+  "note": "M2 slice 16: operation appointments.create through the same capacity engine on the admitted transaction (writeAppointmentInDay with the caller's client); appointment.create and capacity-override audit rows atomic; own scope books its own patients on its own party; override by appointments.override-capacity only; engine refusals roll back with the legacy codes. 2026-10-30 scope boundary: patientScope=own cannot assign an outside patient to self, even with appointmentScope=all; prove current membership after day/doctor locks and before insertion. Other-doctor/unassigned and whole-patient/owner scheduling unchanged."
  },
  {
   "route": "/api/appointments/[id]",
@@ -561,8 +561,14 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 27: public display grants no staff authority; notice GET uses settings.view on an owning canonical read snapshot; PATCH uses the central operational-settings writer (settings.view prerequisite), CAS, post-lock session proof and atomic audit. Legacy branch preserved.",
+  "projection": {
+   "base": "Only on, version and canEdit; no patients, queue, settings dump or financial data.",
+   "groups": {
+    "canEdit": "settings.operational.edit from the same snapshot; never a write grant."
+   }
+  }
  },
  {
   "route": "/api/display/notice",
@@ -577,8 +583,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 27: public display grants no staff authority; notice GET uses settings.view on an owning canonical read snapshot; PATCH uses the central operational-settings writer (settings.view prerequisite), CAS, post-lock session proof and atomic audit. Legacy branch preserved."
  },
  {
   "route": "/api/documents/[id]",
@@ -4765,8 +4771,9 @@
   "need": [],
   "anyOf": [],
   "scope": "appointment",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 25: record read read:provider-blocks in one owning snapshot. With providerId: that doctor's blocks on the day when inside the appointment scope (own = the actor's party only; another doctor answers like one without blocks). Without providerId: the day panel — every in-scope active doctor and its blocks. canManage = appointments.schedule.manage (display only).",
+  "projection": {"legacy": "every admitted role read any doctor's blocks by id.", "groups": {"schedule": "block times and reason of in-scope doctors; doctor names for the day panel"}, "rows": "appointment scope all: every active doctor; own: the actor's own party; none: refused"}
  },
  {
   "route": "/api/provider-blocks",
@@ -4778,9 +4785,9 @@
    "appointments.schedule.manage"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "appointment",
+  "status": "canonical-done",
+  "note": "M2 slice 25: one admitted appointments.schedule.manage transaction; the appointment scope bounds the doctor (all: any active doctor; own: the actor's party; none: refused); the booking engine's appointments-day locks for every clinic day the block touches, ascending; reason required (≤300), at most 92 days; reports the overlapping booked/arrived appointments of that doctor (warning); provider_block.create audit atomic."
  },
  {
   "route": "/api/provider-blocks/[id]",
@@ -4792,9 +4799,9 @@
    "appointments.schedule.manage"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "appointment",
+  "status": "canonical-done",
+  "note": "M2 slice 25: one admitted appointments.schedule.manage transaction; the block locked; another doctor's block reads like a missing one for own scope (404); a second cancel is 409; provider_block.cancel audit atomic."
  },
  {
   "route": "/api/recall",
@@ -4807,8 +4814,9 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 24: record read read:recall (patient scope; own = the patient list's condition applied in SQL before the limits) in one owning snapshot; canRecord = appointments.create (display only).",
+  "projection": {"legacy": "every admitted role read every patient's open past bookings, missed appointments and lapsed patients.", "groups": {"identity": "name, phone, dates, note and doctor of the rows inside the patient scope"}, "rows": "patient scope all: every row; own: the clinician's patients only; none: refused"}
  },
  {
   "route": "/api/recall",
@@ -4822,8 +4830,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 24: one admitted appointments.create transaction; the row (appointment or patient) locked, its patient inside the patient scope (outside = missing 404); the first follow-up time kept; recall.contact audit atomic."
  },
  {
   "route": "/api/referrals/[id]",
@@ -5680,8 +5688,17 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Slice 26: one owning read snapshot; complete drawer aggregates, capability/scope-filtered details. No printing/export or hidden-detail subtotals. Owner approval 2026-10-30. Compound own-patient/all-appointment booking-to-receipt sequence reproduced then guarded at canonical assignment; drawer remains complete. See scope-boundary report 2026-10-30; activation remains held for review.",
+  "projection": {
+   "groups": {
+    "drawer": "finance.shifts.view: complete per-currency drawer and recent shift summaries; never calculated from filtered details",
+    "payments": "finance.payments.view AND current patient scope; own uses the central DOCTOR_PATIENT_CONDITION in SQL before the 1000-row limit; provenance only for visible receipts",
+    "expenses": "finance.expenses.view; at most 1000 expense details",
+    "notes": "Unattributed shift note/differenceReason require both detail grants and patientScope=all; omitted otherwise",
+    "operate": "finance.shifts.operate is display-only here; commands independently re-prove authority"
+   }
+  }
  },
  {
   "route": "/api/shifts",
@@ -5696,8 +5713,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Slice 26: canonical close, existing currency/drawer rules, lifecycle and row locks, authority re-proof after waiting, atomic audit. No durable request key; ambiguous outcomes need a fresh read and new human intent."
  },
  {
   "route": "/api/shifts",
@@ -5712,8 +5729,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Slice 26: canonical open and atomic audit with lifecycle lock and authority re-proof. State guard is not durable idempotency: a delayed retry after closing could open another shift. UI never automatically retries."
  },
  {
   "route": "/api/tasks",
@@ -6193,8 +6210,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 28: appointments.create on one admitted transaction and the existing next-session/capacity engine; current patient scope before any phone/link write, own appointment scope only on its responsible clinician. Day-window then visit lock, authority reproof after waits, NOWAIT patient/responsibility witnesses; same-client settings/service/provider reads. Actual new-file resolution additionally requires patients.create; missing clinical provenance still rolls back. Capacity override requires appointments.override-capacity plus reason. Booking and override audit atomic. No durable request key: overlap/nearby guards retained; UI verifies uncertain outcomes and requires new explicit intent, never automatic retry."
  },
  {
   "route": "/api/visits/[id]/reception-handoff",
@@ -6346,7 +6363,7 @@
      "need": [
       "appointments.create"
      ],
-     "note": "Creates the appointment from the waiting entry. Canonical (M2 slice 20)."
+     "note": "Creates the appointment from the waiting entry. Canonical (M2 slice 20). Same post-lock/pre-insert self-assignment boundary as direct booking: own-patient scope cannot bootstrap access through a new appointment, even with appointmentScope=all."
     },
     "booked": {
      "need": [],
