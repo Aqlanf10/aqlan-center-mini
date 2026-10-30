@@ -42,6 +42,10 @@ const nextConfig: NextConfig = {
    */
   output: "standalone",
 
+  outputFileTracingIncludes: {
+    "/**": ["./migrations/**/*"],
+  },
+
   /**
    * The backup/restore filesystem traces can discover project-root files that
    * are never imported by the application. Keep only this temporary, CI-only
