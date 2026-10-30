@@ -18,3 +18,9 @@ The initial Edge fixture run passed all six test bodies but timed out closing th
 ## Remaining review
 
 Attendance/leave/payroll integration, request retry behavior, employment termination, contracts and permissions require further review against Claude's current work before additional changes.
+
+## Candidate follow-up: fractional allocation browser constraint
+
+On candidate `fff3c794`, native number-input validation still defaulted to step 1 and blocked fractional allocations before submission. The existing writer accepts finite numbers in [0, 366], and the balance column is NUMERIC(5,2); it does not require whole days. Added `step="any"` to align the form with that existing validation without introducing a new precision/rounding policy or changing the server.
+
+Real Chromium with the actual React component and intercepted synthetic requests reproduced three failures before the fix: 2.5, 0.01 and 365.99 all reported `stepMismatch: true`. After the fix, all 14 fixture tests passed. Accepted inputs 1e2, 2.5, 0, 366, 0.01 and 365.99 reached POST as their exact numeric values. Empty, -0.01 and 366.01 triggered native invalid events on submit and sent no POST. Existing read-lifetime and canceled-decision tests remained green. This fixture does not exercise a live database; final-head CI and live staging acceptance are separate evidence.
