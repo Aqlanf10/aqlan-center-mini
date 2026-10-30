@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { CLINIC_BASE_CURRENCY, CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL, type ExpenseCategory } from "@/lib/expenses";
-import { useSetting } from "@/components/SettingsProvider";
-import { Logo } from "@/components/Icon";
+import { PrintMetadata } from "@/components/PrintDocument";
+import { ReportPrintHeader, ReportPrintFooter } from "@/components/ReportPrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString } from "@/lib/schedule";
@@ -26,11 +26,6 @@ import type { VisibleFinanceSummary } from "@/lib/finance-report-visibility";
 export default function FinanceReportsPage() {
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
-  const clinicName = useSetting("clinic.name");
-  const doctor = useSetting("clinic.lead_doctor");
-  const doctorTitle = useSetting("clinic.lead_doctor_title");
-  const phone = useSetting("clinic.phone");
-  const address = useSetting("clinic.address");
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const monthStart = `${today.slice(0, 7)}-01`;
 
@@ -91,38 +86,20 @@ export default function FinanceReportsPage() {
   ];
 
   return (
-    <main data-testid="finance-report" className="mx-auto max-w-3xl p-4 pb-24">
+    <main data-testid="finance-report" className="print-document-on-print mx-auto max-w-3xl p-4 pb-24 print:max-w-none print:p-0 print:bg-white">
       {/* ترويسة الطباعة: التقرير المالي كان يُطبع بلا اسمٍ ولا شعار — والورقة
           المالية أشد الأوراق حاجةً إلى هويةٍ تحمّل مسؤولية أرقامها. */}
       <div className="mb-3 hidden print:block" dir="rtl">
-        <div className="flex items-center gap-3 border-b-2 border-navy-900 pb-2">
-          <Logo className="h-14 w-14 shrink-0" />
-          <div className="min-w-0">
-            <p className="text-base font-black leading-snug text-navy-950">{clinicName}</p>
-            <p className="text-[10px] font-semibold text-slate-600">
-              {doctor} — {doctorTitle}
-            </p>
-            <p className="text-[9px] text-slate-500">
-              {address}
-              {phone ? (
-                <>
-                  {address ? " · " : ""}
-                  هاتف: <span dir="ltr">{phone}</span>
-                </>
-              ) : null}
-            </p>
-          </div>
-          <p className="ms-auto shrink-0 text-xs font-bold text-navy-900">التقرير المالي</p>
-        </div>
+        <ReportPrintHeader title="التقرير المالي" subtitle="البيانات المالية المصرّح بعرضها" />
       </div>
 
-      <PageHeader
+      <div className="print:hidden"><PageHeader
         title="التقرير المالي"
         subtitle="البيانات المالية المصرّح بعرضها"
         links={[...financeLinks("/finance/reports"), { href: "/finance/commissions", label: "العمولات" }]}
       >
         {summary ? <PrintButton /> : null}
-      </PageHeader>
+      </PageHeader></div>
 
       <div className="mb-3 flex flex-wrap gap-1.5 print:hidden">
         {presets.map(([label, start, end]) => (
@@ -156,11 +133,11 @@ export default function FinanceReportsPage() {
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : summary ? (
         <>
-          <p className="mb-3 text-sm font-bold text-slate-600">
-            {summary.from === summary.to
+          <PrintMetadata printOnly className="mb-3 text-sm font-bold text-slate-600">
+            <div className="line mb-3"><span className="hidden print:inline">الفترة</span><span>{summary.from === summary.to
               ? friendlyDateLong(summary.from)
-              : `${friendlyDateLong(summary.from)} — ${friendlyDateLong(summary.to)}`}
-          </p>
+              : `${friendlyDateLong(summary.from)} — ${friendlyDateLong(summary.to)}`}</span></div>
+          </PrintMetadata>
 
           {/* (P-01/D-1) الصافي بالعملة الأساسية — المقبوض والمصروف مكافئان مسجّلان بسعر يومهما. */}
           {summary.netMinor !== undefined ? <section data-testid="finance-net" className={`mb-4 rounded-2xl border-2 p-4 text-center ${
@@ -241,7 +218,7 @@ export default function FinanceReportsPage() {
               <ul className="space-y-1">
                 {summary.topServices.map((service) => (
                   <li key={`${service.name}-${service.currency}`} className="flex justify-between gap-3 text-sm">
-                    <span className="truncate text-slate-600">
+                    <span className="truncate text-slate-600 print:whitespace-normal print:overflow-visible print:text-clip print:[overflow-wrap:anywhere] print:min-w-0">
                       {service.name} × {service.count} <span className="text-[10px] text-slate-400">({service.currency})</span>
                     </span>
                     <span className="shrink-0 font-bold">{formatMoney(service.totalMinor, service.currency)}</span>
@@ -255,6 +232,7 @@ export default function FinanceReportsPage() {
           </section>
         </>
       ) : null}
+      {summary ? <div className="hidden print:block"><ReportPrintFooter /></div> : null}
     </main>
   );
 }

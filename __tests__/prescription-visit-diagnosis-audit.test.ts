@@ -306,3 +306,83 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     }
   });
 });
+
+describe("empty prescription caller fails closed before save or draft navigation", () => {
+  const printLabel = "طباعة الروشتة (A5)";
+  const validation = "أضف دواءً واحدًا على الأقل باسم مكتوب بالإنجليزية";
+  const writes = () => fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
+
+  it.each([null, "", "   ", "دواء", "123", `${"1".repeat(200)}A`])("rejects canonical-empty items: %s", (name) => {
+    render({ isOpen: true });
+    if (name !== null) {
+      click("إضافة دواء جديد");
+      change(medicinePlaceholder, name);
+    }
+    click(printLabel);
+    expect(writes()).toHaveLength(0);
+    expect(openMock).not.toHaveBeenCalled();
+    expect(contents(render().find((node) => node.props.role === "alert").props.children as ReactNode)).toContain(validation);
+  });
+
+  it("allows correction after validation and preserves official save-before-print", async () => {
+    render({ isOpen: true });
+    click(printLabel);
+    click("إضافة دواء جديد");
+    change(medicinePlaceholder, "SyntheticDrug");
+    click(printLabel);
+    await vi.waitFor(() => expect(openMock).toHaveBeenCalledWith("/print/prescription/91001?rx=92001", "_blank"));
+    expect(writes()).toHaveLength(1);
+    expect(contents(render().tree)).not.toContain(validation);
+  });
+
+  it("preserves mixed raw rows for the server canonical sanitizer", async () => {
+    render({ isOpen: true });
+    click("إضافة دواء جديد");
+    change(medicinePlaceholder, "   ");
+    click("إضافة دواء جديد");
+    const fields = elements(render().tree).filter(node => node.props.placeholder === medicinePlaceholder);
+    (fields[1].props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "  SyntheticDrug  " } });
+    click(printLabel);
+    await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
+    expect(writes()).toHaveLength(1);
+    const body = JSON.parse(writes()[0][1].body);
+    expect(body.items.map((item: { name: string }) => item.name)).toEqual(["   ", "  SyntheticDrug  "]);
+    const canonical = checkPrescriptionDraft({ ...body, visitId: null });
+    expect(canonical.ok).toBe(true);
+    if (canonical.ok) expect(canonical.value.items.map(item => item.name)).toEqual(["SyntheticDrug"]);
+  });
+
+  it("preserves a valid explicit draft fallback after save failure", async () => {
+    render({ isOpen: true });
+    click("إضافة دواء جديد");
+    change(medicinePlaceholder, "SyntheticDrug");
+    fetchMock.mockResolvedValue({ status: 500, json: async () => ({ message: "Synthetic failure" }) });
+    click(printLabel);
+    await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
+    expect(writes()).toHaveLength(1);
+    const url = new URL(openMock.mock.calls[0][0], "https://synthetic.invalid");
+    expect(url.searchParams.get("draft")).toBe("1");
+    expect(JSON.parse(url.searchParams.get("items")!)[0].name).toBe("SyntheticDrug");
+  });
+
+  it.each(["critical", "acknowledge"])("rejects emptied items from the %s secondary path", async (path) => {
+    render({ isOpen: true });
+    click("إضافة دواء جديد");
+    change(medicinePlaceholder, "SyntheticDrug");
+    const label = path === "critical" ? "عرض مسودة غير معتمدة (لا تُصرف كوصفة)" : "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا";
+    fetchMock.mockResolvedValue({
+      status: path === "critical" ? 409 : 200,
+      json: async () => path === "critical"
+        ? { safetyAlerts: [{ id: "synthetic", title: "Synthetic", message: "Synthetic", medicationName: "SyntheticDrug", severity: "critical" }] }
+        : { requiresAcknowledgement: true, acknowledgementToken: "synthetic-token", safetyWarnings: [] },
+    });
+    click(printLabel);
+    await vi.waitFor(() => expect(contents(render().tree)).toContain(label));
+    expect(openMock).not.toHaveBeenCalled();
+    change(medicinePlaceholder, "   ");
+    click(label);
+    expect(writes()).toHaveLength(1); // Initial safety evaluation only; no empty POST.
+    expect(openMock).not.toHaveBeenCalled();
+    expect(contents(render().tree)).toContain(validation);
+  });
+});

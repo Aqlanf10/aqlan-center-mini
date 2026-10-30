@@ -1,0 +1,74 @@
+/* A report modal prints only its selected document. The selector is conditional
+   on this mounted modal; it must never hide a different print route's header. */
+@page aqlan-report-modal {
+  size: A4 portrait;
+  margin: 8mm;
+}
+
+@page aqlan-report-modal-landscape {
+  size: A4 landscape;
+  margin: 8mm;
+}
+
+/* The approved contract's readable density, not fit-to-one-page compression. */
+.modal :global(.print-table-frame) > table { font-size: 9pt; line-height: 1.3; }
+.modal :global(.print-table-frame) th,
+.modal :global(.print-table-frame) td { padding: 1mm; vertical-align: top; overflow-wrap: anywhere; }
+.modal :global(.print-table-frame) th { font-family: inherit; font-size: 9pt; font-weight: 700; letter-spacing: normal; overflow-wrap: normal; word-break: normal; color: #000; background: #fff; border-bottom: 1px solid #000; }
+.modal :global(.print-table-frame) td { border-bottom: 1px solid #ccc; }
+.modal :global(.print-table-frame) tfoot td { color: #000; background: #f8fafc; border-top: 1px solid #000; }
+.modal :global(.print-table-frame) :global(.font-mono) { overflow-wrap: normal; word-break: normal; letter-spacing: normal; }
+.modal :global(.print-table-frame) [class*="text-[9px]"],
+.modal :global(.print-table-frame) [class*="text-[10px]"] { font-size: 8pt; }
+
+@media print {
+  :global(html):has(.modal),
+  :global(body):has(.modal),
+  :global(body):has(.modal) *:has(.modal) {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: white !important;
+    backdrop-filter: none !important;
+    z-index: auto !important;
+  }
+  :global(body):has(.modal) > :not(:has(.modal)):not(.modal):not(:global(.print-document-watermark)),
+  :global(body):has(.modal) *:has(.modal) > :not(:has(.modal)):not(.modal) {
+    display: none !important;
+  }
+  .modal,
+  .modal > div {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: white !important;
+    backdrop-filter: none !important;
+    z-index: auto !important;
+  }
+  .modal { page: aqlan-report-modal; }
+  .modal.landscape { page: aqlan-report-modal-landscape; }
+  .modal :global(.print-table-frame) :global(.truncate) {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+    max-width: none;
+  }
+  .modal :global(.print-document) {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  .modal :global(.page-break) {
+    break-after: page;
+    page-break-after: always;
+  }
+}

@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, getSettingsSafe, getVisitOwner, visitWalkout } from "@/lib/db";
 import { CURRENCY_LABEL, formatMoney } from "@/lib/money";
@@ -37,15 +38,15 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
       <div className="no-print" style={{ marginBottom: "8px" }}><PrintButton /></div>
       <div className="sheet sheet-a5">
         <PrintHeader settings={settings} title="ملخّص الزيارة" compact />
-        <div className="line"><span>المريض</span><span style={{ fontWeight: 700 }}>{walkout.patientName}</span></div>
+        <PrintMetadata><div className="line"><span>المريض</span><span style={{ fontWeight: 700 }}>{walkout.patientName}</span></div>
         {walkout.patientNumber ? (
           <div className="line"><span>رقم الملف</span><span className="num" dir="ltr">{walkout.patientNumber}</span></div>
         ) : null}
         <div className="line"><span>التاريخ</span><span>{friendlyDateLong(day)}</span></div>
-        {walkout.doctorName ? <div className="line"><span>الطبيب</span><span>{walkout.doctorName}</span></div> : null}
+        {walkout.doctorName ? <div className="line"><span>الطبيب</span><span>{walkout.doctorName}</span></div> : null}</PrintMetadata>
 
         <div className="rule" />
-        <table className="items">
+        <PrintTableFrame><table className="items">
           <thead>
             <tr><th>عمل اليوم</th><th className="num">الكمية</th><th className="num">السعر</th></tr>
           </thead>
@@ -65,7 +66,7 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></PrintTableFrame>
         {financialReviewRequired ? <p data-testid="walkout-print-financial-review" className="footer-note">
           توجد بنود تحتاج مراجعة مالية؛ لا يثبت هذا الملخص أنها مجانية أو مشمولة أو مستحقة للتحصيل.
           الفواتير والمدفوعات والأرصدة المثبتة أدناه حقائق مالية مستقلة عن هذه المراجعة.
