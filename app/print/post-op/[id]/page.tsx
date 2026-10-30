@@ -258,7 +258,7 @@ export default async function PostOpPrintPage({
           <div>
             <span>طوارئ واستفسارات المركز: </span>
             <strong style={{ color: "#0f172a" }}>
-              {settings["clinic.phone"] || "المركز الطبي"}
+              <bdi dir="ltr">{settings["clinic.phone"] || "المركز الطبي"}</bdi>
             </strong>
           </div>
         </div>

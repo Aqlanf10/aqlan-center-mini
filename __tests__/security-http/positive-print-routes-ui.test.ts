@@ -111,6 +111,25 @@ describe("positive persisted print routes on the built app", () => {
       const compactPdf = pdfText.replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
       expect(compactPdf).toContain(marker);
       if (name === "prescription") expect(compactPdf).toContain(drug);
+      if (name === "post-op") {
+        const phone = (await page.locator(".print-contact-footer span[dir='ltr']").innerText()).trim();
+        expect(phone).toBe("04-253028"); // Seeded clinic fixture, not production settings.
+        const nativeText = pdfText.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+        expect(nativeText.split(phone)).toHaveLength(3); // emergency line and footer
+        expect(nativeText).not.toContain("253028-04");
+        expect(await page.locator("bdi[dir='ltr']").innerText()).toBe(phone);
+      }
+      if (name === "patient-card") {
+        // A short native A6 card must keep its contact footer with the patient
+        // and appointment, not silently overflow into a footer-only sheet.
+        expect(papers).toHaveLength(1);
+        expect(compactPdf).toContain("04/01/2031");
+        expect(compactPdf).toContain("9:30");
+        const footerPhone = await page.locator(".print-contact-footer span[dir='ltr']").innerText();
+        expect(footerPhone.trim().length).toBeGreaterThan(0);
+        expect(compactPdf).toContain(footerPhone.trim());
+        expect(await page.locator(".print-metadata").count()).toBe(0);
+      }
       expect(text).toContain(fixture.title);
       expect(text).toContain(marker);
       expect(text).toContain(fixture.extra);
