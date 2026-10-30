@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   findUserByUsername: vi.fn(),
   canAccessPatient: vi.fn(),
   getPatient: vi.fn(),
+  getParty: vi.fn(),
   getPrescription: vi.fn(),
   getClinicalVisit: vi.fn(),
   savePrescription: vi.fn(),
@@ -25,11 +26,13 @@ vi.mock("@/lib/db", async (importOriginal) => {
     ...actual,
     findUserByUsername: mocks.findUserByUsername,
     getPatient: mocks.getPatient,
+    getParty: mocks.getParty,
     getPrescription: mocks.getPrescription,
     getClinicalVisit: mocks.getClinicalVisit,
     savePrescription: mocks.savePrescription,
     voidPrescription: mocks.voidPrescription,
     getSettingsSafe: mocks.getSettingsSafe,
+    getPrescriptionPrintSettings: mocks.getSettingsSafe,
   };
 });
 
@@ -775,6 +778,28 @@ describe("الإقرار مربوط بالتحذيرات التي رآها ال�
     expect(response.status).toBe(409);
     const payload = await response.json();
     expect(payload.ackRejected).toBe(true);
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+});
+
+describe("prescriber snapshot authority", () => {
+  it.each(["د. طبيب صناعي", "Dr Synthetic Dentist"])("snapshots registry name %s while keeping actor and issuer", async name => {
+    mocks.requireSession.mockResolvedValue({ ...DOCTOR_SESSION, role: "admin", username: "admin-actor" });
+    mocks.getParty.mockResolvedValue({ id: 5, kind: "doctor", isActive: true, name });
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: 5, prescribingDoctorName: "UNTRUSTED", items: [{ name: "SYNTHETIC" }] }),
+    }));
+    expect(response.status).toBe(201);
+    expect(mocks.savePrescription).toHaveBeenCalledWith(expect.objectContaining({ prescribingDoctorName: name }), "admin-actor", 5);
+  });
+  it("does not silently authorize admin issuance as another clinician", async () => {
+    mocks.requireSession.mockResolvedValue({ ...DOCTOR_SESSION, role: "admin", username: "admin-actor" });
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: 99, items: [{ name: "SYNTHETIC" }] }),
+    }));
+    expect(response.status).toBe(403);
     expect(mocks.savePrescription).not.toHaveBeenCalled();
   });
 });

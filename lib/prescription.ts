@@ -108,7 +108,15 @@ export function sanitizeRxItems(input: unknown): RxItem[] {
   return items;
 }
 
+/** A clinician-entered display snapshot, not a signature or verified identity. */
+export function sanitizePrescribingDoctorName(value: unknown): string {
+  // Explicitly strip control and bidi-override characters from display names.
+  // eslint-disable-next-line no-control-regex
+  return text(value, MAX_FIELD).replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim();
+}
+
 export interface PrescriptionDraft {
+  prescribingDoctorName?: string;
   patientId: number;
   visitId: number | null;
   diagnosis: string;
@@ -128,6 +136,7 @@ export type DraftCheck =
  * كاملة يحتاج أن يعرف **ماذا** نقص لا أن يُقال له «طلب غير صالح».
  */
 export function checkPrescriptionDraft(input: {
+  prescribingDoctorName?: unknown;
   patientId: number;
   visitId: number | null;
   diagnosis: unknown;
@@ -150,6 +159,7 @@ export function checkPrescriptionDraft(input: {
   return {
     ok: true,
     value: {
+      prescribingDoctorName: sanitizePrescribingDoctorName(input.prescribingDoctorName),
       patientId: input.patientId,
       visitId: input.visitId,
       diagnosis: text(input.diagnosis, MAX_TEXT),

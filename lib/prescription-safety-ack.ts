@@ -56,6 +56,7 @@ const ACK_TOKEN_VERSION = 2;
  * جرعة أو تعليمة يغيّر التمثيل ويُبطل الرمز. */
 export function canonicalPrescriptionForAck(draft: PrescriptionDraft): string {
   return JSON.stringify({
+    prescribingDoctorName: draft.prescribingDoctorName ?? "",
     patientId: draft.patientId,
     visitId: draft.visitId,
     diagnosis: draft.diagnosis,

@@ -1899,6 +1899,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         patientPhone={readyPatientContext?.phone ?? null}
         patientContextStatus={patientContextStatus}
         defaultDiagnosis={notes.diagnosis}
+        defaultDoctorPartyId={doctorId}
         defaultDoctorName={doctors.find((d) => d.id === doctorId)?.name ?? ""}
       />
 

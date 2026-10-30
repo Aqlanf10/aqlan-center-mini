@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getClinicalVisit, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
+import { getClinicalVisit, getParty, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { checkPrescriptionDraft } from "@/lib/prescription";
@@ -74,7 +74,25 @@ export async function POST(request: Request) {
     typeof body.acknowledgedSafetyToken === "string" && body.acknowledgedSafetyToken.length > 0
       ? body.acknowledgedSafetyToken
       : null;
+  // Keep issuer doctorPartyId unchanged: it also owns void authorization.
+  // Cross-clinician issuance awaits an explicit workflow decision.
+  let prescribingDoctorName = "";
+  if (body.prescribingDoctorPartyId !== undefined) {
+    const selectedId = Number(body.prescribingDoctorPartyId);
+    if (!Number.isInteger(selectedId) || selectedId <= 0) {
+      return NextResponse.json({ message: "اختر طبيبًا صالحًا من الزيارة." }, { status: 400 });
+    }
+    if (selectedId !== doctorPartyId) {
+      return NextResponse.json({ message: "الطبيب المحدد يختلف عن الهوية السريرية للحساب؛ الإصدار نيابة عن طبيب آخر غير مدعوم حاليًا. يمكن مراجعة المسودة دون اعتمادها." }, { status: 403 });
+    }
+    const selectedDoctor = await getParty(selectedId).catch(() => null);
+    if (!selectedDoctor || selectedDoctor.kind !== "doctor" || !selectedDoctor.isActive || !selectedDoctor.name.trim()) {
+      return NextResponse.json({ message: "الطبيب المحدد غير موجود أو غير نشط." }, { status: 400 });
+    }
+    prescribingDoctorName = selectedDoctor.name;
+  }
   const draft = checkPrescriptionDraft({
+    prescribingDoctorName,
     patientId,
     visitId,
     diagnosis: body.diagnosis,

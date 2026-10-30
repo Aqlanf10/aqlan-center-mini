@@ -5,8 +5,9 @@ import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
+import { PrescriptionMedicationLibrary } from "./PrescriptionMedicationLibrary";
 import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
-import { sanitizeRxItems } from "@/lib/prescription";
+import { sanitizeRxItems, sanitizePrescribingDoctorName } from "@/lib/prescription";
 import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workflow";
 
 /**
@@ -65,6 +66,7 @@ interface PrescriptionModalProps {
   patientContextStatus?: "loading" | "unavailable" | "ready";
   defaultDiagnosis?: string;
   defaultDoctorName?: string;
+  defaultDoctorPartyId?: number | null;
 }
 
 export function PrescriptionModal({
@@ -77,6 +79,7 @@ export function PrescriptionModal({
   patientContextStatus,
   defaultDiagnosis = "",
   defaultDoctorName = "",
+  defaultDoctorPartyId = null,
 }: PrescriptionModalProps) {
   const clinicName = useClinicName();
   // A closed modal stays mounted while the visit diagnosis is loaded/edited.
@@ -84,7 +87,7 @@ export function PrescriptionModal({
   // explicit template/print choices own the Rx draft across cancellation/reopening.
   const [diagnosisOverride, setDiagnosisOverride] = useState<string | null>(null);
   const diagnosis = diagnosisOverride ?? defaultDiagnosis;
-  const [doctorName, setDoctorName] = useState(defaultDoctorName);
+  const doctorName = defaultDoctorName;
   const [notes, setNotes] = useState("");
   const [lang, setLang] = useState<InstructionsLang>("both");
   /* تبدأ فارغة: القالب اختيارٌ صريح لا حالة افتراضية (P0.10) — فتحُ المودال
@@ -191,10 +194,11 @@ export function PrescriptionModal({
 
   const buildPrintUrl = () => {
     if (!validatePrintableItems()) return null;
-    /* معاينة مسودة معلنة (P0.9): تُطبع بعلامة «مسودة غير معتمدة» وباسم الطبيب
-     * من الجلسة — لا من الرابط. الوثيقة الرسمية وحدها (rx) تُطبع كوصفة صرف. */
+    /* معاينة مسودة معلنة (P0.9): تُطبع بعلامة «مسودة للمراجعة» وباسم الطبيب
+     * المدخل للمراجعة — لا اعتماد أو توقيع تلقائي. الوثيقة الرسمية وحدها (rx) تُطبع كوصفة صرف. */
     const params = new URLSearchParams();
     params.set("draft", "1");
+    params.set("doctorName", sanitizePrescribingDoctorName(doctorName));
     if (diagnosis) params.set("diagnosis", diagnosis);
     if (notes) params.set("notes", notes);
     params.set("lang", lang);
@@ -211,6 +215,7 @@ export function PrescriptionModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         patientId,
+        ...(defaultDoctorPartyId ? { prescribingDoctorPartyId: defaultDoctorPartyId } : {}),
         diagnosis,
         notes,
         instructionsLang: lang,
@@ -223,7 +228,7 @@ export function PrescriptionModal({
   };
 
   const openOfficialPrint = (prescriptionId: number) => {
-    /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من السجل (createdBy)
+    /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من snapshot السجل
      * لا من الرابط — فلا وثيقة رسمية تحمل اسمًا مزوّرًا (P0.9). */
     const params = new URLSearchParams();
     params.set("rx", String(prescriptionId));
@@ -464,6 +469,8 @@ export function PrescriptionModal({
             </div>
           )}
 
+          <PrescriptionMedicationLibrary />
+
           {/* قوالب الإجراءات والتشخيصات — لا أدوية (مراجعة الجولة الثانية):
            * تُعبّئ نوع الحالة والتشخيص والملاحظات الإجرائية فقط؛ اختيار الدواء
            * والجرعة يبقى بيد الطبيب، وتظهر معها قائمة تحقق سريري. */}
@@ -683,17 +690,19 @@ export function PrescriptionModal({
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                اسم الطبيب المعالج
+                الطبيب المحدد في الزيارة
               </label>
               <input
                 type="text"
                 value={doctorName}
-                onChange={(e) => setDoctorName(e.target.value)}
-                placeholder="د. طبيب الأسنان"
+                readOnly
+                placeholder="اختر الطبيب من الزيارة"
                 className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs focus:border-brand-navy focus:outline-none"
               />
             </div>
           </div>
+
+          <p className="text-xs text-slate-500">الاسم من الطبيب المحدد في الزيارة. الإصدار باسم طبيب مختلف عن هوية الحساب السريرية غير مدعوم حاليًا؛ معاينة المسودة لا تعتمدها.</p>
 
           {/* قائمة الأدوية */}
           <div>
