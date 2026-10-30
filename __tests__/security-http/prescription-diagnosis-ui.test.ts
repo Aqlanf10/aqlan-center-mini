@@ -103,7 +103,7 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
       else if (holdPatient) pendingPatients.push(route);
       else await json(route, patientPayload, patientStatus);
     }
-    else if (path === `/api/patients/${contextPatientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
+    else if (path === `/api/patients/${contextPatientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 98104, canChooseAnyDoctor: false, doctors: [{ id: 98104, name: "طبيب تجريبي" }] } });
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") await json(route, [{ id: 98104, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);
@@ -214,7 +214,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
       expect(await prints(f.page)).toEqual([]);
 
       const expected = {
-        patientId, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
+        patientId, prescribingDoctorPartyId: 98104, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
         instructionsLang: "en", items: [medicine],
       };
       f.holdPrescriptionPreview();
