@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { CanonicalNextSession } from "./CanonicalNextSession";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
 import { STATUS_LABEL } from "@/lib/appointment-lifecycle";
@@ -138,6 +139,7 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
                 <li key={visit.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                   <span className="font-semibold text-slate-700">{new Date(visit.arrivedAt).toLocaleString("ar-YE-u-nu-latn", { dateStyle: "medium", timeStyle: "short" })}</span>
                   <span className="rounded-lg bg-slate-50 px-2 py-0.5 text-xs font-bold text-slate-600">{VISIT_STATUS_LABEL[visit.status] ?? visit.status}</span>
+                  <CanonicalNextSession visitId={visit.id} patientId={patient.id} />
                 </li>
               ))}
             </ul>

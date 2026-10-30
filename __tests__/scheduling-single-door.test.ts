@@ -57,14 +57,14 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
   });
 
   it("كاتبو اليوم المقفل (createNextSession / confirmBookingRequest / schedulePlannedVisit) لا يُستدعون إلا من مسارٍ يحكم", () => {
-    const writers = ["createNextSession", "confirmBookingRequest", "schedulePlannedVisit"];
+    const writers = ["createNextSession", "createNextSessionWith", "confirmBookingRequest", "schedulePlannedVisit"];
     const callers = production
       .filter(({ code }) => writers.some((name) => calls(code, name)))
       .map(({ file }) => file).sort();
     // db.ts: أغلفته الداخلية تحت القفل نفسه؛ والبقية مساراتٌ تُثبَت أدناه — ملفٌّ جديد يستدعيهم يسقط هنا.
     // The booking-request confirmation (M2 slice 21) and planned-visit scheduling (slice 22)
     // doors are lib files shared by the legacy and canonical branches of their routes.
-    const doors = ["lib/booking-request-confirm.ts", "lib/planned-visit-schedule.ts"];
+    const doors = ["lib/booking-request-confirm.ts", "lib/planned-visit-schedule.ts", "lib/canonical-next-session.ts"];
     expect(callers).toEqual(["app/api/visits/[id]/next/route.ts", ...doors, "lib/db.ts"].sort());
     const bookingRoute = production.find(({ file }) => file === "app/api/booking-requests/[id]/route.ts")!;
     expect(calls(bookingRoute.code, "confirmThroughEngine")).toBe(true);
@@ -111,7 +111,7 @@ describe("TD-03: بابٌ واحد للحكم على المواعيد", () => {
     expect(writers.sort()).toEqual([
       "confirmBookingRequest",     // يُحكم عليه في مسار طلبات الحجز تحت القفل
       "createAppointment",        // خام — للسكربتات فقط (حارس أعلاه)
-      "createNextSession",        // يُحكم عليه في مسار الزيارة التالية تحت القفل
+      "createNextSessionWith",    // يُحكم عليه في مسار الزيارة التالية تحت القفل
       "insertAppointmentOnClient", // قلب bookAppointment
       "schedulePlannedVisit",     // يُحكم عليه عبر judge في مسار الجلسة المخطَّطة
     ]);

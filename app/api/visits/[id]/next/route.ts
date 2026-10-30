@@ -1,3 +1,6 @@
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalWaitingFailure } from "@/lib/canonical-patient-http";
+import { CanonicalNextSessionRefusal, commandCanonicalNextSession } from "@/lib/canonical-next-session";
 import { readReturnBookingContext } from "@/lib/return-booking-context";
 import { parseReturnBookingSource } from "@/lib/return-booking-source";
 import { NextResponse } from "next/server";
@@ -23,6 +26,22 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  * السعة — يمرّ منه الاثنان.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); }
+    catch (error) { const bounded = bodyErrorResponse(error); if (bounded) { bounded.headers.set("Cache-Control", NO_STORE["Cache-Control"]); return bounded; }
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try {
+      const result = await commandCanonicalNextSession(selected.handle, Number((await context.params).id), body);
+      return NextResponse.json(result.ok ? result.value : result.conflict, { status: result.ok ? 201 : 409, headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalNextSessionRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      if ((error as { code?: string }).code === "55P03") return NextResponse.json({ code: "return_booking_source_changed", message: "يجري تحديث ملف المريض أو سياق العودة. حدّث البيانات وأعد المحاولة." }, { status: 409, headers: NO_STORE });
+      return canonicalWaitingFailure(error, "لم يتأكد الحجز. تحقّق من المواعيد قبل أي محاولة جديدة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

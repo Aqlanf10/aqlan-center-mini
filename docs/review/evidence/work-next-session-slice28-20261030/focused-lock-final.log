@@ -1,0 +1,8 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+
+ Test Files  6 passed (6)
+      Tests  67 passed (67)
+   Start at  20:44:59
+   Duration  11.55s (transform 1.49s, setup 0ms, import 4.87s, tests 5.40s, environment 1ms)

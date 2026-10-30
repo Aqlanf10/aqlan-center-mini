@@ -2978,6 +2978,7 @@ async function resolveVisitPatientDetailed(
   visit: { id: number; patient_name: string; patient_phone: string | null; patient_id: number | null },
   overridePhone?: string | null,
   lockedPatientId?: number | null,
+  admit?: (patientId: number | null) => Promise<void>,
 ): Promise<{ patientId: number; created: boolean }> {
   let created = false;
   const rawPhone = overridePhone ?? visit.patient_phone;
@@ -2998,6 +2999,9 @@ async function resolveVisitPatientDetailed(
     // Refuse before updating that patient; retry can acquire patient → visit in the proper order.
     throw new ClinicalPlanConflict("تغير ربط ملف المريض أثناء الحفظ. حدّث الزيارة وأعد المحاولة.");
   }
+  // Canonical composition checks the resolved existing file BEFORE any link can
+  // manufacture a patient relationship. null denotes the actual creation branch.
+  await admit?.(patientId);
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     const { rows } = await client.query(
@@ -3028,12 +3032,13 @@ async function resolveVisitPatientDetailed(
  * This closes the walk-in (patient_id NULL, existing phone) warning bypass. */
 export async function prepareNextSessionPatient(
   client: DbClient, input: { visitId: number; phone: string | null },
+  admit?: (patientId: number | null) => Promise<void>,
 ): Promise<number | null> {
   const { rows } = await client.query<{
     id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
   }>(`SELECT id, patient_name, patient_phone, patient_id FROM visits WHERE id = $1 FOR UPDATE`, [input.visitId]);
   if (!rows[0]) return null;
-  return resolveVisitPatient(client, rows[0], input.phone ?? rows[0].patient_phone);
+  return (await resolveVisitPatientDetailed(client, rows[0], input.phone ?? rows[0].patient_phone, undefined, admit)).patientId;
 }
 
 export async function createNextSession(
@@ -3049,22 +3054,33 @@ export async function createNextSession(
   runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
   await ensureSchema();
-  if (!runOn) {
-    const outer = await getPool().connect();
-    try {
-      await outer.query("BEGIN");
-      const done = await createNextSession(input, outer);
-      if (done === null) { await outer.query("ROLLBACK"); return null; }
-      await outer.query("COMMIT");
-      return done;
-    } catch (error) {
-      await outer.query("ROLLBACK").catch(() => {});
-      throw error;
-    } finally {
-      outer.release();
-    }
-  }
-  const client = runOn;
+  if (runOn) return createNextSessionWith(runOn, input);
+  const outer = await getPool().connect();
+  try {
+    await outer.query("BEGIN");
+    const done = await createNextSessionWith(outer, input);
+    await outer.query(done === null ? "ROLLBACK" : "COMMIT");
+    return done;
+  } catch (error) {
+    await outer.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally { outer.release(); }
+}
+
+/** Same writer on the admitted transaction; no schema initialization or second
+ * connection. Caller owns day locks, patient admission and capacity judgement. */
+export async function createNextSessionWith(
+  client: DbClient,
+  input: {
+    visitId: number;
+    date: string;
+    time: string;
+    durationMinutes: number;
+    phone: string | null;
+    note: string | null;
+    doctorId?: number | null;
+  },
+): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
   const { rows: visits } = await client.query<{
     id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
   }>(
@@ -27142,7 +27158,12 @@ export async function lockAppointmentServiceForBooking(client: DbClient, id: num
  */
 export async function resolveServiceByLegacyType(type: string): Promise<AppointmentService | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<AppointmentServiceRow>(
+  return resolveServiceByLegacyTypeWith(getPool(), type);
+}
+
+/** Same lookup on the admitted booking transaction. */
+export async function resolveServiceByLegacyTypeWith(client: Pick<DbClient, "query">, type: string): Promise<AppointmentService | null> {
+  const { rows } = await client.query<AppointmentServiceRow>(
     `${SERVICE_SELECT} WHERE legacy_type = $1 OR code = $1 ORDER BY is_active DESC, id LIMIT 1`,
     [type],
   );

@@ -6210,8 +6210,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 28: appointments.create on one admitted transaction and the existing next-session/capacity engine; current patient scope before any phone/link write, own appointment scope only on its responsible clinician. Day-window then visit lock, authority reproof after waits, NOWAIT patient/responsibility witnesses; same-client settings/service/provider reads. Actual new-file resolution additionally requires patients.create; missing clinical provenance still rolls back. Capacity override requires appointments.override-capacity plus reason. Booking and override audit atomic. No durable request key: overlap/nearby guards retained; UI verifies uncertain outcomes and requires new explicit intent, never automatic retry."
  },
  {
   "route": "/api/visits/[id]/reception-handoff",

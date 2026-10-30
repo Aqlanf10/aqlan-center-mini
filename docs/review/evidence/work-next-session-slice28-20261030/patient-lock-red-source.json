@@ -1,0 +1,8 @@
+{
+  "stage": "unpublished slice28 draft, before fix",
+  "sha256": "fb5d636070790ba42ee50e71621497fa3c16a7a1ea4427bafb750c8008d873f8",
+  "path": "lib/canonical-next-session.ts",
+  "baselineCommit": "27f0818fb143569324772290424dd7c903d4c2da",
+  "expectedFailure": "40P01 shared patient row lock upgrade",
+  "fixedSourceSha256": "3c2cf22afa57c68a91a62637c9c7d25a1ec5a4623494e5f24c98d4516984a39b"
+}
