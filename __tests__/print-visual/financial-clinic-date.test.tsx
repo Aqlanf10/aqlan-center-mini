@@ -27,14 +27,15 @@ vi.mock("@/lib/receipt-provenance-db", () => ({ readReceiptProvenance: async () 
 vi.mock("@/lib/db", async original => ({ ...await original<typeof import("../../lib/db")>(),
   CLINIC_TIME_ZONE: "Asia/Aden", getSettingsSafe: async () => SETTING_DEFAULTS, printCount: async () => 0,
   getPatient: async () => ({ id: 17, fullName: "مريض اصطناعي", patientNumber: "SYN-17" }),
-  getPayment: async () => fixture.payment,
+  getPayment: async () => fixture.payment, getInvoice: async () => fixture.invoice,
   patientStatementSnapshot: async () => ({ ledger: { invoices: [fixture.invoice], payments: [fixture.payment], openings: [] },
     planCurrencies: new Map(), plans: [], historicalAgreements: [] }),
 }));
 import StatementPage from "../../app/print/statement/[id]/page";
+import InvoicePage from "../../app/print/invoice/[id]/page";
 import ReceiptPage from "../../app/print/receipt/[id]/page";
 
-it("prints the same clinic day on statement and native A6 receipt without clipping", async () => {
+it("prints the same clinic day on invoice, statement and native A6 receipt without clipping", async () => {
   const css = (await postcss([tailwindcss(tailwindConfig), autoprefixer()])
     .process(readFileSync(resolve("app/globals.css"), "utf8"), { from: resolve("app/globals.css") })).css
     + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8");
@@ -42,8 +43,8 @@ it("prints the same clinic day on statement and native A6 receipt without clippi
   const output = resolve(".settings-ui-artifacts/unified-print"); mkdirSync(output, { recursive: true });
   const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
   try {
-    for (const kind of ["statement", "receipt"] as const) {
-      const node = await (kind === "statement" ? StatementPage : ReceiptPage)({ params: Promise.resolve({ id: "17" }) });
+    for (const kind of ["statement", "receipt", "invoice"] as const) {
+      const node = await (kind === "statement" ? StatementPage : kind === "invoice" ? InvoicePage : ReceiptPage)({ params: Promise.resolve({ id: "17" }) });
       const body = renderToStaticMarkup(node);
       expect(body).toContain("الجمعة 30/10/2026");
       expect(body).not.toContain("الخميس 29/10/2026");
@@ -63,7 +64,7 @@ it("prints the same clinic day on statement and native A6 receipt without clippi
           words: [...p.getElementsByTagName("word")].map(w => ({ text: w.textContent, xMin: Number(w.getAttribute("xMin")), xMax: Number(w.getAttribute("xMax")), yMin: Number(w.getAttribute("yMin")), yMax: Number(w.getAttribute("yMax")) })) }));
       }, xml);
       expect(pages).toHaveLength(1);
-      expect(pages[0].words.some(w => w.text?.includes("SYN-R-00021"))).toBe(true);
+      expect(pages[0].words.some(w => w.text?.includes(kind === "invoice" ? "SYN-INV-DATE" : "SYN-R-00021"))).toBe(true);
       expect(pages[0].words.some(w => w.text?.includes("30/10/2026"))).toBe(true);
       for (const word of pages[0].words) {
         expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.yMin).toBeGreaterThanOrEqual(0);

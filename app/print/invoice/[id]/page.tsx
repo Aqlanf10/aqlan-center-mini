@@ -1,8 +1,9 @@
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { getInvoice, getPatient, getSettingsSafe, printCount } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getInvoice, getPatient, getSettingsSafe, printCount } from "@/lib/db";
 import { formatMoney, isCurrency } from "@/lib/money";
-import { friendlyDateLong, invoiceWhatsAppSummaryText, toWhatsAppNumber, whatsAppDirectLink } from "@/lib/reminders";
+import { formatClinicDate } from "@/lib/clinic-clock";
+import { invoiceWhatsAppSummaryText, toWhatsAppNumber, whatsAppDirectLink } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { canViewMoney } from "@/lib/roles";
@@ -78,7 +79,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         </div>
         <div className="line">
           <span>التاريخ</span>
-          <span>{friendlyDateLong(invoice.createdAt.slice(0, 10))}</span>
+          <span>{formatClinicDate(invoice.createdAt, CLINIC_TIME_ZONE)}</span>
         </div></PrintMetadata>
         {invoice.status === "cancelled" ? (
           <p className="amount-box" style={{ borderStyle: "dashed" }}>ملغاة</p>

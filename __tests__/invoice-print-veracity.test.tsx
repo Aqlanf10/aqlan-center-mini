@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.requireSession }));
 vi.mock("@/lib/db", () => ({
-  getInvoice: mocks.getInvoice, getPatient: mocks.getPatient,
+  CLINIC_TIME_ZONE: "Asia/Aden", getInvoice: mocks.getInvoice, getPatient: mocks.getPatient,
   getSettingsSafe: mocks.getSettingsSafe, printCount: mocks.printCount,
 }));
 import InvoicePage from "../app/print/invoice/[id]/page";
@@ -120,4 +120,13 @@ it.each(["doctor", "assistant"])("denies %s invoice printing before reading fina
   await expect(render()).rejects.toThrow();
   expect(mocks.getInvoice).not.toHaveBeenCalled();
   expect(mocks.getPatient).not.toHaveBeenCalled();
+});
+
+
+it("keeps the printed invoice on the same clinic day as its account and statement", async () => {
+  const record = { ...structuredClone(invoice), createdAt: "2026-10-29T23:31:00Z" };
+  const before = structuredClone(record);
+  mocks.getInvoice.mockResolvedValue(record);
+  expect(await render()).toContain("الجمعة 30/10/2026");
+  expect(record).toEqual(before);
 });
