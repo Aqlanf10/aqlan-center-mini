@@ -131,3 +131,25 @@ Exact commands and final test counts belong in the release PR. Historical PR483
 results are not evidence for this extraction. Real browser, hosted CI, Staging,
 backup readiness and Production checks must be reported separately, never inferred
 from focused tests. No real patient data belongs in published evidence.
+
+## Synthetic recovery characterization (2026-10-30)
+
+The test-only fixture `__tests__/fixtures/patient-numbering/cancelled-booking-0090.sql`
+is pinned to cancelled PR492 source commit
+`c69c0ac04db22d0971b1aecabaf7d0e595770e10`, blob
+`598faa8f495f3f5ead642ebdf060515770c366d0`, SHA256
+`608eeee37b44a59cb4d26e915bd0b2610cf619103905be1fca0c2abe77c52e25`.
+The `608eeee3` prefix identifies the SQL checksum, **not a source commit**.
+This fixture is outside the migration registry and is never applied by startup.
+The owned synthetic rehearsal installs that historical metadata before late0080,
+then verifies unchanged booking rows, column definitions, index definitions and
+all earlier registry rows across upgrade/restart; unknown0090 remains disclosed.
+It characterizes this branch's b554/main0089 composition only, not later main,
+Rx0090/0091, or the actual Stage ledger.
+
+Numbering restore tests include a synthetic durable document with exact restored
+bytes and unchanged patient-document linkage, and lower/equal/higher sequence
+high-water replay with both called states and repeated replay before allocation.
+These local synthetic checks do not establish protected live-backup availability,
+a pinned rollback application artifact, Stage compatibility or owner acceptance.
+All deployment/rollback gates above remain in force.

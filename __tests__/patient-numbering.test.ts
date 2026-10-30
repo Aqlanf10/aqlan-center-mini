@@ -12,7 +12,7 @@ describe("patient file number command parsing", () => {
     expect(parsePatientNumber("9223372036854775807")).toBe("P-9223372036854775807");
   });
   it.each([null, 7000, "0", "-1", "1e4", "1.5", "P-1'", "A-07000", "9223372036854775808", "9".repeat(1000)])("rejects invalid identifier %s", (value) => expect(parsePatientNumber(value)).toBeNull());
-  it("allows explicit edits below the new-file floor but never lowers the floor", () => {
+  it("parses historical aliases below the new-file floor without allowing a lower floor", () => {
     expect(parsePatientNumber("42")).toBe("P-00042");
     expect(parseNumberingFloor("6999")).toBeNull();
     expect(parseNumberingFloor("7000")).toBe("7000");
@@ -42,4 +42,12 @@ it("predeployment readiness only reads counts and refuses ambiguous aliases",asy
  expect(sql).toContain("FROM public.patients"); // Preflight deliberately restricts search_path to pg_catalog.
  expect(sql.trim().startsWith("SELECT")).toBe(true);expect(sql).not.toMatch(/INSERT|UPDATE|DELETE|ALTER|CREATE|DROP/);
  expect(await patientNumberingReadiness({query:async()=>({rows:[{ambiguous_alias_groups:0}]})})).toEqual({ready:true,ambiguousAliasGroups:0});
+});
+
+it.each([undefined, null, "0", -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])("readiness refuses unavailable or malformed count %s",async count=>{
+ await expect(patientNumberingReadiness({query:async()=>({rows:[{ambiguous_alias_groups:count}]})})).rejects.toThrow("Patient numbering readiness result unavailable");
+});
+it("readiness propagates query failure and rejects an absent result rather than reporting ready",async()=>{
+ await expect(patientNumberingReadiness({query:async()=>({rows:[]})})).rejects.toThrow("Patient numbering readiness result unavailable");
+ await expect(patientNumberingReadiness({query:async()=>{throw new Error("Synthetic query failure");}})).rejects.toThrow("Synthetic query failure");
 });

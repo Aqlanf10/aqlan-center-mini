@@ -1,6 +1,6 @@
 import {afterAll,beforeAll,expect,it} from "vitest";
-import {randomUUID} from "node:crypto";
-import {mkdtemp,writeFile,rm} from "node:fs/promises";
+import {createHash,randomUUID} from "node:crypto";
+import {mkdtemp,readFile,writeFile,rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {gzipSync} from "node:zlib";
@@ -9,6 +9,7 @@ import type {SessionPayload} from "../../lib/auth";
 import {assertRealPostgresUrl,dropPublicSchema,stubPostgresEnv} from "./_setup";
 import {validatePostgresTestTarget} from "./_safe-target";
 import {validateGeneratedDatabaseName} from "../../scripts/verify-schema-ownership";
+import {patientNumberSequenceRestoreSql} from "../../lib/patient-numbering-backup";
 import {validateLocalVerificationTarget} from "../../lib/verification-target-policy.mjs";
 assertRealPostgresUrl();stubPostgresEnv();
 const db=await import("../../lib/db");
@@ -20,6 +21,8 @@ const {parseTarBytes}=await import("../../lib/restore/archive");
 const {validateBackupArchive}=await import("../../lib/restore/validate");
 const {prepareBackupSql}=await import("../../lib/restore/sql.mjs");
 const {stagedRestore}=await import("../../lib/restore/staging");
+const documentKey="synthetic-numbering-document.txt";
+const documentBytes=Buffer.from("Synthetic numbered-patient document; no real clinical data.\n");
 let session:SessionPayload;
 beforeAll(async()=>{
  await dropPublicSchema(process.env.DATABASE_URL!);await db.ensureSchema();
@@ -31,6 +34,7 @@ beforeAll(async()=>{
  // Preserve recovery coverage for evidence that can exist in historical backups.
  await db.getPool().query("UPDATE patients SET patient_number='P-00123' WHERE id=$1",[p.id]);
  await db.getPool().query("INSERT INTO invoices(invoice_number,patient_id,total_minor) VALUES('SYN-NUMBER-RESTORE',$1,100)",[p.id]);
+ await db.getPool().query("INSERT INTO patient_documents(patient_id,kind,title,mime_type,size_bytes,sha256,storage_key,uploaded_by) VALUES($1,'other','Synthetic numbering document','text/plain',$2,$3,$4,'synthetic-numbering-restore')",[p.id,documentBytes.length,createHash("sha256").update(documentBytes).digest("hex"),documentKey]);
  const preview=await numbering.readNumberingPreview(session);
  await numbering.changeNumberingFloor(session,{minimumNext:"8000",expectedVersion:preview.version,expectedNextNumber:preview.nextNumber,reason:"Synthetic future numbering"});
  await db.getPool().query("SELECT setval('patient_number_seq',9000,true)");
@@ -58,7 +62,7 @@ it("official SQL and full-archive payload replay preserves identity, retired ali
   const source=await db.getPool().connect();let sql:string;let archiveSql:string;
   try{
    const lines:string[]=[];for await(const line of db.backupSqlLines(source))lines.push(line);sql=lines.join("");
-   const blocks:Uint8Array[]=[];for await(const block of fullBackupBlocks({source,readDocument:async()=>{throw new Error("No real documents may be read by this synthetic test");}}))blocks.push(block);
+   const blocks:Uint8Array[]=[];for await(const block of fullBackupBlocks({source,readDocument:async key=>{if(key!==documentKey)throw new Error("Unexpected document: real assets must not be read");return documentBytes;}}))blocks.push(block);
    const archiveBytes=Buffer.concat(blocks.map(block=>Buffer.from(block)));
    await writeFile(join(directory,"synthetic.tar.gz"),gzipSync(archiveBytes));
    const archive=parseTarBytes(archiveBytes);
@@ -66,7 +70,7 @@ it("official SQL and full-archive payload replay preserves identity, retired ali
    expect(validated.ok).toBe(true);if(!validated.ok)throw new Error(validated.errors.join(";"));
    archiveSql=Buffer.from(validated.sql).toString("utf8");
   }finally{source.release();}
-  const tables=["patients","invoices","retired_patient_numbers","patient_numbering_policy","audit_log"];
+  const tables=["patients","patient_documents","invoices","retired_patient_numbers","patient_numbering_policy","audit_log"];
   const snapshots=new Map<string,unknown>();
   for(const table of tables)snapshots.set(table,(await db.getPool().query(`SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) AS data FROM ${table} t`)).rows[0].data);
   for(const payload of [sql,archiveSql]){
@@ -103,8 +107,24 @@ it("official SQL and full-archive payload replay preserves identity, retired ali
   const restored=await stagedRestore({archivePath:join(directory,"synthetic.tar.gz"),targetUrl:url.toString(),stagingDir:join(directory,"documents")});
   expect(restored).toMatchObject({ok:true,errors:[],validationErrors:[],readyForCutover:true});
   expect(restored.migrationsApplied).toContain("0080");
+  expect(await readFile(join(directory,"documents",documentKey))).toEqual(documentBytes);
   for(const table of tables)expect((await target.query(`SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) AS data FROM ${table} t`)).rows[0].data,table).toEqual(snapshots.get(table));
   expect((await target.query("SELECT last_value::text,is_called FROM patient_number_seq")).rows[0]).toEqual({last_value:"9000",is_called:true});
+  // Recovery into an already higher sequence must never rewind it. Exercise both
+  // called states at lower/equal/higher high-water, including an unconsumed backup.
+  // Every reset below is confined to this newly created, ownership-verified DB.
+  for(const currentValue of [9000,10000,11000])for(const currentCalled of [false,true])for(const backupCalled of [false,true]){
+   await target.query("SELECT setval('patient_number_seq',$1::bigint,$2)",[String(currentValue),currentCalled]);
+   const replay=patientNumberSequenceRestoreSql("10000",backupCalled);
+   await target.query(replay);
+   const expectedValue=Math.max(currentValue,10000);
+   const expectedCalled=currentValue>10000 || (currentValue===10000 && currentCalled) || backupCalled;
+   expect((await target.query("SELECT last_value::text,is_called FROM patient_number_seq")).rows[0]).toEqual({last_value:String(expectedValue),is_called:expectedCalled});
+   // Replaying a backup twice is idempotent before allocation.
+   await target.query(replay);
+   expect((await target.query("SELECT aqlan_allocate_patient_number() AS number")).rows[0].number).toBe(`P-${expectedValue+(expectedCalled?1:0)}`);
+  }
+  for(const table of tables)expect((await target.query(`SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) AS data FROM ${table} t`)).rows[0].data,table).toEqual(snapshots.get(table));
  }catch(error){failures.push(error);}
  finally{
   try{await target?.end();}catch(error){failures.push(error);}
