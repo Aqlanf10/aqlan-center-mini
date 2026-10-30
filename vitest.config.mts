@@ -16,6 +16,7 @@ export default defineConfig({
     // في `npm test` (وحدة) الذي يعمل بلا قاعدة.
     exclude: [
       "**/node_modules/**",
+      "**/.next/**",
       "**/dist/**",
       "**/cypress/**",
       "**/.{idea,git,cache,output,temp}/**",
