@@ -667,7 +667,7 @@ use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
 
-### 0091_remediation_security_and_indexes.sql
+### 0095_remediation_security_and_indexes.sql
 
 Additive security and performance migration (0090 remains permanently retired for
 historical cancelled #492 compatibility without restoring #492 code):

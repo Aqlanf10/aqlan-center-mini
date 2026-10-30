@@ -7,9 +7,9 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
-  if (files.at(-1)?.version === "0091") {
-    if (files.at(-2)?.version !== "0089" || files.at(-1)?.filename !== "0091_remediation_security_and_indexes.sql") {
-      throw new Error("Unreviewed 0091 migration suffix.");
+  if (files.at(-1)?.version === "0095") {
+    if (files.at(-2)?.version !== "0089" || files.at(-1)?.filename !== "0095_remediation_security_and_indexes.sql") {
+      throw new Error("Unreviewed 0095 migration suffix.");
     }
     return periodontalCandidateMigrationVersion(files.slice(0, -1));
   }

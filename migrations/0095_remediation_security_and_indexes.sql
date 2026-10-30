@@ -1,4 +1,4 @@
--- 0091: Remediation security columns, owner paper-archive override guard, audit TRUNCATE guard, GL party defaults, HTTP idempotency table, and hot FK indexes.
+-- 0095: Remediation security columns, owner paper-archive override guard, audit TRUNCATE guard, GL party defaults, HTTP idempotency table, and hot FK indexes.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0 CHECK (session_version >= 0);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_owner BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_secret_version INTEGER NOT NULL DEFAULT 0 CHECK (portal_secret_version >= 0);

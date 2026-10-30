@@ -2,7 +2,7 @@
  * Additive security columns, audited owner paper-archive override guard,
  * audit_log TRUNCATE protection, party GL account defaults, HTTP idempotency table, and hot FK indexes.
  */
-export const REMEDIATION_SECURITY_AND_INDEXES_SQL = String.raw`-- 0091: Remediation security columns, owner paper-archive override guard, audit TRUNCATE guard, GL party defaults, HTTP idempotency table, and hot FK indexes.
+export const REMEDIATION_SECURITY_AND_INDEXES_SQL = String.raw`-- 0095: Remediation security columns, owner paper-archive override guard, audit TRUNCATE guard, GL party defaults, HTTP idempotency table, and hot FK indexes.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0 CHECK (session_version >= 0);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_owner BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_secret_version INTEGER NOT NULL DEFAULT 0 CHECK (portal_secret_version >= 0);

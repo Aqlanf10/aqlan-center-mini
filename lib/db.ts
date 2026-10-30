@@ -2208,7 +2208,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), HR_TEMPORAL_RUNTIME_MIGRATIONS);
     await applyOrthoAssessmentRuntime(getPool());
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
-    await applyRuntimeMigrationFiles(getPool(), [{ version: "0091", name: "remediation_security_and_indexes", filename: "0091_remediation_security_and_indexes.sql", sql: REMEDIATION_SECURITY_AND_INDEXES_SQL, checksum: checksumOf(REMEDIATION_SECURITY_AND_INDEXES_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0095", name: "remediation_security_and_indexes", filename: "0095_remediation_security_and_indexes.sql", sql: REMEDIATION_SECURITY_AND_INDEXES_SQL, checksum: checksumOf(REMEDIATION_SECURITY_AND_INDEXES_SQL) }]);
 
 
 
