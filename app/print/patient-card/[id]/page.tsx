@@ -55,7 +55,7 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
           عاديٌّ يوميّ، ووسمُها بعلامةٍ معناها «احذر، صدرت من قبل» يُفرغ العلامة
           من معناها في الأوراق المالية التي وُضعت لها. */}
       <PrintButton />
-      <div className="sheet sheet-a6">
+      <div className="sheet sheet-a6 patient-card-sheet">
         <PrintHeader settings={settings} title="بطاقة المريض" compact />
 
         <p className="amount-box" dir="ltr">{patient.patientNumber}</p>
