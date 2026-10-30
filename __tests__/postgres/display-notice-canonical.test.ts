@@ -51,12 +51,21 @@ it("revocation refuses the existing session and a new session loses editing", as
   expect((await read("revoked")).canEdit).toBe(false);
 });
 it("expiry while waiting on the setting lock rechecks the session and leaves no write/audit", async () => {
-  const session = await fx.session("pending", 1200), version = (await read("owner")).version, count = await auditCount();
+  const version = (await read("owner")).version, count = await auditCount();
   const lock = new Client({ connectionString: process.env.DATABASE_URL }); await lock.connect();
   try {
     await lock.query("BEGIN"); await lock.query("SELECT pg_advisory_xact_lock(hashtext('clinic-setting:display.delay_notice'))");
+    const session = await fx.session("pending", 1500);
     const pending = notice.commandCanonicalDisplayNotice(session, { on: true, version }); pending.catch(() => undefined);
-    await new Promise(resolve => setTimeout(resolve, 1350)); await lock.query("COMMIT");
+    // Prove admission reached the held domain lock; expiring before admission
+    // must not accidentally make this a passing post-wait expiry test.
+    let waiting = false;
+    for (let i = 0; i < 160; i++) {
+      if ((await lock.query("SELECT 1 FROM pg_locks WHERE NOT granted AND locktype='advisory' AND database=(SELECT oid FROM pg_database WHERE datname=current_database())")).rowCount) { waiting = true; break; }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    expect(waiting).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 1600)); await lock.query("COMMIT");
     await expect(pending).rejects.toThrow(/^STAFF_/);
     expect((await read("owner")).on).toBe(false); expect(await auditCount()).toBe(count);
   } finally { await lock.query("ROLLBACK").catch(() => {}); await lock.end(); }

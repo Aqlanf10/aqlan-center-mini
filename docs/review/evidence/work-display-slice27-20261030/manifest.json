@@ -62,7 +62,7 @@
     ".github/workflows/ci.yml": "a90339e74d36849a538ec4018ee6286f3592a9bfc681837acb2385eb0b14150f",
     "__tests__/display-speech.test.ts": "26882a591f2049c47c4d4dd3fc3f0a2c09a8402e9500f8ed64454728656bd0d7",
     "__tests__/layout-clinic-timezone.test.ts": "fac72b5a4c9ec370ab6e4910c5cb4bb822c116bf4862e05a520a15e9a102cd27",
-    "__tests__/postgres/display-notice-canonical.test.ts": "fe1565fb1433988dd8383c350fc331138fb5fb973b6cfcdcd637a4beea55ae78",
+    "__tests__/postgres/display-notice-canonical.test.ts": "f222cfe92ff0df025d4daa4909e5bddd66526e6b79a08c3d3809604df6d592f1",
     "__tests__/postgres/display-public-snapshot.test.ts": "e0ff0e03835a381a1be7b8d0810964dc25170acec26f7f384203f93ffc199504",
     "__tests__/security-http/canonical-display-journey.test.ts": "5b3ed66bf44ca7bbd06cf1bb2bdcd9ccb1cbd6d8392577dbc0cf1e98ddd43876",
     "app/api/display/notice/route.ts": "c40f25534b8456c5385c8423bfc049a2e6ea41993de9941fe10ff5e6aec00472",
@@ -108,7 +108,7 @@
     "layout-unit-final.log": "38f3e8f6cb9acaca760756f6388dfb31a894a1edbdb85e333883da78ebd2286e",
     "lint-focused-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "money-guard.log": "8c426cd2f9b12b1084b5a8855ae1b7567e5491773693a629848a1e0208739bdb",
-    "postgres-final.log": "8260b77c4ab5021d267ffdadda6634edd4c9ecdf73a94746444217d8f7aab64b",
+    "postgres-final.log": "c2a21c0dd5ecbe2ba4e352f77de5c4db4e5720a2bb77da612bd5dec43d35520d",
     "red-canonical-notice-http-setup-error.log": "e773e58987167ec87a1bd6a31758d0e326908b75675e9fa7f0d7cd8cf8e63386",
     "red-canonical-notice-http.log": "de2ab1af3e788ba57191b1341214fc7c256602546bfc55f6c90c45754e0ece64",
     "red-public-get-setup-error.log": "6ef7a8fd97a1c1a58dc1fbc4b74982dd94dd63c9fc5bd996b9282058d18082ab",
@@ -126,5 +126,6 @@
     "unit-focused-final.log": "22c2febfc8271ad8faaa8a90aeb431417d11ac01bdd43bd72269935bc449aac3"
   },
   "failedIntermediateRuns": "Before-final full unit run: 5 failures (inventory not regenerated, old speech transform, layout headers mock absent, local 5s tracing timeout). Isolated tracing passed. Another run was interrupted with exit 130 after detecting the old layout transform; final frozen-source run passed all 13398. Setup and fixture errors were not product defects.",
-  "evidenceNormalization": "ANSI color, volatile repository root and trailing whitespace removed from text logs; assertions, counts and outcomes preserved."
+  "evidenceNormalization": "ANSI color, volatile repository root and trailing whitespace removed from text logs; assertions, counts and outcomes preserved.",
+  "postPushTestRefinement": "The expiry test now observes an ungranted advisory lock in its owned database before expiring the admitted session. All 53 PostgreSQL cases reran successfully; no runtime code changed."
 }
