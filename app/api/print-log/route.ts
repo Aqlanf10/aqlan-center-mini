@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
 import { canAccessPatient } from "@/lib/patient-access";
 import { getPrescription, recordAudit, recordPrint } from "@/lib/db";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";

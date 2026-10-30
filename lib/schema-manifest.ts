@@ -1084,6 +1084,7 @@ export function schemaOwnershipArtifactCatalog(catalog: DetailedSchemaCatalog): 
   const reviewedDefinitions = [
     { name: "aqlan_reclassification_follow_refund", digest: "273166a6d2034278cad975e5bde554dd4e2bb2075f544ab8df1a11fc03f328d0", source: "migrations/0063_invoice_currency_reclassification.sql" },
     { name: "aqlan_patient_number_guard", digest: "be3650ee86318a8431b9449fd05637d930549649b38cec38695c6a9c65bff5cd", source: "migrations/0080_patient_numbering.sql" },
+    { name: "aqlan_patient_number_guard", digest: "25795fb0e4ddea92a4341e4d5e776665d67a7fd97b3ac3b1f0a2abde6de8582a", source: "migrations/0095_remediation_security_and_indexes.sql" },
   ];
   for (const entry of artifact.functions) {
     const reviewed = reviewedDefinitions.find(definition => entry.key === `${definition.name}()`

@@ -102,15 +102,25 @@
   "isAdmin("
  ],
  "/api/invoices": [
-  "canViewMoney("
+  "canViewMoney(",
+  "financeAccess",
+  "role === \"accountant\"",
+  "role === \"cashier\""
  ],
  "/api/invoices/[id]": [
-  "canViewMoney("
+  "canViewMoney(",
+  "financeAccess",
+  "role === \"accountant\"",
+  "role === \"cashier\""
  ],
  "/api/invoices/archive": [
   "canViewMoney("
  ],
  "/api/lab": [
+  "permissions?.canViewAllPatients",
+  "role === \"doctor\""
+ ],
+ "/api/messages": [
   "role === \"doctor\""
  ],
  "/api/ortho/billing-decisions": [
@@ -121,9 +131,13 @@
   "role === \"doctor\""
  ],
  "/api/parties": [
-  "isAdmin("
+  "financeAccess",
+  "isAdmin(",
+  "role === \"accountant\""
  ],
  "/api/party-openings": [
+  "financeAccess",
+  "role === \"accountant\"",
   "role === \"admin\""
  ],
  "/api/patients": [
@@ -199,7 +213,10 @@
   "canViewMoney("
  ],
  "/api/payments": [
-  "canViewMoney("
+  "canViewMoney(",
+  "financeAccess",
+  "role === \"accountant\"",
+  "role === \"cashier\""
  ],
  "/api/plan-templates": [
   "canViewMoney(",
@@ -215,6 +232,9 @@
  ],
  "/api/plans/proposals": [
   "canViewMoney("
+ ],
+ "/api/recall": [
+  "role === \"doctor\""
  ],
  "/api/referrals/mine": [
   "role !== \"admin\"",
@@ -260,6 +280,9 @@
  ],
  "/api/users": [
   "isAdmin("
+ ],
+ "/api/visits": [
+  "role === \"doctor\""
  ],
  "/api/visits/[id]/clinical": [
   "role === \"assistant\""

@@ -1429,6 +1429,23 @@
   "note": "Own requests; approving and balance edits need hr.leaves.approve."
  },
  {
+  "route": "/api/hr/me",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant",
+   "cashier",
+   "accountant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "self",
+  "note": "Caller's own HR attendance, leaves and payroll summary; never reads another staff member."
+ },
+ {
   "route": "/api/hr/payroll/disburse",
   "method": "GET",
   "legacyRoles": [
@@ -2227,6 +2244,12 @@
      ],
      "note": "Recognises the lab cost."
     },
+    "remake": {
+     "need": [
+      "clinical.lab.order"
+     ],
+     "note": "Zero-cost remake linked to original lab order."
+    },
     "unpost": {
      "need": [
       "finance.payables.record"
@@ -2238,6 +2261,18 @@
       "finance.payables.record"
      ],
      "note": ""
+    },
+    "update_clinical": {
+     "need": [
+      "clinical.lab.order"
+     ],
+     "note": "CAS clinical snapshot correction before financial lock."
+    },
+    "update_shade": {
+     "need": [
+      "clinical.lab.order"
+     ],
+     "note": "CAS structured shade specification update."
     }
    },
    "fields": [
@@ -3922,6 +3957,23 @@
   "note": "Read of prescriptions limited to prescribers (current behaviour: admin, doctor)."
  },
  {
+  "route": "/api/patients/[id]/prescriptions/saved",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [
+   "clinical.prescriptions.write",
+   "patients.operational-summary.view"
+  ],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Minimal stored-prescription print picker for clinicians and explicitly granted reception reprints."
+ },
+ {
   "route": "/api/patients/[id]/problems",
   "method": "GET",
   "legacyRoles": [
@@ -5518,6 +5570,48 @@
   "note": ""
  },
  {
+  "route": "/api/settings/login-photo",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Private preview of the login photograph before or after publication."
+ },
+ {
+  "route": "/api/settings/login-photo",
+  "method": "PATCH",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "CAS toggle of login photograph public visibility with transactional audit."
+ },
+ {
+  "route": "/api/settings/login-photo",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.operational.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Upload validated JPEG/PNG login photograph (stored private until published) with transactional audit."
+ },
+ {
   "route": "/api/settings/material-rates",
   "method": "GET",
   "legacyRoles": [
@@ -6196,6 +6290,22 @@
   "scope": "patient",
   "status": "existing",
   "note": ""
+ },
+ {
+  "route": "/api/visits/[id]/materials",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor",
+   "assistant"
+  ],
+  "need": [
+   "clinical.visits.document"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Legacy clinical visit material consumption; guarded by guardLegacyClinicalMaterials when canonical inventory integration is active."
  },
  {
   "route": "/api/visits/[id]/next",
