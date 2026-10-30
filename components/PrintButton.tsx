@@ -44,7 +44,7 @@ export function PrintButton({ docType, docId }: {
 
   return (
     <div className="print-actions">
-      <button type="button" onClick={() => void print()} disabled={busy}>
+      <button type="button" data-print-document-action onClick={() => void print()} disabled={busy}>
         {busy ? "…" : "اطبع"}
       </button>
     </div>
