@@ -209,6 +209,11 @@ function HrLeavesView({ isAdmin = false }: { isAdmin?: boolean }) {
     e.preventDefault();
     if (!alive.current || !isAdmin) return;
     if (!adjStaffId || !adjTypeId) return;
+    const allocatedDays = Number(adjDays);
+    if (!adjDays.trim() || !Number.isFinite(allocatedDays) || allocatedDays < 0 || allocatedDays > 366) {
+      alert("أدخل عدد أيام صالحًا بين 0 و366.");
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch("/api/hr/leaves/balances", {
@@ -217,7 +222,7 @@ function HrLeavesView({ isAdmin = false }: { isAdmin?: boolean }) {
         body: JSON.stringify({
           staffId: adjStaffId,
           leaveTypeId: adjTypeId,
-          allocatedDays: parseInt(adjDays, 10) || 0,
+          allocatedDays,
           reason: adjReason,
         }),
       });
@@ -541,6 +546,8 @@ function HrLeavesView({ isAdmin = false }: { isAdmin?: boolean }) {
                 required
                 type="number"
                 value={adjDays}
+                min={0}
+                max={366}
                 onChange={(e) => setAdjDays(e.target.value)}
                 className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
               />
