@@ -20,13 +20,20 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     const result = await authedMutation(`/api/users/${reception.id}`, h.sessions.admin, "PATCH", JSON.stringify({ permissions: { ...(reception.permissions ?? {}), canPrintSavedPrescriptions: enabled } }));
     expect(result.status, await result.text()).toBe(200);
   };
-  const body = { patientId: patient.id, visitId: visit.id, prescribingDoctorPartyId: doctor.party_id, diagnosis: "Synthetic private diagnosis", notes: "Synthetic private notes", items: [{ name: "SyntheticRxOnly", dose: "fixture", frequency: "fixture" }] };
+  const body = { patientId: patient.id, visitId: visit.id, prescribingDoctorPartyId: doctor.party_id, diagnosis: "Synthetic private diagnosis", notes: "Synthetic private notes", items: [{ name: "SyntheticRxOnly", dose: "fixture", form: "Synthetic form", frequency: "fixture", duration: "Synthetic duration", selection: { id: "amoxicillin", amount: "Synthetic amount only", confirmed: true } }] };
   try {
     await setGrant(false);
     expect((await read(`/api/patients/${patient.id}/prescriptions/saved`)).status).toBe(403);
     expect((await post("/api/prescriptions", { ...body, visitId: h.seeded.visitId })).status).toBe(400);
+    for (const field of ["form", "dose", "frequency", "duration"]) {
+      expect((await post("/api/prescriptions", { ...body, items: [{ ...body.items[0], [field]: "" }] })).status).toBe(400);
+    }
+    for (const selection of [{ ...body.items[0].selection, amount: "" }, { ...body.items[0].selection, confirmed: false }, { ...body.items[0].selection, id: "untrusted" }]) {
+      expect((await post("/api/prescriptions", { ...body, items: [{ ...body.items[0], selection }] })).status).toBe(400);
+    }
     const created = await post("/api/prescriptions", body); expect(created.status).toBe(201); const { id } = await created.json();
     const before = (await db.query("SELECT * FROM prescriptions WHERE id=$1", [id])).rows[0];
+    expect((typeof before.items === "string" ? JSON.parse(before.items) : before.items)[0].selection).toEqual(body.items[0].selection);
     expect(before.visit_id).toBe(visit.id); expect(before.created_by).toBe("secdoctora"); expect(before.prescribing_doctor_party_id).toBe(doctor.party_id);
     const signed = await post(`/api/visits/${visit.id}/clinical`, { action: "sign" }); expect(signed.status, await signed.text()).toBe(200);
     expect((await db.query("SELECT signed_at FROM visits WHERE id=$1", [visit.id])).rows[0].signed_at).toBeTruthy();
@@ -41,7 +48,7 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     // Existing reception scope is all patients; doctor B still cannot read this patient.
     expect((await read(listPath, "doctorB")).status).toBe(403);
     const printPath = `/print/prescription/${patient.id}?rx=${id}`;
-    const html = await (await read(printPath)).text(); expect(html).toContain("SyntheticRxOnly"); expect(html).toContain(before.prescribing_doctor_name);
+    const html = await (await read(printPath)).text(); expect(html).toContain("SyntheticRxOnly"); expect(html).toContain("Synthetic amount only"); expect(html).toContain(before.prescribing_doctor_name);
     for (const path of [`/print/prescription/${patient.id}?draft=1&items=[]`, `/print/prescription/${patient.id}`, `/print/prescription/${h.seeded.patientBId}?rx=${id}`, `/print/prescription/${patient.id}?rx=99999999`]) expect((await read(path)).status).toBe(404);
     for (const method of ["POST", "PATCH"] as const) expect((await authedMutation("/api/prescriptions", h.sessions.reception, method, JSON.stringify({ ...body, prescribingDoctorPartyId: 999 }))).status).toBeGreaterThanOrEqual(400);
     expect((await post(`/api/prescriptions/${id}/void`, { reason: "forbidden" }, "reception")).status).toBe(403);

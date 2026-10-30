@@ -10,15 +10,15 @@ function referenceText(value: string) {
     /^[A-Za-z0-9]/.test(part) ? <bdi dir="ltr" key={index}>{part}</bdi> : part);
 }
 
-/** Review-only: intentionally has no callback that could add, save or approve Rx items. */
-export function PrescriptionMedicationLibrary() {
+/** Reference doses remain review-only. The optional callback selects a name only. */
+export function PrescriptionMedicationLibrary({ onSelectName, disabled = false }: { onSelectName?: (id: string) => void; disabled?: boolean } = {}) {
   const [query, setQuery] = useState("");
   const [population, setPopulation] = useState<"adult" | "child">("adult");
   const entries = MEDICATION_REFERENCES.filter(entry => `${entry.genericName} ${entry.arabicName}`.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <details className="rounded-xl border border-slate-200 p-3 text-xs" data-medication-library="review-only">
       <summary className="cursor-pointer font-bold">مكتبة أدوية إرشادية — تُراجع الجرعة والتعليمات ويعتمدها الطبيب لكل مريض</summary>
-      <p className="my-2 text-slate-600">أربعة مدخلات أولية للمراجعة؛ ليست مكتبة كاملة أو اعتمادًا محليًا. الإضافة للوصفة والحساب السريري غير مفعّلين حتى مراجعة المالك.</p>
+      <p className="my-2 text-slate-600">أربعة مدخلات أولية للمراجعة؛ ليست مكتبة كاملة أو اعتمادًا محليًا. يمكن اختيار اسم المادة فقط لمسودة يملؤها الطبيب. الجرعات المرجعية والحساب السريري غير مفعّلين.</p>
       <div className="flex flex-wrap gap-2">
         <label>بحث باسم الدواء<input aria-label="بحث في مكتبة الأدوية" value={query} onChange={e => setQuery(e.target.value)} className="mx-2 rounded border p-2" /></label>
         <label>الفئة<select aria-label="الفئة العمرية للمراجع" value={population} onChange={e => setPopulation(e.target.value as "adult" | "child")} className="mx-2 rounded border p-2"><option value="adult">بالغ</option><option value="child">طفل</option></select></label>
@@ -31,7 +31,7 @@ export function PrescriptionMedicationLibrary() {
         <p className="mt-2 leading-6">{referenceText(entry.instructions)}</p>
         <p dir="ltr" className="mt-2 text-slate-500">{entry.units}</p>
         <ul className="mt-2 space-y-1">{entry.sources.map(source => <li key={source.url}><a className="underline" href={source.url} target="_blank" rel="noreferrer">{source.title}</a> · {source.version}</li>)}</ul>
-        <button type="button" disabled className="mt-2 rounded border px-3 py-2 text-slate-500">إضافة للوصفة — غير مفعّل للمراجعة</button>
+        <button type="button" disabled={disabled || !onSelectName} onClick={() => onSelectName?.(entry.id)} className="mt-2 rounded border px-3 py-2 disabled:text-slate-500">اختيار اسم {entry.arabicName} فقط — أكمل التفاصيل يدويًا</button>
       </article>)}
       <PrescriptionMedicationPreview />
     </details>

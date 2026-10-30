@@ -1,3 +1,4 @@
+import { manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
 import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
 import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
 import { PrintMetadata } from "@/components/PrintDocument";
@@ -14,6 +15,7 @@ import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 interface RxItem {
+  selection?: import("@/lib/prescription-medication-selection").ManualMedicationSelection;
   name: string;
   dose?: string; // 500mg, 1g
   form?: string; // Tablets, Capsules, Syrup, Mouthwash, Ointment — English
@@ -101,7 +103,8 @@ export default async function PrescriptionPrintPage({
     rxItems = stored.items;
   } else if (isDraftMode) {
     try {
-      rxItems = sanitizeRxItems(JSON.parse(decodeURIComponent(sParams.items!)));
+      const rawItems = JSON.parse(decodeURIComponent(sParams.items!));
+      rxItems = manualMedicationSelectionError(rawItems) ? [] : sanitizeRxItems(rawItems);
     } catch {
       rxItems = [];
     }
@@ -269,6 +272,7 @@ export default async function PrescriptionPrintPage({
                   )}
                 </div>
 
+                {item.selection?.amount && <p dir="ltr" className="mt-1 text-sm">Dose: {item.selection.amount}</p>}
                 {item.frequency && (
                   <div style={{ marginTop: "1mm", fontSize: "8.5pt", color: "#334155" }}>
                     💊 {item.frequency}

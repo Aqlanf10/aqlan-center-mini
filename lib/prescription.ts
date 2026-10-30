@@ -1,3 +1,4 @@
+import { manualMedicationSelectionError, type ManualMedicationSelection } from "./prescription-medication-selection";
 /**
  * الوصفة الطبية — الروشتة التي يخرج بها المريض إلى الصيدلية.
  * (منقولة من مستودع الوكيل الآخر aqlan-center-main ومكيّفة لطباعتنا الحالية.)
@@ -37,6 +38,8 @@ export const INSTRUCTIONS_LANG_LABEL: Record<InstructionsLang, string> = {
 
 /** دواءٌ واحد في الوصفة. */
 export interface RxItem {
+  /** Manual name-entry review only; not a clinical template approval. */
+  selection?: ManualMedicationSelection;
   /** الاسم كما يُكتب على العلبة — إنجليزيًّا. */
   name: string;
   /** العيار: `500mg` · `1g` — نصٌّ لأنّ الوحدات تختلف. */
@@ -88,6 +91,11 @@ export function sanitizeRxItem(input: unknown): RxItem | null {
   if (!name || !hasLatin(name)) return null;
   return {
     name,
+    ...(source.selection && typeof source.selection === "object" ? { selection: {
+      id: (source.selection as ManualMedicationSelection).id,
+      amount: text((source.selection as ManualMedicationSelection).amount, MAX_FIELD),
+      confirmed: (source.selection as ManualMedicationSelection).confirmed === true,
+    } } : {}),
     dose: text(source.dose, MAX_FIELD),
     form: text(source.form, MAX_FIELD),
     frequency: text(source.frequency, MAX_FIELD),
@@ -154,6 +162,11 @@ export function checkPrescriptionDraft(input: {
   if (input.visitId !== null && !(Number.isInteger(input.visitId) && input.visitId > 0)) {
     return { ok: false, message: "رقم الزيارة غير صالح." };
   }
+  if (Array.isArray(input.items) && input.items.length > MAX_ITEMS && input.items.some(item => item && typeof item === "object" && item.selection !== undefined)) {
+    return { ok: false, message: "الحد الأقصى 20 دواءً؛ احذف السطور الزائدة قبل الإصدار." };
+  }
+  const selectionError = manualMedicationSelectionError(input.items);
+  if (selectionError) return { ok: false, message: selectionError };
   const items = sanitizeRxItems(input.items);
   if (items.length === 0) {
     return { ok: false, message: "الوصفة بلا أدوية — أضف دواءً واحدًا على الأقل." };
@@ -234,7 +247,7 @@ export function buildSuggestions(
     .map((entry) => ({
       name: entry.item.name,
       dose: entry.item.dose,
-      frequency: entry.item.frequency,
+      frequency: [entry.item.selection?.amount, entry.item.frequency].filter(Boolean).join("; "),
       duration: entry.item.duration,
       timesPrescribed: entry.count,
       lastPrescribedAt: entry.lastAt,

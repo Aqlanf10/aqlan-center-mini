@@ -452,3 +452,37 @@ it("blocks issuance on prescriber lookup failure and permits explicit safe retry
     expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
   } finally { await f.context.close(); }
 });
+
+it("explicit generic choice fills only a name, never saves or prints, and requires complete reviewed manual fields", async () => {
+  const f = await fixture("Synthetic diagnosis never selects an antibiotic");
+  try {
+    await f.open();
+    expect(await f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).count()).toBe(0);
+    await f.page.locator("summary").filter({ hasText: "مكتبة أدوية إرشادية" }).click();
+    const choose = f.page.getByRole("button", { name: "اختيار اسم أموكسيسيلين فقط — أكمل التفاصيل يدويًا", exact: true });
+    await expect.poll(() => choose.isEnabled()).toBe(true);
+    await choose.click();
+    expect(await f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true }).inputValue()).toBe("Amoxicillin");
+    for (const placeholder of ["Strength / concentration", "Form (Tablets / Syrup)", "Frequency (every 8 hours)", "Duration (5 days)"]) expect(await f.page.getByPlaceholder(placeholder, { exact: true }).inputValue()).toBe("");
+    expect(await f.page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).inputValue()).toBe("");
+    expect(f.requests).toHaveLength(0); expect(await prints(f.page)).toEqual([]);
+    await f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }).click();
+    expect(f.requests).toHaveLength(0); expect(await prints(f.page)).toEqual([]);
+    await f.page.getByPlaceholder("Strength / concentration", { exact: true }).fill("synthetic strength");
+    await f.page.getByPlaceholder("Form (Tablets / Syrup)", { exact: true }).fill("synthetic form");
+    await f.page.getByPlaceholder("Frequency (every 8 hours)", { exact: true }).fill("synthetic frequency");
+    await f.page.getByPlaceholder("Duration (5 days)", { exact: true }).fill("synthetic duration");
+    await f.page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).fill("synthetic amount");
+    await f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }).click(); expect(f.requests).toHaveLength(0);
+    const review = f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ });
+    await review.check();
+    await f.page.getByPlaceholder("Duration (5 days)", { exact: true }).fill("changed synthetic duration");
+    expect(await review.isChecked()).toBe(false);
+    await review.check();
+    await f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }).click();
+    await expect.poll(() => f.requests.length).toBe(1);
+    expect(f.requests[0].items).toEqual([expect.objectContaining({ name: "Amoxicillin", dose: "synthetic strength", duration: "changed synthetic duration", selection: { id: "amoxicillin", amount: "synthetic amount", confirmed: true } })]);
+    expect(await prints(f.page)).toEqual([]); // Existing server warning still requires its own acknowledgement.
+    expect(f.unexpected).toEqual([]);
+  } finally { await f.context.close(); }
+}, 120_000);

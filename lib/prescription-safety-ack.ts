@@ -72,6 +72,7 @@ export function canonicalPrescriptionForAck(draft: PrescriptionDraft): string {
       item.duration,
       item.instructions,
       item.instructionsEn,
+      ...(item.selection ? [item.selection.id, item.selection.amount, item.selection.confirmed] : []),
     ]),
   });
 }

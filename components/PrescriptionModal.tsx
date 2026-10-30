@@ -1,4 +1,5 @@
 "use client";
+import { createManualMedicationSelection, manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
 
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "./SessionProvider";
@@ -8,7 +9,7 @@ import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
 import { PrescriptionMedicationLibrary } from "./PrescriptionMedicationLibrary";
 import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
-import { sanitizeRxItems } from "@/lib/prescription";
+import { MAX_ITEMS, sanitizeRxItems } from "@/lib/prescription";
 import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workflow";
 
 /**
@@ -21,22 +22,7 @@ import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workf
  * إنجليزية، أو الاثنتين معًا لبيئةٍ ثنائية اللغة.
  */
 
-export interface RxItem {
-  /** اسم الدواء — لاتيني دائمًا. */
-  name: string;
-  /** العيار: 1g / 500mg. */
-  dose: string;
-  /** الشكل الدوائي بالإنجليزية: Tablets / Syrup / Mouthwash. */
-  form: string;
-  /** التكرار بالإنجليزية: 1 tablet every 12 hours. */
-  frequency: string;
-  /** المدة بالإنجليزية: 5-7 days. */
-  duration: string;
-  /** تعليمات المريض بالعربية. */
-  instructions: string;
-  /** تعليمات المريض بالإنجليزية. */
-  instructionsEn: string;
-}
+export type RxItem = import("@/lib/prescription").RxItem;
 
 /** لغة التعليمات على الروشتة المطبوعة: عربي، إنجليزي، أو كلاهما. */
 export type InstructionsLang = "both" | "ar" | "en";
@@ -205,10 +191,10 @@ export function PrescriptionModal({
     ]);
   };
 
-  const updateItem = (index: number, field: keyof RxItem, value: string) => {
+  const updateItem = (index: number, field: Exclude<keyof RxItem, "selection">, value: string) => {
     setItems((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
+      next[index] = { ...next[index], [field]: value, ...(next[index].selection ? { selection: { ...next[index].selection!, confirmed: false } } : {}) };
       return next;
     });
   };
@@ -218,10 +204,13 @@ export function PrescriptionModal({
   };
 
   const validatePrintableItems = () => {
+    if (items.length > MAX_ITEMS) { setPreserveError("الحد الأقصى 20 دواءً؛ احذف السطور الزائدة."); return false; }
     if (prescriberMismatch) {
       setPreserveError("طبيب الزيارة يختلف عن هويتك السريرية؛ اختر الإصدار باسمك صراحة قبل المتابعة.");
       return false;
     }
+    const selectionError = manualMedicationSelectionError(items);
+    if (selectionError) { setPreserveError(selectionError); return false; }
     if (sanitizeRxItems(items).length === 0) {
       setPreserveError("أضف دواءً واحدًا على الأقل باسم مكتوب بالإنجليزية قبل طباعة الوصفة أو معاينة المسودة.");
       return false;
@@ -386,6 +375,8 @@ export function PrescriptionModal({
   };
 
   const handleWhatsApp = () => {
+    const selectionError = manualMedicationSelectionError(items);
+    if (selectionError) { setPreserveError(selectionError); return; }
     if (!patientPhone) return;
     const phone = toWhatsAppNumber(patientPhone);
     if (!phone) return;
@@ -399,7 +390,7 @@ export function PrescriptionModal({
 
     items.forEach((item, idx) => {
       text += `${idx + 1}. *${item.name}* ${item.dose ? `(${item.dose})` : ""}\n`;
-      text += `   - ${[item.form, item.frequency, item.duration].filter(Boolean).join(" · ")}\n`;
+      text += `   - ${[item.form, item.selection?.amount, item.frequency, item.duration].filter(Boolean).join(" · ")}\n`;
       for (const line of instructionsLines(item)) {
         text += `   - ${line}\n`;
       }
@@ -511,7 +502,10 @@ export function PrescriptionModal({
             </div>
           )}
 
-          <PrescriptionMedicationLibrary />
+          <PrescriptionMedicationLibrary disabled={items.length >= MAX_ITEMS || prescriberStatus !== "ready"} onSelectName={id => {
+            const item = createManualMedicationSelection(id);
+            if (item) setItems(previous => previous.length < MAX_ITEMS ? [...previous, item] : previous);
+          }} />
 
           {/* قوالب الإجراءات والتشخيصات — لا أدوية (مراجعة الجولة الثانية):
            * تُعبّئ نوع الحالة والتشخيص والملاحظات الإجرائية فقط؛ اختيار الدواء
@@ -812,7 +806,8 @@ export function PrescriptionModal({
                         type="text"
                         value={item.dose}
                         onChange={(e) => updateItem(idx, "dose", e.target.value)}
-                        placeholder="Dose (1g / 500mg)"
+                        placeholder={item.selection ? "Strength / concentration" : "Dose (1g / 500mg)"}
+                        aria-label={item.selection ? `التركيز أو القوة للسطر ${idx + 1}` : undefined}
                         dir="ltr"
                         className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand-navy focus:outline-none"
                       />
@@ -856,6 +851,19 @@ export function PrescriptionModal({
                       className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
                     />
                   </div>
+
+                  {item.selection && <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs">
+                    <p>اختيار اسم فقط — أكمل الشكل والتركيز ومقدار الجرعة والتكرار والمدة بنفسك؛ الجرعات المرجعية غير معتمدة للتعبئة.</p>
+                    <label className="my-2 block">مقدار الجرعة لكل مرة
+                      <input aria-label={`مقدار الجرعة للسطر ${idx + 1}`} dir="ltr" value={item.selection.amount} placeholder="Clinician-entered amount per dose"
+                        onChange={event => setItems(previous => previous.map((row, i) => i === idx && row.selection ? { ...row, selection: { ...row.selection, amount: event.target.value, confirmed: false } } : row))}
+                        className="mx-2 rounded border bg-white p-2" />
+                    </label>
+                    <label className="flex gap-2"><input type="checkbox" checked={item.selection.confirmed}
+                      onChange={event => setItems(previous => previous.map((row, i) => i === idx && row.selection ? { ...row, selection: { ...row.selection, confirmed: event.target.checked } } : row))} />
+                      راجعت الاستطباب والحساسية والشكل والتركيز والجرعة والتكرار والمدة لهذا السطر. هذا لا يلغي تنبيهات السلامة.
+                    </label>
+                  </div>}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <input

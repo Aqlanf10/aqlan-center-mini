@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PrescriptionMedicationLibrary } from "@/components/PrescriptionMedicationLibrary";
 import { MEDICATION_REFERENCES } from "@/lib/prescription-medication-library";
 import { MEDICATION_TEMPLATES } from "@/lib/prescription-medication-templates";
@@ -14,6 +14,13 @@ describe("medication library review gate", () => {
       expect(entry.units).toBeTruthy();
       expect(entry.sources.every(s => s.url.startsWith("https://") && s.version.length > 0)).toBe(true);
     }
+  });
+  it("enables explicit name choices without invoking selection during render or enabling numeric regimens", () => {
+    const select = vi.fn(); const html = renderToStaticMarkup(<PrescriptionMedicationLibrary onSelectName={select} />);
+    expect(select).not.toHaveBeenCalled();
+    expect(html.match(/<button[^>]*>اختيار اسم /g)).toHaveLength(4);
+    expect(html.match(/<button type="button" disabled=""/g) ?? []).toHaveLength(0);
+    expect(MEDICATION_TEMPLATES).toEqual([]);
   });
   it("renders review status and disables every add button", () => {
     const html = renderToStaticMarkup(<PrescriptionMedicationLibrary />);
