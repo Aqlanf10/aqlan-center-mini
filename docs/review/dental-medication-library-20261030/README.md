@@ -32,6 +32,18 @@ WORK inspected read-only: remote `feat/work-ci-intake-20261030` at `0bc3a0c57f57
 
 **Remaining integration blocker:** connect this shared adapter to the separately reviewed canonical admission runtime before owner-on-behalf issuance can work live. The implementation intentionally fails closed until that integration; no parallel owner identity, guessed account or live binding was introduced. This is a missing authority integration, not an unresolved owner policy.
 
+## Saved prescriptions after visit completion
+
+The visit modal now submits its actual `visitId`; malformed IDs are rejected and the existing server verifies patient/visit equality. No legacy rows are backfilled. Completing treatment leaves the saved prescription unchanged.
+
+`GET /api/patients/[id]/prescriptions/saved` exposes only active prescription ID, visit ID, creation time and stored prescriber name. It does not return notes, diagnosis, drug suggestions or prescriber options. The expandable picker appears in the patient file and filters to the checkout visit when present. It opens the existing record, never POSTs a new prescription.
+
+Reception requires an explicit `canPrintSavedPrescriptions: true` grant through the existing user-permission editor/API. The default is false; no live account was granted permission. The server reads this permission freshly. Existing `canAccessPatient` policy is preserved: reception has broad patient access, not encounter-scoped access; doctor ownership is still enforced. No broader restricted-role routing change was made. Creation, modification, void and draft preview remain forbidden for reception.
+
+The print page independently validates the stored record/patient and rejects missing, void or query-only drafts for reception. The prescription branch of `/api/print-log` resolves the actual active record and patient, checks permission/scope and records the printing actor. The button does not invoke `window.print` after refusal or logging failure. Original prescriber snapshots and issuer/void authority remain unchanged.
+
+Real isolated HTTP/browser journey: doctor issues a linked prescription, signs the visit, administrator grants the synthetic reception user print permission, reception finds the exact record in patient/checkout views and prints it. Before/after SQL equality and row count prove no mutation or duplicate. Tests cover scope mismatch, malformed/missing/void IDs, forbidden create/edit/void, query drafts, permission revocation after opening the page, and no successful print after logging refusal. The test restores the synthetic permission and global teardown drops its database. Three built-app suites pass all 11 tests; additional route tests cover minimal disclosure and fresh revocation. Screenshots: `.settings-ui-artifacts/prescription-reprint/{patient,checkout,revoked-print}.png`.
+
 ## Header/footer settings audit
 
 The prescription route uses `getPrescriptionPrintSettings()`: fresh SELECT, no process cache and no safe-reader fallback. Empty/missing clinic identity fields remain empty. Strict rendering is opt-in for this route; other templates keep existing defaults.

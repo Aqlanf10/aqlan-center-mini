@@ -214,7 +214,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
       expect(await prints(f.page)).toEqual([]);
 
       const expected = {
-        patientId, prescribingDoctorPartyId: 98104, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
+        patientId, visitId, prescribingDoctorPartyId: 98104, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
         instructionsLang: "en", items: [medicine],
       };
       f.holdPrescriptionPreview();

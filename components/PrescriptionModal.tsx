@@ -59,6 +59,7 @@ interface PrescriptionModalProps {
   /** اختياري (من عمل الوكيل المساعد): وصفة من مساحة الزيارة قد لا تملك ملفًّا
    * مرتبطًا بعد — فتُكتب بيانات المريض نصًّا حتى يُربط. */
   patientId?: number | null;
+  visitId?: number | null;
   patientName: string;
   patientPhone?: string | null;
   medicalAlert?: string | null;
@@ -73,6 +74,7 @@ export function PrescriptionModal({
   isOpen,
   onClose,
   patientId,
+  visitId,
   patientName,
   patientPhone,
   medicalAlert,
@@ -232,6 +234,7 @@ export function PrescriptionModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         patientId,
+        ...(visitId ? { visitId } : {}),
         ...(selectedDoctorId ? { prescribingDoctorPartyId: selectedDoctorId } : {}),
         diagnosis,
         notes,

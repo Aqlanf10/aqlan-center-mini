@@ -149,6 +149,13 @@ describe("إصدار الوصفة عبر المسار (P0.8)", () => {
     items: [{ name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
   };
 
+  it.each([0, -1, 1.5, "bad"])("معرف زيارة غير صالح %s لا يتحول إلى وصفة بلا زيارة", async visitId => {
+    const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...validDraft, visitId }),
+    }));
+    expect(response.status).toBe(400); expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+
   it("زيارة مريض آخر لا تُربط بوصفة المريض", async () => {
     mocks.getClinicalVisit.mockResolvedValue({ id: 50, patientId: 77 });
     const response = await createPrescription(new Request("http://localhost/api/prescriptions", {

@@ -73,7 +73,10 @@ export async function POST(request: Request) {
 
   const patientId = Number(body.patientId);
   const rawVisit = Number(body.visitId);
-  const visitId = Number.isInteger(rawVisit) && rawVisit > 0 ? rawVisit : null;
+  if (body.visitId !== undefined && body.visitId !== null && (!Number.isSafeInteger(rawVisit) || rawVisit <= 0)) {
+    return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+  }
+  const visitId = Number.isSafeInteger(rawVisit) && rawVisit > 0 ? rawVisit : null;
   const acknowledgedSafetyToken =
     typeof body.acknowledgedSafetyToken === "string" && body.acknowledgedSafetyToken.length > 0
       ? body.acknowledgedSafetyToken

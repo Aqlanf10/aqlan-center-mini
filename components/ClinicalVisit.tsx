@@ -1892,6 +1892,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         isOpen={rxOpen}
         onClose={() => { if (currentOwner()) setRxOpen(false); }}
         patientId={visit?.patientId ?? undefined}
+        visitId={visit?.id ?? undefined}
         patientName={visit?.patientName ?? ""}
         /* التنبيه الطبي والهاتف يمرّان ليُفحص أمان الدواء داخل الزيارة نفسها —
            فحص السلامة بلا بيانات المريض نصٌّ فارغ (P0.10). */

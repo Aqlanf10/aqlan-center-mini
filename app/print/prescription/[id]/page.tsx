@@ -1,9 +1,9 @@
+import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
 import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getPatient, getPrescription, getPrescriptionPrintSettings } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
-import { isAdmin } from "@/lib/roles";
 import { sanitizeRxItems } from "@/lib/prescription";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -61,9 +61,9 @@ export default async function PrescriptionPrintPage({
   const session = await requireSession();
   if (!session) notFound();
 
-  /* وثيقة سريرية رسمية: مستخدمٌ سريري (طبيب، أو مدير) لا استقبال — ومن يفتحها
-     يملك المريض (P0.9): الطبيب A لا يطبع وصفة مريض الطبيب B. */
-  if (!isAdmin(session.role) && session.role !== "doctor") notFound();
+  /* Existing clinicians and explicitly granted reception reprints; patient
+     scope and stored-only reception restrictions are checked independently. */
+  if (!await canPrintSavedPrescription(session)) notFound();
 
   const { id: rawId } = await params;
   const patientId = Number(rawId);
@@ -87,6 +87,8 @@ export default async function PrescriptionPrintPage({
     ? await getPrescription(storedRx) : null;
   if (sParams.rx && !stored) notFound();
   if (stored && stored.patientId !== patientId) notFound();
+  // Reception receives only an active stored record, never a query-only draft.
+  if (session.role === "reception" && (!stored || stored.status !== "active" || sParams.draft !== undefined)) notFound();
 
   /* الوثيقة الرسمية تُطبع من السجل المحفوظ كما صدرت — وما لم يُحفظ فلا وصفة:
    * صفحةٌ بلا وصفةٍ محفوظة لا تطبع أدوية «مثالًا» لم يصفها أحد (P0.9)، ولا
@@ -131,7 +133,7 @@ export default async function PrescriptionPrintPage({
 
   return (
     <>
-      {stored ? <PrintButton docType="prescription" docId={stored.id} /> : null}
+      {stored ? <PrintButton docType="prescription" docId={stored.id} patientId={patientId} /> : null}
       <div className="sheet sheet-a5">
         <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact strictIdentity />
 
