@@ -39,6 +39,7 @@ const {
   decideLeaveRequest,
   listAttendanceRecords,
   listLeaveBalances,
+  recordAttendance,
 } = await import("../../lib/hr-contracts-attendance");
 
 const {
@@ -316,13 +317,20 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     });
   });
 
-  it.each(["2026-11", "2027-01"])("handles leave balance lifecycle, self-approval refusal, and cancellation rollback (%s)", async (month) => {
+  it.each([
+    ["2026-11", "annual"], ["2027-01", "annual"], ["2026-12", "unpaid"],
+  ] as const)("handles leave, attendance and payroll lifecycle (%s, %s)", async (month, leaveType) => {
     const year = Number(month.slice(0, 4));
     const startDate = `${month}-01`, endDate = `${month}-05`;
+    const period = await getOrCreatePayrollPeriod(month, adminSession);
+    const beforeLeave = await calculatePayrollRun(period.id, "YER", adminSession);
+    const expectedNet = beforeLeave.totalNetDueMinor;
+    await recordAttendance({ staffId: supportStaffId, attendanceDate: `${month}-10`,
+      checkIn: `${month}-10T08:00:00+03:00`, checkOut: `${month}-10T16:00:00+03:00`, notes: "Synthetic normal attendance" }, adminSession);
     // 1. Allocate 30 annual leave days
     await adjustLeaveBalance(
       supportStaffId,
-      "annual",
+      leaveType,
       year,
       30,
       "الرصيد السنوي لعام 2026",
@@ -337,7 +345,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     const leaveReq = await createLeaveRequest(
       {
         staffId: supportStaffId,
-        leaveTypeCode: "annual",
+        leaveTypeCode: leaveType,
         startDate: startDate,
         endDate: endDate,
         daysCount: 5,
@@ -378,10 +386,14 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     expect(attendanceRecords.length).toBe(5);
     expect(attendanceRecords.map(row => row.attendanceDate).sort()).toEqual([1,2,3,4,5].map(day => `${month}-0${day}`));
     const {rows: allLeaveDates} = await getPool().query<{day:string}>("SELECT attendance_date::text AS day FROM hr_attendance_records WHERE staff_id=$1 ORDER BY attendance_date", [supportStaffId]);
-    expect(allLeaveDates.map(row => row.day)).toEqual([1,2,3,4,5].map(day => `${month}-0${day}`));
+    expect(allLeaveDates.map(row => row.day)).toEqual([...([1,2,3,4,5].map(day => `${month}-0${day}`)), `${month}-10`]);
     for (const rec of attendanceRecords) {
       expect(rec.status).toBe("on_leave");
     }
+    const withLeave = await calculatePayrollRun(period.id, "YER", adminSession);
+    expect(withLeave.id).toBe(beforeLeave.id);
+    expect(withLeave.totalNetDueMinor).toBe(expectedNet);
+    expect(withLeave.totalDeductionsMinor).toBe(0);
 
     // 5. Manager cancels the leave request
     const cancelledLeave = await decideLeaveRequest(
@@ -404,6 +416,19 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
       endDate: endDate,
     });
     expect(cleanedAttendance.length).toBe(0);
-    expect((await getPool().query("SELECT id FROM hr_attendance_records WHERE staff_id=$1", [supportStaffId])).rows).toHaveLength(0);
+    const retained = await listAttendanceRecords({ staffId: supportStaffId, startDate: `${month}-10`, endDate: `${month}-10` });
+    expect(retained).toHaveLength(1);
+    expect(retained[0].status).toBe("present");
+    const afterCancel = await calculatePayrollRun(period.id, "YER", adminSession);
+    expect(afterCancel.id).toBe(beforeLeave.id);
+    expect(afterCancel.totalNetDueMinor).toBe(expectedNet);
+    expect(afterCancel.totalDeductionsMinor).toBe(0);
+    await approvePayrollRun(afterCancel.id, adminSession);
+    const approvedItems = await listPayrollItems(afterCancel.id);
+    await approvePayrollRun(afterCancel.id, adminSession);
+    expect(await listPayrollItems(afterCancel.id)).toEqual(approvedItems);
+    expect(approvedItems).toHaveLength(2);
+    expect(new Set(approvedItems.map(item => item.payableId)).size).toBe(2);
+    await expect(calculatePayrollRun(period.id, "YER", adminSession)).rejects.toThrow("معتمد");
   });
 });
