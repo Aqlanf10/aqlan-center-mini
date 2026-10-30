@@ -1,5 +1,6 @@
 "use client";
 
+import { CanonicalOrthoDetail } from "./CanonicalOrthoDetail";
 import { useEffect, useId, useState } from "react";
 import { APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, PHASE_LABEL, usesArchwires, type OrthoCaseSummaryFeed } from "@/lib/ortho";
 
@@ -77,6 +78,7 @@ export function CanonicalOrthoCases({ patientId }: { patientId: string }) {
               </> : null}
             </dl>
             {row.baselineKind === "legacy" ? <p className="mt-2 text-xs text-slate-600">علاج بدأ قبل النظام</p> : null}
+            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} />
           </li>)}</ul>}
       {feed?.hasMore ? <p role="status" className="text-sm text-amber-800">تظهر أحدث 300 حالة فقط؛ هذه ليست القائمة الكاملة.</p> : null}
     </div> : null}

@@ -470,6 +470,15 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - Source boundary: one GET only. Existing writers, clinical/financial relationships, full legacy case readers, ceph and plans remain untouched. This is a read: no new mutation/audit policy or idempotency claim.
 - Evidence: `__tests__/postgres/ortho-canonical-cases.test.ts` and built `canonical-ortho-cases-journey` (portOffset 39); delivery report `docs/review/work-ortho-cases-slice29-20261030.md`.
 
+### Slice 30 — one native clinical orthodontic case
+
+- `GET /api/ortho/[id]` / `read:ortho.case`: `clinical.ortho.view` AND patient scope. Case existence and current central patient witnesses are filtered in SQL in the same owning RR READ ONLY snapshot as admission, clinical values, history and progress. Missing/outside have the same 404. No caller-selected field expansion or scope.
+- Explicit clinical fields and native ortho case/adjustment notes. These notes belong to the ortho record; this grants no general visit notes, history or document access. No legacy hydration, plan id, legacy financial mode, images, document metadata, linked visit identifiers/signatures or closed-by account metadata. Owner uses the same bounded representation without changing grants. Independent document delivery remains unconverted.
+- Latest 100 adjustments, deterministic date/id ordering and `hasMore`. Progress uses all scoped-case adjustments, not the bounded array. Read size is bounded at 1 MiB; oversized notes fail the result rather than silently truncating clinical content.
+- Nested on-demand detail under the admitted summary, with existing RTL/390px design, timeout, abort/generation guards and clearing on failure/refresh/hide. No old editor or independent endpoint mounts. Parent-summary refresh may close the detail; no stale retained copy.
+- All three data SELECTs use the owning connection. No mutations, migrations or financial rules change. Legacy GET body and POST/PATCH bodies remain unchanged.
+- Evidence: `ortho-canonical-detail.test.ts`, `canonical-ortho-detail-journey.test.ts` (portOffset 41), report `docs/review/work-ortho-detail-slice30-20261030.md`.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

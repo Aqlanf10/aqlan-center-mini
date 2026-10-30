@@ -2692,8 +2692,16 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: read:ortho.case; native clinical case and latest 100 adjustments, explicit hasMore; no finance, plan, document or linked-visit payload. Legacy GET and all writers unchanged.",
+  "projection": {
+   "legacy": "Full case and financial-link metadata; photos conditional on canViewXrays.",
+   "groups": {
+    "clinical": "clinical.ortho.view: native case fields, native ortho notes, bounded adjustment history and complete case progress; no unrelated visit notes",
+    "independent": "Plan/funding, images, document metadata and visit records are omitted, including for owner; their independent readers are outside this slice"
+   },
+   "rows": "Current patient scope with central witnesses in the owning snapshot; outside and missing cases share the same 404"
+  }
  },
  {
   "route": "/api/ortho/[id]",

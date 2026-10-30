@@ -20,6 +20,8 @@ export interface CanonicalRecordReadRule {
 }
 
 export const CANONICAL_RECORD_READS = Object.freeze({
+  /** GET /api/ortho/[id]: native clinical detail only (M2 slice 30). */
+  "read:ortho.case": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ortho: bounded case summaries, never funding or imaging (M2 slice 29). */
   "read:ortho.cases": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients: search and browse the patient list. */

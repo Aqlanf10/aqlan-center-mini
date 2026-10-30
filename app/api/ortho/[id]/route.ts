@@ -10,6 +10,10 @@ import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalOrthoCaseId, readCanonicalOrthoCase } from "@/lib/canonical-ortho-reads";
+
 import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 
 export const dynamic = "force-dynamic";
@@ -160,6 +164,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const caseId = canonicalOrthoCaseId((await context.params).id, new URL(_request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoCase(selected.handle, caseId), { headers: NO_STORE });
+    } catch (error) { return canonicalPatientReadFailure(error, "تعذّر تحميل تفاصيل التقويم."); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);

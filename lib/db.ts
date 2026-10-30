@@ -23335,7 +23335,7 @@ import {
   canComplete, caseProgress, nextWire,
   type Appliance, type Arches, type CaseProgress, type CaseStatus,
   type ElasticClass, type OrthoPhase, type RetainerType, type SlotSize,
-  type OrthoCaseSummary,
+  type OrthoCaseSummary, type OrthoClinicalDetail,
 } from "./ortho";
 import { checkOrthoSessionDraft, resolveOrthoWire, isLegacyFinancialMode, type BaselineDraft, type LegacyFinancialMode, type OrthoSessionDraft } from "./ortho-baseline";
 
@@ -23573,6 +23573,61 @@ export async function listOrthoCaseSummariesWith(
     responsibleDoctorId: row.responsible_doctor_id, responsibleDoctorName: row.responsible_doctor_name,
     baselineKind: row.baseline_kind === "legacy" ? "legacy" : null,
   })) };
+}
+
+/** M2 slice 30. A scoped clinical projection, never hydrateCases/CASE_SELECT.
+ * All three SELECTs use the caller's owning RR READ ONLY snapshot. No finance,
+ * document, visit or generic-note table is touched. Native ortho notes belong to
+ * clinical.ortho.view; this does not grant access to other clinical records. */
+export async function getOrthoClinicalDetailWith(
+  q: Pick<DbClient, "query">, caseId: number, clinicianPartyId: number | null, today: string,
+): Promise<OrthoClinicalDetail | null> {
+  const { rows } = await q.query<Omit<CaseRow, "plan_id" | "legacy_financial_mode" | "closed_by">>(
+    `SELECT c.id,c.patient_id,p.full_name,c.appliance,c.arches,c.slot,c.bracket_system,
+       c.status,c.phase,c.start_date,c.planned_months,c.upper_wire,c.lower_wire,
+       c.retainer,c.retainer_on,c.note,c.closed_at,c.closed_note,
+       c.baseline_kind,c.baseline_recorded_at,c.elastics,c.responsible_doctor_id,
+       rd.name AS responsible_doctor_name,c.remaining_objectives
+     FROM ortho_cases c JOIN patients p ON p.id=c.patient_id
+     LEFT JOIN parties rd ON rd.id=c.responsible_doctor_id
+     WHERE c.id=$1 ${clinicianPartyId === null ? "" : `AND EXISTS (SELECT 1 FROM patients WHERE patients.id=c.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")})`}`,
+    clinicianPartyId === null ? [caseId] : [caseId, clinicianPartyId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  // Aggregate over the whole scoped case, not the bounded history page.
+  const stats = (await q.query<{ count: number; last: Date | null }>(
+    "SELECT count(*)::int AS count,max(done_on) AS last FROM ortho_adjustments WHERE case_id=$1", [caseId],
+  )).rows[0];
+  const history = (await q.query<Omit<AdjustmentRow, "case_id" | "visit_id" | "visit_signed">>(
+    `SELECT id,done_on,phase,upper_wire,lower_wire,elastics,elastic_note,done,next_weeks,note,recorded_by
+     FROM ortho_adjustments WHERE case_id=$1 ORDER BY done_on DESC,id DESC LIMIT 101`, [caseId],
+  )).rows;
+  return {
+    projection: "case-clinical", today,
+    case: {
+      id: row.id, patientId: row.patient_id, patientName: row.full_name,
+      appliance: row.appliance as Appliance, arches: row.arches as Arches,
+      slot: row.slot as SlotSize, bracketSystem: row.bracket_system,
+      status: row.status as CaseStatus, phase: row.phase as OrthoPhase,
+      startDate: dateText(row.start_date), plannedMonths: row.planned_months,
+      upperWire: row.upper_wire, lowerWire: row.lower_wire,
+      retainer: row.retainer as RetainerType | null, retainerOn: row.retainer_on ? dateText(row.retainer_on) : null,
+      note: row.note, closedAt: row.closed_at?.toISOString() ?? null, closedNote: row.closed_note,
+      baselineKind: row.baseline_kind === "legacy" ? "legacy" : null,
+      baselineRecordedAt: row.baseline_recorded_at?.toISOString() ?? null,
+      elastics: row.elastics, remainingObjectives: row.remaining_objectives,
+      responsibleDoctorId: row.responsible_doctor_id, responsibleDoctorName: row.responsible_doctor_name,
+    },
+    adjustments: history.slice(0, 100).map(a => ({
+      id: a.id, doneOn: dateText(a.done_on), phase: a.phase as OrthoPhase | null,
+      upperWire: a.upper_wire, lowerWire: a.lower_wire, elastics: a.elastics as ElasticClass,
+      elasticNote: a.elastic_note, done: a.done, nextWeeks: a.next_weeks, note: a.note, recordedBy: a.recorded_by,
+    })),
+    hasMore: history.length > 100,
+    progress: caseProgress({ startDate: dateText(row.start_date), plannedMonths: row.planned_months,
+      adjustments: stats.count, lastAdjustmentDate: stats.last ? dateText(stats.last) : null, today }),
+  };
 }
 
 /**

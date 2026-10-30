@@ -357,3 +357,39 @@ export function suggestCephPhase(
   return "during";
 }
 
+
+/** M2 slice 30: native ortho clinical data only. Financial agreements, visit
+ * records/notes and documents have independent capabilities and readers. */
+export interface OrthoClinicalCase extends OrthoCaseSummary {
+  slot: SlotSize;
+  bracketSystem: string | null;
+  retainer: RetainerType | null;
+  retainerOn: string | null;
+  note: string | null;
+  closedAt: string | null;
+  closedNote: string | null;
+  baselineRecordedAt: string | null;
+  elastics: string | null;
+  remainingObjectives: string | null;
+}
+export interface OrthoClinicalAdjustment {
+  id: number;
+  doneOn: string;
+  phase: OrthoPhase | null;
+  upperWire: string | null;
+  lowerWire: string | null;
+  elastics: ElasticClass;
+  elasticNote: string | null;
+  done: string | null;
+  nextWeeks: number;
+  note: string | null;
+  recordedBy: string;
+}
+export interface OrthoClinicalDetail {
+  projection: "case-clinical";
+  case: OrthoClinicalCase;
+  adjustments: OrthoClinicalAdjustment[];
+  hasMore: boolean;
+  progress: CaseProgress;
+  today: string;
+}
