@@ -75,3 +75,45 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     expect((await post("/api/print-log", { docType: "prescription", docId: id, patientId: patient.id }, "reception")).status).toBe(404);
   } finally { await db.query("UPDATE users SET permissions=$1 WHERE id=$2", [reception.permissions, reception.id]); }
 }, 120_000);
+
+
+it("finds an older visit prescription beyond 50 newer records without crossing patient, visit or status", async () => {
+  const { rows: [doctor] } = await db.query("SELECT party_id FROM users WHERE username='secdoctora'");
+  const { rows: [reception] } = await db.query("SELECT id,permissions FROM users WHERE username='secreception'");
+  const patient = (await db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'Synthetic old Rx picker',$2) RETURNING id", [`RX-OLDER-${Date.now()}`, doctor.party_id])).rows[0].id;
+  const oldVisit = (await db.query("INSERT INTO visits(patient_id,patient_name,doctor_id) VALUES($1,'Old visit',$2) RETURNING id", [patient, doctor.party_id])).rows[0].id;
+  const newerVisit = (await db.query("INSERT INTO visits(patient_id,patient_name,doctor_id) VALUES($1,'Newer visit',$2) RETURNING id", [patient, doctor.party_id])).rows[0].id;
+  const oldRx = (await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,prescribing_doctor_name,created_at) VALUES($1,$2,'[]','synthetic-fixture','Original old doctor','2020-01-01T00:00:00Z') RETURNING id", [patient, oldVisit])).rows[0].id;
+  await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,created_at) SELECT $1,$2,'[]','synthetic-fixture','2026-01-01'::timestamptz + n * interval '1 second' FROM generate_series(1,60) n", [patient, newerVisit]);
+  await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,status) VALUES($1,$2,'[]','synthetic-void','void'),($3,$4,'[]','synthetic-other','active')", [patient, oldVisit, h.seeded.patientBId, h.seeded.visitId]);
+  try {
+    // Synthetic fixture grant only; restore exact prior value in finally.
+    await db.query("UPDATE users SET permissions=$1 WHERE id=$2", [{ ...(reception.permissions ?? {}), canPrintSavedPrescriptions: true }, reception.id]);
+    const response = await read(`/api/patients/${patient}/prescriptions/saved?visitId=${oldVisit}`); expect(response.status).toBe(200);
+    expect((await response.json()).prescriptions).toEqual([{ id: oldRx, visitId: oldVisit, createdAt: "2020-01-01T00:00:00.000Z", prescribingDoctorName: "Original old doctor" }]);
+    const newest = await (await read(`/api/patients/${patient}/prescriptions/saved?visitId=${newerVisit}`)).json();
+    expect(newest.prescriptions).toHaveLength(50); expect(newest.prescriptions.every((rx: { visitId: number }) => rx.visitId === newerVisit)).toBe(true);
+    expect((await read(`/api/patients/${h.seeded.patientBId}/prescriptions/saved?visitId=${oldVisit}`)).status).toBe(404);
+    expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescriptions WHERE patient_id=$1", [patient])).rows[0].n)).toBe(62);
+  } finally { await db.query("UPDATE users SET permissions=$1 WHERE id=$2", [reception.permissions, reception.id]); }
+});
+
+it("actual PG catalogue detector keeps unrelated binding artifacts legacy and quarantines any canonical footprint", async () => {
+  const { readStaffEntryMode } = await import("../../lib/legacy-staff-schema.mjs");
+  const schema = "aqlan_identity_1234567890abcdef";
+  try {
+    await db.query(`CREATE SCHEMA ${schema}`);
+    await db.query(`CREATE TABLE ${schema}.users(id int); CREATE TABLE ${schema}.parties(id int); CREATE TABLE ${schema}.clinic_owner_binding_state(id int)`);
+    expect(await readStaffEntryMode(db, schema)).toBe("legacy");
+    await db.query(`CREATE TABLE ${schema}.staff_authority_control(id int)`);
+    expect(await readStaffEntryMode(db, schema)).toBe("canonical");
+    await db.query(`DROP TABLE ${schema}.staff_authority_control; ALTER TABLE ${schema}.users ADD COLUMN authorization_epoch bigint`);
+    expect(await readStaffEntryMode(db, schema)).toBe("canonical");
+    await db.query(`ALTER TABLE ${schema}.users DROP COLUMN authorization_epoch; CREATE FUNCTION ${schema}.staff_restore_hold_guard() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'`);
+    expect(await readStaffEntryMode(db, schema)).toBe("canonical");
+    await db.query(`ALTER FUNCTION ${schema}.staff_restore_hold_guard() RENAME TO synthetic_guard; CREATE TRIGGER staff_restore_hold_guard_row BEFORE INSERT ON ${schema}.users FOR EACH ROW EXECUTE FUNCTION ${schema}.synthetic_guard()`);
+    expect(await readStaffEntryMode(db, schema)).toBe("canonical");
+    await db.query(`DROP TRIGGER staff_restore_hold_guard_row ON ${schema}.users`);
+    expect(await readStaffEntryMode(db, schema)).toBe("legacy");
+  } finally { await db.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); }
+});

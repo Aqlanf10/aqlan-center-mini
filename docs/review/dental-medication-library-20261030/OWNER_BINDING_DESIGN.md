@@ -1,6 +1,6 @@
 # Central clinic owner binding — design awaiting review
 
-Status: proposal only. No schema, provisioning command, owner identity or live grant is implemented by this document. The Rx owner adapter still returns null. Ordinary clinician issuance and reception reprinting remain independently usable under their existing checks.
+Status: binding schema and authority remain a proposal. The actual WORK SELECT-only detector and a non-applicable read-only candidate inspection tool are extracted; neither is wired into login or grants authority. No schema, provisioning command, owner identity or live grant is implemented. The Rx owner adapter still returns null. Ordinary clinician issuance and reception reprinting remain independently usable under their existing checks.
 
 ## Evidence and allocation
 
@@ -54,6 +54,31 @@ Canonical cutover is a separate coordinated operation: freeze binding changes, p
 - Any canonical artifact selects canonical-only; unavailable/invalid runtime refuses without legacy fallback.
 - PG18 lock ordering, concurrent relink/revoke, forged history, backup/restore quarantine and version monotonicity tested on synthetic databases.
 
-The release base does not yet expose WORK’s shared mode selector. Review must explicitly authorize reuse/extraction of its SELECT-only detector (and schema-name validator) into the central adapter; no tables, ready state or activation runtime would be copied. A duplicated guessed marker list is not an acceptable long-term mode authority.
+The parent authorized extraction of WORK’s SELECT-only detector. `lib/legacy-staff-schema.mjs` is byte-identical to WORK 0bc3a0c5 except its import points to the separately extracted exact schema-name validator. A SHA-256 parity test fixes the original source identity; real PG tests exercise table, function, trigger and column footprints. No canonical DDL, initializer, admission runtime or login changes are imported. The candidate inspection tool performs SELECTs only with PostgreSQL read-only transactions enforced and always returns canApply=false.
 
 Main review decisions: allocation of the migration number; acceptance of shared revision tracking; exact provisioning operator authorization; restore/quarantine contract; and the canonical runtime integration/cutover owner. These are unresolved design choices, not permission to provision a real owner.
+
+
+## Reviewed lock ordering and actual writer compatibility
+
+Required operation order: shared advisory binding fence (exclusive for bind/revoke), singleton binding state, actor account, all issuer/selected doctor rows sorted numerically, identity revision rows in the same entity order, then patient/visit witnesses. Read account and doctor rows with NOWAIT; any 55P03 ends the whole transaction with a retryable refusal. A retry starts fresh session and binding verification, never reuses a proof. Revision reads are also NOWAIT and require exactly one existing row; issuance must not create a missing witness. The fence does not replace row/revision verification after waits.
+
+Actual base writers in `lib/db.ts` were inspected:
+
+- `linkUserDoctor` takes the account row FOR UPDATE, then `withDoctorCommissionChange` takes old/new doctor rows in numeric order, then updates the account.
+- `updateUser` with commission changes takes the account, then linked doctor; without commission changes its UPDATE acquires the account row directly.
+- `updateParty` with commission changes takes the doctor row first; otherwise its UPDATE acquires that row directly. It does not acquire an account afterward.
+
+Revision triggers must only increment the witness belonging to the row being changed. They must never acquire the binding fence, another account, or another doctor. This preserves account-before-own-revision and doctor-before-own-revision; issuance must never reverse that order. A link writer can update its account revision after holding doctor rows, so issuance takes all account/doctor rows before any revision. Proposed bind/revoke uses the exclusive fence then the same row order. Existing commission bookkeeping locks remain outside the authority proof; NOWAIT on authority witnesses avoids waiting behind a partially held writer chain. No writer changes or revision triggers are installed yet.
+
+Implementation acceptance requires real `linkUserDoctor`, `updateUser`, and `updateParty` concurrency tests, not mock substitutes: hold account/doctor lock in a writer, attempt issuance and observe retryable denial, release writer and reject old revision; exercise A→B→A, concurrent revoke, absent revision and rollback on audit failure. These tests cannot truthfully pass before the deferred binding schema exists.
+
+## Target installation witness and restore hold
+
+The release's `scripts/restore-full.ts` validates an empty target and restores documents to DOCUMENTS_DIR staging; `scripts/restore.mjs` guards SQL restoration. Neither supplies a target-owned installation witness outside the restored data. Importing WORK's provenance machinery partially would change the authority boundary and is not part of this patch.
+
+The minimal proposed witness is a non-secret random installation identifier held in a target-owned file outside SQL backups and DOCUMENTS_DIR archives. It identifies the installation only, never an owner. The explicit binding stores its digest; missing/mismatched file denies admission. A supported restoration must stop the application, rotate this target file before restoring, keep the restored binding quarantined, and require an explicit reviewed rebind before resuming on-behalf issuance. Copying both the database and this external file is outside that guarantee; no raw-clone detection is claimed.
+
+No safe placement/exclusion/rotation integration is approved in the current restore contract. Therefore no witness file, environment setting, schema migration or live binding is created, and issuance as another doctor remains closed. Restore tools are unchanged. A future patch must review backup exclusions, target-file ownership and all supported restore entry points together before enabling the adapter.
+
+Allocation remains unreserved. Open PR inventory includes #494/#493 HR changes and #483 canonical review in addition to WORK/#490; inspecting only the latter two is insufficient to claim 0092. Since no schema is introduced here, no migration number is consumed.

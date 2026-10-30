@@ -24042,6 +24042,19 @@ export async function listPatientPrescriptions(
   return rows.map(toPrescription);
 }
 
+/** Minimal saved-print picker. Scope and active status are filtered BEFORE limit. */
+export async function listSavedPrescriptionPrints(patientId: number, visitId: number | null = null): Promise<{
+  id: number; visitId: number | null; createdAt: string; prescribingDoctorName: string | null;
+}[]> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; visit_id: number | null; created_at: Date; prescribing_doctor_name: string | null }>(
+    `SELECT id, visit_id, created_at, prescribing_doctor_name FROM prescriptions
+      WHERE patient_id=$1 AND status='active' AND ($2::int IS NULL OR visit_id=$2::int)
+      ORDER BY created_at DESC, id DESC LIMIT 50`, [patientId, visitId],
+  );
+  return rows.map(row => ({ id: row.id, visitId: row.visit_id, createdAt: row.created_at.toISOString(), prescribingDoctorName: row.prescribing_doctor_name }));
+}
+
 /**
  * إبطالٌ موثَّق بسببه — لا حذف ولا تعديل.
  *

@@ -300,10 +300,10 @@ describe("PG18 schema ownership characterization", () => {
     expect(report.migrationProvenance.map((item) => item.version)).toEqual([
       "0001", "0002", "0003", "0004", "0005", "0006",
       "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043",
-      '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089',
+      '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091',
     ]);
     expect(report.migrationRegistry.present).toBe(true);
-    expect(report.migrationRegistry.rows).toHaveLength(66);
+    expect(report.migrationRegistry.rows).toHaveLength(68);
     expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
 
     const migrationApplicationTables = report.migrationCatalog.tables
@@ -325,7 +325,7 @@ describe("PG18 schema ownership characterization", () => {
       expect(runtimeApplicationTables.some(entry=>entry.table===table)).toBe(true);
     }
     expect(report.runtimeCatalog.registry.present).toBe(true);
-    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089'].includes(row.version)));
+    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0078', '0087', '0089', '0090', '0091'].includes(row.version)));
 
     expect(report.comparison.characterizationOk).toBe(true);
     expect(report.comparison.applicationSchemaEqual).toBe(false);

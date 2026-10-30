@@ -23,6 +23,7 @@ export function SavedPrescriptions({ patientId, visitId }: { patientId: number; 
     {busy && <p role="status">جارٍ قراءة الوصفات…</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {rows?.length === 0 && <p>لا توجد وصفات محفوظة فاعلة لهذا السياق.</p>}
+    {rows?.length === 50 && <p className="text-xs text-slate-600">تُعرض أحدث 50 وصفة فاعلة في السياق المحدد.</p>}
     <ul>{rows?.map(rx => <li key={rx.id} className="my-2 flex flex-wrap items-center gap-3 border-t pt-2">
       <span>وصفة #{rx.id} — <bdi>{rx.createdAt.slice(0, 10)}</bdi> — {rx.prescribingDoctorName || "اسم الطبيب غير موثق في السجل القديم"}</span>
       <span>{rx.visitId ? `زيارة #${rx.visitId}` : "دون ربط موثق بزيارة"}</span>

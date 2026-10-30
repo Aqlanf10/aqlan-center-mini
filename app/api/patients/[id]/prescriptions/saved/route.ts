@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
-import { getClinicalVisit, getPatient, listPatientPrescriptions } from "@/lib/db";
+import { getClinicalVisit, getPatient, listSavedPrescriptionPrints } from "@/lib/db";
 export const dynamic = "force-dynamic";
 /** Minimal print picker; no medications, notes, suggestions or issuer options. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -19,8 +19,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!await getPatient(patientId)) return NextResponse.json({ message: "الملف غير موجود." }, { status: 404 });
     if (visitId !== null && (await getClinicalVisit(visitId))?.patientId !== patientId)
       return NextResponse.json({ message: "الزيارة لا تطابق المريض." }, { status: 404 });
-    const prescriptions = (await listPatientPrescriptions(patientId)).filter(rx => rx.status === "active" && (visitId === null || rx.visitId === visitId))
-      .map(rx => ({ id: rx.id, visitId: rx.visitId, createdAt: rx.createdAt, prescribingDoctorName: rx.prescribingDoctorName ?? null }));
+    const prescriptions = await listSavedPrescriptionPrints(patientId, visitId);
     return NextResponse.json({ prescriptions }, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ message: "تعذرت قراءة الوصفات المحفوظة." }, { status: 500 }); }
 }
