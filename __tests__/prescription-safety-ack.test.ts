@@ -40,7 +40,7 @@ const DRAFT_BODY = {
   diagnosis: "خراج لبي",
   notes: "",
   instructionsLang: "both",
-  items: [{ name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
+  items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
 };
 
 function draftOf(body: Record<string, unknown> = DRAFT_BODY): PrescriptionDraft {

@@ -38,7 +38,7 @@ export const INSTRUCTIONS_LANG_LABEL: Record<InstructionsLang, string> = {
 
 /** دواءٌ واحد في الوصفة. */
 export interface RxItem {
-  /** Manual name-entry review only; not a clinical template approval. */
+  /** Mandatory for NEW issuance; optional only when reading historical rows. Not clinical template approval. */
   selection?: ManualMedicationSelection;
   /** الاسم كما يُكتب على العلبة — إنجليزيًّا. */
   name: string;
@@ -162,7 +162,7 @@ export function checkPrescriptionDraft(input: {
   if (input.visitId !== null && !(Number.isInteger(input.visitId) && input.visitId > 0)) {
     return { ok: false, message: "رقم الزيارة غير صالح." };
   }
-  if (Array.isArray(input.items) && input.items.length > MAX_ITEMS && input.items.some(item => item && typeof item === "object" && item.selection !== undefined)) {
+  if (Array.isArray(input.items) && input.items.length > MAX_ITEMS) {
     return { ok: false, message: "الحد الأقصى 20 دواءً؛ احذف السطور الزائدة قبل الإصدار." };
   }
   const selectionError = manualMedicationSelectionError(input.items);
@@ -170,6 +170,10 @@ export function checkPrescriptionDraft(input: {
   const items = sanitizeRxItems(input.items);
   if (items.length === 0) {
     return { ok: false, message: "الوصفة بلا أدوية — أضف دواءً واحدًا على الأقل." };
+  }
+  // Legacy read sanitization may discard invalid rows; new issuance must not.
+  if (Array.isArray(input.items) && items.length !== input.items.length) {
+    return { ok: false, message: "توجد بيانات دواء غير صالحة؛ صحح جميع السطور قبل الإصدار." };
   }
   const lang: InstructionsLang = isInstructionsLang(input.instructionsLang)
     ? input.instructionsLang : "both";

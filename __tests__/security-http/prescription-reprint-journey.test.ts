@@ -20,11 +20,17 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     const result = await authedMutation(`/api/users/${reception.id}`, h.sessions.admin, "PATCH", JSON.stringify({ permissions: { ...(reception.permissions ?? {}), canPrintSavedPrescriptions: enabled } }));
     expect(result.status, await result.text()).toBe(200);
   };
-  const body = { patientId: patient.id, visitId: visit.id, prescribingDoctorPartyId: doctor.party_id, diagnosis: "Synthetic private diagnosis", notes: "Synthetic private notes", items: [{ name: "SyntheticRxOnly", dose: "fixture", form: "Synthetic form", frequency: "fixture", duration: "Synthetic duration", selection: { id: "amoxicillin", amount: "Synthetic amount only", confirmed: true } }] };
+  const body = { patientId: patient.id, visitId: visit.id, prescribingDoctorPartyId: doctor.party_id, diagnosis: "Synthetic private diagnosis", notes: "Synthetic private notes", items: [{ name: "SyntheticRxOnly", dose: "fixture", form: "Synthetic form", frequency: "fixture", duration: "Synthetic duration", selection: { id: "manual", amount: "Synthetic amount only", confirmed: true } }] };
   try {
     await setGrant(false);
     expect((await read(`/api/patients/${patient.id}/prescriptions/saved`)).status).toBe(403);
     expect((await post("/api/prescriptions", { ...body, visitId: h.seeded.visitId })).status).toBe(400);
+    // Direct requests cannot downgrade new issuance to legacy by deleting metadata.
+    const { selection: _review, ...withoutReview } = body.items[0];
+    for (const item of [withoutReview, { name: "SyntheticRxOnly" }, { ...withoutReview, dose: "" }]) {
+      expect((await post("/api/prescriptions", { ...body, items: [item] })).status).toBe(400);
+    }
+    expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescriptions WHERE patient_id=$1", [patient.id])).rows[0].n)).toBe(0);
     for (const field of ["form", "dose", "frequency", "duration"]) {
       expect((await post("/api/prescriptions", { ...body, items: [{ ...body.items[0], [field]: "" }] })).status).toBe(400);
     }
@@ -90,12 +96,17 @@ it("finds an older visit prescription beyond 50 newer records without crossing p
   const patient = (await db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'Synthetic old Rx picker',$2) RETURNING id", [`RX-OLDER-${Date.now()}`, doctor.party_id])).rows[0].id;
   const oldVisit = (await db.query("INSERT INTO visits(patient_id,patient_name,doctor_id) VALUES($1,'Old visit',$2) RETURNING id", [patient, doctor.party_id])).rows[0].id;
   const newerVisit = (await db.query("INSERT INTO visits(patient_id,patient_name,doctor_id) VALUES($1,'Newer visit',$2) RETURNING id", [patient, doctor.party_id])).rows[0].id;
-  const oldRx = (await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,prescribing_doctor_name,created_at) VALUES($1,$2,'[]','synthetic-fixture','Original old doctor','2020-01-01T00:00:00Z') RETURNING id", [patient, oldVisit])).rows[0].id;
+  const oldRx = (await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,prescribing_doctor_name,created_at) VALUES($1,$2,'[{\"name\":\"SyntheticLegacyRx\"}]','synthetic-fixture','Original old doctor','2020-01-01T00:00:00Z') RETURNING id", [patient, oldVisit])).rows[0].id;
   await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,created_at) SELECT $1,$2,'[]','synthetic-fixture','2026-01-01T00:00:00.000123Z'::timestamptz FROM generate_series(1,60) n", [patient, newerVisit]);
   await db.query("INSERT INTO prescriptions(patient_id,visit_id,items,created_by,status) VALUES($1,$2,'[]','synthetic-void','void'),($3,$4,'[]','synthetic-other','active')", [patient, oldVisit, h.seeded.patientBId, h.seeded.visitId]);
   try {
     // Synthetic fixture grant only; restore exact prior value in finally.
     await db.query("UPDATE users SET permissions=$1 WHERE id=$2", [{ ...(reception.permissions ?? {}), canPrintSavedPrescriptions: true }, reception.id]);
+    const legacyBefore = (await db.query("SELECT * FROM prescriptions WHERE id=$1", [oldRx])).rows[0];
+    const legacyPrint = await read(`/print/prescription/${patient}?rx=${oldRx}`);
+    expect(legacyPrint.status).toBe(200);
+    expect(await legacyPrint.text()).toContain("SyntheticLegacyRx");
+    expect((await db.query("SELECT * FROM prescriptions WHERE id=$1", [oldRx])).rows[0]).toEqual(legacyBefore);
     const response = await read(`/api/patients/${patient}/prescriptions/saved?visitId=${oldVisit}`); expect(response.status).toBe(200);
     expect((await response.json()).prescriptions).toEqual([{ id: oldRx, visitId: oldVisit, createdAt: "2020-01-01T00:00:00.000Z", prescribingDoctorName: "Original old doctor" }]);
     const newest = await (await read(`/api/patients/${patient}/prescriptions/saved?visitId=${newerVisit}`)).json();
