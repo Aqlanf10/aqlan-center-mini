@@ -150,7 +150,7 @@ beforeEach(() => {
     if (clinical) return response(200, options?.method === "POST" ? { ok: true } : structuredClone(visits.get(Number(clinical[1]))));
     const patient = url.match(/^\/api\/patients\/(\d+)$/);
     if (patient) return readPatient(Number(patient[1]));
-    if (/^\/api\/patients\/\d+\/prescriptions$/.test(url)) return response(200, { prescriptions: [], suggestions: [] });
+    if (/^\/api\/patients\/\d+\/prescriptions$/.test(url)) return response(200, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 94001, canChooseAnyDoctor: false, doctors: [{ id: 94001, name: "Synthetic clinician" }] } });
     if (url === "/api/services") return response(200, []);
     if (url === "/api/parties?kind=doctor") return response(200, [{ id: 94001, name: "Synthetic clinician" }]);
     throw new Error(`Unexpected request blocked: ${url}`);

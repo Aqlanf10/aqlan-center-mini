@@ -45,6 +45,7 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
   let patientPayload: unknown = patientRead.body ?? { patient: { id: contextPatientId, medicalAlert: null, phone: null }, visits: [], appointments: [] };
   let patientStatus = patientRead.status ?? 200;
   let holdPatient = false;
+  let failPrescriber = false;
   const pendingPatients: Route[] = [];
   const context = await browser.newContext({
     viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block",
@@ -103,7 +104,10 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
       else if (holdPatient) pendingPatients.push(route);
       else await json(route, patientPayload, patientStatus);
     }
-    else if (path === `/api/patients/${contextPatientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 98104, canChooseAnyDoctor: false, doctors: [{ id: 98104, name: "طبيب تجريبي" }] } });
+    else if (path === `/api/patients/${contextPatientId}/prescriptions`) {
+      if (failPrescriber) await json(route, { message: "Synthetic identity outage" }, 503);
+      else await json(route, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 98104, canChooseAnyDoctor: false, doctors: [{ id: 98104, name: "طبيب تجريبي" }] } });
+    }
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") await json(route, [{ id: 98104, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);
@@ -144,6 +148,7 @@ async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?:
       await diagnosis.waitFor({ state: "detached" });
     };
     return { context, page, visitDiagnosis, diagnosis, notes, open, close, requests, unexpected, errors,
+      failPrescriberRead: (failed: boolean) => { failPrescriber = failed; },
       setPatientResponse: (body: unknown, status = 200) => { patientPayload = body; patientStatus = status; },
       holdPatientRead: () => { holdPatient = true; },
       pendingPatientReads: () => pendingPatients.length,
@@ -429,4 +434,21 @@ describe("patient-file context in the built prescription consumer", () => {
       expect(f.requests).toEqual([]); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
     } finally { await f.context.close(); }
   });
+});
+
+
+it("blocks issuance on prescriber lookup failure and permits explicit safe retry", async () => {
+  const f = await fixture();
+  try {
+    f.failPrescriberRead(true); await f.open(); await fillMedicine(f.page);
+    await f.page.getByText("تعذر التحقق من هوية الطبيب الواصف. الإصدار والمعاينة متوقفان حتى ينجح التحقق.", { exact: true }).waitFor();
+    expect(await f.page.getByLabel("الطبيب الواصف", { exact: true }).inputValue()).toBe("");
+    expect(await f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }).isDisabled()).toBe(true);
+    expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
+    f.failPrescriberRead(false); await f.page.getByRole("button", { name: "إعادة التحقق من الطبيب", exact: true }).click();
+    await expect.poll(() => f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }).isEnabled()).toBe(true);
+    expect(await f.page.getByLabel("الطبيب الواصف", { exact: true }).inputValue()).toBe("طبيب تجريبي");
+    expect(f.requests).toEqual([]); expect(await prints(f.page)).toEqual([]);
+    expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+  } finally { await f.context.close(); }
 });

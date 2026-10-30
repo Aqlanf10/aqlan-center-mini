@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSession } from "./SessionProvider";
 import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
@@ -89,13 +90,18 @@ export function PrescriptionModal({
   // explicit template/print choices own the Rx draft across cancellation/reopening.
   const [diagnosisOverride, setDiagnosisOverride] = useState<string | null>(null);
   const diagnosis = diagnosisOverride ?? defaultDiagnosis;
-  const [prescriberOptions, setPrescriberOptions] = useState<{
-    issuerId: number | null; canChooseAnyDoctor: boolean; doctors: { id: number; name: string }[];
-  } | null>(null);
-  const [prescriberOverride, setPrescriberOverride] = useState<number | null>(null);
-  const preferredDoctorId = prescriberOverride ?? defaultDoctorPartyId;
+  const session = useSession();
+  const prescriberKey = JSON.stringify([isOpen, patientId, visitId, session?.username, session?.role, session?.permissions]);
+  type PrescriberOptions = { issuerId: number; canChooseAnyDoctor: boolean; doctors: { id: number; name: string }[] };
+  const [prescriberRead, setPrescriberRead] = useState<{ key: string; status: "loading" | "error" | "ready"; options: PrescriberOptions | null } | null>(null);
+  const [prescriberRetry, setPrescriberRetry] = useState(0);
+  const prescriberStatus = prescriberRead?.key === prescriberKey ? prescriberRead.status : "loading";
+  const prescriberOptions = prescriberStatus === "ready" ? prescriberRead?.options ?? null : null;
+  const [override, setOverride] = useState<{ key: string; id: number | null } | null>(null);
+  const setPrescriberOverride = (id: number | null) => setOverride({ key: prescriberKey, id });
+  const preferredDoctorId = (override?.key === prescriberKey ? override.id : null) ?? defaultDoctorPartyId;
   const selectedDoctorId = preferredDoctorId ?? prescriberOptions?.issuerId ?? null;
-  const doctorName = prescriberOptions?.doctors.find(d => d.id === selectedDoctorId)?.name
+  const doctorName = !prescriberOptions ? "" : prescriberOptions.doctors.find(d => d.id === selectedDoctorId)?.name
     ?? (selectedDoctorId === defaultDoctorPartyId ? defaultDoctorName : "");
   const prescriberMismatch = Boolean(prescriberOptions && !prescriberOptions.canChooseAnyDoctor
     && selectedDoctorId !== null && selectedDoctorId !== prescriberOptions.issuerId);
@@ -133,24 +139,36 @@ export function PrescriptionModal({
     timesPrescribed: number; lastPrescribedAt: string;
   }[]>([]);
 
-  /* الاقتراحات تُجلب مرة عند الفتح — من وصفاته الفاعلة لا المبطلة، للطبيب
-     والمدير وحدهما؛ وغيرهم لا يقترح ولا يصير الفشل صامتًا. */
+  // Options belong to the exact patient/visit/session and each open request.
+  // Loading or a failed lookup cannot reuse a previously verified clinician.
   useEffect(() => {
-    if (!isOpen || !patientId) return;
+    setPrescriberRead({ key: prescriberKey, status: "loading", options: null });
+    setSuggestions([]);
+    if (!isOpen) return;
+    if (!patientId) { setPrescriberRead({ key: prescriberKey, status: "error", options: null }); return; }
     let cancelled = false;
+    const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(`/api/patients/${patientId}/prescriptions`, { cache: "no-store" });
-        if (!response.ok) return;
+        const response = await fetch(`/api/patients/${patientId}/prescriptions`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("Prescriber lookup refused");
         const payload = await response.json();
+        const options = payload?.prescriberOptions;
+        if (!options || !Number.isSafeInteger(options.issuerId) || options.issuerId <= 0
+          || typeof options.canChooseAnyDoctor !== "boolean" || !Array.isArray(options.doctors)
+          || !options.doctors.some((doctor: { id: number }) => doctor.id === options.issuerId)
+          || !options.doctors.every((doctor: { id: number; name: string }) => Number.isSafeInteger(doctor.id) && doctor.id > 0 && typeof doctor.name === "string" && doctor.name.trim()))
+          throw new Error("Missing verified clinician");
         if (!cancelled) {
-          setSuggestions(payload?.suggestions ?? []);
-          setPrescriberOptions(payload?.prescriberOptions ?? null);
+          setSuggestions(Array.isArray(payload.suggestions) ? payload.suggestions : []);
+          setPrescriberRead({ key: prescriberKey, status: "ready", options });
         }
-      } catch { /* الاقتراحات تحسينٌ لا شرط: فشلها لا يعطّل الوصفة */ }
+      } catch {
+        if (!cancelled) setPrescriberRead({ key: prescriberKey, status: "error", options: null });
+      }
     })();
-    return () => { cancelled = true; };
-  }, [isOpen, patientId]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [isOpen, patientId, prescriberKey, prescriberRetry]);
 
   const safetyAlerts = useMemo(() => {
     return evaluatePrescriptionSafety(items, medicalAlert);
@@ -206,6 +224,10 @@ export function PrescriptionModal({
     }
     if (sanitizeRxItems(items).length === 0) {
       setPreserveError("أضف دواءً واحدًا على الأقل باسم مكتوب بالإنجليزية قبل طباعة الوصفة أو معاينة المسودة.");
+      return false;
+    }
+    if (prescriberStatus !== "ready" || !prescriberOptions) {
+      setPreserveError("لم يكتمل التحقق من هوية الطبيب؛ انتظر أو أعد المحاولة.");
       return false;
     }
     return true;
@@ -538,7 +560,7 @@ export function PrescriptionModal({
             * مما سبق وصفه لهذا المريض (من مستودع الوكيل الآخر): رقائقٌ تُقلّل
             * النقر ولا تُفرض — التكرار الإداري المريح ليس قرارًا سريريًّا.
             */}
-          {suggestions.length > 0 ? (
+          {prescriberStatus === "ready" && suggestions.length > 0 ? (
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-2">
                 ↩️ وُصف له سابقًا (اضغط لإضافته إلى القائمة):
@@ -645,7 +667,7 @@ export function PrescriptionModal({
                 <button
                   type="button"
                   onClick={() => void handleAcknowledgeAndPrint()}
-                  disabled={preserving}
+                  disabled={preserving || prescriberStatus !== "ready"}
                   className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-amber-700 transition-all disabled:opacity-50"
                 >
                   {preserving ? "جارٍ الحفظ بعد الإقرار…" : "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا"}
@@ -726,13 +748,21 @@ export function PrescriptionModal({
             </div>
           </div>
 
+          {prescriberStatus === "loading" && <p role="status" className="text-sm">جارٍ التحقق من هوية الطبيب الواصف…</p>}
+          {prescriberStatus === "error" && <div role="alert" className="rounded border border-red-200 p-3 text-sm">
+            <p>تعذر التحقق من هوية الطبيب الواصف. الإصدار والمعاينة متوقفان حتى ينجح التحقق.</p>
+            <button type="button" onClick={() => setPrescriberRetry(value => value + 1)} className="mt-2 rounded border px-3 py-2">إعادة التحقق من الطبيب</button>
+          </div>}
+          {session?.role === "admin" && !prescriberOptions?.canChooseAnyDoctor && <p role="status" className="rounded border border-amber-200 p-3 text-xs">
+            اختيار طبيب آخر للمالك غير متاح حاليًا؛ لم يكتمل ربط صلاحية المالك. الإصدار الحالي باسم طبيب الحساب فقط بعد التحقق منه.
+          </p>}
           {prescriberMismatch && <div role="alert" className="rounded border border-amber-300 bg-amber-50 p-3 text-xs">
             <p>الطبيب المحدد في الزيارة يختلف عن الطبيب المرتبط بحسابك. لم نغيّر الاختيار تلقائيًا.</p>
             <button type="button" onClick={() => setPrescriberOverride(prescriberOptions?.issuerId ?? null)} className="mt-2 rounded border px-3 py-2">
               إصدار باسمي: {prescriberOptions?.doctors.find(d => d.id === prescriberOptions.issuerId)?.name}
             </button>
           </div>}
-          <p className="text-xs text-slate-500">الطبيب يصدر باسمه المرتبط بحسابه؛ المالك الطبيب وحده يمكنه اختيار طبيب مسجّل آخر. يبقى حساب المُصدر محفوظًا في التدقيق.</p>
+          <p className="text-xs text-slate-500">الطبيب يصدر باسمه المرتبط بحسابه. اختيار طبيب آخر يتطلب صلاحية مالك موثقة ومفعّلة؛ حساب المُصدر الحقيقي يبقى محفوظًا في التدقيق.</p>
 
           {/* قائمة الأدوية */}
           <div>
@@ -898,7 +928,7 @@ export function PrescriptionModal({
             <button
               type="button"
               onClick={() => void handlePrint()}
-              disabled={preserving}
+              disabled={preserving || prescriberStatus !== "ready"}
               className="flex items-center gap-1.5 rounded-xl bg-brand-navy px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-900 transition-all disabled:opacity-50"
             >
               <Icon name="print" className="h-4 w-4" />

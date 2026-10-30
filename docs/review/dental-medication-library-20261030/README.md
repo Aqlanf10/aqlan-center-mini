@@ -30,6 +30,8 @@ WORK inspected read-only: remote `feat/work-ci-intake-20261030` at `0bc3a0c57f57
 
 `lib/staff-owner-authority.ts` is the single server adapter contract to the shared authority system. It currently returns null because the release base has no admitted canonical runtime. The Rx adapter accepts only an opaque shared `ResolvedStaffAccess` matching both current user ID and exact clinician party, verified by the shared authorization fingerprint. A cloned JSON proof or changed clinician link fails. Tests supply synthetic shared-resolver proofs; they do not grant live ownership.
 
+Owner binding follow-up design (not implemented): [OWNER_BINDING_DESIGN.md](./OWNER_BINDING_DESIGN.md). The UI explicitly warns that owner-on-behalf selection is unavailable. Prescriber lookup now has loading/error/retry states, blocks save/draft actions until verified, and retires choices and suggestions when patient/visit/session context changes.
+
 **Remaining integration blocker:** connect this shared adapter to the separately reviewed canonical admission runtime before owner-on-behalf issuance can work live. The implementation intentionally fails closed until that integration; no parallel owner identity, guessed account or live binding was introduced. This is a missing authority integration, not an unresolved owner policy.
 
 ## Saved prescriptions after visit completion
