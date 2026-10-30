@@ -58,7 +58,7 @@ it("reads privacy, current call and announcements on one read-only snapshot duri
 
 it("changing completed visits, queue, chair occupancy, orthos and staff financial settings never changes the public projection", async () => {
   const before = await (await route.GET()).json(); delete before.now;
-  await fx.pool.query("INSERT INTO visits(patient_name,status,chair) VALUES('SYN-DONE-HIDDEN','done',NULL),('SYN-WAITING-HIDDEN','waiting',NULL),('SYN-SEATED-HIDDEN','in_treatment',2)");
+  await fx.pool.query("INSERT INTO visits(patient_name,status,chair) VALUES('SYN-DONE-HIDDEN','done',NULL),('SYN-WAITING-HIDDEN','waiting',NULL),('SYN-SEATED-HIDDEN','in_chair',2)");
   await fx.pool.query("INSERT INTO settings(key,value) VALUES('display.show_ortho','true'),('finance.rate.SAR','999'),('clinic.chairs','20') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
   const patient = (await fx.pool.query("INSERT INTO patients(patient_number,full_name,phone) VALUES('SYN-DISPLAY-ORTHO','SYN-ORTHO-HIDDEN','0559999999') RETURNING id")).rows[0].id;
   await fx.pool.query("INSERT INTO ortho_cases(patient_id,status,created_by) VALUES($1,'active','SYN-DISPLAY-OWNER')", [patient]);
