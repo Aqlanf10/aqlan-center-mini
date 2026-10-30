@@ -31,6 +31,10 @@
 .rule { border-top: 1px solid #000; margin: 3mm 0; }
 .rule-light { border-top: 1px dashed #666; margin: 2.5mm 0; }
 
+/* A6 patient cards have four separators: use compact whitespace rather than
+   shrinking text or orphaning the contact footer on a second sheet. */
+.patient-card-sheet > .rule-light { margin: 1mm 0; }
+
 .line { display: flex; justify-content: space-between; gap: 4mm; font-size: 9pt; margin: 1mm 0; }
 .line-strong { font-size: 11pt; font-weight: 800; }
 

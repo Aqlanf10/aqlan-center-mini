@@ -17,7 +17,7 @@ vi.mock("@/lib/db", () => ({
 describe("native A6 patient card keeps the original compact metadata flow", () => {
   it("retains two plain metadata lines and all card contents without a padded metadata box", async () => {
     const html = renderToStaticMarkup(await PatientCardPage({ params: Promise.resolve({ id: "1" }) }));
-    expect(html).toContain('class="sheet sheet-a6"');
+    expect(html).toContain('class="sheet sheet-a6 patient-card-sheet"');
     expect(html).not.toContain("print-metadata");
     for (const value of ["SYN-CARD-001", "Synthetic card patient", "777000123", "الهاتف", "تاريخ التسجيل", "04/01/2031", "9:30", "مواعيدك القادمة", "طُبعت في", "print-contact-footer", SETTING_DEFAULTS["clinic.phone"]]) expect(html).toContain(value);
     expect(html.match(/class="line"/g)).toHaveLength(3); // phone, registration, appointment
