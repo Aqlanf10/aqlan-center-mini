@@ -50,6 +50,8 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
       <div className="sheet sheet-a6">
         <PrintHeader settings={settings} title={receiptDocumentTitle(payment.kind, provenance)} compact />
 
+        {/* Native A6 keeps its compact identity flow; the shared boxed grid
+            adds enough vertical padding to split receipts with provenance. */}
         <div className="line">
           <span>رقم السند</span>
           <span className="num" dir="ltr">{payment.receiptNumber}</span>

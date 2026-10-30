@@ -87,19 +87,19 @@ export function exportLabAccountingToExcel(params: LabAccountingExportParams) {
   <Style ss:ID="Default" ss:Name="Normal">
    <Alignment ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
    <Borders/>
-   <Font ss:FontName="Segoe UI" x:CharSet="1" ss:Size="11" ss:Color="#1E293B"/>
+   <Font ss:FontName="Segoe UI" x:CharSet="1" ss:Size="11" ss:Color="#0D2137"/>
    <Interior/>
    <NumberFormat/>
    <Protection/>
   </Style>
   <Style ss:ID="TitleStyle">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
-   <Font ss:FontName="Segoe UI" ss:Size="16" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#F1F5F9" ss:Pattern="Solid"/>
+   <Font ss:FontName="Segoe UI" ss:Size="16" ss:Bold="1" ss:Color="#0D2137"/>
+   <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
   </Style>
   <Style ss:ID="SubTitleStyle">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
-   <Font ss:FontName="Segoe UI" ss:Size="10" ss:Color="#475569" ss:Italic="1"/>
+   <Font ss:FontName="Segoe UI" ss:Size="10" ss:Color="#475569"/>
   </Style>
   <Style ss:ID="KpiLabel">
    <Alignment ss:Horizontal="Right" ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
@@ -114,8 +114,8 @@ export function exportLabAccountingToExcel(params: LabAccountingExportParams) {
   </Style>
   <Style ss:ID="KpiValue">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
-   <Font ss:FontName="Segoe UI" ss:Size="11" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
+   <Font ss:FontName="Segoe UI" ss:Size="11" ss:Bold="1" ss:Color="#0D2137"/>
+   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
     <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
@@ -126,17 +126,17 @@ export function exportLabAccountingToExcel(params: LabAccountingExportParams) {
   <Style ss:ID="TableHeader">
    <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1" ss:ReadingOrder="RightToLeft"/>
    <Font ss:FontName="Segoe UI" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#1E293B" ss:Pattern="Solid"/>
+   <Interior ss:Color="#1A3A5C" ss:Pattern="Solid"/>
    <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#0F172A"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#334155"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#334155"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#334155"/>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#0D2137"/>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
    </Borders>
   </Style>
   <Style ss:ID="DataRowEven">
    <Alignment ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9.5" ss:Color="#0F172A"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9.5" ss:Color="#0D2137"/>
    <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
@@ -147,7 +147,7 @@ export function exportLabAccountingToExcel(params: LabAccountingExportParams) {
   </Style>
   <Style ss:ID="DataRowOdd">
    <Alignment ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9.5" ss:Color="#0F172A"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9.5" ss:Color="#0D2137"/>
    <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
@@ -158,7 +158,7 @@ export function exportLabAccountingToExcel(params: LabAccountingExportParams) {
   </Style>
   <Style ss:ID="MoneyCell">
    <Alignment ss:Horizontal="Left" ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
-   <Font ss:FontName="Segoe UI" ss:Size="9.5" ss:Bold="1" ss:Color="#0F172A"/>
+   <Font ss:FontName="Segoe UI" ss:Size="9.5" ss:Bold="1" ss:Color="#0D2137"/>
    <Borders>
     <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
     <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
@@ -201,11 +201,11 @@ export function exportLabAccountingToExcel(params: LabAccountingExportParams) {
   </Style>
   <Style ss:ID="TotalFooter">
    <Alignment ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/>
-   <Font ss:FontName="Segoe UI" ss:Size="10" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/>
+   <Font ss:FontName="Segoe UI" ss:Size="10" ss:Bold="1" ss:Color="#0D2137"/>
+   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
    <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#0F172A"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#64748B"/>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#0D2137"/>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#1A3A5C"/>
    </Borders>
   </Style>
  </Styles>

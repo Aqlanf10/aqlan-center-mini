@@ -8,6 +8,7 @@ import { restoreClientConfigFor } from "./client-config";
 import { readTarGzEntries } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
+import { loginPhotoRestoreProblem } from "./login-photo";
 
 /**
  * الاستعادة بإعداد Staging/Cutover (P1.15) — لا حالة نصف مستعادة أبدًا.
@@ -205,6 +206,14 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
             + `ALTER CONSTRAINT ${quoteIdentifier(key.constraint_name)} NOT DEFERRABLE INITIALLY IMMEDIATE`,
           );
         }
+        // The restored setting may point only at its reserved branding asset
+        // already verified in this archive. Check before committing isolated
+        // replay, writing files, or ever declaring this target ready for cutover.
+        const { rows: photoSettings } = await client.query<{ value: string }>(
+          "SELECT value FROM settings WHERE key = $1", ["clinic.login_photo_asset"],
+        );
+        const photoProblem = loginPhotoRestoreProblem(photoSettings[0]?.value ?? "", validated.documents);
+        if (photoProblem) throw new Error(photoProblem);
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});

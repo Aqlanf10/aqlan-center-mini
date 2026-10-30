@@ -1,7 +1,9 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { getInvoice, getPatient, getSettingsSafe, printCount } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getInvoice, getPatient, getSettingsSafe, printCount } from "@/lib/db";
 import { formatMoney, isCurrency } from "@/lib/money";
-import { friendlyDateLong, invoiceWhatsAppSummaryText, toWhatsAppNumber, whatsAppDirectLink } from "@/lib/reminders";
+import { formatClinicDate } from "@/lib/clinic-clock";
+import { invoiceWhatsAppSummaryText, toWhatsAppNumber, whatsAppDirectLink } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { canViewMoney } from "@/lib/roles";
@@ -67,7 +69,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       <div className="sheet sheet-a4">
         <PrintHeader settings={settings} title="فاتورة" />
 
-        <div className="line">
+        <PrintMetadata><div className="line">
           <span>رقم الفاتورة</span>
           <span className="num" dir="ltr">{invoice.invoiceNumber}</span>
         </div>
@@ -77,15 +79,15 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         </div>
         <div className="line">
           <span>التاريخ</span>
-          <span>{friendlyDateLong(invoice.createdAt.slice(0, 10))}</span>
-        </div>
+          <span>{formatClinicDate(invoice.createdAt, CLINIC_TIME_ZONE)}</span>
+        </div></PrintMetadata>
         {invoice.status === "cancelled" ? (
           <p className="amount-box" style={{ borderStyle: "dashed" }}>ملغاة</p>
         ) : null}
 
         <div className="rule" />
 
-        <table className="items">
+        <PrintTableFrame><table className="items">
           <thead>
             <tr>
               <th>البند</th>
@@ -104,7 +106,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></PrintTableFrame>
 
         <div style={{ marginTop: "4mm" }}>
           <div className="line">

@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
+import { ReportPrintHeader, ReportPrintFooter } from "@/components/ReportPrintHeader";
 import { useClinicName } from "@/components/SettingsProvider";
 import { useSession } from "@/components/SessionProvider";
 import { CURRENCIES, formatAmount, isCurrency, type Currency } from "@/lib/money";
@@ -46,7 +48,7 @@ function TablePanel({ title, note, children, id, className = "" }: { title: stri
   return <section className={`${styles.section} ${className}`} aria-labelledby={`${id}-heading`}>
     <h2 id={`${id}-heading`}>{title}</h2>
     {note ? <p className={styles.note}>{note}</p> : null}
-    <div className={styles.tableScroll} tabIndex={0} role="region" aria-label={title}>{children}</div>
+    <PrintTableFrame printOnly screenFrame className={styles.tableScroll} tabIndex={0} role="region" aria-label={title}>{children}</PrintTableFrame>
   </section>;
 }
 
@@ -112,14 +114,20 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
     ...report.attendees.flatMap((row) => [row.agreement, row.explicitlySettled, row.agreementRemaining]),
     ...expenses.recipientTotals.flatMap((row) => [row.totals.outflowMinor, row.totals.reversalMinor, row.totals.netOutflowMinor]),
   ].some((amounts) => CURRENCIES.some((currency) => formatAmount(amounts[currency], currency).length > 14));
-  return <div data-testid="daily-clinic-result" data-report-date={report.date} data-print-scope={printScope} className={styles.result}>
-    <header className={styles.paperHeading}>
-      <p className={styles.clinicName}>{clinicName}</p>
-      <h2>{TITLE}</h2>
-      <p>يوم الحضور: <bdi data-testid="daily-clinic-result-date">{report.date}</bdi> · توقيت العيادة: <bdi>{zone}</bdi></p>
-      <p>أُعد في: <Timestamp value={report.generatedAt} zone={zone} /></p>
-      <p data-testid="daily-clinic-print-scope">نطاق الطباعة: {printScope === "full" ? "كشف اليوم مع ملحق المراجع الكامل" : "ملخص كشف اليوم: جميع المراجعين والأعمال والتحصيل والصرف والإجماليات؛ دون ملحق تفاصيل الاتفاقات والحسابات"}</p>
-    </header>
+  return <div data-testid="daily-clinic-result" data-report-date={report.date} data-print-scope={printScope} className={`${styles.result} print-document-on-print`}>
+    <div className={styles.paperHeading}>
+      <header className={styles.screenOnly}>
+        <p className={styles.clinicName}>{clinicName}</p>
+        <h2>{TITLE}</h2>
+      </header>
+      <div className={styles.printOnly}><ReportPrintHeader title={TITLE} clinicName={clinicName} /></div>
+      <PrintMetadata printOnly className={styles.identityMetadata}>
+        <div className="line"><span>يوم الحضور</span><bdi data-testid="daily-clinic-result-date">{report.date}</bdi></div>
+        <div className="line"><span>توقيت العيادة</span><bdi>{zone}</bdi></div>
+        <div className="line"><span>أُعد في</span><Timestamp value={report.generatedAt} zone={zone} /></div>
+        <div className="line" data-testid="daily-clinic-print-scope"><span>نطاق الطباعة</span><span>{printScope === "full" ? "كشف اليوم مع ملحق المراجع الكامل" : "ملخص كشف اليوم: جميع المراجعين والأعمال والتحصيل والصرف والإجماليات؛ دون ملحق تفاصيل الاتفاقات والحسابات"}</span></div>
+      </PrintMetadata>
+    </div>
     <div className={styles.basis} data-testid="daily-clinic-basis">
       <strong>الحضور والأعمال: اليوم المختار. الاتفاقات والأرصدة: حالتها الحالية عند إعداد الكشف.</strong>
       <p>المريض مرة واحدة ولو تعددت زياراته. التوثيق المعتمد قبل <Timestamp value={report.selectedDayCutoff} zone={zone} /> (الحد غير مشمول). الأرصدة ليست لقطة تاريخية؛ المتبقي بعد السداد المربوط يختلف عن مديونية المريض. الدفعات غير المربوطة لا تُنسب إلى اتفاق. تفاصيل الاتفاقات وحسابات المراجعين ومراجع الدفعات في ملحق المراجع عند اختيار الطباعة الكاملة؛ المديونية والرصيد الدائن الحاليان ضمن إجماليات هذا الكشف.</p>
@@ -153,11 +161,11 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
       <p className={styles.note}>الأرقام الطويلة تُطبع كاملة في لوحات مستقلة لكل عملة، بالقيم نفسها دون اختصار أو تصغير مفرط.</p>
       {CURRENCIES.map((currency) => <div className={styles.currencyPanel} key={currency}>
         <h3>{CURRENCY_NAME[currency]} · <bdi>{currency}</bdi></h3>
-        <table data-panel-currency={currency}><thead><tr><th scope="col">المراجع / العمل</th><th scope="col">الاتفاق <bdi>{currency}</bdi></th><th scope="col">المسدّد المربوط <bdi>{currency}</bdi></th><th scope="col">المتبقي بعد السداد المربوط <bdi>{currency}</bdi></th></tr></thead>
+        <PrintTableFrame printOnly><table data-panel-currency={currency}><thead><tr><th scope="col">المراجع / العمل</th><th scope="col">الاتفاق <bdi>{currency}</bdi></th><th scope="col">المسدّد المربوط <bdi>{currency}</bdi></th><th scope="col">المتبقي بعد السداد المربوط <bdi>{currency}</bdi></th></tr></thead>
           <tbody>{report.attendees.map((patient) => <tr key={patient.key}><th scope="row">{patient.patientName}<PatientIdentity patientNumber={patient.patientNumber} patientId={patient.patientId} /><small>{patient.workSummary || "لا عمل موقّع موثّق قبل حد اليوم"}</small><small className={styles.referenceOnly}>{patient.visitsCount} زيارة · {patient.signedVisitsCount} موقّعة · {patient.pendingVisitsCount} بانتظار التوقيع</small>{patient.pendingVisitsCount > 0 ? <small className={styles.unknown} data-pending-patient={patient.key}>زيارات بانتظار التوقيع: {patient.pendingVisitsCount}</small> : null}<small>توثيق بعد الحد: {patient.lateSignedVisitsCount} · اتفاقات مستبعدة: {patient.excludedAgreementCount}</small><small className={styles.referenceOnly}>مراجع الزيارات: {patient.visitIds.join("، ")}</small>{patient.agreementIds.length === 0 ? <small>لا اتفاق موثّق مرتبط؛ الأصفار لا تعني أن حساب المريض بلا دين.</small> : null}</th>
             <td><Money minor={patient.agreement[currency]} currency={currency} /></td><td><Money minor={patient.explicitlySettled[currency]} currency={currency} /></td><td><Money minor={patient.agreementRemaining[currency]} currency={currency} /></td></tr>)}</tbody>
           <tfoot><tr><th scope="row">الإجمالي دون تكرار</th><td><Money minor={totals.agreement[currency]} currency={currency} /></td><td><Money minor={totals.explicitlySettled[currency]} currency={currency} /></td><td><Money minor={totals.agreementRemaining[currency]} currency={currency} /></td></tr></tfoot>
-        </table>
+        </table></PrintTableFrame>
       </div>)}
     </section> : null}
 
@@ -215,11 +223,11 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
       <h2>المستفيدون: تفصيل الطباعة حسب العملة</h2>
       {CURRENCIES.map((currency) => <div className={styles.currencyPanel} key={currency}>
         <h3>{CURRENCY_NAME[currency]} · <bdi>{currency}</bdi></h3>
-        <table><thead><tr><th scope="col">المستفيد</th><th scope="col">الصرف الموجب <bdi>{currency}</bdi></th><th scope="col">العكس والتعديل السالب <bdi>{currency}</bdi></th><th scope="col">صافي الصرف المسجّل <bdi>{currency}</bdi></th></tr></thead>
+        <PrintTableFrame printOnly><table><thead><tr><th scope="col">المستفيد</th><th scope="col">الصرف الموجب <bdi>{currency}</bdi></th><th scope="col">العكس والتعديل السالب <bdi>{currency}</bdi></th><th scope="col">صافي الصرف المسجّل <bdi>{currency}</bdi></th></tr></thead>
           <tbody>{expenses.recipientTotals.map((row) => <tr key={row.recipient.key}><th scope="row"><Recipient recipient={row.recipient} /><small>سندات: {row.totals.voucherCount} · عكس: {row.totals.reversalCount} · تعديل سالب: {row.totals.negativeAdjustmentCount}</small>{row.recordedPayeeTexts.length ? <small>{row.recordedPayeeTexts.join("؛ ")}</small> : null}</th>
             <td><Money minor={row.totals.outflowMinor[currency]} currency={currency} /></td><td><Money minor={row.totals.reversalMinor[currency]} currency={currency} /></td><td><Money minor={row.totals.netOutflowMinor[currency]} currency={currency} /></td></tr>)}</tbody>
           <tfoot><tr><th scope="row">كل السندات</th><td><Money minor={expenses.totals.outflowMinor[currency]} currency={currency} /></td><td><Money minor={expenses.totals.reversalMinor[currency]} currency={currency} /></td><td><Money minor={expenses.totals.netOutflowMinor[currency]} currency={currency} /></td></tr></tfoot>
-        </table>
+        </table></PrintTableFrame>
       </div>)}
     </section> : null}
 
@@ -304,18 +312,19 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
         <p className={styles.note}>أرصدة حالية عند إعداد الكشف، تشمل تاريخ حساب المراجع كله. الدفعات غير المربوطة لا تُنسب إلى اتفاق. المديونية منفصلة عن المتبقي بعد السداد المربوط، والرصيد الدائن منفصل عن الدين.</p>
         {CURRENCIES.map((currency) => <div key={currency} className={styles.currencyPanel}>
           <h3><bdi>{currency}</bdi></h3>
-          <div className={styles.tableScroll} tabIndex={0} role="region" aria-label={`حسابات المراجعين ${currency}`}>
+          <PrintTableFrame printOnly screenFrame className={styles.tableScroll} tabIndex={0} role="region" aria-label={`حسابات المراجعين ${currency}`}>
             <table className={styles.detailsTable} data-account-currency={currency}><thead><tr><th scope="col">المريض</th><th scope="col">الافتتاحي</th><th scope="col">المفوتر</th><th scope="col">التسويات</th><th scope="col">المديونية الآن</th><th scope="col">رصيد دائن الآن</th><th scope="col">دفعات غير مربوطة</th></tr></thead>
               <tbody>{report.currentAccounts.length === 0 ? <tr><td colSpan={7}>لا حسابات مرضى مرتبطة بالحضور.</td></tr> : report.currentAccounts.map((account) => <tr key={account.patientId}>
                 <th scope="row">{account.patientName}<PatientIdentity patientId={account.patientId} /></th>
                 <td><Money minor={account.byCurrency[currency].openingMinor} currency={currency} /></td><td><Money minor={account.byCurrency[currency].billedMinor} currency={currency} /></td><td><Money minor={account.byCurrency[currency].collectedMinor} currency={currency} /></td><td><Money minor={account.byCurrency[currency].receivableMinor} currency={currency} /></td><td><Money minor={account.byCurrency[currency].creditMinor} currency={currency} /></td><td>{account.unallocatedPaymentIds.join("، ") || "لا يوجد"}<small>المراجع تخص الحساب بجميع عملاته</small></td>
               </tr>)}</tbody><tfoot><tr><th scope="row" colSpan={4}>إجمالي الحسابات دون تكرار</th><td><Money minor={totals.currentReceivable[currency]} currency={currency} /></td><td><Money minor={totals.currentCredit[currency]} currency={currency} /></td><td> </td></tr></tfoot>
             </table>
-          </div>
+          </PrintTableFrame>
         </div>)}
       </section>
     </section>
     <p className={styles.endNote} data-testid="daily-clinic-end">{printScope === "full" ? "نهاية الكشف الكامل" : "نهاية ملخص كشف اليوم؛ ملحق المراجع غير مشمول بالطباعة"} · {totals.attendeesCount} مراجع · {report.work.length} سطر توثيق عمل · {report.receipts.length} حركة تحصيل · {expenses.movements.length} سند صرف. سطور توثيق بلا قيمة مستقلة: {totals.unvaluedWorkCount}. لا يُعدّ هذا المجموع الجزئي إيرادًا كاملًا لليوم، ولا تجمع سطور التوثيق كعدد إجراءات مستقلة.</p>
+    <div className={styles.printOnly}><ReportPrintFooter /></div>
   </div>;
 }
 

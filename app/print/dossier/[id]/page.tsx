@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getPatientFile, getSettingsSafe, ledgerBalancesByCurrency, patientChart, patientLedger, patientPlanCurrencies } from "@/lib/db";
 import { PrintHeader } from "@/components/PrintHeader";
@@ -159,8 +160,8 @@ export default async function PatientDossierPage({
         </p>
 
         {/* 1. بيانات المريض التعريفية */}
-        <div style={{ margin: "2mm 0 4mm", padding: "3mm", background: "#f8fafc", borderRadius: "2mm", border: "1px solid #e2e8f0" }}>
-          <div className="dossier-demographics-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2mm", fontSize: "10pt" }}>
+        <>
+          <PrintMetadata className="dossier-demographics-grid">
             <div className="line" style={{ margin: 0 }}>
               <span style={{ color: "#64748b" }}>اسم المريض:</span>
               <span style={{ fontWeight: 800, fontSize: "11pt", color: "#0f172a" }}>{patient.fullName}</span>
@@ -187,8 +188,8 @@ export default async function PatientDossierPage({
               <span>تاريخ التسجيل بالمركز:</span>
               <span>{friendlyDateLong(patient.createdAt.slice(0, 10))}</span>
             </div>
-          </div>
-        </div>
+          </PrintMetadata>
+        </>
 
         {/* 2. محطة العلامات الحيوية وفصيلة الدم */}
         <div style={{ margin: "3mm 0", border: "1px solid #cbd5e1", borderRadius: "2mm", overflow: "hidden" }}>
@@ -301,7 +302,7 @@ export default async function PatientDossierPage({
           </p>}
 
           {!chartData ? null : chartRecords.length > 0 ? (
-            <table style={{ width: "100%", fontSize: "8pt", borderCollapse: "collapse", textAlign: "right" }}>
+            <PrintTableFrame><table style={{ width: "100%", fontSize: "8pt", borderCollapse: "collapse", textAlign: "right" }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #cbd5e1" }}>
                   <th style={{ padding: "1.5mm" }}>رقم السن (FDI / Univ)</th>
@@ -332,7 +333,7 @@ export default async function PatientDossierPage({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></PrintTableFrame>
           ) : (
             <p style={{ margin: "2mm 0", fontSize: "8.5pt", color: "#64748b" }}>لا توجد إجراءات مسجلة على المخطط السني بعد.</p>
           )}
@@ -345,7 +346,7 @@ export default async function PatientDossierPage({
           </h3>
           <p style={{ fontSize: "8pt", color: "#64748b" }}>يعرض هذا القسم أحدث 50 زيارة كحد أقصى؛ لا يمثل كامل التاريخ إذا تجاوز الملف هذا العدد.</p>
           {visits.length > 0 ? (
-            <table style={{ width: "100%", fontSize: "8pt", borderCollapse: "collapse", textAlign: "right" }}>
+            <PrintTableFrame><table style={{ width: "100%", fontSize: "8pt", borderCollapse: "collapse", textAlign: "right" }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #cbd5e1" }}>
                   <th style={{ padding: "1.5mm" }}>التاريخ</th>
@@ -366,7 +367,7 @@ export default async function PatientDossierPage({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></PrintTableFrame>
           ) : (
             <p style={{ margin: "2mm 0", fontSize: "8.5pt", color: "#64748b" }}>لا توجد زيارات سابقة موثقة.</p>
           )}

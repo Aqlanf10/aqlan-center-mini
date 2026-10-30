@@ -256,6 +256,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/services/[id]": { PATCH: ADMIN },
   "/api/services/prices": { POST: ADMIN },
   "/api/services/provisional": { POST: ADMIN },
+  "/api/branding/login-photo": { GET: "public" },
+  "/api/settings/login-photo": { GET: ADMIN, POST: ADMIN, PATCH: ADMIN },
   "/api/settings": { GET: CLINIC, POST: CLINIC, PATCH: CLINIC },
   "/api/settings/ai": { GET: ADMIN, PUT: ADMIN },
   "/api/settings/ai/providers": { GET: ADMIN, POST: ADMIN },

@@ -14,6 +14,8 @@ import { documentPrefixProblem } from "./document-numbers";
 
 export type SettingKey =
   | "clinic.name"
+  | "clinic.login_photo_asset"
+  | "clinic.login_photo_visible"
   | "clinic.lead_doctor"
   | "clinic.lead_doctor_title"
   | "clinic.lead_doctor_credentials"
@@ -94,6 +96,8 @@ export type SettingKey =
  * يضبط أحدٌ شيئًا، فلا تُفتح الشاشة فارغة يوم التنصيب. أي قيمة في الجدول تغلبها.
  */
 export const SETTING_DEFAULTS: Record<SettingKey, string> = {
+  "clinic.login_photo_asset": "",
+  "clinic.login_photo_visible": "false",
   "clinic.name": "مركز الدكتور عقلان الكامل لتقويم وزراعة وتجميل الأسنان",
   "clinic.lead_doctor": "د. عقلان الكامل",
   "clinic.lead_doctor_title": "أخصائي تقويم الأسنان",
@@ -233,6 +237,7 @@ export const ALL_SETTING_KEYS = Object.keys(SETTING_DEFAULTS) as SettingKey[];
  * لا **ممنوعًا**: مفتاحٌ يُضاف غدًا (نسبة طبيب، رقم حساب) يكون محجوبًا تلقائيًا.
  */
 export const PUBLIC_SETTING_KEYS: SettingKey[] = [
+  "clinic.login_photo_visible",
   // Display policy only, never patient data; used by the lab dispatch preview.
   "lab.patient_identity_mode",
   "clinic.name",

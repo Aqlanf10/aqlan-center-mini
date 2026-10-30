@@ -3,9 +3,10 @@ import { createReadStream } from "node:fs";
 import { mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { backupSnapshotSqlLines, backupSqlLines, getPool, type Queryable } from "./db";
+import { backupSnapshotSqlLines, ensureSchema, getPool, type Queryable } from "./db";
 import { readFileByKey } from "./files";
 import { tarEnd, tarHeader, tarPadding } from "./tar";
+import { parseLoginPhotoAsset } from "./login-photo";
 
 /**
  * النسخة الكاملة بملفٍّ واحد — قاعدة البيانات **وأشعّة المرضى معًا**.
@@ -144,6 +145,18 @@ async function readDocumentMetadata(source: Queryable): Promise<BackupDocument[]
   )) as unknown as { rows: { present: boolean }[] };
   const sql = probe.rows[0]?.present ? DOCUMENT_AND_ATTACHMENT_METADATA_SQL : DOCUMENT_METADATA_SQL;
   const { rows } = (await source.query(sql)) as unknown as { rows: BackupDocument[] };
+  // The configured branding photo is not a patient document. Include it even
+  // when hidden: hiding controls public delivery, never backup retention.
+  const configured = (await source.query(
+    "SELECT value FROM settings WHERE key = $1", ["clinic.login_photo_asset"],
+  )) as unknown as { rows: { value: string }[] };
+  const raw = configured.rows[0]?.value ?? "";
+  if (raw.trim()) {
+    const asset = parseLoginPhotoAsset(raw);
+    if (!asset) throw new Error("Invalid configured login photo metadata; backup refused.");
+    rows.push({ id: "branding-login-photo", storage_key: asset.key,
+      sha256: asset.sha256, size_bytes: asset.sizeBytes });
+  }
   return rows;
 }
 
@@ -185,31 +198,17 @@ async function captureSnapshotFromSource(source: Queryable, stage: string): Prom
   }
 }
 
-/**
- * المسار الافتراضي القديم (بلا مصدر صريح): database.sql من backupSqlLines
- * (فتحها معاملتها الخاصة واستدعاء ensureSchema كما هو) ثم metadata من المجمع.
- * هذا مسار أداة التنزيل الإدارية القائمة — ليس مسار النسخ الإنتاجي.
- */
+/** The admin path uses the same SQL/metadata snapshot as the explicit-source path. */
 async function captureSnapshotDefault(stage: string): Promise<BackupSnapshot> {
-  const sqlPath = join(stage, "database.sql");
-  const sqlFile = await open(sqlPath, "wx", 0o600);
-  const hash = createHash("sha256");
+  // Preserve the existing default-path initialization; production's explicit
+  // source still never runs ensureSchema. Both paths now avoid SQL/photo races.
+  await ensureSchema();
+  const client = await getPool().connect();
   try {
-    for await (const line of backupSqlLines()) {
-      hash.update(line);
-      await sqlFile.writeFile(line);
-    }
+    return await captureSnapshotFromSource(client, stage);
   } finally {
-    await sqlFile.close();
+    client.release();
   }
-
-  const rows = await readDocumentMetadata(getPool());
-  return {
-    sqlPath,
-    sqlSha256: hash.digest("hex"),
-    sqlSize: (await stat(sqlPath)).size,
-    documents: uniqueDocumentsByStorageKey(rows),
-  };
 }
 
 /**

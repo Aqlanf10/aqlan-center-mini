@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
-import { DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv, exportExcel } from "./shared";
+import { DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, PrintFrameFooter, exportCsv, exportExcel } from "./shared";
 import type { ReportResult } from "@/lib/reports-types";
 import { applyReportView, type ReportViewSpec } from "@/lib/report-view";
 import { formatReportGeneratedAt } from "@/lib/report-generated-time";
@@ -62,8 +62,8 @@ export function ReportView({
   }
 
   return (
-    <div className="space-y-4">
-      <PrintFrame result={result} clinicName={clinicName} generated={generated} />
+    <div className="report-view-print print-document-on-print space-y-4">
+      <PrintFrame result={result} clinicName={clinicName} />
 
       {/* الترويسة على الشاشة */}
       <header className="flex flex-wrap items-start justify-between gap-2 print:hidden">
@@ -241,6 +241,7 @@ export function ReportView({
         </footer>
       ) : null}
 
+      <PrintFrameFooter generated={generated} />
       <p className="text-[10px] text-slate-400 print:hidden">
         أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by} · العملة الأساسية: {result.baseCurrency}
       </p>

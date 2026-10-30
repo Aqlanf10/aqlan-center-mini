@@ -1,5 +1,8 @@
+import { PrintTableFrame } from "@/components/PrintDocument";
 import type { Invoice } from "@/lib/db";
 import { CURRENCY_LABEL, formatMoney, invoiceNet } from "@/lib/money";
+import { formatClinicDate } from "@/lib/clinic-clock";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { friendlyDateLong } from "@/lib/reminders";
 import { currentStatementInvoices } from "@/lib/statement-lines";
 import type { HistoricalOpeningBucket } from "@/lib/statement-historical-details";
@@ -7,18 +10,18 @@ import type { HistoricalOpeningBucket } from "@/lib/statement-historical-details
 export { currentStatementInvoices, statementAgreements, statementPaymentLabel } from "@/lib/statement-lines";
 
 /** Stored invoice evidence, not a repricing of treatment against today's catalogue. */
-export function StatementInvoiceDetails({ invoices }: { invoices: readonly Invoice[] }) {
+export function StatementInvoiceDetails({ invoices, timeZone = CLINIC_ZONE_FALLBACK }: { invoices: readonly Invoice[]; timeZone?: string }) {
   const current = currentStatementInvoices(invoices);
   return <section className="statement-invoices" aria-label="تفاصيل الفواتير الصحيحة">
     <h2 style={{ fontSize: "10pt", margin: "2mm 0" }}>الفواتير وتفاصيل العلاج</h2>
-    {current.length === 0 ? <p>لا فواتير حالية</p> : current.map((invoice) => <table
+    {current.length === 0 ? <p>لا فواتير حالية</p> : current.map((invoice) => <PrintTableFrame key={invoice.id}><table
       key={invoice.id} className="items statement-invoice" data-invoice-id={invoice.id}>
       <colgroup><col style={{ width: "46%" }} /><col style={{ width: "10%" }} />
         <col style={{ width: "22%" }} /><col style={{ width: "22%" }} /></colgroup>
       <thead>
         <tr><th colSpan={4}>
           فاتورة <bdi dir="ltr">{invoice.invoiceNumber}</bdi>
-          {" — "}{friendlyDateLong(invoice.createdAt.slice(0, 10))}
+          {" — "}{formatClinicDate(invoice.createdAt, timeZone)}
           {" — "}{invoice.status === "paid" ? "مسدّدة" : "مفتوحة"}
         </th></tr>
         <tr><th>العلاج / البيان</th><th className="num">الكمية</th>
@@ -39,7 +42,7 @@ export function StatementInvoiceDetails({ invoices }: { invoices: readonly Invoi
         <tr className="statement-total"><td colSpan={3}>صافي الفاتورة بعد الخصم</td>
           <td className="num">{formatMoney(invoiceNet(invoice), invoice.baseCurrency)}</td></tr>
       </tbody>
-    </table>)}
+    </table></PrintTableFrame>)}
   </section>;
 }
 
@@ -56,7 +59,7 @@ export function StatementHistoricalDetails({ buckets }: { buckets: readonly Hist
   if (agreements.length === 0) return null;
   return <section className="statement-historical" aria-label="العلاج السابق">
     <h2 style={{ fontSize: "10pt", margin: "2mm 0" }}>العلاج السابق</h2>
-    {agreements.map((agreement) => <table key={`${agreement.kind}-${agreement.id}`}
+    {agreements.map((agreement) => <PrintTableFrame key={`${agreement.kind}-${agreement.id}`}><table key={`${agreement.kind}-${agreement.id}`}
       className="items statement-invoice statement-historical-agreement" data-historical-kind={agreement.kind} data-historical-id={agreement.id}>
       <colgroup><col style={{ width: "30%" }} /><col style={{ width: "14%" }} /><col style={{ width: "8%" }} />
         <col style={{ width: "16%" }} /><col style={{ width: "16%" }} /><col style={{ width: "16%" }} /></colgroup>
@@ -88,7 +91,7 @@ export function StatementHistoricalDetails({ buckets }: { buckets: readonly Hist
         <tr className="statement-total"><td colSpan={5}>المبلغ المتبقي</td>
           <td className="num">{formatMoney(agreement.remainingMinor, agreement.currency)}</td></tr>
       </tbody>
-    </table>)}
+    </table></PrintTableFrame>)}
     {undetailed.map((bucket) => <p key={bucket.currency} className="footer-note" data-undetailed-currency={bucket.currency}>
       {bucket.agreements.length === 0 ? "الرصيد السابق" : "جزء من الرصيد السابق"} ({CURRENCY_LABEL[bucket.currency]}) بلا تفاصيل علاج مسجلة.
     </p>)}

@@ -4,7 +4,8 @@ import { ArrowLeft, RefreshCw, Printer, Languages, Package, ShieldCheck, X } fro
 import styles from "./inventory.module.css";
 import { useEffect, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
-import { ReportPrintHeader } from "@/components/ReportPrintHeader";
+import { ReportPrintHeader, ReportPrintFooter } from "@/components/ReportPrintHeader";
+import { PrintMetadata } from "@/components/PrintDocument";
 import { CLINIC_BASE_CURRENCY, formatMoney } from "@/lib/money";
 import type { ValuedInventoryItem } from "@/lib/inventory-domain/read";
 
@@ -52,7 +53,7 @@ export function InventoryValuationReview() {
       <dt>{text.value}</dt><dd className="text-end font-bold">{item.valueMinor === null ? text.missing : formatMoney(item.valueMinor, CLINIC_BASE_CURRENCY)}</dd>
     </dl>
   </article>;
-  return <section dir={locale === "ar" ? "rtl" : "ltr"} lang={locale} className={`${styles.root} space-y-5`} data-testid="inventory-valuation-review">
+  return <section dir={locale === "ar" ? "rtl" : "ltr"} lang={locale} className={`${styles.root} print-document-on-print space-y-5`} data-testid="inventory-valuation-review">
     <div className={styles.toolbar}>
       <Link href="/inventory" className={styles.button}><ArrowLeft size={16} aria-hidden="true" />{text.back}</Link>
       <button type="button" onClick={() => setLocale(locale === "ar" ? "en" : "ar")} className={styles.button}><Languages size={16} aria-hidden="true" />{locale === "ar" ? "English" : "العربية"}</button>
@@ -65,11 +66,11 @@ export function InventoryValuationReview() {
         <button type="button" onClick={() => window.print()} disabled={!report || loading || failed} className={`${styles.button} ${styles.primary}`}><Printer aria-hidden="true" size={16}/>{text.print}</button>
       </div>
       {loading ? <p className={styles.feedback} role="status">{text.loading}</p> : failed ? <p role="alert" className={styles.feedback}>{text.failed}</p> : report ? <>
-        <dl className={styles.metrics}>
+        <PrintMetadata printOnly className={styles.printMetrics}><dl className={styles.metrics}>
           <div className={`${styles.metric} ${report.totalMinor === null ? styles.warn : ""}`}><dt>{text.total}</dt><dd><h2>{report.totalMinor === null ? text.incomplete : formatMoney(report.totalMinor, CLINIC_BASE_CURRENCY)}</h2></dd></div>
           <div className={styles.metric}><dt>{text.knownTotal}</dt><dd>{formatMoney(report.knownTotalMinor, CLINIC_BASE_CURRENCY)}</dd></div>
           <div className={styles.metric}><dt>{text.missingCount} · {text.estimatedCount}</dt><dd dir="ltr">{report.withoutCost} · {report.estimated}</dd></div>
-        </dl>
+        </dl></PrintMetadata>
         <p className={styles.note}>{text.note}</p>
         <div className={styles.panel}><div className={styles.panelHeading}><span>{text.title}</span><Package size={18} aria-hidden="true" /></div>
           <div className={`${styles.note} ${styles.screenControls}`}>
@@ -86,6 +87,7 @@ export function InventoryValuationReview() {
           <div className={`${styles.items} ${styles.printItems}`}>{report.items.map(renderItem)}</div>
         </div>
         {!report.items.length ? <p>{text.empty}</p> : null}
+        <div className={styles.printFooter}><ReportPrintFooter /></div>
       </> : null}
     </>}
   </section>;

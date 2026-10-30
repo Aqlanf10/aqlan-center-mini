@@ -54,3 +54,37 @@
     min-height:0 !important;
   }
 }
+
+/* Printed inventory is a record-list variant of the approved contract. Keep
+   existing fields/meaning: these documents have no data table to watermark. */
+.printDocument, .printFooter { display: none; }
+@page aqlan-inventory-document { size: A4 portrait; margin: 8mm; }
+@media print {
+  .root { page: aqlan-inventory-document; }
+  .root .printHeader { margin-bottom: 3mm; }
+  .root .printDocument, .root .printFooter { display: block; }
+  .root .panel { overflow: visible; border-color: #e2e8f0; border-radius: 1mm; }
+  .root .items { display: block; padding: 1mm 0; }
+  .root .screenItems { display: none; }
+  .root .item { margin: 2mm 0; padding: 2mm; border: 1px solid #e2e8f0; border-radius: 1mm; font-size: 9pt; line-height: 1.4; overflow-wrap: anywhere; }
+  .root .item h2 { font-size: 10pt; color: #000; }
+  .root .caption, .root .note { color: #333; font-size: 8pt; line-height: 1.5; }
+  .root .note, .root .panelHeading { padding: 2mm; }
+  .root .panelHeading { color: #000; background: #f8fafc; font-size: 9pt; }
+  /* This card contains a complete definition-list grid, not paired metadata
+     fields. A block owner prevents nested RTL grid min-content collapse. */
+  .root .printMetrics { display: block; direction: rtl; }
+  .root .printMetrics > dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; min-width: 0; grid-column: auto; margin: 0; }
+  .root .printMetrics > dl > .metric { min-width: 0; }
+  .root .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .root .metric { padding: .7mm 0; border: 0; border-radius: 0; background: transparent; }
+  .root .metric dt { font-size: 8pt; margin: 0; color: #333; }
+  .root .metric dd, .root .metric.warn dd { font-size: 10pt; color: #000; }
+  .root .badge { font-size: 8pt; border-radius: 1mm; }
+  .root .item dl { font-size: 9pt; margin-top: 1mm; gap: .7mm 2mm; }
+  /* A location can contain arbitrarily many lots; paginate between lots,
+     not by shrinking or attempting to keep the entire location on one page. */
+  .root .printRecordGroup { break-inside: auto; page-break-inside: auto; }
+  .root .printRecordGroup > h2, .root .printRecordGroup > .caption { break-after: avoid; }
+  .root .printRecordGroup li { break-inside: avoid; page-break-inside: avoid; }
+}

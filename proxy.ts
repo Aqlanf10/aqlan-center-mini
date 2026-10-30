@@ -63,6 +63,7 @@ const PUBLIC_PATHS = new Set([
   "/checkin",
 ]);
 const PUBLIC_API = new Set([
+  "/api/branding/login-photo",
   "/api/auth/login",
   "/api/auth/setup",
   "/api/auth/logout",

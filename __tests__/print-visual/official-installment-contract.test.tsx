@@ -9,6 +9,7 @@ import type { readSavedRepaymentAgreement } from "../../lib/debt-repayment-agree
 import { debtInstallmentProgress } from "../../lib/debt-installments";
 import { formatMoney } from "../../lib/money";
 import { SETTING_DEFAULTS } from "../../lib/settings";
+import { PrintDocumentWatermark } from "../../components/PrintDocument";
 
 type Agreement = NonNullable<Awaited<ReturnType<typeof readSavedRepaymentAgreement>>>;
 const state = vi.hoisted(() => ({ agreement: null as Agreement | null }));
@@ -57,15 +58,19 @@ async function geometry(page: Page) {
       const r = element.getBoundingClientRect();
       return { x: r.x, y: r.y, width: r.width, height: r.height, top: r.top, right: r.right, bottom: r.bottom, left: r.left };
     };
-    const watermark = required(".agreement-table-watermark");
+    const print = window.matchMedia("print").matches;
+    const watermark = required(print ? "body > .print-document-watermark" : ".agreement-table-watermark");
     return {
       table: rect(required(".agreement-installments")), watermark: rect(watermark),
-      logo: rect(required(".agreement-table-watermark img")), header: rect(required("header")),
+      logo: rect(required(print ? ".print-document-watermark img" : ".agreement-table-watermark img")), header: rect(required("header")),
       summary: rect(required(".agreement-financial-summary")), signatures: rect(required(".agreement-signatures")),
       opacity: getComputedStyle(watermark).opacity, pointerEvents: getComputedStyle(watermark).pointerEvents,
       logoLayer: getComputedStyle(watermark).zIndex,
       cellLayers: [...document.querySelectorAll(".agreement-installments th,.agreement-installments td")].map(cell => getComputedStyle(cell).zIndex),
-      watermarkCount: document.querySelectorAll(".agreement-table-watermark").length,
+      watermarkCount: document.querySelectorAll(print ? "body > .print-document-watermark" : ".agreement-table-watermark").length,
+      print, viewport: { width: window.innerWidth, height: window.innerHeight },
+      oldMarkHidden: getComputedStyle(required(".agreement-table-watermark")).display === "none",
+      signatureBackground: getComputedStyle(required(".agreement-signatures")).backgroundColor,
     };
   });
 }
@@ -73,18 +78,17 @@ function assertGeometry(g: Awaited<ReturnType<typeof geometry>>) {
   expect(g.watermarkCount).toBe(1);
   expect(g.opacity).toBe("0.15");
   expect(g.pointerEvents).toBe("none");
-  expect(g.logoLayer).toBe("1");
+  expect(g.logoLayer).toBe(g.print ? "10" : "1");
   expect(g.cellLayers.every(layer => layer === "2")).toBe(true);
-  for (const box of [g.watermark, g.logo]) {
-    expect(box.width).toBeGreaterThan(0);
-    expect(box.height).toBeGreaterThan(0);
-    expect(box.left).toBeGreaterThanOrEqual(g.table.left - 1);
-    expect(box.right).toBeLessThanOrEqual(g.table.right + 1);
-    expect(box.top).toBeGreaterThanOrEqual(g.table.top - 1);
-    expect(box.bottom).toBeLessThanOrEqual(g.table.bottom + 1);
-  }
-  expect(Math.abs((g.watermark.left + g.watermark.right) / 2 - (g.table.left + g.table.right) / 2)).toBeLessThan(1);
-  expect(Math.abs((g.watermark.top + g.watermark.bottom) / 2 - (g.table.top + g.table.bottom) / 2)).toBeLessThan(1);
+  expect(Math.abs(g.watermark.width - 76 * 96 / 25.4)).toBeLessThan(1);
+  expect(Math.abs(g.watermark.height - 65 * 96 / 25.4)).toBeLessThan(1);
+  expect(g.logo.width).toBeGreaterThan(250);
+  expect(g.oldMarkHidden).toBe(g.print);
+  expect(g.signatureBackground).toBe("rgba(0, 0, 0, 0)");
+  const centerX = g.print ? g.viewport.width / 2 : (g.table.left + g.table.right) / 2;
+  const centerY = g.print ? g.viewport.height / 2 : (g.table.top + g.table.bottom) / 2;
+  expect(Math.abs((g.watermark.left + g.watermark.right) / 2 - centerX)).toBeLessThan(1);
+  expect(Math.abs((g.watermark.top + g.watermark.bottom) / 2 - centerY)).toBeLessThan(1);
   expect(g.header.bottom).toBeLessThanOrEqual(g.table.top);
   expect(g.summary.bottom).toBeLessThanOrEqual(g.table.top);
   expect(g.signatures.top).toBeGreaterThanOrEqual(g.table.bottom);
@@ -93,14 +97,15 @@ function assertGeometry(g: Awaited<ReturnType<typeof geometry>>) {
 // Hosted visual job only: ordinary Playwright Chromium, no local
 // browser flags, live application, sessions, database, or external network.
 describe("official agreement actual browser and PDF print evidence", () => {
-  it.each([{ name: "short-1", count: 1 }, { name: "short-2", count: 2 }, { name: "dense-24", count: 24 }, { name: "dense-36", count: 36 }, { name: "overflow-60", count: 60 }])(
-    "$name retains table-only watermark, money and every installment across printed pages", async ({ name, count }) => {
+  it.each([1, 2, 4, 6, 12, 24, 36, 60].map(count => ({ name: `fixed-logo-${count}`, count })))(
+    "$name retains fixed physical logo size, money and every installment across printed pages", async ({ name, count }) => {
       const agreement = syntheticAgreement(count);
       state.agreement = agreement;
       const before = structuredClone(agreement);
       const markup = renderToStaticMarkup(await DebtRepaymentAgreementPrint({ id: 99003, version: 2, today: "2031-01-01" }));
       const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
-      const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${reset}\n${readFileSync(resolve("app/print/print.css"), "utf8")}</style></head><body><div class="print-root">${markup.replaceAll('src="/logo.png"', `src="${logo}"`)}</div></body></html>`;
+      const watermark = renderToStaticMarkup(<PrintDocumentWatermark />).replaceAll('src="/logo.png"', `src="${logo}"`);
+      const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${reset}\n${readFileSync(resolve("components/print-document.css"), "utf8")}\n${readFileSync(resolve("app/print/print.css"), "utf8")}</style></head><body>${watermark}<div class="print-root">${markup.replaceAll('src="/logo.png"', `src="${logo}"`)}</div></body></html>`;
       mkdirSync(artifactRoot, { recursive: true });
       const browser = await chromium.launch();
       const requests: string[] = [];
@@ -134,13 +139,15 @@ describe("official agreement actual browser and PDF print evidence", () => {
         const print = await geometry(page);
         assertGeometry(print);
         const pdf = resolve(artifactRoot, `${name}.pdf`);
-        await page.pdf({ path: pdf, format: "A4", printBackground: true, preferCSSPageSize: true });
+        await page.pdf({ path: pdf, format: "A4", printBackground: false, preferCSSPageSize: true });
         const commandOptions = { encoding: "utf8" as const, timeout: 30_000, maxBuffer: 1024 * 1024 };
         const info = execFileSync("pdfinfo", [pdf], commandOptions);
         const pages = Number(info.match(/^Pages:\s+(\d+)/m)?.[1]);
         expect(Number.isInteger(pages)).toBe(true);
         expect(pages).toBeGreaterThanOrEqual(count === 60 ? 2 : 1);
         expect(pages).toBeLessThanOrEqual(count === 60 ? 4 : 1);
+        const paintedLogos = [...execFileSync("pdfimages", ["-list", pdf], commandOptions).matchAll(/^\s*(\d+)\s+\d+\s+image\s+1000\s+846\s/gm)].map(match => Number(match[1]));
+        for (let physicalPage = 1; physicalPage <= pages; physicalPage++) expect(paintedLogos.filter(number => number === physicalPage)).toHaveLength(physicalPage === 1 ? 2 : 1);
         const text = execFileSync("pdftotext", ["-layout", pdf, "-"], commandOptions)
           .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
           .replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 0x0660));

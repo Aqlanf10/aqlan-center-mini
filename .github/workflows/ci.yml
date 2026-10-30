@@ -349,6 +349,22 @@ jobs:
           INVENTORY_SCHEMA_TEST: "1"
         run: npm run test:security-http
 
+      # Four pristine unauthenticated login views only, before any credentials.
+      # Never upload cookies, browser storage, traces, videos, or broad directories.
+      - name: Upload official-identity login screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-reference-ui
+          path: |
+            .settings-ui-artifacts/login-reference/login-1280.png
+            .settings-ui-artifacts/login-reference/login-390.png
+            .settings-ui-artifacts/login-reference/login-photo-1280.png
+            .settings-ui-artifacts/login-reference/login-photo-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Five exact real-app synthetic invoice views and bounded geometry only.
       # No browser state, cookies, traces, databases, or broad directory upload.
       - name: Upload grouped invoice entry evidence
@@ -553,6 +569,20 @@ jobs:
         with:
           name: prescription-diagnosis-ui-screenshot
           path: .settings-ui-artifacts/prescription-diagnosis-pinned.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Real built-route reads from owned ephemeral synthetic fixtures only.
+      - name: Upload positive print route evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: positive-print-routes-ui
+          path: |
+            .settings-ui-artifacts/positive-print-routes/*.png
+            .settings-ui-artifacts/positive-print-routes/*.pdf
+            .settings-ui-artifacts/positive-print-routes/*.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -1323,6 +1353,9 @@ jobs:
             .settings-ui-artifacts/official-contract-print/*.pdf
             .settings-ui-artifacts/official-contract-print/*.png
             .settings-ui-artifacts/official-contract-print/*.json
+            .settings-ui-artifacts/unified-print/*.pdf
+            .settings-ui-artifacts/unified-print/*.png
+            .settings-ui-artifacts/unified-print/*.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

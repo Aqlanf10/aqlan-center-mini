@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import labelStyles from "./labels.module.css";
 import { statementAgreementsRequireReview } from "@/lib/statement-lines";
 import { StatementHistoricalDetails, StatementInvoiceDetails, currentStatementInvoices, statementAgreements, statementPaymentLabel } from "./presentation";
@@ -8,7 +9,7 @@ import {
   type Balance, type Currency,
 } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
-import { friendlyDateLong } from "@/lib/reminders";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { PrintableReportDocument } from "@/components/reports/PrintableReportDocument";
@@ -118,14 +119,14 @@ export default async function StatementPage({ params, searchParams }: {
         `}</style>
         <PrintHeader settings={settings} title="كشف حساب" />
 
-        <div className="line">
+        <PrintMetadata><div className="line">
           <span>المريض</span>
           <span style={{ fontWeight: 700 }}>{patient.fullName}</span>
         </div>
         <div className="line">
           <span>رقم الملف</span>
           <span className="num" dir="ltr">{patient.patientNumber}</span>
-        </div>
+        </div></PrintMetadata>
         <div className="rule" />
 
         {/* (P1-5ب) الرصيد الافتتاحي بعملته — سطرٌ لكل عملة، لا يُحوَّل. */}
@@ -140,10 +141,10 @@ export default async function StatementPage({ params, searchParams }: {
 
         <StatementHistoricalDetails buckets={historicalBuckets} />
 
-        {showInvoiceDetails ? <StatementInvoiceDetails invoices={ledger.invoices} /> : null}
+        {showInvoiceDetails ? <StatementInvoiceDetails invoices={ledger.invoices} timeZone={CLINIC_TIME_ZONE} /> : null}
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "5mm 0 2mm" }}>الدفعات</p>
-        <table className="items">
+        <PrintTableFrame><table className="items">
           <thead>
             <tr>
               <th>السند</th><th>التاريخ</th><th>المدفوع</th><th className="num">المكافئ</th>
@@ -155,7 +156,7 @@ export default async function StatementPage({ params, searchParams }: {
             ) : ledger.payments.map((payment) => (
               <tr key={payment.id}>
                 <td dir="ltr">{payment.receiptNumber}</td>
-                <td>{friendlyDateLong(payment.createdAt.slice(0, 10))}</td>
+                <td>{formatClinicDate(payment.createdAt, CLINIC_TIME_ZONE)}</td>
                 <td>
                   {statementPaymentLabel(payment, ledger.payments)}{" — "}
                   {formatMoney(payment.amountMinor, payment.currency)}
@@ -168,7 +169,7 @@ export default async function StatementPage({ params, searchParams }: {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></PrintTableFrame>
 
         <div style={{ marginTop: "5mm" }}>
           {activeCurrencies.map((currency) => {

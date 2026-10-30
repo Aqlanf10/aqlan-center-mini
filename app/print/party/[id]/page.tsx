@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getParty, getSettingsSafe, partyStatement } from "@/lib/db";
 import { EXPENSE_CATEGORY_LABEL, PARTY_KIND_LABEL } from "@/lib/expenses";
@@ -43,7 +44,7 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
       <div className="sheet sheet-a4">
         <PrintHeader settings={settings} title="كشف حساب جهة" />
 
-        <div className="line">
+        <PrintMetadata><div className="line">
           <span>الجهة</span>
           <span style={{ fontWeight: 700 }}>{party.name} — {PARTY_KIND_LABEL[party.kind]}</span>
         </div>
@@ -52,11 +53,11 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
             <span>الهاتف</span>
             <span className="num" dir="ltr">{party.phone}</span>
           </div>
-        ) : null}
+        ) : null}</PrintMetadata>
         <div className="rule" />
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "2mm 0" }}>الالتزامات (فواتير وأعمال)</p>
-        <table className="items">
+        <PrintTableFrame><table className="items">
           <thead>
             <tr>
               <th>التاريخ</th><th>البيان</th><th className="num">المبلغ</th>
@@ -80,10 +81,10 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></PrintTableFrame>
 
         <p style={{ fontSize: "10pt", fontWeight: 700, margin: "5mm 0 2mm" }}>سندات الصرف</p>
-        <table className="items">
+        <PrintTableFrame><table className="items">
           <thead>
             <tr>
               <th>السند</th><th>التاريخ</th><th>البند</th><th className="num">المبلغ</th>
@@ -108,7 +109,7 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></PrintTableFrame>
 
         <div style={{ marginTop: "5mm" }}>
           {totals.length === 0 ? (
