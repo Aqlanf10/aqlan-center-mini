@@ -180,6 +180,7 @@ export function PrescriptionModal({
     setItems((prev) => [
       ...prev,
       {
+        selection: { id: "manual", amount: "", confirmed: false },
         name: "",
         dose: "",
         form: "Tablets",
@@ -209,12 +210,12 @@ export function PrescriptionModal({
       setPreserveError("طبيب الزيارة يختلف عن هويتك السريرية؛ اختر الإصدار باسمك صراحة قبل المتابعة.");
       return false;
     }
-    const selectionError = manualMedicationSelectionError(items);
-    if (selectionError) { setPreserveError(selectionError); return false; }
     if (sanitizeRxItems(items).length === 0) {
       setPreserveError("أضف دواءً واحدًا على الأقل باسم مكتوب بالإنجليزية قبل طباعة الوصفة أو معاينة المسودة.");
       return false;
     }
+    const selectionError = manualMedicationSelectionError(items);
+    if (selectionError) { setPreserveError(selectionError); return false; }
     if (prescriberStatus !== "ready" || !prescriberOptions) {
       setPreserveError("لم يكتمل التحقق من هوية الطبيب؛ انتظر أو أعد المحاولة.");
       return false;
@@ -568,6 +569,7 @@ export function PrescriptionModal({
                     onClick={() => setItems((prev) => [
                       ...prev,
                       {
+                        selection: { id: "manual", amount: "", confirmed: false },
                         name: suggestion.name,
                         dose: suggestion.dose,
                         form: "",
@@ -806,8 +808,8 @@ export function PrescriptionModal({
                         type="text"
                         value={item.dose}
                         onChange={(e) => updateItem(idx, "dose", e.target.value)}
-                        placeholder={item.selection ? "Strength / concentration" : "Dose (1g / 500mg)"}
-                        aria-label={item.selection ? `التركيز أو القوة للسطر ${idx + 1}` : undefined}
+                        placeholder={item.selection && item.selection.id !== "manual" ? "Strength / concentration" : "Dose (1g / 500mg)"}
+                        aria-label={item.selection && item.selection.id !== "manual" ? `التركيز أو القوة للسطر ${idx + 1}` : undefined}
                         dir="ltr"
                         className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand-navy focus:outline-none"
                       />
@@ -853,7 +855,7 @@ export function PrescriptionModal({
                   </div>
 
                   {item.selection && <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs">
-                    <p>اختيار اسم فقط — أكمل الشكل والتركيز ومقدار الجرعة والتكرار والمدة بنفسك؛ الجرعات المرجعية غير معتمدة للتعبئة.</p>
+                    <p>أكمل الشكل والتركيز ومقدار الجرعة والتكرار والمدة بنفسك؛ الجرعات المرجعية غير معتمدة للتعبئة.</p>
                     <label className="my-2 block">مقدار الجرعة لكل مرة
                       <input aria-label={`مقدار الجرعة للسطر ${idx + 1}`} dir="ltr" value={item.selection.amount} placeholder="Clinician-entered amount per dose"
                         onChange={event => setItems(previous => previous.map((row, i) => i === idx && row.selection ? { ...row, selection: { ...row.selection, amount: event.target.value, confirmed: false } } : row))}

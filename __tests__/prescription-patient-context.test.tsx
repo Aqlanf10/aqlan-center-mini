@@ -171,7 +171,9 @@ describe("prescription patient context contract", () => {
     change(find(renderModal(), (node) => node.props.placeholder === "Drug name (e.g. Augmentin / Brufen)"), "Amoxicillin");
     expect(text(renderModal())).toContain("خطر تحسسي حرج (Penicillin Allergy)");
     click(button(renderModal(), "💬إرسال واتساب"));
-    expect(openMock).toHaveBeenCalledWith(expect.stringContaining("https://wa.me/967777100099?"), "_blank");
+    // Incomplete new medication cannot escape issuance review through sharing.
+    expect(openMock).not.toHaveBeenCalled();
+    expect(text(renderModal())).toContain("أكمل اسم الدواء");
     expect(readCalls()[0][1]).toMatchObject({ cache: "no-store", signal: expect.any(AbortSignal) });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   });

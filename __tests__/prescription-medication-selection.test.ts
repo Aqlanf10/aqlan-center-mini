@@ -31,7 +31,25 @@ describe("explicit manual generic name selection", () => {
   it("does not silently truncate a selected line beyond the item limit", () => {
     expect(check(Array.from({ length: 21 }, selected)).ok).toBe(false);
   });
-  it("leaves the historical/manual entry format compatible", () => {
-    expect(manualMedicationSelectionError([{ name: "Synthetic legacy item" }])).toBeNull();
+  it("rejects missing review for new issuance while preserving legacy reads", () => {
+    const legacy = { name: "Synthetic legacy item" };
+    expect(manualMedicationSelectionError([legacy])).not.toBeNull();
+    expect(check([legacy]).ok).toBe(false);
+    expect(sanitizeRxItems([legacy])[0].name).toBe(legacy.name);
+    const { selection: _selection, ...completeWithoutReview } = selected();
+    expect(check([completeWithoutReview]).ok).toBe(false);
+    expect(check([{ ...selected(), selection: { id: "manual", amount: "synthetic amount", confirmed: true } }]).ok).toBe(true);
   });
+  it.each(["name", "form", "dose", "frequency", "duration"])("manual origin cannot omit %s", field => {
+    const manual = { ...selected(), selection: { id: "manual", amount: "synthetic amount", confirmed: true } };
+    expect(check([{ ...manual, [field]: "" }]).ok).toBe(false);
+  });
+  it("manual review cannot omit amount or confirmation and mixed invalid rows cannot disappear", () => {
+    for (const selection of [{ id: "manual", confirmed: true }, { id: "manual", amount: "fixture" }, { id: "manual", amount: "fixture", confirmed: "true" }]) {
+      expect(check([{ ...selected(), selection }]).ok).toBe(false);
+    }
+    expect(check([selected(), { ...selected(), name: "1".repeat(200) + "A" }]).ok).toBe(false);
+    expect(check(Array.from({ length: 21 }, () => ({ name: "legacy-shaped" }))).ok).toBe(false);
+  });
+
 });

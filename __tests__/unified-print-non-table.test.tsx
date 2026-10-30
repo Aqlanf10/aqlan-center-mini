@@ -41,6 +41,7 @@ const prescription = {
   createdBy: "طبيب الوصفة المحفوظ صناعي", createdAt: "2031-01-04T10:00:00Z", items: [
     { name: "SYNTHETIC-DRUG-A (NOT FOR USE)", dose: "TEST-DOSE", form: "Synthetic tablets", frequency: "SYNTHETIC FREQUENCY — NOT MEDICAL ADVICE", duration: "SYNTHETIC DURATION", instructions: "تعليمات عربية صناعية لا تستخدم للعلاج", instructionsEn: "Synthetic instructions, not for treatment" },
   ] };
+const reviewedDraftItems = prescription.items.map(item => ({ ...item, selection: { id: "manual", amount: "Synthetic amount", confirmed: true } }));
 const appointment = { id: 99004, patientId: patient.id, patientName: patient.fullName, scheduledDate: "2031-02-08", scheduledTime: "09:30", durationMinutes: 45,
   appointmentType: "consultation", status: "confirmed", note: "ملاحظة موعد صناعية" };
 const referral = { id: 99005, patientId: patient.id, toName: "أخصائي صناعي", toSpecialty: "oral_surgery", urgency: "urgent", reason: "سبب إحالة صناعي محفوظ لفحص التفاف النص والطباعة", teeth: "16, 26", createdAt: "2031-01-04T10:00:00Z", doctorName: "طبيب الإحالة المحفوظ" };
@@ -104,7 +105,7 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
   });
   it("draft prescription remains explicitly unapproved, with no stored clinician invented", async () => {
     readers.prescription.mockResolvedValue(null);
-    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", items: JSON.stringify(prescription.items), diagnosis: "تشخيص مسودة صناعي", date: "2031-01-04", lang: "en" }) }));
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", items: JSON.stringify(reviewedDraftItems), diagnosis: "تشخيص مسودة صناعي", date: "2031-01-04", lang: "en" }) }));
     expect(html).toContain("مسودة للمراجعة"); expect(html).not.toContain("UNAPPROVED DRAFT"); expect(html).not.toContain("#fffbeb"); expect(html).toContain(prescription.items[0].instructionsEn); expect(html).not.toContain(prescription.items[0].instructions);
     expect(html).toContain("اسم الطبيب غير موثق في المسودة"); expect(html).not.toContain("synthetic-session"); expect(html).not.toContain(prescription.createdBy); artifact("prescription-draft", html, "A5");
   });
@@ -199,11 +200,11 @@ describe("prescription identity and direction", () => {
     const legacy = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002" }) }));
     expect(legacy).toContain("اسم الطبيب غير موثق في الوصفة القديمة");
     expect(legacy).not.toContain(prescription.createdBy);
-    const draft = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorName: "د. معاينة فقط", items: JSON.stringify(prescription.items) }) }));
+    const draft = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorName: "د. معاينة فقط", items: JSON.stringify(reviewedDraftItems) }) }));
     expect(draft).not.toContain("د. معاينة فقط"); expect(draft).toContain("اسم الطبيب غير موثق في المسودة"); expect(draft).toContain("مسودة للمراجعة");
   });
   it.each([false, true])("reads current identity and respects empty fields (draft=%s)", async draft => {
-    const query = draft ? { draft: "1", items: JSON.stringify(prescription.items) } : { rx: "99002" };
+    const query = draft ? { draft: "1", items: JSON.stringify(reviewedDraftItems) } : { rx: "99002" };
     readers.settings.mockResolvedValue({ ...settings, "clinic.name": "NEW-CLINIC", "clinic.phone": "NEW-PHONE", "clinic.address": "", "clinic.lead_doctor": "", "clinic.lead_doctor_title": "", "clinic.lead_doctor_credentials": "" });
     const first = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve(query) }));
     expect(first).toContain("NEW-CLINIC"); expect(first).toContain("NEW-PHONE");
@@ -217,17 +218,17 @@ describe("prescription identity and direction", () => {
 
 describe("draft physician identity cannot be forged", () => {
   it("resolves allowed ID on server and ignores supplied name", async () => {
-    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "5", doctorName: "FORGED", items: JSON.stringify(prescription.items) }) }));
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "5", doctorName: "FORGED", items: JSON.stringify(reviewedDraftItems) }) }));
     expect(html).toContain("د. موثق"); expect(html).not.toContain("FORGED");
   });
   it.each(["99", "bad", "0"])("rejects disallowed/invalid draft clinician %s", async doctorPartyId => {
-    await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId, items: JSON.stringify(prescription.items) }) })).rejects.toThrow();
+    await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId, items: JSON.stringify(reviewedDraftItems) }) })).rejects.toThrow();
   });
   it("permits owner choice only from current server-authorized options", async () => {
     readers.prescriberOptions.mockResolvedValue({ issuerId: 5, canChooseAnyDoctor: true, doctors: [{ id: 5, name: "Owner" }, { id: 99, name: "Dr Target" }] });
-    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "99", items: JSON.stringify(prescription.items) }) }));
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "99", items: JSON.stringify(reviewedDraftItems) }) }));
     expect(html).toContain("Dr Target");
     readers.prescriberOptions.mockResolvedValue({ issuerId: 7, canChooseAnyDoctor: false, doctors: [{ id: 7, name: "Other viewer" }] });
-    await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "99", items: JSON.stringify(prescription.items) }) })).rejects.toThrow();
+    await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "99", items: JSON.stringify(reviewedDraftItems) }) })).rejects.toThrow();
   });
 });

@@ -24,6 +24,7 @@ const prescriptionId = 98103;
 const acknowledgementToken = "synthetic-prescription-acknowledgement";
 const draftNotes = "تعليمات تجريبية محفوظة في المسودة";
 const medicine = {
+  selection: { id: "manual", amount: "Synthetic amount", confirmed: true },
   name: "SyntheticRx", dose: "fixture dose", form: "Tablets",
   frequency: "fixture frequency", duration: "fixture duration",
   instructions: "تعليمات تجريبية", instructionsEn: "Synthetic instructions",
@@ -183,6 +184,8 @@ async function fillMedicine(page: Page) {
     ["التعليمات بالعربية (بعد الأكل…)", medicine.instructions],
     ["Instructions in English (after meals…)", medicine.instructionsEn],
   ]) await page.getByPlaceholder(placeholder, { exact: true }).fill(value);
+  await page.getByLabel("مقدار الجرعة للسطر 1", { exact: true }).fill(medicine.selection.amount);
+  await page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ }).check();
 }
 
 async function assertMedicine(page: Page) {
@@ -382,6 +385,12 @@ describe("patient-file context in the built prescription consumer", () => {
       const drugName = f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true });
       await drugName.fill("Amoxicillin");
       await f.page.getByText("خطر تحسسي حرج (Penicillin Allergy)", { exact: true }).waitFor();
+      // A manual edit clears the same review contract as a library-origin edit.
+      const manualReview = f.page.getByRole("checkbox", { name: /راجعت الاستطباب والحساسية والشكل/ });
+      expect(await manualReview.isChecked()).toBe(false);
+      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
+      expect(await prints(f.page)).toEqual([]);
+      await manualReview.check();
       await capturePatientContext(f.page, width, "warning");
       await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
       expect(await prints(f.page)).toEqual([expect.stringContaining("https://wa.me/967777100099?")]);

@@ -99,6 +99,14 @@ function field(placeholder: string) {
 function change(placeholder: string, value: string) {
   (field(placeholder).props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
 }
+function completeManualLine() {
+  change("Dose (1g / 500mg)", "Synthetic strength");
+  change("Frequency (every 8 hours)", "Synthetic interval");
+  change("Duration (5 days)", "Synthetic duration");
+  change("Clinician-entered amount per dose", "Synthetic amount");
+  const review = render().find(node => node.type === "input" && node.props.type === "checkbox");
+  (review.props.onChange as (event: { target: { checked: boolean } }) => void)({ target: { checked: true } });
+}
 function click(label: string) {
   const button = render().find((node) => node.type === "button" && contents(node.props.children as ReactNode) === label);
   (button.props.onClick as () => void)();
@@ -162,6 +170,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     render({ isOpen: true });
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
+    completeManualLine();
     await ready();
     click("طباعة الروشتة (A5)");
     await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
@@ -178,6 +187,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     change(diagnosisPlaceholder, "Synthetic clinician Rx diagnosis");
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
+    completeManualLine();
     change(notesPlaceholder, "Synthetic clinician notes");
     click("إلغاء");
     render({ isOpen: false });
@@ -226,6 +236,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     render({ defaultDiagnosis: "Synthetic visit diagnosis", isOpen: true });
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
+    completeManualLine();
     change(notesPlaceholder, "Synthetic clinician notes");
     render({ defaultDiagnosis: "" });
     expect(field(diagnosisPlaceholder).props.value).toBe("");
@@ -246,6 +257,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     render({ defaultDiagnosis: "Synthetic submitted diagnosis", isOpen: true });
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
+    completeManualLine();
     await ready();
     click("طباعة الروشتة (A5)");
     const post = fetchMock.mock.calls.find(([url, options]) => url === "/api/prescriptions" && options?.method === "POST");
@@ -289,6 +301,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     render({ defaultDiagnosis: "Synthetic current visit diagnosis", isOpen: true });
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
+    completeManualLine();
     await ready();
     click("طباعة الروشتة (A5)");
     const acknowledgement = "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا";
@@ -326,6 +339,7 @@ describe("empty prescription caller fails closed before save or draft navigation
     if (name !== null) {
       click("إضافة دواء جديد");
       change(medicinePlaceholder, name);
+      completeManualLine();
     }
     click(printLabel);
     expect(writes()).toHaveLength(0);
@@ -338,6 +352,7 @@ describe("empty prescription caller fails closed before save or draft navigation
     click(printLabel);
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
+    completeManualLine();
     await ready();
     click(printLabel);
     await vi.waitFor(() => expect(openMock).toHaveBeenCalledWith("/print/prescription/91001?rx=92001", "_blank"));
@@ -345,28 +360,21 @@ describe("empty prescription caller fails closed before save or draft navigation
     expect(contents(render().tree)).not.toContain(validation);
   });
 
-  it("preserves mixed raw rows for the server canonical sanitizer", async () => {
+  it("rejects mixed incomplete raw rows instead of silently dropping them", async () => {
     render({ isOpen: true });
+    click("إضافة دواء جديد"); change(medicinePlaceholder, "SyntheticDrug"); completeManualLine();
     click("إضافة دواء جديد");
-    change(medicinePlaceholder, "   ");
-    click("إضافة دواء جديد");
-    const fields = elements(render().tree).filter(node => node.props.placeholder === medicinePlaceholder);
-    (fields[1].props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "  SyntheticDrug  " } });
-    await ready();
-    click(printLabel);
-    await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
-    expect(writes()).toHaveLength(1);
-    const body = JSON.parse(writes()[0][1].body);
-    expect(body.items.map((item: { name: string }) => item.name)).toEqual(["   ", "  SyntheticDrug  "]);
-    const canonical = checkPrescriptionDraft({ ...body, visitId: null });
-    expect(canonical.ok).toBe(true);
-    if (canonical.ok) expect(canonical.value.items.map(item => item.name)).toEqual(["SyntheticDrug"]);
+    await ready(); click(printLabel);
+    expect(writes()).toHaveLength(0);
+    expect(openMock).not.toHaveBeenCalled();
+    expect(contents(render().tree)).toContain("أكمل اسم الدواء");
   });
 
   it("preserves a valid explicit draft fallback after save failure", async () => {
     render({ isOpen: true });
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
+    completeManualLine();
     await ready();
     fetchMock.mockResolvedValue({ status: 500, json: async () => ({ message: "Synthetic failure" }) });
     await ready();
@@ -382,6 +390,7 @@ describe("empty prescription caller fails closed before save or draft navigation
     render({ isOpen: true });
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
+    completeManualLine();
     const label = path === "critical" ? "عرض مسودة غير معتمدة (لا تُصرف كوصفة)" : "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا";
     await ready();
     fetchMock.mockResolvedValue({
@@ -395,6 +404,7 @@ describe("empty prescription caller fails closed before save or draft navigation
     await vi.waitFor(() => expect(contents(render().tree)).toContain(label));
     expect(openMock).not.toHaveBeenCalled();
     change(medicinePlaceholder, "   ");
+    completeManualLine();
     click(label);
     expect(writes()).toHaveLength(1); // Initial safety evaluation only; no empty POST.
     expect(openMock).not.toHaveBeenCalled();
@@ -413,7 +423,7 @@ it("never silently replaces a mismatched visit prescriber with the current clini
   await vi.waitFor(() => expect(contents(render().tree)).toContain("لم نغيّر الاختيار تلقائيًا"));
   const physician = render().find(node => node.props["aria-label"] === "الطبيب الواصف");
   expect(physician.props.value).toBe("Dr Visit");
-  click("إضافة دواء جديد"); change(medicinePlaceholder, "SYNTHETIC"); click("طباعة الروشتة (A5)");
+  click("إضافة دواء جديد"); change(medicinePlaceholder, "SYNTHETIC"); completeManualLine(); click("طباعة الروشتة (A5)");
   expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(0);
   const accept = render().find(node => node.type === "button" && contents(node.props.children as ReactNode).startsWith("إصدار باسمي:"));
   (accept.props.onClick as () => void)();

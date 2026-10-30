@@ -146,7 +146,7 @@ describe("إصدار الوصفة عبر المسار (P0.8)", () => {
     diagnosis: "خلع جراحي",
     notes: "",
     instructionsLang: "both",
-    items: [{ name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
+    items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
   };
 
   it.each([0, -1, 1.5, "bad"])("معرف زيارة غير صالح %s لا يتحول إلى وصفة بلا زيارة", async visitId => {
@@ -191,7 +191,7 @@ describe("إصدار الوصفة عبر المسار (P0.8)", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...validDraft,
-        items: [{ name: "Augmentin 1g", dose: "1g", form: "Tablets", frequency: "1 every 12h", duration: "5 days", instructions: "", instructionsEn: "" }],
+        items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Augmentin 1g", dose: "1g", form: "Tablets", frequency: "1 every 12h", duration: "5 days", instructions: "", instructionsEn: "" }],
       }),
     }));
     expect(response.status).toBe(409);
@@ -412,7 +412,7 @@ describe("تحذيرات السلامة الخادمية: عرض ← إقرار 
     diagnosis: "خراج لبي",
     notes: "",
     instructionsLang: "both",
-    items: [{ name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" }],
+    items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" }],
   };
 
   /* تحذيرات غير حرجة يحسبها المحرك الحقيقي من ملفٍّ نصّه كما يلي —
@@ -534,8 +534,8 @@ describe("تحذيرات السلامة الخادمية: عرض ← إقرار 
     const penicillinDraft = {
       ...WARNING_DRAFT,
       items: [
-        { name: "Amoxicillin 500mg", dose: "500mg", form: "Capsules", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" },
-        { name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" },
+        { selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Amoxicillin 500mg", dose: "500mg", form: "Capsules", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" },
+        { selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Metronidazole 500mg", dose: "500mg", form: "Tablets", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" },
       ],
     };
     /* الرمز أُصدر وقت معاينةٍ كان الملف فيه "حاملًا" فقط (تحذير
@@ -570,7 +570,7 @@ describe("تحذيرات السلامة الخادمية: عرض ← إقرار 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...WARNING_DRAFT,
-        items: [{ name: "Augmentin 1g", dose: "1g", form: "Tablets", frequency: "1 every 12h", duration: "5 days", instructions: "", instructionsEn: "" }],
+        items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Augmentin 1g", dose: "1g", form: "Tablets", frequency: "1 every 12h", duration: "5 days", instructions: "", instructionsEn: "" }],
       }),
     }));
     expect(response.status).toBe(409);
@@ -598,7 +598,7 @@ const NSAID_DRAFT = {
   diagnosis: "خلع جراحي",
   notes: "",
   instructionsLang: "both",
-  items: [{ name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
+  items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
 };
 
 describe("الإقرار مربوط بالتحذيرات التي رآها الطبيب (مراجعة الجولة الثالثة)", () => {
@@ -777,7 +777,7 @@ describe("الإقرار مربوط بالتحذيرات التي رآها ال�
     const penicillinDraft = {
       ...NSAID_DRAFT,
       items: [
-        { name: "Amoxicillin 500mg", dose: "500mg", form: "Capsules", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" },
+        { selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Amoxicillin 500mg", dose: "500mg", form: "Capsules", frequency: "1 every 8h", duration: "5 days", instructions: "", instructionsEn: "" },
         ...NSAID_DRAFT.items,
       ],
     };
@@ -807,7 +807,7 @@ describe("prescriber snapshot authority", () => {
     mocks.getParty.mockResolvedValue({ id: 5, kind: "doctor", isActive: true, name });
     const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: 5, prescribingDoctorName: "UNTRUSTED", items: [{ name: "SYNTHETIC" }] }),
+      body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: 5, prescribingDoctorName: "UNTRUSTED", items: [{ name: "SYNTHETIC", dose: "fixture strength", form: "fixture form", frequency: "fixture interval", duration: "fixture duration", selection: { id: "manual", amount: "fixture amount", confirmed: true } }] }),
     }));
     expect(response.status).toBe(201);
     expect(mocks.savePrescription).toHaveBeenCalledWith(expect.objectContaining({ prescribingDoctorName: name }), "admin-actor", 5);
@@ -817,7 +817,7 @@ describe("prescriber snapshot authority", () => {
     mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "admin-actor", role: "admin", isActive: true, partyId: 5 });
     const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: 99, items: [{ name: "SYNTHETIC" }] }),
+      body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: 99, items: [{ name: "SYNTHETIC", dose: "fixture strength", form: "fixture form", frequency: "fixture interval", duration: "fixture duration", selection: { id: "manual", amount: "fixture amount", confirmed: true } }] }),
     }));
     expect(response.status).toBe(403);
     expect(mocks.savePrescription).not.toHaveBeenCalled();
@@ -827,7 +827,7 @@ describe("prescriber snapshot authority", () => {
 describe("owner-only cross-clinician issuance", () => {
   const request = (id: unknown = 99) => new Request("http://localhost/api/prescriptions", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: id, prescribingDoctorName: "FORGED", isOwner: true, role: "admin", items: [{ name: "SYNTHETIC" }] }),
+    body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: id, prescribingDoctorName: "FORGED", isOwner: true, role: "admin", items: [{ name: "SYNTHETIC", dose: "fixture strength", form: "fixture form", frequency: "fixture interval", duration: "fixture duration", selection: { id: "manual", amount: "fixture amount", confirmed: true } }] }),
   });
   function owner() {
     const context = ownerContextFromTrustedBinding({ ownerUserId: 2, bindingVersion: "synthetic-v1" });
