@@ -15,8 +15,10 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
     "0078": "0078_agreement_reconciliation.sql",
     "0087": "0087_agreement_reminder_metadata.sql",
     "0089": "0089_lab_shade_specification.sql",
+    "0090": "0090_prescribing_doctor_snapshot.sql",
+    "0091": "0091_prescribing_doctor_identity.sql",
   };
-  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0068,0069,0078", "0066,0067,0068,0069,0078", "0066,0068,0069,0078,0087", "0066,0067,0068,0069,0078,0087", "0066,0068,0069,0078,0087,0089", "0066,0067,0068,0069,0078,0087,0089"];
+  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0068,0069,0078", "0066,0067,0068,0069,0078", "0066,0068,0069,0078,0087", "0066,0067,0068,0069,0078,0087", "0066,0068,0069,0078,0087,0089", "0066,0067,0068,0069,0078,0087,0089", "0066,0068,0069,0078,0087,0089,0090,0091", "0066,0067,0068,0069,0078,0087,0089,0090,0091"];
   if (files.length > 59 && reviewedTails.includes(files.slice(59).map(file => file.version).join(",")) &&
       files.slice(59).every(file => reviewedAdditions[file.version] === file.filename)) {
     return periodontalCandidateMigrationVersion(files.slice(0, 59));
