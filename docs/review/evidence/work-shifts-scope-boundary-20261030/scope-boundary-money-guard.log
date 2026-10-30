@@ -1,0 +1,17 @@
+
+> aqlan-center@0.1.0 scan:money
+> node --import tsx scripts/scan-money-aggregation.mjs
+
+استثناءات موثَّقة (5):
+  · lib/db.ts:20638 [amount_minor] — (TD-05) استعلامٌ مرتبطٌ لكل خطةٍ على حدة: الدفعات تُسوَّى بدلو عملة الخطة نفسها (بمبلغها إن وافقت وبمكافئها المسجَّل وإلا) — دلو واحد حكامًا
+  · lib/reports.ts:372 [unit_price_minor] — (Reports R4) أوزان تخصصات خطةٍ واحدة: بنودها كلها بعملة خطتها نفسها، والناتج نِسبٌ لتوزيع قيمة الخطة بعملتها — دلو واحد حكامًا
+  · lib/reports.ts:5378 [unit_price_minor] — (Reports R4) المنفّذ من خطةٍ واحدة: استعلامٌ مرتبط لكل خطة وبنودها بعملة الخطة نفسها، ويُحصر بقيمة الخطة — دلو واحد حكامًا
+  · scripts/verify-backup.mjs:203 [amount_minor] — (رحلة النسخ الاحتياطي) بذرة الرحلة يمنيّة العملة حصرًا (YER) والمجموع إثباتُ استعادةٍ لا تقريرُ عملات — تُثبَّت البذرة كذلك في الرحلة
+  · scripts/verify-backup.mjs:204 [amount_minor] — (رحلة النسخ الاحتياطي) بذرة الرحلة يمنيّة العملة حصرًا (YER) والمجموع إثباتُ استعادةٍ لا تقريرُ عملات — تُثبَّت البذرة كذلك في الرحلة
+
+✓ حارس تجميع المال: لا جمع عبر العملات في كود المنتج
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

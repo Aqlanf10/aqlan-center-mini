@@ -13,6 +13,7 @@ const ACCOUNTS = {
   ungrantedAdmin: { username: "canon-shift-admin", password: "Canon#ShiftAdmin1", role: "admin", display: "مدير بلا منح", grants: {} },
   own: { username: "canon-shift-own", password: "Canon#ShiftOwn1", role: "doctor", doctor: true, patientScope: "own", display: "قارئ سندات مرضاه", grants: { "finance.shifts.view": true, "finance.payments.view": true } },
   expenses: { username: "canon-shift-expenses", password: "Canon#ShiftExpense1", role: "reception", display: "قارئ المصروفات", grants: { "finance.shifts.view": true, "finance.expenses.view": true } },
+  hybrid: { username: "canon-shift-hybrid", password: "Canon#ShiftHybrid1", role: "doctor", doctor: true, patientScope: "own", appointmentScope: "all", display: "طبيب بمواعيد المركز", grants: { "appointments.create": true, "appointments.edit": true, "finance.shifts.view": true, "finance.payments.view": true } },
 } as const;
 type Key = keyof typeof ACCOUNTS;
 let journey: CanonicalJourney<Key>;
@@ -106,6 +107,34 @@ it("HTTP: complete aggregates survive projection; receipt scope, expenses and un
     if (key === "expenses") expect(body.expenses).toHaveLength(1);
     else expect(JSON.stringify(body)).not.toMatch(/SYN-HIDDEN-(VOUCHER|PAYEE|EXPENSE-NOTE)/);
   }
+  expect(await journey.ddlLog()).toEqual([]);
+});
+
+it("HTTP and browser: own patient scope plus all appointments cannot mint receipt access by self-booking", async () => {
+  const login = await journey.login("hybrid");
+  const before = await (await journey.api("/api/shifts", login.cookie)).json();
+  expect(before.payments).toEqual([]);
+  const counts = async () => (await journey.db.query(`SELECT (SELECT count(*)::int FROM appointments) AS appointments,
+    (SELECT count(*)::int FROM audit_log WHERE action LIKE 'appointment.%') AS audits`)).rows[0];
+  const initial = await counts();
+  const booking = { patientId: outsidePatient, doctorId: journey.parties.hybrid, date: "2027-03-03", time: "09:00", durationMinutes: 30 };
+  const denied = await journey.api("/api/appointments", login.cookie, { method: "POST", body: JSON.stringify(booking) });
+  expect(denied.status).toBe(403); expect(await counts()).toEqual(initial);
+  expect(await denied.text()).not.toMatch(/SYN-HIDDEN|SELECT|patient_id/);
+  const after = await (await journey.api("/api/shifts", login.cookie)).json();
+  expect(after.payments).toEqual([]); expect(after.receiptProvenance).toEqual({}); expect(after.drawer).toEqual(before.drawer);
+  // Clinic-wide appointment authority remains usable for another clinician.
+  const permitted = await journey.api("/api/appointments", login.cookie, { method: "POST", body: JSON.stringify({ ...booking, doctorId: journey.parties.doctor }) });
+  expect(permitted.status).toBe(201);
+  const final = await (await journey.api("/api/shifts", login.cookie)).json();
+  expect(final.payments).toEqual([]); expect(final.drawer).toEqual(before.drawer);
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 900 }, locale: "ar" });
+  try {
+    const page = await context.newPage(); await journey.browserLogin(page, "hybrid"); await page.goto(`${journey.baseUrl}/finance`);
+    const view = page.getByTestId("canonical-shifts"); await view.getByText("لا توجد سندات ظاهرة ضمن نطاقك في الوردية المفتوحة.").waitFor();
+    expect(await view.innerText()).not.toMatch(/SYN-HIDDEN|مريض ظاهر للصندوق/);
+    expect(await view.locator("[data-payment-id]").count()).toBe(0);
+  } finally { await context.close(); }
   expect(await journey.ddlLog()).toEqual([]);
 });
 

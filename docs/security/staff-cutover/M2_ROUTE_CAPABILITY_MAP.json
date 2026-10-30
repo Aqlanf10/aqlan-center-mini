@@ -92,7 +92,7 @@
   "anyOf": [],
   "scope": "appointment",
   "status": "canonical-done",
-  "note": "M2 slice 16: operation appointments.create through the same capacity engine on the admitted transaction (writeAppointmentInDay with the caller's client); appointment.create and capacity-override audit rows atomic; own scope books its own patients on its own party; override by appointments.override-capacity only; engine refusals roll back with the legacy codes."
+  "note": "M2 slice 16: operation appointments.create through the same capacity engine on the admitted transaction (writeAppointmentInDay with the caller's client); appointment.create and capacity-override audit rows atomic; own scope books its own patients on its own party; override by appointments.override-capacity only; engine refusals roll back with the legacy codes. 2026-10-30 scope boundary: patientScope=own cannot assign an outside patient to self, even with appointmentScope=all; prove current membership after day/doctor locks and before insertion. Other-doctor/unassigned and whole-patient/owner scheduling unchanged."
  },
  {
   "route": "/api/appointments/[id]",
@@ -5683,7 +5683,7 @@
   "anyOf": [],
   "scope": null,
   "status": "canonical-done",
-  "note": "Slice 26: one owning read snapshot; complete drawer aggregates, capability/scope-filtered details. No printing/export or hidden-detail subtotals. Owner approval 2026-10-30.",
+  "note": "Slice 26: one owning read snapshot; complete drawer aggregates, capability/scope-filtered details. No printing/export or hidden-detail subtotals. Owner approval 2026-10-30. Compound own-patient/all-appointment booking-to-receipt sequence reproduced then guarded at canonical assignment; drawer remains complete. See scope-boundary report 2026-10-30; activation remains held for review.",
   "projection": {
    "groups": {
     "drawer": "finance.shifts.view: complete per-currency drawer and recent shift summaries; never calculated from filtered details",
@@ -6357,7 +6357,7 @@
      "need": [
       "appointments.create"
      ],
-     "note": "Creates the appointment from the waiting entry. Canonical (M2 slice 20)."
+     "note": "Creates the appointment from the waiting entry. Canonical (M2 slice 20). Same post-lock/pre-insert self-assignment boundary as direct booking: own-patient scope cannot bootstrap access through a new appointment, even with appointmentScope=all."
     },
     "booked": {
      "need": [],

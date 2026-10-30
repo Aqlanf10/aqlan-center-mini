@@ -356,8 +356,10 @@ export async function bookAppointment(
   input: BookAppointmentInput, actor: BookingActor,
   /** The canonical path (M2 slice 16): its admitted transaction, and an atomic audit
    * writer on it for the capacity override. Without them, as before: the engine owns
-   * its transaction and the override audit is written after the commit. */
-  options: { client?: DbClient; audit?: (input: AuditInput) => Promise<void> } = {},
+   * its transaction and the override audit is written after the commit.
+   * assertAssignment sees the resolved clinician under the day/doctor locks,
+   * before insertion; it cannot authorize itself through the new appointment. */
+  options: { client?: DbClient; audit?: (input: AuditInput) => Promise<void>; assertAssignment?: (patientId: number, doctorId: number | null) => Promise<void> } = {},
 ): Promise<BookingResult> {
   const patientId = Number(input.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
@@ -481,25 +483,28 @@ export async function bookAppointment(
       state.overridden = judged.overridden;
       return { ok: true as const };
     },
-    commit: (client) => insertAppointmentOnClient(client, {
-      patientId,
-      date: input.date,
-      time: input.time,
-      durationMinutes,
-      appointmentType: input.appointmentType ?? service?.legacyType ?? null,
-      note: input.note ? input.note.slice(0, 300) : null,
-      doctorId,
-      serviceId: service?.id ?? null,
-      /* لقطةُ الفواصل تُكتب مع الموعد: تغييرُ الخدمة غدًا لا يعيد حساب ما حُجز. */
-      bufferBeforeMinutes: service?.bufferBeforeMinutes ?? 0,
-      bufferAfterMinutes: service?.bufferAfterMinutes ?? 0,
-      chairNo,
-      /* لقطتان يسألُ عنهما المحرّك لاحقًا: هل شغل هذا الموعد كرسيًّا، وهل كان
-         صاحبه مريضًا جديدًا. وقراءتهما من الخدمة الحاضرة تُعيد رسم ما مضى. */
-      occupiesChair: service ? service.requiresChair : true,
-      isNewPatient: input.isNewPatient ?? false,
-      waitingListId: input.waitingListId ?? null,
-    }),
+    commit: async (client) => {
+      await options.assertAssignment?.(patientId, doctorId);
+      return insertAppointmentOnClient(client, {
+        patientId,
+        date: input.date,
+        time: input.time,
+        durationMinutes,
+        appointmentType: input.appointmentType ?? service?.legacyType ?? null,
+        note: input.note ? input.note.slice(0, 300) : null,
+        doctorId,
+        serviceId: service?.id ?? null,
+        /* لقطةُ الفواصل تُكتب مع الموعد: تغييرُ الخدمة غدًا لا يعيد حساب ما حُجز. */
+        bufferBeforeMinutes: service?.bufferBeforeMinutes ?? 0,
+        bufferAfterMinutes: service?.bufferAfterMinutes ?? 0,
+        chairNo,
+        /* لقطتان يسألُ عنهما المحرّك لاحقًا: هل شغل هذا الموعد كرسيًّا، وهل كان
+           صاحبه مريضًا جديدًا. وقراءتهما من الخدمة الحاضرة تُعيد رسم ما مضى. */
+        occupiesChair: service ? service.requiresChair : true,
+        isNewPatient: input.isNewPatient ?? false,
+        waitingListId: input.waitingListId ?? null,
+      });
+    },
   }).catch(error => {
     if (isReturnBooking && (error as { code?: string }).code === "55P03") {
       state.returnRejected = { message: "يجري تحديث مسؤولية الحالة. حدّث اقتراح العودة وأعد المحاولة.", code: "return_booking_source_changed" };

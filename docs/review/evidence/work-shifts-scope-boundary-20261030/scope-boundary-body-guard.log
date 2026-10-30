@@ -1,0 +1,5 @@
+
+> aqlan-center@0.1.0 ci:scan:body
+> node scripts/scan-raw-body-parsers.mjs
+
+بوابة قارئات الأجسام خضراء: 263 مسار API بلا قارئ خام (0 استثناء موثق).

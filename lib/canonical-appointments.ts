@@ -1,4 +1,5 @@
 import "server-only";
+import { canonicalAppointmentAssignmentGuard } from "./canonical-appointment-assignment";
 import { CLINIC_TIME_ZONE, arriveAppointmentWith, deleteAppointmentWith, findAppointmentForWaitingWith, getAppointmentWith, getWaitingEntryWith, markWaitingBookedWith, getPool, insertAuditRow, labWorkForPatientsWith, listAppointmentsByDateWith, patientInDoctorScopeWith, transitionAppointmentInTransaction } from "./db";
 import { reasonAcceptable, requiresReason } from "./appointment-lifecycle";
 import { CanonicalWaitingRefusal, readCanonicalFreedSlotCandidates } from "./canonical-waiting-list";
@@ -181,7 +182,7 @@ export async function commandCanonicalBooking(session: VerifiedDurableSession, i
     const result = await bookAppointment({ ...input, patientId, doctorId: clinician ?? input.doctorId ?? null }, {
       username: identity.username, userId: identity.userId, role: "canonical", doctorPartyId: null,
       canOverrideCapacity: held.has("appointments.override-capacity"), channel: "ui",
-    }, { client, audit });
+    }, { client, audit, assertAssignment: canonicalAppointmentAssignmentGuard(client, handle, "appointments.create") });
     if (!result.ok) {
       if (result.status === 409) throw new CanonicalBookingConflict(result.conflict);
       throw new CanonicalAppointmentRefusal("booking_refused", 400, result.message, result.code);
@@ -507,7 +508,7 @@ export async function commandCanonicalWaitingBook(session: VerifiedDurableSessio
     }, {
       username: identity.username, userId: identity.userId, role: "canonical", doctorPartyId: null,
       canOverrideCapacity: held.has("appointments.override-capacity"), channel: "ui",
-    }, { client, audit });
+    }, { client, audit, assertAssignment: canonicalAppointmentAssignmentGuard(client, handle, "appointments.edit") });
     if (!result.ok) {
       if (result.status === 409) throw new CanonicalBookingConflict(result.conflict);
       throw new CanonicalAppointmentRefusal("booking_refused", 400, result.message, result.code);
