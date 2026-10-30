@@ -2039,6 +2039,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         isOpen={rxOpen}
         onClose={() => { if (currentOwner()) setRxOpen(false); }}
         patientId={visit?.patientId ?? undefined}
+        visitId={visit?.id ?? undefined}
         patientName={visit?.patientName ?? ""}
         /* التنبيه الطبي والهاتف يمرّان ليُفحص أمان الدواء داخل الزيارة نفسها —
            فحص السلامة بلا بيانات المريض نصٌّ فارغ (P0.10). */
@@ -2046,6 +2047,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         patientPhone={readyPatientContext?.phone ?? null}
         patientContextStatus={patientContextStatus}
         defaultDiagnosis={notes.diagnosis}
+        defaultDoctorPartyId={doctorId}
         defaultDoctorName={doctors.find((d) => d.id === doctorId)?.name ?? ""}
       />
 

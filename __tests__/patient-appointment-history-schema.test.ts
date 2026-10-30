@@ -25,6 +25,8 @@ describe("patient appointment history index provenance", () => {
       "0082_invoice_service_additions.sql",
       "0087_agreement_reminder_metadata.sql",
       "0089_lab_shade_specification.sql",
+      "0090_prescribing_doctor_snapshot.sql",
+      "0091_prescribing_doctor_identity.sql",
       "0095_remediation_security_and_indexes.sql",
     ]);
   });

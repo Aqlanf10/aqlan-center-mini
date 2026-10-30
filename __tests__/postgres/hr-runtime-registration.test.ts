@@ -3,6 +3,7 @@ import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "../../lib/ortho-followup-coverage-s
 import { PATIENT_NUMBERING_SQL } from "../../lib/patient-numbering-schema";
 import { INVOICE_ARCHIVE_SQL } from "../../lib/invoice-archive-schema";
 import { INVOICE_SERVICE_ADDITIONS_SQL } from "../../lib/invoice-service-additions-schema";
+import { PRESCRIBING_DOCTOR_SNAPSHOT_SQL, PRESCRIBING_DOCTOR_IDENTITY_SQL } from "../../lib/prescribing-doctor-schema";
 import { LAB_SHADE_SPECIFICATION_SQL } from "../../lib/lab-shade-schema";
 import { REMEDIATION_SECURITY_AND_INDEXES_SQL } from "../../lib/remediation-security-schema";
 import { AGREEMENT_REMINDER_GUARD_SQL } from "../../lib/agreement-reminder-guard-schema";
@@ -57,6 +58,8 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0082", name: "invoice_service_additions", checksum: createHash("sha256").update(INVOICE_SERVICE_ADDITIONS_SQL).digest("hex") },
     { version: "0087", name: "agreement_reminder_metadata", checksum: createHash("sha256").update(AGREEMENT_REMINDER_GUARD_SQL).digest("hex") },
     { version: "0089", name: "lab_shade_specification", checksum: createHash("sha256").update(LAB_SHADE_SPECIFICATION_SQL).digest("hex") },
+    { version: "0090", name: "prescribing_doctor_snapshot", checksum: createHash("sha256").update(PRESCRIBING_DOCTOR_SNAPSHOT_SQL).digest("hex") },
+    { version: "0091", name: "prescribing_doctor_identity", checksum: createHash("sha256").update(PRESCRIBING_DOCTOR_IDENTITY_SQL).digest("hex") },
     { version: "0095", name: "remediation_security_and_indexes", checksum: createHash("sha256").update(REMEDIATION_SECURITY_AND_INDEXES_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {

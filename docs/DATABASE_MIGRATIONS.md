@@ -667,10 +667,25 @@ use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
 
+### 0090_prescribing_doctor_snapshot.sql
+
+Adds nullable `prescriptions.prescribing_doctor_name` TEXT, populated only for
+new prescriptions from the server-validated prescribing doctor. Legacy rows
+remain NULL; current registry or printing-user names are not historical evidence.
+
+### 0091_prescribing_doctor_identity.sql
+
+Adds nullable `prescriptions.prescribing_doctor_party_id` INTEGER for that
+separate prescribing identity. Existing `doctor_party_id` remains the issuing
+clinician and retains its void-authorization contract; `created_by` and audit
+actor remain the actual issuing account. No legacy backfill or permission grant.
+Both migrations use identical numbered/runtime SQL and checksum registration.
+Application rollback must preserve the columns and migration history. Exact-head
+PostgreSQL/schema/restore gates and review are required before any rollout.
+
 ### 0095_remediation_security_and_indexes.sql
 
-Additive security and performance migration (0090 remains permanently retired for
-historical cancelled #492 compatibility without restoring #492 code):
+Additive security and performance migration:
 - Adds `users.session_version`, `users.is_owner`, and `patients.portal_secret_version`.
 - Aligns uncustomized non-lab `parties` GL account defaults with `lib/accounting.ts` (`5201/2105`, `5301/2106`, `5401/2107`).
 - Adds `audit_log_no_truncate` statement guard on `audit_log`.

@@ -1,3 +1,4 @@
+import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
 import { NextResponse } from "next/server";
 import { listMedicalHistory, listPatientPrescriptions, prescribedBefore } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -31,12 +32,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const [prescriptions, suggestions, historyRows] = await Promise.all([
+    const [prescriptions, suggestions, prescriberOptions, historyRows] = await Promise.all([
       listPatientPrescriptions(patientId),
       prescribedBefore(patientId),
+      prescriptionPrescriberOptions(session),
       typeof listMedicalHistory === "function" ? listMedicalHistory(patientId, 1).catch(() => []) : Promise.resolve([]),
     ]);
-    return NextResponse.json({ prescriptions, suggestions, latestMedicalHistory: historyRows[0] ?? null });
+    return NextResponse.json({
+      prescriptions,
+      suggestions,
+      prescriberOptions,
+      latestMedicalHistory: historyRows[0] ?? null,
+    });
   } catch {
     return NextResponse.json({ message: "تعذّرت قراءة الوصفات." }, { status: 500 });
   }
