@@ -1,3 +1,4 @@
+import { isConfiguredPrescriptionOwner } from "@/lib/prescription-owner";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -56,7 +57,10 @@ export async function POST(request: Request) {
   }
   /* الفحص المركزي الموحّد للقدرة السريرية (lib/clinical-identity.ts) —
      نفس الفحص الذي تحرس به أدوات AI السريرية وإبطال الوصفات. */
-  const capability = clinicalCapabilityOf({ role: session.role, doctorPartyId: user.partyId });
+  if (session.userId !== user.id || session.username !== user.username || session.role !== user.role) {
+    return NextResponse.json({ message: "تغيّرت هوية الحساب؛ أعد تسجيل الدخول." }, { status: 403 });
+  }
+  const capability = clinicalCapabilityOf({ role: user.role, doctorPartyId: user.partyId });
   if (!capability.ok) {
     return NextResponse.json({ message: capability.reason }, { status: 403 });
   }
@@ -74,25 +78,26 @@ export async function POST(request: Request) {
     typeof body.acknowledgedSafetyToken === "string" && body.acknowledgedSafetyToken.length > 0
       ? body.acknowledgedSafetyToken
       : null;
-  // Keep issuer doctorPartyId unchanged: it also owns void authorization.
-  // Cross-clinician issuance awaits an explicit workflow decision.
-  let prescribingDoctorName = "";
-  if (body.prescribingDoctorPartyId !== undefined) {
-    const selectedId = Number(body.prescribingDoctorPartyId);
-    if (!Number.isInteger(selectedId) || selectedId <= 0) {
-      return NextResponse.json({ message: "اختر طبيبًا صالحًا من الزيارة." }, { status: 400 });
-    }
-    if (selectedId !== doctorPartyId) {
-      return NextResponse.json({ message: "الطبيب المحدد يختلف عن الهوية السريرية للحساب؛ الإصدار نيابة عن طبيب آخر غير مدعوم حاليًا. يمكن مراجعة المسودة دون اعتمادها." }, { status: 403 });
-    }
-    const selectedDoctor = await getParty(selectedId).catch(() => null);
-    if (!selectedDoctor || selectedDoctor.kind !== "doctor" || !selectedDoctor.isActive || !selectedDoctor.name.trim()) {
-      return NextResponse.json({ message: "الطبيب المحدد غير موجود أو غير نشط." }, { status: 400 });
-    }
-    prescribingDoctorName = selectedDoctor.name;
+  // Keep the existing issuer ID/void contract; prescribing identity is separate.
+  const issuerDoctor = await getParty(doctorPartyId!).catch(() => null);
+  if (!issuerDoctor || issuerDoctor.kind !== "doctor" || !issuerDoctor.isActive || !issuerDoctor.name.trim()) {
+    return NextResponse.json({ message: "هوية الحساب السريرية غير نشطة أو غير صالحة." }, { status: 403 });
   }
+  const selectedId = body.prescribingDoctorPartyId === undefined ? doctorPartyId! : Number(body.prescribingDoctorPartyId);
+  if (!Number.isSafeInteger(selectedId) || selectedId <= 0) {
+    return NextResponse.json({ message: "اختر طبيبًا صالحًا من القائمة." }, { status: 400 });
+  }
+  if (selectedId !== doctorPartyId && !isConfiguredPrescriptionOwner(user)) {
+    return NextResponse.json({ message: "اختيار طبيب آخر لإصدار الوصفة متاح للمالك الطبيب المرتبط بهوية موثوقة فقط." }, { status: 403 });
+  }
+  const selectedDoctor = selectedId === doctorPartyId ? issuerDoctor : await getParty(selectedId).catch(() => null);
+  if (!selectedDoctor || selectedDoctor.kind !== "doctor" || !selectedDoctor.isActive || !selectedDoctor.name.trim()) {
+    return NextResponse.json({ message: "الطبيب المحدد غير موجود أو غير نشط." }, { status: 400 });
+  }
+  const prescribingDoctorName = selectedDoctor.name;
   const draft = checkPrescriptionDraft({
     prescribingDoctorName,
+    prescribingDoctorPartyId: selectedId,
     patientId,
     visitId,
     diagnosis: body.diagnosis,

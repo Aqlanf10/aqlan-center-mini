@@ -117,6 +117,7 @@ export function sanitizePrescribingDoctorName(value: unknown): string {
 
 export interface PrescriptionDraft {
   prescribingDoctorName?: string;
+  prescribingDoctorPartyId?: number | null;
   patientId: number;
   visitId: number | null;
   diagnosis: string;
@@ -137,6 +138,7 @@ export type DraftCheck =
  */
 export function checkPrescriptionDraft(input: {
   prescribingDoctorName?: unknown;
+  prescribingDoctorPartyId?: number | null;
   patientId: number;
   visitId: number | null;
   diagnosis: unknown;
@@ -160,6 +162,7 @@ export function checkPrescriptionDraft(input: {
     ok: true,
     value: {
       prescribingDoctorName: sanitizePrescribingDoctorName(input.prescribingDoctorName),
+      prescribingDoctorPartyId: input.prescribingDoctorPartyId ?? null,
       patientId: input.patientId,
       visitId: input.visitId,
       diagnosis: text(input.diagnosis, MAX_TEXT),

@@ -87,7 +87,14 @@ export function PrescriptionModal({
   // explicit template/print choices own the Rx draft across cancellation/reopening.
   const [diagnosisOverride, setDiagnosisOverride] = useState<string | null>(null);
   const diagnosis = diagnosisOverride ?? defaultDiagnosis;
-  const doctorName = defaultDoctorName;
+  const [prescriberOptions, setPrescriberOptions] = useState<{
+    issuerId: number | null; canChooseAnyDoctor: boolean; doctors: { id: number; name: string }[];
+  } | null>(null);
+  const [prescriberOverride, setPrescriberOverride] = useState<number | null>(null);
+  const preferredDoctorId = prescriberOverride ?? defaultDoctorPartyId;
+  const selectedDoctorId = prescriberOptions?.canChooseAnyDoctor && prescriberOptions.doctors.some(d => d.id === preferredDoctorId)
+    ? preferredDoctorId : prescriberOptions?.issuerId ?? defaultDoctorPartyId;
+  const doctorName = prescriberOptions?.doctors.find(d => d.id === selectedDoctorId)?.name ?? defaultDoctorName;
   const [notes, setNotes] = useState("");
   const [lang, setLang] = useState<InstructionsLang>("both");
   /* تبدأ فارغة: القالب اختيارٌ صريح لا حالة افتراضية (P0.10) — فتحُ المودال
@@ -131,7 +138,10 @@ export function PrescriptionModal({
         const response = await fetch(`/api/patients/${patientId}/prescriptions`, { cache: "no-store" });
         if (!response.ok) return;
         const payload = await response.json();
-        if (!cancelled) setSuggestions(payload?.suggestions ?? []);
+        if (!cancelled) {
+          setSuggestions(payload?.suggestions ?? []);
+          setPrescriberOptions(payload?.prescriberOptions ?? null);
+        }
       } catch { /* الاقتراحات تحسينٌ لا شرط: فشلها لا يعطّل الوصفة */ }
     })();
     return () => { cancelled = true; };
@@ -215,7 +225,7 @@ export function PrescriptionModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         patientId,
-        ...(defaultDoctorPartyId ? { prescribingDoctorPartyId: defaultDoctorPartyId } : {}),
+        ...(selectedDoctorId ? { prescribingDoctorPartyId: selectedDoctorId } : {}),
         diagnosis,
         notes,
         instructionsLang: lang,
@@ -690,19 +700,23 @@ export function PrescriptionModal({
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                الطبيب المحدد في الزيارة
+                الطبيب الواصف
               </label>
-              <input
-                type="text"
-                value={doctorName}
-                readOnly
-                placeholder="اختر الطبيب من الزيارة"
-                className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs focus:border-brand-navy focus:outline-none"
-              />
+              {prescriberOptions?.canChooseAnyDoctor ? (
+                <select aria-label="الطبيب الواصف" value={selectedDoctorId ?? ""}
+                  onChange={event => setPrescriberOverride(Number(event.target.value))}
+                  className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs">
+                  {prescriberOptions.doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+                </select>
+              ) : (
+                <input aria-label="الطبيب الواصف" type="text" value={doctorName} readOnly
+                  placeholder="الاسم من الهوية السريرية للحساب"
+                  className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs" />
+              )}
             </div>
           </div>
 
-          <p className="text-xs text-slate-500">الاسم من الطبيب المحدد في الزيارة. الإصدار باسم طبيب مختلف عن هوية الحساب السريرية غير مدعوم حاليًا؛ معاينة المسودة لا تعتمدها.</p>
+          <p className="text-xs text-slate-500">الطبيب يصدر باسمه المرتبط بحسابه؛ المالك الطبيب وحده يمكنه اختيار طبيب مسجّل آخر. يبقى حساب المُصدر محفوظًا في التدقيق.</p>
 
           {/* قائمة الأدوية */}
           <div>

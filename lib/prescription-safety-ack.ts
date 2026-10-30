@@ -57,6 +57,7 @@ const ACK_TOKEN_VERSION = 2;
 export function canonicalPrescriptionForAck(draft: PrescriptionDraft): string {
   return JSON.stringify({
     prescribingDoctorName: draft.prescribingDoctorName ?? "",
+    prescribingDoctorPartyId: draft.prescribingDoctorPartyId ?? null,
     patientId: draft.patientId,
     visitId: draft.visitId,
     diagnosis: draft.diagnosis,

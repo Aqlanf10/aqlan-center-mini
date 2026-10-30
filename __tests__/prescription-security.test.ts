@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * اختبارات أمان الوصفات (P0.8/P0.9/P0.16): طباعة بلا وصفة محفوظة، تزوير اسم
@@ -40,6 +40,8 @@ import PrescriptionPrintPage from "../app/print/prescription/[id]/page";
 import { POST as createPrescription } from "../app/api/prescriptions/route";
 import { POST as voidPrescription } from "../app/api/prescriptions/[id]/void/route";
 
+afterEach(() => vi.unstubAllEnvs());
+
 const DOCTOR_SESSION = { userId: 2, username: "dr.amjad", role: "doctor", partyId: 5 };
 
 const STORED_RX = {
@@ -61,10 +63,13 @@ const STORED_RX = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("PRESCRIPTION_OWNER_USER_ID", "");
+  vi.stubEnv("PRESCRIPTION_OWNER_BINDING_VERSION", "");
   mocks.requireSession.mockResolvedValue(DOCTOR_SESSION);
   mocks.findUserByUsername.mockResolvedValue({
     id: 2, username: "dr.amjad", isActive: true, partyId: 5, role: "doctor", permissions: {},
   });
+  mocks.getParty.mockResolvedValue({ id: 5, kind: "doctor", isActive: true, name: "Dr Verified" });
   mocks.canAccessPatient.mockResolvedValue(true);
   mocks.getPatient.mockResolvedValue({
     id: 42, fullName: "سالم عبدالله", patientNumber: "P-00042", phone: "770000001",
@@ -411,6 +416,8 @@ describe("تحذيرات السلامة الخادمية: عرض ← إقرار 
 
   function draftOf(body: Record<string, unknown>): PrescriptionDraft {
     const check = checkPrescriptionDraft({
+      prescribingDoctorName: "Dr Verified",
+      prescribingDoctorPartyId: 5,
       patientId: Number(body.patientId),
       visitId: null,
       diagnosis: body.diagnosis,
@@ -600,6 +607,8 @@ describe("الإقرار مربوط بالتحذيرات التي رآها ال�
 
   function draftOf(body: Record<string, unknown>): PrescriptionDraft {
     const check = checkPrescriptionDraft({
+      prescribingDoctorName: "Dr Verified",
+      prescribingDoctorPartyId: 5,
       patientId: Number(body.patientId),
       visitId: null,
       diagnosis: body.diagnosis,
@@ -785,6 +794,7 @@ describe("الإقرار مربوط بالتحذيرات التي رآها ال�
 describe("prescriber snapshot authority", () => {
   it.each(["د. طبيب صناعي", "Dr Synthetic Dentist"])("snapshots registry name %s while keeping actor and issuer", async name => {
     mocks.requireSession.mockResolvedValue({ ...DOCTOR_SESSION, role: "admin", username: "admin-actor" });
+    mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "admin-actor", role: "admin", isActive: true, partyId: 5 });
     mocks.getParty.mockResolvedValue({ id: 5, kind: "doctor", isActive: true, name });
     const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -795,11 +805,47 @@ describe("prescriber snapshot authority", () => {
   });
   it("does not silently authorize admin issuance as another clinician", async () => {
     mocks.requireSession.mockResolvedValue({ ...DOCTOR_SESSION, role: "admin", username: "admin-actor" });
+    mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "admin-actor", role: "admin", isActive: true, partyId: 5 });
     const response = await createPrescription(new Request("http://localhost/api/prescriptions", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: 99, items: [{ name: "SYNTHETIC" }] }),
     }));
     expect(response.status).toBe(403);
     expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+});
+
+describe("owner-only cross-clinician issuance", () => {
+  const request = (id: unknown = 99) => new Request("http://localhost/api/prescriptions", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: id, prescribingDoctorName: "FORGED", isOwner: true, role: "admin", items: [{ name: "SYNTHETIC" }] }),
+  });
+  function owner() {
+    vi.stubEnv("PRESCRIPTION_OWNER_USER_ID", "2"); vi.stubEnv("PRESCRIPTION_OWNER_BINDING_VERSION", "synthetic-v1");
+    mocks.requireSession.mockResolvedValue({ userId: 2, username: "owner-synthetic", role: "admin" });
+    mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "owner-synthetic", role: "admin", isActive: true, partyId: 5 });
+    mocks.getParty.mockImplementation(async (id: number) => ({ id, kind: "doctor", isActive: true, name: id === 5 ? "Owner Clinician" : "د. الطبيب المختار" }));
+  }
+  it("allows bound owner to select another active doctor with actor/issuer separate", async () => {
+    owner();
+    expect((await createPrescription(request())).status).toBe(201);
+    expect(mocks.savePrescription).toHaveBeenCalledWith(expect.objectContaining({ prescribingDoctorPartyId: 99, prescribingDoctorName: "د. الطبيب المختار" }), "owner-synthetic", 5);
+  });
+  it("rejects normal doctor selecting another doctor despite forged role/owner/name", async () => {
+    expect((await createPrescription(request())).status).toBe(403); expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+  it.each([0, -1, 1.5, "not-an-id", null])("rejects invalid selected ID %s", async id => {
+    owner(); expect((await createPrescription(request(id))).status).toBe(400); expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+  it.each(["inactive", "non-doctor", "missing"])("rejects %s target", async kind => {
+    owner();
+    mocks.getParty.mockImplementation(async (id: number) => id === 5 ? { id, kind: "doctor", isActive: true, name: "Owner" } : kind === "missing" ? null : { id, kind: kind === "non-doctor" ? "lab" : "doctor", isActive: kind !== "inactive", name: "Target" });
+    expect((await createPrescription(request())).status).toBe(400); expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+  it("rejects stale role and lost owner clinical linkage", async () => {
+    owner(); mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "owner-synthetic", role: "reception", isActive: true, partyId: 5 });
+    expect((await createPrescription(request())).status).toBe(403);
+    owner(); mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "owner-synthetic", role: "admin", isActive: true, partyId: null });
+    expect((await createPrescription(request())).status).toBe(403); expect(mocks.savePrescription).not.toHaveBeenCalled();
   });
 });
