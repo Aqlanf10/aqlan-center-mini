@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { canonicalCephFailure, readCanonicalCephReferenceSets } from "@/lib/canonical-ceph";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import { listCephReferenceSets } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +15,17 @@ export const dynamic = "force-dynamic";
  * تغيير كود. القراءة لأي من يدخل البرنامج: المرجع لا سرٌّ فيه.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalCephReferenceSets(selected.handle), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalCephFailure(error, "تعذّر تحميل المجموعات المرجعية.");
+    }
+  }
   if (!(await requireSession())) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }

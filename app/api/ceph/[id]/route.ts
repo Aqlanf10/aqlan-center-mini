@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import {
+  canonicalCephFailure,
+  commandCanonicalCephDiscard,
+  commandCanonicalCephPatch,
+  readCanonicalCephStudy,
+} from "@/lib/canonical-ceph";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
@@ -8,6 +15,7 @@ import {
 import { isCephLandmarkCode } from "@/lib/ceph";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +45,19 @@ const num = (v: unknown): number | null => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const id = await idFrom(context);
+    if (!id) return NextResponse.json({ code: "invalid_ceph_input", message: "رقم التحليل غير صالح." }, { status: 400, headers: NO_STORE });
+    try {
+      return NextResponse.json(await readCanonicalCephStudy(selected.handle, id), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalCephFailure(error, "تعذّر تحميل التحليل.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const id = await idFrom(context);
@@ -55,6 +76,27 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const id = await idFrom(context);
+    if (!id) return NextResponse.json({ code: "invalid_ceph_input", message: "رقم التحليل غير صالح." }, { status: 400, headers: NO_STORE });
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_ceph_input", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await commandCanonicalCephPatch(selected.handle, id, body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalCephFailure(error, "تعذّر حفظ التعديل.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const id = await idFrom(context);
@@ -127,6 +169,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const id = await idFrom(context);
+    if (!id) return NextResponse.json({ code: "invalid_ceph_input", message: "رقم التحليل غير صالح." }, { status: 400, headers: NO_STORE });
+    let note: string | null = null;
+    try {
+      const body = await readJsonBody<Record<string, unknown> | null>(request, JSON_BODY_LIMIT_BYTES);
+      if (body && typeof body.note === "string") note = body.note;
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+    }
+    try {
+      return NextResponse.json(await commandCanonicalCephDiscard(selected.handle, id, note), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalCephFailure(error, "تعذّر رفض المسودة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const id = await idFrom(context);

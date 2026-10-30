@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { canonicalCephFailure, readCanonicalCephSuperimpose } from "@/lib/canonical-ceph";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import { getCephAnalysisForCompare } from "@/lib/db";
 import { chronologicalOrder } from "@/lib/cephCompare";
 import { referenceLines, superimposeOnSN } from "@/lib/cephSuperimpose";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +19,18 @@ export const dynamic = "force-dynamic";
  * شيئًا ويقول الرسم غيره. ومصدرٌ واحد للترتيب لا اثنان.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalCephSuperimpose(selected.handle, new URL(request.url).searchParams), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalCephFailure(error, "تعذّر التراكب.");
+    }
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

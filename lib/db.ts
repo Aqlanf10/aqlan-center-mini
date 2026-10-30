@@ -25100,11 +25100,11 @@ function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
   const calibrated = row.cal_x1 != null && row.cal_y1 != null && row.cal_x2 != null
     && row.cal_y2 != null && row.cal_mm != null;
   return {
-    id: row.id,
-    patientId: row.patient_id,
-    documentId: row.document_id,
+    id: Number(row.id),
+    patientId: Number(row.patient_id),
+    documentId: Number(row.document_id),
     status: row.status as CephAnalysisRow["status"],
-    orthoCaseId: row.ortho_case_id,
+    orthoCaseId: row.ortho_case_id == null ? null : Number(row.ortho_case_id),
     phase: (row.phase ?? "pretreatment") as CephPhase,
     xrayDate: row.xray_date_text,
     device: row.device,
@@ -25124,6 +25124,68 @@ function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
   };
 }
 
+/** M2 slice 30: client-accepting draft creator inside an admitted transaction.
+ * Uses a savepoint around the unique-draft INSERT so a 23505 conflict returns a bounded
+ * domain refusal without aborting the caller's outer transaction. */
+export async function createCephAnalysisWith(
+  client: DbClient,
+  input: {
+    patientId: number;
+    documentId: number;
+    createdBy: string;
+    orthoCaseId?: number | null;
+    phase?: CephPhase;
+    xrayDate?: string | null;
+    device?: string | null;
+    refSet?: string | null;
+  },
+): Promise<{ ok: true; id: number; auditLabel: string } | { ok: false; message: string }> {
+  const { rows: docs } = await client.query<{ id: number; mime_type: string; removed_at: Date | null }>(
+    `SELECT id, mime_type, removed_at FROM patient_documents WHERE id = $1 AND patient_id = $2`,
+    [input.documentId, input.patientId],
+  );
+  const doc = docs[0];
+  if (!doc) return { ok: false, message: "المستند غير موجود لهذا المريض." };
+  if (doc.removed_at) return { ok: false, message: "المستند مخفيّ — أظهره أولًا أو اختر شععة أخرى." };
+  if (!doc.mime_type.startsWith("image/")) {
+    return { ok: false, message: "التحليل السيفالومتري على صورة — اختر شععة أو صورة من المستندات." };
+  }
+  if (input.orthoCaseId != null) {
+    const { rows: cases } = await client.query<{ id: number }>(
+      `SELECT id FROM ortho_cases WHERE id = $1 AND patient_id = $2`,
+      [input.orthoCaseId, input.patientId],
+    );
+    if (!cases[0]) return { ok: false, message: "حالة التقويم غير موجودة لهذا المريض." };
+  }
+  const phase = input.phase ?? "pretreatment";
+  await client.query("SAVEPOINT ceph_create_unique");
+  try {
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO ceph_analyses
+         (patient_id, document_id, created_by, ortho_case_id, phase, xray_date, device, ref_set)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [
+        input.patientId, input.documentId, input.createdBy,
+        input.orthoCaseId ?? null,
+        phase,
+        input.xrayDate ?? null,
+        input.device?.trim() || null,
+        input.refSet?.trim() || "builtin_default",
+      ],
+    );
+    await client.query("RELEASE SAVEPOINT ceph_create_unique");
+    return { ok: true, id: Number(rows[0].id), auditLabel: `على المستند #${input.documentId} — مرحلة ${phase}` };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT ceph_create_unique").catch(() => {});
+    await client.query("RELEASE SAVEPOINT ceph_create_unique").catch(() => {});
+    if ((error as { code?: string }).code === "23505") {
+      return { ok: false, message: "للمريض مسودة تحليل مفتوحة — أكملها أو أرفضها قبل فتح أخرى." };
+    }
+    throw error;
+  }
+}
+
 /** يفتح مسودة تحليل على شععة موجودة للمريض نفسه — الصورة مرجعٌ لا نسخة. */
 export async function createCephAnalysis(input: {
   patientId: number;
@@ -25139,74 +25201,32 @@ export async function createCephAnalysis(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // الشععة تُنتمي للمريض نفسه: تحليلٌ على شععة غيره يضع قياسات مريضٍ في ملف آخر.
-    const { rows: docs } = await client.query<{ id: number; mime_type: string; removed_at: Date | null }>(
-      `SELECT id, mime_type, removed_at FROM patient_documents WHERE id = $1 AND patient_id = $2`,
-      [input.documentId, input.patientId],
-    );
-    const doc = docs[0];
-    if (!doc) {
+    const created = await createCephAnalysisWith(client, input);
+    if (!created.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "المستند غير موجود لهذا المريض." };
+      return created;
     }
-    if (doc.removed_at) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "المستند مخفيّ — أظهره أولًا أو اختر شععة أخرى." };
-    }
-    if (!doc.mime_type.startsWith("image/")) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل السيفالومتري على صورة — اختر شععة أو صورة من المستندات." };
-    }
-    // حالة التقويم المرتبطة إن ذُكرت — لا يصل دراسةٌ لحالة تقويم مريضٍ آخر.
-    if (input.orthoCaseId != null) {
-      const { rows: cases } = await client.query<{ id: number }>(
-        `SELECT id FROM ortho_cases WHERE id = $1 AND patient_id = $2`,
-        [input.orthoCaseId, input.patientId],
-      );
-      if (!cases[0]) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "حالة التقويم غير موجودة لهذا المريض." };
-      }
-    }
-    try {
-      const { rows } = await client.query<{ id: number }>(
-        `INSERT INTO ceph_analyses
-           (patient_id, document_id, created_by, ortho_case_id, phase, xray_date, device, ref_set)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id`,
-        [
-          input.patientId, input.documentId, input.createdBy,
-          input.orthoCaseId ?? null,
-          input.phase ?? "pretreatment",
-          input.xrayDate ?? null,
-          input.device?.trim() || null,
-          input.refSet?.trim() || "builtin_default",
-        ],
-      );
-      await client.query("COMMIT");
-      await recordAudit({
-        action: "ceph.create", entity: "ceph_analysis", entityId: String(rows[0].id),
-        entityLabel: `على المستند #${input.documentId} — مرحلة ${input.phase ?? "pretreatment"}`,
-        actor: input.createdBy,
-      });
-      return { ok: true, id: rows[0].id };
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      // مسودة واحدة لكل مريض: فتحَ ثانية يعني وضعين لنفس المعالم بأيدي مختلفة.
-      if ((error as { code?: string }).code === "23505") {
-        return { ok: false, message: "للمريض مسودة تحليل مفتوحة — أكملها أو أرفضها قبل فتح أخرى." };
-      }
-      throw error;
-    }
+    await client.query("COMMIT");
+    await recordAudit({
+      action: "ceph.create", entity: "ceph_analysis", entityId: String(created.id),
+      entityLabel: created.auditLabel,
+      actor: input.createdBy,
+    });
+    return { ok: true, id: created.id };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     client.release();
   }
 }
 
 /** تحليلات المريض بترتيبها — الأحدث أولًا، والمسودة أولى من ذلك، ومعتمدها بأهم نتائجه. */
-export async function listPatientCephAnalyses(patientId: number): Promise<CephAnalysisRow[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<CephAnalysisReadRow>(
+export async function listPatientCephAnalysesWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<CephAnalysisRow[]> {
+  const { rows } = await q.query<CephAnalysisReadRow>(
     `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses
      WHERE patient_id = $1 AND status <> 'discarded'
      ORDER BY (status = 'draft') DESC, created_at DESC`,
@@ -25216,20 +25236,25 @@ export async function listPatientCephAnalyses(patientId: number): Promise<CephAn
   const stampedIds = analyses.filter((a) => a.status === "completed").map((a) => a.id);
   if (stampedIds.length > 0) {
     // لقطةٌ لا حساب: ANB وFMA وWITS كما خُتمت يوم الاعتماد.
-    const { rows: ms } = await getPool().query<{ analysis_id: number; code: string; value: number }>(
+    const { rows: ms } = await q.query<{ analysis_id: number; code: string; value: number }>(
       `SELECT analysis_id, code, value FROM ceph_measurements
        WHERE analysis_id = ANY($1) AND code IN ('ANB','FMA','WITS')`,
       [stampedIds],
     );
     for (const a of analyses) {
       if (a.status !== "completed") continue;
-      const own = ms.filter((m) => m.analysis_id === a.id);
+      const own = ms.filter((m) => Number(m.analysis_id) === a.id);
       if (own.length === 0) continue;
       const pick = (code: string) => own.find((m) => m.code === code)?.value ?? null;
       a.findings = { anb: pick("ANB"), fma: pick("FMA"), wits: pick("WITS") };
     }
   }
   return analyses;
+}
+
+export async function listPatientCephAnalyses(patientId: number): Promise<CephAnalysisRow[]> {
+  await ensureSchema();
+  return listPatientCephAnalysesWith(getPool(), patientId);
 }
 
 export interface CephLandmarkRow {
@@ -25274,9 +25299,11 @@ export interface CephAnalysisForCompare {
  * للمعتمد تُقرأ القياسات من لقطته المختومة لا حسابًا: الأرقام التي خُتمت يوم
  * الاعتماد هي التي تُقارن، فلو تغيّر كود الحساب لاحقًا لم تتغيّر المقارنة.
  */
-export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysisForCompare | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<CephAnalysisReadRow & {
+export async function getCephAnalysisForCompareWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<CephAnalysisForCompare | null> {
+  const { rows } = await q.query<CephAnalysisReadRow & {
     width: number | null; height: number | null;
   }>(
     `SELECT a.*, a.xray_date::text AS xray_date_text, d.width, d.height
@@ -25287,7 +25314,7 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
   if (!rows[0]) return null;
   const row = rows[0];
 
-  const { rows: lm } = await getPool().query<{ code: string; x: number; y: number }>(
+  const { rows: lm } = await q.query<{ code: string; x: number; y: number }>(
     `SELECT code, x, y FROM ceph_landmarks WHERE analysis_id = $1 ORDER BY confirmed_at`,
     [id],
   );
@@ -25298,7 +25325,7 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
     }
   }
 
-  const { rows: ms } = await getPool().query<{ code: string; value: number }>(
+  const { rows: ms } = await q.query<{ code: string; value: number }>(
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1`,
     [id],
   );
@@ -25321,9 +25348,9 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
   }
 
   return {
-    id: row.id,
-    patientId: row.patient_id,
-    documentId: row.document_id,
+    id: Number(row.id),
+    patientId: Number(row.patient_id),
+    documentId: Number(row.document_id),
     phase: row.phase ?? "pretreatment",
     xrayDate: row.xray_date_text,
     createdAt: row.created_at.toISOString(),
@@ -25334,6 +25361,11 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
     documentWidth: row.width ?? null,
     documentHeight: row.height ?? null,
   };
+}
+
+export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysisForCompare | null> {
+  await ensureSchema();
+  return getCephAnalysisForCompareWith(getPool(), id);
 }
 
 // ─── الوصفات الموثّقة (من مستودع الوكيل الآخر) ───────────────────────────────
@@ -25560,21 +25592,23 @@ export async function patientAppointmentsFrom(
   return rows.map(toAppointment);
 }
 
-export async function getCephStudy(id: number): Promise<{
+export async function getCephStudyWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<{
   analysis: CephAnalysisRow;
   landmarks: CephLandmarkRow[];
   measurements: { code: string; value: number }[];
   diagnosis: CephDiagnosisRow | null;
 } | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<CephAnalysisReadRow>(
+  const { rows } = await q.query<CephAnalysisReadRow>(
     `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses
      WHERE id = $1 AND status <> 'discarded'`, [id],
   );
   if (!rows[0]) return null;
   const analysis = mapCephAnalysis(rows[0]);
 
-  const { rows: lm } = await getPool().query<{
+  const { rows: lm } = await q.query<{
     code: string; x: number; y: number; source: string; confirmed_by: string;
   }>(
     `SELECT code, x, y, source, confirmed_by FROM ceph_landmarks
@@ -25590,12 +25624,12 @@ export async function getCephStudy(id: number): Promise<{
       confirmedBy: r.confirmed_by,
     }));
 
-  const { rows: ms } = await getPool().query<{ code: string; value: number }>(
+  const { rows: ms } = await q.query<{ code: string; value: number }>(
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1 ORDER BY id`,
     [id],
   );
 
-  const { rows: dx } = await getPool().query<{
+  const { rows: dx } = await q.query<{
     skeletal: string | null; dental: string | null; soft_tissue: string | null;
     note: string | null; final_dx: string; created_by: string; updated_at: Date;
   }>(
@@ -25616,8 +25650,44 @@ export async function getCephStudy(id: number): Promise<{
   return { analysis, landmarks, measurements: ms, diagnosis };
 }
 
+export async function getCephStudy(id: number): Promise<{
+  analysis: CephAnalysisRow;
+  landmarks: CephLandmarkRow[];
+  measurements: { code: string; value: number }[];
+  diagnosis: CephDiagnosisRow | null;
+} | null> {
+  await ensureSchema();
+  return getCephStudyWith(getPool(), id);
+}
+
 export interface CephCalibrationInput {
   x1: number; y1: number; x2: number; y2: number; mm: number;
+}
+
+export async function updateCephCalibrationWith(
+  client: DbClient,
+  id: number,
+  cal: CephCalibrationInput,
+): Promise<{ ok: true; mmPerPixel: number; auditLabel: string } | { ok: false; status: 404 | 409; message: string }> {
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!rows[0]) return { ok: false, status: 404, message: "التحليل غير موجود." };
+  if (rows[0].status !== "draft") {
+    return { ok: false, status: 409, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
+  }
+  const px = Math.hypot(cal.x2 - cal.x1, cal.y2 - cal.y1);
+  if (!Number.isFinite(px) || px <= 0 || !Number.isFinite(cal.mm) || cal.mm <= 0) {
+    return { ok: false, status: 409, message: "نقطتا المعايرة متطابقتان أو المسافة غير صالحة." };
+  }
+  const scale = cal.mm / px;
+  await client.query(
+    `UPDATE ceph_analyses
+     SET cal_x1=$2, cal_y1=$3, cal_x2=$4, cal_y2=$5, cal_mm=$6, mm_per_pixel=$7
+     WHERE id=$1`,
+    [id, cal.x1, cal.y1, cal.x2, cal.y2, cal.mm, scale],
+  );
+  return { ok: true, mmPerPixel: scale, auditLabel: `معايرة ${cal.mm} مم على ${px.toFixed(1)} بكسل` };
 }
 
 /**
@@ -25633,39 +25703,58 @@ export async function updateCephCalibration(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (rows[0].status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
-    }
-    const px = Math.hypot(cal.x2 - cal.x1, cal.y2 - cal.y1);
-    if (!Number.isFinite(px) || px <= 0 || !Number.isFinite(cal.mm) || cal.mm <= 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "نقطتا المعايرة متطابقتان أو المسافة غير صالحة." };
-    }
-    const scale = cal.mm / px;
-    await client.query(
-      `UPDATE ceph_analyses
-       SET cal_x1=$2, cal_y1=$3, cal_x2=$4, cal_y2=$5, cal_mm=$6, mm_per_pixel=$7
-       WHERE id=$1`,
-      [id, cal.x1, cal.y1, cal.x2, cal.y2, cal.mm, scale],
-    );
+    const done = await updateCephCalibrationWith(client, id, cal);
+    if (!done.ok) { await client.query("ROLLBACK"); return { ok: false, message: done.message }; }
     await client.query("COMMIT");
     await recordAudit({
       action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
-      entityLabel: `معايرة ${cal.mm} مم على ${px.toFixed(1)} بكسل`,
+      entityLabel: done.auditLabel,
       actor: by,
     });
-    return { ok: true, mmPerPixel: scale };
+    return { ok: true, mmPerPixel: done.mmPerPixel };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function updateCephLandmarksWith(
+  client: DbClient,
+  id: number,
+  points: { code: LandmarkCode; x: number; y: number; source?: "manual" | "suggested" }[],
+  by: string,
+): Promise<{ ok: true; count: number; auditLabel: string | null } | { ok: false; status: 404 | 409; message: string }> {
+  if (points.length === 0) return { ok: true, count: 0, auditLabel: null };
+  const clean = points.filter(
+    (pt) => isCephLandmarkCode(pt.code)
+      && Number.isFinite(pt.x) && Number.isFinite(pt.y),
+  );
+  if (clean.length === 0) return { ok: false, status: 409, message: "لا معلم صالح في الطلب." };
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!rows[0]) return { ok: false, status: 404, message: "التحليل غير موجود." };
+  if (rows[0].status !== "draft") {
+    return { ok: false, status: 409, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
+  }
+  for (const pt of clean) {
+    await client.query(
+      `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (analysis_id, code)
+       DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y,
+          source = EXCLUDED.source, confirmed_by = EXCLUDED.confirmed_by,
+          confirmed_at = NOW()`,
+      [id, pt.code, pt.x, pt.y, pt.source === "suggested" ? "suggested" : "manual", by],
+    );
+  }
+  return {
+    ok: true,
+    count: clean.length,
+    auditLabel: `كتابة ${clean.length} معلمًا (${clean.map((p) => p.code).join("، ")})`,
+  };
 }
 
 /**
@@ -25690,32 +25779,17 @@ export async function updateCephLandmarks(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (rows[0].status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
-    }
-    for (const pt of clean) {
-      await client.query(
-        `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (analysis_id, code)
-         DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y,
-            source = EXCLUDED.source, confirmed_by = EXCLUDED.confirmed_by,
-            confirmed_at = NOW()`,
-        [id, pt.code, pt.x, pt.y, pt.source === "suggested" ? "suggested" : "manual", by],
-      );
-    }
+    const done = await updateCephLandmarksWith(client, id, clean, by);
+    if (!done.ok) { await client.query("ROLLBACK"); return { ok: false, message: done.message }; }
     await client.query("COMMIT");
-    await recordAudit({
-      action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
-      entityLabel: `كتابة ${clean.length} معلمًا (${clean.map((p) => p.code).join("، ")})`,
-      actor: by,
-    });
-    return { ok: true, count: clean.length };
+    if (done.auditLabel) {
+      await recordAudit({
+        action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
+        entityLabel: done.auditLabel,
+        actor: by,
+      });
+    }
+    return { ok: true, count: done.count };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -25729,6 +25803,42 @@ export interface CephCompleteResult {
   message?: string;
   summary?: string;
   measurements?: { code: string; value: number }[];
+}
+
+export async function updateCephDiagnosisWith(
+  client: DbClient,
+  id: number,
+  dx: { skeletal?: string | null; dental?: string | null; softTissue?: string | null; note?: string | null; finalDx: string },
+  by: string,
+): Promise<{ ok: true; auditLabel: string } | { ok: false; status: 404 | 409; message: string }> {
+  const finalDx = dx.finalDx.trim();
+  if (!finalDx) return { ok: false, status: 409, message: "الاستنتاج السيفالومتري لا يُترك فارغًا." };
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!rows[0]) return { ok: false, status: 404, message: "التحليل غير موجود." };
+  if (rows[0].status !== "draft") {
+    return { ok: false, status: 409, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
+  }
+  const clean = (v: string | null | undefined, cap: number): string | null => {
+    const t = v?.trim();
+    return t ? t.slice(0, cap) : null;
+  };
+  await client.query(
+    `INSERT INTO ceph_diagnoses
+       (analysis_id, skeletal, dental, soft_tissue, note, final_dx, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (analysis_id) DO UPDATE SET
+       skeletal = EXCLUDED.skeletal, dental = EXCLUDED.dental,
+       soft_tissue = EXCLUDED.soft_tissue, note = EXCLUDED.note,
+       final_dx = EXCLUDED.final_dx, updated_at = NOW()`,
+    [
+      id,
+      clean(dx.skeletal, 2000), clean(dx.dental, 2000), clean(dx.softTissue, 2000),
+      clean(dx.note, 2000), finalDx.slice(0, 2000), by,
+    ],
+  );
+  return { ok: true, auditLabel: `تشخيص منظّم: ${finalDx.slice(0, 80)}` };
 }
 
 /**
@@ -25746,36 +25856,12 @@ export async function updateCephDiagnosis(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (rows[0].status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
-    }
-    const clean = (v: string | null | undefined, cap: number): string | null => {
-      const t = v?.trim();
-      return t ? t.slice(0, cap) : null;
-    };
-    await client.query(
-      `INSERT INTO ceph_diagnoses
-         (analysis_id, skeletal, dental, soft_tissue, note, final_dx, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (analysis_id) DO UPDATE SET
-         skeletal = EXCLUDED.skeletal, dental = EXCLUDED.dental,
-         soft_tissue = EXCLUDED.soft_tissue, note = EXCLUDED.note,
-         final_dx = EXCLUDED.final_dx, updated_at = NOW()`,
-      [
-        id,
-        clean(dx.skeletal, 2000), clean(dx.dental, 2000), clean(dx.softTissue, 2000),
-        clean(dx.note, 2000), finalDx.slice(0, 2000), by,
-      ],
-    );
+    const done = await updateCephDiagnosisWith(client, id, dx, by);
+    if (!done.ok) { await client.query("ROLLBACK"); return { ok: false, message: done.message }; }
     await client.query("COMMIT");
     await recordAudit({
       action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
-      entityLabel: `تشخيص منظّم: ${finalDx.slice(0, 80)}`,
+      entityLabel: done.auditLabel,
       actor: by,
     });
     return { ok: true };
@@ -25799,9 +25885,10 @@ export interface CephReferenceSetRow {
 }
 
 /** المجموعات المرجعية المفعلة بقيمها — تُعرض للدراسة حسب اختيارها. */
-export async function listCephReferenceSets(): Promise<CephReferenceSetRow[]> {
-  await ensureSchema();
-  const { rows: sets } = await getPool().query<{
+export async function listCephReferenceSetsWith(
+  q: Pick<DbClient, "query">,
+): Promise<CephReferenceSetRow[]> {
+  const { rows: sets } = await q.query<{
     id: number; key: string; name: string; population: string | null;
     age_min: number | null; age_max: number | null; sex: string | null; version: string;
   }>(
@@ -25809,7 +25896,7 @@ export async function listCephReferenceSets(): Promise<CephReferenceSetRow[]> {
      FROM ceph_reference_sets WHERE active = TRUE ORDER BY id`,
   );
   if (sets.length === 0) return [];
-  const { rows: vals } = await getPool().query<{ set_id: number; code: string; mean: number; sd: number }>(
+  const { rows: vals } = await q.query<{ set_id: number; code: string; mean: number; sd: number }>(
     `SELECT v.set_id, v.code, v.mean, v.sd FROM ceph_reference_values v
      JOIN ceph_reference_sets s ON s.id = v.set_id WHERE s.active = TRUE`,
   );
@@ -25822,15 +25909,75 @@ export async function listCephReferenceSets(): Promise<CephReferenceSetRow[]> {
     sex: (s.sex as "male" | "female" | null) ?? null,
     version: s.version,
     values: Object.fromEntries(
-      vals.filter((v) => v.set_id === s.id).map((v) => [v.code, { mean: v.mean, sd: v.sd }]),
+      vals.filter((v) => Number(v.set_id) === Number(s.id)).map((v) => [v.code, { mean: v.mean, sd: v.sd }]),
     ),
   }));
+}
+
+export async function listCephReferenceSets(): Promise<CephReferenceSetRow[]> {
+  await ensureSchema();
+  return listCephReferenceSetsWith(getPool());
 }
 
 /** مجموعة واحدة بمفتاحها — للدراسة التي تحمل مفتاحها. */
 export async function getCephReferenceSet(key: string): Promise<CephReferenceSetRow | null> {
   const sets = await listCephReferenceSets();
   return sets.find((s) => s.key === key) ?? null;
+}
+
+export async function completeCephAnalysisWith(
+  client: DbClient,
+  id: number,
+  by: string,
+): Promise<
+  | { ok: true; measurements: { code: string; value: number }[]; summary: string; auditLabel: string }
+  | { ok: false; status: 404 | 409; message: string }
+> {
+  const { rows } = await client.query<CephAnalysisDbRow>(
+    `SELECT * FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  const analysis = rows[0];
+  if (!analysis) return { ok: false, status: 404, message: "التحليل غير موجود." };
+  if (analysis.status === "completed") {
+    return { ok: false, status: 409, message: "التحليل معتمد سلفًا." };
+  }
+  if (analysis.status !== "draft") {
+    return { ok: false, status: 409, message: "التحليل مرفوض — لا يُعتمد." };
+  }
+  if (analysis.mm_per_pixel == null) {
+    return { ok: false, status: 409, message: "اعتمد بلا معايرة ممنوع: عاير الشععة أولًا حتى تكون الأطوال بالمليمتر." };
+  }
+
+  const { rows: lm } = await client.query<{ code: string; x: number; y: number }>(
+    `SELECT code, x, y FROM ceph_landmarks WHERE analysis_id = $1`, [id],
+  );
+  const map: LandmarkMap = {};
+  for (const r of lm) if (isCephLandmarkCode(r.code)) map[r.code as LandmarkCode] = { x: r.x, y: r.y };
+  const missing = REQUIRED_LANDMARKS.filter((c) => map[c] == null);
+  if (missing.length > 0) {
+    return { ok: false, status: 409, message: `المعالم ناقصة: ${missing.join("، ")}` };
+  }
+
+  const results = computeAll(map, analysis.mm_per_pixel);
+  const stamped = results.filter((r) => r.value != null) as { code: string; value: number }[];
+  for (const r of stamped) {
+    await client.query(
+      `INSERT INTO ceph_measurements (analysis_id, code, value) VALUES ($1, $2, $3)
+       ON CONFLICT (analysis_id, code) DO UPDATE SET value = EXCLUDED.value`,
+      [id, r.code, r.value],
+    );
+  }
+  await client.query(
+    `UPDATE ceph_analyses SET status='completed', completed_by=$2, completed_at=NOW() WHERE id=$1`,
+    [id, by],
+  );
+  const summary = summarize(results);
+  return {
+    ok: true,
+    measurements: stamped.map((r) => ({ code: r.code, value: r.value })),
+    summary: `${summary.skeletal} · ${summary.vertical}`,
+    auditLabel: `ANB=${stamped.find((r) => r.code === "ANB")?.value ?? "—"} · FMA=${stamped.find((r) => r.code === "FMA")?.value ?? "—"} · ${summary.skeletal}`,
+  };
 }
 
 /**
@@ -25847,60 +25994,21 @@ export async function completeCephAnalysis(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<CephAnalysisDbRow>(
-      `SELECT * FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    const analysis = rows[0];
-    if (!analysis) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (analysis.status === "completed") {
+    const done = await completeCephAnalysisWith(client, id, by);
+    if (!done.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل معتمد سلفًا." };
+      return { ok: false, message: done.message };
     }
-    if (analysis.status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل مرفوض — لا يُعتمد." };
-    }
-    if (analysis.mm_per_pixel == null) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "اعتمد بلا معايرة ممنوع: عاير الشععة أولًا حتى تكون الأطوال بالمليمتر." };
-    }
-
-    const { rows: lm } = await client.query<{ code: string; x: number; y: number }>(
-      `SELECT code, x, y FROM ceph_landmarks WHERE analysis_id = $1`, [id],
-    );
-    const map: LandmarkMap = {};
-    for (const r of lm) if (isCephLandmarkCode(r.code)) map[r.code as LandmarkCode] = { x: r.x, y: r.y };
-    const missing = REQUIRED_LANDMARKS.filter((c) => map[c] == null);
-    if (missing.length > 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: `المعالم ناقصة: ${missing.join("، ")}` };
-    }
-
-    const results = computeAll(map, analysis.mm_per_pixel);
-    const stamped = results.filter((r) => r.value != null) as { code: string; value: number }[];
-    for (const r of stamped) {
-      await client.query(
-        `INSERT INTO ceph_measurements (analysis_id, code, value) VALUES ($1, $2, $3)
-         ON CONFLICT (analysis_id, code) DO UPDATE SET value = EXCLUDED.value`,
-        [id, r.code, r.value],
-      );
-    }
-    await client.query(
-      `UPDATE ceph_analyses SET status='completed', completed_by=$2, completed_at=NOW() WHERE id=$1`,
-      [id, by],
-    );
     await client.query("COMMIT");
-
-    const summary = summarize(results);
     await recordAudit({
       action: "ceph.complete", entity: "ceph_analysis", entityId: String(id),
-      entityLabel: `ANB=${stamped.find((r) => r.code === "ANB")?.value ?? "—"} · FMA=${stamped.find((r) => r.code === "FMA")?.value ?? "—"} · ${summary.skeletal}`,
+      entityLabel: done.auditLabel,
       actor: by,
     });
     return {
       ok: true,
-      measurements: stamped.map((r) => ({ code: r.code, value: r.value })),
-      summary: `${summary.skeletal} · ${summary.vertical}`,
+      measurements: done.measurements,
+      summary: done.summary,
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -25908,6 +26016,26 @@ export async function completeCephAnalysis(
   } finally {
     client.release();
   }
+}
+
+export async function discardCephAnalysisWith(
+  client: DbClient,
+  id: number,
+  note: string | null,
+): Promise<{ ok: true; auditLabel: string | null } | { ok: false; status: 404 | 409; message: string }> {
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!rows[0]) return { ok: false, status: 404, message: "التحليل غير موجود." };
+  if (rows[0].status !== "draft") {
+    return { ok: false, status: 409, message: "المعتمد لا يُرفض — تاريخُ ما قُرئ لا يُمحى. افتح نسخةً للتصحيح." };
+  }
+  const cleanNote = note?.trim() || null;
+  await client.query(
+    `UPDATE ceph_analyses SET status='discarded', note=$2 WHERE id=$1`,
+    [id, cleanNote],
+  );
+  return { ok: true, auditLabel: cleanNote ? cleanNote.slice(0, 120) : null };
 }
 
 /** رفض مسودة — بدل حذفٍ صامت: الرفض يُوثَّق باسم رافضه. */
@@ -25918,27 +26046,78 @@ export async function discardCephAnalysis(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (rows[0].status !== "draft") {
+    const done = await discardCephAnalysisWith(client, id, note);
+    if (!done.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "المعتمد لا يُرفض — تاريخُ ما قُرئ لا يُمحى. افتح نسخةً للتصحيح." };
+      return { ok: false, message: done.message };
     }
-    await client.query(
-      `UPDATE ceph_analyses SET status='discarded', note=$2 WHERE id=$1`,
-      [id, note?.trim() || null],
-    );
     await client.query("COMMIT");
     await recordAudit({
       action: "ceph.discard", entity: "ceph_analysis", entityId: String(id),
-      entityLabel: note?.trim() ? note.trim().slice(0, 120) : null,
+      entityLabel: done.auditLabel,
       actor: by,
     });
     return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     client.release();
+  }
+}
+
+export async function duplicateCephAnalysisWith(
+  client: DbClient,
+  id: number,
+  by: string,
+): Promise<{ ok: true; id: number; auditLabel: string } | { ok: false; status: 404 | 409; message: string }> {
+  const { rows } = await client.query<CephAnalysisReadRow & { study_kind: string }>(
+    `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  const source = rows[0];
+  if (!source) return { ok: false, status: 404, message: "التحليل غير موجود." };
+  if (source.status !== "completed") {
+    return { ok: false, status: 409, message: "النسخ من المعتمد فقط — المسودة تُعدَّل كما هي." };
+  }
+  const { rows: open } = await client.query<{ n: string }>(
+    `SELECT 1 AS n FROM ceph_analyses WHERE patient_id = $1 AND status = 'draft'`,
+    [source.patient_id],
+  );
+  if (open[0]) {
+    return { ok: false, status: 409, message: "للمريض مسودة مفتوحة — أكملها أو أرفضها أولًا." };
+  }
+  await client.query("SAVEPOINT ceph_duplicate_unique");
+  try {
+    const { rows: created } = await client.query<{ id: number }>(
+      `INSERT INTO ceph_analyses
+         (patient_id, document_id, status, cal_x1, cal_y1, cal_x2, cal_y2, cal_mm,
+          mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind)
+       VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8,
+         $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16) RETURNING id`,
+      [
+        source.patient_id, source.document_id,
+        source.cal_x1, source.cal_y1, source.cal_x2, source.cal_y2, source.cal_mm,
+        source.mm_per_pixel,
+        `نسخة تصحيح عن التحليل #${id} (المعتمد ${source.completed_at ? new Date(source.completed_at).toISOString().slice(0, 10) : ""})`,
+        by,
+        source.ortho_case_id, source.phase, source.xray_date_text, source.device, source.ref_set, source.study_kind,
+      ],
+    );
+    const newId = Number(created[0].id);
+    await client.query(
+      `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
+       SELECT $2, code, x, y, source, $3 FROM ceph_landmarks WHERE analysis_id = $1`,
+      [id, newId, by],
+    );
+    await client.query("RELEASE SAVEPOINT ceph_duplicate_unique");
+    return { ok: true, id: newId, auditLabel: `نسخة تصحيح عن #${id}` };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT ceph_duplicate_unique").catch(() => {});
+    await client.query("RELEASE SAVEPOINT ceph_duplicate_unique").catch(() => {});
+    if ((error as { code?: string }).code === "23505") {
+      return { ok: false, status: 409, message: "للمريض مسودة مفتوحة — أكملها أو أرفضها أولًا." };
+    }
+    throw error;
   }
 }
 
@@ -25955,59 +26134,20 @@ export async function duplicateCephAnalysis(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // DATE يُقرأ نصًّا: Date المحلي يُزيح اليوم إن أُعيد تسلسله (انظر CephAnalysisReadRow).
-    const { rows } = await client.query<CephAnalysisReadRow & { study_kind: string }>(
-      `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    const source = rows[0];
-    if (!source) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (source.status !== "completed") {
+    const done = await duplicateCephAnalysisWith(client, id, by);
+    if (!done.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "النسخ من المعتمد فقط — المسودة تُعدَّل كما هي." };
+      return { ok: false, message: done.message };
     }
-    // مسودة أخرى قائمة؟ النسخة ستكون مسودة — فيحكمها القيد ذاته.
-    const { rows: open } = await client.query<{ n: string }>(
-      `SELECT 1 AS n FROM ceph_analyses WHERE patient_id = $1 AND status = 'draft'`,
-      [source.patient_id],
-    );
-    if (open[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "للمريض مسودة مفتوحة — أكملها أو أرفضها أولًا." };
-    }
-    const { rows: created } = await client.query<{ id: number }>(
-      `INSERT INTO ceph_analyses
-         (patient_id, document_id, status, cal_x1, cal_y1, cal_x2, cal_y2, cal_mm,
-          mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind)
-       VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8,
-         $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16) RETURNING id`,
-      [
-        source.patient_id, source.document_id,
-        source.cal_x1, source.cal_y1, source.cal_x2, source.cal_y2, source.cal_mm,
-        source.mm_per_pixel,
-        `نسخة تصحيح عن التحليل #${id} (المعتمد ${source.completed_at ? new Date(source.completed_at).toISOString().slice(0, 10) : ""})`,
-        by,
-        // (ORTHO-ID) التصحيح دراسةٌ بهوية المعتمد نفسها — الحالة والمرحلة والتاريخ والجهاز والمرجع — فلا يعود T2/T3 إلى T1.
-        source.ortho_case_id, source.phase, source.xray_date_text, source.device, source.ref_set, source.study_kind,
-      ],
-    );
-    const newId = created[0].id;
-    await client.query(
-      `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
-       SELECT $2, code, x, y, source, $3 FROM ceph_landmarks WHERE analysis_id = $1`,
-      [id, newId, by],
-    );
     await client.query("COMMIT");
     await recordAudit({
-      action: "ceph.create", entity: "ceph_analysis", entityId: String(newId),
-      entityLabel: `نسخة تصحيح عن #${id}`,
+      action: "ceph.create", entity: "ceph_analysis", entityId: String(done.id),
+      entityLabel: done.auditLabel,
       actor: by,
     });
-    return { ok: true, id: newId };
+    return { ok: true, id: done.id };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
-    if ((error as { code?: string }).code === "23505") {
-      return { ok: false, message: "للمريض مسودة مفتوحة — أكملها أو أرفضها أولًا." };
-    }
     throw error;
   } finally {
     client.release();

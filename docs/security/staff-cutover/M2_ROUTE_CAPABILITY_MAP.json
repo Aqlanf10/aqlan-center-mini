@@ -421,8 +421,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: active cephalometric reference sets via exact capability clinical.xrays.view in one owning RR READ ONLY snapshot."
  },
  {
   "route": "/api/ceph/[id]",
@@ -437,8 +437,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: draft discard via clinical.ceph.analyze + patient scope, patients -> ceph_analyses lock order, post-lock session proof and atomic audit."
  },
  {
   "route": "/api/ceph/[id]",
@@ -453,8 +453,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: single cephalometric study via registered record read read:ceph (clinical.xrays.view + patient scope; outside scope = 404)."
  },
  {
   "route": "/api/ceph/[id]",
@@ -469,8 +469,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: atomic draft calibration, landmarks and structured diagnosis update via clinical.ceph.analyze + patient scope, patients -> ceph_analyses lock order and atomic audit."
  },
  {
   "route": "/api/ceph/[id]/ai-analyze",
@@ -499,8 +499,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: stamps measurements and completes a calibrated draft via clinical.ceph.analyze + patient scope, patients -> ceph_analyses lock order and atomic audit."
  },
  {
   "route": "/api/ceph/[id]/duplicate",
@@ -515,8 +515,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: opens a correction draft from a completed study via clinical.ceph.analyze + patient scope, patients -> ceph_analyses lock order, savepoint unique-draft guard and atomic audit."
  },
  {
   "route": "/api/ceph/compare",
@@ -530,8 +530,14 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: chronological cephalometric comparison via read:ceph; both studies are checked against patient scope before cross-patient equality so outside IDs never leak existence.",
+  "projection": {
+   "legacy": "admin and doctor roles with canViewXrays on the shared patient.",
+   "groups": {
+    "comparison": "chronologically ordered before/after analyses, measurement deltas and clinical summary inside the actor's patient scope (clinical.xrays.view)."
+   }
+  }
  },
  {
   "route": "/api/ceph/superimpose",
@@ -545,8 +551,14 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: S-N cranial-base superimposition via read:ceph; both studies are checked against patient scope before cross-patient equality so outside IDs never leak existence.",
+  "projection": {
+   "legacy": "admin and doctor roles with canViewXrays on the shared patient.",
+   "groups": {
+    "superimposition": "chronologically ordered S-N transformed reference lines and rotation metrics inside the actor's patient scope (clinical.xrays.view)."
+   }
+  }
  },
  {
   "route": "/api/display/notice",
@@ -3217,11 +3229,13 @@
    "reception",
    "doctor"
   ],
-  "need": [],
+  "need": [
+   "clinical.xrays.view"
+  ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: per-patient cephalometric analysis list via registered record read read:ceph (clinical.xrays.view + patient scope; outside scope = 404)."
  },
  {
   "route": "/api/patients/[id]/ceph",
@@ -3236,8 +3250,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 30: opens a draft cephalometric study on an image document of the patient via clinical.xrays.upload + patient scope, patients FOR NO KEY UPDATE, savepoint unique-draft guard and atomic audit."
  },
  {
   "route": "/api/patients/[id]/chart",
