@@ -70,6 +70,30 @@ export const PHASE_ORDER: OrthoPhase[] = ["aligning", "working", "finishing", "r
 
 export type CaseStatus = "active" | "retention" | "completed" | "discontinued";
 
+/** M2 slice 29: a case summary only, not the clinical history, imaging or funding record. */
+export interface OrthoCaseSummary {
+  id: number;
+  patientId: number;
+  patientName: string;
+  appliance: Appliance;
+  arches: Arches;
+  status: CaseStatus;
+  phase: OrthoPhase;
+  startDate: string;
+  plannedMonths: number;
+  upperWire: string | null;
+  lowerWire: string | null;
+  responsibleDoctorId: number | null;
+  responsibleDoctorName: string | null;
+  baselineKind: "legacy" | null;
+}
+export interface OrthoCaseSummaryFeed {
+  cases: OrthoCaseSummary[];
+  today: string;
+  hasMore: boolean;
+  projection: "case-summary";
+}
+
 export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
   active: "جارية",
   retention: "تثبيت",
