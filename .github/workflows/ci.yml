@@ -557,6 +557,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Real built-route reads from owned ephemeral synthetic fixtures only.
+      - name: Upload positive print route evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: positive-print-routes-ui
+          path: |
+            .settings-ui-artifacts/positive-print-routes/*.png
+            .settings-ui-artifacts/positive-print-routes/*.pdf
+            .settings-ui-artifacts/positive-print-routes/*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Allowlist only the synthetic projected financial report, never live data.
       - name: Upload finance report visibility screenshots
         if: always()
