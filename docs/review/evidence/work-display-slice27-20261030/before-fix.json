@@ -1,0 +1,39 @@
+{
+  "base": "6297d12255840b95f92ab921c090052f41d454aa",
+  "productionSourceUnchanged": true,
+  "syntheticOnly": true,
+  "failures": {
+    "publicRead": {
+      "failed": 1,
+      "reason": "GET changed legacy announcement value and inserted migration marker and announcement rows"
+    },
+    "canonicalNotice": {
+      "failed": 1,
+      "reason": "settings.view session received 401 instead of 200"
+    },
+    "privateProjection": {
+      "failed": 1,
+      "reason": "Unchanged 6297d122 in detached worktree returns chairs/queue/stats outside the explicit public allowlist"
+    },
+    "staleBrowser": {
+      "failed": 1,
+      "reason": "Prior built UI retains caller after failed refresh"
+    },
+    "publicSSR": {
+      "failed": 1,
+      "reason": "Prior built HTML serializes synthetic internal clinical setting"
+    },
+    "speechFallback": {
+      "failed": 1,
+      "reason": "Prior built UI calls speech with voice:null when only synthetic English voice exists; no auditory result claimed"
+    }
+  },
+  "setupOnly": "First attempts failed because owned PostgreSQL restarted on default 5432; corrected to its owned 55437 before these red runs.",
+  "sources": {
+    "app/api/display/route.ts": "7e67f14b672bc6e7e5818d237e306e4ef59f4b10e9367d0371870e84b03dc4a4",
+    "app/api/display/notice/route.ts": "102a8ba6457300a12dc053608d2ad9d4c95c4b18d310b7ece52a532587a2716c",
+    "app/display/page.tsx": "167588ddabf2b28750d17acecb71a7b9602a1208116cc32ac9a2e8737ebdb544",
+    "lib/db.ts": "56242b757fddcba9d5240dd0ef9ee8f8735e41eed93ec8cd62aebe7771a214bd"
+  },
+  "httpBaseline": "Owned previously built app, before display changes; the detached projection test used unchanged source 6297d122. Product source hashes above identify the intake base."
+}

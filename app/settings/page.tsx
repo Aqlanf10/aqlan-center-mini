@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DisplayVoicePreview } from "@/components/settings/DisplayVoicePreview";
 import { ClinicHoursEditor } from "@/components/settings/ClinicHoursEditor";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 import { InstallApp } from "@/components/InstallApp";
@@ -551,7 +552,8 @@ export default function SettingsPage() {
             ) : (
               <div className="mt-4">
                 <label className="text-xs font-bold text-slate-700">القيمة الجديدة</label>
-                <SettingInput definition={editor.definition} value={editor.draft} onChange={(draft) => setEditor((current) => current ? { ...current, draft, conflict: null } : current)} />
+                {editor.definition.key !== "display.voice_uri" ? <SettingInput definition={editor.definition} value={editor.draft} onChange={(draft) => setEditor((current) => current ? { ...current, draft, conflict: null } : current)} /> : null}
+                {["display.voice_uri", "display.voice_rate", "display.voice_pause_ms"].includes(editor.definition.key) ? <DisplayVoicePreview values={{ ...snapshot.values, [editor.definition.key]: editor.draft }} onVoiceChange={editor.definition.key === "display.voice_uri" ? draft => setEditor(current => current ? { ...current, draft, conflict: null } : current) : undefined} /> : null}
                 {editor.definition.unit ? <p className="mt-1 text-[11px] text-slate-400">الوحدة: {editor.definition.unit}</p> : null}
                 {editorProblem ? <p role="alert" className="mt-2 text-xs font-bold text-red-700">{editorProblem}</p> : null}
               </div>

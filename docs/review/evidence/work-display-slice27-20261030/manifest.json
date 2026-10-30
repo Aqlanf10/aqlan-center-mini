@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "syntheticOnly": true,
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "branch": "feat/work-recovery-followup-20261027",
+  "baseCommit": "6297d12255840b95f92ab921c090052f41d454aa",
+  "readiness": "NOT_READY",
+  "inventorySourceDigest": "f5db18ba1eac4675de18e9f8dead1e0b387880ef67772f419428e94ee0111bcd",
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.4",
+    "browser": "system Chromium 151.0.7922.173",
+    "database": "owned loopback synthetic databases only",
+    "auditoryTestPerformed": false,
+    "browserNativeVoices": 0,
+    "ownerNaayfBrowserAvailability": "unverified; Windows installation only"
+  },
+  "results": {
+    "postgres": {
+      "files": 6,
+      "passed": 53,
+      "newDisplayTests": 15
+    },
+    "httpBrowser": {
+      "files": 3,
+      "passed": 24,
+      "displayJourneyTests": 16
+    },
+    "unitFocused": {
+      "files": 8,
+      "passed": 126
+    },
+    "layoutUnit": {
+      "files": 1,
+      "passed": 2
+    },
+    "unitAll": {
+      "files": 798,
+      "passed": 13398,
+      "exit": 0,
+      "generatedBuildTestsExcluded": ".next/**"
+    },
+    "typecheckExit": 0,
+    "buildExit": 0,
+    "buildAfterProductionChanges": "all runtime changes; only explanatory lint comments changed after build",
+    "eslintExit": 0,
+    "eslintFocusedWarnings": 0,
+    "moneyGuardExit": 0,
+    "bodyGuardExit": 0,
+    "inventoryVerifyExit": 0
+  },
+  "mapCounts": {
+    "total": 383,
+    "canonical-done": 46,
+    "existing": 298,
+    "owner-only": 20,
+    "excluded": 12,
+    "entry": 4,
+    "self": 3
+  },
+  "sourceHashes": {
+    ".github/workflows/ci.yml": "a90339e74d36849a538ec4018ee6286f3592a9bfc681837acb2385eb0b14150f",
+    "__tests__/display-speech.test.ts": "26882a591f2049c47c4d4dd3fc3f0a2c09a8402e9500f8ed64454728656bd0d7",
+    "__tests__/layout-clinic-timezone.test.ts": "fac72b5a4c9ec370ab6e4910c5cb4bb822c116bf4862e05a520a15e9a102cd27",
+    "__tests__/postgres/display-notice-canonical.test.ts": "fe1565fb1433988dd8383c350fc331138fb5fb973b6cfcdcd637a4beea55ae78",
+    "__tests__/postgres/display-public-snapshot.test.ts": "e0ff0e03835a381a1be7b8d0810964dc25170acec26f7f384203f93ffc199504",
+    "__tests__/security-http/canonical-display-journey.test.ts": "5b3ed66bf44ca7bbd06cf1bb2bdcd9ccb1cbd6d8392577dbc0cf1e98ddd43876",
+    "app/api/display/notice/route.ts": "c40f25534b8456c5385c8423bfc049a2e6ea41993de9941fe10ff5e6aec00472",
+    "app/api/display/route.ts": "94a69696967d7dad817358f726556ef513a5270461756eb87d9b7bd03564146a",
+    "app/display/page.tsx": "66dc9032f5b912ddafebb58487181e2dc5ac78cf70c794ba90370f684d0665fb",
+    "app/layout.tsx": "1000fadad31ea5fd677a1ec7ea2138263e09da4e76d19ccbb636d0568fa079aa",
+    "app/settings/page.tsx": "fb63ad0b5ce991ffcff4b56efc7ffb1819e0ec44f277611ef37d7d79c30769ef",
+    "components/AnnouncementsManager.tsx": "71f5c24206c8cd43701922ed67e4702f5484e00f1d1bdfef609da3bc0f08d6d5",
+    "components/settings/DisplayVoicePreview.tsx": "0428322da219ac5301aa4f9e2bcdbc54efce6398e433a9d1608d9930a5d547b2",
+    "components/today/CanonicalDisplayNotice.tsx": "ab491302985a52513af7ec6aa04f0fe35e755e57fdc440ed1143b3d450339ab6",
+    "components/today/CanonicalTodayQueue.tsx": "0b066132371f0a82f6ec35290bbc88a700b3257c9ddcb5bc7b284c6657cd837e",
+    "lib/canonical-display-notice.ts": "7b5ef330227bb1f504e8df41a4bf167571514687121d48d53262b938997074e3",
+    "lib/db.ts": "ac9d7377069f07601921c0fa53b6f28116bb4968049b1a7a963d2b732fe86cc2",
+    "lib/display-feed.ts": "b4f1f94eb55f0d79a0b968462fa65a8ca8166ce0744cc9b4e33be7e433fa09c3",
+    "lib/display-snapshot.ts": "40d4ad91f74ec9d1e328d9f590ac940598cc0c770f820a810f3be44ab845d53e",
+    "lib/display-speech.ts": "930b4fd370b8af99c5c563ef81aac18d4524c7e0cda940a8f600522c705c8fc6",
+    "lib/settings-capabilities.ts": "bd19f5f5da6363e26fa1f1499bb12d1597e656e2c30347ff57f2333fe3d490c4",
+    "lib/settings-definitions.ts": "857b9629fd174ee08082c26d967267044a5ba4eebca5f732dc597bd4efe2b5d7",
+    "lib/settings.ts": "c4a80d1fe339bf09f32e7052d5ead85aeef76b94cc43117235c0a2b4dfe5182e",
+    "lib/waiting-room.ts": "dc78f9268c9bc2f4eefcda51bb322977170a6117d06bd9c1cf0053b42bd0caaf",
+    "proxy.ts": "2e605b1c7f5b7b9cd1d0e7c0198dbbfc91e62147348c90652885a2347ae7d19d"
+  },
+  "unchangedReceiptHashes": {
+    "lib/receipt-provenance-db.ts": "88d5a290b4297d803240c1e060cad8e9a3b7dd3bac1a5e6d078d0612dc1f5c10",
+    "lib/receipt-provenance.ts": "3edae9e481561b4ec0198e0d2457820f66faf15d8bafc44688f71bb72b579a7b"
+  },
+  "ci": "Final pushed head must be verified; previous CI success is not reused. Final handoff supplies run URL and terminal conclusions.",
+  "notRunLocally": [
+    "Full PostgreSQL suite",
+    "Full security HTTP suite",
+    "Actual auditory playback on the owners TV/browser"
+  ],
+  "evidenceHashes": {
+    "before-fix.json": "698d1c09fa941593a71a8994a1c7f46cbf1994564cb79e3747c2767bbd3a2c79",
+    "body-guard.log": "040707324ed7862b350bebb81c657cf17272a9d5115d01cf0a7f059eb332c8c4",
+    "build-final.log": "41237e0d60ce56aea372e0dd2184bbd6fef06940a0b103fd5e31019caaae5f67",
+    "canonical-display-journey.test.ts.before-fix.txt": "c8cd487d2a150f525be5ab1742a29f335c3dd892896de5ea70ab429895098153",
+    "display-public-1440.png": "3eb8b4abfebccb36e298a5fe3d6ce5d48393c008b90c9fff752f93999df55c37",
+    "display-public-snapshot.test.ts.before-fix.txt": "b7448575eefb9f7d57455d35baf013808e17a386b653a43ae26876cc73650bd3",
+    "http-final.log": "092dbb218999b4259e707de2358d4fc88713842439be400958675f16746756a1",
+    "http-privacy-and-voice.before-fix.txt": "4a360b24f169e44a2716bcf06017312c52e2d4ec259d37cfe060459fec981807",
+    "inventory-final.log": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+    "layout-unit-final.log": "38f3e8f6cb9acaca760756f6388dfb31a894a1edbdb85e333883da78ebd2286e",
+    "lint-focused-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "money-guard.log": "8c426cd2f9b12b1084b5a8855ae1b7567e5491773693a629848a1e0208739bdb",
+    "postgres-final.log": "8260b77c4ab5021d267ffdadda6634edd4c9ecdf73a94746444217d8f7aab64b",
+    "red-canonical-notice-http-setup-error.log": "e773e58987167ec87a1bd6a31758d0e326908b75675e9fa7f0d7cd8cf8e63386",
+    "red-canonical-notice-http.log": "de2ab1af3e788ba57191b1341214fc7c256602546bfc55f6c90c45754e0ece64",
+    "red-public-get-setup-error.log": "6ef7a8fd97a1c1a58dc1fbc4b74982dd94dd63c9fc5bd996b9282058d18082ab",
+    "red-public-get.log": "e23613c16a4c0452e241fd6bf2040b2b9e1077c055454a212ea248543c20edf1",
+    "red-public-private-projection.log": "b1ed9e6cd38f6385545c79a3de9ae2098776f07f8ea35122b735e8c4a3efc6ee",
+    "red-public-ssr.log": "a6ecdc8d2aa310c7d39ca361cd5a961ae554a43d48a401512d1ad6f17525daf9",
+    "red-public-stale-browser.log": "9d6d9fa36512dd95c626cf5a516d7f40fa66fcdf08733b132489f1d9552733d0",
+    "red-speech-fallback-browser.log": "883bd86295f06205390ed9adee42720100c4d5682d7d453ce2d283db699f7c0d",
+    "runtime-tracing-focused.log": "0445cea36221d60bf0cd99d860ae5440342532e9fa3b3364865f73ed157c1d3d",
+    "speech-device-baseline.json": "77b8f6901fb07ff99276bb228da7e39bb405c95423539cb17b3606c283a1e45b",
+    "typecheck-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "unit-all-before-final.log": "c5e2cad29c520ddbda74ca8ce5d8f5a377eb07ec468a03676e4a91dc8e0598ad",
+    "unit-all-final.log": "aa84a970c7fe5a1279d23061367689da45b87c4c050b2c1356daa7c4333beb57",
+    "unit-all-interrupted-old-layout.log": "d3db09b61fc00006b7aebf1e95e75a4a21126e4eaeb4f79a7c52aea0396b4cdb",
+    "unit-focused-final.log": "22c2febfc8271ad8faaa8a90aeb431417d11ac01bdd43bd72269935bc449aac3"
+  },
+  "failedIntermediateRuns": "Before-final full unit run: 5 failures (inventory not regenerated, old speech transform, layout headers mock absent, local 5s tracing timeout). Isolated tracing passed. Another run was interrupted with exit 130 after detecting the old layout transform; final frozen-source run passed all 13398. Setup and fixture errors were not product defects.",
+  "evidenceNormalization": "ANSI color, volatile repository root and trailing whitespace removed from text logs; assertions, counts and outcomes preserved."
+}

@@ -1,0 +1,14 @@
+> aqlan-center@0.1.0 test
+> vitest run --exclude .next/**
+
+
+ RUN  v4.1.12 <repo>
+
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+
+ Test Files  798 passed (798)
+      Tests  13398 passed (13398)
+   Start at  18:58:06
+   Duration  425.05s (transform 17.62s, setup 0ms, import 87.33s, tests 241.11s, environment 72ms)

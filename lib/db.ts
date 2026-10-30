@@ -5209,6 +5209,17 @@ export async function callVisitAgainWith(client: DbClient, id: number, actor?: V
   return toVisit(rows[0]);
 }
 
+/** Current call only, on the caller's public snapshot. No IDs, notes, phone,
+ * status history, chair occupancy or work totals are even selected. */
+export async function currentPublicDisplayCallWith(q: Pick<DbClient, "query">): Promise<import("./waiting-room").PublicDisplayCallSource[]> {
+  const { rows } = await q.query<{ patient_name: string; called_at: Date | null; chair: number | null }>(
+    `SELECT patient_name, called_at, chair FROM visits
+      WHERE ${onClinicDaySql("arrived_at", "$1", clinicTodaySql("$1"))} AND status = 'called'
+      ORDER BY called_at DESC NULLS LAST, arrived_at ASC, id ASC LIMIT 1`, [CLINIC_TIME_ZONE],
+  );
+  return rows.map(row => ({ patientName: row.patient_name, calledAt: row.called_at?.toISOString() ?? null, chair: row.chair }));
+}
+
 /**
  * مرضى لديهم حالة تقويم قائمة — لبطاقة «جلسات التقويم اليوم» على شاشة الصالة.
  *
@@ -8664,6 +8675,15 @@ export async function activeAnnouncementsForScreen(): Promise<Announcement[]> {
   }
   const settings = await getSettingsSafe();
   return parseAnnouncements(settings["display.announcements"]);
+}
+
+/** Same public projection on the caller's snapshot. No migration, initialization,
+ * cache or second connection; missing schema/SQL errors fail the whole read. */
+export async function activeAnnouncementsForScreenWith(q: Pick<DbClient, "query">, settings: SettingsMap): Promise<Announcement[]> {
+  const { rows } = await q.query<{ title: string; body: string }>(
+    "SELECT title, body FROM display_announcements WHERE is_active ORDER BY sort_order, id",
+  );
+  return rows.length ? rows.map(row => ({ title: row.title, body: row.body })) : parseAnnouncements(settings["display.announcements"]);
 }
 
 /**

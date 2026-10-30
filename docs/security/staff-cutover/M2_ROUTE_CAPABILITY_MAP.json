@@ -561,8 +561,14 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 27: public display grants no staff authority; notice GET uses settings.view on an owning canonical read snapshot; PATCH uses the central operational-settings writer (settings.view prerequisite), CAS, post-lock session proof and atomic audit. Legacy branch preserved.",
+  "projection": {
+   "base": "Only on, version and canEdit; no patients, queue, settings dump or financial data.",
+   "groups": {
+    "canEdit": "settings.operational.edit from the same snapshot; never a write grant."
+   }
+  }
  },
  {
   "route": "/api/display/notice",
@@ -577,8 +583,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 27: public display grants no staff authority; notice GET uses settings.view on an owning canonical read snapshot; PATCH uses the central operational-settings writer (settings.view prerequisite), CAS, post-lock session proof and atomic audit. Legacy branch preserved."
  },
  {
   "route": "/api/documents/[id]",

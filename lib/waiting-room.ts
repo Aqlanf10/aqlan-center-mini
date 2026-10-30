@@ -1,17 +1,17 @@
 /**
  * شاشة الصالة — المنطق الخالص.
  *
- * شاشة النداء الأولى كانت تقول «من نُودي عليه» فقط، وكانت تكفي يومًا فيه مريضان.
- * يومٌ فيه اثنا عشر مريض تقويم يحتاج أكثر من ذلك: من هو في الدور الآن، ومن أمامه
- * من، وكم انتظار اليوم في المتوسط — بلا أن يخرج من الشاشة ما لا يجوز أن يراه كل
- * من في الصالة.
+ * الإسقاط العام الحالي يعرض النداء الجاري وحده. تبقى مساعدات الصف والإحصاء
+ * التاريخية للتشغيل الداخلي والانحدار؛ لا يدخل ناتجها في استجابة شاشة الصالة.
  *
  * القاعدة التي تحكم هذا الملف: **كل ما يُعرض على التلفاز يُحسب هنا ويُخفى هنا**.
  * الاسم يُقنَّع على الخادم لا في الواجهة، والهاتف والتشخيص والحساب لا يعبرون هذا
  * الملف أصلًا — فلو فتح أحد أدوات المتصفح على التلفاز لم يجد شيئًا يستحق الحفظ.
  */
 
-import type { Visit } from "./flow";
+import { firstNameOnly, type Visit } from "./flow";
+import type { SettingsMap } from "./settings";
+import { displaySpeechOptions, type DisplaySpeechOptions } from "./display-speech";
 import type { Appointment } from "./schedule";
 
 /**
@@ -428,4 +428,42 @@ export function parseAnnouncementsForMigration(raw: string | null | undefined): 
     });
   }
   return list;
+}
+
+/** Only the current public call, never queue IDs, file numbers, service/status,
+ * chair occupancy, production counters or financial/clinical facts. */
+export interface PublicDisplayCallSource { patientName: string; calledAt: string | null; chair: number | null }
+export interface PublicDisplayFeed {
+  now: string;
+  called: { at: string | null; name: string; speechName: string; chair: number | null }[];
+  delayNotice: boolean;
+  voice: boolean;
+  speech: DisplaySpeechOptions;
+  announcements: Announcement[];
+  welcomeText: string;
+  tagline: string;
+}
+
+/** Owner decision 2026-10-30: this explicit allowlist is the SAME for anonymous,
+ * staff and both deployment modes. Display preferences can never restore the
+ * removed workload/orthodontic/queue projections. Identity uses the existing
+ * central privacy choice; speech is derived from the already-public name. */
+export function projectWaitingRoomDisplay({ now, calls, settings, announcements }: {
+  now: Date; calls: PublicDisplayCallSource[]; settings: SettingsMap; announcements: Announcement[];
+}): PublicDisplayFeed {
+  const privacy: PrivacyMode = settings["display.privacy_mode"] === "first_only" ? "first_only" : "first_initial";
+  return {
+    now: now.toISOString(),
+    called: calls.slice(0, 1).map(call => {
+      const name = maskName(call.patientName, privacy);
+      return { at: call.calledAt, name, speechName: firstNameOnly(name), chair: call.chair };
+    }),
+    delayNotice: settings["display.delay_notice"] === "true",
+    voice: settings["display.voice"] !== "false",
+    speech: displaySpeechOptions(settings),
+    // Editorial public content, not an inferred privacy filter for staff notes.
+    announcements: announcements.map(item => ({ title: item.title, body: item.body })),
+    welcomeText: `مرحبًا بكم في ${settings["clinic.name"]}`,
+    tagline: settings["display.tagline"] || DEFAULT_TAGLINE,
+  };
 }

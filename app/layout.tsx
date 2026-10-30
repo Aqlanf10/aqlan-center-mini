@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import localFont from "next/font/local";
 import "./globals.css";
 import { CLINIC_TIME_ZONE, findUserByUsername, getSettingsSafe } from "@/lib/db";
@@ -60,14 +61,15 @@ export const viewport: Viewport = {
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const publicDisplay = (await headers()).get("x-aqlan-public-display") === "1";
   /* قاعدة اختيار واحدة: كوكي موحّدة تُقبل بإثبات القاعدة الحالي ولا تمر أبدًا بالمسار
      القديم؛ غيرها يبقى على requireSession كما كان. */
-  const selected = await selectRequestStaffEnvelope().catch(() => ({ kind: "none" as const }));
+  const selected = publicDisplay ? { kind: "none" as const } : await selectRequestStaffEnvelope().catch(() => ({ kind: "none" as const }));
   const canonical = selected.kind === "canonical" || selected.kind === "denied";
   const [settings, session, canonicalView] = await Promise.all([
     getSettingsSafe(),
     // الجلسة قد تكون غائبة — صفحة الدخول والشاشات العامة تُصيَّر بلا واحدة.
-    canonical ? Promise.resolve(null) : requireSession().catch(() => null),
+    publicDisplay || canonical ? Promise.resolve(null) : requireSession().catch(() => null),
     selected.kind === "canonical" ? admitCanonicalStaffSession(selected.handle).catch(() => null) : Promise.resolve(null),
   ]);
 
@@ -99,12 +101,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="ar" dir="rtl" className={arabic.variable}>
       <body className="min-h-full bg-canvas font-sans text-navy-900 antialiased">
-        <SettingsProvider value={publicSubset(settings)}>
-          <SessionProvider
+        <SettingsProvider value={publicDisplay ? { "clinic.name": settings["clinic.name"] } : publicSubset(settings)}>
+          {publicDisplay ? children : <SessionProvider
             value={sessionValue}
           >
             <AppShell clinicTimeZone={CLINIC_TIME_ZONE}>{children}</AppShell>
-          </SessionProvider>
+          </SessionProvider>}
         </SettingsProvider>
         <PwaRegister />
       </body>

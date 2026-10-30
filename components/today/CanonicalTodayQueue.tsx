@@ -6,6 +6,7 @@ import { useChairCount, useNumberSetting } from "@/components/SettingsProvider";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { sendGatedMove } from "@/components/today/useChairReadiness";
 import { formatMoney, type Currency } from "@/lib/money";
+import { CanonicalDisplayNotice } from "./CanonicalDisplayNotice";
 
 /**
  * قائمة اليوم لجلسة الهوية الموحّدة (M2 slices 11–12).
@@ -108,6 +109,7 @@ export function CanonicalTodayQueue() {
         <h1 id="today-queue-title" className="text-lg font-black text-navy-900">قائمة اليوم</h1>
         <button type="button" onClick={reload} className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">تحديث</button>
       </header>
+      <CanonicalDisplayNotice />
       {error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
       {view ? (
         <>

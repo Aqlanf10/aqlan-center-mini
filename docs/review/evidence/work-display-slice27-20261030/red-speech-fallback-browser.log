@@ -1,0 +1,40 @@
+RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-display-journey.test.ts (4 tests | 1 failed | 3 skipped) 4510ms
+   × browser never speaks a patient call through a non-Arabic fallback voice 874ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-display-journey.test.ts > browser never speaks a patient call through a non-Arabic fallback voice
+AssertionError: expected [ { …(3) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "lang": "ar-SA",
++     "text": "SYN-NEWCALL، يرجى التوجه إلى غرفة العلاج رقم 1",
++     "voice": null,
++   },
++ ]
+
+ ❯ __tests__/security-http/canonical-display-journey.test.ts:63:110
+     61|     await expect.poll(() => page.locator("body").innerText()).toContai…
+     62|     await page.evaluate(() => new Promise(resolve => requestAnimationF…
+     63|     expect(await page.evaluate(() => (window as unknown as { __display…
+       |                                                                                                              ^
+     64|   } finally { await context.close(); }
+     65| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  18:36:35
+   Duration  9.38s (transform 180ms, setup 0ms, import 650ms, tests 4.51s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

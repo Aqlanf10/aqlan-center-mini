@@ -1,0 +1,65 @@
+/** Slice 27: public screen and separately admitted staff controls, synthetic only. */
+import { afterAll, beforeAll, expect, it } from "vitest";
+import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
+const ACCOUNTS = {
+  owner: { username: "canon-display-owner", password: "Canon#DisplayOwner1", role: "admin", display: "مالك تجريبي" },
+  operator: { username: "canon-display-operator", password: "Canon#DisplayOperator1", role: "reception", display: "مشغل رسالة التأخير", grants: { "settings.view": true, "settings.operational.edit": true } },
+} as const;
+type Key = keyof typeof ACCOUNTS;
+let journey: CanonicalJourney<Key>;
+beforeAll(async () => {
+  journey = await openCanonicalJourney({ portOffset: 35, secret: "canonical-display-journey-secret-20261030-only", accounts: ACCOUNTS, ownerKey: "owner", seed: async db => {
+    await db.query("INSERT INTO visits(patient_name,patient_phone,note,status,chair,called_at) VALUES('SYN-CALL SYN-SECRET-LAST','0551234567','SYN-PRIVATE-NOTE','called',1,NOW())");
+    await db.query("INSERT INTO settings(key,value) VALUES('clinical.phrases_diagnosis','SYN-INTERNAL-CLINIC-PHRASE') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
+  } });
+}, 300_000);
+afterAll(async () => { await journey?.close(); });
+
+it("admits the canonical notice reader by settings.view without granting a patient scope", async () => {
+  const login = await journey.login("operator");
+  const response = await journey.api("/api/display/notice", login.cookie);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ on: false });
+});
+
+it("public HTML does not serialize the staff settings context", async () => {
+  const response = await fetch(`${journey.baseUrl}/display`);
+  expect(response.status).toBe(200);
+  expect(await response.text()).not.toContain("SYN-INTERNAL-CLINIC-PHRASE");
+});
+
+it("browser drops the current caller after a failed refresh", async () => {
+  const context = await journey.browser.newContext({ viewport: { width: 1280, height: 720 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(`${journey.baseUrl}/display`);
+    await expect.poll(() => page.locator("body").innerText()).toContain("SYN-CALL");
+    await page.route("**/api/display", route => route.fulfill({ status: 503, json: { message: "synthetic unavailable" } }));
+    await page.getByText("يُعاد الاتصال…").waitFor();
+    expect(await page.locator("body").innerText()).not.toContain("SYN-CALL");
+  } finally { await context.close(); }
+});
+
+it("browser never speaks a patient call through a non-Arabic fallback voice", async () => {
+  const context = await journey.browser.newContext({ viewport: { width: 1280, height: 720 } });
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      const observed: unknown[] = [];
+      Object.assign(window, { __displaySpeech: observed });
+      Object.defineProperty(window, "speechSynthesis", { configurable: true, value: {
+        getVoices: () => [{ name: "Synthetic English", lang: "en-US", voiceURI: "synthetic-en", localService: true, default: true }],
+        addEventListener() {}, removeEventListener() {}, cancel() {},
+        speak(utterance: SpeechSynthesisUtterance) { observed.push({ text: utterance.text, lang: utterance.lang, voice: utterance.voice?.voiceURI ?? null }); },
+      } });
+    });
+    await page.goto(`${journey.baseUrl}/display`);
+    await expect.poll(() => page.locator("body").innerText()).toContain("SYN-CALL");
+    await page.getByRole("button", { name: "تشغيل صوت النداء" }).click();
+    await journey.db.query("UPDATE visits SET patient_name='SYN-NEWCALL SYN-SECRET-LAST',called_at=clock_timestamp() WHERE status='called'");
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => page.locator("body").innerText()).toContain("SYN-NEWCALL");
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(await page.evaluate(() => (window as unknown as { __displaySpeech: unknown[] }).__displaySpeech)).toEqual([]);
+  } finally { await context.close(); }
+});

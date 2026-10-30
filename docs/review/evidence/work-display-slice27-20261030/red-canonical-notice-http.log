@@ -1,0 +1,34 @@
+RUN  v4.1.12 <checkout>
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-display-journey.test.ts (1 test | 1 failed) 3986ms
+   × admits the canonical notice reader by settings.view without granting a patient scope 337ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-display-journey.test.ts > admits the canonical notice reader by settings.view without granting a patient scope
+AssertionError: expected 401 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 401
+
+ ❯ __tests__/security-http/canonical-display-journey.test.ts:18:27
+     16|   const login = await journey.login("operator");
+     17|   const response = await journey.api("/api/display/notice", login.cook…
+     18|   expect(response.status).toBe(200);
+       |                           ^
+     19|   expect(await response.json()).toMatchObject({ on: false });
+     20| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  18:17:48
+   Duration  9.16s (transform 172ms, setup 0ms, import 738ms, tests 3.99s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

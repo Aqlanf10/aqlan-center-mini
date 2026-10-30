@@ -61,6 +61,7 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   "patients.referral_sources": k("operational"), "patients.flags": k("operational"),
   "followup.proposal_days": k("operational"), "recall.lapse_weeks": k("operational"), "ops.follow_up_lookback_days": k("operational"),
   "display.privacy_mode": k("operational", "Waiting-room privacy: confirm delegates may relax it."),
+  "display.voice_uri": k("operational"), "display.voice_rate": k("operational"), "display.voice_pause_ms": k("operational"),
   "display.voice": k("operational"), "display.delay_notice": k("operational"), "display.show_ortho": k("operational"),
   "display.announcements": k("operational"),
   "ops.late_tolerance_minutes": k("operational"), "ops.wait_warning_minutes": k("operational"), "ops.wait_critical_minutes": k("operational"),

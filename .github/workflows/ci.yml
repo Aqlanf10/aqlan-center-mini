@@ -1176,6 +1176,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # One synthetic public call; no traces, cookies or real records.
+      - name: Upload synthetic public display screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: display-public-synthetic-ui
+          path: .settings-ui-artifacts/display-public-1440.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exactly two synthetic built Today screenshots and target/occlusion bounds.
       # No traces, HAR, cookies, browser state, real records or broad uploads.
       - name: Upload Today readiness read lifetime evidence
