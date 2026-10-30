@@ -35,6 +35,7 @@ export const CANONICAL_PAGES: readonly CanonicalPage[] = Object.freeze([
  { href: "/waiting-list", label: "قائمة الانتظار", anyOf: [], record: "appointment", exact: true, description: "من لم يجد موعدًا: المكالمات وتفضيلات الموعد والإغلاق ضمن مواعيد نطاقك." },
  { href: "/recall", label: "المتابعة", anyOf: [], record: "patient", exact: true, description: "مواعيد مضت بلا إغلاق، ومن لم يحضر، ومن انقطع عن المتابعة — ضمن نطاق مرضاك." },
  { href: "/patients", label: "المرضى", anyOf: [], record: "patient", exact: true, description: "البحث عن المرضى وتصفّح قائمتهم ضمن نطاق مرضاك المسموح." },
+ { href: "/finance", label: "الصندوق والورديات", anyOf: ["finance.shifts.view"], exact: true, description: "إجماليات الصندوق، تفاصيل الحركات المسموحة، وفتح الوردية وإقفالها بحسب صلاحياتك." },
  { href: "/patients/[id]", label: "ملف المريض", anyOf: [], record: "patient", pattern: /^\/patients\/[1-9][0-9]{0,9}$/, description: "ملف مريضٍ ضمن نطاق مرضاك." },
  { href: "/staff-access", label: "صلاحيات الطاقم", anyOf: ["staff.view"], description: "دليل الطاقم وتعديل صلاحيات كل موظف بمراجعة وتدقيق." },
  { href: "/settings", label: "الإعدادات", anyOf: ["settings.view"], exact: true, description: "إعدادات العيادة والتشغيل والمالية؛ تعدّل ما تسمح به صلاحيتك فقط، وما للمالك يبقى للمالك." },

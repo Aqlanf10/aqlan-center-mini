@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 <checkout>
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.4 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  15:27:27
+   Duration  7.00s (transform 1.93s, setup 0ms, import 2.28s, tests 4.14s, environment 0ms)

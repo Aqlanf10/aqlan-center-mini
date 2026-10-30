@@ -30,16 +30,16 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 held route/method entries, verified at WORK `1ccb30c2`)
+### Counts (383 mapped route/method entries, after slice 26 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 303 |
+| existing | 300 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 41 |
+| canonical-done | 44 |
 
 | Record scope | Routes |
 |---|---|
@@ -443,13 +443,14 @@ The queue holds people who are not patients yet (name and phone), so on the cano
   - Unit `provider-blocks-panel-time` (clinic wall time).
   - Built journey `canonical-provider-blocks-journey` (2, portOffset 31). The appointments journey's API allowlists now include `/api/provider-blocks`.
 
-### Slice 26 — shifts, partial command implementation; read projection decision pending
-- **Not accepted as a complete slice:** all three map rows remain `existing`. No canonical finance page or GET projection is registered yet.
-- **Commands:** `POST/PATCH /api/shifts` use `finance.shifts.operate` (with the existing view prerequisite), regardless of role label. The clinic still has one global drawer. A canonical lifecycle advisory lock precedes the existing shift row lock; current session/authority is proved again after each wait. The existing same-client writers and drawer equation are reused; `shift.open`/`shift.close` audit and effect commit or roll back together.
-- **Retries:** opening while another shift is open and closing an already closed shift return 409 without a second effect/audit. There is no new persisted idempotency key or automatic retry of an ambiguous write. The future screen must refresh after an uncertain outcome before a new human intent.
-- **Read decision:** does `finance.shifts.view` alone expose all patient receipt and expense details, or must those details also satisfy their capabilities and patient scope? Preserve full drawer totals in either case. GET and the canonical screen are held until this policy is settled.
-- **Snapshot composition:** the old `readReceiptProvenanceWith` sends SAVEPOINT, which the canonical facade correctly forbids. `readReceiptProvenanceInSnapshot` uses SELECTs only, with identical SQL/parameters, projection and bounds; an SQL error aborts the whole owning snapshot. The facade guard and old helpers are unchanged.
-- **Evidence:** PG `shifts-canonical` (12), built HTTP `canonical-shifts-journey` (2, portOffset 33), and legacy regression/performance evidence are recorded in `docs/review/work-shifts-slice26-writes-20261030.md`. Canonical read/UI scope and browser acceptance are still pending.
+### Slice 26 — shifts (`GET/POST/PATCH /api/shifts`, `/finance`)
+- **Owner decision, 2026-10-30:** `finance.shifts.view` exposes complete per-currency drawer aggregates and recent shift summaries. Receipt details additionally require `finance.payments.view` AND the current patient scope; expenses require `finance.expenses.view`. The protected owner retains all details. Unattributed shift notes/difference reasons require both detail grants and the whole patient scope. No category, party or hidden-patient subtotals/counts are exposed.
+- **Read:** `readCanonicalShifts` uses one owning RR read-only snapshot for current authority, scope, shifts, full drawer, filtered details and provenance. `own` reuses the central patient condition in SQL before limiting; `none` omits receipt keys. Each detail list is bounded to 1000 visible rows plus a scoped truncation flag; full totals are unaffected. `readReceiptProvenanceInSnapshot` remains SELECT-only, with its previous guards/bounds; SQL failure aborts the whole snapshot. No helper falls back to a second lease.
+- **Commands:** unchanged from the reviewed `780448b9` batch. Exact operate grant, lifecycle lock then existing shared shift row lock, proof after waits, existing currency/drawer rules and atomic effect/audit. No collection, expense, payroll or migration changes.
+- **Screen:** `app/finance/layout.tsx` chooses the canonical component, preserving the legacy page and avoiding its unrelated API calls. `/finance` is registered exactly under shifts.view, even without patient scope; nested finance pages remain held. It renders only server-projected details, never print/export links. Refresh/focus/visibility and a 30-second visible-tab reread clear stale data before reading and after refusal; authority is always proved on the server.
+- **Uncertain writes:** state guards are NOT a durable request key. A late open retry after the original shift closed could open another shift. Exactly one POST/PATCH per explicit submission; on lost/5xx/malformed replies, a tab-local sessionStorage marker blocks commands across reload/navigation. GET verifies current state; a separate explicit new-intent acknowledgement and fresh read unlock a new form submission. No automatic retry.
+- **Evidence:** PG commands 12 + reads 9; canonical built HTTP/browser journey 9 (portOffset 33), including 390/1280px, scope projection, revoked permissions, safe read failures, legacy print/export refusal, and a committed open whose response is lost after external close. Existing command/financial regression and receipt performance guards remain. See `docs/review/work-shifts-slice26-complete-20261030.md` for actual runs and limitations. Three map rows are `canonical-done` as source migration status; cutover remains `NOT_READY` and parent acceptance is pending.
+- **Inherited scope caveat:** HANDOFF §3.3 defines `own` using `DOCTOR_PATIENT_CONDITION`, which includes appointment relationships. This slice reuses it without changing booking or patient-scope policy. An account with own patient scope and broader appointment authority needs independent review against the owner's no-automatic-expansion requirement before activation; this slice does not prove that stronger invariant.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.

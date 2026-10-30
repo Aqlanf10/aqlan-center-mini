@@ -9,7 +9,7 @@ import { requireSession } from "@/lib/session";
 import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canonicalErrorResponse, NO_STORE } from "@/lib/canonical-route";
-import { CanonicalShiftRefusal, commandCanonicalShiftClose, commandCanonicalShiftOpen } from "@/lib/canonical-shifts";
+import { CanonicalShiftRefusal, commandCanonicalShiftClose, commandCanonicalShiftOpen, readCanonicalShifts } from "@/lib/canonical-shifts";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +56,12 @@ function readAmounts(source: Record<string, unknown>, key: string): Record<Curre
 }
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try { return NextResponse.json(await readCanonicalShifts(selected.handle), { headers: NO_STORE }); }
+    catch (error) { return canonicalErrorResponse(error); }
+  }
   const session = await requireSession();
   if (!session) return denied();
   /* صلاحيات الوكيل المساعد: الصندوق والورديات من «المالية المخفية» — الطبيب

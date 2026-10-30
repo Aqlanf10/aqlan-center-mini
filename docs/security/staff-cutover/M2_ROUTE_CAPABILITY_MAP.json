@@ -5682,8 +5682,17 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": "Slice 26 held: patient receipt/expense detail projection needs an explicit scope decision; full drawer totals must remain unchanged."
+  "status": "canonical-done",
+  "note": "Slice 26: one owning read snapshot; complete drawer aggregates, capability/scope-filtered details. No printing/export or hidden-detail subtotals. Owner approval 2026-10-30.",
+  "projection": {
+   "groups": {
+    "drawer": "finance.shifts.view: complete per-currency drawer and recent shift summaries; never calculated from filtered details",
+    "payments": "finance.payments.view AND current patient scope; own uses the central DOCTOR_PATIENT_CONDITION in SQL before the 1000-row limit; provenance only for visible receipts",
+    "expenses": "finance.expenses.view; at most 1000 expense details",
+    "notes": "Unattributed shift note/differenceReason require both detail grants and patientScope=all; omitted otherwise",
+    "operate": "finance.shifts.operate is display-only here; commands independently re-prove authority"
+   }
+  }
  },
  {
   "route": "/api/shifts",
@@ -5698,8 +5707,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": "Slice 26 partial: canonical close command and atomic audit implemented; whole shift slice remains held for GET projection and UI acceptance."
+  "status": "canonical-done",
+  "note": "Slice 26: canonical close, existing currency/drawer rules, lifecycle and row locks, authority re-proof after waiting, atomic audit. No durable request key; ambiguous outcomes need a fresh read and new human intent."
  },
  {
   "route": "/api/shifts",
@@ -5714,8 +5723,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": "Slice 26 partial: canonical open command and atomic audit implemented; whole shift slice remains held for GET projection and UI acceptance."
+  "status": "canonical-done",
+  "note": "Slice 26: canonical open and atomic audit with lifecycle lock and authority re-proof. State guard is not durable idempotency: a delayed retry after closing could open another shift. UI never automatically retries."
  },
  {
   "route": "/api/tasks",

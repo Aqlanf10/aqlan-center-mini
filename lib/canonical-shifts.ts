@@ -1,9 +1,70 @@
 import "server-only";
-import { closeShiftWith, getPool, insertAuditRow, openShiftWith } from "./db";
+import { CLINIC_TIME_ZONE, closeShiftWith, getOpenShiftWith, getPool, insertAuditRow, listShiftExpensesWith, listShiftPaymentsWith, listShiftsWith, openShiftWith, shiftDrawerBreakdown, type CashierShift, type Payment, type Expense } from "./db";
+import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
+import { readReceiptProvenanceInSnapshot } from "./receipt-provenance-db";
+import type { ReceiptProvenance } from "./receipt-provenance";
 import { CURRENCIES, formatMoney, parseAmount, type Currency } from "./money";
 import type { VerifiedDurableSession } from "./staff-durable-session";
 import { staffOperationIdentity, withStaffOperation } from "./staff-operation-runtime";
-import type { Amounts } from "./shift-close";
+import type { Amounts, DrawerBreakdown } from "./shift-close";
+
+export const SHIFT_DETAIL_LIMIT = 1000;
+type ShiftSummary = Omit<CashierShift, "note" | "differenceReason"> & Partial<Pick<CashierShift, "note" | "differenceReason">>;
+type ShiftPayment = Pick<Payment, "id" | "receiptNumber" | "patientId" | "patientName" | "kind" | "amountMinor" | "currency" | "method" | "createdAt" | "note">;
+type ShiftExpense = Pick<Expense, "id" | "voucherNumber" | "category" | "partyName" | "payeeText" | "amountMinor" | "currency" | "createdAt" | "note">;
+export interface CanonicalShiftFeed {
+  clinicTimeZone: string;
+  open: ShiftSummary | null;
+  drawer: DrawerBreakdown | null;
+  recent: ShiftSummary[];
+  canOperate: boolean;
+  projection: { payments: boolean; expenses: boolean; notes: boolean; patientScope: "none" | "own" | "all" };
+  payments?: ShiftPayment[];
+  receiptProvenance?: Record<string, ReceiptProvenance>;
+  paymentsTruncated?: boolean;
+  expenses?: ShiftExpense[];
+  expensesTruncated?: boolean;
+}
+
+/** Owner decision 2026-10-30: complete drawer aggregates under shifts.view;
+ * receipt details additionally need payments.view AND the current patient scope;
+ * expense details need expenses.view. Never derive drawer totals from filtered rows.
+ * Free-text shift notes have no patient attribution, so require both detail grants
+ * and the whole patient scope (the protected owner has all three).
+ * No category/party/patient subtotals or hidden-row counts are published. */
+export async function readCanonicalShifts(session: VerifiedDurableSession): Promise<CanonicalShiftFeed> {
+  return runCanonicalReadSnapshot(session, "finance.shifts.view", async (query, scope) => {
+    const payments = scope.granted("finance.payments.view") && scope.patientScope.kind !== "none";
+    const expenses = scope.granted("finance.expenses.view");
+    const notes = payments && expenses && scope.patientScope.kind === "all";
+    const projectShift = ({ note, differenceReason, ...summary }: CashierShift): ShiftSummary =>
+      ({ ...summary, ...(notes ? { note, differenceReason } : {}) });
+    const open = await getOpenShiftWith(query);
+    const drawer = open ? await shiftDrawerBreakdown(open, query) : null;
+    const recent = await listShiftsWith(query, 15);
+    const out: CanonicalShiftFeed = { clinicTimeZone: CLINIC_TIME_ZONE,
+      open: open ? projectShift(open) : null, drawer, recent: recent.map(projectShift),
+      canOperate: scope.granted("finance.shifts.operate"),
+      projection: { payments, expenses, notes, patientScope: scope.patientScope.kind } };
+    if (payments) {
+      const rows = open ? await listShiftPaymentsWith(query, open.id, {
+        doctorPartyId: scope.patientScope.kind === "own" ? scope.patientScope.clinicianPartyId : null,
+        limit: SHIFT_DETAIL_LIMIT + 1,
+      }) : [];
+      out.paymentsTruncated = rows.length > SHIFT_DETAIL_LIMIT;
+      out.payments = rows.slice(0, SHIFT_DETAIL_LIMIT).map(({ id, receiptNumber, patientId, patientName, kind, amountMinor, currency, method, createdAt, note }) =>
+        ({ id, receiptNumber, patientId, patientName, kind, amountMinor, currency, method, createdAt, note }));
+      out.receiptProvenance = await readReceiptProvenanceInSnapshot(query, out.payments.map(row => row.id));
+    }
+    if (expenses) {
+      const rows = open ? await listShiftExpensesWith(query, open.id, SHIFT_DETAIL_LIMIT + 1) : [];
+      out.expensesTruncated = rows.length > SHIFT_DETAIL_LIMIT;
+      out.expenses = rows.slice(0, SHIFT_DETAIL_LIMIT).map(({ id, voucherNumber, category, partyName, payeeText, amountMinor, currency, createdAt, note }) =>
+        ({ id, voucherNumber, category, partyName, payeeText, amountMinor, currency, createdAt, note }));
+    }
+    return out;
+  }, { errorPrefix: "STAFF_READ", maxBytes: 2 * 1024 * 1024 });
+}
 
 /** M2 slice 26. One clinic drawer, as in the existing shift contract. This lock
  * serializes canonical open/close commands even when no open row exists. It is

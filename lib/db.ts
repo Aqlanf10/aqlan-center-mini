@@ -9921,9 +9921,15 @@ export async function listShiftPayments(shiftId: number): Promise<Payment[]> {
   await ensureSchema();
   return listShiftPaymentsWith(getPool(), shiftId);
 }
-export async function listShiftPaymentsWith(q: Pick<DbClient, "query">, shiftId: number): Promise<Payment[]> {
+export async function listShiftPaymentsWith(q: Pick<DbClient, "query">, shiftId: number,
+  scope?: { doctorPartyId: number | null; limit: number }): Promise<Payment[]> {
   const { rows } = await q.query<PaymentRow>(
-    `${PAYMENT_SELECT} WHERE y.shift_id = $1 ORDER BY y.created_at DESC`, [shiftId],
+    scope ? `${PAYMENT_SELECT} WHERE y.shift_id = $1
+      AND ($2::int IS NULL OR EXISTS (SELECT 1 FROM patients WHERE patients.id = y.patient_id
+        AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")}))
+      ORDER BY y.created_at DESC, y.id DESC LIMIT $3`
+      : `${PAYMENT_SELECT} WHERE y.shift_id = $1 ORDER BY y.created_at DESC`,
+    scope ? [shiftId, scope.doctorPartyId, scope.limit] : [shiftId],
   );
   return rows.map(toPayment);
 }
@@ -12685,9 +12691,10 @@ export async function listShiftExpenses(shiftId: number): Promise<Expense[]> {
   await ensureSchema();
   return listShiftExpensesWith(getPool(), shiftId);
 }
-export async function listShiftExpensesWith(q: Pick<DbClient, "query">, shiftId: number): Promise<Expense[]> {
+export async function listShiftExpensesWith(q: Pick<DbClient, "query">, shiftId: number, limit?: number): Promise<Expense[]> {
   const { rows } = await q.query<ExpenseRow>(
-    `${EXPENSE_SELECT} WHERE e.shift_id = $1 ORDER BY e.created_at DESC`, [shiftId],
+    `${EXPENSE_SELECT} WHERE e.shift_id = $1 ORDER BY e.created_at DESC${limit === undefined ? "" : ", e.id DESC LIMIT $2"}`,
+    limit === undefined ? [shiftId] : [shiftId, limit],
   );
   return rows.map(toExpense);
 }
