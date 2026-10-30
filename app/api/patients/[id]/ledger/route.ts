@@ -94,6 +94,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // Display metadata only, after patient authorization and the canonical read.
     const receiptProvenance = await readReceiptProvenance(payments.map((payment) => payment.id));
     return NextResponse.json({
+      clinicTimeZone: CLINIC_TIME_ZONE,
       // (P1-5ب) opening: الرصيد اليمني للتوافق مع القرّاء القدامى؛ openings: كل العملات.
       invoices, payments, opening: openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null, openings, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
       // قصص الخطط: الخطة اتفاق لا دَين، لكن الحساب الذي يصمت عن اتفاقٍ قائم
