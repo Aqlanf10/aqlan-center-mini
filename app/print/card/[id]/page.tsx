@@ -1,3 +1,4 @@
+import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getAppointment, getPatient, getSettingsSafe } from "@/lib/db";
 import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
@@ -44,7 +45,7 @@ export default async function AppointmentCardPage({ params }: { params: Promise<
       <div className="sheet sheet-a6">
         <PrintHeader settings={settings} title="بطاقة موعد" compact />
 
-        <div className="line">
+        <PrintMetadata><div className="line">
           <span>المريض</span>
           <span style={{ fontWeight: 800 }}>{appointment.patientName}</span>
         </div>
@@ -53,7 +54,7 @@ export default async function AppointmentCardPage({ params }: { params: Promise<
             <span>رقم الملف</span>
             <span className="num" dir="ltr">{patient.patientNumber}</span>
           </div>
-        )}
+        )}</PrintMetadata>
         <div className="rule-light" />
 
         <div className="line line-strong" style={{ fontSize: "11pt", marginTop: "2mm" }}>

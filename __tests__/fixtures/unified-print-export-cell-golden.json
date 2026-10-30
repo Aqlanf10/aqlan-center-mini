@@ -1,0 +1,50 @@
+{
+  "lab-YER-0": {
+    "count": 39,
+    "sha256": "78f151301466b6d775369614efa43071763e3127ce34c8ba42fde4c9b6c3fdcf"
+  },
+  "expense-YER-0": {
+    "count": 40,
+    "sha256": "a5eb91925ad8ca113168736464a150208f578eb5522936e7b40a22560eb68c7f"
+  },
+  "lab-YER-2": {
+    "count": 67,
+    "sha256": "33c4a0d392b662833e1e3d02d07ca7c0b81147f664d13a638e06fe0ee053bff7"
+  },
+  "expense-YER-2": {
+    "count": 72,
+    "sha256": "65c21b8b007299faa92814d3a5c6c22ee631008b8853b0576ec86c996e2e84d6"
+  },
+  "lab-SAR-0": {
+    "count": 39,
+    "sha256": "9a8eecd145803226838732120d4ab3aa851debc8418e7c691a4ad7a82f13c77a"
+  },
+  "expense-SAR-0": {
+    "count": 40,
+    "sha256": "6eec634c64614dd1e6f59a1a88b9f7c8d7465b7067226d1f349a526aef12cf6b"
+  },
+  "lab-SAR-2": {
+    "count": 67,
+    "sha256": "bf872774284b9fd4526a860743803cb7351285d53ffd442ff268079c39a7429c"
+  },
+  "expense-SAR-2": {
+    "count": 72,
+    "sha256": "6253f141cdd21b38fc414d3fc3bf7f55d34c5f3f7d053b296df01d844497472c"
+  },
+  "lab-USD-0": {
+    "count": 39,
+    "sha256": "6547a0a323d739dcf5525e69c22bf761bf119b89deafd6a7d0335739179ec9ac"
+  },
+  "expense-USD-0": {
+    "count": 40,
+    "sha256": "aa8c787fa67f27fc2f5d6bebb73c4ae5bb3e97951003a7cce4182020329b221f"
+  },
+  "lab-USD-2": {
+    "count": 67,
+    "sha256": "efd6c91e0abdd79d2b3eb8570176bca473600e287b4483b00b459814ca39fdcb"
+  },
+  "expense-USD-2": {
+    "count": 72,
+    "sha256": "3e9919c12cc4fc8acdc424293b7d3ab3aa14ca0ed0b7685f78be4df2412d253d"
+  }
+}

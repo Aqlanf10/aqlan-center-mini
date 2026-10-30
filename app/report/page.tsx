@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useClinicName, useSetting } from "@/components/SettingsProvider";
-import { Icon, Logo } from "@/components/Icon";
+import { useClinicName } from "@/components/SettingsProvider";
+import { Icon } from "@/components/Icon";
+import { PrintMetadata } from "@/components/PrintDocument";
+import { ReportPrintHeader, ReportPrintFooter } from "@/components/ReportPrintHeader";
 import { friendlyDateNamed } from "@/lib/reminders";
 import { addDays, clinicDateString, type DayLoad } from "@/lib/schedule";
 import { appointmentsCountText, reportText, shortMinutes, type DayReport } from "@/lib/report";
@@ -102,10 +104,6 @@ function ReportPrintButton() {
 
 export default function ReportPage() {
   const clinicName = useClinicName();
-  const doctor = useSetting("clinic.lead_doctor");
-  const doctorTitle = useSetting("clinic.lead_doctor_title");
-  const phone = useSetting("clinic.phone");
-  const address = useSetting("clinic.address");
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const [date, setDate] = useState(today);
   /* (هوية العرض) التقرير المحمول مقترنٌ بالتاريخ الذي طُلب له، فاختيارُ يومٍ
@@ -181,44 +179,7 @@ export default function ReportPage() {
   }, [feed, clinicName]);
 
   return (
-    <main data-testid="daily-report" className={`${styles.report} mx-auto max-w-4xl p-4 pb-24`}>
-      {/* ترويسة الورقة الوحيدة: هوية المركز والعنوان وتاريخ التقرير — مرةً
-          واحدة لا مرتين. التاريخ لا يظهر عليها إلا لتقريرٍ صحيحٍ وصل فعلًا،
-          فلا ورقةً تحمل تاريخًا قديمًا تحت يومٍ جديد. */}
-      <div data-testid="report-paper-header" className="mb-3 hidden print:block" dir="rtl">
-        <div className="flex items-center gap-3 border-b-2 border-navy-900 pb-2">
-          <Logo className="h-14 w-14 shrink-0" />
-          <div className="min-w-0">
-            <p className="text-base font-black leading-snug text-navy-950">{clinicName}</p>
-            <p className="text-[10px] font-semibold text-slate-600">
-              {doctor} — {doctorTitle}
-            </p>
-            <p className="text-[9px] text-slate-500">
-              {address}
-              {phone ? (
-                <>
-                  {address ? " · " : ""}
-                  هاتف: <span dir="ltr">{phone}</span>
-                </>
-              ) : null}
-            </p>
-          </div>
-          <div className="ms-auto shrink-0 text-end">
-            <p className="text-xs font-bold text-navy-900">تقرير الأداء اليومي</p>
-            {feed ? (
-              <p data-testid="print-report-date" className="mt-0.5 text-[11px] font-bold text-navy-900">
-                {friendlyDateNamed(feed.date)}
-              </p>
-            ) : null}
-            {feed ? (
-              <p className="mt-0.5 text-[9px] font-semibold text-slate-600">
-                عدد الكراسي الفعالة: {feed.chairs}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
+    <main data-testid="daily-report" className={`${styles.report} print-document-on-print mx-auto max-w-4xl p-4 pb-24`}>
       {/* ترويسة الشاشة تختبئ من الورقة — العنوان عليها مرةً في ترويسة الطباعة. */}
       <div className="print:hidden">
         <PageHeader
@@ -230,6 +191,17 @@ export default function ReportPage() {
               ولا زرًّا تفاعليًّا على الورقة. */}
           {feed ? <ReportPrintButton /> : null}
         </PageHeader>
+      </div>
+
+      {/* ترويسة الورقة الوحيدة: هوية المركز والعنوان وتاريخ التقرير — مرةً
+          واحدة لا مرتين. التاريخ لا يظهر عليها إلا لتقريرٍ صحيحٍ وصل فعلًا،
+          فلا ورقةً تحمل تاريخًا قديمًا تحت يومٍ جديد. */}
+      <div data-testid="report-paper-header" className="mb-3 hidden print:block" dir="rtl">
+        <ReportPrintHeader title="تقرير الأداء اليومي" clinicName={clinicName} />
+        {feed ? <PrintMetadata>
+          <div className="line"><span>تاريخ التقرير</span><strong data-testid="print-report-date">{friendlyDateNamed(feed.date)}</strong></div>
+          <div className="line"><span>عدد الكراسي الفعالة</span><strong>{feed.chairs}</strong></div>
+        </PrintMetadata> : null}
       </div>
 
       {/* شريط اختيار التاريخ — حقلٌ مسمّى، وبجانبه التاريخ المختار بنصٍّ عربيٍّ
@@ -606,6 +578,7 @@ export default function ReportPage() {
           ) : null}
         </div>
       ) : null}
+      {feed ? <footer className="hidden print:block"><ReportPrintFooter /></footer> : null}
     </main>
   );
 }

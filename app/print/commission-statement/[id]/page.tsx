@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, commissionDetailReport, commissionReport, getParty, getSettingsSafe, type CommissionDetailLineView } from "@/lib/db";
 import { resolveCommissionViewer } from "@/lib/commission-access";
@@ -165,13 +166,13 @@ export default async function CommissionStatementPrintPage({
       <PrintButton />
       <div className="sheet sheet-report sheet-report-landscape cs-sheet" dir="rtl">
         <PrintHeader settings={settings} title="كشف عمولة طبيب حسب الحالة" />
-        <div className="report-meta">
+        <PrintMetadata>
           <div className="line"><span>الطبيب المنفّذ</span><span style={{ fontWeight: 700 }}>{doctor.name}</span></div>
           <div className="line"><span>الفترة</span><span>{friendlyDateLong(from)} ← {friendlyDateLong(to)}</span></div>
           {filterLabel ? <div className="line"><span>المرشّحات</span><span>{filterLabel}</span></div> : null}
           <div className="line"><span>عدد الأعمال</span><span className="num">{lines.length}</span></div>
-        </div>
-        <table className="items report-table cs-table" data-statement-table>
+        </PrintMetadata>
+        <PrintTableFrame><table className="items report-table cs-table" data-statement-table>
           <thead>
             <tr>
               <th>التاريخ</th><th>المريض</th><th>الفاتورة</th><th>العمل المنفّذ</th>
@@ -257,7 +258,7 @@ export default async function CommissionStatementPrintPage({
               ];
             })}
           </tbody>
-        </table>
+        </table></PrintTableFrame>
 
         <div className="cs-summary">
           {shownCurrencies.map((code) => {

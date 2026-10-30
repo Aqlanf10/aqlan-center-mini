@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import "@/components/print-document.css";
 import { CLINIC_TIME_ZONE, findUserByUsername, getSettingsSafe } from "@/lib/db";
 import { publicSubset } from "@/lib/settings";
 import { SettingsProvider } from "@/components/SettingsProvider";
@@ -9,6 +10,7 @@ import { requireSession } from "@/lib/session";
 import { admitCanonicalStaffSession, selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { AppShell } from "@/components/AppShell";
 import { PwaRegister } from "@/components/PwaRegister";
+import { PrintDocumentWatermark } from "@/components/PrintDocumentWatermark";
 
 /**
  * خط الواجهة — مُستضاف معنا لا مطلوب من خادم بعيد.
@@ -99,6 +101,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="ar" dir="rtl" className={arabic.variable}>
       <body className="min-h-full bg-canvas font-sans text-navy-900 antialiased">
+        <PrintDocumentWatermark />
         <SettingsProvider value={publicSubset(settings)}>
           <SessionProvider
             value={sessionValue}

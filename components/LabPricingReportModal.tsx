@@ -12,7 +12,9 @@ import {
 } from "@/lib/lab";
 import { clinicDateString } from "@/lib/schedule";
 import { useSetting } from "@/components/SettingsProvider";
-import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
+import { ReportPrintHeader, ReportPrintFooter } from "@/components/ReportPrintHeader";
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
+import printStyles from "./PrintReportModal.module.css";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 export interface LabPricingReportLab {
@@ -129,43 +131,11 @@ export function LabPricingReportModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-navy-950/75 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-white print:p-0 print:backdrop-blur-none"
+      className={`${printStyles.modal} fixed inset-0 z-50 flex items-center justify-center bg-navy-950/75 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-white print:p-0 print:backdrop-blur-none`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      {/* Print CSS Rules specifically for A4 format */}
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 12mm 10mm;
-          }
-          body {
-            background: #ffffff !important;
-            color: #000000 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          nav, header, aside, .print\\:hidden {
-            display: none !important;
-          }
-          #lab-pricing-report-root {
-            display: block !important;
-            box-shadow: none !important;
-            border: none !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          .page-break {
-            page-break-after: always;
-            break-after: page;
-          }
-        }
-      `}</style>
-
       <div className="relative my-4 sm:my-8 w-full max-w-5xl rounded-3xl border border-slate-200 bg-white p-4 sm:p-7 shadow-2xl transition-all print:m-0 print:max-w-none print:rounded-none print:border-none print:p-0 print:shadow-none">
         {/* Modal Toolbar (Hidden during printing) */}
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4 print:hidden">
@@ -257,54 +227,29 @@ export function LabPricingReportModal({
             return (
               <div
                 key={lab.id}
-                className={`space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-7 shadow-xs print:border-none print:p-0 print:shadow-none ${
+                className={`print-document space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-7 shadow-xs print:border-none print:p-0 print:shadow-none ${
                   !isLast ? "page-break" : ""
                 }`}
               >
-                {/* Official Header */}
-                <div className="flex items-start justify-between gap-3 border-b-2 border-navy-950 pb-4">
-                  <div className="space-y-1">
-                    {/* الشعار الرسمي بدل الرمز التعبيري: تقرير تسعيرٍ يُتفاوض عليه
-                        مع المختبر مستندٌ رسمي، والشعار الحقيقي توقيعٌ لا ابتسامة. */}
-                    <ReportPrintIdentity
-                      clinicName={resolvedName}
-                      clinicPhone={resolvedPhone}
-                      logoClassName="h-12 w-12"
-                    />
-                    <p className="text-xs font-bold text-slate-600">
-                      قسم الاستعاضة والتركيبات السنية وإدارة شؤون المختبرات
-                    </p>
-                  </div>
-
-                  {/* QR Code & Issue Meta */}
-                  <div className="flex items-center gap-3" dir="ltr">
-                    {qrCodeDataUrl && (
-                      <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
-                        <img
-                          src={qrCodeDataUrl}
-                          alt="QR Verification"
-                          className="h-16 w-16"
-                        />
-                        <span className="text-[8px] font-mono font-bold text-slate-500 mt-0.5">VERIFIED</span>
-                      </div>
-                    )}
-
-                    <div className="text-right" dir="rtl">
-                      <div className="inline-block rounded-xl bg-navy-950 px-3 py-1 text-xs font-black text-white font-mono shadow-2xs">
-                        OFFICIAL LAB TARIFF
-                      </div>
-                      <p className="mt-1 text-[11px] font-bold text-slate-500">
-                        تاريخ الإصدار: <span className="font-mono text-navy-950 font-bold">{today}</span>
-                      </p>
-                      <p className="text-[11px] font-bold text-slate-500">
-                        صيغة الوثيقة: <span className="font-mono text-slate-800">A4 Standard</span>
-                      </p>
-                    </div>
-                  </div>
+                <ReportPrintHeader
+                  title="قائمة الأسعار المعتمدة للخدمات والتركيبات السنية السارية"
+                  subtitle="قسم الاستعاضة والتركيبات السنية وإدارة شؤون المختبرات"
+                  clinicName={resolvedName} clinicPhone={resolvedPhone}
+                />
+                <div className="flex items-center gap-4">
+                  <PrintMetadata className="flex-1">
+                    <div className="line"><span>تاريخ الإصدار</span><strong>{today}</strong></div>
+                    <div className="line"><span>صيغة الوثيقة</span><strong>A4 Standard</strong></div>
+                    <div className="line"><span>OFFICIAL LAB TARIFF</span><strong>قائمة الأسعار المعتمدة</strong></div>
+                  </PrintMetadata>
+                  {qrCodeDataUrl ? <div className="shrink-0 text-center">
+                    <img src={qrCodeDataUrl} alt="QR Verification" className="print-watermark-protected h-16 w-16" />
+                    <span className="text-[8px]">VERIFIED</span>
+                  </div> : null}
                 </div>
 
                 {/* Laboratory Info Banner */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-2xl bg-slate-50 p-3.5 text-xs border border-slate-200">
+                <PrintMetadata>
                   <div>
                     <span className="block text-[10px] font-bold text-slate-400">المختبر السني المعتمد</span>
                     <span className="font-black text-navy-950 text-sm sm:text-base">{lab.name}</span>
@@ -331,17 +276,11 @@ export function LabPricingReportModal({
                       {labRules.length} خدمة سارية ومثبتة
                     </span>
                   </div>
-                </div>
+                </PrintMetadata>
 
-                {/* Document Title */}
-                <div className="text-center py-1 border-b border-dashed border-slate-200">
-                  <h2 className="text-sm font-black text-navy-950 tracking-wide">
-                    قائمة الأسعار المعتمدة للخدمات والتركيبات السنية السارية
-                  </h2>
-                  <p className="text-[11px] text-slate-500">
-                    تُعتمد هذه التكاليف كأساس ملزم لمحاسبة وتوريد طلبات المعمل الصادرة ابتداءً من تواريخ السريان
-                  </p>
-                </div>
+                <p className="print-document-notes text-[11px] text-slate-600">
+                  تُعتمد هذه التكاليف كأساس ملزم لمحاسبة وتوريد طلبات المعمل الصادرة ابتداءً من تواريخ السريان
+                </p>
 
                 {/* Tables by Specialty Category */}
                 {labRules.length === 0 ? (
@@ -356,7 +295,7 @@ export function LabPricingReportModal({
                       const catMeta = LAB_SERVICE_CATEGORY_META[catKey];
 
                       return (
-                        <div key={catKey} className="overflow-hidden rounded-xl border border-slate-200">
+                        <div key={catKey} className="print-document-table-container overflow-hidden rounded-xl border border-slate-200">
                           <div className={`flex items-center justify-between px-3 py-1.5 ${catMeta?.bg || "bg-slate-100"} border-b border-slate-200`}>
                             <span className={`text-xs font-black ${catMeta?.text || "text-navy-950"} flex items-center gap-1.5`}>
                               <span>{catMeta?.label || catKey}</span>
@@ -364,7 +303,7 @@ export function LabPricingReportModal({
                             </span>
                           </div>
 
-                          <table className="w-full text-right text-[11px] border-collapse">
+                          <PrintTableFrame><table className="w-full text-right text-[11px] border-collapse">
                             <thead>
                               <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-extrabold text-[10px]">
                                 <th className="p-2 w-12 text-center">#الكود</th>
@@ -417,7 +356,7 @@ export function LabPricingReportModal({
                                 );
                               })}
                             </tbody>
-                          </table>
+                          </table></PrintTableFrame>
                         </div>
                       );
                     })}
@@ -425,7 +364,7 @@ export function LabPricingReportModal({
                 )}
 
                 {/* Important Notes & Conditions Box */}
-                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-[10px] text-slate-600 space-y-1">
+                <div className="print-document-notes rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-[10px] text-slate-600 space-y-1">
                   <span className="font-extrabold text-navy-950 block">الشروط والضوابط الفنية المتفق عليها:</span>
                   <ul className="list-disc list-inside space-y-0.5 pr-1">
                     <li>الأسعار المذكورة أعلاه ملزمة ومعتمدة ولا تسري أي زيادة إلا بعد إشعار مسبق وتحديث السجل بتاريخ جديد.</li>
@@ -435,7 +374,7 @@ export function LabPricingReportModal({
                 </div>
 
                 {/* Official Sign-off and Authorization Box */}
-                <div className="pt-4 border-t-2 border-slate-300 grid grid-cols-2 gap-8 text-xs text-slate-700">
+                <div className="print-document-signatures pt-4 border-t-2 border-slate-300 grid grid-cols-2 gap-8 text-xs text-slate-700">
                   <div className="space-y-6">
                     <div>
                       <p className="font-black text-navy-950">اعتماد إدارة المركز / الطبيب المسؤول:</p>
@@ -458,6 +397,7 @@ export function LabPricingReportModal({
                     </div>
                   </div>
                 </div>
+                <ReportPrintFooter clinicPhone={resolvedPhone} />
               </div>
             );
           })}

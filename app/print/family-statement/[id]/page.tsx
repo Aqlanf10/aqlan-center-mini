@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, listPatientPlans, getSettingsSafe } from "@/lib/db";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
@@ -52,12 +53,12 @@ export default async function FamilyStatementPage({ params }: { params: Promise<
       <div className="sheet sheet-a4">
         <PrintHeader settings={settings} title="كشف حساب العائلة" />
 
-        <div className="line"><span>العائلة</span><span style={{ fontWeight: 700 }}>{family.name}</span></div>
+        <PrintMetadata><div className="line"><span>العائلة</span><span style={{ fontWeight: 700 }}>{family.name}</span></div>
         <div className="line"><span>الضامن</span><span>{guarantor}</span></div>
-        <div className="line"><span>التاريخ</span><span>{friendlyDateLong(today)}</span></div>
+        <div className="line"><span>التاريخ</span><span>{friendlyDateLong(today)}</span></div></PrintMetadata>
         <div className="rule" />
 
-        <table className="items">
+        <PrintTableFrame><table className="items">
           <thead>
             <tr>
               <th>الفرد</th><th>رقم الملف</th><th>الصلة</th>
@@ -80,7 +81,7 @@ export default async function FamilyStatementPage({ params }: { params: Promise<
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></PrintTableFrame>
 
         <div style={{ marginTop: "5mm" }}>
           {currencies.length === 0 ? (

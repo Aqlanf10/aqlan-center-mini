@@ -1,3 +1,4 @@
+import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getPatient, getSettingsSafe, getDocumentForDownload, CLINIC_TIME_ZONE } from "@/lib/db";
 import { readFileByKey } from "@/lib/files";
@@ -97,13 +98,7 @@ function PatientBox({ patient, dateStr, dateLabel, unknownDate }: {
   const ageDate = dateStr ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const age = ageFromBirthYear(patient.birthYear, ageDate);
   return (
-    <div
-      className="consent-grid"
-      style={{
-        display: "grid", gridTemplateColumns: "1.2fr 0.8fr 1fr 1fr", gap: "2mm", backgroundColor: "#f8fafc",
-        border: "1px solid #cbd5e1", borderRadius: "2mm", padding: "2.5mm 3.5mm", marginTop: "3mm", fontSize: "8.5pt",
-      }}
-    >
+    <PrintMetadata>
       <div><span style={{ color: "#64748b" }}>اسم المريض: </span><strong style={{ color: "#0f172a" }}>{patient.fullName}</strong></div>
       <div>
         <span style={{ color: "#64748b" }}>رقم الملف: </span>
@@ -112,7 +107,7 @@ function PatientBox({ patient, dateStr, dateLabel, unknownDate }: {
       <div><span style={{ color: "#64748b" }}>{unknownDate ? "العمر الحالي / الجنس" : "العمر / الجنس"}: </span><span>{ageText(age)} · {GENDER_LABEL[patient.gender]}</span></div>
       <div><span style={{ color: "#64748b" }}>{dateLabel}: </span><span data-signing-date={unknownDate ? "unknown" : undefined}>
         {dateStr ? friendlyDateLong(dateStr) : unknownDate ? "غير مسجّل في السجل" : "...................."}</span></div>
-    </div>
+    </PrintMetadata>
   );
 }
 

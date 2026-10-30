@@ -408,7 +408,7 @@ function referenceSpecs(date: string, clinic: string): ReferenceSpec[] {
     ...["تراكيب متأخرة بالمختبر:", "جاهزة للتركيب:"].map((text, index) => ({ key: `lab${index}`, parts: [{ text, selector: `[aria-label="أعمال المختبر الآن"] li:nth-child(${index + 1}) span` }] })),
     { key: "unclosed", parts: [{ text: "مواعيد غير مغلقة ليوم التقرير:", selector: '[aria-label="مواعيد غير مغلقة"] p' }] },
     { key: "clinic", parts: [{ text: clinic, selector: `${header} p` }] },
-    { key: "title", parts: [{ text: "تقرير الأداء اليومي", selector: `${header} > div > div:last-child p:first-child` }] },
+    { key: "title", parts: [{ text: "تقرير الأداء اليومي", selector: `${header} .doc-title` }] },
     { key: "date", parts: [{ text: friendlyDateNamed(date), selector: '[data-testid="print-report-date"]' }] },
     { key: "next", parts: [{ text: `حجوزات اليوم التالي — ${friendlyDateNamed(addDays(date, 1))}`, selector: '[aria-label="حجوزات اليوم التالي"] h2' }] },
     { key: "lab", parts: [{ text: "أعمال المختبر — الحالة الآن", selector: '[aria-label="أعمال المختبر الآن"] h2' }] },

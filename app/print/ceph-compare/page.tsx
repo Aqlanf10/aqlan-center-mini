@@ -1,3 +1,4 @@
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getCephAnalysisForCompare, getPatient, getSettingsSafe } from "@/lib/db";
 import { compareAnalyses, comparisonSummary, chronologicalOrder, CHANGE_LABEL } from "@/lib/cephCompare";
@@ -65,7 +66,7 @@ export default async function CephComparePrintPage({
       <div className="sheet sheet-a4">
         <PrintHeader settings={settings} title="تقرير مقارنة التحليلات السيفالومترية" />
 
-        <div className="line">
+        <PrintMetadata><div className="line">
           <span>المريض</span>
           <span style={{ fontWeight: 800 }}>{patient?.fullName ?? `#${before.patientId}`}</span>
         </div>
@@ -82,13 +83,13 @@ export default async function CephComparePrintPage({
             #{after.id} ({PHASE_LABEL[after.phase] ?? after.phase} —{" "}
             {after.xrayDate ? friendlyDateLong(after.xrayDate) : "بلا تاريخ تصوير"})
           </span>
-        </div>
+        </div></PrintMetadata>
 
         <div className="rule-light" />
         <p style={{ fontWeight: 800, margin: "2mm 0" }}>{summary.ar}</p>
 
         {comparison.measurements.length > 0 ? (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9pt" }}>
+          <PrintTableFrame><table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9pt" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid #999" }}>
                 <th style={{ padding: "1.5mm", textAlign: "right" }}>القياس</th>
@@ -115,7 +116,7 @@ export default async function CephComparePrintPage({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></PrintTableFrame>
         ) : (
           <p style={{ fontWeight: 700, fontSize: "9pt" }}>
             لا قياسًا مشتركًا بين التحليلين — لا يُقارَنان.

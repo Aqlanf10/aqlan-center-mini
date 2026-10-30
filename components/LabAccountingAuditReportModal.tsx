@@ -6,7 +6,9 @@ import { formatMoney, type Currency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { Icon } from "@/components/Icon";
 import { useSetting } from "@/components/SettingsProvider";
-import { ReportPrintIdentity } from "@/components/ReportPrintHeader";
+import { ReportPrintHeader, ReportPrintFooter } from "@/components/ReportPrintHeader";
+import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
+import printStyles from "./PrintReportModal.module.css";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   exportLabAccountingToExcel,
@@ -147,43 +149,12 @@ export function LabAccountingAuditReportModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-white print:p-0 print:backdrop-blur-none"
+      className={`${printStyles.modal} ${printStyles.landscape} fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-white print:p-0 print:backdrop-blur-none`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
       id="lab-accounting-audit-modal"
     >
-      {/* Print stylesheet */}
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 8mm 8mm 8mm 8mm;
-          }
-          body {
-            background: #ffffff !important;
-            color: #000000 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          nav,
-          header,
-          aside,
-          .print\\:hidden {
-            display: none !important;
-          }
-          #lab-accounting-audit-print-root {
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          .page-break {
-            page-break-after: always;
-            break-after: page;
-          }
-        }
-      `}</style>
-
       <div className="relative my-4 sm:my-8 w-full max-w-6xl rounded-3xl border border-slate-200 bg-white p-4 sm:p-7 shadow-2xl transition-all print:m-0 print:max-w-none print:rounded-none print:border-none print:p-0 print:shadow-none">
         {/* Modal Toolbar (Hidden during printing) */}
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4 print:hidden">
@@ -286,61 +257,27 @@ export function LabAccountingAuditReportModal({
         </div>
 
         {/* Printable Document Root */}
-        <div id="lab-accounting-audit-print-root" ref={printRef} className="space-y-6 text-slate-900">
-          {/* Header section */}
-          <div className="flex flex-wrap items-start justify-between border-b-2 border-slate-900 pb-4 gap-4">
-            <div className="space-y-1.5">
-              {/* الشعار الرسمي بجوار الاسم — كان رمزًا تعبيريًّا والورقة تُحمل
-                  إلى محاسبة المختبرات للتوقيع عليها. */}
-              <ReportPrintIdentity
-                clinicName={resolvedName}
-                clinicPhone={resolvedPhone}
-                clinicAddress={resolvedAddress}
-                logoClassName="h-14 w-14"
-              />
-              <div className="pt-2">
-                <h2 className="text-base font-black text-indigo-950">
-                  تقرير مطابقة وتدقيق ربط حسابات المختبرات والترحيل الآلي
-                </h2>
-                <p className="text-xs font-semibold text-slate-600">
-                  Laboratory Accounting & Auto-Posting Audit Statement (Income Statement & Balance Sheet)
-                </p>
-              </div>
-            </div>
-
-            {/* Document metadata & QR Code */}
-            <div className="flex items-center gap-3">
-              <div className="text-left text-xs space-y-1 font-mono">
-                <div className="text-[11px] font-bold text-slate-900">
-                  الرقم المرجعي: <span className="text-indigo-700">{auditDocRef}</span>
-                </div>
-                <div className="text-slate-500 text-[10px]">
-                  التاريخ: {today} | {reportTime}
-                </div>
-                <div className="text-slate-500 text-[10px]">
-                  العملة الأساسية: {baseCurrency}
-                </div>
-                <div className="inline-block rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-sans font-bold text-slate-700">
-                  نطاق التقرير: {filteredRows.length} مختبر
-                </div>
-              </div>
-
-              {qrCodeDataUrl && (
-                <div className="flex flex-col items-center">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={qrCodeDataUrl}
-                    alt="Audit Verification QR"
-                    className="h-16 w-16 rounded-lg border border-slate-200 bg-white p-0.5 shadow-xs"
-                  />
-                  <span className="mt-0.5 text-[8px] font-mono text-slate-400">ختم التدقيق الرقمي</span>
-                </div>
-              )}
-            </div>
+        <div id="lab-accounting-audit-print-root" ref={printRef} className="print-document space-y-6 text-slate-900">
+          <ReportPrintHeader
+            title="تقرير مطابقة وتدقيق ربط حسابات المختبرات والترحيل الآلي"
+            subtitle="Laboratory Accounting & Auto-Posting Audit Statement (Income Statement & Balance Sheet)"
+            clinicName={resolvedName} clinicPhone={resolvedPhone} clinicAddress={resolvedAddress}
+          />
+          <div className="flex items-center gap-4">
+            <PrintMetadata className="flex-1">
+              <div className="line"><span>الرقم المرجعي</span><strong dir="ltr">{auditDocRef}</strong></div>
+              <div className="line"><span>التاريخ</span><strong><bdi>{today}</bdi> | {reportTime}</strong></div>
+              <div className="line"><span>العملة الأساسية</span><strong>{baseCurrency}</strong></div>
+              <div className="line"><span>نطاق التقرير</span><strong>{filteredRows.length} مختبر</strong></div>
+            </PrintMetadata>
+            {qrCodeDataUrl ? <div className="shrink-0 text-center">
+              <img src={qrCodeDataUrl} alt="Audit Verification QR" className="print-watermark-protected h-16 w-16" />
+              <span className="text-[8px]">ختم التدقيق الرقمي</span>
+            </div> : null}
           </div>
 
           {/* Audit Key Metrics Cards */}
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5 text-xs">
+          <div className="print-document-kpis grid grid-cols-2 gap-2.5 sm:grid-cols-5 text-xs">
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
               <div className="text-[10px] font-bold text-slate-500">المختبرات بالتقرير</div>
               <div className="mt-1 text-base font-black text-slate-900">
@@ -384,8 +321,8 @@ export function LabAccountingAuditReportModal({
           </div>
 
           {/* Audit Table */}
-          <div className="overflow-hidden rounded-xl border border-slate-300 bg-white">
-            <table className="w-full text-right text-[11px]">
+          <div className="print-document-table-container overflow-hidden rounded-xl border border-slate-300 bg-white">
+            <PrintTableFrame><table className="w-full text-right text-[11px]">
               <thead className="border-b border-slate-300 bg-slate-100 text-slate-900 font-bold">
                 <tr>
                   <th className="py-2.5 pr-3 pl-1 text-center w-8">م</th>
@@ -507,11 +444,11 @@ export function LabAccountingAuditReportModal({
                   </td>
                 </tr>
               </tfoot>
-            </table>
+            </table></PrintTableFrame>
           </div>
 
           {/* Accounting Double-Entry Impact & Audit Standards */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 text-xs text-slate-700 space-y-2">
+          <div className="print-document-notes rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 text-xs text-slate-700 space-y-2">
             <div className="font-bold text-slate-900 flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-indigo-600" />
               <span>معايير التوجيه المحاسبي لدفتر اليومية والتدقيق:</span>
@@ -541,7 +478,7 @@ export function LabAccountingAuditReportModal({
           </div>
 
           {/* Official Sign-off & Audit Signature Block */}
-          <div className="pt-4 border-t border-slate-300">
+          <div className="print-document-signatures pt-4 border-t border-slate-300">
             <div className="grid grid-cols-3 gap-6 text-center text-xs">
               <div className="space-y-8">
                 <div className="font-bold text-slate-900">إعداد المحاسب المالي</div>
@@ -562,6 +499,7 @@ export function LabAccountingAuditReportModal({
               </div>
             </div>
           </div>
+          <ReportPrintFooter clinicPhone={resolvedPhone} clinicAddress={resolvedAddress} />
         </div>
       </div>
     </div>
