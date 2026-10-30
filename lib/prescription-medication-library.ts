@@ -20,8 +20,8 @@ export const MEDICATION_REFERENCES: readonly MedicationReference[] = [
     reviewStatus: "pending-owner-review", version: "review-2026-10-30", units: "mg/kg/dose; mg/24h",
     adult: "مرجع SDCEP: أقراص 500 mg؛ مثال 1000 mg أربع مرات يوميًا لمدة 5 أيام، سقف 4000 mg/24h. معلومة مرجعية وليست جرعة افتراضية؛ يختار الطبيب الجرعة والمدة الملائمتين.",
     child: "AAPD، أقل من 12 سنة: 10–15 mg/kg لكل جرعة، كل 4–6 ساعات عند الحاجة. السقف 75 mg/kg/24h وبحد أقصى 4000 mg/24h. يختار الطبيب المقدار والفاصل وعدد الجرعات؛ 15 mg/kg كل 4 ساعات يتجاوز السقف اليومي. يلزم حد عمر أدنى ونشرة منتج مؤكدة وعمر ووزن حديث وتركيز mg/mL صريح؛ هذا النطاق لا يفعّل حديثي الولادة أو الرضع تلقائيًا، وخارجه مراجعة يدوية.",
-    instructions: "راجع مرض الكبد وجميع الأدوية المحتوية على نفس المادة؛ لا تجمعها دون احتساب مجموع الجرعة. الشكل والتركيز من العبوة. المدة والتعليمات النهائية يحددهما الطبيب.",
-    sources: [aapd, { title: "SDCEP — Paracetamol", url: sdcep("paracetamol"), version: "صفحة حية، تحقق 2026-10-30" }],
+    instructions: "راجع وزن البالغ الأقل من 50 kg وسوء التغذية والجفاف والكحول المزمن ومرض الكبد وجميع الأدوية المحتوية على نفس المادة؛ لا تجمعها دون احتساب مجموع الجرعة؛ 4000 mg/day ليس هدفًا افتراضيًا ولا مناسبًا للجميع. الشكل والتركيز من العبوة. المدة والتعليمات النهائية يحددهما الطبيب.",
+    sources: [{ title: "NHS — Paracetamol adults", url: "https://www.nhs.uk/medicines/paracetamol-for-adults/", version: "تحقق 2026-10-30" }, { title: "HSE — Hepatotoxicity risk", url: "https://www2.healthservice.hse.ie/organisation/nqpsd/pst/safety-supplements/paracetamol-dosing-for-adult-patients-under-50-kg-and-those-with-additional-risk-factors-for-hepatotoxicity/", version: "2026-05-11" }, aapd, { title: "SDCEP — Paracetamol", url: sdcep("paracetamol"), version: "صفحة حية، تحقق 2026-10-30" }],
   },
   {
     id: "ibuprofen", genericName: "Ibuprofen", arabicName: "إيبوبروفين",
@@ -34,10 +34,10 @@ export const MEDICATION_REFERENCES: readonly MedicationReference[] = [
   {
     id: "amoxicillin", genericName: "Amoxicillin", arabicName: "أموكسيسيلين",
     reviewStatus: "pending-owner-review", version: "review-2026-10-30", units: "mg/kg/day (not per dose); mg/dose",
-    adult: "ADA/CDC: 500 mg ثلاث مرات يوميًا لمدة 3–7 أيام عند وجود استطباب مناسب في البالغ المؤهل للإرشاد. مراجعة بعد 3 أيام؛ الإيقاف بعد 24 ساعة من زوال العلامات والأعراض بالكامل وفق تقييم الطبيب.",
+    adult: "ADA/CDC: 500 mg ثلاث مرات يوميًا لمدة 3–7 أيام عند وجود استطباب مناسب في البالغ المؤهل للإرشاد ذي المناعة السليمة. مراجعة بعد 3 أيام؛ الإيقاف بعد 24 ساعة من زوال العلامات والأعراض الجهازية بالكامل وفق تقييم الطبيب.",
     child: "AAPD: عمر أكبر من 3 أشهر ووزن أقل من 40 kg. مسار مستقل: 20–40 mg/kg/day مقسمة كل 8 ساعات، سقف 500 mg/dose. أو مسار مستقل: 25–45 mg/kg/day مقسمة كل 12 ساعة، سقف 875 mg/dose. يختار الطبيب المسار والجرعة والمدة حسب الاستطباب؛ لا تُنقل مدة البالغ للطفل. وزن 40 kg بالضبط يحتاج مراجعة يدوية.",
-    instructions: "يلزم تحديد الاستطباب ومراجعة الحساسية والتداخلات. معظم الألم اللبي لا يحتاج مضادًا مع إمكان العلاج الموضعي؛ المضاد لا يعوض التصريف أو علاج الجذور أو الخلع. لا بديل دوائي تلقائي عند الحساسية. الشكل والتركيز يؤخذان من العبوة.",
-    sources: [aapd, { title: "ADA/CDC — Dental pain and swelling", url: "https://cdc.gov/antibiotic-use/media/pdfs/ADA-treatment-guidelines-508.pdf", version: "ADA 2019؛ CDC CS329314-A" }, { title: "AAPD — Antibiotic therapy", url: "https://www.aapd.org/globalassets/media/policies_guidelines/bp_antibiotictherapy.pdf", version: "مراجعة 2022، دليل 2025" }],
+    instructions: "يلزم تحديد الاستطباب ومراجعة الحساسية والتداخلات ووظائف الكلى. معظم الألم اللبي لا يحتاج مضادًا مع إمكان العلاج الموضعي؛ المضاد لا يعوض التصريف أو علاج الجذور أو الخلع. راجع النشرة في القصور الكلوي؛ لا تُستخدم قوة 875 mg عند GFR أقل من 30 mL/min وفق النشرة المشار إليها، ولا تستنتج جرعة بديلة من هذا التنبيه وحده. لا بديل دوائي تلقائي عند الحساسية. الشكل والتركيز يؤخذان من العبوة.",
+    sources: [{ title: "DailyMed — Amoxicillin label", url: "https://www.dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=26e257d5-5b98-3795-e063-6394a90a05bc", version: "تحقق 2026-10-30؛ ليست نشرة المنتج المحلي" }, aapd, { title: "ADA/CDC — Dental pain and swelling", url: "https://cdc.gov/antibiotic-use/media/pdfs/ADA-treatment-guidelines-508.pdf", version: "ADA 2019؛ CDC CS329314-A" }, { title: "AAPD — Antibiotic therapy", url: "https://www.aapd.org/globalassets/media/policies_guidelines/bp_antibiotictherapy.pdf", version: "مراجعة 2022، دليل 2025" }],
   },
   {
     id: "chlorhexidine", genericName: "Chlorhexidine 0.2%", arabicName: "كلورهكسيدين",

@@ -386,3 +386,25 @@ describe("empty prescription caller fails closed before save or draft navigation
     expect(contents(render().tree)).toContain(validation);
   });
 });
+
+it("never silently replaces a mismatched visit prescriber with the current clinician", async () => {
+  fetchMock.mockImplementation(async (url: string, options?: RequestInit) => ({
+    ok: true, status: options?.method === "POST" ? 201 : 200,
+    json: async () => url === "/api/prescriptions" ? { id: 92001 } : {
+      suggestions: [], prescriberOptions: { issuerId: 5, canChooseAnyDoctor: false, doctors: [{ id: 5, name: "Dr Self" }] },
+    },
+  }));
+  render({ isOpen: true, defaultDoctorPartyId: 99, defaultDoctorName: "Dr Visit" });
+  await vi.waitFor(() => expect(contents(render().tree)).toContain("لم نغيّر الاختيار تلقائيًا"));
+  const physician = render().find(node => node.props["aria-label"] === "الطبيب الواصف");
+  expect(physician.props.value).toBe("Dr Visit");
+  click("إضافة دواء جديد"); change(medicinePlaceholder, "SYNTHETIC"); click("طباعة الروشتة (A5)");
+  expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(0);
+  const accept = render().find(node => node.type === "button" && contents(node.props.children as ReactNode).startsWith("إصدار باسمي:"));
+  (accept.props.onClick as () => void)();
+  expect(render().find(node => node.props["aria-label"] === "الطبيب الواصف").props.value).toBe("Dr Self");
+  click("طباعة الروشتة (A5)");
+  await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
+  const write = fetchMock.mock.calls.find(([, options]) => options?.method === "POST");
+  expect(JSON.parse(write![1].body).prescribingDoctorPartyId).toBe(5);
+});

@@ -7,7 +7,7 @@ import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
 import { PrescriptionMedicationLibrary } from "./PrescriptionMedicationLibrary";
 import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
-import { sanitizeRxItems, sanitizePrescribingDoctorName } from "@/lib/prescription";
+import { sanitizeRxItems } from "@/lib/prescription";
 import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workflow";
 
 /**
@@ -92,9 +92,12 @@ export function PrescriptionModal({
   } | null>(null);
   const [prescriberOverride, setPrescriberOverride] = useState<number | null>(null);
   const preferredDoctorId = prescriberOverride ?? defaultDoctorPartyId;
-  const selectedDoctorId = prescriberOptions?.canChooseAnyDoctor && prescriberOptions.doctors.some(d => d.id === preferredDoctorId)
-    ? preferredDoctorId : prescriberOptions?.issuerId ?? defaultDoctorPartyId;
-  const doctorName = prescriberOptions?.doctors.find(d => d.id === selectedDoctorId)?.name ?? defaultDoctorName;
+  const selectedDoctorId = preferredDoctorId ?? prescriberOptions?.issuerId ?? null;
+  const doctorName = prescriberOptions?.doctors.find(d => d.id === selectedDoctorId)?.name
+    ?? (selectedDoctorId === defaultDoctorPartyId ? defaultDoctorName : "");
+  const prescriberMismatch = Boolean(prescriberOptions && !prescriberOptions.canChooseAnyDoctor
+    && selectedDoctorId !== null && selectedDoctorId !== prescriberOptions.issuerId);
+
   const [notes, setNotes] = useState("");
   const [lang, setLang] = useState<InstructionsLang>("both");
   /* تبدأ فارغة: القالب اختيارٌ صريح لا حالة افتراضية (P0.10) — فتحُ المودال
@@ -195,6 +198,10 @@ export function PrescriptionModal({
   };
 
   const validatePrintableItems = () => {
+    if (prescriberMismatch) {
+      setPreserveError("طبيب الزيارة يختلف عن هويتك السريرية؛ اختر الإصدار باسمك صراحة قبل المتابعة.");
+      return false;
+    }
     if (sanitizeRxItems(items).length === 0) {
       setPreserveError("أضف دواءً واحدًا على الأقل باسم مكتوب بالإنجليزية قبل طباعة الوصفة أو معاينة المسودة.");
       return false;
@@ -208,7 +215,7 @@ export function PrescriptionModal({
      * المدخل للمراجعة — لا اعتماد أو توقيع تلقائي. الوثيقة الرسمية وحدها (rx) تُطبع كوصفة صرف. */
     const params = new URLSearchParams();
     params.set("draft", "1");
-    params.set("doctorName", sanitizePrescribingDoctorName(doctorName));
+    if (selectedDoctorId) params.set("doctorPartyId", String(selectedDoctorId));
     if (diagnosis) params.set("diagnosis", diagnosis);
     if (notes) params.set("notes", notes);
     params.set("lang", lang);
@@ -716,6 +723,12 @@ export function PrescriptionModal({
             </div>
           </div>
 
+          {prescriberMismatch && <div role="alert" className="rounded border border-amber-300 bg-amber-50 p-3 text-xs">
+            <p>الطبيب المحدد في الزيارة يختلف عن الطبيب المرتبط بحسابك. لم نغيّر الاختيار تلقائيًا.</p>
+            <button type="button" onClick={() => setPrescriberOverride(prescriberOptions?.issuerId ?? null)} className="mt-2 rounded border px-3 py-2">
+              إصدار باسمي: {prescriberOptions?.doctors.find(d => d.id === prescriberOptions.issuerId)?.name}
+            </button>
+          </div>}
           <p className="text-xs text-slate-500">الطبيب يصدر باسمه المرتبط بحسابه؛ المالك الطبيب وحده يمكنه اختيار طبيب مسجّل آخر. يبقى حساب المُصدر محفوظًا في التدقيق.</p>
 
           {/* قائمة الأدوية */}

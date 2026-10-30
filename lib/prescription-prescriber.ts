@@ -1,6 +1,6 @@
 import { findUserByUsername, getParty, listParties } from "./db";
 import { clinicalCapabilityOf } from "./clinical-identity";
-import { isConfiguredPrescriptionOwner } from "./prescription-owner";
+import { getPrescriptionOwnerAuthority } from "./prescription-owner";
 
 export async function prescriptionPrescriberOptions(session: { userId: number; username: string; role: string }) {
   const unavailable = { issuerId: null, canChooseAnyDoctor: false, doctors: [] };
@@ -10,7 +10,7 @@ export async function prescriptionPrescriberOptions(session: { userId: number; u
   if (!clinical.ok || clinical.partyId === null) return unavailable;
   const issuer = await getParty(clinical.partyId);
   if (!issuer || issuer.kind !== "doctor" || !issuer.isActive) return unavailable;
-  const canChooseAnyDoctor = isConfiguredPrescriptionOwner(user);
+  const canChooseAnyDoctor = Boolean(await getPrescriptionOwnerAuthority(user));
   const doctors = (canChooseAnyDoctor ? await listParties("doctor") : [issuer])
     .filter(doctor => doctor.kind === "doctor" && doctor.isActive && doctor.name.trim())
     .map(doctor => ({ id: doctor.id, name: doctor.name }));

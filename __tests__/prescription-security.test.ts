@@ -1,3 +1,4 @@
+import { ownerContextFromTrustedBinding, resolveStaffCapabilities } from "@/lib/staff-capabilities";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   canAccessPatient: vi.fn(),
   getPatient: vi.fn(),
   getParty: vi.fn(),
+  ownerAuthority: vi.fn(),
   getPrescription: vi.fn(),
   getClinicalVisit: vi.fn(),
   savePrescription: vi.fn(),
@@ -18,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getSettingsSafe: vi.fn(),
 }));
 
+vi.mock("@/lib/staff-owner-authority", () => ({ loadCanonicalOwnerAuthority: mocks.ownerAuthority }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.requireSession }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: mocks.canAccessPatient }));
 vi.mock("@/lib/db", async (importOriginal) => {
@@ -63,8 +66,7 @@ const STORED_RX = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubEnv("PRESCRIPTION_OWNER_USER_ID", "");
-  vi.stubEnv("PRESCRIPTION_OWNER_BINDING_VERSION", "");
+  mocks.ownerAuthority.mockResolvedValue(null);
   mocks.requireSession.mockResolvedValue(DOCTOR_SESSION);
   mocks.findUserByUsername.mockResolvedValue({
     id: 2, username: "dr.amjad", isActive: true, partyId: 5, role: "doctor", permissions: {},
@@ -821,7 +823,9 @@ describe("owner-only cross-clinician issuance", () => {
     body: JSON.stringify({ patientId: 42, prescribingDoctorPartyId: id, prescribingDoctorName: "FORGED", isOwner: true, role: "admin", items: [{ name: "SYNTHETIC" }] }),
   });
   function owner() {
-    vi.stubEnv("PRESCRIPTION_OWNER_USER_ID", "2"); vi.stubEnv("PRESCRIPTION_OWNER_BINDING_VERSION", "synthetic-v1");
+    const context = ownerContextFromTrustedBinding({ ownerUserId: 2, bindingVersion: "synthetic-v1" });
+    const access = resolveStaffCapabilities({ subject: { userId: 2, role: "admin", isActive: true, clinicianPartyId: 5 }, permissionDocument: { schemaVersion: 1, revision: 1, patientScope: "all", appointmentScope: "all", grants: {} } }, context);
+    mocks.ownerAuthority.mockResolvedValue({ access, bindingVersion: "synthetic-v1" });
     mocks.requireSession.mockResolvedValue({ userId: 2, username: "owner-synthetic", role: "admin" });
     mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "owner-synthetic", role: "admin", isActive: true, partyId: 5 });
     mocks.getParty.mockImplementation(async (id: number) => ({ id, kind: "doctor", isActive: true, name: id === 5 ? "Owner Clinician" : "د. الطبيب المختار" }));

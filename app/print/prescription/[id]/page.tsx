@@ -1,9 +1,10 @@
+import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getPatient, getPrescription, getPrescriptionPrintSettings } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { isAdmin } from "@/lib/roles";
-import { sanitizeRxItems, sanitizePrescribingDoctorName } from "@/lib/prescription";
+import { sanitizeRxItems } from "@/lib/prescription";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
@@ -44,7 +45,8 @@ export default async function PrescriptionPrintPage({
 }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
-    doctorName?: string;
+    doctorName?: string; // Ignored legacy query; never a clinical identity.
+    doctorPartyId?: string;
     diagnosis?: string;
     items?: string;
     notes?: string;
@@ -115,9 +117,17 @@ export default async function PrescriptionPrintPage({
       ? sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
       : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const age = ageFromBirthYear(patient.birthYear, dateStr);
-  const prescribingDoctorName = stored
+  let prescribingDoctorName = stored
     ? stored.prescribingDoctorName || "اسم الطبيب غير موثق في الوصفة القديمة"
-    : sanitizePrescribingDoctorName(sParams.doctorName) || "اسم الطبيب غير محدد";
+    : "اسم الطبيب غير موثق في المسودة";
+  if (isDraftMode && sParams.doctorPartyId !== undefined) {
+    const selectedId = Number(sParams.doctorPartyId);
+    if (!Number.isSafeInteger(selectedId) || selectedId <= 0) notFound();
+    const policy = await prescriptionPrescriberOptions(session);
+    const selected = policy.doctors.find(doctor => doctor.id === selectedId);
+    if (!selected || (!policy.canChooseAnyDoctor && selectedId !== policy.issuerId)) notFound();
+    prescribingDoctorName = selected.name;
+  }
 
   return (
     <>
@@ -193,17 +203,17 @@ export default async function PrescriptionPrintPage({
           </div>
         ) : null}
 
+        <section dir="ltr" data-prescription-body="ltr" style={{ textAlign: "left" }}>
         {diagnosisText ? (
           <div className="line" style={{ marginTop: "2.5mm", fontSize: "9pt" }}>
             <span style={{ color: "#475569" }}>التشخيص الطبي:</span>
-            <span style={{ fontWeight: 700 }}>{diagnosisText}</span>
+            <span dir="auto" style={{ fontWeight: 700 }}>{diagnosisText}</span>
           </div>
         ) : null}
 
         <div className="rule" />
 
         {/* Entire medication section starts LTR; Arabic instructions remain isolated RTL. */}
-        <section dir="ltr" data-prescription-body="ltr" style={{ textAlign: "left" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "2mm", margin: "2mm 0" }}>
           <span style={{
             fontSize: "18pt",
@@ -284,18 +294,16 @@ export default async function PrescriptionPrintPage({
           })}
         </div>
 
-        </section>
-
         {notesText && (
-          <div style={{ marginTop: "3mm", fontSize: "8pt", color: "#475569", lineHeight: "1.5" }}>
+          <div dir="auto" style={{ marginTop: "3mm", fontSize: "8pt", color: "#475569", lineHeight: "1.5" }}>
             <span style={{ fontWeight: 700 }}>إرشادات إضافية: </span>
             <span>{notesText}</span>
           </div>
         )}
 
-        <div className="sign-row" style={{ marginTop: "12mm", alignItems: "flex-end" }}>
+        <div className="sign-row" dir="ltr" style={{ textAlign: "left", marginTop: "12mm", alignItems: "flex-end" }}>
           <div>
-            <div style={{ fontSize: "8pt", color: "#64748b" }}>الطبيب المعالج · <span dir="ltr">Physician</span></div>
+            <div style={{ fontSize: "8pt", color: "#64748b" }}><span dir="ltr">Physician</span> · <span dir="rtl">الطبيب المعالج</span></div>
             <div style={{ fontWeight: 800, fontSize: "9pt", marginTop: "1mm" }}>
               <bdi>{prescribingDoctorName}</bdi>
             </div>
@@ -307,6 +315,7 @@ export default async function PrescriptionPrintPage({
           </div>
         </div>
 
+        </section>
         <PrintFooter settings={settings} strictIdentity />
       </div>
     </>

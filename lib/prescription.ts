@@ -116,6 +116,7 @@ export function sanitizePrescribingDoctorName(value: unknown): string {
 }
 
 export interface PrescriptionDraft {
+  ownerAuthority?: { bindingVersion: string; fingerprint: string } | null;
   prescribingDoctorName?: string;
   prescribingDoctorPartyId?: number | null;
   patientId: number;
@@ -137,6 +138,7 @@ export type DraftCheck =
  * كاملة يحتاج أن يعرف **ماذا** نقص لا أن يُقال له «طلب غير صالح».
  */
 export function checkPrescriptionDraft(input: {
+  ownerAuthority?: { bindingVersion: string; fingerprint: string } | null;
   prescribingDoctorName?: unknown;
   prescribingDoctorPartyId?: number | null;
   patientId: number;
@@ -161,6 +163,7 @@ export function checkPrescriptionDraft(input: {
   return {
     ok: true,
     value: {
+      ownerAuthority: input.ownerAuthority ?? null,
       prescribingDoctorName: sanitizePrescribingDoctorName(input.prescribingDoctorName),
       prescribingDoctorPartyId: input.prescribingDoctorPartyId ?? null,
       patientId: input.patientId,

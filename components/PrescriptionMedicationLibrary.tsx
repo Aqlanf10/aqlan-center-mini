@@ -1,5 +1,6 @@
 "use client";
 
+import { PrescriptionMedicationPreview } from "./PrescriptionMedicationPreview";
 import { useState } from "react";
 import { MEDICATION_REFERENCES } from "@/lib/prescription-medication-library";
 
@@ -32,6 +33,7 @@ export function PrescriptionMedicationLibrary() {
         <ul className="mt-2 space-y-1">{entry.sources.map(source => <li key={source.url}><a className="underline" href={source.url} target="_blank" rel="noreferrer">{source.title}</a> · {source.version}</li>)}</ul>
         <button type="button" disabled className="mt-2 rounded border px-3 py-2 text-slate-500">إضافة للوصفة — غير مفعّل للمراجعة</button>
       </article>)}
+      <PrescriptionMedicationPreview />
     </details>
   );
 }

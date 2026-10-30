@@ -1,4 +1,4 @@
-import { isConfiguredPrescriptionOwner } from "@/lib/prescription-owner";
+import { getPrescriptionOwnerAuthority } from "@/lib/prescription-owner";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -87,7 +87,8 @@ export async function POST(request: Request) {
   if (!Number.isSafeInteger(selectedId) || selectedId <= 0) {
     return NextResponse.json({ message: "اختر طبيبًا صالحًا من القائمة." }, { status: 400 });
   }
-  if (selectedId !== doctorPartyId && !isConfiguredPrescriptionOwner(user)) {
+  const ownerAuthority = selectedId !== doctorPartyId ? await getPrescriptionOwnerAuthority(user) : null;
+  if (selectedId !== doctorPartyId && !ownerAuthority) {
     return NextResponse.json({ message: "اختيار طبيب آخر لإصدار الوصفة متاح للمالك الطبيب المرتبط بهوية موثوقة فقط." }, { status: 403 });
   }
   const selectedDoctor = selectedId === doctorPartyId ? issuerDoctor : await getParty(selectedId).catch(() => null);
@@ -96,6 +97,7 @@ export async function POST(request: Request) {
   }
   const prescribingDoctorName = selectedDoctor.name;
   const draft = checkPrescriptionDraft({
+    ownerAuthority,
     prescribingDoctorName,
     prescribingDoctorPartyId: selectedId,
     patientId,

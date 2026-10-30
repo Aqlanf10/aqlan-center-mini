@@ -9,7 +9,8 @@ import { friendlyDateLong, friendlyTime } from "../lib/reminders";
 import { POST_OP_TEMPLATES } from "../lib/post-op-care";
 import { CONSENT_TEMPLATES } from "../lib/consent-templates";
 
-const readers = vi.hoisted(() => ({ patient: vi.fn(), settings: vi.fn(), prescription: vi.fn(), referral: vi.fn(), appointment: vi.fn(), appointments: vi.fn(), expense: vi.fn(), document: vi.fn(), file: vi.fn(), contract: vi.fn(), addenda: vi.fn(), session: vi.fn(), access: vi.fn(), printCount: vi.fn() }));
+const readers = vi.hoisted(() => ({ prescriberOptions: vi.fn(), patient: vi.fn(), settings: vi.fn(), prescription: vi.fn(), referral: vi.fn(), appointment: vi.fn(), appointments: vi.fn(), expense: vi.fn(), document: vi.fn(), file: vi.fn(), contract: vi.fn(), addenda: vi.fn(), session: vi.fn(), access: vi.fn(), printCount: vi.fn() }));
+vi.mock("@/lib/prescription-prescriber", () => ({ prescriptionPrescriberOptions: readers.prescriberOptions }));
 vi.mock("@/lib/session", () => ({ requireSession: readers.session }));
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", getPatient: readers.patient, getSettingsSafe: readers.settings, getPrescriptionPrintSettings: readers.settings,
   getPrescription: readers.prescription, getReferral: readers.referral, getAppointment: readers.appointment,
@@ -74,6 +75,7 @@ function artifact(name: string, markup: string, paper: "A4" | "A5" | "A6") {
 
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers(); vi.setSystemTime(new Date("2031-01-05T10:00:00Z"));
+  readers.prescriberOptions.mockResolvedValue({ issuerId: 5, canChooseAnyDoctor: false, doctors: [{ id: 5, name: "د. موثق" }] });
   readers.session.mockResolvedValue({ role: "admin", username: "synthetic-session", userId: 99099 }); readers.access.mockResolvedValue(true);
   readers.settings.mockResolvedValue(settings); readers.patient.mockResolvedValue(patient); readers.prescription.mockResolvedValue(prescription);
   readers.referral.mockResolvedValue(referral); readers.appointment.mockResolvedValue(appointment); readers.appointments.mockResolvedValue([appointment]);
@@ -104,7 +106,7 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
     readers.prescription.mockResolvedValue(null);
     const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", items: JSON.stringify(prescription.items), diagnosis: "تشخيص مسودة صناعي", date: "2031-01-04", lang: "en" }) }));
     expect(html).toContain("مسودة للمراجعة"); expect(html).not.toContain("UNAPPROVED DRAFT"); expect(html).not.toContain("#fffbeb"); expect(html).toContain(prescription.items[0].instructionsEn); expect(html).not.toContain(prescription.items[0].instructions);
-    expect(html).toContain("اسم الطبيب غير محدد"); expect(html).not.toContain("synthetic-session"); expect(html).not.toContain(prescription.createdBy); artifact("prescription-draft", html, "A5");
+    expect(html).toContain("اسم الطبيب غير موثق في المسودة"); expect(html).not.toContain("synthetic-session"); expect(html).not.toContain(prescription.createdBy); artifact("prescription-draft", html, "A5");
   });
   it("referral preserves reason, FDI, alert, urgency and recorded physician signature block", async () => {
     const before = structuredClone(referral); const html = render(await ReferralPage({ params: params(referral.id) }));
@@ -198,7 +200,7 @@ describe("prescription identity and direction", () => {
     expect(legacy).toContain("اسم الطبيب غير موثق في الوصفة القديمة");
     expect(legacy).not.toContain(prescription.createdBy);
     const draft = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorName: "د. معاينة فقط", items: JSON.stringify(prescription.items) }) }));
-    expect(draft).toContain("د. معاينة فقط"); expect(draft).toContain("مسودة للمراجعة");
+    expect(draft).not.toContain("د. معاينة فقط"); expect(draft).toContain("اسم الطبيب غير موثق في المسودة"); expect(draft).toContain("مسودة للمراجعة");
   });
   it.each([false, true])("reads current identity and respects empty fields (draft=%s)", async draft => {
     const query = draft ? { draft: "1", items: JSON.stringify(prescription.items) } : { rx: "99002" };
@@ -210,5 +212,22 @@ describe("prescription identity and direction", () => {
     expect(second).toContain("NEXT-CLINIC");
     expect(second).not.toContain("NEW-PHONE"); expect(second).not.toContain("print-contact-footer");
     expect(second).not.toContain(settings["clinic.lead_doctor"]);
+  });
+});
+
+describe("draft physician identity cannot be forged", () => {
+  it("resolves allowed ID on server and ignores supplied name", async () => {
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "5", doctorName: "FORGED", items: JSON.stringify(prescription.items) }) }));
+    expect(html).toContain("د. موثق"); expect(html).not.toContain("FORGED");
+  });
+  it.each(["99", "bad", "0"])("rejects disallowed/invalid draft clinician %s", async doctorPartyId => {
+    await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId, items: JSON.stringify(prescription.items) }) })).rejects.toThrow();
+  });
+  it("permits owner choice only from current server-authorized options", async () => {
+    readers.prescriberOptions.mockResolvedValue({ issuerId: 5, canChooseAnyDoctor: true, doctors: [{ id: 5, name: "Owner" }, { id: 99, name: "Dr Target" }] });
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "99", items: JSON.stringify(prescription.items) }) }));
+    expect(html).toContain("Dr Target");
+    readers.prescriberOptions.mockResolvedValue({ issuerId: 7, canChooseAnyDoctor: false, doctors: [{ id: 7, name: "Other viewer" }] });
+    await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", doctorPartyId: "99", items: JSON.stringify(prescription.items) }) })).rejects.toThrow();
   });
 });
