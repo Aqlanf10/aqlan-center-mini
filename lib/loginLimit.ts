@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import { consumeLoginAttempt } from "./db";
-import { clientIpFromForwardedFor } from "./net";
+import { clientIpFromForwardedFor, isTrustedProxy } from "./net";
 
 /**
  * حدُّ محاولات الدخول المشترك — الطاقم والبوابة على السواء.
@@ -53,18 +53,24 @@ export function loginLimitKeys(
   const hmac = (value: string) =>
     createHmac("sha256", secret).update(value).digest("hex");
 
-  const limits: { key: string; maximum: number }[] = [
-    { key: hmac(`${scope}:account:${identifier.trim().toLowerCase()}`), maximum: ACCOUNT_ATTEMPTS },
-  ];
-  if (process.env.TRUST_PROXY === "true") {
+  const normalizedId = identifier.trim().toLowerCase();
+  if (isTrustedProxy()) {
     /* آخر قيمة في السلسلة — التي أضافها الوسيط الموثوق نفسه؛ الأولى يكتبها
-       العميل فيمكنه تزويرها (lib/net.ts). */
+       العميل فيمكنه تزويرها (lib/net.ts). عزل عداد الحساب بـ (IP + الحساب)
+       يمنع مهاجمًا خارجيًا من قفل حساب المدير من عنوان آخر، مع بقاء سقف المصدر
+       وسقف واسع للحساب ضد التوزيع الشبكي. */
     const address = clientIpFromForwardedFor(headers.get("x-forwarded-for"));
     if (address) {
-      limits.push({ key: hmac(`${scope}:source:${address}`), maximum: SOURCE_ATTEMPTS });
+      return [
+        { key: hmac(`${scope}:ip_account:${address}:${normalizedId}`), maximum: ACCOUNT_ATTEMPTS },
+        { key: hmac(`${scope}:source:${address}`), maximum: SOURCE_ATTEMPTS },
+        { key: hmac(`${scope}:account:${normalizedId}`), maximum: SOURCE_ATTEMPTS },
+      ];
     }
   }
-  return limits;
+  return [
+    { key: hmac(`${scope}:account:${normalizedId}`), maximum: ACCOUNT_ATTEMPTS },
+  ];
 }
 
 /** مفتاح الحدّ القديم لحساب الطاقم (sha256 للاسم بأحرف صغيرة) — كما كان في مسار الدخول. */

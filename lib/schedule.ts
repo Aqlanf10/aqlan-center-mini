@@ -375,20 +375,37 @@ export function distributeAppointmentsToChairs(
     appointments: [],
   }));
 
+  const overlapsOnChair = (chair: ChairSchedule, apptStart: number, apptEnd: number): boolean =>
+    chair.appointments.some((existing) => {
+      if (!occupiesChair(existing.status)) return false;
+      const existStart = toMinutes(existing.scheduledTime) ?? 0;
+      const existEnd = existStart + existing.durationMinutes;
+      return apptStart < existEnd && existStart < apptEnd;
+    });
+
+  const unpinned: Appointment[] = [];
   for (const appt of dayAppointments) {
+    const pinnedNo = appt.chairNo != null && Number.isInteger(appt.chairNo)
+      && appt.chairNo >= 1 && appt.chairNo <= count ? appt.chairNo : null;
+    if (pinnedNo !== null) {
+      const targetChair = chairs[pinnedNo - 1];
+      const apptStart = toMinutes(appt.scheduledTime) ?? 0;
+      const apptEnd = apptStart + appt.durationMinutes;
+      if (!occupiesChair(appt.status) || !overlapsOnChair(targetChair, apptStart, apptEnd)) {
+        targetChair.appointments.push(appt);
+        continue;
+      }
+    }
+    unpinned.push(appt);
+  }
+
+  for (const appt of unpinned) {
     const apptStart = toMinutes(appt.scheduledTime) ?? 0;
     const apptEnd = apptStart + appt.durationMinutes;
 
     let placed = false;
     for (const chair of chairs) {
-      const hasOverlap = chair.appointments.some((existing) => {
-        if (!occupiesChair(existing.status)) return false;
-        const existStart = toMinutes(existing.scheduledTime) ?? 0;
-        const existEnd = existStart + existing.durationMinutes;
-        return apptStart < existEnd && existStart < apptEnd;
-      });
-
-      if (!hasOverlap) {
+      if (!overlapsOnChair(chair, apptStart, apptEnd)) {
         chair.appointments.push(appt);
         placed = true;
         break;
@@ -401,6 +418,10 @@ export function distributeAppointmentsToChairs(
       );
       minChair.appointments.push(appt);
     }
+  }
+
+  for (const chair of chairs) {
+    chair.appointments.sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime));
   }
 
   return chairs;

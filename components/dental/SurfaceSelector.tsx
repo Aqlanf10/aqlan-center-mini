@@ -9,6 +9,7 @@ import { SURFACES } from "@/lib/dental";
 export const SURFACE_DESCRIPTIONS: Record<string, { label: string; desc: string }> = {
   M: { label: "M", desc: "إنسي (Mesial)" },
   O: { label: "O", desc: "إطباقي (Occlusal)" },
+  I: { label: "I", desc: "قاطعي (Incisal)" },
   D: { label: "D", desc: "وحشي (Distal)" },
   B: { label: "B", desc: "دهليزي (Buccal)" },
   L: { label: "L", desc: "لساني (Lingual)" },
@@ -23,7 +24,7 @@ export function SurfaceSelector({ value, onChange }: {
   onChange: (next: string[]) => void;
 }) {
   return (
-    <div className="grid grid-cols-5 gap-2">
+    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
       {SURFACES.map((surface) => {
         const active = value.includes(surface);
         const meta = SURFACE_DESCRIPTIONS[surface];

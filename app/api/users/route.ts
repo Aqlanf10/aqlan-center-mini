@@ -1,9 +1,8 @@
-import { legacySessionEvidence } from "@/lib/auth";
+import { MAX_PASSWORD_LENGTH, hashPassword, legacySessionEvidence } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createStaffUser, findUserByUsername, listUsers, recordAudit } from "@/lib/db";
-import { hashPassword } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
@@ -52,8 +51,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اكتب الاسم الظاهر." }, { status: 400 });
   }
   const password = typeof source.password === "string" ? source.password : "";
-  if (password.length < 8) {
-    return NextResponse.json({ message: "كلمة المرور يجب ألا تقل عن 8 أحرف." }, { status: 400 });
+  if (password.length < 8 || password.length > MAX_PASSWORD_LENGTH) {
+    return NextResponse.json({ message: `كلمة المرور يجب أن تكون بين 8 و${MAX_PASSWORD_LENGTH} حرفًا.` }, { status: 400 });
   }
   if (!isRole(source.role)) {
     return NextResponse.json({ message: "اختر الدور." }, { status: 400 });

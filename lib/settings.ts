@@ -88,7 +88,10 @@ export type SettingKey =
   | "reception.balance_warning_minor"
   /* (SEC-05) أعلام تشغيل الواجهات العامة بقرار المالك. */
   | "portal.enabled"
-  | "booking.public_enabled";
+  | "booking.public_enabled"
+  /* (CLIN-07) منع الحجز خارج ساعات الورديات وأيام العطلة الأسبوعية إلا بتجاوز موثق. */
+  | "scheduling.strict_hours"
+  | "clinic.closed_weekdays";
 
 /**
  * القيم الافتراضية.
@@ -224,6 +227,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "reception.balance_warning_minor": "",
   "portal.enabled": "true",
   "booking.public_enabled": "true",
+  "scheduling.strict_hours": "false",
+  "clinic.closed_weekdays": "",
 };
 
 export type SettingsMap = Record<SettingKey, string>;

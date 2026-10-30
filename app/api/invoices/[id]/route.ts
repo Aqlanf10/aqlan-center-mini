@@ -16,6 +16,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
+  if ((session.role === "cashier" || session.role === "accountant") && session.financeAccess?.viewPatientLedger === false) {
+    return NextResponse.json({ message: "عرض الفواتير خارج صلاحياتك المالية." }, { status: 403 });
+  }
   const { id: rawId } = await context.params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) {

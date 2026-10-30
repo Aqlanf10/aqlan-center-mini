@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { findUserByUsername, getSettingsSafe, personNameTokens, recordAudit } from "@/lib/db";
+import { CLINIC_TIME_ZONE, findUserByUsername, getSettingsSafe, personNameTokens, recordAudit } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
 import { type Role, canUseAiChat } from "@/lib/roles";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
@@ -158,7 +159,7 @@ export async function POST(request: Request) {
 
   const started = Date.now();
   const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
-  const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
+  const todayISO = await dbTodayISO().catch(() => clinicDateString(new Date(), CLINIC_TIME_ZONE));
   const isDbConnected = isDatabaseOnline();
 
   // سياق المريض الجلسي إن أُرسل من العميل: لا يُصدَّق قبل فحص ملكيته (P0.5) —

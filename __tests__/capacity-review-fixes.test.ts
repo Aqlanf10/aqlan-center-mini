@@ -175,10 +175,20 @@ describe("كلُّ بابٍ يسجّل تجاوزه", () => {
     it(`${door} يترك أثرًا للتجاوز`, () => {
       const source = readFileSync(join(root, door), "utf8");
       /* مسار المواعيد يسجّل عبر `bookAppointment`؛ والبقيّة تستدعي المسجِّل
-         المشترك مباشرةً. وأيُّ بابٍ لا يفعل أيًّا منهما يتجاوز بلا أثر. */
-      expect(source).toMatch(/recordCapacityOverride|bookAppointment\(/);
+         المشترك مباشرةً أو عبر محوّلي المحرّك الموحّدين. */
+      expect(source).toMatch(/recordCapacityOverride|bookAppointment\(|confirmBookingRequestThroughEngine|schedulePlannedVisitThroughEngine/);
     });
   }
+
+  it("ومحولّا التأكيد والزيارة المخطّطة يسجّلان التجاوز عبر recordCapacityOverride", () => {
+    for (const helper of [
+      join("lib", "booking-request-confirm.ts"),
+      join("lib", "planned-visit-schedule.ts"),
+    ]) {
+      const source = readFileSync(join(root, helper), "utf8");
+      expect(source).toContain("recordCapacityOverride(");
+    }
+  });
 
   it("والمسجِّل مشتركٌ لا منسوخ — نسخةٌ ثانية تنحرف عن الأولى", () => {
     const source = readFileSync(join(root, "lib", "book-appointment.ts"), "utf8");

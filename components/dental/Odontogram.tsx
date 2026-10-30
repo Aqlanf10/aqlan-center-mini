@@ -65,6 +65,8 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
         const active = selected.includes(code);
         const displayLabel = system === "universal" ? toUniversal(code) : String(code);
         const isAbsent = state?.absent || condition === "missing" || condition === "extracted";
+        const quadrant = Math.floor(code / 10);
+        const isUpperTooth = quadrant === 1 || quadrant === 2 || quadrant === 5 || quadrant === 6;
 
         return (
           <button
@@ -86,7 +88,8 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
             </span>
             <div className="relative">
               <svg viewBox="0 0 24 30" className={SVG_SIZE[size]} aria-hidden="true">
-                <path d={TOOTH_PATH} className={chartKnown ? CONDITION_COLOR[condition] : "fill-slate-100 stroke-slate-400"}
+                <path d={TOOTH_PATH} transform={isUpperTooth ? "rotate(180 12 15)" : undefined}
+                  className={chartKnown ? CONDITION_COLOR[condition] : "fill-slate-100 stroke-slate-400"}
                   strokeWidth="1.2" strokeDasharray={chartKnown ? undefined : "2 2"} />
                 {!chartKnown ? <text x="12" y="14" textAnchor="middle" fontSize="10" className="fill-slate-500">?</text> : null}
                 {isAbsent ? (

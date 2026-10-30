@@ -716,7 +716,7 @@ export function ExpenseCategoriesManager({
 
       {/* Floating Batch Save Bar */}
       {!readOnly && hasPendingChanges && (
-        <div className="fixed bottom-6 start-1/2 -translate-x-1/2 z-40 flex items-center gap-3 rounded-2xl bg-slate-900/95 text-white px-5 py-3 shadow-2xl border border-slate-700 backdrop-blur-md animate-bounce">
+        <div className="fixed bottom-20 lg:bottom-6 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-3 rounded-2xl bg-slate-900/95 text-white px-5 py-3 shadow-2xl border border-slate-700 backdrop-blur-md">
           <div className="flex items-center gap-2">
             <span className="flex h-2.5 w-2.5 rounded-full bg-amber-400 animate-ping" />
             <span className="text-xs font-bold">

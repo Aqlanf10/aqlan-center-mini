@@ -1,13 +1,13 @@
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { getPatient, getPrescription, getSettingsSafe } from "@/lib/db";
+import { getPatient, getPrescription, getSettingsSafe, printCount } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { isAdmin } from "@/lib/roles";
 import { sanitizeRxItems } from "@/lib/prescription";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
-import { PrintButton } from "@/components/PrintButton";
+import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -114,10 +114,16 @@ export default async function PrescriptionPrintPage({
       ? sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
       : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const age = ageFromBirthYear(patient.birthYear, dateStr);
+  const printed = stored ? await printCount("prescription", stored.id).catch(() => 0) : 0;
 
   return (
     <>
-      {stored ? <PrintButton docType="prescription" docId={stored.id} /> : null}
+      {stored ? (
+        <>
+          <PrintButton docType="prescription" docId={stored.id} />
+          <ReprintMark printed={printed > 0} />
+        </>
+      ) : null}
       <div className="sheet sheet-a5">
         <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact />
 

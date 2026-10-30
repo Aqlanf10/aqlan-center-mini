@@ -3,7 +3,7 @@ import labelStyles from "./labels.module.css";
 import { statementAgreementsRequireReview } from "@/lib/statement-lines";
 import { StatementHistoricalDetails, StatementInvoiceDetails, currentStatementInvoices, statementAgreements } from "./presentation";
 import { notFound } from "next/navigation";
-import { CLINIC_TIME_ZONE, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientStatementSnapshot } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientStatementSnapshot, printCount } from "@/lib/db";
 import {
   CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatMoney,
   type Balance, type Currency,
@@ -11,7 +11,7 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
-import { PrintButton } from "@/components/PrintButton";
+import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { PatientStatementDocument } from "@/components/PatientStatementDocument";
 import { loadPatientStatementDocument } from "@/lib/patient-statement-build";
 import { parsePatientStatementOptions, StatementInputError } from "@/lib/patient-statement-options";
@@ -63,14 +63,15 @@ export default async function StatementPage({ params, searchParams }: {
       throw error;
     }
     if (!document) notFound();
-    return <><PrintButton /><PatientStatementDocument document={document} /></>;
+    const printed = await printCount("statement", id).catch(() => 0);
+    return <><PrintButton docType="statement" docId={id} /><ReprintMark printed={printed > 0} /><PatientStatementDocument document={document} /></>;
   }
 
   // The existing no-query print remains the current, all-history ledger and plan agreement view.
   // Its ledger, plan currencies and agreement progress come from one read-only snapshot, so the
   // receipts, balances and agreement on one sheet always describe the same committed state.
-  const [patient, settings, { ledger, planCurrencies, plans, historicalAgreements, statementEvidence }] = await Promise.all([
-    getPatient(id), getSettingsSafe(),
+  const [patient, settings, printed, { ledger, planCurrencies, plans, historicalAgreements, statementEvidence }] = await Promise.all([
+    getPatient(id), getSettingsSafe(), printCount("statement", id).catch(() => 0),
     patientStatementSnapshot(id, clinicDateString(new Date(), CLINIC_TIME_ZONE), { historicalAgreements: true, patientFacing: true }),
   ]);
   if (!patient) notFound();
@@ -96,7 +97,8 @@ export default async function StatementPage({ params, searchParams }: {
 
   return (
     <>
-      <PrintButton />
+      <PrintButton docType="statement" docId={id} />
+      <ReprintMark printed={printed > 0} />
       <div className="sheet sheet-a4 statement-sheet" dir="rtl">
         <style>{`
           .statement-invoice { margin-bottom: 4mm; table-layout: fixed; }

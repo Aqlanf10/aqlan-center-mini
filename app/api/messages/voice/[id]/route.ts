@@ -36,13 +36,17 @@ export async function GET(
     return NextResponse.json({ message: "الرسالة الصوتية غير موجودة." }, { status: 404 });
   }
 
+  if (payload.recipientType === "staff_all" && (portal || !session)) {
+    return NextResponse.json({ message: "لا يمكنك سماع هذه الرسالة." }, { status: 403 });
+  }
+
   if (portal) {
     const mine = payload.senderPatientId === portal.patientId
       || payload.recipientPatientId === portal.patientId;
     if (!mine) {
       return NextResponse.json({ message: "لا يمكنك سماع هذه الرسالة." }, { status: 403 });
     }
-    return audioResponse(payload.mime, payload.data);
+    return audioResponse(payload.mime, payload.data, payload.bytes);
   }
 
   if (!session) {
@@ -68,17 +72,17 @@ export async function GET(
     );
   }
 
-  return audioResponse(payload.mime, payload.data);
+  return audioResponse(payload.mime, payload.data, payload.bytes);
 }
 
-function audioResponse(mime: string, base64: string): NextResponse {
-  const buffer = Buffer.from(base64, "base64");
+function audioResponse(mime: string, base64: string, rawBytes?: Buffer | null): NextResponse {
+  const buffer = rawBytes ?? Buffer.from(base64, "base64");
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,
     headers: {
       "Content-Type": mime,
       "Content-Length": String(buffer.byteLength),
-      "Cache-Control": "private, max-age=86400",
+      "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Accept-Ranges": "none",
     },

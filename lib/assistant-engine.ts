@@ -14,7 +14,8 @@ import { clinicalCapabilityOf } from "./clinical-identity";
 import { generateDentalExpertReply } from "./dental-ai-engine";
 import { extractPatientIdentifier } from "./assistant-knowledge";
 import type { PeriodPreset, CurrencyFilter } from "./reports-types";
-import { addDays } from "./schedule";
+import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
+import { addDays, clinicDateString } from "./schedule";
 
 /**
  * فحص محاولات حقن الأوامر والتلاعب بالصلاحيات (Prompt Injection)
@@ -404,7 +405,7 @@ async function processAssistantQueryImpl(
     !norm.includes("كيف") && !norm.includes("مواعيد اليوم")
   ) {
     const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
-    const pDate = extractActionDate(trimmed, context.todayISO || new Date().toISOString().slice(0, 10));
+    const pDate = extractActionDate(trimmed, context.todayISO || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
     const pTime = extractActionTime(trimmed);
     const pSpecialty = extractSpecialty(trimmed);
 

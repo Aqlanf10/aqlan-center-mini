@@ -54,7 +54,7 @@ function sslFor(url) {
   const lowered = url.toLowerCase();
   if (lowered.includes("sslmode=disable")) return false;
   if (/@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(lowered)) return false;
-  return { rejectUnauthorized: false };
+  return { rejectUnauthorized: process.env.PGSSL_ALLOW_SELF_SIGNED !== "true" };
 }
 
 const MINI_DB = "aqlan_center_mini_v2";
@@ -113,8 +113,8 @@ if (!password) {
   console.error("\nخطأ: اكتب كلمة المرور الجديدة.");
   process.exit(1);
 }
-if (password.length < 8) {
-  console.error("خطأ: كلمة المرور يجب ألا تقل عن 8 أحرف — القاعدة نفسها المطبَّقة في النظام.");
+if (password.length < 8 || password.length > 200) {
+  console.error("خطأ: كلمة المرور يجب أن تكون بين 8 و200 حرف — القاعدة نفسها المطبَّقة في النظام.");
   process.exit(1);
 }
 if (/^\s|\s$/.test(password)) {

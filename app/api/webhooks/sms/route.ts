@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { FORM_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readBoundedBody } from "@/lib/http-body";
 import { webhookDeps } from "@/lib/messaging-webhook-deps";
+import { constantTimeEqual } from "@/lib/messaging-inbound";
 import { smsReceive } from "@/lib/messaging-webhooks";
 
 export const dynamic = "force-dynamic";
@@ -12,8 +13,28 @@ export const dynamic = "force-dynamic";
  * لأن البوابات تختلف في ذلك.
  */
 
+function extractWebhookKey(request: Request, url: URL): string {
+  const headerKey = request.headers.get("x-webhook-key")?.trim();
+  if (headerKey) return headerKey;
+  const auth = request.headers.get("authorization")?.trim() ?? "";
+  if (/^bearer\s+/i.test(auth)) return auth.replace(/^bearer\s+/i, "").trim();
+  return url.searchParams.get("key") ?? "";
+}
+
 async function handle(request: Request, readBody: boolean) {
   const url = new URL(request.url);
+  const key = extractWebhookKey(request, url);
+  if (!readBody && process.env.SMS_WEBHOOK_ALLOW_GET !== "true") {
+    const channel = await webhookDeps.channel("sms");
+    const expected = typeof channel.config.inboundKey === "string" ? channel.config.inboundKey : "";
+    if (!expected || !key || !constantTimeEqual(key, expected)) {
+      return NextResponse.json({ message: "طلب غير مصرّح به." }, { status: 403 });
+    }
+    return NextResponse.json(
+      { message: "استعمل POST لاستقبال الرسائل الواردة." },
+      { status: 405, headers: { Allow: "POST" } },
+    );
+  }
   const fields: Record<string, unknown> = {};
   for (const [name, value] of url.searchParams) if (name !== "key") fields[name] = value;
   if (readBody) {
@@ -38,7 +59,7 @@ async function handle(request: Request, readBody: boolean) {
     }
   }
   try {
-    const outcome = await smsReceive(url.searchParams.get("key") ?? "", fields, webhookDeps);
+    const outcome = await smsReceive(key, fields, webhookDeps);
     return NextResponse.json(outcome.json ?? {}, { status: outcome.status });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ الرسالة الواردة الآن." }, { status: 500 });

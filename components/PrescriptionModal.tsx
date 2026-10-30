@@ -150,6 +150,17 @@ export function PrescriptionModal({
 
   const hasCriticalAlert = safetyAlerts.some((a) => a.severity === "critical");
 
+  const hasUnsavedRxDraft = items.length > 0 || notes.trim() !== "" || diagnosisOverride !== null;
+  useEffect(() => {
+    if (!hasUnsavedRxDraft || typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedRxDraft]);
+
   if (!isOpen) return null;
 
   const applyTemplate = (index: number) => {

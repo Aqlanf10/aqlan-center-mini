@@ -29,6 +29,9 @@ export async function GET(request: Request) {
   if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
+  if ((session.role === "cashier" || session.role === "accountant") && session.financeAccess?.viewPatientLedger === false) {
+    return NextResponse.json({ message: "عرض الفواتير خارج صلاحياتك المالية." }, { status: 403 });
+  }
   const patientId = Number(new URL(request.url).searchParams.get("patientId"));
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });

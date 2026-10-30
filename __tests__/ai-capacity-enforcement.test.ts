@@ -214,10 +214,21 @@ describe("كل باب حجزٍ يستشير المحرّك", () => {
   for (const door of doors) {
     it(`${door} يمرّ من محرّك السعة لا من فحصٍ خاصّ به`, () => {
       const source = readFileSync(join(root, door), "utf8");
-      expect(source).toMatch(/judgeBookingInDay|bookAppointment/);
+      expect(source).toMatch(/judgeBookingInDay|bookAppointment|confirmBookingRequestThroughEngine|schedulePlannedVisitThroughEngine/);
       /* `checkSlot` هو الفحص الثنائيّ القديم: يقول «ممتلئ أو لا» ولا يعرف
          الفواصل ولا الورديات ولا احتياطي الطوارئ. لا يعود إلى مسار حجز. */
       expect(source).not.toContain("checkSlot(");
     });
   }
+
+  it("ومحولّا التأكيد والزيارة المخطّطة يستدعيان judgeBookingInDay فعليًا", () => {
+    for (const helper of [
+      join("lib", "booking-request-confirm.ts"),
+      join("lib", "planned-visit-schedule.ts"),
+    ]) {
+      const source = readFileSync(join(root, helper), "utf8");
+      expect(source).toContain("judgeBookingInDay(");
+      expect(source).not.toContain("checkSlot(");
+    }
+  });
 });

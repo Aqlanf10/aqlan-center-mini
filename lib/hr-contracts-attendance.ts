@@ -419,6 +419,18 @@ async function isPrincipalOwnerAdmin(client: DbClient, userId: number): Promise<
   return Boolean(res.rows[0]?.is_principal);
 }
 
+/**
+ * (HR-02) استثناء العيادة الفردية: إن كان المالك الرئيسي هو المدير النشط الوحيد في النظام
+ * فلا يُقفل عليه تصحيح حضوره أو اعتماده؛ أما إن وُجد مدير نشط ثانٍ فيستمر الفصل الثنائي للصلاحيات.
+ */
+async function isSoleActiveOwnerAdmin(client: DbClient, userId: number): Promise<boolean> {
+  if (!(await isPrincipalOwnerAdmin(client, userId))) return false;
+  const { rows } = await client.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM users WHERE role = 'admin' AND is_active = TRUE`,
+  );
+  return Number(rows[0]?.n ?? 0) === 1;
+}
+
 export async function approveContract(
   contractId: number | string,
   session: SessionPayload,
@@ -464,6 +476,24 @@ export async function approveContract(
     );
 
     await synchronizeContractPayTerms(client,Number(rows[0].staff_id),session);
+    // (HR-02) تهيئة رصيد الإجازة السنوية للسنة التعاقدية عند اعتماد العقد الرسمي إن لم يكن مخصّصًا بعد.
+    const startYear = Number(postgresDateOnly(rows[0].start_date).slice(0, 4));
+    if (Number.isInteger(startYear) && startYear >= 2000 && startYear <= 9999) {
+      const payloadAnnual = Number((rows[0].terms_payload as Record<string, unknown> | null)?.annualLeaveDays);
+      const customAnnual = Number.isFinite(payloadAnnual) && payloadAnnual >= 0 && payloadAnnual <= 366
+        ? payloadAnnual : null;
+      await client.query(
+        `INSERT INTO hr_leave_balances (
+           staff_id, leave_type_code, year, allocated_days, effective_from, effective_to
+         )
+         SELECT $1, 'annual', $2, COALESCE($3::numeric, lt.default_days_per_year, 21),
+                ($2::text || '-01-01')::date, ($2::text || '-12-31')::date
+           FROM hr_leave_types lt
+          WHERE lt.code = 'annual'
+         ON CONFLICT (staff_id, leave_type_code, year) DO NOTHING`,
+        [Number(rows[0].staff_id), startYear, customAnnual],
+      );
+    }
     const contract = mapContractRow(rows[0]);
     await auditWithClient(
       client,
@@ -1223,15 +1253,34 @@ export async function correctAttendanceRecord(
     const curr = currRows[0];
     await assertSinglePairCorrection(client,curr.schedule_id);
 
-    await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, hasRequest: false });
-    // منع الموافقة الذاتية على تصحيح الحضور
-    if (curr.staff_user_id === session.userId) {
-      throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
+    const soleOwner = await isSoleActiveOwnerAdmin(client, session.userId);
+    if (!soleOwner) {
+      await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, hasRequest: false });
+      // منع الموافقة الذاتية على تصحيح الحضور
+      if (curr.staff_user_id === session.userId) {
+        throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
+      }
     }
 
-    const newIn = input.newCheckIn !== undefined ? (input.newCheckIn ? new Date(input.newCheckIn) : null) : curr.check_in_actual;
-    const newOut = input.newCheckOut !== undefined ? (input.newCheckOut ? new Date(input.newCheckOut) : null) : curr.check_out_actual;
-    const newStatus = input.newStatus ?? curr.status;
+    const newIn = input.newCheckIn !== undefined ? (input.newCheckIn ? new Date(input.newCheckIn) : null) : (curr.check_in_actual ? new Date(curr.check_in_actual) : null);
+    const newOut = input.newCheckOut !== undefined ? (input.newCheckOut ? new Date(input.newCheckOut) : null) : (curr.check_out_actual ? new Date(curr.check_out_actual) : null);
+    if (newIn && newOut && newOut.getTime() < newIn.getTime()) {
+      throw new Error("وقت الخروج يسبق الدخول.");
+    }
+    const { rows: [schedule] } = await client.query(
+      `SELECT * FROM hr_work_schedules WHERE id = $1`,
+      [curr.schedule_id],
+    );
+    const calculated = calculateShiftAttendance({
+      checkIn: newIn,
+      checkOut: newOut,
+      scheduledStart: schedule?.shift_start_time ?? "00:00",
+      scheduledEnd: schedule?.shift_end_time ?? "23:59",
+      graceMins: schedule?.grace_period_mins ?? 0,
+      crossesMidnight: schedule?.crosses_midnight ?? false,
+      timeZone: CLINIC_TIME_ZONE,
+    });
+    const newStatus = input.newStatus ?? calculated.status;
 
     const identityEvidence = await captureRequestIdentity(client, curr.staff_id, session.userId);
     // تسجيل التصحيح في سجل التصحيحات append-only
@@ -1258,13 +1307,31 @@ export async function correctAttendanceRecord(
       ],
     );
 
-    // تطبيق التصحيح على السجل الفعلي مع بقاء raw دون تغيير
+    // (HR-02) تطبيق التصحيح مع إعادة حساب دقائق العمل والتأخير والانصراف المبكر والإضافي
     const { rows: updatedRows } = await client.query(
       `UPDATE hr_attendance_records
-       SET check_in_actual = $1, check_out_actual = $2, status = $3, is_incomplete = $4, updated_at = NOW()
-       WHERE id = $5
+       SET check_in_actual = $1,
+           check_out_actual = $2,
+           status = $3,
+           work_minutes = $4,
+           late_minutes = $5,
+           early_exit_minutes = $6,
+           overtime_minutes = $7,
+           is_incomplete = $8,
+           updated_at = NOW()
+       WHERE id = $9
        RETURNING *`,
-      [newIn, newOut, newStatus, Boolean(newIn && !newOut), attId],
+      [
+        newIn,
+        newOut,
+        newStatus,
+        calculated.workMinutes,
+        schedule ? calculated.lateMinutes : 0,
+        schedule ? calculated.earlyExitMinutes : 0,
+        schedule ? calculated.overtimeMinutes : 0,
+        calculated.isIncomplete,
+        attId,
+      ],
     );
 
     const updated = mapAttendanceRow({ ...curr, ...updatedRows[0] });
@@ -1387,10 +1454,13 @@ export async function decideAttendanceCorrection(
     if (!corrRows[0]) throw new Error("طلب تصحيح الحضور غير موجود.");
     const corr = corrRows[0];
 
-    if (decision === "approved") await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: corr.staff_id, requesterUserId: corr.requester_user_id, evidence: corr.identity_evidence, hasRequest: true });
-    // منع الموافقة الذاتية
-    if (decision === "approved" && (corr.requested_by === session.username || corr.staff_user_id === session.userId)) {
-      throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
+    const soleOwner = decision === "approved" ? await isSoleActiveOwnerAdmin(client, session.userId) : false;
+    if (decision === "approved" && !soleOwner) {
+      await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: corr.staff_id, requesterUserId: corr.requester_user_id, evidence: corr.identity_evidence, hasRequest: true });
+      // منع الموافقة الذاتية
+      if (corr.requested_by === session.username || corr.staff_user_id === session.userId) {
+        throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
+      }
     }
     if (corr.status !== "pending") { if (corr.status === decision) return mapCorrectionRow(corr); throw new Error("حُسم طلب التصحيح سابقًا."); }
 

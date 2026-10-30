@@ -3,7 +3,7 @@ import { clearAccountLoginAttempts, consumeStaffLoginAttempt, findUserByUsername
 import { accountLimitKey, consumeLoginAttemptFor, legacyStaffAccountKey } from "@/lib/loginLimit";
 import { currentStaffEntryMode } from "@/lib/staff-entry-mode";
 import { issueDurableStaffSession } from "@/lib/staff-durable-issuer";
-import { firstHeaderEntry, isHostTrusted } from "@/lib/net";
+import { firstHeaderEntry, isHostTrusted, isTrustedProxy } from "@/lib/net";
 import { normalizeOrigin } from "@/lib/origin-policy";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/lib/http-body";
 import { FORM_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import {
+  MAX_PASSWORD_LENGTH,
   SESSION_COOKIE,
   SESSION_DURATION_MS,
   createSessionToken,
@@ -32,7 +33,7 @@ function getRedirectUrl(path: string, request: Request): string {
    * تُقرأ إطلاقًا إلا عند TRUST_PROXY=true — بلا وسيطٍ موثوق لا تفتح
    * الترويسات المزيّفة بابًا: لا redirect إلى أصلٍ مزيّف ولا خفضٌ إلى http
    * من ترويسة يكتبها العميل، حتى لو طابق مضيفها قائمة المشغّل. */
-  if ((process.env.TRUST_PROXY ?? "").trim().toLowerCase() === "true") {
+  if (isTrustedProxy()) {
     const forwardedHost = firstHeaderEntry(request.headers.get("x-forwarded-host"))
       ?? firstHeaderEntry(request.headers.get("host"));
     const rawProto = firstHeaderEntry(request.headers.get("x-forwarded-proto")) ?? "https";
@@ -128,6 +129,12 @@ export async function POST(request: Request) {
       return NextResponse.redirect(getRedirectUrl("/login?error=missing_fields", request), 303);
     }
     return NextResponse.json({ message: "اسم المستخدم وكلمة المرور مطلوبان." }, { status: 400 });
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    if (isHtmlRequest) {
+      return NextResponse.redirect(getRedirectUrl("/login?error=invalid_credentials", request), 303);
+    }
+    return NextResponse.json({ message: INVALID_CREDENTIALS }, { status: 401 });
   }
 
   try {

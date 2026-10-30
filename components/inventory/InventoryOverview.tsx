@@ -18,7 +18,8 @@ import {
   type StockStatus,
 } from "@/lib/inventory";
 import { useDurablePurchaseAttempt } from "./useDurablePurchaseAttempt";
-import { purchaseDocument, PURCHASE_UNCERTAIN } from "@/lib/inventory-purchase-command";
+import { createPurchaseCommand, purchaseDocument, PURCHASE_UNCERTAIN } from "@/lib/inventory-purchase-command";
+import { INVENTORY_PURCHASE_KEY_HEADER } from "@/lib/inventory-purchase-protocol";
 import { friendlyDateLong } from "@/lib/reminders";
 
 interface InventoryItemView {
@@ -136,6 +137,7 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
   const [minLevel, setMinLevel] = useState("3");
   const [initialQty, setInitialQty] = useState("");
   const [initialExpiry, setInitialExpiry] = useState("");
+  const [initialUnitCost, setInitialUnitCost] = useState("");
 
   // لوحة البند المفتوح
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -156,6 +158,7 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
     items: { id: number; name: string; qty: number; valueMinor: number | null; unitCostMinor: number | null; costStatus: "known" | "estimated" | "missing" }[];
   } | null>(null);
   const [qty, setQty] = useState("");
+  const [actualCount, setActualCount] = useState("");
   const [expiry, setExpiry] = useState("");
   const [reason, setReason] = useState("");
   const purchase = useDurablePurchaseAttempt(detail?.item.id ?? null);
@@ -217,6 +220,7 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
     setDetail(null);
     setKind("out");
     setQty("");
+    setActualCount("");
     setExpiry("");
     setReason("");
     setUnitCost("");
@@ -255,16 +259,42 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
          افتتاحي لم يُسجَّل لا يُعلن «تم بنجاح» فيُكتشف يوم الصرف. */
       let openingFailed: string | null = null;
       if (initialQty && Number(initialQty) > 0 && payload?.id) {
-        const opening = await fetch(`/api/inventory/${payload.id}/movements`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            kind: "in",
-            qty: Number(initialQty),
-            expiryDate: initialExpiry || null,
-            reason: "رصيد افتتاحي عند الإنشاء",
-          }),
-        }).catch(() => null);
+        let opening: Response | null = null;
+        if (initialUnitCost.trim() !== "" && session?.username) {
+          const me = (await fetch("/api/auth/me", { cache: "no-store" })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)) as { id?: number } | null;
+          if (me && Number.isSafeInteger(me.id) && me.id! > 0) {
+            const cmd = await createPurchaseCommand(session.username, me.id!, Number(payload.id), {
+              kind: "in",
+              qty: Number(initialQty),
+              expiryDate: initialExpiry || null,
+              unitCost: initialUnitCost.trim(),
+              reason: "رصيد افتتاحي عند الإنشاء",
+            });
+            opening = await fetch(`/api/inventory/${payload.id}/movements`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                [INVENTORY_PURCHASE_KEY_HEADER]: cmd.key,
+                "X-Purchase-Actor": encodeURIComponent(session.username),
+                "X-Purchase-Actor-Id": String(me.id!),
+              },
+              body: cmd.body,
+            }).catch(() => null);
+          }
+        } else {
+          opening = await fetch(`/api/inventory/${payload.id}/movements`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              kind: "in",
+              qty: Number(initialQty),
+              expiryDate: initialExpiry || null,
+              reason: "رصيد افتتاحي عند الإنشاء",
+            }),
+          }).catch(() => null);
+        }
         if (!opening || !opening.ok) {
           const detail = opening ? await opening.json().catch(() => null) : null;
           openingFailed = detail?.message ?? "تعذّر الاتصال.";
@@ -276,6 +306,7 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
       setMinLevel("3");
       setInitialQty("");
       setInitialExpiry("");
+      setInitialUnitCost("");
       setMessage(openingFailed
         ? `أُنشئ البند، لكن الرصيد الافتتاحي لم يُسجَّل (${openingFailed}) — سجّله «إدخال» من تفاصيل البند.`
         : "تم إنشاء البند بنجاح.");
@@ -606,6 +637,20 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
             </label>
+            <label className="text-xs">
+              <span className="mb-1 block font-bold text-slate-700">تكلفة الوحدة الافتتاحية (اختياري)</span>
+              <input
+                value={initialUnitCost}
+                onChange={(e) => setInitialUnitCost(e.target.value)}
+                inputMode="decimal"
+                dir="ltr"
+                placeholder="مثال: 2500"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800 tabular-nums"
+              />
+              <span className="mt-1 block text-[10px] text-slate-400">
+                بالعملة الأساسية — تركُها فارغة يسجّل الرصيد الافتتاحي بلا تكلفة وحدة.
+              </span>
+            </label>
           </div>
           <div className="mt-3 flex justify-end gap-2">
             <button
@@ -875,13 +920,38 @@ function InventoryOverviewContent({ integrationEnabled }: { integrationEnabled: 
               </div>
 
               <div className="grid gap-2 sm:grid-cols-2">
+                {movementKind === "adjust" ? (
+                  <label className="text-xs">
+                    <span className="mb-1 block font-bold text-slate-700">
+                      الرصيد الفعلي بالجرد ({detail.item.unit})
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={actualCount}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setActualCount(val);
+                        if (val.trim() === "" || !Number.isFinite(Number(val))) return;
+                        const delta = Number((Number(val) - detail.item.balance).toFixed(3));
+                        setQty(delta === 0 ? "" : String(delta));
+                      }}
+                      placeholder={`الحالي بالنظام: ${fmt(detail.item.balance)}`}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                    />
+                    <span className="mt-1 block text-[10px] text-slate-400">
+                      يحسب فرق الجرد تلقائيًا (زيادة أو نقصان).
+                    </span>
+                  </label>
+                ) : null}
                 <label className="text-xs">
                   <span className="mb-1 block font-bold text-slate-700">
-                    الكمية ({detail.item.unit}) *
+                    {movementKind === "adjust" ? `فرق التسوية (+ / − ${detail.item.unit}) *` : `الكمية (${detail.item.unit}) *`}
                   </span>
                   <input
                     type="number"
-                    min="0.001"
+                    min={movementKind === "adjust" ? undefined : "0.001"}
                     step="any"
                     value={savedText("qty", qty)}
                     onChange={(e) => setQty(e.target.value)}

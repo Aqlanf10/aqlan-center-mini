@@ -601,17 +601,34 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
   // a second ledger principal. Opening history is already net of prior cash.
   const { rows: approvedSources } = await pool.query<{plan_id:number;patient_id:number;invoice_id:number|null;opening_currency:string|null;historical_paid_minor:string;currency:Currency}>(
     "SELECT plan_id,patient_id,invoice_id,opening_currency,historical_paid_minor::text,currency FROM approved_agreement_principals WHERE patient_id=ANY($1::int[])",[ids]);
+  const { rows: deltaAmendments } = await pool.query<{plan_id:number;patient_id:number;delta_invoice_id:number;delta_minor:string}>(
+    `SELECT plan_id, patient_id, delta_invoice_id, delta_minor::text
+       FROM agreement_delta_amendments
+      WHERE patient_id = ANY($1::int[]) AND (occurred_at AT TIME ZONE $2)::date <= $3::date
+      ORDER BY id`,
+    [ids, CLINIC_TIME_ZONE, opts.asOf ?? clinicTodayISO()],
+  );
   // مدفوعات الخطة: الدفعة المرتبطة بالخطة مباشرة أو بفاتورة من الخطة — بعملة
   // الخطة نفسها (P-01/D-1): تقدُّم الخطة يُقاس بعملة اتفاقها لا بمكافئ الدفاتر.
   for (const patient of byId.values()) {
     const planById = new Map(patient.plans.map((plan) => [plan.id, plan]));
     const approved = approvedSources.filter(source=>source.patient_id===patient.patientId);
+    const patientDeltas = deltaAmendments.filter(d=>d.patient_id===patient.patientId);
     const approvedInvoicePlans=new Map<number,number>();
     for(const source of approved){
       const plan=planById.get(source.plan_id);if(plan)plan.paidMinor=num(source.historical_paid_minor);
       if(source.invoice_id!==null)for(const invoiceId of await invoiceSettlementLineage(pool,source.invoice_id,patient.patientId,source.currency)){
         if(approvedInvoicePlans.has(invoiceId))throw new Error("Overlapping approved invoice lineage");
         approvedInvoicePlans.set(invoiceId,source.plan_id);
+      }
+    }
+    for (const delta of patientDeltas) {
+      const plan = planById.get(delta.plan_id);
+      if (plan) {
+        plan.totalMinor += num(delta.delta_minor);
+        for (const invoiceId of await invoiceSettlementLineage(pool, delta.delta_invoice_id, patient.patientId, plan.currency)) {
+          approvedInvoicePlans.set(invoiceId, delta.plan_id);
+        }
       }
     }
     for (const payment of patient.payments) {

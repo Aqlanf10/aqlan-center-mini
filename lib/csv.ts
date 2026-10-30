@@ -15,7 +15,14 @@
  */
 export function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const text = String(value);
+  let text = String(value);
+  if (
+    typeof value === "string" &&
+    /^[=+\-@\t\r]/.test(text) &&
+    !/^[-+]?\d+(?:\.\d+)?$/.test(text)
+  ) {
+    text = `'${text}`;
+  }
   if (!/[",\n\r]/.test(text)) return text;
   return `"${text.replace(/"/g, '""')}"`;
 }

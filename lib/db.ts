@@ -160,7 +160,7 @@ import {
   type BatchResult, type MovementKind, type StockStatus,
 } from "./inventory";
 import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
-import { quantityAtoms, QUANTITY_SCALE } from "./inventory-domain/quantities";
+import { assertBaseUnitEdit, quantityAtoms, QUANTITY_SCALE } from "./inventory-domain/quantities";
 import { proportionalCostMinor } from "./inventory-domain/treatment-cost";
 import { hashPassword } from "./auth";
 import { seedDefaultServices } from "./services-seed";
@@ -3304,6 +3304,16 @@ export async function createFirstAdmin(input: {
   });
 }
 
+export class UserGovernanceError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "UserGovernanceError";
+  }
+}
+
 export async function createStaffUser(input: {
   username: string; displayName: string; passwordHash: string; role: string;
   partyId?: number | null; specialty?: string; branch?: string;
@@ -3313,27 +3323,38 @@ export async function createStaffUser(input: {
   await withTransaction(getPool(), client => assertLegacyStaffWrite(client, authorization, null, "create"));
   await ensureSchema();
   let assignedPartyId: number | null = input.partyId ?? null;
+  let promoteFirstOwner = false;
   const auditContext = { ...ctx };
   const { result: rows } = await withDoctorCommissionChange(
     auditContext, "advanced",
     async client => {
       const actor = await assertLegacyStaffWrite(client, authorization, null, "create");
       auditContext.actor = actor.username; auditContext.actorRole = actor.role;
-      // Doctor creation is now inside the same guarded transaction: denial or
-      // final-expiry rollback cannot leave an orphan party.
+      if (input.role === "admin") {
+        const { rows: existingOwners } = await client.query<{ id: number }>(
+          `SELECT id FROM users WHERE role = 'admin' AND is_active LIMIT 1`,
+        );
+        promoteFirstOwner = existingOwners.length === 0;
+      }
+      // (SEC-08) Create a dedicated doctor party with canonical doctor accounts (5301/2106)
+      // instead of silently binding by display name (which could hijack another doctor's patients).
       if (input.role === "doctor" && !assignedPartyId) {
-        const existing = await client.query<{ id: number }>(
-          `SELECT id FROM parties WHERE kind='doctor' AND (LOWER(name)=LOWER($1) OR name=$2) LIMIT 1`, [input.displayName,input.displayName]);
-        if (existing.rows[0]) assignedPartyId=existing.rows[0].id;
-        else assignedPartyId=(await client.query<{id:number}>(`INSERT INTO parties(name,kind,is_active) VALUES($1,'doctor',true) RETURNING id`,[input.displayName])).rows[0]?.id ?? null;
+        assignedPartyId = (
+          await client.query<{ id: number }>(
+            `INSERT INTO parties (name, kind, is_active, default_expense_account_code, default_payable_account_code)
+             VALUES ($1, 'doctor', true, '5301', '2106') RETURNING id`,
+            [input.displayName],
+          )
+        ).rows[0]?.id ?? null;
       }
       return [assignedPartyId];
     },
     async client => (await client.query<UserRow>(
-      `INSERT INTO users (username,display_name,password_hash,role,party_id,specialty,branch,permissions,commission_config)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO users (username,display_name,password_hash,role,party_id,specialty,branch,permissions,commission_config,is_owner)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [input.username,input.displayName,input.passwordHash,input.role,assignedPartyId,input.specialty??null,input.branch??null,
-        input.permissions?JSON.stringify(input.permissions):null,input.commissionConfig?JSON.stringify(input.commissionConfig):null],
+        input.permissions?JSON.stringify(input.permissions):null,input.commissionConfig?JSON.stringify(input.commissionConfig):null,
+        promoteFirstOwner],
     )).rows,
     undefined,
     client => finishLegacyStaffWrite(client, authorization!, null),
@@ -9984,6 +10005,45 @@ export async function listPatientInvoices(patientId: number, client?: DbClient):
   return rows.map((row) => toInvoice(row, items.get(row.id) ?? []));
 }
 
+export async function cancelActiveInvoiceDebtArrangementInTx(
+  client: DbClient,
+  invoiceId: number,
+  actor: string,
+  actorRole: string | null,
+  reason: string,
+): Promise<void> {
+  const { rows: [arr] } = await client.query<{ id: number; patient_id: number }>(
+    `SELECT id, patient_id FROM debt_repayment_arrangements WHERE invoice_id = $1 FOR UPDATE`,
+    [invoiceId],
+  );
+  if (!arr) return;
+  const { rows: [rev] } = await client.query<{ version: number; status: string }>(
+    `SELECT version, status FROM debt_repayment_revisions WHERE arrangement_id = $1 ORDER BY version DESC LIMIT 1`,
+    [arr.id],
+  );
+  if (!rev || rev.status !== "active") return;
+  const nextVersion = Number(rev.version) + 1;
+  const idempotencyKey = `auto-cancel-inv-${invoiceId}-v${nextVersion}`;
+  const requestHash = createHash("sha256")
+    .update(JSON.stringify({ arrangementId: arr.id, invoiceId, nextVersion, actor, reason }))
+    .digest("hex");
+  const cleanReason = reason.trim().length >= 3 ? reason.trim().slice(0, 300) : "إلغاء تلقائي لترتيب السداد بسبب الفاتورة";
+  await client.query(
+    `INSERT INTO debt_repayment_revisions
+       (arrangement_id, version, status, principal_minor, settled_snapshot_minor, source_snapshot, terms, reason, idempotency_key, request_hash, created_by)
+     VALUES ($1, $2, 'cancelled', 0, 0, $3::jsonb, '{"mode":"full","installments":[]}'::jsonb, $4, $5, $6, $7)`,
+    [arr.id, nextVersion, JSON.stringify({ invoiceId, autoCancelled: true }), cleanReason, idempotencyKey, requestHash, actor || "system"],
+  );
+  await insertAuditRow(client, {
+    action: "debt_repayment.cancel",
+    entity: "patient",
+    entityId: arr.patient_id,
+    actor: actor || "system",
+    actorRole,
+    details: { arrangementId: arr.id, version: nextVersion, invoiceId, reason: cleanReason },
+  });
+}
+
 export async function setInvoiceStatus(
   id: number, status: "open" | "paid" | "cancelled",
   ctx: { actor: string; actorRole: string | null },
@@ -10005,6 +10065,7 @@ export async function setInvoiceStatus(
     if (status === "cancelled") {
       await reopenOrthoDecisionsForInvoice(client, id, ctx.actor, ctx.actorRole);
       await releasePlanItemFinancialLinks(client, id, ctx.actor, ctx.actorRole, "أُلغيت الفاتورة");
+      await cancelActiveInvoiceDebtArrangementInTx(client, id, ctx.actor, ctx.actorRole, "أُلغيت الفاتورة المرتبطة بجدول السداد");
     }
     /* (FIN-3) تعليمها مسدّدة أو إعادتها مفتوحة يدويًّا يُسجَّل هنا في المعاملة نفسها؛ والإلغاء
        يسجّله مساره بسببه وما دُفع عليه (invoice.cancel). */
@@ -16108,16 +16169,48 @@ export async function updateUser(id: number, input: {
   await ensureSchema();
   const auditContext={...ctx};
   const touchesCommission = input.commissionConfig !== undefined || input.clearCommissionConfig === true;
+  const revokesSession = input.isActive === false || input.role !== undefined;
   const { result: rows } = await withDoctorCommissionChange(
     auditContext, "advanced",
     async (client) => {
       const actor=await assertLegacyStaffWrite(client,authorization,id,"update");
       auditContext.actor=actor.username;auditContext.actorRole=actor.role;
-      if (!touchesCommission) return [];
-      const { rows: owner } = await client.query<{ party_id: number | null }>(
-        `SELECT party_id FROM users WHERE id = $1 FOR UPDATE`, [id],
+      const { rows: targetRows } = await client.query<{
+        id: number; role: string; is_active: boolean; is_owner: boolean | null; party_id: number | null;
+      }>(
+        `SELECT id, role, is_active, is_owner, party_id FROM users WHERE id = $1 FOR UPDATE`,
+        [id],
       );
-      return [owner[0]?.party_id ?? null];
+      const target = targetRows[0];
+      if (!target) return [];
+      if (target.is_owner) {
+        if (input.isActive === false || (input.role !== undefined && input.role !== "admin")) {
+          throw new UserGovernanceError(409, "لا يمكن إيقاف حساب المالك الأساسي أو تنزيل دوره.");
+        }
+        if (!authorization?.selfPassword && actor.userId !== target.id) {
+          const { rows: actorOwnerRows } = await client.query<{ is_owner: boolean | null }>(
+            `SELECT is_owner FROM users WHERE id = $1`,
+            [actor.userId],
+          );
+          if (!actorOwnerRows[0]?.is_owner) {
+            throw new UserGovernanceError(403, "لا يُعدَّل حساب المالك الأساسي إلا من المالك نفسه.");
+          }
+        }
+      }
+      if (
+        target.role === "admin" &&
+        target.is_active &&
+        (input.isActive === false || (input.role !== undefined && input.role !== "admin"))
+      ) {
+        const { rows: activeAdmins } = await client.query<{ id: number }>(
+          `SELECT id FROM users WHERE role = 'admin' AND is_active ORDER BY id FOR UPDATE`,
+        );
+        if (activeAdmins.length <= 1) {
+          throw new UserGovernanceError(409, "لا يمكن إيقاف آخر مدير أو تغيير دوره. عيّن مديرًا آخر أولًا.");
+        }
+      }
+      if (!touchesCommission) return [];
+      return [target.party_id ?? null];
     },
     async (client) => (await client.query<{
     id: number; username: string; display_name: string;
@@ -16135,7 +16228,8 @@ export async function updateUser(id: number, input: {
        specialty        = COALESCE($6::text, specialty),
        branch           = COALESCE($7::text, branch),
        permissions      = COALESCE($8::text, permissions),
-       commission_config = CASE WHEN $10::boolean THEN NULL ELSE COALESCE($9::text, commission_config) END
+       commission_config = CASE WHEN $10::boolean THEN NULL ELSE COALESCE($9::text, commission_config) END,
+       session_version  = CASE WHEN $11::boolean THEN COALESCE(session_version, 0) + 1 ELSE COALESCE(session_version, 0) END
      WHERE id = $1
      RETURNING id, username, display_name, role, is_active, created_at, party_id,
                specialty, branch, permissions, commission_config, session_version, is_owner`,
@@ -16145,6 +16239,7 @@ export async function updateUser(id: number, input: {
       input.permissions ? JSON.stringify(input.permissions) : null,
       input.commissionConfig ? JSON.stringify(input.commissionConfig) : null,
       input.clearCommissionConfig === true,
+      revokesSession,
     ],
     )).rows,
     undefined, client => finishLegacyStaffWrite(client, authorization!, id),
@@ -19881,19 +19976,22 @@ async function progressTreatmentSessions(input: {
     touchedItemIds.push(item.id);
     byProcedure.set(line.id, { sessionIndex, sessionCount: item.session_count });
 
-    // حالة البند من جلساته — لا رقمٌ يُكتب فوقه.
+    // حالة البند من جلساته — لا رقمٌ يُكتب فوقه. البند متعدّد الجلسات لا يُغلق من أول جلسة.
     const { rows: counts } = await input.client.query<{
-      done: string; live: string;
+      done: string; live: string; total: string;
     }>(
       `SELECT
          COUNT(*) FILTER (WHERE status = 'done')::text AS done,
-         COUNT(*) FILTER (WHERE status <> 'skipped')::text AS live
+         COUNT(*) FILTER (WHERE status <> 'skipped')::text AS live,
+         COUNT(*)::text AS total
        FROM treatment_sessions WHERE plan_item_id = $1`,
       [item.id],
     );
     const done = Number(counts[0]?.done ?? 0);
     const live = Number(counts[0]?.live ?? 0);
-    if (live > 0 && done >= live) {
+    const total = Number(counts[0]?.total ?? 0);
+    const finished = total >= item.session_count ? (live > 0 && done >= live) : (done >= item.session_count);
+    if (finished) {
       await input.client.query(
         `UPDATE plan_items SET status = 'done', visit_id = $2, done_at = NOW()
           WHERE id = $1 AND status <> 'done'`,
@@ -20124,7 +20222,7 @@ async function createAutoLabOrders(input: {
   const { rows: todayRows } = await input.client.query<{ d: string }>(
     `SELECT CURRENT_DATE::text AS d`,
   );
-  const today = todayRows[0]?.d ?? new Date().toISOString().slice(0, 10);
+  const today = todayRows[0]?.d ?? clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const dueDate = addDays(today, DEFAULT_LAB_DAYS);
   let created = 0;
 
@@ -20378,6 +20476,7 @@ export async function recordToothCondition(input: {
       );
       if (!visits[0]) throw new ToothVisitConflict();
     }
+    const normalizedSurf = normalizeSurfaces(input.surfaces);
     const { rows } = await client.query<ToothRow>(
       `INSERT INTO tooth_conditions
          (patient_id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by)
@@ -20385,10 +20484,46 @@ export async function recordToothCondition(input: {
        RETURNING id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by, recorded_at`,
       [
         input.patientId, input.toothCode, input.condition, input.stage,
-        normalizeSurfaces(input.surfaces), input.note?.trim() || null,
+        normalizedSurf, input.note?.trim() || null,
         visitId, input.recordedBy,
       ],
     );
+    if (input.stage === "completed") {
+      const { rows: candidates } = await client.query<{
+        id: number; plan_id: number; category: string | null; surfaces: string | null; session_count: number;
+      }>(
+        `SELECT i.id, i.plan_id, i.category, i.surfaces, i.session_count
+           FROM plan_items i
+           JOIN treatment_plans t ON t.id = i.plan_id
+          WHERE t.patient_id = $1
+            AND i.tooth_code = $2
+            AND t.status = 'active'
+            AND i.status IN ('planned', 'in_progress')`,
+        [input.patientId, input.toothCode],
+      );
+      const matched = candidates.filter((c) =>
+        conditionForCategory(c.category) === input.condition
+        && c.session_count <= 1
+        && (normalizedSurf === null || normalizeSurfaces(c.surfaces) === normalizedSurf),
+      );
+      if (matched.length > 0) {
+        await client.query(
+          `UPDATE plan_items SET status = 'done', visit_id = COALESCE(visit_id, $2::int), done_at = NOW()
+            WHERE id = ANY($1::int[]) AND status <> 'done'`,
+          [matched.map((m) => m.id), visitId],
+        );
+        const touchedPlans = [...new Set(matched.map((m) => m.plan_id))];
+        await client.query(
+          `UPDATE treatment_plans t SET status = 'completed'
+            WHERE t.id = ANY($1::int[]) AND t.status = 'active'
+              AND NOT EXISTS (
+                SELECT 1 FROM plan_items i
+                 WHERE i.plan_id = t.id AND i.status NOT IN ('done', 'cancelled')
+              )`,
+          [touchedPlans],
+        );
+      }
+    }
     return rows[0] ? toToothRecord(rows[0]) : null;
   });
 }
@@ -22547,7 +22682,7 @@ export async function schedulePlannedVisit(input: {
     return { ok: false, reason: "already_scheduled" };
   }
 
-  let admittedDoctorId: number | null = null;
+  let admittedDoctorId: number | null = preview.doctor_id ?? null;
   try {
     const result = await writeAppointmentInDay({
       client: input.client,
@@ -22555,7 +22690,7 @@ export async function schedulePlannedVisit(input: {
       judge: async (day, client) => {
         if (input.judge) {
           const judged = await input.judge(day, client, preview.duration_minutes);
-          if (judged.ok) admittedDoctorId = judged.doctorId ?? null;
+          if (judged.ok) admittedDoctorId = judged.doctorId !== undefined ? judged.doctorId : (preview.doctor_id ?? null);
           return judged;
         }
         const verdict = checkSlot(day, input.date, input.time, preview.duration_minutes, input.chairs);
@@ -25807,24 +25942,39 @@ export async function updateInventoryItem(
   actor: string,
 ): Promise<InventoryItem | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<InventoryItemRow>(
-    `UPDATE inventory_items SET
-       name       = COALESCE($2, name),
-       category   = COALESCE($3, category),
-       unit       = COALESCE($4, unit),
-       min_level  = COALESCE($5, min_level),
-       note       = CASE WHEN $6::text IS NULL THEN note ELSE $6 END,
-       is_active  = COALESCE($7, is_active)
-     WHERE id = $1 RETURNING
-       id, name, category, unit, min_level, note, is_active, created_by, created_at`,
-    [
-      id, patch.name ?? null, patch.category ?? null, patch.unit ?? null,
-      patch.minLevel ?? null, patch.note === undefined ? null : patch.note,
-      patch.isActive ?? null,
-    ],
-  );
-  if (!rows[0]) return null;
-  const item = await inventoryBalanceFor(id, rows[0]);
+  const updatedRow = await withTransaction(getPool(), async (client) => {
+    const { rows: currentRows } = await client.query<{ id: number; unit: string }>(
+      `SELECT id, unit FROM inventory_items WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!currentRows[0]) return null;
+    if (patch.unit !== undefined) {
+      const { rows: countRows } = await client.query<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM inventory_movements WHERE item_id = $1`,
+        [id],
+      );
+      assertBaseUnitEdit(currentRows[0].unit, patch.unit, countRows[0]?.c ?? 0);
+    }
+    const { rows } = await client.query<InventoryItemRow>(
+      `UPDATE inventory_items SET
+         name       = COALESCE($2, name),
+         category   = COALESCE($3, category),
+         unit       = COALESCE($4, unit),
+         min_level  = COALESCE($5, min_level),
+         note       = CASE WHEN $6::text IS NULL THEN note ELSE $6 END,
+         is_active  = COALESCE($7, is_active)
+       WHERE id = $1 RETURNING
+         id, name, category, unit, min_level, note, is_active, created_by, created_at`,
+      [
+        id, patch.name ?? null, patch.category ?? null, patch.unit ?? null,
+        patch.minLevel ?? null, patch.note === undefined ? null : patch.note,
+        patch.isActive ?? null,
+      ],
+    );
+    return rows[0] ?? null;
+  });
+  if (!updatedRow) return null;
+  const item = await inventoryBalanceFor(id, updatedRow);
   void recordAudit({
     action: "inventory.item", entity: "inventory_item", entityId: id,
     entityLabel: item.name,
@@ -25875,6 +26025,8 @@ export interface InventoryMovementInput {
   supplierPartyId?: number | null;
   /** (P2-10) تاريخ استحقاق فاتورة المورّد — اختياري. */
   supplierDueDate?: string | null;
+  /** (INV-02) إشعار تخفيض ذمة مورد عند إرجاع بضاعة (kind='out', isReturn=true) على التزام قائم. */
+  returnPayableId?: number | null;
 }
 export type InventoryMovementResult = { ok: true; movement: InventoryMovement; balance: number } | { ok: false; message: string };
 
@@ -25913,11 +26065,12 @@ export async function createInventoryMovementInTransaction(client: DbClient, inp
   /* التكلفة تكتب للشراء وحده: الردّ والصرف والتسوية تُقيَّم بالمشتقّ لا بثمنٍ
      يُدخل معها — والسعر السالب أو غير الرقمي يُهمل لا يُفسد الحركة. */
   const isPurchase = input.kind === "in" && !input.isReturn;
-  const unitCost = isPurchase
+  const isSupplierReturn = input.kind === "out" && Boolean(input.isReturn) && input.returnPayableId != null;
+  const unitCost = (isPurchase || isSupplierReturn)
     && typeof input.unitCostMinor === "number"
     && Number.isFinite(input.unitCostMinor) && input.unitCostMinor >= 0
     ? input.unitCostMinor : null;
-  const isReturn = input.kind === "in" ? Boolean(input.isReturn) : false;
+  const isReturn = input.kind === "in" || isSupplierReturn ? Boolean(input.isReturn) : false;
   let purchaseAmountMinor: number | null = null;
   if (unitCost !== null) {
     // Minor-unit prices must already be exact integers. The HTTP boundary
@@ -25939,7 +26092,47 @@ export async function createInventoryMovementInTransaction(client: DbClient, inp
      الشراء مرتين يدويًّا ولا تُنسى المستحقات. رفضُ أي شرطٍ يتراجع بالحركة كلها. */
   let supplier: { id: number; name: string } | null = null;
   let payableId: number | null = null;
-  if (input.supplierPartyId != null) {
+  if (isSupplierReturn && input.returnPayableId != null) {
+    if (unitCost == null || unitCost <= 0 || purchaseAmountMinor === null || purchaseAmountMinor <= 0) {
+      return { ok: false, message: "اكتب ثمن الوحدة لتُسجَّل تسوية مرتجع المورّد." };
+    }
+    const { rows: payRows } = await client.query<{
+      id: number; party_id: number; party_name: string; party_kind: string; currency: string;
+      effective_minor: string; settled_minor: string;
+    }>(
+      `SELECT b.id, b.party_id, t.name AS party_name, t.kind AS party_kind, b.currency,
+              ${payableAmountSql("b")}::text AS effective_minor,
+              ${payableSettledTotalSql("b")}::text AS settled_minor
+         FROM payables b
+         JOIN parties t ON t.id = b.party_id
+        WHERE b.id = $1 FOR UPDATE OF b`,
+      [input.returnPayableId],
+    );
+    const payRow = payRows[0];
+    if (!payRow || payRow.party_kind === "doctor") {
+      return { ok: false, message: "التزام المورّد غير موجود." };
+    }
+    if (input.supplierPartyId != null && payRow.party_id !== input.supplierPartyId) {
+      return { ok: false, message: "الالتزام المحدد لا يتبع المورّد المختار." };
+    }
+    if (payRow.currency !== CLINIC_BASE_CURRENCY) {
+      return { ok: false, message: "مرتجع المخزون الآلي يدعم فواتير المورّد بالعملة الأساسية فقط." };
+    }
+    const remainingMinor = Number(payRow.effective_minor) - Number(payRow.settled_minor);
+    if (purchaseAmountMinor > remainingMinor) {
+      return { ok: false, message: "قيمة المرتجع تتجاوز الرصيد المتبقي على فاتورة المورّد." };
+    }
+    const creditReason = input.reason && input.reason.trim().length >= 3
+      ? `إشعار دائن مرتجع مخزون: ${items[0].name} — ${input.reason.trim()}`.slice(0, 240)
+      : `إشعار دائن مرتجع مخزون: ${items[0].name} × ${Math.abs(input.qty)}`.slice(0, 240);
+    await client.query(
+      `INSERT INTO payable_adjustments (payable_id, delta_minor, reason, created_by)
+       VALUES ($1, $2, $3, $4)`,
+      [payRow.id, -purchaseAmountMinor, creditReason, input.createdBy],
+    );
+    supplier = { id: payRow.party_id, name: payRow.party_name };
+    payableId = payRow.id;
+  } else if (input.supplierPartyId != null) {
     if (!isPurchase) {
       return { ok: false, message: "المورّد يُربط بإدخال الشراء وحده — لا بالصرف أو التسوية أو الرد." };
     }
@@ -25980,7 +26173,7 @@ export async function createInventoryMovementInTransaction(client: DbClient, inp
       input.itemId, input.kind,
       input.kind === "adjust" ? input.qty : Math.abs(input.qty),
       expiry, input.reason ?? null, input.visitId ?? null, input.patientId ?? null,
-      input.createdBy, unitCost, isReturn, supplier?.id ?? null, payableId,
+      input.createdBy, isPurchase ? unitCost : null, isReturn, supplier?.id ?? null, payableId,
     ],
   );
   const movement = toMovement(inserted[0]);
@@ -26127,22 +26320,54 @@ export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
      تقع بين ٣٠ والمهلة المضبوطة. */
   const windowDays = Number.isFinite(expirySoonDays) && expirySoonDays > 0 ? Math.ceil(expirySoonDays) : 30;
   const withExpiry = await getPool().query<{ item_id: number }>(
-    `SELECT DISTINCT item_id FROM inventory_movements
-      WHERE kind = 'in' AND expiry_date IS NOT NULL AND expiry_date <= ($1::date + $2::int)`,
+    `SELECT DISTINCT m.item_id
+       FROM inventory_movements m
+       JOIN inventory_items i ON i.id = m.item_id
+      WHERE i.is_active
+        AND m.kind = 'in'
+        AND m.expiry_date IS NOT NULL
+        AND m.expiry_date <= ($1::date + $2::int)`,
     [today, windowDays],
   );
   const expired: InventoryBatchAlert[] = [];
   const soon: InventoryBatchAlert[] = [];
-  for (const { item_id } of withExpiry.rows) {
-    const detail = await getInventoryItemDetail(item_id);
-    if (!detail || !detail.item.isActive) continue;
-    for (const batch of detail.batches.batches) {
-      if (!batch.expiryDate || batch.remaining <= 0.001) continue;
-      const state = expiryState(batch.expiryDate, today, expirySoonDays);
-      if (state === "expired") {
-        expired.push({ itemId: item_id, itemName: detail.item.name, batchId: batch.id, expiryDate: batch.expiryDate, remaining: batch.remaining });
-      } else if (state === "soon") {
-        soon.push({ itemId: item_id, itemName: detail.item.name, batchId: batch.id, expiryDate: batch.expiryDate, remaining: batch.remaining });
+  if (withExpiry.rows.length > 0) {
+    const candidateIds = withExpiry.rows.map((r) => r.item_id);
+    const activeById = new Map(items.filter((i) => i.isActive).map((i) => [i.id, i]));
+    const { rows: moveRows } = await getPool().query<{
+      id: number; item_id: number; kind: string; qty: string; expiry_date: string | null; created_at: Date;
+    }>(
+      `SELECT id, item_id, kind, qty, expiry_date::text AS expiry_date, created_at
+         FROM inventory_movements
+        WHERE item_id = ANY($1::int[])
+        ORDER BY item_id, id ASC`,
+      [candidateIds],
+    );
+    const movesByItem = new Map<number, Array<{ id: number; kind: MovementKind; qty: number; expiryDate: string | null; createdAt: string }>>();
+    for (const row of moveRows) {
+      const list = movesByItem.get(row.item_id) ?? [];
+      list.push({
+        id: row.id,
+        kind: row.kind as MovementKind,
+        qty: Number(row.qty),
+        expiryDate: row.expiry_date,
+        createdAt: row.created_at.toISOString(),
+      });
+      movesByItem.set(row.item_id, list);
+    }
+    for (const itemId of candidateIds) {
+      const activeItem = activeById.get(itemId);
+      if (!activeItem) continue;
+      const chronological = movesByItem.get(itemId) ?? [];
+      const batches = batchRemaining(chronological);
+      for (const batch of batches.batches) {
+        if (!batch.expiryDate || batch.remaining <= 0.001) continue;
+        const state = expiryState(batch.expiryDate, today, expirySoonDays);
+        if (state === "expired") {
+          expired.push({ itemId, itemName: activeItem.name, batchId: batch.id, expiryDate: batch.expiryDate, remaining: batch.remaining });
+        } else if (state === "soon") {
+          soon.push({ itemId, itemName: activeItem.name, batchId: batch.id, expiryDate: batch.expiryDate, remaining: batch.remaining });
+        }
       }
     }
   }
@@ -26229,9 +26454,9 @@ export interface PatientIssuedCost {
 export async function issuedCostForPatient(patientId: number): Promise<PatientIssuedCost> {
   await ensureSchema();
   const { rows } = await getPool().query<{
-    id: number; item_id: number; kind: string; created_at: Date;
+    id: number; item_id: number; kind: string; is_return: boolean | null; created_at: Date;
   }>(
-    `SELECT id, item_id, kind, created_at
+    `SELECT id, item_id, kind, is_return, created_at
        FROM inventory_movements WHERE patient_id = $1 ORDER BY id`,
     [patientId],
   );
@@ -26240,6 +26465,11 @@ export async function issuedCostForPatient(patientId: number): Promise<PatientIs
     return { materialCostMinor: 0, issuedCount: 0, firstIssuedAt: null };
   }
 
+  const wantedIds = new Set(
+    rows
+      .filter((row) => row.kind === "out" || (row.kind === "in" && Boolean(row.is_return)))
+      .map((row) => row.id),
+  );
   const itemIds = [...new Set(rows.map((row) => row.item_id))];
   const { rows: fullRows } = await getPool().query<{
     id: number; item_id: number; kind: string; qty: string; unit_cost_minor: string | null; is_return: boolean | null;
@@ -26248,9 +26478,6 @@ export async function issuedCostForPatient(patientId: number): Promise<PatientIs
       WHERE item_id = ANY($1::int[]) ORDER BY item_id, id`,
     [itemIds],
   );
-  const issuedIds = new Set(issued.map((row) => row.id));
-  // خطّ زمني لكل بند على حدة: المتوسّط المرجّح يُبنى داخل البند الواحد، فخلطُ
-  // بندين في سلسلةٍ واحدة يعطي متوسّطًا لا يقوله أيٌّ من الرفّين.
   const timelineByItem = new Map<number, { id: number; movement: CostedMovement }[]>();
   for (const row of fullRows) {
     const list = timelineByItem.get(row.item_id) ?? [];
@@ -26267,18 +26494,18 @@ export async function issuedCostForPatient(patientId: number): Promise<PatientIs
   }
 
   let total = 0;
-  for (const [itemId, timeline] of timelineByItem) {
-    const patientMovements = timeline.filter((entry) => issuedIds.has(entry.id));
-    if (patientMovements.length === 0) { void itemId; continue; }
-    // كلّ صرفٍ للمريض يُقوَّم بحال الرفّ **قبل** حركته — من بداية خطّ البند إليها.
-    for (const target of patientMovements) {
-      const upto = timeline.filter((entry) => entry.id <= target.id).map((entry) => entry.movement);
-      total += issuedCostMinor(upto, (index) => index === upto.length - 1);
+  for (const timeline of timelineByItem.values()) {
+    const costs = movementCostsAtIndexes(
+      timeline.map((entry) => entry.movement),
+      (index) => wantedIds.has(timeline[index].id),
+    );
+    for (const cost of costs.values()) {
+      total += cost;
     }
   }
   const first = issued[0]?.created_at;
   return {
-    materialCostMinor: Math.round(total),
+    materialCostMinor: Math.max(0, Math.round(total)),
     issuedCount: issued.length,
     firstIssuedAt: first ? new Date(first).toISOString() : null,
   };
@@ -26777,6 +27004,42 @@ async function replyFitsThread(replyToId: number, input: {
   return false;
 }
 
+import { putFile, readFileByKey, storageStatus } from "./files";
+
+function mediaExtensionFromMimeOrName(mime: string | null | undefined, fileName?: string | null): string {
+  const fromName = typeof fileName === "string" ? /\.([A-Za-z0-9]{1,8})$/.exec(fileName)?.[1]?.toLowerCase() : null;
+  if (fromName) return fromName;
+  const m = (mime ?? "").toLowerCase();
+  if (m.includes("webm")) return "webm";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("mp4") || m.includes("m4a")) return "m4a";
+  if (m.includes("wav")) return "wav";
+  if (m.includes("png")) return "png";
+  if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
+  if (m.includes("webp")) return "webp";
+  if (m.includes("pdf")) return "pdf";
+  return "bin";
+}
+
+async function persistMessageMediaToDiskOrFallback(
+  base64Data: string | null | undefined,
+  mime: string | null | undefined,
+  fileName?: string | null,
+): Promise<string | null> {
+  if (!base64Data) return null;
+  try {
+    const status = await storageStatus();
+    if (!status.ready) return base64Data;
+    const bytes = Buffer.from(base64Data, "base64");
+    if (bytes.byteLength === 0) return base64Data;
+    const stored = await putFile(bytes, mediaExtensionFromMimeOrName(mime, fileName));
+    return `storage:${stored.key}`;
+  } catch {
+    return base64Data;
+  }
+}
+
 /**
  * إدراج رسالة واحدة — كل مرسِل يمرّ من هنا: الطاقم والبوابة على السواء.
  *
@@ -26792,6 +27055,8 @@ export async function insertMessage(input: SendMessageInput): Promise<MessageVie
     if (!fits) throw new Error("reply-out-of-thread");
     replyToId = input.replyToId;
   }
+  const storedVoiceData = await persistMessageMediaToDiskOrFallback(input.voiceData, input.voiceMime);
+  const storedFileData = await persistMessageMediaToDiskOrFallback(input.fileData, input.fileMime, input.fileName);
   const { rows } = await getPool().query<MessageRow>(
     `INSERT INTO messages (
        sender_type, sender_user_id, sender_patient_id,
@@ -26807,8 +27072,8 @@ export async function insertMessage(input: SendMessageInput): Promise<MessageVie
     [
       input.senderType, input.senderUserId, input.senderPatientId,
       input.recipientType, input.recipientUserId, input.recipientPatientId,
-      input.body, input.kind, input.voiceMime, input.voiceData, input.voiceMs,
-      input.fileName, input.fileMime, input.fileSize, input.fileData,
+      input.body, input.kind, input.voiceMime, storedVoiceData, input.voiceMs,
+      input.fileName, input.fileMime, input.fileSize, storedFileData,
       urgent, replyToId,
     ],
   );
@@ -27337,7 +27602,7 @@ export async function urgentUnreadMessageCount(userId: number, scopedDoctorParty
 
 /** جسم رسالة صوتية مع تحقق الوصول قبل الكشف عن بايت واحد. */
 export async function voiceMessagePayload(id: number): Promise<{
-  mime: string; data: string;
+  mime: string; data: string; bytes?: Buffer | null;
   senderType: "user" | "patient";
   senderUserId: number | null;
   senderPatientId: number | null;
@@ -27362,9 +27627,16 @@ export async function voiceMessagePayload(id: number): Promise<{
   );
   const row = rows[0];
   if (!row) return null;
+  const rawData = row.voice_data ?? "";
+  let bytes: Buffer | null = null;
+  if (rawData.startsWith("storage:")) {
+    bytes = await readFileByKey(rawData.slice("storage:".length));
+    if (!bytes) return null;
+  }
   return {
     mime: row.voice_mime ?? "audio/webm",
-    data: row.voice_data ?? "",
+    data: bytes ? "" : rawData,
+    bytes,
     senderType: row.sender_type,
     senderUserId: row.sender_user_id,
     senderPatientId: row.sender_patient_id,
@@ -27402,7 +27674,7 @@ export async function getStaffUserById(id: number): Promise<StaffAccount | null>
  * جسم مرفق رسالة — بتحقق الوصول قبل الكشف عن بايت واحد، كجسم الصوت سواء بسواء.
  */
 export async function fileMessagePayload(id: number): Promise<{
-  mime: string; name: string | null; size: number | null; data: string;
+  mime: string; name: string | null; size: number | null; data: string; bytes?: Buffer | null;
   senderType: "user" | "patient";
   senderUserId: number | null;
   senderPatientId: number | null;
@@ -27427,11 +27699,18 @@ export async function fileMessagePayload(id: number): Promise<{
   );
   const row = rows[0];
   if (!row) return null;
+  const rawData = row.file_data ?? "";
+  let bytes: Buffer | null = null;
+  if (rawData.startsWith("storage:")) {
+    bytes = await readFileByKey(rawData.slice("storage:".length));
+    if (!bytes) return null;
+  }
   return {
     mime: row.file_mime ?? "application/octet-stream",
     name: row.file_name,
     size: row.file_size,
-    data: row.file_data ?? "",
+    data: bytes ? "" : rawData,
+    bytes,
     senderType: row.sender_type,
     senderUserId: row.sender_user_id,
     senderPatientId: row.sender_patient_id,
@@ -27745,7 +28024,46 @@ export async function listProviderBlocks(
       ORDER BY starts_at`,
     [providerId, date, CLINIC_TIME_ZONE],
   );
-  return rows.map((row) => ({
+  const { rows: leaveReg } = await runner.query<{ has_leaves: boolean }>(
+    `SELECT (to_regclass('public.hr_leave_requests') IS NOT NULL
+             AND to_regclass('public.hr_staff') IS NOT NULL
+             AND to_regclass('public.users') IS NOT NULL) AS has_leaves`,
+  );
+  let leaveRows: typeof rows = [];
+  if (leaveReg[0]?.has_leaves) {
+    const res = await runner.query<{
+      id: string; provider_id: number; starts_at: Date; ends_at: Date; reason: string;
+      cancelled_at: Date | null; created_by: string; created_at: Date;
+    }>(
+      `SELECT ('hr-leave:' || lr.id::text) AS id,
+              $1::int AS provider_id,
+              ($2::date::timestamp AT TIME ZONE $3) AS starts_at,
+              (($2::date + 1)::timestamp AT TIME ZONE $3) AS ends_at,
+              ('إجازة معتمدة: ' || lr.reason) AS reason,
+              NULL::timestamptz AS cancelled_at,
+              lr.created_by,
+              lr.created_at
+         FROM hr_leave_requests lr
+         JOIN hr_staff s ON s.id = lr.staff_id
+         LEFT JOIN users u ON u.id = s.user_id
+        WHERE lr.status = 'approved'
+          AND lr.start_date <= $2::date
+          AND lr.end_date >= $2::date
+          AND (
+            u.party_id = $1
+            OR EXISTS (
+              SELECT 1 FROM hr_contracts c
+               WHERE c.staff_id = s.id
+                 AND c.doctor_party_id = $1
+                 AND c.status IN ('approved', 'active')
+            )
+          )
+        ORDER BY lr.id`,
+      [providerId, date, CLINIC_TIME_ZONE],
+    );
+    leaveRows = res.rows;
+  }
+  return [...rows, ...leaveRows].map((row) => ({
     id: row.id, providerId: row.provider_id,
     startsAt: row.starts_at.toISOString(), endsAt: row.ends_at.toISOString(),
     reason: row.reason, cancelledAt: row.cancelled_at ? row.cancelled_at.toISOString() : null,

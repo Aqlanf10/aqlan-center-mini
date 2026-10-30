@@ -226,6 +226,17 @@ export function CephTracer({
   }));
   const [dxDirty, setDxDirty] = useState(false);
 
+  const hasUnsavedChanges = saving || dxDirty;
+  useEffect(() => {
+    if (!hasUnsavedChanges || typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   /** حفظ نقطة واحدة — كتابةٌ فوقية برمزها، والخادم يرفض إن كان المعتمد. */
   const savePoint = useCallback(async (code: LandmarkCode, pt: Pt) => {
     setSaving(true);

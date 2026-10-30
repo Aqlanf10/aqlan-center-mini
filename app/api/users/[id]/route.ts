@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { countActiveAdmins, linkUserDoctor, listUsers, recordAudit, updateUser } from "@/lib/db";
-import { hashPassword, legacySessionEvidence } from "@/lib/auth";
+import { UserGovernanceError, countActiveAdmins, linkUserDoctor, listUsers, recordAudit, updateUser } from "@/lib/db";
+import { MAX_PASSWORD_LENGTH, hashPassword, legacySessionEvidence } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
@@ -79,8 +79,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
   if (typeof source.isActive === "boolean") patch.isActive = source.isActive;
   if (typeof source.password === "string" && source.password) {
-    if (source.password.length < 8) {
-      return NextResponse.json({ message: "كلمة المرور يجب ألا تقل عن 8 أحرف." }, { status: 400 });
+    if (source.password.length < 8 || source.password.length > MAX_PASSWORD_LENGTH) {
+      return NextResponse.json({ message: `كلمة المرور يجب أن تكون بين 8 و${MAX_PASSWORD_LENGTH} حرفًا.` }, { status: 400 });
     }
     patch.passwordHash = await hashPassword(source.password);
   }
@@ -160,8 +160,36 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actor: session.username, actorRole: session.role,
       }).catch(() => {});
     }
+    if (
+      patch.displayName !== undefined ||
+      patch.role !== undefined ||
+      patch.isActive !== undefined ||
+      patch.passwordHash !== undefined ||
+      patch.specialty !== undefined ||
+      patch.branch !== undefined
+    ) {
+      await recordAudit({
+        action: "user.update",
+        entity: "user",
+        entityId: id,
+        entityLabel: updated.username,
+        details: {
+          ...(patch.displayName !== undefined ? { الاسم: updated.displayName } : {}),
+          ...(patch.role !== undefined ? { الدور: updated.role } : {}),
+          ...(patch.isActive !== undefined ? { الحالة: updated.isActive ? "مفعّل" : "موقوف" } : {}),
+          ...(patch.passwordHash !== undefined ? { كلمة_المرور: "تغيير" } : {}),
+          ...(patch.specialty !== undefined ? { التخصص: updated.specialty ?? "" } : {}),
+          ...(patch.branch !== undefined ? { الفرع: updated.branch ?? "" } : {}),
+        },
+        actor: session.username,
+        actorRole: session.role,
+      }).catch(() => {});
+    }
     return NextResponse.json(updated);
-  } catch {
+  } catch (error) {
+    if (error instanceof UserGovernanceError) {
+      return NextResponse.json({ message: error.message }, { status: error.status });
+    }
     return NextResponse.json({ message: "تعذّر حفظ التعديل." }, { status: 500 });
   }
 }

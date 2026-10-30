@@ -34,8 +34,8 @@ const text = (value: unknown, max: number): string | null =>
 export async function GET() {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canViewFinancialReports(session.role)) {
-    return NextResponse.json({ message: "الأرصدة السابقة لمن يرى التقارير المالية." }, { status: 403 });
+  if (!canViewFinancialReports(session.role) || (session.role === "accountant" && session.financeAccess?.viewSuppliers === false)) {
+    return NextResponse.json({ message: "الأرصدة السابقة لمن يرى ذمم الموردين والتقارير المالية." }, { status: 403 });
   }
   try {
     const [openings, labs, suppliers] = await Promise.all([

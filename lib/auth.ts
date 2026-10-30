@@ -15,6 +15,7 @@ const scrypt = promisify(scryptCb);
  */
 
 const SCRYPT_KEY_LENGTH = 64;
+export const MAX_PASSWORD_LENGTH = 200;
 
 /**
  * تجزئة كلمة المرور بـ scrypt وملح عشوائي لكل مستخدم.
@@ -23,6 +24,9 @@ const SCRYPT_KEY_LENGTH = 64;
  * scrypt مُكلف بالذاكرة عمدًا: كسر قائمة كلمات مرور مسروقة يصير بطيئًا بدل أن يكون فوريًا.
  */
 export async function hashPassword(password: string): Promise<string> {
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    throw new Error("PASSWORD_TOO_LONG");
+  }
   const salt = randomBytes(16).toString("hex");
   const derived = (await scrypt(password, salt, SCRYPT_KEY_LENGTH)) as Buffer;
   return `scrypt:${salt}:${derived.toString("hex")}`;
@@ -35,6 +39,7 @@ export async function hashPassword(password: string): Promise<string> {
  * من التجزئة حرفًا حرفًا. `timingSafeEqual` لا تفعل ذلك — ولهذا السبب وحده هي هنا.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  if (!password || password.length > MAX_PASSWORD_LENGTH) return false;
   const [scheme, salt, expected] = stored.split(":");
   if (scheme !== "scrypt" || !salt || !expected) return false;
   const derived = (await scrypt(password, salt, SCRYPT_KEY_LENGTH)) as Buffer;

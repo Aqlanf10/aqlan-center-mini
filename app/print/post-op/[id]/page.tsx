@@ -1,6 +1,6 @@
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe } from "@/lib/db";
+import { findUserByUsername, getPatient, getSettingsSafe } from "@/lib/db";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
@@ -43,10 +43,12 @@ export default async function PostOpPrintPage({
 
   const sParams = await searchParams;
 
-  const [patient, settings] = await Promise.all([
+  const [patient, settings, doctorUser] = await Promise.all([
     getPatient(patientId),
     getSettingsSafe(),
+    findUserByUsername(session.username).catch(() => null),
   ]);
+  const doctorLabel = (doctorUser?.displayName || session.username).replace(/^د\.\s*/, "");
 
   if (!patient) notFound();
   /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
@@ -253,12 +255,12 @@ export default async function PostOpPrintPage({
         >
           <div>
             <span>الطبيب المعالج: </span>
-            <strong style={{ color: "#0f172a" }}>د. {session.username}</strong>
+            <strong style={{ color: "#0f172a" }}>د. {doctorLabel}</strong>
           </div>
           <div>
             <span>طوارئ واستفسارات المركز: </span>
             <strong style={{ color: "#0f172a" }}>
-              {settings["clinic.phone"] || "المركز الطبي"}
+              <bdi dir="ltr">{settings["clinic.phone"] || "المركز الطبي"}</bdi>
             </strong>
           </div>
         </div>

@@ -277,9 +277,24 @@ export async function judgeBookingInDay(input: {
     };
   }
 
+  const parsedDate = new Date(`${input.date}T12:00:00Z`);
+  const weekday = Number.isFinite(parsedDate.getTime()) ? parsedDate.getUTCDay() : -1;
+  const closedDay = weekday >= 0 && (input.context.closedWeekdays ?? []).includes(weekday);
+  const strictOutsideHours = Boolean(input.context.strictHours) && verdict.outsideHours;
+  const requiresOverride = verdict.state === "OVER_CAPACITY" || closedDay || strictOutsideHours;
+  const effectiveReasons = [
+    ...(closedDay ? ["اليوم المحدّد ضمن أيام العطلة الأسبوعية للمركز."] : []),
+    ...verdict.reasons,
+  ];
+  const effectiveMessage = closedDay
+    ? "اليوم المحدّد ضمن أيام العطلة الأسبوعية للمركز — يتطلّب الحجز سببَ تجاوزٍ موثّق."
+    : strictOutsideHours && verdict.state !== "OVER_CAPACITY"
+      ? "الوقت خارج ورديات المركز — يتطلّب الحجز سببَ تجاوزٍ موثّق."
+      : verdict.message;
+
   // Acknowledgement is never a capacity or overlap override. Only ask after
   // those existing guards admit this proposal, and re-read on every attempt.
-  if (input.patientId !== null && (verdict.state !== "OVER_CAPACITY"
+  if (input.patientId !== null && (!requiresOverride
     || (input.canOverride && input.overrideReason.trim().length >= 3))) {
     const warning = await nearbyPatientBookingWarning(input.client, {
       actor: input.bookingActor ?? "", scope: input.bookingScope ?? "booking",
@@ -298,7 +313,7 @@ export async function judgeBookingInDay(input: {
       } };
     }
   }
-  if (verdict.state !== "OVER_CAPACITY") return { ok: true, verdict, overridden: false };
+  if (!requiresOverride) return { ok: true, verdict, overridden: false };
 
   /* التجاوز حقٌّ موثَّق: صلاحيةٌ **وسبب**. وغيابُ أيّهما رفضٌ لا استثناء — وهذا
      يسري على الوكيل الذكي كما يسري على الاستقبال حرفًا بحرف. */
@@ -310,33 +325,40 @@ export async function judgeBookingInDay(input: {
   // Never offer the rejected slot, an out-of-shift slot or a patient collision.
   // Minute precision preserves the earliest valid boundary for arbitrary buffers.
   let suggestion: string | null = null;
-  const shifts = usableShifts(input.context.shifts);
-  const from = timeToMinutes(input.time) + 1;
-  const closing = Math.min(1440, Math.max(0, ...shifts.map(shift => shift.end)));
-  for (let minute = from; minute < closing; minute++) {
-    if (!shifts.some(shift => minute >= shift.start && minute < shift.end)) continue;
-    const time = minutesToTime(minute);
-    if (input.patientId !== null && patientOverlap(
-      input.sameDay, input.patientId, time, input.durationMinutes, input.excludeId,
-    )) continue;
-    const candidate = evaluateAt(time);
-    if (candidate.state !== "OVER_CAPACITY" && !candidate.outsideHours) {
-      suggestion = time;
-      break;
+  if (!closedDay) {
+    const shifts = usableShifts(input.context.shifts);
+    const from = timeToMinutes(input.time) + 1;
+    const closing = Math.min(1440, Math.max(0, ...shifts.map(shift => shift.end)));
+    for (let minute = from; minute < closing; minute++) {
+      if (!shifts.some(shift => minute >= shift.start && minute < shift.end)) continue;
+      const time = minutesToTime(minute);
+      if (input.patientId !== null && patientOverlap(
+        input.sameDay, input.patientId, time, input.durationMinutes, input.excludeId,
+      )) continue;
+      const candidate = evaluateAt(time);
+      if (candidate.state !== "OVER_CAPACITY" && !candidate.outsideHours) {
+        suggestion = time;
+        break;
+      }
     }
   }
   return {
     ok: false,
-    verdict,
+    verdict: {
+      ...verdict,
+      state: "OVER_CAPACITY",
+      message: effectiveMessage,
+      reasons: effectiveReasons.length > 0 ? effectiveReasons : [effectiveMessage],
+    },
     conflict: {
-      message: verdict.message,
-      state: verdict.state,
-      reasons: verdict.reasons,
+      message: effectiveMessage,
+      state: "OVER_CAPACITY",
+      reasons: effectiveReasons.length > 0 ? effectiveReasons : [effectiveMessage],
       dayPercent: verdict.dayPercent,
       canOverride: input.canOverride,
       overrideHint: input.canOverride
         ? "اكتب سبب التجاوز ليُسجَّل في سجلّ التدقيق."
-        : "تجاوز السعة يحتاج صلاحيةً أعلى.",
+        : "تجاوز السعة أو العطلة يحتاج صلاحيةً أعلى.",
       suggestion,
       suggestionMessage: suggestion
         ? `أقرب وقت متاح: ${suggestion}`
@@ -469,7 +491,7 @@ export async function bookAppointment(
       }
       const judged = await judgeBookingInDay({
         sameDay, client, date: input.date, time: input.time, durationMinutes,
-        service, context, providerId: doctorId, chairNo, requireAssignedProvider: isReturnBooking,
+        service, context, providerId: doctorId, chairNo, requireAssignedProvider: isReturnBooking || (!service && doctorId !== null),
         isNewPatient: input.isNewPatient ?? false,
         patientId,
         canOverride, overrideReason,

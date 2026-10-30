@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createPayable, getParty, getSettings, partyBalances, partyNativeBalanceSnapshot, partyStatement, recordAudit } from "@/lib/db";
+import { CLINIC_TIME_ZONE, createPayable, getParty, getSettings, isPeriodLocked, partyBalances, partyNativeBalanceSnapshot, partyStatement, recordAudit } from "@/lib/db";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { withHttpIdempotency } from "@/lib/http-idempotency";
@@ -91,6 +92,10 @@ export async function POST(request: Request) {
   const requestedCategory = typeof source.category === "string" && source.category.trim()
     ? source.category.trim().slice(0, 40) : null;
 
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  if (await isPeriodLocked(today)) {
+    return NextResponse.json({ message: "الفترة المحاسبية مقفلة. لا يمكن تسجيل التزام جديد في فترة مقفلة." }, { status: 409 });
+  }
   const settings = await getSettings();
   // (TD-05) الأساس دستوري من الكود — والإعدادات تبقى لأسعار الصرف.
   const base = CLINIC_BASE_CURRENCY;

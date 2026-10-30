@@ -115,14 +115,31 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      من الإعدادات — فالثمن لحظةَ الشراء لا بسعر اليوم. */
   // (TD-05) الأساس دستوري من الكود.
   const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
-  const unitCost = kind === "in" && canManageInventory(session.role)
+  const returnPayableRaw = source.returnPayableId;
+  let returnPayableId: number | null = null;
+  if (returnPayableRaw !== undefined && returnPayableRaw !== null && returnPayableRaw !== "") {
+    const parsedPayable = typeof returnPayableRaw === "number" ? returnPayableRaw
+      : typeof returnPayableRaw === "string" && !/[^0-9]/.test(returnPayableRaw) ? Number(returnPayableRaw) : NaN;
+    if (!Number.isInteger(parsedPayable) || parsedPayable <= 0 || parsedPayable > 2_147_483_647) {
+      return refuse("رقم فاتورة المورّد غير صالح.");
+    }
+    returnPayableId = parsedPayable;
+  }
+  if (returnPayableId !== null && !canHandleMoney(session.role)) {
+    return NextResponse.json({ message: "تسوية مرتجع المورّد للإدارة والاستقبال." }, { status: 403 });
+  }
+  const isSupplierReturn = kind === "out" && source.isReturn === true && returnPayableId !== null;
+  if (returnPayableId !== null && !isSupplierReturn) {
+    return refuse("ربط التزام المورّد بالمرتجع يتطلّب حركة صرف موسومة كمرتجع (isReturn=true).");
+  }
+  const unitCost = ((kind === "in" && canManageInventory(session.role)) || isSupplierReturn)
     && typeof source.unitCost === "string" && source.unitCost.trim() !== ""
     ? parseAmount(source.unitCost, baseCurrency) : null;
-  if (kind === "in" && typeof source.unitCost === "string"
+  if ((kind === "in" || isSupplierReturn) && typeof source.unitCost === "string"
       && source.unitCost.trim() !== "" && unitCost === null) {
     return refuse("ثمن الوحدة رقمٌ غير صالح.");
   }
-  const isReturn = kind === "in" && source.isReturn === true;
+  const isReturn = (kind === "in" || isSupplierReturn) && source.isReturn === true;
   if (reason?.startsWith(AUTO_MATERIAL_REASON_PREFIX.trim())) {
     return refuse("هذا الوسم محجوز للخصم التلقائي من ربط الخدمات — اكتب سببًا آخر.");
   }
@@ -190,7 +207,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const input = {
       itemId, kind, qty, expiryDate, reason, visitId, patientId, createdBy: session.username,
-      unitCostMinor: unitCost, isReturn, supplierPartyId, supplierDueDate,
+      unitCostMinor: unitCost, isReturn, supplierPartyId, supplierDueDate, returnPayableId,
     };
     if (keyed && requestKey && envelope) {
       const result = await createInventoryPurchase({ session, requestKey, itemId, purchase: envelope, input });

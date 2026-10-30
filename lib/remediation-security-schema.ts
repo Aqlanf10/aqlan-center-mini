@@ -98,6 +98,41 @@ BEGIN
   RETURN NEW;
 END $$;
 
+CREATE OR REPLACE FUNCTION aqlan_legacy_coverage_site_valid(
+  category TEXT, mode TEXT, anchor SMALLINT, teeth SMALLINT[], scope TEXT, surfaces TEXT
+) RETURNS BOOLEAN AS $$
+  SELECT COALESCE(
+    teeth IS NOT NULL
+    AND cardinality(teeth) BETWEEN 0 AND 32
+    AND teeth = ARRAY(SELECT DISTINCT tooth FROM unnest(teeth) AS tooth ORDER BY tooth)
+    AND NOT EXISTS (SELECT 1 FROM unnest(teeth) AS tooth WHERE tooth IS NULL
+      OR NOT ((tooth / 10 BETWEEN 1 AND 4 AND tooth % 10 BETWEEN 1 AND 8)
+           OR (tooth / 10 BETWEEN 5 AND 8 AND tooth % 10 BETWEEN 1 AND 5)))
+    AND CASE
+      WHEN category IN ('rct', 'post', 'implant', 'extraction', 'surgery') THEN
+        mode = 'per_tooth_episode' AND anchor IS NOT NULL AND teeth = ARRAY[anchor]
+        AND scope IS NULL AND surfaces IS NULL
+      WHEN category IN ('crown', 'veneer', 'bridge') THEN
+        mode = 'multi_tooth_episode' AND anchor IS NOT NULL AND anchor = ANY(teeth)
+        AND scope IS NULL AND surfaces IS NULL
+      WHEN category IN ('filling', 'sealant') THEN
+        mode = 'tooth_surfaces' AND anchor IS NOT NULL AND teeth = ARRAY[anchor] AND scope IS NULL
+        AND (surfaces IS NULL OR (length(surfaces) BETWEEN 1 AND 6
+          AND surfaces !~ '[^MDOIBL]' AND surfaces ~ '^M?D?O?I?B?L?$'))
+      WHEN category = 'ortho' THEN
+        mode = 'arch' AND anchor IS NULL AND cardinality(teeth) = 0
+        AND scope IN ('upper', 'lower', 'both') AND surfaces IS NULL
+      WHEN category = 'cleaning' THEN
+        mode = 'region' AND surfaces IS NULL AND (
+          (anchor IS NOT NULL AND teeth = ARRAY[anchor] AND scope IS NULL)
+          OR (anchor IS NULL AND cardinality(teeth) = 0 AND scope IN ('upper', 'lower', 'full_mouth')))
+      WHEN category = 'whitening' THEN
+        mode = 'none' AND anchor IS NULL AND cardinality(teeth) = 0
+        AND scope = 'full_mouth' AND surfaces IS NULL
+      ELSE FALSE
+    END, FALSE);
+$$ LANGUAGE SQL IMMUTABLE;
+
 CREATE INDEX IF NOT EXISTS idx_visits_patient_id ON visits(patient_id);
 CREATE INDEX IF NOT EXISTS idx_visits_appointment_id ON visits(appointment_id);
 CREATE INDEX IF NOT EXISTS idx_payments_invoice_id ON payments(invoice_id);

@@ -555,8 +555,17 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
       actor: input.actor, actorRole: input.actorRole,
     });
     if(request.repaymentTerms && request.repaymentRemainingMinor!>0){
+      const currentVersionRes = await client.query<{ version: number }>(
+        `SELECT r.version
+           FROM debt_repayment_arrangements a
+           JOIN debt_repayment_revisions r ON r.arrangement_id = a.id
+          WHERE a.patient_id = $1 AND a.invoice_id IS NULL AND a.opening_currency = $2
+          ORDER BY r.version DESC LIMIT 1`,
+        [patientId, request.currency],
+      );
+      const currentVersion = Number(currentVersionRes.rows[0]?.version ?? 0);
       await writeDebtRepaymentInTransaction(client,{target:{patientId,currency:request.currency,invoiceId:null,openingCurrency:request.currency},
-        terms:request.repaymentTerms,expectedVersion:0,expectedRemainingMinor:request.repaymentRemainingMinor!,reason:"طريقة سداد الرصيد عند تسجيل العلاج السابق",
+        terms:request.repaymentTerms,expectedVersion:currentVersion,expectedRemainingMinor:request.repaymentRemainingMinor!,reason:"طريقة سداد الرصيد عند تسجيل العلاج السابق",
         idempotencyKey:`legacy:${agreement.id}:repayment`,session:input.session!});
     }
     if(input.session)await assertDebtSession(client,input.session);

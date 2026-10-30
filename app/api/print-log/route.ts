@@ -7,7 +7,7 @@ import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-const DOC_TYPES = ["receipt", "invoice", "voucher", "statement", "prescription"] as const;
+const DOC_TYPES = ["receipt", "invoice", "voucher", "statement", "prescription", "card"] as const;
 
 /**
  * يسجّل طبعة مستند ويقول إن كانت إعادة.
@@ -37,6 +37,10 @@ export async function POST(request: Request) {
   if (docType === "prescription") {
     if (!isAdmin(session.role) && session.role !== "doctor") {
       return NextResponse.json({ message: "طباعة الوصفات للطبيب والمدير." }, { status: 403 });
+    }
+  } else if (docType === "card") {
+    if (!isAdmin(session.role) && session.role !== "reception" && session.role !== "doctor") {
+      return NextResponse.json({ message: "طباعة بطاقة الموعد للإدارة والاستقبال والطبيب." }, { status: 403 });
     }
   } else if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "المستندات المالية للإدارة والاستقبال." }, { status: 403 });

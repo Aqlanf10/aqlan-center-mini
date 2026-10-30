@@ -24,6 +24,8 @@ export interface CapacityContext {
   nearCapacityPercent: number;
   emergencyReserveMinutes: number;
   newPatientDailyLimit: number;
+  strictHours?: boolean;
+  closedWeekdays?: number[];
 }
 
 /** يقرأ سياسة السعة من الإعدادات — مصدرٌ واحد لساعات المركز وطاقته. */
@@ -34,6 +36,26 @@ export async function loadCapacityContext(): Promise<CapacityContext> {
 /** The same context read on the caller's client (canonical snapshots, M2 slice 19). */
 export async function loadCapacityContextWith(q: Pick<DbClient, "query">): Promise<CapacityContext> {
   return capacityContextFrom(await getSettingsWith(q));
+}
+
+const WEEKDAY_TOKEN: Record<string, number> = {
+  "0": 0, sun: 0, sunday: 0, "الأحد": 0, "الاحد": 0,
+  "1": 1, mon: 1, monday: 1, "الاثنين": 1, "الإثنين": 1,
+  "2": 2, tue: 2, tuesday: 2, "الثلاثاء": 2,
+  "3": 3, wed: 3, wednesday: 3, "الأربعاء": 3, "الاربعاء": 3,
+  "4": 4, thu: 4, thursday: 4, "الخميس": 4,
+  "5": 5, fri: 5, friday: 5, "الجمعة": 5, "الجمعه": 5,
+  "6": 6, sat: 6, saturday: 6, "السبت": 6,
+};
+
+function parseClosedWeekdays(raw: string | undefined): number[] {
+  if (!raw || !raw.trim()) return [];
+  const days = new Set<number>();
+  for (const token of raw.split(/[,\u060C;]+/)) {
+    const key = token.trim().toLowerCase();
+    if (key in WEEKDAY_TOKEN) days.add(WEEKDAY_TOKEN[key]);
+  }
+  return [...days].sort((a, b) => a - b);
 }
 
 function capacityContextFrom(settings: SettingsMap): CapacityContext {
@@ -51,12 +73,15 @@ function capacityContextFrom(settings: SettingsMap): CapacityContext {
     const parsed = Number(settings[key as keyof typeof settings]);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
   };
+  const strictRaw = (settings["scheduling.strict_hours"] ?? "").trim().toLowerCase();
   return {
     shifts,
     chairs: chairCount(settings),
     nearCapacityPercent: number("scheduling.near_capacity_percent", 80),
     emergencyReserveMinutes: number("scheduling.emergency_reserve_minutes", 0),
     newPatientDailyLimit: number("scheduling.new_patient_daily_limit", 0),
+    strictHours: strictRaw === "true" || strictRaw === "on" || strictRaw === "1",
+    closedWeekdays: parseClosedWeekdays(settings["clinic.closed_weekdays"]),
   };
 }
 
@@ -137,7 +162,7 @@ export interface CapacityEvaluationInput {
 /** Freeze verified block windows once for the decision and its alternatives. */
 export async function prepareCapacityEvaluator(input: CapacityEvaluationInput): Promise<(time: string) => CapacityVerdict> {
   const { service, context } = input;
-  const capacityService = service ?? (input.requireAssignedProvider
+  const capacityService = service ?? ((input.requireAssignedProvider ?? Boolean(input.providerId))
     ? { ...FALLBACK_SERVICE, requiresProvider: true } : FALLBACK_SERVICE);
   const blocks: ProviderBlockWindow[] = [];
   if (capacityService.requiresProvider && input.providerId) {

@@ -570,6 +570,20 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     permission: "settings.manage_permissions",
     description: "يتحكّم في استقبال طلبات المواعيد من الصفحة العامة خارج العيادة.",
     impact: "إيقافه يرفض أي طلب حجز خارجي جديد مع توجيه المريض للاتصال بالمركز." }),
+  def({ key: "scheduling.strict_hours", keywords: ["دوام", "خارج الدوام", "ساعات", "فجر", "تجاوز", "hours", "strict"],
+    category: "scheduling",
+    label: "رفض الحجز خارج ساعات الدوام إلا بتجاوز موثّق", type: "BOOLEAN",
+    defaultValue: "false", order: 32, scope: "clinic", sensitivity: "normal",
+    permission: "settings.manage",
+    description: "عند تفعيله يُرفض أي موعد يقع خارج ورديات المركز المحددة ما لم يكتب المخوّل سبب التجاوز.",
+    impact: "يمنع الحجز بالخطأ خارج أوقات العمل مع إبقاء باب الطوارئ مفتوحًا بسبب يُسجَّل في التدقيق." }),
+  def({ key: "clinic.closed_weekdays", keywords: ["عطلة", "جمعة", "إجازة", "يوم راحة", "closed", "friday"],
+    category: "scheduling",
+    label: "أيام العطلة الأسبوعية للمركز", type: "LIST",
+    defaultValue: "", order: 33, scope: "clinic", sensitivity: "normal",
+    permission: "settings.manage",
+    description: "أرقام أيام الأسبوع المغلقة مفصولة بفواصل (0=الأحد .. 5=الجمعة، 6=السبت). فارغ = لا عطلة أسبوعية ثابتة.",
+    impact: "يمنع الحجز في يوم العطلة المحدد إلا بتجاوز موثّق بالسبب." }),
 ] as const;
 
 const BY_KEY = new Map<string, SettingDefinition>(

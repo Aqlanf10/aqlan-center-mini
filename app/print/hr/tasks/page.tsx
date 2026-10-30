@@ -1,7 +1,8 @@
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { canUseTasks, listTasks } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
-import { getSettingsSafe } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getSettingsSafe } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
@@ -74,7 +75,7 @@ export default async function HrTasksPrintPage({
                 <td>{task.assigneeLabel || "—"}</td>
                 <td>{task.ownerDisplayName}</td>
                 <td className="num">{task.plannedFor ?? "—"}</td>
-                <td className="num">{task.dueAt ? new Date(task.dueAt).toISOString().slice(0, 10) : "—"}</td>
+                <td className="num">{task.dueAt ? clinicDateString(new Date(task.dueAt), CLINIC_TIME_ZONE) : "—"}</td>
                 <td className="num">{overdueDays !== null ? `${overdueDays} يومًا` : "—"}</td>
                 <td>{task.isPrivate ? "خاصة" : "مشتركة"}</td>
               </tr>

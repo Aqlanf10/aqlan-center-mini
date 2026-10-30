@@ -93,6 +93,7 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   "backup.schedule_timezone": k("backup"), "backup.retention_daily_count": k("backup"),
   "backup.retention_weekly_count": k("backup"), "backup.destination_railway_volume": k("backup"),
   "backup.destination_s3": k("backup"), "backup.destination_google_drive": k("backup"),
+  "scheduling.strict_hours": k("operational"), "clinic.closed_weekdays": k("operational"),
 });
 
 export type SettingBatchRequirement =

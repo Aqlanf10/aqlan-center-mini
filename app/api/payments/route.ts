@@ -28,6 +28,13 @@ export async function GET(request: Request) {
   if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
+  if (
+    (session.role === "cashier" || session.role === "accountant") &&
+    session.financeAccess?.viewPatientLedger === false &&
+    session.financeAccess?.collectPayments === false
+  ) {
+    return NextResponse.json({ message: "عرض المقبوضات خارج صلاحياتك المالية." }, { status: 403 });
+  }
   const requested = new URL(request.url).searchParams.get("date") ?? "";
   const date = DATE_PATTERN.test(requested)
     ? requested : clinicDateString(new Date(), CLINIC_TIME_ZONE);

@@ -688,8 +688,8 @@ function ToothCell({
             isPrimary ? "h-6 w-5" : isMolar ? "h-8 w-7" : isPremolar ? "h-7 w-6" : "h-7 w-5"
           } ${isHovered ? "scale-110" : ""}`}
         >
-          {/* Anatomical Tooth Shape (Roots + Crown) */}
-          <g transform={isUpper ? "" : "rotate(180 14 17)"}>
+          {/* Anatomical Tooth Shape (Roots + Crown: upper roots point up, lower roots point down) */}
+          <g transform={isUpper ? "rotate(180 14 17)" : ""}>
             {/* Root(s) */}
             {isMolar ? (
               // Multi-rooted molar

@@ -1,6 +1,6 @@
 import {withLegacyStaffReadOnlySnapshot} from "./legacy-staff-readonly-snapshot";
 import type { SessionPayload } from "./auth";
-import { CLINIC_TIME_ZONE, ensureSchema, getInvoice, getPool, insertAuditRow, listPatientInvoices, type DbClient, type Invoice } from "./db";
+import { CLINIC_TIME_ZONE, cancelActiveInvoiceDebtArrangementInTx, ensureSchema, getInvoice, getPool, insertAuditRow, listPatientInvoices, type DbClient, type Invoice } from "./db";
 import { debtRequestHash } from "./debt-source-proof";
 import { readInvoiceSettlementPosition, InvoiceSettlementError } from "./invoice-settlement-position";
 import { requireCurrency } from "./money";
@@ -188,6 +188,9 @@ export async function changeInvoiceArchive(invoiceId: number, source: unknown, s
       (invoice_id,patient_id,invoice_number,invoice_created_at,currency,version,action,reason,idempotency_key,request_hash,actor_user_id,actor)
       SELECT id,patient_id,invoice_number,created_at,base_currency,$2,$3,$4,$5,$6,$7,$8 FROM invoices WHERE id=$1 RETURNING *,id::text`,
     [invoiceId, current.version + 1, command.action, command.reason, command.idempotencyKey, hash, session.userId, session.username]);
+    if (command.action === "archive") {
+      await cancelActiveInvoiceDebtArrangementInTx(client, invoiceId, session.username, session.role, `أرشفة الفاتورة: ${command.reason}`);
+    }
     await insertAuditRow(client, { action: command.action === "archive" ? "invoice.archive" : "invoice.restore", entity: "invoice", entityId: invoiceId,
       entityLabel: invoice.invoiceNumber, actor: session.username, actorRole: session.role,
       details: { السبب: command.reason, المريض: invoice.patientId, النسخة: event.version, الإجراء: command.action, أثر_محاسبي: "لا تغيير في الفاتورة أو الدين أو السندات" } });
