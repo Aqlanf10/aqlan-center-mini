@@ -486,8 +486,8 @@ export async function approveContract(
         `INSERT INTO hr_leave_balances (
            staff_id, leave_type_code, year, allocated_days, effective_from, effective_to
          )
-         SELECT $1, 'annual', $2, COALESCE($3::numeric, lt.default_days_per_year, 21),
-                ($2::text || '-01-01')::date, ($2::text || '-12-31')::date
+         SELECT $1::int, 'annual', $2::int, COALESCE($3::numeric, lt.default_days_per_year, 21),
+                ($2::int::text || '-01-01')::date, ($2::int::text || '-12-31')::date
            FROM hr_leave_types lt
           WHERE lt.code = 'annual'
          ON CONFLICT (staff_id, leave_type_code, year) DO NOTHING`,
@@ -1868,10 +1868,13 @@ export async function decideLeaveRequest(
 
     // Serialize balance, overlap and decisions on the same staff row.
     await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[curr.staff_id]);
-    if (decision === "approved") await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, requesterUserId: curr.requester_user_id, evidence: curr.identity_evidence, hasRequest: true });
-    // منع الموافقة الذاتية: لا يجوز لأي مستخدم (حتى المدير) اعتماد طلبه الخاص
-    if (decision === "approved" && curr.staff_user_id === session.userId) {
-      throw new Error("لا يجوز اعتماد طلب الإجازة ذاتيًا.");
+    const soleOwner = decision === "approved" ? await isSoleActiveOwnerAdmin(client, session.userId) : false;
+    if (decision === "approved" && !soleOwner) {
+      await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, requesterUserId: curr.requester_user_id, evidence: curr.identity_evidence, hasRequest: true });
+      // منع الموافقة الذاتية: لا يجوز لأي مستخدم (حتى المدير) اعتماد طلبه الخاص
+      if (curr.staff_user_id === session.userId) {
+        throw new Error("لا يجوز اعتماد طلب الإجازة ذاتيًا.");
+      }
     }
 
     if (session.role !== "admin") throw new Error("قرار الإجازة للمدير وحده.");

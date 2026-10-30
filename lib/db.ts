@@ -373,56 +373,68 @@ export function getPool(): DbPool {
     application_name: "aqlan-center-mini",
   });
   // (DATA-02) حارس سلامة اتصالات المجمع: يمنع إعادة اتصال عالق في معاملة أو بعد فشل ROLLBACK إلى المجمع،
-  // ويجعل client.release() آمن التكرار عند تحريره مبكرًا بعد COMMIT قبل استعلامات القراءة اللاحقة.
-  const txGuardSym = Symbol.for("aqlan.poolClientTxGuard");
-  type GuardState = { inTx: boolean; poisoned: boolean; released: boolean };
+  // ويجعل client.release() آمن التكرار عند تحريره مبكرًا بعد COMMIT قبل استعلامات القراءة اللاحقة،
+  // مع الحفاظ على مسار استدعاءات pg-pool الداخلية المبنية على callback في pool.query دون أي مساس بالعميل الأصلي.
   const rawConnect = rawPool.connect.bind(rawPool);
-  (rawPool as unknown as { connect: () => Promise<unknown> }).connect = async () => {
-    const client = await rawConnect();
-    let state = (client as unknown as Record<symbol, GuardState | undefined>)[txGuardSym];
-    if (!state) {
-      state = { inTx: false, poisoned: false, released: false };
-      (client as unknown as Record<symbol, GuardState>)[txGuardSym] = state;
-      const origQuery = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
-      const origRelease = client.release.bind(client);
-      (client as unknown as { query: (...args: unknown[]) => Promise<unknown> }).query = async (...args: unknown[]) => {
-        const sqlText = typeof args[0] === "string"
-          ? args[0]
-          : (args[0] && typeof args[0] === "object" && "text" in args[0] && typeof (args[0] as { text?: unknown }).text === "string"
-            ? (args[0] as { text: string }).text
+  (rawPool as unknown as { connect: (cb?: unknown) => unknown }).connect = (cb?: unknown) => {
+    if (typeof cb === "function") {
+      return (rawConnect as (callback: unknown) => unknown)(cb);
+    }
+    return rawConnect().then((rawClient) => {
+      let inTx = false;
+      let poisoned = false;
+      let released = false;
+      const nativeQuery = rawClient.query.bind(rawClient) as unknown as (...qArgs: unknown[]) => Promise<unknown>;
+      const nativeRelease = rawClient.release.bind(rawClient);
+      const guardedQuery = async (...args: unknown[]) => {
+        const first = args[0];
+        const sqlText = typeof first === "string"
+          ? first
+          : (first && typeof first === "object" && "text" in first && typeof (first as { text?: unknown }).text === "string"
+            ? (first as { text: string }).text
             : "");
         const isBegin = /^\s*(?:BEGIN|START\s+TRANSACTION)\b/i.test(sqlText);
         const isRollback = /^\s*ROLLBACK(?!\s+TO\b)\b/i.test(sqlText);
         const isCommit = /^\s*(?:COMMIT|END)\b/i.test(sqlText);
         try {
-          const res = await origQuery(...args);
-          if (isBegin) state!.inTx = true;
-          else if (isCommit || isRollback) state!.inTx = false;
+          const res = await nativeQuery(...args);
+          if (isBegin) inTx = true;
+          else if (isCommit || isRollback) inTx = false;
           return res;
         } catch (err) {
-          if (isRollback || isCommit) state!.poisoned = true;
+          if (isRollback || isCommit) poisoned = true;
           throw err;
         }
       };
-      client.release = (err?: boolean | Error) => {
-        if (state!.released) return;
-        state!.released = true;
+      const guardedRelease = (err?: boolean | Error) => {
+        if (released) return;
+        released = true;
         if (err) {
-          origRelease(err);
+          nativeRelease(err);
           return;
         }
-        if (state!.poisoned || state!.inTx) {
-          origRelease(true);
+        if (poisoned || inTx) {
+          nativeRelease(true);
           return;
         }
-        origRelease();
+        nativeRelease();
       };
-    } else {
-      state.inTx = false;
-      state.poisoned = false;
-      state.released = false;
-    }
-    return client;
+      let activeQuery: unknown = guardedQuery;
+      let activeRelease: unknown = guardedRelease;
+      return new Proxy(rawClient, {
+        get(target, prop, receiver) {
+          if (prop === "query") return activeQuery;
+          if (prop === "release") return activeRelease;
+          const val = Reflect.get(target, prop, receiver);
+          return typeof val === "function" ? val.bind(target) : val;
+        },
+        set(target, prop, value, receiver) {
+          if (prop === "query") { activeQuery = value; return true; }
+          if (prop === "release") { activeRelease = value; return true; }
+          return Reflect.set(target, prop, value, receiver);
+        },
+      });
+    });
   };
   pool = rawPool as unknown as DbPool;
   return pool;
@@ -7145,8 +7157,10 @@ export async function createLabOrder(input: {
         automaticBaseAmount = automaticPrice.baseAmountMinor;
       }
     }
-    const baseAmount = automaticBaseAmount ?? (resolvedCost != null && resolvedCurrency
-      ? toBaseAmount(resolvedCost, resolvedCurrency, input.baseCurrency, resolvedExchangeRate)
+    const effectiveBaseCurrency = input.baseCurrency ?? CLINIC_BASE_CURRENCY;
+    const effectiveExchangeRate = resolvedExchangeRate ?? (resolvedCurrency === effectiveBaseCurrency ? 1 : undefined);
+    const baseAmount = automaticBaseAmount ?? (resolvedCost != null && resolvedCurrency && effectiveExchangeRate != null
+      ? toBaseAmount(resolvedCost, resolvedCurrency, effectiveBaseCurrency, effectiveExchangeRate)
       : null);
 
     // الترحيل المحاسبي: بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة،
@@ -7195,7 +7209,7 @@ export async function createLabOrder(input: {
         input.toothNumbers ?? null, input.shade ?? null, input.stumpShade ?? null,
         input.priority ?? "normal", input.impressionType ?? "physical",
         input.technicianName ?? null,
-        baseAmount, resolvedExchangeRate,
+        baseAmount, effectiveExchangeRate ?? null,
         expenseCatId, expenseAccCode, payableAccCode, isPosted,
         parsedShade.value === null ? null : JSON.stringify(parsedShade.value),
       ],
@@ -7239,8 +7253,8 @@ export async function createLabOrder(input: {
         [
           resolvedPartyId,
           `${input.workType}${input.toothNumbers ? ` [سن ${input.toothNumbers}]` : ""}${input.details ? ` — ${input.details}` : ""}`,
-          resolvedCost, resolvedCurrency, resolvedExchangeRate, baseAmount,
-          input.baseCurrency, orderId, input.dueDate, input.createdBy,
+          resolvedCost, resolvedCurrency, effectiveExchangeRate ?? 1, baseAmount,
+          effectiveBaseCurrency, orderId, input.dueDate, input.createdBy,
           expenseCatId, expenseAccCode, payableAccCode, isPosted,
         ],
       );
@@ -16461,7 +16475,8 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       [from, to],
     ),
     pool.query<{ id: number; as_of_date: Date; party_name: string; currency: string; amount_minor: string; payable_account_code: string | null }>(
-      `SELECT o.id, o.as_of_date, t.name AS party_name, o.currency, o.amount_minor, t.payable_account_code
+      `SELECT o.id, o.as_of_date, t.name AS party_name, o.currency, o.amount_minor,
+              COALESCE(t.payable_account_code, CASE WHEN t.kind = 'supplier' THEN '2105' ELSE '2101' END) AS payable_account_code
          FROM party_opening_advances o JOIN parties t ON t.id = o.party_id
         WHERE o.voided_at IS NULL AND o.as_of_date BETWEEN $1::date AND $2::date`,
       [from, to],
@@ -26131,7 +26146,9 @@ export async function createInventoryMovementInTransaction(client: DbClient, inp
       [payRow.id, -purchaseAmountMinor, creditReason, input.createdBy],
     );
     supplier = { id: payRow.party_id, name: payRow.party_name };
-    payableId = payRow.id;
+    // يبقى payable_id على حركة الرد فارغًا لأن الفهرس الفريد inventory_movements_payable_uniq
+    // يربط حركة التوريد الأصلية وحدها بالتزام المورّد، بينما يوثَّق الارتباط في payable_adjustments وسجل التدقيق.
+    payableId = null;
   } else if (input.supplierPartyId != null) {
     if (!isPurchase) {
       return { ok: false, message: "المورّد يُربط بإدخال الشراء وحده — لا بالصرف أو التسوية أو الرد." };
