@@ -421,19 +421,55 @@ export function getPool(): DbPool {
         }
         nativeRelease();
       };
-      let activeQuery: unknown = guardedQuery;
-      let activeRelease: unknown = guardedRelease;
+      let queryDesc: PropertyDescriptor = { value: guardedQuery, writable: true, enumerable: true, configurable: true };
+      let releaseDesc: PropertyDescriptor = { value: guardedRelease, writable: true, enumerable: true, configurable: true };
       return new Proxy(rawClient, {
         get(target, prop, receiver) {
-          if (prop === "query") return activeQuery;
-          if (prop === "release") return activeRelease;
+          if (prop === "query") return queryDesc.get ? queryDesc.get.call(receiver) : queryDesc.value;
+          if (prop === "release") return releaseDesc.get ? releaseDesc.get.call(receiver) : releaseDesc.value;
           const val = Reflect.get(target, prop, receiver);
           return typeof val === "function" ? val.bind(target) : val;
         },
         set(target, prop, value, receiver) {
-          if (prop === "query") { activeQuery = value; return true; }
-          if (prop === "release") { activeRelease = value; return true; }
+          if (prop === "query") {
+            if (queryDesc.set) queryDesc.set.call(receiver, value);
+            else queryDesc = { ...queryDesc, value };
+            return true;
+          }
+          if (prop === "release") {
+            if (releaseDesc.set) releaseDesc.set.call(receiver, value);
+            else releaseDesc = { ...releaseDesc, value };
+            return true;
+          }
           return Reflect.set(target, prop, value, receiver);
+        },
+        getOwnPropertyDescriptor(target, prop) {
+          if (prop === "query") return queryDesc;
+          if (prop === "release") return releaseDesc;
+          return Reflect.getOwnPropertyDescriptor(target, prop);
+        },
+        defineProperty(target, prop, descriptor) {
+          if (prop === "query") {
+            queryDesc = {
+              configurable: descriptor.configurable ?? queryDesc.configurable ?? true,
+              enumerable: descriptor.enumerable ?? queryDesc.enumerable ?? true,
+              ...(descriptor.get || descriptor.set
+                ? { get: descriptor.get, set: descriptor.set }
+                : { value: "value" in descriptor ? descriptor.value : queryDesc.value, writable: descriptor.writable ?? queryDesc.writable ?? true }),
+            };
+            return true;
+          }
+          if (prop === "release") {
+            releaseDesc = {
+              configurable: descriptor.configurable ?? releaseDesc.configurable ?? true,
+              enumerable: descriptor.enumerable ?? releaseDesc.enumerable ?? true,
+              ...(descriptor.get || descriptor.set
+                ? { get: descriptor.get, set: descriptor.set }
+                : { value: "value" in descriptor ? descriptor.value : releaseDesc.value, writable: descriptor.writable ?? releaseDesc.writable ?? true }),
+            };
+            return true;
+          }
+          return Reflect.defineProperty(target, prop, descriptor);
         },
       });
     });

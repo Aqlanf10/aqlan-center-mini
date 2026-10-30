@@ -311,10 +311,11 @@ describe("PG18 schema ownership characterization", () => {
     const runtimeApplicationTables = report.runtimeCatalog.tables
       .filter((entry) => entry.table !== "schema_migrations");
 
-    expect(migrationApplicationTables).toHaveLength(145);
-    expect(runtimeApplicationTables).toHaveLength(145);
+    expect(migrationApplicationTables).toHaveLength(146);
+    expect(runtimeApplicationTables).toHaveLength(146);
     for (const catalog of [migrationApplicationTables, runtimeApplicationTables]) {
       expect(catalog.some(entry => entry.table === "inventory_purchase_receipts")).toBe(true);
+      expect(catalog.some(entry => entry.table === "http_idempotency_keys")).toBe(true);
       for (const table of ["ortho_followup_coverage_revisions", "ortho_followup_coverage_rejections", "lab_work_intents", "lab_work_members", "lab_prescription_source_memberships", "lab_work_commands", "lab_work_intent_schema"]) {
         expect(catalog.some(entry => entry.table === table)).toBe(true);
       }
