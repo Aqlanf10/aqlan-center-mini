@@ -91,11 +91,18 @@ describe("one physical A4 preview logo, independent of table count/content", () 
       expect(text).not.toContain("معاينة صفحات الطباعة");
     } finally { await browser.close(); }
   });
-  it.each(["staff", "tasks"])("native HR %s watermark is centered on physical paper despite asymmetric margins", async kind => {
+  it.each(["staff", "tasks", "dossier", "commission"])("native %s watermark is centered on physical paper despite asymmetric margins", async kind => {
     const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
     try {
       const page = await browser.newPage();
-      await mount(page, `print-sheet hr-${kind}-sheet`, 2, 28);
+      const classes = kind === "dossier" ? "sheet sheet-a4 dossier-sheet" : kind === "commission" ? "sheet sheet-report sheet-report-landscape cs-sheet" : `print-sheet hr-${kind}-sheet`;
+      await mount(page, classes, 2, 28);
+      if (kind === "dossier" || kind === "commission") {
+        const path = kind === "dossier" ? "app/print/dossier/[id]/page.tsx" : "app/print/commission-statement/[id]/page.tsx";
+        const actualStyles = readFileSync(resolve(path), "utf8").match(/const (?:DOSSIER|STATEMENT)_PRINT_STYLES = `([\s\S]*?)`;/)?.[1];
+        expect(actualStyles).toBeTruthy();
+        await page.addStyleTag({ content: actualStyles! });
+      }
       await page.evaluate(async () => { await Promise.all([...document.images].map(image => image.decode().catch(() => undefined))); });
       const pdf = resolve(output, `a4-preview-hr-${kind}-center.pdf`);
       await page.pdf({ path: pdf, preferCSSPageSize: true, printBackground: true });

@@ -130,10 +130,10 @@
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .print-document-watermark-image { display: block; width: 100%; height: 100%; object-fit: contain; }
-  /* HR named pages reserve extra bottom space for page numbers. Native PDF
+  /* Numbered A4 pages reserve extra bottom space for page numbers. Native PDF
      measurements confirm 50% alone centers the printable area, not the paper:
      compensate half of (bottom - top) without moving document content. */
-  body:has(.print-brand-header):has(.hr-staff-sheet) > .print-document-watermark { top: calc(50% + 3mm); }
+  body:has(.print-brand-header):has(.hr-staff-sheet, .dossier-sheet, .cs-sheet) > .print-document-watermark { top: calc(50% + 3mm); }
   body:has(.print-brand-header):has(.hr-tasks-sheet) > .print-document-watermark { top: calc(50% + 2mm); }
   /* Keep the logical compact sheet's midpoint on operator-selected A4 stock;
      this changes neither the paper size nor document flow. */
