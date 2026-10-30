@@ -548,6 +548,7 @@ function HrLeavesView({ isAdmin = false }: { isAdmin?: boolean }) {
                 value={adjDays}
                 min={0}
                 max={366}
+                step="any"
                 onChange={(e) => setAdjDays(e.target.value)}
                 className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
               />
