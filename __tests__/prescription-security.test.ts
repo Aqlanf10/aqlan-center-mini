@@ -636,6 +636,29 @@ describe("الإقرار مربوط بالتحذيرات التي رآها ال�
       body: JSON.stringify(body),
     }));
 
+  it.each([
+    { failure: "missing", status: 404, acknowledged: false },
+    { failure: "rejected", status: 503, acknowledged: false },
+    { failure: "missing", status: 404, acknowledged: true },
+    { failure: "rejected", status: 503, acknowledged: true },
+  ])("fails closed when patient context is $failure (acknowledged=$acknowledged)", async ({ failure, status, acknowledged }) => {
+    let acknowledgedSafetyToken: string | undefined;
+    if (acknowledged) {
+      const preview = await post(NSAID_DRAFT);
+      expect(preview.status).toBe(200);
+      const payload = await preview.json();
+      expect(payload.requiresAcknowledgement).toBe(true);
+      expect(payload.acknowledgementToken).toEqual(expect.any(String));
+      acknowledgedSafetyToken = payload.acknowledgementToken;
+    }
+    if (failure === "missing") mocks.getPatient.mockResolvedValue(null);
+    else mocks.getPatient.mockRejectedValue(new Error("Synthetic context read failure"));
+    const response = await post({ ...NSAID_DRAFT, ...(acknowledgedSafetyToken ? { acknowledgedSafetyToken } : {}) });
+    expect(response.status).toBe(status);
+    expect(await response.json()).not.toHaveProperty("id");
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+
   it("تغيّرت التحذيرات بين المعاينة والإقرار (أُضيف تحذير): 200 إعادة عرض بتحذيرات جديدة ورمز جديد — ولا حفظ", async () => {
     /* ١) المعاينة: ملف فيه سيولة دم فقط ⇒ تحذير نزف واحد. */
     const previewToken = buildSafetyAcknowledgementToken({

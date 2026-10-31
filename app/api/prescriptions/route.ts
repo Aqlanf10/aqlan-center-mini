@@ -137,7 +137,15 @@ export async function POST(request: Request) {
      أو بوصفةٍ بديلة). والتحذيرات غير الحرجة لا تُحفظ وتُنسى: تُعرض، ويُقرّها
      الطبيب صراحةً، وربطُ الإقرار بالوصفة نفسها **وبالتحذيرات التي رآها**
      برمزٍ خادمي قصير العمر (Blocker B ثم الجولة الثالثة). */
-  const patient = await getPatient(draft.value.patientId).catch(() => null);
+  let patient: Awaited<ReturnType<typeof getPatient>>;
+  try {
+    patient = await getPatient(draft.value.patientId);
+  } catch {
+    return NextResponse.json({ message: "تعذر تحميل ملف المريض للتحقق من السلامة؛ أعد المحاولة." }, { status: 503 });
+  }
+  if (!patient) {
+    return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
+  }
   if (patient) {
     /* دائمًا يُعاد التقييم من الملف الحالي وقت كل طلب — لا حالة عميل. */
     const alerts = evaluatePrescriptionSafety(

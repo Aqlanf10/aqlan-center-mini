@@ -72,7 +72,9 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
         const link = page.getByRole("link", { name: "فتح الوصفة للطباعة", exact: true }); await link.waitFor(); expect(await link.getAttribute("href")).toBe(printPath);
         await page.screenshot({ path: `.settings-ui-artifacts/prescription-reprint/${suffix ? "checkout" : "patient"}.png`, fullPage: true });
       }
-      await page.goto(`${baseUrl}${printPath}`); await page.getByRole("button", { name: "اطبع", exact: true }).click();
+      await page.goto(`${baseUrl}${printPath}`);
+      expect(await page.getByRole("button", { name: "اطبع", exact: true }).getAttribute("data-print-document-action")).not.toBeNull();
+      await page.getByRole("button", { name: "اطبع", exact: true }).click();
       await expect.poll(() => page.evaluate(() => (window as typeof window & { syntheticPrintCount: number }).syntheticPrintCount)).toBe(1);
       await setGrant(false); await page.getByRole("button", { name: "اطبع", exact: true }).click(); await page.getByRole("alert").waitFor();
       expect(await page.evaluate(() => (window as typeof window & { syntheticPrintCount: number }).syntheticPrintCount)).toBe(1);
