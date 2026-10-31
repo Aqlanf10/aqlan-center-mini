@@ -1052,7 +1052,7 @@ export default function UsersAndDoctorsPage() {
                                 if (!refreshOwnIdentity || !owner || editorOwner.current !== owner || !payload || typeof payload !== "object") return;
                                 const updated = payload as Record<string, unknown>;
                                 if (updated.id !== editingUser.id || updated.username !== editingUser.username || updated.role !== "admin" || updated.partyId !== partyId || (updated.partyName !== null && typeof updated.partyName !== "string")) return;
-                                setEditingUser((current) => current?.id === updated.id
+                                setEditingUser((current) => current && current.id === updated.id
                                   ? { ...current, partyId, partyName: updated.partyName as string | null }
                                   : current);
                               },

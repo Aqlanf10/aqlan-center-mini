@@ -8,7 +8,7 @@ type Hooks = { values: unknown[]; cursor: number; changed: boolean; mounted: boo
   memos: Map<number, { deps?: readonly unknown[]; value: unknown }>; pending: Array<() => void>; layout: Array<() => void> };
 const identity = vi.hoisted(() => ({ session: { username: "self-admin", role: "admin" } as { username: string; role: string } | null }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => identity.session }));
-const runtime = vi.hoisted(() => ({ current: null as Hooks | null }));
+const runtime = vi.hoisted(() => ({ current: null as Hooks | null, editorUpdaters: [] as Array<(current: unknown) => unknown> }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   const same = (a?: readonly unknown[], b?: readonly unknown[]) => !!a && !!b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
@@ -26,6 +26,8 @@ vi.mock("react", async (original) => {
   return { ...react,
     useState: (initial: unknown) => { const hooks = current(); const index = slot(hooks, typeof initial === "function" ? initial() : initial);
       return [hooks.values[index], (value: unknown) => { if (!hooks.mounted) hooks.lateUpdates++;
+        const previous = hooks.values[index];
+        if (typeof value === "function" && previous && typeof previous === "object" && "username" in previous && "partyId" in previous) runtime.editorUpdaters.push(value as (current: unknown) => unknown);
         const next = typeof value === "function" ? value(hooks.values[index]) : value;
         if (!Object.is(next, hooks.values[index])) hooks.changed = true; hooks.values[index] = next; }]; },
     useRef: (initial: unknown) => { const hooks = current(); return hooks.values[slot(hooks, { current: initial })]; },
@@ -70,6 +72,7 @@ const writes: Array<{ url: string; body: Record<string, unknown> }> = [];
 beforeEach(() => {
   hooks = { values: [], cursor: 0, changed: false, mounted: true, lateUpdates: 0,
     effects: new Map(), memos: new Map(), pending: [], layout: [] };
+  runtime.editorUpdaters.length = 0;
   patchReply = null; accountRole = "admin"; accountUsername = "self-admin";
   identity.session = { username: "self-admin", role: "admin" }; writes.length = 0;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -105,6 +108,8 @@ describe("own admin clinical identity selector", () => {
     await settle();
     expect(writes).toEqual([{ url: "/api/users/71", body: { action: "link_doctor", partyId: 81 } }]);
     expect(selector()?.props.value).toBe(81);
+    expect(runtime.editorUpdaters).toHaveLength(1);
+    expect(runtime.editorUpdaters[0](null)).toBeNull();
   });
   it("preserves an unsaved profile draft while refreshing only confirmed clinical identity", async () => {
     await ready(); open();
