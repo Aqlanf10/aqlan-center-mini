@@ -9333,9 +9333,8 @@ const toService = (row: ServiceRow): Service => ({
 
 const SERVICE_COLUMNS = "id, name, category, price_minor, is_active, sort_order, price_configured, price_provisional, price_sar_minor, price_usd_minor";
 
-export async function listServices(includeInactive = false): Promise<Service[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<ServiceRow>(
+export async function listServicesWith(q: Pick<DbClient, "query">, includeInactive = false): Promise<Service[]> {
+  const { rows } = await q.query<ServiceRow>(
     `SELECT ${SERVICE_COLUMNS} FROM services
       ${includeInactive ? "" : "WHERE is_active"}
       ORDER BY sort_order, name`,
@@ -9343,14 +9342,23 @@ export async function listServices(includeInactive = false): Promise<Service[]> 
   return rows.map(toService);
 }
 
-/** خدمةٌ واحدة من الدليل — لأن سعرًا يأتي من المتصفّح سعرٌ يمكن تغييره في المتصفّح. */
-export async function getService(id: number): Promise<Service | null> {
+export async function listServices(includeInactive = false): Promise<Service[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ServiceRow>(
+  return listServicesWith(getPool(), includeInactive);
+}
+
+/** خدمةٌ واحدة من الدليل — لأن سعرًا يأتي من المتصفّح سعرٌ يمكن تغييره في المتصفّح. */
+export async function getServiceWith(q: Pick<DbClient, "query">, id: number): Promise<Service | null> {
+  const { rows } = await q.query<ServiceRow>(
     `SELECT ${SERVICE_COLUMNS} FROM services WHERE id = $1`,
     [id],
   );
   return rows[0] ? toService(rows[0]) : null;
+}
+
+export async function getService(id: number): Promise<Service | null> {
+  await ensureSchema();
+  return getServiceWith(getPool(), id);
 }
 
 export async function createService(input: {
@@ -16306,18 +16314,22 @@ export async function getPlanPatientId(planId: number): Promise<number | null> {
  * الخادم، لا من الطلب: سعر الدليل بالعملة الأساسية لا يُنسخ إلى خطةٍ بعملة
  * اتفاق (SAR/USD) بلا سعرٍ صريحٍ بعملتها.
  */
-export async function getPlanCurrency(planId: number): Promise<Currency | null> {
-  await ensureSchema();
+export async function getPlanCurrencyWith(q: Pick<DbClient, "query">, planId: number): Promise<Currency | null> {
   // (P-01 owner review — تصحيح ٣) بلا COALESCE ولا سقوطٍ صامت: الخطة الموجودة
   // بعملةٍ فاسدة ترفع خطأ سلامةٍ مالية — لا تُعاد يمنيّة فيتسوّى دلو الأساس
   // بدل دلوها بصمت. null يعني حصرًا: لا خطة بهذا المعرّف.
-  const { rows } = await getPool().query<{ base_currency: string }>(
+  const { rows } = await q.query<{ base_currency: string }>(
     `SELECT base_currency
        FROM treatment_plans WHERE id = $1 LIMIT 1`,
     [planId],
   );
   if (rows.length === 0) return null;
   return requireCurrency(rows[0].base_currency, "خطة علاج", planId);
+}
+
+export async function getPlanCurrency(planId: number): Promise<Currency | null> {
+  await ensureSchema();
+  return getPlanCurrencyWith(getPool(), planId);
 }
 
 /**
@@ -21486,8 +21498,24 @@ export async function patientStatementSnapshot(patientId:number,today:string,opt
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
   return readPlans(PATIENT_PLANS_WHERE,[patientId],today);
 }
+export async function getPlanWith(q: Pick<DbClient, "query">, id: number, today: string): Promise<TreatmentPlan | null> {
+  const { rows } = await q.query<PlanRow>(`${PLAN_SELECT} WHERE t.id=$1`, [id]);
+  return (await hydratePlans(rows, today, q as DbClient))[0] ?? null;
+}
 export async function getPlan(id:number,today:string):Promise<TreatmentPlan|null> {
   return (await readPlans("WHERE t.id=$1",[id],today))[0]??null;
+}
+export async function listActivePlansWith(
+  q: Pick<DbClient, "query">,
+  today: string,
+  clinicianPartyId: number | null = null,
+): Promise<TreatmentPlan[]> {
+  const where = clinicianPartyId === null
+    ? "WHERE t.status='active' ORDER BY t.created_at DESC LIMIT 300"
+    : `WHERE t.status='active' AND (t.primary_doctor_id = $1 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = t.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")})) ORDER BY t.created_at DESC LIMIT 300`;
+  const params = clinicianPartyId === null ? [] : [clinicianPartyId];
+  const { rows } = await q.query<PlanRow>(`${PLAN_SELECT} ${where}`, params);
+  return hydratePlans(rows, today, q as DbClient);
 }
 export async function listActivePlans(today:string):Promise<TreatmentPlan[]> {
   return readPlans("WHERE t.status='active' ORDER BY t.created_at DESC LIMIT 300",[],today);
@@ -21515,6 +21543,60 @@ export interface PendingProposal {
  * (P1-E) عروض العلاج المعلّقة: خطط سارية بلا موافقة. قراءةٌ فقط، والأقدم أولًا؛
  * التصنيف (حان الاتصال/قديم/…) في consultation-followup.ts بمدّة الإعدادات.
  */
+export async function listPendingProposalsWith(
+  q: Pick<DbClient, "query">,
+  options: { includeMoney: boolean; clinicianPartyId?: number | null },
+): Promise<PendingProposal[]> {
+  const clinicianPartyId = options.clinicianPartyId ?? null;
+  const scopeClause = clinicianPartyId === null
+    ? ""
+    : ` AND (t.primary_doctor_id = $2 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = t.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")}))`;
+  const params: unknown[] = clinicianPartyId === null ? [CLINIC_TIME_ZONE] : [CLINIC_TIME_ZONE, clinicianPartyId];
+  const { rows } = await q.query<{
+    id: number; patient_id: number; full_name: string; phone: string | null; title: string;
+    doctor_name: string | null; created_on: string; last_contact_on: string | null;
+    items: number; total_minor: string; base_currency: string;
+  }>(
+    `SELECT t.id, t.patient_id, p.full_name, p.phone, t.title, d.name AS doctor_name,
+            (t.created_at AT TIME ZONE $1)::date::text AS created_on,
+            /* تواصل المتابعة من سجلّه هو (plan.proposal_contact) — لا من طابع تذكير الأقساط. */
+            (SELECT (max(a.created_at) AT TIME ZONE $1)::date::text FROM audit_log a
+              WHERE a.action = 'plan.proposal_contact' AND a.entity_id = t.id::text) AS last_contact_on,
+            (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = t.id AND i.status <> 'cancelled')::int AS items,
+            t.total_minor::text, t.base_currency
+       FROM treatment_plans t
+       JOIN patients p ON p.id = t.patient_id
+       LEFT JOIN parties d ON d.id = t.primary_doctor_id
+      WHERE t.status = 'active' AND t.consent_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM invoices inv WHERE inv.plan_id = t.id AND inv.status <> 'cancelled')
+        AND NOT EXISTS (
+          SELECT 1 FROM plan_items i
+          WHERE i.plan_id = t.id
+            AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL})
+        )${scopeClause}
+      ORDER BY t.created_at ASC
+      LIMIT 300`,
+    params,
+  );
+  const consents = await contactConsentStatesWith(q, rows.map((row) => row.patient_id));
+  const settings = await getSettingsWith(q);
+  const consentMode = parseConsentMode(settings["messaging.consent_mode"]);
+  return rows.map((row) => ({
+    planId: row.id,
+    patientId: row.patient_id,
+    patientName: row.full_name,
+    patientPhone: row.phone,
+    title: row.title,
+    doctorName: row.doctor_name,
+    createdOn: row.created_on,
+    lastContactOn: row.last_contact_on,
+    items: row.items,
+    totalMinor: options.includeMoney ? toMinor(row.total_minor) : null,
+    currency: row.base_currency as Currency,
+    whatsappAllowed: consentAllows(consents.get(row.patient_id)?.whatsapp ?? "unknown", consentMode),
+  }));
+}
+
 export async function listPendingProposals(options: { includeMoney: boolean }): Promise<PendingProposal[]> {
   await ensureSchema();
   const { rows } = await getPool().query<{
@@ -21567,25 +21649,30 @@ export async function listPendingProposals(options: { includeMoney: boolean }): 
  * (P1-E) تسجيل تواصلٍ مع المريض بشأن عرض علاجه — قيدٌ في التدقيق بملاحظة، منفصلٌ عن طابع تذكير الأقساط.
  * لا يغيّر الخطة ولا أقساطها: الموافقة والإلغاء بمسارَيهما في ملف المريض.
  */
+export async function recordProposalContactWith(
+  client: DbClient,
+  input: { planId: number; note: string | null; actor: string; actorRole: string | null },
+): Promise<{ ok: true; lastContactAt: string } | { ok: false; status: 404 | 409; message: string }> {
+  const { rows: [plan] } = await client.query<{ title: string; status: string; consent_at: Date | null; patient_id: number }>(
+    `SELECT title, status, consent_at, patient_id FROM treatment_plans WHERE id = $1 FOR UPDATE`, [input.planId]);
+  if (!plan) return { ok: false as const, status: 404 as const, message: "الخطة غير موجودة." };
+  if (plan.status !== "active" || plan.consent_at !== null) {
+    return { ok: false as const, status: 409 as const, message: "هذه الخطة ليست عرضًا معلّقًا — وافق عليها المريض أو أُغلقت." };
+  }
+  /* لا يمسّ last_reminder_at (طابع تذكير الأقساط): التواصل يُسجَّل في التدقيق وحده. */
+  await insertAuditRow(client, {
+    action: "plan.proposal_contact", entity: "treatment_plans", entityId: input.planId, entityLabel: plan.title,
+    details: { المريض: plan.patient_id, ...(input.note ? { الملاحظة: input.note } : {}) },
+    actor: input.actor, actorRole: input.actorRole,
+  });
+  return { ok: true as const, lastContactAt: new Date().toISOString() };
+}
+
 export async function recordProposalContact(input: {
   planId: number; note: string | null; actor: string; actorRole: string | null;
 }): Promise<{ ok: true; lastContactAt: string } | { ok: false; status: 404 | 409; message: string }> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
-    const { rows: [plan] } = await client.query<{ title: string; status: string; consent_at: Date | null; patient_id: number }>(
-      `SELECT title, status, consent_at, patient_id FROM treatment_plans WHERE id = $1 FOR UPDATE`, [input.planId]);
-    if (!plan) return { ok: false as const, status: 404 as const, message: "الخطة غير موجودة." };
-    if (plan.status !== "active" || plan.consent_at !== null) {
-      return { ok: false as const, status: 409 as const, message: "هذه الخطة ليست عرضًا معلّقًا — وافق عليها المريض أو أُغلقت." };
-    }
-    /* لا يمسّ last_reminder_at (طابع تذكير الأقساط): التواصل يُسجَّل في التدقيق وحده. */
-    await insertAuditRow(client, {
-      action: "plan.proposal_contact", entity: "treatment_plans", entityId: input.planId, entityLabel: plan.title,
-      details: { المريض: plan.patient_id, ...(input.note ? { الملاحظة: input.note } : {}) },
-      actor: input.actor, actorRole: input.actorRole,
-    });
-    return { ok: true as const, lastContactAt: new Date().toISOString() };
-  });
+  return withTransaction(getPool(), async (client) => recordProposalContactWith(client, input));
 }
 
 /**
@@ -21595,6 +21682,56 @@ export async function recordProposalContact(input: {
  * «قسطك مستحق» ثلاث مرات في ثلاثة أيام فيصمّ عن الرسائل كلها. الطابع على الخطة
  * وعلى الأقساط المستحقة والمتأخرة معًا: تذكيرٌ واحد يوثَّق مرة واحدة.
  */
+export async function recordPlanInstallmentRemindersWith(
+  client: DbClient,
+  input: {
+    planIds: number[];
+    installmentNumber?: number;
+    bulk: boolean;
+    actor: string;
+    actorRole: string | null;
+    clinicianPartyId?: number | null;
+  },
+): Promise<{ lastReminderAt: string; updatedCount: number }> {
+  const planIds = [...new Set(input.planIds)].sort((a, b) => a - b);
+  if (!planIds.length || planIds.length > 500 || planIds.some(id => !Number.isSafeInteger(id) || id <= 0 || id > 2147483647)
+    || (input.installmentNumber !== undefined && (!Number.isSafeInteger(input.installmentNumber) || input.installmentNumber <= 0 || input.installmentNumber > 2147483647 || planIds.length !== 1))) {
+    throw new Error("Invalid reminder targets");
+  }
+  const now = new Date();
+  // Lock in deterministic order. The batch, its timestamps and mandatory audit are atomic.
+  const { rows: plans } = await client.query<{ id: number; patient_id: number }>(
+    "SELECT id, patient_id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE", [planIds]);
+  let updatedCount = 0;
+  for (const plan of plans) {
+    if (
+      input.clinicianPartyId !== undefined
+      && input.clinicianPartyId !== null
+      && !(await patientInDoctorScopeWith(client, input.clinicianPartyId, plan.patient_id))
+    ) {
+      continue;
+    }
+    if (input.installmentNumber !== undefined) {
+      const { rows } = await client.query(
+        "SELECT id FROM plan_installments WHERE plan_id=$1 AND number=$2 FOR UPDATE", [plan.id, input.installmentNumber]);
+      if (!rows.length) continue; // A missing installment must not stamp the plan.
+    }
+    await client.query("UPDATE treatment_plans SET last_reminder_at=$1 WHERE id=$2", [now, plan.id]);
+    if (input.installmentNumber !== undefined) {
+      await client.query("UPDATE plan_installments SET last_reminder_at=$1 WHERE plan_id=$2 AND number=$3", [now, plan.id, input.installmentNumber]);
+    } else {
+      await client.query("UPDATE plan_installments SET last_reminder_at=$1 WHERE plan_id=$2 AND due_date <= CURRENT_DATE", [now, plan.id]);
+    }
+    await insertAuditRow(client, {
+      action: "plan.installment_reminder", entity: "treatment_plans", entityId: plan.id,
+      details: input.bulk ? { جماعي: true } : input.installmentNumber !== undefined ? { القسط: input.installmentNumber } : {},
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    updatedCount += 1;
+  }
+  return { lastReminderAt: now.toISOString(), updatedCount };
+}
+
 export async function recordPlanInstallmentReminders(input: {
   planIds: number[];
   installmentNumber?: number;
@@ -21602,39 +21739,8 @@ export async function recordPlanInstallmentReminders(input: {
   actor: string;
   actorRole: string | null;
 }): Promise<{ lastReminderAt: string; updatedCount: number }> {
-  const planIds = [...new Set(input.planIds)].sort((a, b) => a - b);
-  if (!planIds.length || planIds.length > 500 || planIds.some(id => !Number.isSafeInteger(id) || id <= 0 || id > 2147483647)
-    || (input.installmentNumber !== undefined && (!Number.isSafeInteger(input.installmentNumber) || input.installmentNumber <= 0 || input.installmentNumber > 2147483647 || planIds.length !== 1))) {
-    throw new Error("Invalid reminder targets");
-  }
   await ensureSchema();
-  const now = new Date();
-  return withTransaction(getPool(), async client => {
-    // Lock in deterministic order. The batch, its timestamps and mandatory audit are atomic.
-    const { rows: plans } = await client.query<{ id: number }>(
-      "SELECT id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE", [planIds]);
-    let updatedCount = 0;
-    for (const plan of plans) {
-      if (input.installmentNumber !== undefined) {
-        const { rows } = await client.query(
-          "SELECT id FROM plan_installments WHERE plan_id=$1 AND number=$2 FOR UPDATE", [plan.id, input.installmentNumber]);
-        if (!rows.length) continue; // A missing installment must not stamp the plan.
-      }
-      await client.query("UPDATE treatment_plans SET last_reminder_at=$1 WHERE id=$2", [now, plan.id]);
-      if (input.installmentNumber !== undefined) {
-        await client.query("UPDATE plan_installments SET last_reminder_at=$1 WHERE plan_id=$2 AND number=$3", [now, plan.id, input.installmentNumber]);
-      } else {
-        await client.query("UPDATE plan_installments SET last_reminder_at=$1 WHERE plan_id=$2 AND due_date <= CURRENT_DATE", [now, plan.id]);
-      }
-      await insertAuditRow(client, {
-        action: "plan.installment_reminder", entity: "treatment_plans", entityId: plan.id,
-        details: input.bulk ? { جماعي: true } : input.installmentNumber !== undefined ? { القسط: input.installmentNumber } : {},
-        actor: input.actor, actorRole: input.actorRole,
-      });
-      updatedCount += 1;
-    }
-    return { lastReminderAt: now.toISOString(), updatedCount };
-  });
+  return withTransaction(getPool(), async client => recordPlanInstallmentRemindersWith(client, input));
 }
 
 /**
@@ -21668,6 +21774,68 @@ function planItemChanges(before: PlanItemAuditRow, after: PlanItemAuditRow | und
   return changes;
 }
 
+export async function updatePlanItemWith(
+  client: DbClient,
+  input: {
+    planId: number;
+    itemId: number;
+    plannedVisitNumber?: number;
+    billingRule?: PlanBillingRule;
+    sessionCount?: number;
+    doctorId?: number | null;
+    note?: string | null;
+    actor: string;
+    actorRole: string | null;
+  },
+): Promise<PlanGuard> {
+  const plan = await lockPlan(client, input.planId);
+  if (!plan) return { ok: false, message: "الخطة غير موجودة." };
+
+  const { rows: [before] } = await client.query<PlanItemAuditRow>(
+    `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1 AND plan_id = $2 FOR UPDATE`,
+    [input.itemId, input.planId],
+  );
+  if (!before) return { ok: false, message: "البند غير موجود." };
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
+    AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL}) LIMIT 1`, [input.itemId]);
+  if (financial && ((input.doctorId !== undefined && input.doctorId !== before.doctor_id)
+    || (input.billingRule !== undefined && input.billingRule !== before.billing_rule)
+    || (input.sessionCount !== undefined && input.sessionCount !== before.session_count))) {
+    return { ok: false, message: "البند له سجل مالي؛ تغيير الطبيب أو جلساته أو قاعدة الفوترة يحتاج مراجعة الاتفاق." };
+  }
+
+  await client.query(
+    `UPDATE plan_items SET
+       planned_visit_number = COALESCE($3, planned_visit_number),
+       billing_rule         = COALESCE($4, billing_rule),
+       session_count        = COALESCE($5, session_count),
+       doctor_id            = COALESCE($6, doctor_id),
+       note                 = COALESCE($7, note)
+     WHERE id = $1 AND plan_id = $2`,
+    [
+      input.itemId,
+      input.planId,
+      input.plannedVisitNumber ?? null,
+      input.billingRule ?? null,
+      input.sessionCount ?? null,
+      input.doctorId ?? null,
+      input.note !== undefined ? input.note : null,
+    ],
+  );
+  const { rows: [after] } = await client.query<PlanItemAuditRow>(
+    `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1`, [input.itemId],
+  );
+  const changes = planItemChanges(before, after);
+  if (Object.keys(changes).length > 0) {
+    await insertAuditRow(client, {
+      action: "plan.item_update", entity: "plan_items", entityId: input.itemId, entityLabel: before.service_name,
+      details: { الخطة: input.planId, ...changes },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+  }
+  return { ok: true };
+}
+
 export async function updatePlanItem(input: {
   planId: number;
   itemId: number;
@@ -21684,54 +21852,9 @@ export async function updatePlanItem(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const plan = await lockPlan(client, input.planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
-
-    const { rows: [before] } = await client.query<PlanItemAuditRow>(
-      `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1 AND plan_id = $2 FOR UPDATE`,
-      [input.itemId, input.planId],
-    );
-    if (!before) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
-    const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-      AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL}) LIMIT 1`, [input.itemId]);
-    if (financial && ((input.doctorId !== undefined && input.doctorId !== before.doctor_id)
-      || (input.billingRule !== undefined && input.billingRule !== before.billing_rule)
-      || (input.sessionCount !== undefined && input.sessionCount !== before.session_count))) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "البند له سجل مالي؛ تغيير الطبيب أو جلساته أو قاعدة الفوترة يحتاج مراجعة الاتفاق." };
-    }
-
-    await client.query(
-      `UPDATE plan_items SET
-         planned_visit_number = COALESCE($3, planned_visit_number),
-         billing_rule         = COALESCE($4, billing_rule),
-         session_count        = COALESCE($5, session_count),
-         doctor_id            = COALESCE($6, doctor_id),
-         note                 = COALESCE($7, note)
-       WHERE id = $1 AND plan_id = $2`,
-      [
-        input.itemId,
-        input.planId,
-        input.plannedVisitNumber ?? null,
-        input.billingRule ?? null,
-        input.sessionCount ?? null,
-        input.doctorId ?? null,
-        input.note !== undefined ? input.note : null,
-      ],
-    );
-    const { rows: [after] } = await client.query<PlanItemAuditRow>(
-      `SELECT ${PLAN_ITEM_AUDIT_COLUMNS} FROM plan_items WHERE id = $1`, [input.itemId],
-    );
-    const changes = planItemChanges(before, after);
-    if (Object.keys(changes).length > 0) {
-      await insertAuditRow(client, {
-        action: "plan.item_update", entity: "plan_items", entityId: input.itemId, entityLabel: before.service_name,
-        details: { الخطة: input.planId, ...changes },
-        actor: input.actor, actorRole: input.actorRole,
-      });
-    }
-    await client.query("COMMIT");
-    return { ok: true };
+    const result = await updatePlanItemWith(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -21789,30 +21912,37 @@ export async function createPlan(input: {
  */
 export type PlanStatusResult = "ok" | "not_found" | "reason_required";
 
+export async function setPlanStatusWith(
+  client: DbClient,
+  id: number,
+  status: PlanStatus,
+  ctx: { actor: string; actorRole: string | null; reason?: string | null },
+): Promise<PlanStatusResult> {
+  const { rows: [plan] } = await client.query<{ status: string; title: string }>(
+    `SELECT status, title FROM treatment_plans WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!plan) return "not_found";
+  if (plan.status === status) return "ok";
+  const reason = ctx.reason?.trim() || null;
+  /* إلغاء الخطة أو إحياء الملغاة قرارٌ مسبَّب — يُحكم عليه تحت قفل الصف نفسه، فطلبٌ متزامن
+     ألغاها للتو لا يُحييه طلبٌ آخر بلا سبب (قرأ حالةً قديمة قبل القفل). */
+  if ((status === "cancelled" || plan.status === "cancelled") && (reason?.length ?? 0) < 3) return "reason_required";
+  await client.query(`UPDATE treatment_plans SET status = $2 WHERE id = $1`, [id, status]);
+  await insertAuditRow(client, {
+    action: "plan.status", entity: "treatment_plans", entityId: id, entityLabel: plan.title,
+    details: { من: plan.status, إلى: status, ...(reason ? { السبب: reason } : {}) },
+    actor: ctx.actor, actorRole: ctx.actorRole,
+  });
+  return "ok";
+}
+
 export async function setPlanStatus(
   id: number,
   status: PlanStatus,
   ctx: { actor: string; actorRole: string | null; reason?: string | null },
 ): Promise<PlanStatusResult> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client): Promise<PlanStatusResult> => {
-    const { rows: [plan] } = await client.query<{ status: string; title: string }>(
-      `SELECT status, title FROM treatment_plans WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!plan) return "not_found";
-    if (plan.status === status) return "ok";
-    const reason = ctx.reason?.trim() || null;
-    /* إلغاء الخطة أو إحياء الملغاة قرارٌ مسبَّب — يُحكم عليه تحت قفل الصف نفسه، فطلبٌ متزامن
-       ألغاها للتو لا يُحييه طلبٌ آخر بلا سبب (قرأ حالةً قديمة قبل القفل). */
-    if ((status === "cancelled" || plan.status === "cancelled") && (reason?.length ?? 0) < 3) return "reason_required";
-    await client.query(`UPDATE treatment_plans SET status = $2 WHERE id = $1`, [id, status]);
-    await insertAuditRow(client, {
-      action: "plan.status", entity: "treatment_plans", entityId: id, entityLabel: plan.title,
-      details: { من: plan.status, إلى: status, ...(reason ? { السبب: reason } : {}) },
-      actor: ctx.actor, actorRole: ctx.actorRole,
-    });
-    return "ok";
-  });
+  return withTransaction(getPool(), async (client): Promise<PlanStatusResult> => setPlanStatusWith(client, id, status, ctx));
 }
 
 /* ────────────────── بنود الخطة السريرية وموافقتها ────────────────── */
@@ -21866,6 +21996,81 @@ export async function recomputePlanTotal(client: DbClient, planId: number): Prom
   return total;
 }
 
+export async function addPlanItemWith(
+  client: DbClient,
+  input: {
+    planId: number;
+    serviceId: number | null;
+    serviceName: string;
+    category: string | null;
+    toothCode: number | null;
+    surfaces: string | null;
+    quantity: number;
+    unitPriceMinor: number;
+    note: string | null;
+    plannedVisitNumber?: number;
+    billingRule?: PlanBillingRule;
+    sessionCount?: number;
+    doctorId?: number | null;
+  },
+): Promise<PlanGuard & { totalMinor?: number }> {
+  const plan = await lockPlan(client, input.planId);
+  if (!plan) return { ok: false, message: "الخطة غير موجودة." };
+
+  const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
+  if (!allowed.ok) return allowed;
+
+  const { rows: [planFinancial] } = await client.query(
+    `SELECT 1
+     WHERE EXISTS (SELECT 1 FROM invoices inv WHERE inv.plan_id = $1 AND inv.status <> 'cancelled')
+        OR EXISTS (
+          SELECT 1 FROM plan_items i
+          WHERE i.plan_id = $1
+            AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL})
+        )`,
+    [input.planId],
+  );
+  if (planFinancial) {
+    return { ok: false, message: "الخطة مرتبطة بفاتورة نشطة أو بنود مفوترة؛ استخدم ملحق الاتفاق المالي لإضافة بنود جديدة." };
+  }
+
+  if (input.toothCode !== null && !isValidTooth(input.toothCode)) {
+    return { ok: false, message: "رقم سنّ غير صحيح بالترقيم الدولي." };
+  }
+  // This generic item editor has no explicit new-episode selector. Keep historical work on its original identity.
+  const { rows: historical } = await client.query<{ legacy_context: unknown }>(
+    `SELECT ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context FROM legacy_treatment_agreements la
+      JOIN plan_items i ON i.id = la.plan_item_id
+      WHERE la.patient_id = $1 AND la.service_id = $2`, [plan.patientId, input.serviceId]);
+  const checkedHistoricalProbe = validateLineSite({ category: input.category, toothCode: input.toothCode, surfaces: input.surfaces });
+  const historicalProbe: LineSite = checkedHistoricalProbe.ok ? checkedHistoricalProbe.site
+    : { mode: "region", toothCode: input.toothCode, surfaces: normalizeSurfaces(input.surfaces), episodeTeeth: null, scope: null };
+  if (historical.some((row) => legacyCoverageOverlaps(legacyCoverageStateFromContext(row.legacy_context), historicalProbe))) {
+    return { ok: false, message: "العلاج له اتفاق تاريخي محفوظ؛ استخدم بنده أو راجع الحلقة العلاجية قبل إضافة بند جديد." };
+  }
+
+  await client.query(
+    `INSERT INTO plan_items
+       (plan_id, service_id, service_name, category, tooth_code, surfaces,
+        quantity, unit_price_minor, note, planned_visit_number, billing_rule,
+        session_count, doctor_id, sort_order)
+     VALUES ($1, $2, $3, $4::text, $5, $6::text, $7, $8, $9::text, $10, $11, $12, $13,
+             COALESCE((SELECT MAX(sort_order) + 1 FROM plan_items WHERE plan_id = $1), 100))`,
+    [
+      input.planId, input.serviceId, input.serviceName.trim(), input.category,
+      input.toothCode, normalizeSurfaces(input.surfaces),
+      Math.max(1, Math.round(input.quantity)), Math.max(0, Math.round(input.unitPriceMinor)),
+      input.note?.trim() || null,
+      input.plannedVisitNumber && input.plannedVisitNumber > 0 ? Math.round(input.plannedVisitNumber) : 1,
+      input.billingRule ?? "on_completion",
+      input.sessionCount && input.sessionCount > 0 ? Math.round(input.sessionCount) : 1,
+      input.doctorId ?? null,
+    ],
+  );
+  const totalMinor = await recomputePlanTotal(client, input.planId);
+  return { ok: true, totalMinor };
+}
+
 export async function addPlanItem(input: {
   planId: number;
   serviceId: number | null;
@@ -21886,62 +22091,9 @@ export async function addPlanItem(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const plan = await lockPlan(client, input.planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
-
-    const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
-    if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
-
-    const { rows: [planFinancial] } = await client.query(
-      `SELECT 1
-       WHERE EXISTS (SELECT 1 FROM invoices inv WHERE inv.plan_id = $1 AND inv.status <> 'cancelled')
-          OR EXISTS (
-            SELECT 1 FROM plan_items i
-            WHERE i.plan_id = $1
-              AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL})
-          )`,
-      [input.planId],
-    );
-    if (planFinancial) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "الخطة مرتبطة بفاتورة نشطة أو بنود مفوترة؛ استخدم ملحق الاتفاق المالي لإضافة بنود جديدة." };
-    }
-
-    if (input.toothCode !== null && !isValidTooth(input.toothCode)) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "رقم سنّ غير صحيح بالترقيم الدولي." };
-    }
-    // This generic item editor has no explicit new-episode selector. Keep historical work on its original identity.
-    const { rows: historical } = await client.query<{ legacy_context: unknown }>(
-      `SELECT ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context FROM legacy_treatment_agreements la
-        JOIN plan_items i ON i.id = la.plan_item_id
-        WHERE la.patient_id = $1 AND la.service_id = $2`, [plan.patientId, input.serviceId]);
-    const checkedHistoricalProbe = validateLineSite({ category: input.category, toothCode: input.toothCode, surfaces: input.surfaces });
-    const historicalProbe: LineSite = checkedHistoricalProbe.ok ? checkedHistoricalProbe.site
-      : { mode: "region", toothCode: input.toothCode, surfaces: normalizeSurfaces(input.surfaces), episodeTeeth: null, scope: null };
-    if (historical.some((row) => legacyCoverageOverlaps(legacyCoverageStateFromContext(row.legacy_context), historicalProbe))) { await client.query("ROLLBACK"); return { ok: false, message: "العلاج له اتفاق تاريخي محفوظ؛ استخدم بنده أو راجع الحلقة العلاجية قبل إضافة بند جديد." }; }
-
-    await client.query(
-      `INSERT INTO plan_items
-         (plan_id, service_id, service_name, category, tooth_code, surfaces,
-          quantity, unit_price_minor, note, planned_visit_number, billing_rule,
-          session_count, doctor_id, sort_order)
-       VALUES ($1, $2, $3, $4::text, $5, $6::text, $7, $8, $9::text, $10, $11, $12, $13,
-               COALESCE((SELECT MAX(sort_order) + 1 FROM plan_items WHERE plan_id = $1), 100))`,
-      [
-        input.planId, input.serviceId, input.serviceName.trim(), input.category,
-        input.toothCode, normalizeSurfaces(input.surfaces),
-        Math.max(1, Math.round(input.quantity)), Math.max(0, Math.round(input.unitPriceMinor)),
-        input.note?.trim() || null,
-        input.plannedVisitNumber && input.plannedVisitNumber > 0 ? Math.round(input.plannedVisitNumber) : 1,
-        input.billingRule ?? "on_completion",
-        input.sessionCount && input.sessionCount > 0 ? Math.round(input.sessionCount) : 1,
-        input.doctorId ?? null,
-      ],
-    );
-    const totalMinor = await recomputePlanTotal(client, input.planId);
-    await client.query("COMMIT");
-    return { ok: true, totalMinor };
+    const result = await addPlanItemWith(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -21957,6 +22109,47 @@ export async function addPlanItem(input: {
  * لا يوجد «حذف بند» بعد الموافقة أصلًا — لا إلغاء ولا شطب: الوثيقة تبقى كما وُقّعت،
  * والمستجدّ يُوثَّق بخطةٍ جديدة.
  */
+export async function removePlanItemWith(
+  client: DbClient,
+  planId: number,
+  itemId: number,
+  ctx: { actor: string; actorRole: string | null },
+): Promise<PlanGuard> {
+  const plan = await lockPlan(client, planId);
+  if (!plan) return { ok: false, message: "الخطة غير موجودة." };
+
+  const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
+  if (!allowed.ok) return allowed;
+
+  const { rows: [planInvoice] } = await client.query(
+    `SELECT 1 FROM invoices inv WHERE inv.plan_id = $1 AND inv.status <> 'cancelled' LIMIT 1`,
+    [planId],
+  );
+  if (planInvoice) {
+    return { ok: false, message: "الخطة مرتبطة بفاتورة نشطة؛ استخدم ملحق الاتفاق المالي بدل الحذف المباشر." };
+  }
+
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
+    AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL})`, [itemId]);
+  if (financial) return { ok: false, message: "البند له سجل مالي أو اتفاق تاريخي محفوظ؛ لا يُحذف." };
+  const { rows: [removed] } = await client.query<PlanItemAuditRow>(
+    `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
+  );
+  if (!removed) return { ok: false, message: "البند غير موجود." };
+
+  await recomputePlanTotal(client, planId);
+  // (TD-06) حذفٌ نهائي لبندٍ مسعَّر — يبقى في السجل ما حُذف ومن حذفه.
+  await insertAuditRow(client, {
+    action: "plan.item_remove", entity: "plan_items", entityId: itemId, entityLabel: removed.service_name,
+    details: {
+      الخطة: planId, الخدمة: removed.service_name, الكمية: removed.quantity,
+      سعر_الوحدة: Number(removed.unit_price_minor), عملة_الخطة: plan.baseCurrency,
+    },
+    actor: ctx.actor, actorRole: ctx.actorRole,
+  });
+  return { ok: true };
+}
+
 export async function removePlanItem(
   planId: number,
   itemId: number,
@@ -21966,41 +22159,9 @@ export async function removePlanItem(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const plan = await lockPlan(client, planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
-
-    const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
-    if (!allowed.ok) { await client.query("ROLLBACK"); return allowed; }
-
-    const { rows: [planInvoice] } = await client.query(
-      `SELECT 1 FROM invoices inv WHERE inv.plan_id = $1 AND inv.status <> 'cancelled' LIMIT 1`,
-      [planId],
-    );
-    if (planInvoice) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "الخطة مرتبطة بفاتورة نشطة؛ استخدم ملحق الاتفاق المالي بدل الحذف المباشر." };
-    }
-
-    const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-      AND (${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} OR ${PLAN_ITEM_VISIT_PROCEDURE_INVOICED_SQL})`, [itemId]);
-    if (financial) { await client.query("ROLLBACK"); return { ok: false, message: "البند له سجل مالي أو اتفاق تاريخي محفوظ؛ لا يُحذف." }; }
-    const { rows: [removed] } = await client.query<PlanItemAuditRow>(
-      `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
-    );
-    if (!removed) { await client.query("ROLLBACK"); return { ok: false, message: "البند غير موجود." }; }
-
-    await recomputePlanTotal(client, planId);
-    // (TD-06) حذفٌ نهائي لبندٍ مسعَّر — يبقى في السجل ما حُذف ومن حذفه.
-    await insertAuditRow(client, {
-      action: "plan.item_remove", entity: "plan_items", entityId: itemId, entityLabel: removed.service_name,
-      details: {
-        الخطة: planId, الخدمة: removed.service_name, الكمية: removed.quantity,
-        سعر_الوحدة: Number(removed.unit_price_minor), عملة_الخطة: plan.baseCurrency,
-      },
-      actor: ctx.actor, actorRole: ctx.actorRole,
-    });
-    await client.query("COMMIT");
-    return { ok: true };
+    const result = await removePlanItemWith(client, planId, itemId, ctx);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -22016,6 +22177,87 @@ export async function removePlanItem(
  * كانت نيّةً في رأس الطبيب، وبعدها صارت عملًا متفَقًا عليه يجب أن يراه كل من يفتح
  * ملف المريض — بما فيهم طبيبٌ آخر يستلم الحالة غدًا.
  */
+export async function recordPlanConsentWith(
+  client: DbClient,
+  input: {
+    planId: number;
+    actor: string;
+    actorRole?: string | null;
+    note: string | null;
+  },
+): Promise<PlanGuard & { itemCount?: number; totalMinor?: number }> {
+  const plan = await lockPlan(client, input.planId);
+  if (!plan) return { ok: false, message: "الخطة غير موجودة." };
+
+  const { rows: historicalScopes } = await client.query<{ legacy_context: unknown }>(
+    `SELECT ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context FROM plan_items i WHERE i.plan_id = $1 AND ${PLAN_ITEM_LEGACY_LINEAGE_SQL}`,
+    [input.planId]);
+  if (historicalScopes.some((row) => legacyCoverageStateFromContext(row.legacy_context).kind !== "verified")) {
+    return { ok: false, message: "نطاق العلاج التاريخي غير موثّق بالكامل؛ يلزم التحقق من النطاق ثم توثيق موافقة سريرية حالية صريحة. التاريخ القديم وحده لا يكفي، ولن يُمسح أو يُعاد تأريخه." };
+  }
+
+  const { rows: itemRows } = await client.query<{
+    id: number; category: string | null; tooth_code: number | null;
+    surfaces: string | null; quantity: number; unit_price_minor: string; status: string;
+  }>(
+    `SELECT id, category, tooth_code, surfaces, quantity, unit_price_minor, status
+       FROM plan_items WHERE plan_id = $1 ORDER BY sort_order, id`,
+    [input.planId],
+  );
+
+  const agreedTotalMinor = plan.totalFromItems ? 0 : plan.totalMinor;
+  const guard = canConsent({
+    agreedTotalMinor,
+    status: plan.status,
+    consentAt: plan.consentAt?.toISOString() ?? null,
+    items: itemRows.map((row) => ({
+      serviceId: null, toothCode: row.tooth_code,
+      quantity: row.quantity, unitPriceMinor: toMinor(row.unit_price_minor),
+      status: row.status as PlanItemStatus,
+    })),
+  });
+  if (!guard.ok) return guard;
+
+  const totalMinor = plan.totalFromItems ? await recomputePlanTotal(client, input.planId) : plan.totalMinor;
+  await client.query(
+    `UPDATE treatment_plans SET consent_at = NOW(), consent_by = $2, consent_note = $3::text
+       WHERE id = $1`,
+    [input.planId, input.actor, input.note?.trim() || null],
+  );
+
+  // البنود على المخطط: حالاتٌ مخطَّطة لا منجَزة — والفرق بينهما نصف قيمة المخطط.
+  let charted = 0;
+  for (const row of itemRows) {
+    const condition = conditionForCategory(row.category);
+    if (!condition || row.tooth_code === null) continue;
+    await client.query(
+      `INSERT INTO tooth_conditions
+         (patient_id, tooth_code, condition, stage, surfaces, note, recorded_by)
+       VALUES ($1, $2, $3, 'planned', $4::text, $5::text, $6)`,
+      [
+        plan.patientId, row.tooth_code, condition, normalizeSurfaces(row.surfaces),
+        `من خطة العلاج رقم ${input.planId}`, input.actor,
+      ],
+    );
+    charted += 1;
+  }
+
+  // Consent, chart entries and their audit evidence commit together.
+  await insertAuditRow(client, {
+    action: "plan.consent",
+    entity: "treatment_plans",
+    entityId: input.planId,
+    entityLabel: `خطة رقم ${input.planId}`,
+    details: {
+      البنود: itemRows.length, "على المخطط": charted, المبلغ: totalMinor, العملة: plan.baseCurrency,
+      النطاق: plan.totalFromItems ? "بنود الخطة" : "اتفاق بمبلغ ثابت",
+    },
+    actor: input.actor,
+    ...(input.actorRole !== undefined ? { actorRole: input.actorRole } : {}),
+  });
+  return { ok: true, itemCount: itemRows.length, totalMinor };
+}
+
 export async function recordPlanConsent(input: {
   planId: number;
   actor: string;
@@ -22025,77 +22267,9 @@ export async function recordPlanConsent(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const plan = await lockPlan(client, input.planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
-
-    const { rows: historicalScopes } = await client.query<{ legacy_context: unknown }>(
-      `SELECT ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context FROM plan_items i WHERE i.plan_id = $1 AND ${PLAN_ITEM_LEGACY_LINEAGE_SQL}`,
-      [input.planId]);
-    if (historicalScopes.some((row) => legacyCoverageStateFromContext(row.legacy_context).kind !== "verified")) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "نطاق العلاج التاريخي غير موثّق بالكامل؛ يلزم التحقق من النطاق ثم توثيق موافقة سريرية حالية صريحة. التاريخ القديم وحده لا يكفي، ولن يُمسح أو يُعاد تأريخه." };
-    }
-
-    const { rows: itemRows } = await client.query<{
-      id: number; category: string | null; tooth_code: number | null;
-      surfaces: string | null; quantity: number; unit_price_minor: string; status: string;
-    }>(
-      `SELECT id, category, tooth_code, surfaces, quantity, unit_price_minor, status
-         FROM plan_items WHERE plan_id = $1 ORDER BY sort_order, id`,
-      [input.planId],
-    );
-
-    const agreedTotalMinor = plan.totalFromItems ? 0 : plan.totalMinor;
-    const guard = canConsent({
-      agreedTotalMinor,
-      status: plan.status,
-      consentAt: plan.consentAt?.toISOString() ?? null,
-      items: itemRows.map((row) => ({
-        serviceId: null, toothCode: row.tooth_code,
-        quantity: row.quantity, unitPriceMinor: toMinor(row.unit_price_minor),
-        status: row.status as PlanItemStatus,
-      })),
-    });
-    if (!guard.ok) { await client.query("ROLLBACK"); return guard; }
-
-    const totalMinor = plan.totalFromItems ? await recomputePlanTotal(client, input.planId) : plan.totalMinor;
-    await client.query(
-      `UPDATE treatment_plans SET consent_at = NOW(), consent_by = $2, consent_note = $3::text
-         WHERE id = $1`,
-      [input.planId, input.actor, input.note?.trim() || null],
-    );
-
-    // البنود على المخطط: حالاتٌ مخطَّطة لا منجَزة — والفرق بينهما نصف قيمة المخطط.
-    let charted = 0;
-    for (const row of itemRows) {
-      const condition = conditionForCategory(row.category);
-      if (!condition || row.tooth_code === null) continue;
-      await client.query(
-        `INSERT INTO tooth_conditions
-           (patient_id, tooth_code, condition, stage, surfaces, note, recorded_by)
-         VALUES ($1, $2, $3, 'planned', $4::text, $5::text, $6)`,
-        [
-          plan.patientId, row.tooth_code, condition, normalizeSurfaces(row.surfaces),
-          `من خطة العلاج رقم ${input.planId}`, input.actor,
-        ],
-      );
-      charted += 1;
-    }
-
-    // Consent, chart entries and their audit evidence commit together.
-    await insertAuditRow(client, {
-      action: "plan.consent",
-      entity: "treatment_plans",
-      entityId: input.planId,
-      entityLabel: `خطة رقم ${input.planId}`,
-      details: {
-        البنود: itemRows.length, "على المخطط": charted, المبلغ: totalMinor, العملة: plan.baseCurrency,
-        النطاق: plan.totalFromItems ? "بنود الخطة" : "اتفاق بمبلغ ثابت",
-      },
-      actor: input.actor,
-    });
-    await client.query("COMMIT");
-    return { ok: true, itemCount: itemRows.length, totalMinor };
+    const result = await recordPlanConsentWith(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -22111,6 +22285,50 @@ export async function recordPlanConsent(input: {
  * بالموافقة. وجدولٌ يُبنى على رقمٍ ما زال يتغيّر جدولٌ يُعاد بناؤه — وكل إعادةٍ فرصةٌ
  * لأن يبقى قسطٌ قديمٌ معلّقًا في مكانٍ ما.
  */
+export async function schedulePlanInstallmentsWith(
+  client: DbClient,
+  input: {
+    planId: number;
+    count: number;
+    everyDays: number;
+    firstDueDate: string;
+  },
+): Promise<PlanGuard & { count?: number }> {
+  const plan = await lockPlan(client, input.planId);
+  if (!plan) return { ok: false, message: "الخطة غير موجودة." };
+  if (!plan.consentAt) {
+    return { ok: false, message: "سجّل موافقة المريض قبل جدولة الأقساط." };
+  }
+
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.plan_id = $1
+    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} LIMIT 1`, [input.planId]);
+  if (financial) return { ok: false, message: "الخطة مرتبطة بسجل مالي أو اتفاق تاريخي؛ لا تُنشأ أقساط تفوتر العلاج نفسه مرة ثانية." };
+  const { rows: existing } = await client.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM plan_installments WHERE plan_id = $1`, [input.planId],
+  );
+  if (Number(existing[0].count) > 0) {
+    return { ok: false, message: "للخطة جدول أقساط سلفًا." };
+  }
+
+  const { rows: totals } = await client.query<{ total_minor: string }>(
+    `SELECT total_minor FROM treatment_plans WHERE id = $1`, [input.planId],
+  );
+  const totalMinor = toMinor(totals[0].total_minor);
+  if (totalMinor <= 0) {
+    return { ok: false, message: "لا يمكن جدولة أقساط لخطة بلا مبلغ." };
+  }
+
+  const parts = splitInstallments(totalMinor, input.count, input.firstDueDate, input.everyDays);
+  for (const part of parts) {
+    await client.query(
+      `INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
+       VALUES ($1, $2, $3::date, $4)`,
+      [input.planId, part.number, part.dueDate, part.amountMinor],
+    );
+  }
+  return { ok: true, count: parts.length };
+}
+
 export async function schedulePlanInstallments(input: {
   planId: number;
   count: number;
@@ -22121,43 +22339,9 @@ export async function schedulePlanInstallments(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const plan = await lockPlan(client, input.planId);
-    if (!plan) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة غير موجودة." }; }
-    if (!plan.consentAt) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "سجّل موافقة المريض قبل جدولة الأقساط." };
-    }
-
-    const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.plan_id = $1
-      AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} LIMIT 1`, [input.planId]);
-    if (financial) { await client.query("ROLLBACK"); return { ok: false, message: "الخطة مرتبطة بسجل مالي أو اتفاق تاريخي؛ لا تُنشأ أقساط تفوتر العلاج نفسه مرة ثانية." }; }
-    const { rows: existing } = await client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM plan_installments WHERE plan_id = $1`, [input.planId],
-    );
-    if (Number(existing[0].count) > 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "للخطة جدول أقساط سلفًا." };
-    }
-
-    const { rows: totals } = await client.query<{ total_minor: string }>(
-      `SELECT total_minor FROM treatment_plans WHERE id = $1`, [input.planId],
-    );
-    const totalMinor = toMinor(totals[0].total_minor);
-    if (totalMinor <= 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "لا يمكن جدولة أقساط لخطة بلا مبلغ." };
-    }
-
-    const parts = splitInstallments(totalMinor, input.count, input.firstDueDate, input.everyDays);
-    for (const part of parts) {
-      await client.query(
-        `INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
-         VALUES ($1, $2, $3::date, $4)`,
-        [input.planId, part.number, part.dueDate, part.amountMinor],
-      );
-    }
-    await client.query("COMMIT");
-    return { ok: true, count: parts.length };
+    const result = await schedulePlanInstallmentsWith(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -29850,18 +30034,67 @@ export async function listPatientCasesWith(q: Pick<DbClient, "query">, patientId
   });
 }
 
-export async function getClinicalCase(id: number): Promise<SpecialtyCase | null> {
-  await ensureSchema();
-  const { rows: owner } = await getPool().query<{ patient_id: number }>(
+export async function getClinicalCaseWith(q: Pick<DbClient, "query">, id: number): Promise<SpecialtyCase | null> {
+  const { rows: owner } = await q.query<{ patient_id: number }>(
     `SELECT patient_id FROM clinical_cases WHERE id = $1`, [id]);
   if (!owner[0]) return null;
-  return (await listPatientCases(owner[0].patient_id)).find((item) => item.id === id) ?? null;
+  return (await listPatientCasesWith(q, owner[0].patient_id)).find((item) => item.id === id) ?? null;
+}
+
+export async function getClinicalCase(id: number): Promise<SpecialtyCase | null> {
+  await ensureSchema();
+  return getClinicalCaseWith(getPool(), id);
 }
 
 /**
  * فتح حالة تخصصية — والمعاملة كلها أو لا شيء، ومعها سطر التدقيق. الطبيب المسؤول يُقبل طبيبًا
  * فقط، وجسر التقويم يُقبل لحالة تقويمٍ للمريض نفسه ومرةً واحدة.
  */
+export async function createClinicalCaseWith(
+  client: DbClient,
+  input: CaseDraft & { patientId: number; actor: string; actorRole?: string | null },
+): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "no_patient" | "bad_responsible" | "bad_ortho" | "already_bridged" }> {
+  const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
+  if (!patient[0]) return { ok: false, reason: "no_patient" };
+  if (input.responsiblePartyId !== null) {
+    const { rows } = await client.query(
+      `SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active FOR SHARE NOWAIT`,
+      [input.responsiblePartyId],
+    );
+    if (!rows[0]) return { ok: false, reason: "bad_responsible" };
+  }
+  /* الجسر يبدأ بحالة التقويم نفسها (منتهيةً إن كانت منتهية) — فلا تظهر حالةٌ مغلقة «جارية». */
+  let bridgeStatus: SpecialtyCaseStatus = "active";
+  let bridgeClosedAt: Date | null = null;
+  let bridgeSite: string | null = input.site;
+  if (input.orthoCaseId !== null) {
+    const { rows } = await client.query<{ status: string; closed_at: Date | null; arches: string | null }>(
+      `SELECT status, closed_at, arches FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.orthoCaseId, input.patientId]);
+    if (!rows[0]) return { ok: false, reason: "bad_ortho" };
+    /* (ORTHO-ID) موضع الجسر نطاق فك حالة التقويم نفسها لا نصٌّ حرٌّ يكتبه المنشئ — فتتطابق القراءتان. */
+    bridgeSite = orthoArchesSiteText(rows[0].arches) ?? bridgeSite;
+    bridgeStatus = rows[0].status === "active" || rows[0].status === "retention" ? "active"
+      : rows[0].status === "completed" ? "completed" : "closed";
+    if (bridgeStatus !== "active") bridgeClosedAt = rows[0].closed_at ?? new Date();
+    const { rows: bridged } = await client.query(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [input.orthoCaseId]);
+    if (bridged[0]) return { ok: false, reason: "already_bridged" };
+  }
+  const specialty = input.orthoCaseId !== null ? "orthodontics" : input.specialty;
+  const { rows: [created] } = await client.query<{ id: number }>(
+    `INSERT INTO clinical_cases (patient_id, specialty, title, site, problem, responsible_party_id, ortho_case_id, created_by, status, completed_at)
+     VALUES ($1, $2, $3, $4::text, $5::text, $6::int, $7::int, $8, $9, $10::timestamptz) RETURNING id`,
+    [input.patientId, specialty, input.title, bridgeSite, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor,
+      bridgeStatus, bridgeClosedAt],
+  );
+  await insertAuditRow(client, {
+    action: "case.create", entity: "patient", entityId: input.patientId, entityLabel: input.title,
+    details: { الحالة: created.id, التخصص: specialty, الموضع: bridgeSite ?? "—", الطبيب_المسؤول: input.responsiblePartyId ?? "—", جسر_التقويم: input.orthoCaseId ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  const result = await getClinicalCaseWith(client, created.id);
+  return { ok: true, case: result as SpecialtyCase };
+}
+
 export async function createClinicalCase(input: CaseDraft & {
   patientId: number; actor: string; actorRole?: string | null; admittedSession?: import("./auth").SessionPayload;
 }): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "no_patient" | "bad_responsible" | "bad_ortho" | "already_bridged" }> {
@@ -29875,40 +30108,10 @@ export async function createClinicalCase(input: CaseDraft & {
       const verified = await (await import("./initial-responsibility-authority")).authorizeInitialResponsibility(client, input.admittedSession, input.patientId, input.responsiblePartyId);
       if (!verified) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_responsible" }; }
       input = { ...input, actor: verified.username, actorRole: verified.role };
-      const { rows } = await client.query(`SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.responsiblePartyId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_responsible" }; }
     }
-    /* الجسر يبدأ بحالة التقويم نفسها (منتهيةً إن كانت منتهية) — فلا تظهر حالةٌ مغلقة «جارية». */
-    let bridgeStatus: SpecialtyCaseStatus = "active";
-    let bridgeClosedAt: Date | null = null;
-    let bridgeSite: string | null = input.site;
-    if (input.orthoCaseId !== null) {
-      const { rows } = await client.query<{ status: string; closed_at: Date | null; arches: string | null }>(
-        `SELECT status, closed_at, arches FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.orthoCaseId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_ortho" }; }
-      /* (ORTHO-ID) موضع الجسر نطاق فك حالة التقويم نفسها لا نصٌّ حرٌّ يكتبه المنشئ — فتتطابق القراءتان. */
-      bridgeSite = orthoArchesSiteText(rows[0].arches) ?? bridgeSite;
-      bridgeStatus = rows[0].status === "active" || rows[0].status === "retention" ? "active"
-        : rows[0].status === "completed" ? "completed" : "closed";
-      if (bridgeStatus !== "active") bridgeClosedAt = rows[0].closed_at ?? new Date();
-      const { rows: bridged } = await client.query(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [input.orthoCaseId]);
-      if (bridged[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "already_bridged" }; }
-    }
-    const specialty = input.orthoCaseId !== null ? "orthodontics" : input.specialty;
-    const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO clinical_cases (patient_id, specialty, title, site, problem, responsible_party_id, ortho_case_id, created_by, status, completed_at)
-       VALUES ($1, $2, $3, $4::text, $5::text, $6::int, $7::int, $8, $9, $10::timestamptz) RETURNING id`,
-      [input.patientId, specialty, input.title, bridgeSite, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor,
-        bridgeStatus, bridgeClosedAt],
-    );
-    await insertAuditRow(client, {
-      action: "case.create", entity: "patient", entityId: input.patientId, entityLabel: input.title,
-      details: { الحالة: created.id, التخصص: specialty, الموضع: bridgeSite ?? "—", الطبيب_المسؤول: input.responsiblePartyId ?? "—", جسر_التقويم: input.orthoCaseId ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
-    await client.query("COMMIT");
-    const result = await getClinicalCase(created.id);
-    return { ok: true, case: result as SpecialtyCase };
+    const result = await createClinicalCaseWith(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -29918,6 +30121,32 @@ export async function createClinicalCase(input: CaseDraft & {
 }
 
 /** انتقال الحالة: المسار المسموح وحده، والمنتهية لا تعود — والإلغاء بسببٍ مكتوب (قيد في القاعدة أيضًا). */
+export async function changeClinicalCaseStatusWith(
+  client: DbClient,
+  input: { id: number; status: SpecialtyCaseStatus; outcome: string | null; actor: string; actorRole?: string | null },
+): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "not_found" | "invalid_transition" | "ortho_managed" }> {
+  const { rows } = await client.query<{ patient_id: number; status: SpecialtyCaseStatus; title: string; ortho_case_id: number | null }>(
+    `SELECT patient_id, status, title, ortho_case_id FROM clinical_cases WHERE id = $1 FOR UPDATE`, [input.id]);
+  if (!rows[0]) return { ok: false, reason: "not_found" };
+  // حالة التقويم المجسورة تُدار من وحدة التقويم (الإغلاق بمثبّته وملاحظته) — لا مصدران لحالتها.
+  if (rows[0].ortho_case_id !== null) return { ok: false, reason: "ortho_managed" };
+  if (!canMoveCase(rows[0].status, input.status)) return { ok: false, reason: "invalid_transition" };
+  const terminal = CASE_TERMINAL.includes(input.status);
+  await client.query(
+    `UPDATE clinical_cases
+        SET status = $2, completed_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+            outcome = COALESCE($4::text, outcome)
+      WHERE id = $1`,
+    [input.id, input.status, terminal, input.outcome],
+  );
+  await insertAuditRow(client, {
+    action: "case.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].title,
+    details: { الحالة: input.id, من: rows[0].status, إلى: input.status, النتيجة: input.outcome ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true, case: (await getClinicalCaseWith(client, input.id)) as SpecialtyCase };
+}
+
 export async function changeClinicalCaseStatus(input: {
   id: number; status: SpecialtyCaseStatus; outcome: string | null; actor: string; actorRole?: string | null;
 }): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "not_found" | "invalid_transition" | "ortho_managed" }> {
@@ -29925,27 +30154,9 @@ export async function changeClinicalCaseStatus(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; status: SpecialtyCaseStatus; title: string; ortho_case_id: number | null }>(
-      `SELECT patient_id, status, title, ortho_case_id FROM clinical_cases WHERE id = $1 FOR UPDATE`, [input.id]);
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    // حالة التقويم المجسورة تُدار من وحدة التقويم (الإغلاق بمثبّته وملاحظته) — لا مصدران لحالتها.
-    if (rows[0].ortho_case_id !== null) { await client.query("ROLLBACK"); return { ok: false, reason: "ortho_managed" }; }
-    if (!canMoveCase(rows[0].status, input.status)) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
-    const terminal = CASE_TERMINAL.includes(input.status);
-    await client.query(
-      `UPDATE clinical_cases
-          SET status = $2, completed_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
-              outcome = COALESCE($4::text, outcome)
-        WHERE id = $1`,
-      [input.id, input.status, terminal, input.outcome],
-    );
-    await insertAuditRow(client, {
-      action: "case.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].title,
-      details: { الحالة: input.id, من: rows[0].status, إلى: input.status, النتيجة: input.outcome ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
-    await client.query("COMMIT");
-    return { ok: true, case: (await getClinicalCase(input.id)) as SpecialtyCase };
+    const result = await changeClinicalCaseStatusWith(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -30062,10 +30273,11 @@ export async function changePatientProblemStatus(input: {
 }
 
 /** بنود خطط المريض القائمة (غير الملغاة) مع حالتها وأولويتها — لترتيب الخطة الشاملة وربطها بالحالات. */
-export async function listCasePlanItems(patientId: number): Promise<{ items: CasePlanItem[]; dependencies: PlanItemDependency[] }> {
-  await ensureSchema();
-  const pool = getPool();
-  const { rows: items } = await pool.query<{
+export async function listCasePlanItemsWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<{ items: CasePlanItem[]; dependencies: PlanItemDependency[] }> {
+  const { rows: items } = await q.query<{
     id: number; plan_id: number; plan_title: string; service_name: string; category: string | null; tooth_code: number | null;
     surfaces: string | null; billing_status: BillingStatus; case_site: string | null; origin: string | null;
     origin_invoice_id: number | null; billed_invoice_id: number | null; financial_review: boolean; consented: boolean;
@@ -30083,7 +30295,7 @@ export async function listCasePlanItems(patientId: number): Promise<{ items: Cas
       ORDER BY i.priority NULLS LAST, t.id, i.sort_order, i.id`,
     [patientId],
   );
-  const { rows: deps } = await pool.query<{
+  const { rows: deps } = await q.query<{
     item_id: number; requires_item_id: number; requirement: "completed" | "clearance"; note: string | null;
     required_status: string; created_by: string;
   }>(
@@ -30111,15 +30323,62 @@ export async function listCasePlanItems(patientId: number): Promise<{ items: Cas
   };
 }
 
-/** صاحب بند الخطة (المريض) — لفحص الوصول قبل أي تعديل. */
-export async function getPlanItemPatient(itemId: number): Promise<number | null> {
+export async function listCasePlanItems(patientId: number): Promise<{ items: CasePlanItem[]; dependencies: PlanItemDependency[] }> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number }>(
+  return listCasePlanItemsWith(getPool(), patientId);
+}
+
+/** صاحب بند الخطة (المريض) — لفحص الوصول قبل أي تعديل. */
+export async function getPlanItemPatientWith(q: Pick<DbClient, "query">, itemId: number): Promise<number | null> {
+  const { rows } = await q.query<{ patient_id: number }>(
     `SELECT t.patient_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`, [itemId]);
   return rows[0]?.patient_id ?? null;
 }
 
+export async function getPlanItemPatient(itemId: number): Promise<number | null> {
+  await ensureSchema();
+  return getPlanItemPatientWith(getPool(), itemId);
+}
+
 /** ربط بند الخطة بحالةٍ للمريض نفسه وتحديد أولويته — الربط المالي التاريخي لا يُعاد نسبه. */
+export async function setPlanItemCaseWith(
+  client: DbClient,
+  input: { itemId: number; caseId: number | null; priority: number | null; actor: string; actorRole?: string | null },
+): Promise<{ ok: true } | { ok: false; reason: "not_found" | "bad_case" | "billed_case_lock" }> {
+  const { rows: [owner] } = await client.query<{ patient_id: number }>(
+    `SELECT t.patient_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`, [input.itemId]);
+  if (!owner) return { ok: false, reason: "not_found" };
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
+  const { rows } = await client.query<{ patient_id: number; service_name: string; case_id: number | null; priority: number | null }>(
+    `SELECT t.patient_id, i.service_name, i.case_id, i.priority
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 FOR UPDATE OF i`, [input.itemId]);
+  if (!rows[0]) return { ok: false, reason: "not_found" };
+  if (input.caseId !== null) {
+    const { rows: owned } = await client.query(
+      `SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, rows[0].patient_id]);
+    if (!owned[0]) return { ok: false, reason: "bad_case" };
+  }
+  if (input.caseId !== rows[0].case_id) {
+    const { rows: [historical] } = await client.query(
+      `SELECT 1 FROM legacy_treatment_agreements WHERE plan_item_id = $1 LIMIT 1`, [input.itemId]);
+    if (historical) return { ok: false, reason: "billed_case_lock" };
+    const { rows: billed } = await client.query(
+      `SELECT 1 FROM invoice_items it
+         LEFT JOIN visit_procedures p ON it.source_type = 'visit_procedure' AND it.source_id = p.id
+        WHERE it.plan_item_id = $1 OR (it.source_type = 'plan_item' AND it.source_id = $1)
+           OR p.plan_item_id = $1 LIMIT 1`, [input.itemId]);
+    if (billed[0]) return { ok: false, reason: "billed_case_lock" };
+  }
+  await client.query(`UPDATE plan_items SET case_id = $2::int, priority = $3::smallint WHERE id = $1`,
+    [input.itemId, input.caseId, input.priority]);
+  await insertAuditRow(client, {
+    action: "plan.item_case", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
+    details: { البند: input.itemId, الحالة_قبل: rows[0].case_id ?? "—", الحالة: input.caseId ?? "—", الأولوية_قبل: rows[0].priority ?? "—", الأولوية: input.priority ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
 export async function setPlanItemCase(input: {
   itemId: number; caseId: number | null; priority: number | null; actor: string; actorRole?: string | null;
 }): Promise<{ ok: true } | { ok: false; reason: "not_found" | "bad_case" | "billed_case_lock" }> {
@@ -30127,44 +30386,9 @@ export async function setPlanItemCase(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [owner] } = await client.query<{ patient_id: number }>(
-      `SELECT t.patient_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`, [input.itemId]);
-    if (!owner) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
-    const { rows } = await client.query<{ patient_id: number; service_name: string; case_id: number | null; priority: number | null }>(
-      `SELECT t.patient_id, i.service_name, i.case_id, i.priority
-         FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 FOR UPDATE OF i`, [input.itemId]);
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (input.caseId !== null) {
-      const { rows: owned } = await client.query(
-        `SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, rows[0].patient_id]);
-      if (!owned[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
-    }
-    if (input.caseId !== rows[0].case_id) {
-      // Commission reads this case through the retained invoice source. Check in
-      // a fresh statement AFTER the item lock: a signature that held that lock
-      // may have committed its invoice while we waited. Do not filter cancelled,
-      // refunded or zero-value lines: their historical attribution is retained.
-      // An included installment session has no such source and remains editable.
-      const { rows: [historical] } = await client.query(
-        `SELECT 1 FROM legacy_treatment_agreements WHERE plan_item_id = $1 LIMIT 1`, [input.itemId]);
-      if (historical) { await client.query("ROLLBACK"); return { ok: false, reason: "billed_case_lock" }; }
-      const { rows: billed } = await client.query(
-        `SELECT 1 FROM invoice_items it
-           LEFT JOIN visit_procedures p ON it.source_type = 'visit_procedure' AND it.source_id = p.id
-          WHERE it.plan_item_id = $1 OR (it.source_type = 'plan_item' AND it.source_id = $1)
-             OR p.plan_item_id = $1 LIMIT 1`, [input.itemId]);
-      if (billed[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "billed_case_lock" }; }
-    }
-    await client.query(`UPDATE plan_items SET case_id = $2::int, priority = $3::smallint WHERE id = $1`,
-      [input.itemId, input.caseId, input.priority]);
-    await insertAuditRow(client, {
-      action: "plan.item_case", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
-      details: { البند: input.itemId, الحالة_قبل: rows[0].case_id ?? "—", الحالة: input.caseId ?? "—", الأولوية_قبل: rows[0].priority ?? "—", الأولوية: input.priority ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
-    await client.query("COMMIT");
-    return { ok: true };
+    const result = await setPlanItemCaseWith(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -30233,6 +30457,25 @@ export async function addPlanItemDependency(input: AddPlanDependencyInput): Prom
   }
 }
 
+export async function removePlanItemDependencyWith(
+  client: DbClient,
+  input: { itemId: number; requiresItemId: number; actor: string; actorRole?: string | null },
+): Promise<{ ok: true } | { ok: false; reason: "not_found" }> {
+  const { rows } = await client.query<{ patient_id: number; service_name: string; requirement: string }>(
+    `DELETE FROM plan_item_dependencies dep
+      USING plan_items i, treatment_plans t
+      WHERE dep.item_id = $1 AND dep.requires_item_id = $2 AND i.id = dep.item_id AND t.id = i.plan_id
+      RETURNING t.patient_id, i.service_name, dep.requirement`,
+    [input.itemId, input.requiresItemId]);
+  if (!rows[0]) return { ok: false, reason: "not_found" };
+  await insertAuditRow(client, {
+    action: "plan.dependency_remove", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
+    details: { البند: input.itemId, كان_يتطلب: input.requiresItemId, النوع: rows[0].requirement },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
 export async function removePlanItemDependency(input: {
   itemId: number; requiresItemId: number; actor: string; actorRole?: string | null;
 }): Promise<{ ok: true } | { ok: false; reason: "not_found" }> {
@@ -30240,20 +30483,9 @@ export async function removePlanItemDependency(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; service_name: string; requirement: string }>(
-      `DELETE FROM plan_item_dependencies dep
-        USING plan_items i, treatment_plans t
-        WHERE dep.item_id = $1 AND dep.requires_item_id = $2 AND i.id = dep.item_id AND t.id = i.plan_id
-        RETURNING t.patient_id, i.service_name, dep.requirement`,
-      [input.itemId, input.requiresItemId]);
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    await insertAuditRow(client, {
-      action: "plan.dependency_remove", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
-      details: { البند: input.itemId, كان_يتطلب: input.requiresItemId, النوع: rows[0].requirement },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
-    await client.query("COMMIT");
-    return { ok: true };
+    const result = await removePlanItemDependencyWith(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;

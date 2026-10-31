@@ -30,6 +30,16 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:ortho.billing-decisions": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ortho/[id]/followup-coverage: agreement follow-up coverage read inside patient scope (M2 slice 31). */
   "read:ortho.followup-coverage": Object.freeze({ record: "patient", need: Object.freeze(["finance.agreements.manage"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/plans: one patient's treatment plans inside patient scope (M2 slice 32). */
+  "read:patients.plans": Object.freeze({ record: "patient", need: Object.freeze(["clinical.plans.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/plans: active treatment plans or single plan read inside patient scope (M2 slice 32). */
+  "read:plans": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze(["clinical.plans.view", "finance.invoices.view"] as const) }),
+  /** GET /api/plans/proposals: pending plan proposals inside patient scope (M2 slice 32). */
+  "read:plans.proposals": Object.freeze({ record: "patient", need: Object.freeze(["clinical.plans.edit"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/plans/[id]/agreement-amendment: approved-agreement amendment snapshot inside patient scope (M2 slice 32). */
+  "read:plans.agreement-amendment": Object.freeze({ record: "patient", need: Object.freeze(["finance.agreements.manage"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/plans/[id]/reconcile: approved-agreement reconciliation snapshot inside patient scope (M2 slice 32). */
+  "read:plans.reconcile": Object.freeze({ record: "patient", need: Object.freeze(["finance.agreements.manage"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]/ceph, /api/ceph/[id], /api/ceph/compare, /api/ceph/superimpose (M2 slice 30). */
   "read:ceph": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients: search and browse the patient list. */

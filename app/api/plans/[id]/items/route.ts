@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalPlanCaseFailure,
+  commandCanonicalAddPlanItem,
+  commandCanonicalRemovePlanItem,
+  commandCanonicalUpdatePlanItem,
+} from "@/lib/canonical-plans-and-cases";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanCurrency, getPlanPatientId, getService, getSettings, recordAudit, removePlanItem, updatePlanItem } from "@/lib/db";
@@ -7,6 +14,7 @@ import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { canHandleMoney } from "@/lib/roles";
 import { CLINIC_BASE_CURRENCY, parseAmount } from "@/lib/money";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import type { BillingRule } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
@@ -74,6 +82,25 @@ async function doctorBlockedForPlan(session: { username: string; role: string; p
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      const result = await commandCanonicalAddPlanItem(selected.handle, id, body);
+      return NextResponse.json({ totalMinor: result.totalMinor }, { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر إضافة البند.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
 
@@ -198,6 +225,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 /** تحديث بند خطة: توزيع الجلسات — الزيارة المخطَّطة وقاعدة الفوترة والجلسات
  * والطبيب والملاحظة. تنظيميٌ لا مالي: لا يغيّر السعر ولا الكمية ولا الحالة. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      return NextResponse.json(await commandCanonicalUpdatePlanItem(selected.handle, id, body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر تحديث البند.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
 
@@ -242,6 +287,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      const { id } = await context.params;
+      const rawItemId = new URL(request.url).searchParams.get("itemId");
+      return NextResponse.json(await commandCanonicalRemovePlanItem(selected.handle, id, rawItemId), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر حذف البند.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
 

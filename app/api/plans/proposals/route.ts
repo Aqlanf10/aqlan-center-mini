@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalPlanCaseFailure,
+  commandCanonicalProposalContact,
+  readCanonicalPendingProposals,
+} from "@/lib/canonical-plans-and-cases";
 import { CLINIC_TIME_ZONE, getSettings, listPendingProposals, recordProposalContact } from "@/lib/db";
 import { followUpDaysFrom, proposalTiming, sortProposals } from "@/lib/consultation-followup";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -6,6 +12,7 @@ import { canViewMoney } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +21,17 @@ const ALLOWED = new Set(["admin", "reception"]);
 
 /** (P1-E) عروض العلاج المعلّقة للمتابعة — للإدارة والاستقبال. */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalPendingProposals(selected.handle), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر تحميل عروض العلاج المعلّقة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!ALLOWED.has(session.role)) {
@@ -35,6 +53,23 @@ export async function GET() {
 
 /** (P1-E) تسجيل تواصلٍ مع المريض بشأن عرضه — بملاحظة اختيارية تُدقَّق. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await commandCanonicalProposalContact(selected.handle, body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر تسجيل التواصل.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!ALLOWED.has(session.role)) {

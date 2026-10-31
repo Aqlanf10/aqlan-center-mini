@@ -78,3 +78,51 @@ export function decideProcedurePrice(input: PriceCheckInput): PriceDecision {
   }
   return { ok: true, unitPriceMinor: requested, override: { kind: "discount", catalogMinor: catalog, requestedMinor: requested, discountPercent, reason } };
 }
+
+export interface CanonicalPriceCapabilities {
+  readonly canIncreasePrice: boolean;
+  readonly canApplyDiscount: boolean;
+  readonly canOverrideDiscount: boolean;
+}
+
+export function decideCanonicalProcedurePrice(input: Omit<PriceCheckInput, "role"> & {
+  capabilities: CanonicalPriceCapabilities;
+}): PriceDecision & { forbidden?: boolean } {
+  const requested = Math.max(0, Math.round(input.requestedMinor));
+  const reason = cleanReason(input.reason);
+
+  if (!input.priceConfigured || input.catalogMinor <= 0) {
+    return {
+      ok: true,
+      unitPriceMinor: requested,
+      override: requested > 0
+        ? { kind: "unpriced", catalogMinor: input.catalogMinor, requestedMinor: requested, discountPercent: null, reason }
+        : null,
+    };
+  }
+
+  const catalog = input.catalogMinor;
+  if (requested === catalog) return { ok: true, unitPriceMinor: catalog, override: null };
+
+  if (requested > catalog) {
+    if (!input.capabilities.canIncreasePrice) {
+      return { ok: false, forbidden: true, message: `سعر «${input.serviceName}» أعلى من سعر الدليل — رفع السعر غير مفعّل لحسابك.` };
+    }
+    if (!reason) return { ok: false, message: `اكتب سبب تغيير سعر «${input.serviceName}» عن سعر الدليل.` };
+    return { ok: true, unitPriceMinor: requested, override: { kind: "increase", catalogMinor: catalog, requestedMinor: requested, discountPercent: null, reason } };
+  }
+
+  if (!input.capabilities.canApplyDiscount && !input.capabilities.canOverrideDiscount) {
+    return { ok: false, forbidden: true, message: `تطبيق الخصم على «${input.serviceName}» غير مفعّل لحسابك.` };
+  }
+  const discountPercent = Math.round(((catalog - requested) / catalog) * 1000) / 10;
+  if (!reason) return { ok: false, message: `اكتب سبب الخصم على «${input.serviceName}» (${discountPercent}٪ عن سعر الدليل).` };
+  if (!input.capabilities.canOverrideDiscount && discountPercent > Math.max(0, input.maxDiscountPercent)) {
+    return {
+      ok: false,
+      forbidden: true,
+      message: `الخصم على «${input.serviceName}» ${discountPercent}٪ يتجاوز الحد المسموح (${Math.max(0, input.maxDiscountPercent)}٪) — يحتاج صلاحية تجاوز سقف الخصم.`,
+    };
+  }
+  return { ok: true, unitPriceMinor: requested, override: { kind: "discount", catalogMinor: catalog, requestedMinor: requested, discountPercent, reason } };
+}

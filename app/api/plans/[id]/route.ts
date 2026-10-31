@@ -1,17 +1,24 @@
 import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
 import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalPlanCaseFailure,
+  commandCanonicalPlanCollect,
+  commandCanonicalSetPlanStatus,
+} from "@/lib/canonical-plans-and-cases";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, getPlan, getSettings, recordPlanInstallment, setPlanStatus } from "@/lib/db";
-import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 import { canHandleMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +27,31 @@ const denied = () =>
 
 /** تسجيل قسط: فاتورة بقيمته ودفعة عليها في معاملة واحدة. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      const result = await commandCanonicalPlanCollect(
+        selected.handle,
+        id,
+        body,
+        request.headers.get("idempotency-key"),
+        request.headers.get(SIMILAR_COLLECTION_REVIEW_HEADER),
+      );
+      return NextResponse.json(result.body, { status: result.status, headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر تسجيل القسط. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) {
@@ -144,6 +176,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      return NextResponse.json(await commandCanonicalSetPlanStatus(selected.handle, id, body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalPlanCaseFailure(error, "تعذّر تنفيذ الإجراء.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) {

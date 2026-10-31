@@ -405,8 +405,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalChangeCaseStatus via withStaffOperation(clinical.plans.edit) + patient scope (outside=missing 404), ortho-managed refusal, and atomic insertAuditRow."
  },
  {
   "route": "/api/ceph-reference-sets",
@@ -3255,8 +3255,15 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalPatientCases via read:patients.record in one owning RR read-only snapshot; outside patient scope reads as 404; plan items and dependencies projected only when clinical.plans.view is granted.",
+  "projection": {
+   "legacy": "patient-scoped read; planVisible and items/dependencies gated by canViewPlans.",
+   "groups": {
+    "identity": "cases and problems for every actor admitted to read:patients.record",
+    "plan": "items and dependencies when clinical.plans.view is granted"
+   }
+  }
  },
  {
   "route": "/api/patients/[id]/cases",
@@ -3270,8 +3277,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalCreateCase via withStaffOperation(clinical.plans.edit) + patient scope (outside=missing 404), enforcing own-scope clinician responsibility boundary and atomic insertAuditRow."
  },
  {
   "route": "/api/patients/[id]/ceph",
@@ -4004,8 +4011,17 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalPatientPlans via read:patients.plans (clinical.plans.view + patient scope) in one owning RR read-only snapshot; money fields projected by finance.patient-ledger.view and plannedVisits[].canRebook by appointments.create + appointment scope.",
+  "projection": {
+   "legacy": "canAccessPatient; money fields gated by canHandleMoney or doctor canViewFinancials; rebook gated by booking access.",
+   "groups": {
+    "clinical": "plan items, consent, clinical progress and planned visits — clinical.plans.view",
+    "balances": "plan money fields, paidMinor, installments and invoiceFinancial — finance.patient-ledger.view",
+    "rebook": "plannedVisits[].canRebook — appointments.create + appointment scope + referral receiver match"
+   },
+   "rows": "patient outside scope reads as missing (404)"
+  }
  },
  {
   "route": "/api/patients/[id]/prescriptions",
@@ -4461,8 +4477,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalSetPlanItemCase via withStaffOperation(clinical.plans.edit) + patient scope, billed-item case lock, and atomic insertAuditRow."
  },
  {
   "route": "/api/plan-items/[id]/dependencies",
@@ -4477,8 +4493,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalRemovePlanItemDependency via withStaffOperation(clinical.plans.edit) + patient scope and atomic insertAuditRow."
  },
  {
   "route": "/api/plan-items/[id]/dependencies",
@@ -4493,8 +4509,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalAddPlanItemDependency via withStaffOperation(clinical.plans.edit) + patient scope, cross-patient and DAG cycle guards, and atomic insertAuditRow."
  },
  {
   "route": "/api/plan-templates",
@@ -4509,8 +4525,16 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalPlanTemplates via withStaffOperation(clinical.plans.view), projecting catalog service prices by finance.service-prices.view and canEdit by settings.operational.edit.",
+  "projection": {
+   "legacy": "any authenticated staff; showPrices from canViewMoney or doctor permissions.canViewServicePrices; canEdit from isAdmin.",
+   "groups": {
+    "templates": "specialty templates and active service catalog names/categories — clinical.plans.view",
+    "prices": "services[].priceMinor and showPrices — finance.service-prices.view",
+    "canEdit": "canEdit — settings.operational.edit"
+   }
+  }
  },
  {
   "route": "/api/planned-visits/[id]/rebook",
@@ -4559,8 +4583,16 @@
    "finance.invoices.view"
   ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalPlans via read:plans (anyOf: [clinical.plans.view, finance.invoices.view] + patient scope) in one owning RR read-only snapshot; finance-only actors receive clinical-redacted receivable summaries, and clinical-only actors receive withoutPlanPayments.",
+  "projection": {
+   "legacy": "admin, reception, cashier, accountant or doctor with canViewPlans; financial fields gated by canViewMoney; clinical items redacted for restricted non-clinical finance roles.",
+   "groups": {
+    "clinical": "plan titles, items, tooth codes and clinical notes — clinical.plans.view",
+    "financial": "installments, paidMinor, invoiceFinancial, approvedAgreement and debtSource — finance.invoices.view or finance.patient-ledger.view"
+   },
+   "rows": "patient scope all: all active plans; own: plans of patients inside the clinician's scope (optional patientId outside scope = 404)"
+  }
  },
  {
   "route": "/api/plans",
@@ -4575,8 +4607,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalCreatePlanRefusal via withStaffOperation(clinical.plans.edit) + patient scope (outside=missing 404), preserving 409 PLAN_CREATION_ENTRY_REQUIRED for in-scope patients."
  },
  {
   "route": "/api/plans/[id]",
@@ -4590,8 +4622,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalSetPlanStatus via withStaffOperation(clinical.plans.edit) + patient scope (outside=missing 404), mandatory cancellation/reactivation reason, and atomic insertAuditRow."
  },
  {
   "route": "/api/plans/[id]",
@@ -4601,12 +4633,12 @@
    "reception"
   ],
   "need": [
-   "clinical.plans.edit"
+   "finance.payments.collect"
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalPlanCollect via withStaffOperation(finance.payments.collect) + patient scope (outside=missing 404) + open cashier shift, idempotency replay, similar-collection review, and atomic audit."
  },
  {
   "route": "/api/plans/[id]/agreement-amendment",
@@ -4619,8 +4651,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalAgreementAmendment via read:plans.agreement-amendment (finance.agreements.manage + patient scope) in one owning RR read-only snapshot."
  },
  {
   "route": "/api/plans/[id]/agreement-amendment",
@@ -4633,8 +4665,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: saveCanonicalAgreementAmendment via withStaffOperation(finance.agreements.manage) + patient scope, committing durable agreement_delta_attempt_rejections before surfacing stale-source 409."
  },
  {
   "route": "/api/plans/[id]/agreement-amendment",
@@ -4647,8 +4679,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalAgreementAmendmentAttemptStatus via withStaffOperation(finance.agreements.manage) + patient scope."
  },
  {
   "route": "/api/plans/[id]/consent",
@@ -4662,8 +4694,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalPlanConsent via withStaffOperation(clinical.plans.edit) + patient scope, recording patient consent and optional installment schedule atomically with audit."
  },
  {
   "route": "/api/plans/[id]/financial-approval",
@@ -4677,8 +4709,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "Financial approval of a plan creates billable obligations."
+  "status": "canonical-done",
+  "note": "M2 slice 32: approveCanonicalAgreement via withStaffOperation(finance.invoices.create) + patient scope; reconciling historical invoice/opening sources additionally requires finance.agreements.manage; atomic principal and audit rows."
  },
  {
   "route": "/api/plans/[id]/items",
@@ -4693,8 +4725,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalRemovePlanItem via withStaffOperation(clinical.plans.edit) + patient scope and atomic insertAuditRow."
  },
  {
   "route": "/api/plans/[id]/items",
@@ -4709,8 +4741,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalUpdatePlanItem via withStaffOperation(clinical.plans.edit) + patient scope and atomic insertAuditRow."
  },
  {
   "route": "/api/plans/[id]/items",
@@ -4725,8 +4757,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalAddPlanItem via withStaffOperation(clinical.plans.edit) + patient scope, capability-based foreign-currency price authority (finance.price-increases.apply, finance.discounts.apply, finance.discounts.override), and atomic insertAuditRow."
  },
  {
   "route": "/api/plans/[id]/reconcile",
@@ -4739,8 +4771,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalAgreementReconciliation via read:plans.reconcile (finance.agreements.manage + patient scope) in one owning RR read-only snapshot."
  },
  {
   "route": "/api/plans/[id]/reconcile",
@@ -4753,8 +4785,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: saveCanonicalAgreementReconciliation via withStaffOperation(finance.agreements.manage) + patient scope, committing durable agreement_reconciliation_rejections and refusal audit before surfacing 409 agreement_source_changed."
  },
  {
   "route": "/api/plans/[id]/reconcile",
@@ -4767,8 +4799,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalAgreementReconciliationAttemptStatus via withStaffOperation(finance.agreements.manage) + patient scope."
  },
  {
   "route": "/api/plans/proposals",
@@ -4782,8 +4814,16 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: readCanonicalPendingProposals via read:plans.proposals (clinical.plans.edit + patient scope) in one owning RR read-only snapshot; totalMinor projected only when finance.invoices.view or finance.patient-ledger.view is granted.",
+  "projection": {
+   "legacy": "admin, reception, doctor; totalMinor gated by canViewMoney.",
+   "groups": {
+    "proposals": "pending unconsented plan proposals and follow-up timing — clinical.plans.edit",
+    "money": "proposals[].totalMinor — finance.invoices.view or finance.patient-ledger.view"
+   },
+   "rows": "patient scope all: all pending proposals; own: proposals of patients inside the clinician's scope"
+  }
  },
  {
   "route": "/api/plans/proposals",
@@ -4797,8 +4837,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalProposalContact via withStaffOperation(clinical.plans.edit) + patient scope and atomic insertAuditRow."
  },
  {
   "route": "/api/plans/reminders",
@@ -4813,8 +4853,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: commandCanonicalPlanReminders via withStaffOperation(appointments.create) + patient scope (filtering bulk reminders to own patient scope and returning 404 on out-of-scope single reminder) with atomic insertAuditRow."
  },
  {
   "route": "/api/prescriptions",
@@ -4891,7 +4931,13 @@
   "scope": "appointment",
   "status": "canonical-done",
   "note": "M2 slice 25: record read read:provider-blocks in one owning snapshot. With providerId: that doctor's blocks on the day when inside the appointment scope (own = the actor's party only; another doctor answers like one without blocks). Without providerId: the day panel — every in-scope active doctor and its blocks. canManage = appointments.schedule.manage (display only).",
-  "projection": {"legacy": "every admitted role read any doctor's blocks by id.", "groups": {"schedule": "block times and reason of in-scope doctors; doctor names for the day panel"}, "rows": "appointment scope all: every active doctor; own: the actor's own party; none: refused"}
+  "projection": {
+   "legacy": "every admitted role read any doctor's blocks by id.",
+   "groups": {
+    "schedule": "block times and reason of in-scope doctors; doctor names for the day panel"
+   },
+   "rows": "appointment scope all: every active doctor; own: the actor's own party; none: refused"
+  }
  },
  {
   "route": "/api/provider-blocks",
@@ -4934,7 +4980,13 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 24: record read read:recall (patient scope; own = the patient list's condition applied in SQL before the limits) in one owning snapshot; canRecord = appointments.create (display only).",
-  "projection": {"legacy": "every admitted role read every patient's open past bookings, missed appointments and lapsed patients.", "groups": {"identity": "name, phone, dates, note and doctor of the rows inside the patient scope"}, "rows": "patient scope all: every row; own: the clinician's patients only; none: refused"}
+  "projection": {
+   "legacy": "every admitted role read every patient's open past bookings, missed appointments and lapsed patients.",
+   "groups": {
+    "identity": "name, phone, dates, note and doctor of the rows inside the patient scope"
+   },
+   "rows": "patient scope all: every row; own: the clinician's patients only; none: refused"
+  }
  },
  {
   "route": "/api/recall",

@@ -4,7 +4,14 @@ import {withLegacyStaffReadOnlySnapshot} from "./legacy-staff-readonly-snapshot"
  * the price difference, documented as a dated invoice and immutable event.
  */
 import type { SessionPayload } from "./auth";
-import { ensureSchema, getPool, insertAuditRow, type DbClient } from "./db";
+import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
+import { ensureSchema, getPool, insertAuditRow, patientInDoctorScopeWith, type DbClient, type DbPool } from "./db";
+import type { VerifiedDurableSession } from "./staff-durable-session";
+import {
+  staffOperationIdentity,
+  staffOperationPatientScope,
+  withStaffOperation,
+} from "./staff-operation-runtime";
 import { readApprovedAgreement } from "./approved-agreements";
 import { debtRequestHash, DebtRepaymentError } from "./debt-installments-db";
 import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
@@ -310,4 +317,232 @@ export async function saveAgreementAmendment(planId:number,input:AmendmentWrite,
   await authorize(client,session);await client.query("COMMIT");
   return {...receipt,eventId:safe(row.id),replayed:false};
  }catch(e){try{await client.query("ROLLBACK");}catch{destroy=true;}throw e;}finally{client.release(destroy);}
+}
+
+function validateAmendmentInput(planId: number, input: AmendmentWrite, invalidMessage: string) {
+  if (!positive(planId) || !record(input)
+    || Object.keys(input).some(k => !["idempotencyKey", "expectedSourceHash", "newServiceId", "newUnitMinor", "reason"].includes(k))
+    || typeof input.idempotencyKey !== "string" || !/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)
+    || typeof input.expectedSourceHash !== "string" || !/^[a-f0-9]{64}$/.test(input.expectedSourceHash)
+    || !positive(input.newServiceId) || !amount(input.newUnitMinor) || typeof input.reason !== "string"
+    || input.reason.trim().length < 3 || input.reason.trim().length > 300) {
+    fail(invalidMessage, "invalid");
+  }
+}
+
+export async function readCanonicalAgreementAmendment(planId: number, session: VerifiedDurableSession) {
+  if (!positive(planId)) fail("معرف الخطة غير صالح.", "invalid");
+  return runCanonicalReadSnapshot(
+    session,
+    "read:plans.agreement-amendment",
+    async (query, scope) => {
+      const owner = (await query.query<{ patient_id: number }>("SELECT patient_id FROM treatment_plans WHERE id=$1", [planId])).rows[0];
+      if (!owner) fail("الخطة غير موجودة.", "missing");
+      if (
+        scope.patientScope.kind === "own"
+        && !(await patientInDoctorScopeWith(query, scope.patientScope.clinicianPartyId, owner.patient_id))
+      ) {
+        fail("الخطة غير موجودة.", "missing");
+      }
+      const result = await snapshot(query as unknown as DbClient, planId);
+      const services = (await query.query<ServiceRow>("SELECT id,name,category,is_active FROM services WHERE is_active=TRUE ORDER BY name,id")).rows;
+      return { ...result, services };
+    },
+    { errorPrefix: "STAFF_READ", maxBytes: 1024 * 1024 },
+  );
+}
+
+export async function readCanonicalAgreementAmendmentAttemptStatus(
+  planId: number,
+  input: AmendmentWrite,
+  session: VerifiedDurableSession,
+  pool: DbPool = getPool(),
+) {
+  validateAmendmentInput(planId, input, "طلب الاستعلام عن المحاولة غير صالح.");
+  return withStaffOperation(pool, session, "finance.agreements.manage", async (client, handle) => {
+    const identity = await staffOperationIdentity(client, handle, "finance.agreements.manage");
+    const patientScope = await staffOperationPatientScope(client, handle, "finance.agreements.manage");
+    if (patientScope.kind === "none") fail("لا تملك صلاحية الوصول لملفات المرضى.", "unauthorized");
+
+    const owner = (await client.query<{ patient_id: number }>("SELECT patient_id FROM treatment_plans WHERE id=$1", [planId])).rows[0];
+    if (!owner) fail("الخطة غير موجودة.", "missing");
+    if (patientScope.kind === "own" && !(await patientInDoctorScopeWith(client, patientScope.clinicianPartyId, owner.patient_id))) {
+      fail("الخطة غير موجودة.", "missing");
+    }
+
+    const hash = debtRequestHash({ purpose: "agreement-delta-v1", planId, input, actor: identity.userId });
+    await lockAmendmentAttempt(client, input.idempotencyKey);
+    const saved = (await client.query<{ id: string; plan_id: number; actor_id: number; request_hash: string; receipt: Record<string, unknown> }>(
+      "SELECT id,plan_id,actor_id,request_hash,receipt FROM agreement_delta_amendments WHERE idempotency_key=$1",
+      [input.idempotencyKey],
+    )).rows[0];
+    if (saved) {
+      if (saved.actor_id !== identity.userId || saved.plan_id !== planId || saved.request_hash !== hash) {
+        fail("هذا المفتاح يخص محاولة مختلفة.");
+      }
+      if (!record(saved.receipt) || saved.receipt.idempotencyKey !== input.idempotencyKey || !positive(saved.receipt.deltaInvoiceId)) {
+        fail("إقرار تعديل محفوظ غير متطابق.");
+      }
+      return { state: "committed" as const, receipt: { ...saved.receipt, eventId: safe(saved.id), replayed: true } };
+    }
+    const rejected = (await client.query<{
+      actor_id: number; plan_id: number; request_hash: string; expected_source_hash: string; observed_source_hash: string; rejected_at: Date;
+    }>(
+      "SELECT actor_id,plan_id,request_hash,expected_source_hash,observed_source_hash,rejected_at FROM agreement_delta_attempt_rejections WHERE idempotency_key=$1",
+      [input.idempotencyKey],
+    )).rows[0];
+    if (rejected && (rejected.actor_id !== identity.userId || rejected.plan_id !== planId
+      || rejected.request_hash !== hash || rejected.expected_source_hash !== input.expectedSourceHash)) {
+      fail("بصمة المحاولة المرفوضة غير متطابقة.");
+    }
+    if (rejected) {
+      return {
+        state: "rejected_stale" as const,
+        requestKey: input.idempotencyKey,
+        requestHash: hash,
+        observedSourceHash: rejected.observed_source_hash,
+        rejectedAt: rejected.rejected_at.toISOString(),
+      };
+    }
+    return { state: "unresolved" as const };
+  });
+}
+
+export async function saveCanonicalAgreementAmendment(
+  planId: number,
+  input: AmendmentWrite,
+  session: VerifiedDurableSession,
+  pool: DbPool = getPool(),
+) {
+  validateAmendmentInput(planId, input, "يرجى مراجعة الخدمة المحددة والسعر ومفتاح الطلب والسبب.");
+  const outcome = await withStaffOperation(pool, session, "finance.agreements.manage", async (client, handle) => {
+    const identity = await staffOperationIdentity(client, handle, "finance.agreements.manage");
+    const patientScope = await staffOperationPatientScope(client, handle, "finance.agreements.manage");
+    if (patientScope.kind === "none") fail("لا تملك صلاحية الوصول لملفات المرضى.", "unauthorized");
+
+    const owner = (await client.query<{ patient_id: number }>("SELECT patient_id FROM treatment_plans WHERE id=$1", [planId])).rows[0];
+    if (!owner) fail("الخطة غير موجودة.", "missing");
+    await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [owner.patient_id]);
+    if (patientScope.kind === "own" && !(await patientInDoctorScopeWith(client, patientScope.clinicianPartyId, owner.patient_id))) {
+      fail("الخطة غير موجودة.", "missing");
+    }
+
+    const hash = debtRequestHash({ purpose: "agreement-delta-v1", planId, input, actor: identity.userId });
+    await lockAmendmentAttempt(client, input.idempotencyKey);
+    const staleRejection = (await client.query<{ request_hash: string; actor_id: number; plan_id: number }>(
+      "SELECT request_hash,actor_id,plan_id FROM agreement_delta_attempt_rejections WHERE idempotency_key=$1",
+      [input.idempotencyKey],
+    )).rows[0];
+    if (staleRejection) {
+      if (staleRejection.request_hash !== hash || staleRejection.actor_id !== identity.userId || staleRejection.plan_id !== planId) {
+        fail("مفتاح المحاولة المرفوضة مستخدم لطلب مختلف.");
+      }
+      fail("هذه المحاولة رُفضت بسبب تغيّر المصدر ولم تُحفظ؛ افحص حالتها قبل تحديث المعاينة.", "stale");
+    }
+    const replay = async (): Promise<(AgreementDeltaReceipt & { eventId: number; replayed: boolean }) | null> => {
+      const row = (await client.query<{ request_hash: string; actor_id: number; plan_id: number; receipt: Record<string, unknown>; id: string }>(
+        "SELECT request_hash,actor_id,plan_id,receipt,id FROM agreement_delta_amendments WHERE idempotency_key=$1",
+        [input.idempotencyKey],
+      )).rows[0];
+      if (!row) return null;
+      if (row.request_hash !== hash || row.actor_id !== identity.userId || row.plan_id !== planId) {
+        fail("مفتاح إعادة المحاولة مستعمل لطلب آخر.");
+      }
+      if (!record(row.receipt) || row.receipt.planId !== planId || row.receipt.idempotencyKey !== input.idempotencyKey || !positive(row.receipt.deltaInvoiceId)) {
+        fail("إقرار المحاولة السابقة ناقص؛ تحقق من المصادر.");
+      }
+      return { ...(row.receipt as unknown as AgreementDeltaReceipt), eventId: safe(row.id), replayed: true };
+    };
+    const earlier = await replay();
+    if (earlier) return earlier;
+
+    await lockDebtAccountForSchedule(client, owner.patient_id, true);
+    await client.query("SELECT id FROM plan_items WHERE plan_id=$1 ORDER BY id FOR UPDATE", [planId]);
+    const repeated = await replay();
+    if (repeated) return repeated;
+
+    const before = await snapshot(client, planId);
+    if (before.sourceHash !== input.expectedSourceHash) {
+      await client.query(
+        `INSERT INTO agreement_delta_attempt_rejections
+           (idempotency_key,request_hash,actor_id,plan_id,patient_id,expected_source_hash,observed_source_hash)
+           VALUES($1,$2,$3,$4,$5,$6,$7)`,
+        [input.idempotencyKey, hash, identity.userId, planId, before.patientId, input.expectedSourceHash, before.sourceHash],
+      );
+      return null;
+    }
+    if (before.patientId !== owner.patient_id) fail("تغير مالك المصدر؛ أوقف التعديل.");
+    const service = (await client.query<ServiceRow>("SELECT id,name,category,is_active FROM services WHERE id=$1", [input.newServiceId])).rows[0];
+    if (!service?.is_active) fail("يجب اختيار خدمة فعالة صراحة، ولا تكفي كتابة اسمها في السبب.", "invalid");
+    const quote = quoteAgreementAmendment({
+      ...before,
+      previousServiceId: before.oldServiceId,
+      selectedServiceId: input.newServiceId,
+      previousUnitPriceMinor: before.oldUnitMinor,
+      selectedUnitPriceMinor: input.newUnitMinor,
+      reason: input.reason,
+    });
+    if (quote.deltaMinor <= 0) fail("هذا المسار للترقية الموجبة فقط؛ لا يُسجل رصيدًا سالبًا.", "invalid");
+    const settings = await getSettingsInTransaction(client);
+    const nowDate = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    if (settings["finance.locked_before"]?.trim() && nowDate < settings["finance.locked_before"].trim()) {
+      fail("الفترة المالية الحالية مقفلة.");
+    }
+    const commission = await commissionAtAmendment(client, { doctorId: before.doctorId, caseId: before.caseId, planId, service });
+    const { rows: [deltaInvoice] } = await client.query<{ id: number }>(
+      `INSERT INTO invoices
+         (invoice_number,patient_id,base_currency,total_minor,discount_minor,status,plan_id,note,created_by)
+         VALUES(${documentNumberSql("invoice")},$1,$2,$3,0,'open',NULL,$4,$5) RETURNING id`,
+      [before.patientId, before.currency, quote.deltaMinor, `فرق اتفاق الخطة #${planId} — ${input.reason.trim()}`, identity.username],
+    );
+    await client.query(
+      `INSERT INTO invoice_items
+         (invoice_id,service_id,doctor_id,description,quantity,unit_price_minor,total_minor)
+         VALUES($1,$2,$3,$4,1,$5,$5)`,
+      [deltaInvoice.id, input.newServiceId, commission.automaticDoctorId, `فرق ترقية العلاج — ${service.name}`, quote.deltaMinor],
+    );
+    const receipt: AgreementDeltaReceipt = {
+      planId, patientId: before.patientId, planItemId: before.itemId, caseId: before.caseId,
+      originalInvoiceId: before.approvalInvoiceId, deltaInvoiceId: deltaInvoice.id,
+      previousServiceId: before.oldServiceId, newServiceId: input.newServiceId,
+      currency: before.currency, previousAgreementMinor: quote.previousAgreementMinor,
+      deltaMinor: quote.deltaMinor, revisedAgreementMinor: quote.revisedAgreementMinor,
+      settledMinor: quote.settledMinor, remainingMinor: quote.remainingMinor,
+      idempotencyKey: input.idempotencyKey, commissionDecision: commission.decision,
+      commissionHistoryId: commission.historyId, commissionOverrideId: commission.overrideId,
+      doctorId: commission.doctorId, cashMovementMinor: 0,
+    };
+    const row = (await client.query<{ id: string }>(
+      `INSERT INTO agreement_delta_amendments
+         (plan_id,plan_item_id,patient_id,case_id,original_invoice_id,delta_invoice_id,previous_amendment_id,
+          old_service_id,new_service_id,doctor_id,quantity,old_unit_minor,new_unit_minor,
+          previous_agreement_minor,delta_minor,revised_agreement_minor,settled_snapshot_minor,source_hash,
+          idempotency_key,request_hash,actor_id,actor_username,reason,receipt)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::jsonb) RETURNING id`,
+      [
+        planId, before.itemId, before.patientId, before.caseId, before.approvalInvoiceId, deltaInvoice.id,
+        before.previousAmendmentId, before.oldServiceId, input.newServiceId, commission.doctorId,
+        before.quantity, before.oldUnitMinor, input.newUnitMinor, quote.previousAgreementMinor,
+        quote.deltaMinor, quote.revisedAgreementMinor, quote.settledMinor, before.sourceHash,
+        input.idempotencyKey, hash, identity.userId, identity.username, input.reason.trim(), JSON.stringify(receipt),
+      ],
+    )).rows[0];
+    await insertAuditRow(client, {
+      action: "plan.agreement_delta_amendment", entity: "treatment_plans", entityId: planId,
+      actor: identity.username, actorRole: identity.role,
+      details: {
+        eventId: safe(row.id), sourceInvoiceId: before.approvalInvoiceId, deltaInvoiceId: deltaInvoice.id,
+        beforeMinor: quote.previousAgreementMinor, afterMinor: quote.revisedAgreementMinor,
+        deltaMinor: quote.deltaMinor, sourceProofHash: before.sourceHash, reason: input.reason.trim(),
+        fromServiceId: before.oldServiceId, toServiceId: input.newServiceId, refundsPreserved: true,
+        originalInvoicesPreserved: true, cashMovementMinor: 0, commission,
+      },
+    });
+    return { ...receipt, eventId: safe(row.id), replayed: false };
+  });
+
+  if (outcome === null) {
+    throw new DebtRepaymentError("stale", "تغيرت مصادر الاتفاق أو التسويات؛ تحقق من رفض المحاولة ثم حدّث المعاينة.");
+  }
+  return outcome;
 }
