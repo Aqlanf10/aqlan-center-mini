@@ -2748,8 +2748,18 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: read:ortho.assessment; verified immutable schema2 history on one owning snapshot, separate source grants/ownership, no source-picker or writes. Legacy GET/POST unchanged.",
+  "projection": {
+   "legacy": "Versioned clinical assessment/history plus mutable source choices; legacy authority and row locks.",
+   "groups": {
+    "clinical": "clinical.ortho.view and patient scope; exact saved revision, pinned hash verification, complete bounded history metadata and current source states",
+    "imaging": "Document/ceph references and derived data require clinical.xrays.view, including every historical ancestor; no document bytes, paths, titles or unreferenced source choices",
+    "care": "Patient-history/clinical-visit sources require the existing PATIENT_CARE_CAPABILITIES group; source facts are hashed privately without returning their raw payload",
+    "writes": "clinicalWritable=false; source hints explicitly incomplete and empty; no edit, bridge repair, billing or schema mutation"
+   },
+   "rows": "Current patient membership, unique owned ortho bridge, revision scope and all external source ownership in the same read-only RR snapshot; missing/outside share 404"
+  }
  },
  {
   "route": "/api/ortho/[id]/assessment",

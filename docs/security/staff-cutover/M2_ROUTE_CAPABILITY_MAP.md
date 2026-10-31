@@ -479,6 +479,16 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - All three data SELECTs use the owning connection. No mutations, migrations or financial rules change. Legacy GET body and POST/PATCH bodies remain unchanged.
 - Evidence: `ortho-canonical-detail.test.ts`, `canonical-ortho-detail-journey.test.ts` (portOffset 41), report `docs/review/work-ortho-detail-slice30-20261030.md`.
 
+### Slice 31 — immutable assessment read
+
+- `GET /api/ortho/[id]/assessment`, registered `read:ortho.assessment`: `clinical.ortho.view` and current patient scope. Explicit `acceptSchema=2` or `1,2`; optional positive INTEGER `revisionId` scoped to this case. No extra/duplicate query keys or legacy fallback.
+- One owning RR READ ONLY snapshot covers admission, central patient witnesses, unique owned clinical bridge, supported treatment-episode state, complete bounded history and source ownership/versions. A missing bridge with no history is explicit; orphaned history, corrupt hashes/schema/lineage and unknown revisions fail rather than becoming empty records. No bridge creation or history repair.
+- Reuse the existing version-pinned content/hash decoder and unchanged history budgets (5000 revisions / 8 MiB stored content). Every historical source closure is checked, including copies; history reasons or an older revision URL cannot bypass a restricted ancestor. Imaging needs `clinical.xrays.view`; patient-history/visit references need the existing `PATIENT_CARE_CAPABILITIES` group, not ortho view alone. No new role policy.
+- All external source identities across the returned history share the existing 128-source bound. Different historical versions of one mutable source remain distinct witnesses; capture current facts once with SELECT only. Missing/foreign ownership refuses the whole read; an owned changed/removed source preserves immutable content with an honest changed/unavailable state. Existing graph/external byte limits remain; resource excess never truncates history silently.
+- No funding, image bytes/URLs, storage paths, source titles, unrelated notes or source-picker data. Only authorized reference ids/hashes and states are returned. `clinicalWritable=false`; editing choices are empty and explicitly incomplete. The owner retains their grants, but this route contract admits no mutation.
+- Existing assessment renderer/async hash verifier reused in explicit read-only mode beneath the case detail. No editor lifetime or POST; on-demand mount, 30-second refresh and clear on hide/focus, generation guards and 15-second read timeout. Existing legacy rendering/writers keep their default behavior. No historical result is rewritten or recalculated using a replacement engine.
+- Tests: `ortho-canonical-assessment`, `canonical-ortho-assessment-journey` (portOffset 43); report `docs/review/work-ortho-assessment-slice31-20261031.md`.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

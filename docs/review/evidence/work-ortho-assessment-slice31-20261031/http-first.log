@@ -1,0 +1,16 @@
+
+ RUN  v4.1.12 /tmp/aqlan-shifts-complete-20261030
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+
+ Test Files  3 passed (3)
+      Tests  19 passed (19)
+   Start at  00:50:18
+   Duration  159.53s (transform 430ms, setup 0ms, import 1.19s, tests 152.32s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
