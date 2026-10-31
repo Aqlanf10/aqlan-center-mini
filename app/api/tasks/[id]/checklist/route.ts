@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { taskChecklistPostCanonicalResponse } from "@/lib/canonical-messages-tasks";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { canUseTasks, mutateTaskChecklist, type ChecklistOperation } from "@/lib/hr";
@@ -11,6 +14,15 @@ const denied = () =>
 
 /** قائمة التحقق: إضافة بند أو تحويله أو إزالته — العملية تُقرأ من جسم الطلب. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return taskChecklistPostCanonicalResponse(request, rawId, selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canUseTasks(session.role)) {

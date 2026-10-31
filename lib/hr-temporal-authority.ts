@@ -2,6 +2,11 @@ import type { SessionPayload } from './auth';
 import type { DbClient } from './db';
 import { revalidateSessionInTransaction } from './session';
 import { historyFail } from './hr-temporal-request';
+import {
+  staffOperationIdentity,
+  type StaffOperationHandle,
+  type StaffRuntimeAction,
+} from './staff-operation-runtime';
 
 const issued = new WeakSet<object>();
 export interface HrTemporalAuthority {
@@ -23,6 +28,34 @@ export function hrTemporalAuthority(admitted: SessionPayload, signal?: AbortSign
     assertCurrent(); return live;
   } });
   issued.add(authority); return authority;
+}
+/** Canonical HR temporal authority bound to an active `withStaffOperation` handle. */
+export function canonicalHrTemporalAuthority(
+  handle: StaffOperationHandle,
+  action: StaffRuntimeAction,
+  signal?: AbortSignal,
+): HrTemporalAuthority {
+  const assertCurrent = () => {
+    if (signal?.aborted) {
+      historyFail('request_cancelled', 'أُلغي الطلب؛ لا توجد نتيجة حفظ مؤكدة. تحقق من السجل قبل تغيير الطلب.', 409);
+    }
+  };
+  const authority: HrTemporalAuthority = Object.freeze({
+    assertCurrent,
+    verify: async (client: DbClient) => {
+      assertCurrent();
+      const identity = await staffOperationIdentity(client, handle, action);
+      assertCurrent();
+      return Object.freeze({
+        userId: identity.userId,
+        username: identity.username,
+        role: identity.role as SessionPayload['role'],
+        expiresAt: Date.now() + 60_000,
+      });
+    },
+  });
+  issued.add(authority);
+  return authority;
 }
 export function requireHrTemporalAuthority(authority: HrTemporalAuthority): void {
   if (!authority || !issued.has(authority)) historyFail('untrusted_authority', 'لم تُقدّم صلاحية خادم موثوقة.', 403);

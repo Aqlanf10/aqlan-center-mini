@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { taskCommentsPostCanonicalResponse } from "@/lib/canonical-messages-tasks";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { addTaskComment, canUseTasks } from "@/lib/hr";
@@ -11,6 +14,15 @@ const denied = () =>
 
 /** تعليق على مهمة — يُنسب لصاحب الجلسة فعلًا ولو نُفّذ نيابةً عن موظفٍ بلا حساب. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return taskCommentsPostCanonicalResponse(request, rawId, selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canUseTasks(session.role)) {

@@ -5,7 +5,7 @@ import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { revalidateVerifiedDurableSession, type VerifiedDurableSession } from "./staff-durable-session";
 import { appointmentCapabilityConstraint, canPerformOwnerOperation, hasStaffCapability, patientCapabilityConstraint, type StaffRecordConstraint } from "./staff-capabilities";
 import type { OwnerOnlyOperation, StaffCapability } from "./staff-capability-catalogue";
-import { loadLockedStaffAuthority } from "./staff-authority-proof-internal";
+import { loadLockedStaffAuthority, lockedAccountHoldsCapability } from "./staff-authority-proof-internal";
 
 /** Inventory/procurement operations admitted through the canonical inventory adapter
  * (lib/inventory-domain/canonical-operation.ts). Each is an exact catalogue capability. */
@@ -20,7 +20,7 @@ export const INVENTORY_RUNTIME_ACTIONS = Object.freeze([
 export type InventoryRuntimeAction = typeof INVENTORY_RUNTIME_ACTIONS[number];
 /** Clinic operations migrated in M2 (docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md §5).
  * Each is an exact catalogue capability admitted by `withStaffOperation`. */
-export const CLINIC_RUNTIME_ACTIONS = Object.freeze(["patients.create", "patients.edit", "settings.view", "visits.manage", "appointments.edit", "appointments.create", "appointments.cancel", "appointments.schedule.manage", "finance.shifts.view", "finance.shifts.operate", "clinical.xrays.view", "clinical.xrays.upload", "clinical.ceph.analyze", "clinical.ortho.view", "clinical.ortho.edit", "clinical.plans.view", "clinical.plans.edit", "finance.agreements.manage", "finance.invoices.create", "finance.payments.collect", "clinical.lab.view", "clinical.lab.order", "clinical.lab.cancel", "clinical.laboratories.manage", "finance.lab-prices.edit", "clinical.visits.document", "finance.payables.record", "patients.documents.delete", "clinical.prescriptions.write", "clinical.referrals.manage", "visits.delete", "clinical.visits.sign", "patients.delete", "patients.merge", "patients.number.manage", "finance.reconciliation.view", "finance.opening-balances.manage", "finance.patient-ledger.manage", "patients.history.record", "patients.history.correct", "finance.legacy.record", "finance.legacy.void", "finance.invoices.view", "finance.invoices.cancel", "finance.invoices.mark-paid", "finance.invoices.correct", "finance.payments.view", "finance.payments.refund", "finance.payments.void", "finance.service-prices.view", "finance.service-prices.edit", "finance.cost-prices.view", "settings.operational.edit", "reports.financial.view", "finance.journal.post", "finance.expenses.view", "finance.expenses.create", "finance.expenses.void", "finance.commissions.manage-rates", "finance.commissions.view-all", "finance.commissions.view-own", "finance.patient-ledger.view", "settings.finance.edit", "finance.fx.manage", "finance.reconciliation.manage", "finance.parties.manage"] as const);
+export const CLINIC_RUNTIME_ACTIONS = Object.freeze(["patients.create", "patients.edit", "settings.view", "visits.manage", "appointments.edit", "appointments.create", "appointments.cancel", "appointments.schedule.manage", "finance.shifts.view", "finance.shifts.operate", "clinical.xrays.view", "clinical.xrays.upload", "clinical.ceph.analyze", "clinical.ortho.view", "clinical.ortho.edit", "clinical.plans.view", "clinical.plans.edit", "finance.agreements.manage", "finance.invoices.create", "finance.payments.collect", "clinical.lab.view", "clinical.lab.order", "clinical.lab.cancel", "clinical.laboratories.manage", "finance.lab-prices.edit", "clinical.visits.document", "finance.payables.record", "patients.documents.delete", "clinical.prescriptions.write", "clinical.referrals.manage", "visits.delete", "clinical.visits.sign", "patients.delete", "patients.merge", "patients.number.manage", "finance.reconciliation.view", "finance.opening-balances.manage", "finance.patient-ledger.manage", "patients.history.record", "patients.history.correct", "finance.legacy.record", "finance.legacy.void", "finance.invoices.view", "finance.invoices.cancel", "finance.invoices.mark-paid", "finance.invoices.correct", "finance.payments.view", "finance.payments.refund", "finance.payments.void", "finance.service-prices.view", "finance.service-prices.edit", "finance.cost-prices.view", "settings.operational.edit", "reports.financial.view", "finance.journal.post", "finance.expenses.view", "finance.expenses.create", "finance.expenses.void", "finance.commissions.manage-rates", "finance.commissions.view-all", "finance.commissions.view-own", "finance.patient-ledger.view", "settings.finance.edit", "finance.fx.manage", "finance.reconciliation.manage", "finance.parties.manage", "hr.directory.view", "hr.attendance.record", "hr.attendance.correct", "hr.staff.manage", "hr.leaves.request", "hr.leaves.approve", "hr.schedules.manage", "hr.payroll.manage", "hr.reports.view", "hr.settings.edit", "staff.profile.edit", "tasks.use", "messages.use"] as const);
 export type ClinicRuntimeAction = typeof CLINIC_RUNTIME_ACTIONS[number];
 export type StaffRuntimeAction = "staff.view" | "staff.permissions.edit" | "inventory.references.view" | "inventory.items.create" | "inventory.units.revise" | "inventory.locations.create" | InventoryRuntimeAction | ClinicRuntimeAction;
 // A literal list (the readiness audit reads it as an AST constant); a unit test pins it
@@ -40,7 +40,8 @@ const actions = new Set<string>(["staff.view","staff.permissions.edit","inventor
  "visits.delete","clinical.visits.sign","patients.delete","patients.merge","patients.number.manage",
  "finance.reconciliation.view","finance.opening-balances.manage","finance.patient-ledger.manage","patients.history.record","patients.history.correct","finance.legacy.record","finance.legacy.void",
  "finance.invoices.view","finance.invoices.cancel","finance.invoices.mark-paid","finance.invoices.correct","finance.payments.view","finance.payments.refund","finance.payments.void","finance.service-prices.view","finance.service-prices.edit","finance.cost-prices.view","settings.operational.edit",
- "reports.financial.view","finance.journal.post","finance.expenses.view","finance.expenses.create","finance.expenses.void","finance.commissions.manage-rates","finance.commissions.view-all","finance.commissions.view-own","finance.patient-ledger.view","settings.finance.edit","finance.fx.manage","finance.reconciliation.manage","finance.parties.manage"]);
+ "reports.financial.view","finance.journal.post","finance.expenses.view","finance.expenses.create","finance.expenses.void","finance.commissions.manage-rates","finance.commissions.view-all","finance.commissions.view-own","finance.patient-ledger.view","settings.finance.edit","finance.fx.manage","finance.reconciliation.manage","finance.parties.manage",
+ "hr.directory.view","hr.attendance.record","hr.attendance.correct","hr.staff.manage","hr.leaves.request","hr.leaves.approve","hr.schedules.manage","hr.payroll.manage","hr.reports.view","hr.settings.edit","staff.profile.edit","tasks.use","messages.use"]);
 /** Test hook: the exact admitted action list (copy). */
 export function staffRuntimeActions(): readonly string[] { return Object.freeze([...actions]); }
 declare const operationBrand: unique symbol;
@@ -126,6 +127,18 @@ export async function staffOperationAppointmentScope(client:DbClient,handle:Staf
 export async function staffOperationClinician(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,schema?:string):Promise<number|null>{
  const current=await assertAndLoadStaffOperation(client,handle,action,schema);
  return current.access.clinicianPartyId;
+}
+/** Fresh exact-handle assertion, then whether any other active canonical account in the
+ * schema currently holds `capability` under the shared lifecycle fence. Used for
+ * dual-control / sole-owner separation-of-duties checks without role labels. */
+export async function staffOperationOtherAccountHoldsCapability(client:DbClient,handle:StaffOperationHandle,action:StaffRuntimeAction,capability:StaffCapability,schema?:string):Promise<boolean>{
+ const current=await assertAndLoadStaffOperation(client,handle,action,schema);
+ const s=staffIdentitySchemaName(schema ?? operations.get(handle)!.schema);
+ const {rows}=await client.query<{id:number}>(`SELECT id FROM ${s}.users WHERE is_active = TRUE AND authorization_mode = 'canonical' AND id <> $1 ORDER BY id`,[current.identity.userId]);
+ for(const row of rows){
+  if(await lockedAccountHoldsCapability(client,row.id,capability,s))return true;
+ }
+ return false;
 }
 /** Owns transaction/commit. Trusted callback MUST NOT issue top-level transaction
  * control. Changed/ended XID refuses, but a malicious early COMMIT cannot be undone.

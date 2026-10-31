@@ -1,5 +1,5 @@
 import type { SessionPayload } from "./auth";
-import { CLINIC_TIME_ZONE, ensureSchema, getPool } from "./db";
+import { CLINIC_TIME_ZONE, ensureSchema, getPool, type DbClient } from "./db";
 import { staffIdentityForUser } from "./hr-person-identity-approval";
 import { clinicDateString } from "./schedule";
 
@@ -74,14 +74,20 @@ export interface HrSelfServiceSummary {
 
 export async function getMyHrSummary(session: SessionPayload): Promise<HrSelfServiceSummary> {
   await ensureSchema();
-  const pool = getPool();
+  return getMyHrSummaryWith(getPool(), session.userId);
+}
+
+export async function getMyHrSummaryWith(
+  pool: Pick<DbClient, "query">,
+  userId: number,
+): Promise<HrSelfServiceSummary> {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const currentMonth = today.slice(0, 7);
   const currentYear = Number(today.slice(0, 4));
 
   let staffId: number | null = null;
   try {
-    staffId = await staffIdentityForUser(pool, session.userId);
+    staffId = await staffIdentityForUser(pool, userId);
   } catch {
     staffId = null;
   }
@@ -99,127 +105,125 @@ export async function getMyHrSummary(session: SessionPayload): Promise<HrSelfSer
     };
   }
 
-  const [staffRes, contractRes, scheduleRes, attRes, balRes, reqRes] = await Promise.all([
-    pool.query<{
-      id: number;
-      full_name: string;
-      department: string | null;
-      job_title: string | null;
-      work_status: string;
-      contract_kind: string;
-      hire_date: string | null;
-    }>(
-      `SELECT id, full_name, department, job_title, work_status, contract_kind, hire_date::text AS hire_date
-         FROM hr_staff WHERE id = $1`,
-      [staffId],
-    ),
-    pool.query<{
-      id: number;
-      contract_number: string;
-      title: string;
-      template_kind: string;
-      status: string;
-      start_date: string;
-      end_date: string | null;
-      compensation_kind: string;
-      base_salary_minor: string | null;
-      salary_currency: string | null;
-      salary_period: string | null;
-      commission_rate_percent: string | null;
-    }>(
-      `SELECT id, contract_number, title, template_kind, status,
-              start_date::text AS start_date, end_date::text AS end_date,
-              compensation_kind, base_salary_minor::text AS base_salary_minor,
-              salary_currency, salary_period, commission_rate_percent::text AS commission_rate_percent
-         FROM hr_contracts
-        WHERE staff_id = $1 AND status IN ('active', 'approved')
-        ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, start_date DESC, id DESC
-        LIMIT 1`,
-      [staffId],
-    ),
-    pool.query<{
-      id: number;
-      name: string;
-      schedule_type: string;
-      working_days: number[];
-      shift_start_time: string;
-      shift_end_time: string;
-      grace_period_mins: number;
-      effective_from: string;
-      effective_to: string | null;
-    }>(
-      `SELECT id, name, schedule_type, working_days, shift_start_time::text AS shift_start_time,
-              shift_end_time::text AS shift_end_time, grace_period_mins,
-              effective_from::text AS effective_from, effective_to::text AS effective_to
-         FROM hr_work_schedules
-        WHERE staff_id = $1 AND is_active = TRUE
-        ORDER BY effective_from DESC, id DESC`,
-      [staffId],
-    ),
-    pool.query<{
-      id: number;
-      attendance_date: string;
-      status: string;
-      check_in_actual: Date | null;
-      check_out_actual: Date | null;
-      work_minutes: number;
-      late_minutes: number;
-      early_exit_minutes: number;
-      overtime_minutes: number;
-      is_incomplete: boolean;
-    }>(
-      `SELECT id, attendance_date::text AS attendance_date, status,
-              check_in_actual, check_out_actual,
-              COALESCE(work_minutes, 0) AS work_minutes,
-              COALESCE(late_minutes, 0) AS late_minutes,
-              COALESCE(early_exit_minutes, 0) AS early_exit_minutes,
-              COALESCE(overtime_minutes, 0) AS overtime_minutes,
-              COALESCE(is_incomplete, FALSE) AS is_incomplete
-         FROM hr_attendance_records
-        WHERE staff_id = $1 AND to_char(attendance_date, 'YYYY-MM') = $2
-        ORDER BY attendance_date DESC, id DESC`,
-      [staffId, currentMonth],
-    ),
-    pool.query<{
-      leave_type_code: string;
-      leave_type_name: string;
-      year: number;
-      allocated_days: string;
-      carried_over_days: string;
-      used_days: string;
-      pending_days: string;
-    }>(
-      `SELECT lb.leave_type_code, lt.name_ar AS leave_type_name, lb.year,
-              lb.allocated_days::text AS allocated_days,
-              COALESCE(lb.carried_over_days, 0)::text AS carried_over_days,
-              COALESCE(lb.used_days, 0)::text AS used_days,
-              COALESCE(lb.pending_days, 0)::text AS pending_days
-         FROM hr_leave_balances lb
-         JOIN hr_leave_types lt ON lt.code = lb.leave_type_code
-        WHERE lb.staff_id = $1 AND lb.year = $2
-        ORDER BY lb.leave_type_code`,
-      [staffId, currentYear],
-    ),
-    pool.query<{
-      id: number;
-      leave_type_name: string;
-      start_date: string;
-      end_date: string;
-      days_count: string;
-      status: string;
-      reason: string;
-    }>(
-      `SELECT lr.id, lt.name_ar AS leave_type_name,
-              lr.start_date::text AS start_date, lr.end_date::text AS end_date,
-              lr.days_count::text AS days_count, lr.status, lr.reason
-         FROM hr_leave_requests lr
-         JOIN hr_leave_types lt ON lt.code = lr.leave_type_code
-        WHERE lr.staff_id = $1
-        ORDER BY lr.created_at DESC
-        LIMIT 20`,
-      [staffId],
-    ),
-  ]);
+  const staffRes = await pool.query<{
+    id: number;
+    full_name: string;
+    department: string | null;
+    job_title: string | null;
+    work_status: string;
+    contract_kind: string;
+    hire_date: string | null;
+  }>(
+    `SELECT id, full_name, department, job_title, work_status, contract_kind, hire_date::text AS hire_date
+       FROM hr_staff WHERE id = $1`,
+    [staffId],
+  );
+  const contractRes = await pool.query<{
+    id: number;
+    contract_number: string;
+    title: string;
+    template_kind: string;
+    status: string;
+    start_date: string;
+    end_date: string | null;
+    compensation_kind: string;
+    base_salary_minor: string | null;
+    salary_currency: string | null;
+    salary_period: string | null;
+    commission_rate_percent: string | null;
+  }>(
+    `SELECT id, contract_number, title, template_kind, status,
+            start_date::text AS start_date, end_date::text AS end_date,
+            compensation_kind, base_salary_minor::text AS base_salary_minor,
+            salary_currency, salary_period, commission_rate_percent::text AS commission_rate_percent
+       FROM hr_contracts
+      WHERE staff_id = $1 AND status IN ('active', 'approved')
+      ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, start_date DESC, id DESC
+      LIMIT 1`,
+    [staffId],
+  );
+  const scheduleRes = await pool.query<{
+    id: number;
+    name: string;
+    schedule_type: string;
+    working_days: number[];
+    shift_start_time: string;
+    shift_end_time: string;
+    grace_period_mins: number;
+    effective_from: string;
+    effective_to: string | null;
+  }>(
+    `SELECT id, name, schedule_type, working_days, shift_start_time::text AS shift_start_time,
+            shift_end_time::text AS shift_end_time, grace_period_mins,
+            effective_from::text AS effective_from, effective_to::text AS effective_to
+       FROM hr_work_schedules
+      WHERE staff_id = $1 AND is_active = TRUE
+      ORDER BY effective_from DESC, id DESC`,
+    [staffId],
+  );
+  const attRes = await pool.query<{
+    id: number;
+    attendance_date: string;
+    status: string;
+    check_in_actual: Date | null;
+    check_out_actual: Date | null;
+    work_minutes: number;
+    late_minutes: number;
+    early_exit_minutes: number;
+    overtime_minutes: number;
+    is_incomplete: boolean;
+  }>(
+    `SELECT id, attendance_date::text AS attendance_date, status,
+            check_in_actual, check_out_actual,
+            COALESCE(work_minutes, 0) AS work_minutes,
+            COALESCE(late_minutes, 0) AS late_minutes,
+            COALESCE(early_exit_minutes, 0) AS early_exit_minutes,
+            COALESCE(overtime_minutes, 0) AS overtime_minutes,
+            COALESCE(is_incomplete, FALSE) AS is_incomplete
+       FROM hr_attendance_records
+      WHERE staff_id = $1 AND to_char(attendance_date, 'YYYY-MM') = $2
+      ORDER BY attendance_date DESC, id DESC`,
+    [staffId, currentMonth],
+  );
+  const balRes = await pool.query<{
+    leave_type_code: string;
+    leave_type_name: string;
+    year: number;
+    allocated_days: string;
+    carried_over_days: string;
+    used_days: string;
+    pending_days: string;
+  }>(
+    `SELECT lb.leave_type_code, lt.name_ar AS leave_type_name, lb.year,
+            lb.allocated_days::text AS allocated_days,
+            COALESCE(lb.carried_over_days, 0)::text AS carried_over_days,
+            COALESCE(lb.used_days, 0)::text AS used_days,
+            COALESCE(lb.pending_days, 0)::text AS pending_days
+       FROM hr_leave_balances lb
+       JOIN hr_leave_types lt ON lt.code = lb.leave_type_code
+      WHERE lb.staff_id = $1 AND lb.year = $2
+      ORDER BY lb.leave_type_code`,
+    [staffId, currentYear],
+  );
+  const reqRes = await pool.query<{
+    id: number;
+    leave_type_name: string;
+    start_date: string;
+    end_date: string;
+    days_count: string;
+    status: string;
+    reason: string;
+  }>(
+    `SELECT lr.id, lt.name_ar AS leave_type_name,
+            lr.start_date::text AS start_date, lr.end_date::text AS end_date,
+            lr.days_count::text AS days_count, lr.status, lr.reason
+       FROM hr_leave_requests lr
+       JOIN hr_leave_types lt ON lt.code = lr.leave_type_code
+      WHERE lr.staff_id = $1
+      ORDER BY lr.created_at DESC
+      LIMIT 20`,
+    [staffId],
+  );
 
   const s = staffRes.rows[0];
   if (!s) {

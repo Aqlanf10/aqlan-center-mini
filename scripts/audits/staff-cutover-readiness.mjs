@@ -22,10 +22,11 @@ export function discoverEntries(files) {
 const entryKind = file => path.basename(file).split('.')[0];
 const routeOf = file => '/'+file.slice(4).replace(/(?:^|\/)(route|page|layout)\.[^/]+$/,'');
 function inventoryReader(root) {
-const read = f => fs.readFileSync(path.join(root, f), 'utf8');
+const readCache = new Map(), walkCache = new Map(), parseCache = new Map(), evidenceCache = new Map(), methodsCache = new Map();
+const read = f => { let c = readCache.get(f); if (c === undefined) { c = fs.readFileSync(path.join(root, f), 'utf8'); readCache.set(f, c); } return c; };
 const hash = s => crypto.createHash('sha256').update(s).digest('hex');
-const walk = d => fs.readdirSync(path.join(root,d), {withFileTypes:true}).flatMap(e => e.isDirectory()?walk(`${d}/${e.name}`):[`${d}/${e.name}`]).sort();
-const parse = f => ts.createSourceFile(f,read(f),ts.ScriptTarget.Latest,true,({'.tsx':ts.ScriptKind.TSX,'.jsx':ts.ScriptKind.JSX,'.js':ts.ScriptKind.JS})[path.extname(f)]??ts.ScriptKind.TS);
+const walk = d => { let c = walkCache.get(d); if (!c) { c = fs.readdirSync(path.join(root,d), {withFileTypes:true}).flatMap(e => e.isDirectory()?walk(`${d}/${e.name}`):[`${d}/${e.name}`]).sort(); walkCache.set(d, c); } return c; };
+const parse = f => { let c = parseCache.get(f); if (!c) { c = ts.createSourceFile(f,read(f),ts.ScriptTarget.Latest,true,({'.tsx':ts.ScriptKind.TSX,'.jsx':ts.ScriptKind.JSX,'.js':ts.ScriptKind.JS})[path.extname(f)]??ts.ScriptKind.TS); parseCache.set(f, c); } return c; };
 function constants(file) {
  const result = {};
  function value(n) {
@@ -43,11 +44,15 @@ function constants(file) {
  return result;
 }
 const helpers=['requireSession','requireSessionStrict','readSessionPayload','readSessionToken','findUserByUsername','withLegacyStaffReadOnlySnapshot','revalidateSessionInTransaction','requireBackupAdminSession','requireBackupAdmin','readVerifiedDurableSession','withStaffOperation','assertStaffOperation'];
+const helperPatterns=helpers.map(symbol=>[symbol,new RegExp(`\\b${symbol}\\b`)]);
 function evidence(file) {
- const source=read(file);
- return helpers.flatMap(symbol=>source.split('\n').flatMap((line,i)=>new RegExp(`\\b${symbol}\\b`).test(line)?[{symbol,line:i+1}]:[]));
+ let c=evidenceCache.get(file);if(c)return c;
+ const lines=read(file).split('\n');
+ c=helperPatterns.flatMap(([symbol,re])=>lines.flatMap((line,i)=>re.test(line)?[{symbol,line:i+1}]:[]));
+ evidenceCache.set(file,c);return c;
 }
 function methods(file) {
+ let c=methodsCache.get(file);if(c)return c;
  const found=new Set();
  for(const s of parse(file).statements) {
   const exported=s.modifiers?.some(m=>m.kind===ts.SyntaxKind.ExportKeyword);
@@ -55,7 +60,8 @@ function methods(file) {
   if(exported&&ts.isVariableStatement(s))for(const d of s.declarationList.declarations)found.add(d.name.text);
   if(ts.isExportDeclaration(s)&&s.exportClause&&ts.isNamedExports(s.exportClause))for(const e of s.exportClause.elements)found.add(e.name.text);
  }
- return [...found].filter(m=>/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(m)).sort();
+ c=[...found].filter(m=>/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(m)).sort();
+ methodsCache.set(file,c);return c;
 }
 function family(route) {
  if(/\/(ai|dot)(\/|$)/.test(route))return 'excluded-ai-dot';

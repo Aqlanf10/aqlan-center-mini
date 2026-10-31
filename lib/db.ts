@@ -6104,6 +6104,12 @@ export async function patientMessagingConsent(
   const [states, settings] = await Promise.all([contactConsentStates([patientId]), getSettingsSafe()]);
   return { state: states.get(patientId)?.[channel] ?? "unknown", mode: parseConsentMode(settings["messaging.consent_mode"]) };
 }
+export async function patientMessagingConsentWith(
+  q: Pick<DbClient, "query">, patientId: number, channel: ConsentChannel,
+): Promise<{ state: ConsentState; mode: ConsentMode }> {
+  const [states, settings] = await Promise.all([contactConsentStatesWith(q, [patientId]), getSettingsWith(q)]);
+  return { state: states.get(patientId)?.[channel] ?? "unknown", mode: parseConsentMode(settings["messaging.consent_mode"]) };
+}
 
 /** حالة الموافقة لكل قناة لعدة مرضى معًا — آخر قيدٍ لكل (مريض، قناة). */
 export async function contactConsentStates(patientIds: readonly number[],): Promise<Map<number, Record<ConsentChannel, ConsentState>>> {
@@ -17962,7 +17968,23 @@ export async function doctorOwnsPatient(
       ORDER BY cc.id LIMIT 1 FOR SHARE OF cc, oc${ownershipLockMode === "nowait" ? " NOWAIT" : ""}`, [partyId, patientId]);
     return Boolean(bridge[0]);
   }
-  const { rows } = await getPool().query<{ ok: boolean }>(
+  return doctorOwnsPatientWith(getPool(), partyId, patientId);
+}
+/** Non-locking witness read over a caller-owned query facade (safe inside RR READ ONLY snapshots). */
+export async function doctorOwnsPatientWith(
+  q: Pick<DbClient, "query">, partyId: number, patientId: number,
+): Promise<boolean> {
+  const witnesses = [
+    { table: "treatment_plans", alias: "t", predicate: "t.patient_id = $2 AND t.primary_doctor_id = $1 AND t.status = 'active'" },
+    { table: "visits", alias: "v", predicate: "v.patient_id = $2 AND v.doctor_id = $1" },
+    { table: "planned_visits", alias: "pv", predicate: "pv.patient_id = $2 AND pv.doctor_id = $1" },
+    { table: "patients", alias: "pd", predicate: "pd.id = $2 AND pd.primary_doctor_id = $1" },
+    { table: "appointments", alias: "a", predicate: "a.patient_id = $2 AND a.doctor_id = $1 AND a.status <> 'cancelled'" },
+    { table: "clinical_cases", alias: "cc", predicate: "cc.patient_id = $2 AND cc.ortho_case_id IS NULL AND cc.responsible_party_id = $1 AND cc.status IN ('active', 'waiting')" },
+    { table: "ortho_cases", alias: "oc", predicate: "oc.patient_id = $2 AND oc.responsible_doctor_id = $1 AND oc.status IN ('active', 'retention')" },
+    { table: "patient_referrals", alias: "r", predicate: "r.patient_id = $2 AND r.kind = 'internal' AND r.to_party_id = $1 AND r.workflow_state NOT IN ('declined', 'cancelled')" },
+  ];
+  const { rows } = await q.query<{ ok: boolean }>(
     `SELECT EXISTS (${witnesses.map(({ table, alias, predicate }) =>
       `SELECT 1 FROM ${table} ${alias} WHERE ${predicate}`).join(" UNION ALL ")}
       UNION ALL SELECT 1 FROM clinical_cases cc JOIN ortho_cases oc ON oc.id = cc.ortho_case_id
@@ -17984,7 +18006,15 @@ export async function doctorOwnedPatientIds(
 ): Promise<Set<number>> {
   if (patientIds.length === 0) return new Set();
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number }>(
+  return doctorOwnedPatientIdsWith(getPool(), partyId, patientIds);
+}
+export async function doctorOwnedPatientIdsWith(
+  q: Pick<DbClient, "query">,
+  partyId: number,
+  patientIds: number[],
+): Promise<Set<number>> {
+  if (patientIds.length === 0) return new Set();
+  const { rows } = await q.query<{ patient_id: number }>(
     `SELECT DISTINCT patient_id FROM (
        SELECT t.patient_id FROM treatment_plans t
         WHERE t.primary_doctor_id = $1 AND t.status = 'active'
@@ -19345,7 +19375,12 @@ export async function listMessagingChannels(): Promise<MessagingChannelView[]> {
 /** القناة وأسرارها مفكوكةً — للإرسال والتحقق وحدهما، لا تخرج من الخادم. `secret` هو الأساسي. */
 export async function messagingChannelWithSecret(channel: Channel): Promise<{ view: MessagingChannelView; secret: string | null; secrets: ChannelSecrets }> {
   await ensureSchema();
-  const { rows } = await getPool().query<MessagingChannelRow>(`SELECT * FROM messaging_channels WHERE channel = $1`, [channel]);
+  return messagingChannelWithSecretWith(getPool(), channel);
+}
+export async function messagingChannelWithSecretWith(
+  q: Pick<DbClient, "query">, channel: Channel,
+): Promise<{ view: MessagingChannelView; secret: string | null; secrets: ChannelSecrets }> {
+  const { rows } = await q.query<MessagingChannelRow>(`SELECT * FROM messaging_channels WHERE channel = $1`, [channel]);
   const secrets = decodeChannelSecrets(rows[0]?.secret_enc);
   return { view: messagingChannelView(channel, rows[0], secrets), secret: primarySecret(channel, secrets), secrets };
 }
@@ -19447,7 +19482,25 @@ export async function recordMessageDelivery(input: {
   createdBy: string | null;
 }): Promise<number | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  return recordMessageDeliveryWith(getPool(), input);
+}
+export async function recordMessageDeliveryWith(
+  q: Pick<DbClient, "query">,
+  input: {
+    channel: Channel;
+    direction?: "out" | "in";
+    patientId: number | null;
+    counterpart: string;
+    subject?: string | null;
+    body: string;
+    purpose: string;
+    status: "sent" | "failed" | "received";
+    providerMessageId?: string | null;
+    error?: string | null;
+    createdBy: string | null;
+  },
+): Promise<number | null> {
+  const { rows } = await q.query<{ id: number }>(
     `INSERT INTO message_deliveries (channel, direction, patient_id, counterpart, subject, body, purpose, status,
                                      provider_message_id, error, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -19465,7 +19518,13 @@ export async function isVerifiedInboundReply(input: {
   inboundId: number; channel: Channel; patientId: number | null; to: string;
 }): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
+  return isVerifiedInboundReplyWith(getPool(), input);
+}
+export async function isVerifiedInboundReplyWith(
+  q: Pick<DbClient, "query">,
+  input: { inboundId: number; channel: Channel; patientId: number | null; to: string },
+): Promise<boolean> {
+  const { rowCount } = await q.query(
     `SELECT 1 FROM message_deliveries
       WHERE id = $1 AND direction = 'in' AND status = 'received'
         AND channel = $2 AND patient_id IS NOT DISTINCT FROM $3::int
@@ -19485,9 +19544,14 @@ export async function isVerifiedInboundReply(input: {
 /** مستلمٌ مباشر قد يكون مريضًا معروفًا؛ لا يسقط شرط الموافقة لمجرد حذف patientId من الطلب. */
 export async function patientIdsForOutboundRecipient(channel: Channel, to: string): Promise<number[]> {
   await ensureSchema();
+  return patientIdsForOutboundRecipientWith(getPool(), channel, to);
+}
+export async function patientIdsForOutboundRecipientWith(
+  q: Pick<DbClient, "query">, channel: Channel, to: string,
+): Promise<number[]> {
   const digits = to.replace(/\D/g, "");
   if (channel !== "email" && digits.length < 7) return [];
-  const { rows } = await getPool().query<{ id: number }>(
+  const { rows } = await q.query<{ id: number }>(
     `SELECT id FROM patients
       WHERE ($1::text = 'email' AND lower(email) = lower($2::text))
          OR ($1::text <> 'email' AND (
@@ -19541,7 +19605,13 @@ export async function markDeliveryFailedByProvider(channel: Channel, providerMes
 
 export async function listMessageDeliveries(filter: { patientId?: number | null; channel?: Channel | null; limit?: number } = {}): Promise<MessageDelivery[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listMessageDeliveriesWith(getPool(), filter);
+}
+export async function listMessageDeliveriesWith(
+  q: Pick<DbClient, "query">,
+  filter: { patientId?: number | null; channel?: Channel | null; limit?: number } = {},
+): Promise<MessageDelivery[]> {
+  const { rows } = await q.query<{
     id: number; channel: Channel; direction: "out" | "in"; patient_id: number | null; patient_name: string | null;
     counterpart: string; subject: string | null; body: string; purpose: string; status: MessageDelivery["status"];
     error: string | null; created_by: string | null; created_at: Date;
@@ -30040,8 +30110,8 @@ async function replyFitsThread(replyToId: number, input: {
   recipientType: "user" | "patient" | "staff_all";
   recipientUserId: number | null;
   recipientPatientId: number | null;
-}): Promise<boolean> {
-  const { rows } = await getPool().query<{
+}, q: Pick<DbClient, "query"> = getPool()): Promise<boolean> {
+  const { rows } = await q.query<{
     sender_type: string; sender_user_id: number | null; sender_patient_id: number | null;
     recipient_type: string; recipient_user_id: number | null; recipient_patient_id: number | null;
   }>(
@@ -30120,16 +30190,19 @@ async function persistMessageMediaToDiskOrFallback(
  */
 export async function insertMessage(input: SendMessageInput): Promise<MessageView> {
   await ensureSchema();
+  return insertMessageWith(getPool(), input);
+}
+export async function insertMessageWith(q: Pick<DbClient, "query">, input: SendMessageInput): Promise<MessageView> {
   const urgent = input.isUrgent === true && input.senderType === "patient";
   let replyToId: number | null = null;
   if (input.replyToId) {
-    const fits = await replyFitsThread(input.replyToId, input);
+    const fits = await replyFitsThread(input.replyToId, input, q);
     if (!fits) throw new Error("reply-out-of-thread");
     replyToId = input.replyToId;
   }
   const storedVoiceData = await persistMessageMediaToDiskOrFallback(input.voiceData, input.voiceMime);
   const storedFileData = await persistMessageMediaToDiskOrFallback(input.fileData, input.fileMime, input.fileName);
-  const { rows } = await getPool().query<MessageRow>(
+  const { rows } = await q.query<MessageRow>(
     `INSERT INTO messages (
        sender_type, sender_user_id, sender_patient_id,
        recipient_type, recipient_user_id, recipient_patient_id,
@@ -30152,23 +30225,25 @@ export async function insertMessage(input: SendMessageInput): Promise<MessageVie
   const row = rows[0];
   let senderName: string | null = null;
   if (input.senderType === "user" && input.senderUserId) {
-    const nameRes = await getPool().query<{ display_name: string }>(
+    const nameRes = await q.query<{ display_name: string }>(
       `SELECT display_name FROM users WHERE id = $1`, [input.senderUserId],
     );
     senderName = nameRes.rows[0]?.display_name ?? null;
   } else if (input.senderType === "patient" && input.senderPatientId) {
-    const nameRes = await getPool().query<{ full_name: string }>(
+    const nameRes = await q.query<{ full_name: string }>(
       `SELECT full_name FROM patients WHERE id = $1`, [input.senderPatientId],
     );
     senderName = nameRes.rows[0]?.full_name ?? null;
   }
   if (input.senderType === "user" && input.senderUserId) {
-    await getPool().query(
+    await q.query(
       `INSERT INTO message_reads (message_id, user_id) VALUES ($1, $2)
        ON CONFLICT (message_id, user_id) DO NOTHING`,
       [row.id, input.senderUserId],
     );
   }
+  const hydrated = await getMessageViewById(row.id, q);
+  if (hydrated) return hydrated;
   return toMessageView({
     ...row,
     sender_name: senderName,
@@ -30186,7 +30261,12 @@ export async function insertMessage(input: SendMessageInput): Promise<MessageVie
  */
 export async function directMessages(userId: number, otherUserId: number): Promise<MessageView[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<MessageRow>(
+  return directMessagesWith(getPool(), userId, otherUserId);
+}
+export async function directMessagesWith(
+  q: Pick<DbClient, "query">, userId: number, otherUserId: number,
+): Promise<MessageView[]> {
+  const { rows } = await q.query<MessageRow>(
     `SELECT ${MESSAGE_COLUMNS}
      WHERE m.sender_type = 'user' AND m.recipient_type = 'user'
        AND ((m.sender_user_id = $1 AND m.recipient_user_id = $2)
@@ -30207,7 +30287,12 @@ export async function directMessages(userId: number, otherUserId: number): Promi
  */
 export async function patientThreadMessages(patientId: number): Promise<MessageView[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<MessageRow>(
+  return patientThreadMessagesWith(getPool(), patientId);
+}
+export async function patientThreadMessagesWith(
+  q: Pick<DbClient, "query">, patientId: number,
+): Promise<MessageView[]> {
+  const { rows } = await q.query<MessageRow>(
     `SELECT ${MESSAGE_COLUMNS}
      WHERE (m.sender_type = 'patient' AND m.sender_patient_id = $1)
         OR (m.recipient_type = 'patient' AND m.recipient_patient_id = $1)
@@ -30243,6 +30328,13 @@ export async function markConversationRead(userId: number, scope: {
   withUserId?: number; withPatientId?: number; broadcast?: boolean;
 }): Promise<void> {
   await ensureSchema();
+  return markConversationReadWith(getPool(), userId, scope);
+}
+export async function markConversationReadWith(
+  q: Pick<DbClient, "query">,
+  userId: number,
+  scope: { withUserId?: number; withPatientId?: number; broadcast?: boolean },
+): Promise<void> {
   const params: unknown[] = [userId];
   let scopeSql = "";
   if (scope.broadcast) {
@@ -30262,7 +30354,7 @@ export async function markConversationRead(userId: number, scope: {
   } else {
     return;
   }
-  await getPool().query(
+  await q.query(
     `INSERT INTO message_reads (message_id, user_id)
      SELECT m.id, $1 FROM messages m
      WHERE ${scopeSql}
@@ -30279,7 +30371,10 @@ export async function markConversationRead(userId: number, scope: {
  */
 export async function broadcastMessages(): Promise<MessageView[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<MessageRow>(
+  return broadcastMessagesWith(getPool());
+}
+export async function broadcastMessagesWith(q: Pick<DbClient, "query">): Promise<MessageView[]> {
+  const { rows } = await q.query<MessageRow>(
     `SELECT ${MESSAGE_COLUMNS}
      WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
      ORDER BY m.id ASC LIMIT 500`,
@@ -30288,8 +30383,8 @@ export async function broadcastMessages(): Promise<MessageView[]> {
 }
 
 /** رسالة بمعرفها بصيغة العرض — لاستجابات التعديل والحذف. */
-async function getMessageViewById(id: number): Promise<MessageView | null> {
-  const { rows } = await getPool().query<MessageRow>(
+async function getMessageViewById(id: number, q: Pick<DbClient, "query"> = getPool()): Promise<MessageView | null> {
+  const { rows } = await q.query<MessageRow>(
     `SELECT ${MESSAGE_COLUMNS} WHERE m.id = $1`,
     [id],
   );
@@ -30312,14 +30407,19 @@ export async function editStaffMessage(
   messageId: number, userId: number, body: string,
 ): Promise<MessageMutationResult> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
+  return editStaffMessageWith(getPool(), messageId, userId, body);
+}
+export async function editStaffMessageWith(
+  q: Pick<DbClient, "query">, messageId: number, userId: number, body: string,
+): Promise<MessageMutationResult> {
+  const { rowCount } = await q.query(
     `UPDATE messages SET body = $3, edited_at = NOW()
      WHERE id = $1 AND sender_type = 'user' AND sender_user_id = $2
        AND kind = 'text' AND deleted_at IS NULL`,
     [messageId, userId, body],
   );
   if (!rowCount) return { ok: false, reason: "not-allowed" };
-  const view = await getMessageViewById(messageId);
+  const view = await getMessageViewById(messageId, q);
   if (!view) return { ok: false, reason: "not-found" };
   return { ok: true, message: view };
 }
@@ -30329,14 +30429,19 @@ export async function deleteStaffMessage(
   messageId: number, userId: number,
 ): Promise<MessageMutationResult> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
+  return deleteStaffMessageWith(getPool(), messageId, userId);
+}
+export async function deleteStaffMessageWith(
+  q: Pick<DbClient, "query">, messageId: number, userId: number,
+): Promise<MessageMutationResult> {
+  const { rowCount } = await q.query(
     `UPDATE messages SET deleted_at = NOW()
      WHERE id = $1 AND sender_type = 'user' AND sender_user_id = $2
        AND deleted_at IS NULL`,
     [messageId, userId],
   );
   if (!rowCount) return { ok: false, reason: "not-allowed" };
-  const view = await getMessageViewById(messageId);
+  const view = await getMessageViewById(messageId, q);
   if (!view) return { ok: false, reason: "not-found" };
   return { ok: true, message: view };
 }
@@ -30441,7 +30546,15 @@ export async function staffConversationList(userId: number, scopedDoctorPartyId?
   broadcast: BroadcastSummary;
 }> {
   await ensureSchema();
-  const pool = getPool();
+  return staffConversationListWith(getPool(), userId, scopedDoctorPartyId);
+}
+export async function staffConversationListWith(
+  pool: Pick<DbClient, "query">, userId: number, scopedDoctorPartyId?: number | null,
+): Promise<{
+  staff: StaffConversationItem[];
+  patients: PatientConversationItem[];
+  broadcast: BroadcastSummary;
+}> {
   const hideAllPatients = scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0);
   const hasDocScope = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
   const docPatientFilterOnP = hasDocScope
@@ -30451,109 +30564,107 @@ export async function staffConversationList(userId: number, scopedDoctorPartyId?
     ? `AND EXISTS (SELECT 1 FROM patients WHERE patients.id = m.sender_patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")})`
     : "";
 
-  const [usersRes, dmLastRes, dmUnreadRes, patientLastRes, patientUnreadRes, patientUrgentRes, broadcastRes, broadcastUnreadRes] = await Promise.all([
-    pool.query<{ id: number; username: string; display_name: string; role: string }>(
-      `SELECT id, username, display_name, role FROM users
-        WHERE is_active = TRUE AND id <> $1 ORDER BY display_name`,
-      [userId],
-    ),
-    pool.query<{
-      other_id: number; id: number; kind: "text" | "voice" | "file"; body: string | null;
-      voice_ms: number | null; file_name: string | null; created_at: Date; sender_user_id: number | null;
-      deleted_at: Date | null; is_urgent: boolean;
-    }>(
-      `SELECT DISTINCT ON (other_id) other_id, id, kind, body, voice_ms, file_name, created_at, sender_user_id,
-         deleted_at, is_urgent
-       FROM (
-         SELECT id, kind, body, voice_ms, file_name, created_at, sender_user_id, recipient_user_id,
-           deleted_at, is_urgent,
-           CASE WHEN sender_user_id = $1 THEN recipient_user_id ELSE sender_user_id END AS other_id
-         FROM messages
-         WHERE sender_type = 'user' AND recipient_type = 'user'
-           AND (sender_user_id = $1 OR recipient_user_id = $1)
-       ) convo
-       ORDER BY other_id, id DESC`,
-      [userId],
-    ),
-    pool.query<{ sender_user_id: number; unread: number }>(
-      `SELECT m.sender_user_id, count(*)::int AS unread
-       FROM messages m
-       WHERE m.recipient_type = 'user' AND m.recipient_user_id = $1 AND m.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
-       GROUP BY m.sender_user_id`,
-      [userId],
-    ),
-    hideAllPatients
-      ? Promise.resolve({ rows: [] as Array<{
-          patient_id: number; patient_name: string; patient_number: string; phone: string | null;
-          id: number; kind: "text" | "voice" | "file"; body: string | null;
-          voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
-          deleted_at: Date | null; is_urgent: boolean;
-        }> })
-      : pool.query<{
-          patient_id: number; patient_name: string; patient_number: string; phone: string | null;
-          id: number; kind: "text" | "voice" | "file"; body: string | null;
-          voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
-          deleted_at: Date | null; is_urgent: boolean;
-        }>(
-          `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
-             id, kind, body, voice_ms, file_name, created_at, sender_type, deleted_at, is_urgent
-           FROM (
-             SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at, m.sender_type,
-               m.deleted_at, m.is_urgent,
-               p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
-             FROM messages m
-             JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
-                            OR (m.recipient_type = 'patient' AND m.recipient_patient_id = p.id)
-             ${docPatientFilterOnP}
-           ) thread
-           ORDER BY patient_id, id DESC`,
-          hasDocScope ? [scopedDoctorPartyId] : [],
-        ),
-    hideAllPatients
-      ? Promise.resolve({ rows: [] as Array<{ patient_id: number; unread: number }> })
-      : pool.query<{ patient_id: number; unread: number }>(
-          `SELECT m.sender_patient_id AS patient_id, count(*)::int AS unread
+  const usersRes = await pool.query<{ id: number; username: string; display_name: string; role: string }>(
+    `SELECT id, username, display_name, role FROM users
+      WHERE is_active = TRUE AND id <> $1 ORDER BY display_name`,
+    [userId],
+  );
+  const dmLastRes = await pool.query<{
+    other_id: number; id: number; kind: "text" | "voice" | "file"; body: string | null;
+    voice_ms: number | null; file_name: string | null; created_at: Date; sender_user_id: number | null;
+    deleted_at: Date | null; is_urgent: boolean;
+  }>(
+    `SELECT DISTINCT ON (other_id) other_id, id, kind, body, voice_ms, file_name, created_at, sender_user_id,
+       deleted_at, is_urgent
+     FROM (
+       SELECT id, kind, body, voice_ms, file_name, created_at, sender_user_id, recipient_user_id,
+         deleted_at, is_urgent,
+         CASE WHEN sender_user_id = $1 THEN recipient_user_id ELSE sender_user_id END AS other_id
+       FROM messages
+       WHERE sender_type = 'user' AND recipient_type = 'user'
+         AND (sender_user_id = $1 OR recipient_user_id = $1)
+     ) convo
+     ORDER BY other_id, id DESC`,
+    [userId],
+  );
+  const dmUnreadRes = await pool.query<{ sender_user_id: number; unread: number }>(
+    `SELECT m.sender_user_id, count(*)::int AS unread
+     FROM messages m
+     WHERE m.recipient_type = 'user' AND m.recipient_user_id = $1 AND m.deleted_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+     GROUP BY m.sender_user_id`,
+    [userId],
+  );
+  const patientLastRes = hideAllPatients
+    ? { rows: [] as Array<{
+        patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+        id: number; kind: "text" | "voice" | "file"; body: string | null;
+        voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
+        deleted_at: Date | null; is_urgent: boolean;
+      }> }
+    : await pool.query<{
+        patient_id: number; patient_name: string; patient_number: string; phone: string | null;
+        id: number; kind: "text" | "voice" | "file"; body: string | null;
+        voice_ms: number | null; file_name: string | null; created_at: Date; sender_type: "user" | "patient";
+        deleted_at: Date | null; is_urgent: boolean;
+      }>(
+        `SELECT DISTINCT ON (patient_id) patient_id, patient_name, patient_number, phone,
+           id, kind, body, voice_ms, file_name, created_at, sender_type, deleted_at, is_urgent
+         FROM (
+           SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at, m.sender_type,
+             m.deleted_at, m.is_urgent,
+             p.id AS patient_id, p.full_name AS patient_name, p.patient_number AS patient_number, p.phone AS phone
            FROM messages m
-           WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient' AND m.deleted_at IS NULL
-             ${docPatientFilterOnSender}
-             AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
-           GROUP BY m.sender_patient_id`,
-          hasDocScope ? [userId, scopedDoctorPartyId] : [userId],
-        ),
-    hideAllPatients
-      ? Promise.resolve({ rows: [] as Array<{ patient_id: number; urgent: number }> })
-      : pool.query<{ patient_id: number; urgent: number }>(
-          `SELECT m.sender_patient_id AS patient_id, count(*)::int AS urgent
-           FROM messages m
-           WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
-             AND m.is_urgent AND m.deleted_at IS NULL
-             ${docPatientFilterOnSender}
-             AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
-           GROUP BY m.sender_patient_id`,
-          hasDocScope ? [userId, scopedDoctorPartyId] : [userId],
-        ),
-    pool.query<{
-      id: number; kind: "text" | "voice" | "file"; body: string | null;
-      voice_ms: number | null; file_name: string | null; created_at: Date;
-      sender_user_id: number | null; sender_name: string | null;
-      deleted_at: Date | null; is_urgent: boolean;
-    }>(
-      `SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at,
-         m.sender_user_id, u.display_name AS sender_name, m.deleted_at, m.is_urgent
-       FROM messages m
-       LEFT JOIN users u ON u.id = m.sender_user_id
-       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
-       ORDER BY m.id DESC LIMIT 1`,
-    ),
-    pool.query<{ unread: number }>(
-      `SELECT count(*)::int AS unread FROM messages m
-       WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
-         AND m.sender_user_id <> $1 AND m.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)`,
-      [userId],
-    ),
-  ]);
+           JOIN patients p ON (m.sender_type = 'patient' AND m.sender_patient_id = p.id)
+                          OR (m.recipient_type = 'patient' AND m.recipient_patient_id = p.id)
+           ${docPatientFilterOnP}
+         ) thread
+         ORDER BY patient_id, id DESC`,
+        hasDocScope ? [scopedDoctorPartyId] : [],
+      );
+  const patientUnreadRes = hideAllPatients
+    ? { rows: [] as Array<{ patient_id: number; unread: number }> }
+    : await pool.query<{ patient_id: number; unread: number }>(
+        `SELECT m.sender_patient_id AS patient_id, count(*)::int AS unread
+         FROM messages m
+         WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient' AND m.deleted_at IS NULL
+           ${docPatientFilterOnSender}
+           AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+         GROUP BY m.sender_patient_id`,
+        hasDocScope ? [userId, scopedDoctorPartyId] : [userId],
+      );
+  const patientUrgentRes = hideAllPatients
+    ? { rows: [] as Array<{ patient_id: number; urgent: number }> }
+    : await pool.query<{ patient_id: number; urgent: number }>(
+        `SELECT m.sender_patient_id AS patient_id, count(*)::int AS urgent
+         FROM messages m
+         WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
+           AND m.is_urgent AND m.deleted_at IS NULL
+           ${docPatientFilterOnSender}
+           AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)
+         GROUP BY m.sender_patient_id`,
+        hasDocScope ? [userId, scopedDoctorPartyId] : [userId],
+      );
+  const broadcastRes = await pool.query<{
+    id: number; kind: "text" | "voice" | "file"; body: string | null;
+    voice_ms: number | null; file_name: string | null; created_at: Date;
+    sender_user_id: number | null; sender_name: string | null;
+    deleted_at: Date | null; is_urgent: boolean;
+  }>(
+    `SELECT m.id, m.kind, m.body, m.voice_ms, m.file_name, m.created_at,
+       m.sender_user_id, u.display_name AS sender_name, m.deleted_at, m.is_urgent
+     FROM messages m
+     LEFT JOIN users u ON u.id = m.sender_user_id
+     WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
+     ORDER BY m.id DESC LIMIT 1`,
+  );
+  const broadcastUnreadRes = await pool.query<{ unread: number }>(
+    `SELECT count(*)::int AS unread FROM messages m
+     WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'user'
+       AND m.sender_user_id <> $1 AND m.deleted_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM message_reads r WHERE r.message_id = m.id AND r.user_id = $1)`,
+    [userId],
+  );
 
   const lastByOther = new Map(dmLastRes.rows.map((row) => [row.other_id, row]));
   const unreadBySender = new Map(dmUnreadRes.rows.map((row) => [row.sender_user_id, row.unread]));
@@ -30625,6 +30736,11 @@ export async function staffConversationList(userId: number, scopedDoctorPartyId?
 /** إجمالي غير المقروء عند مستخدم طاقم — لشارة القشرة. المحذوف لا يُعدّ. */
 export async function unreadMessageCount(userId: number, scopedDoctorPartyId?: number | null): Promise<number> {
   await ensureSchema();
+  return unreadMessageCountWith(getPool(), userId, scopedDoctorPartyId);
+}
+export async function unreadMessageCountWith(
+  q: Pick<DbClient, "query">, userId: number, scopedDoctorPartyId?: number | null,
+): Promise<number> {
   const hideAllPatients = scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0);
   const hasDocScope = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
   const staffAllCondition = hideAllPatients
@@ -30632,7 +30748,7 @@ export async function unreadMessageCount(userId: number, scopedDoctorPartyId?: n
     : hasDocScope
       ? `(m.recipient_type = 'staff_all' AND ((m.sender_type = 'user' AND m.sender_user_id <> $1) OR (m.sender_type = 'patient' AND EXISTS (SELECT 1 FROM patients WHERE patients.id = m.sender_patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")}))))`
       : `(m.recipient_type = 'staff_all' AND (m.sender_type <> 'user' OR m.sender_user_id <> $1))`;
-  const { rows } = await getPool().query<{ c: number }>(
+  const { rows } = await q.query<{ c: number }>(
     `SELECT count(*)::int AS c FROM messages m
      WHERE (
              (m.recipient_type = 'user' AND m.recipient_user_id = $1 AND m.sender_type = 'user')
@@ -30655,11 +30771,16 @@ export async function unreadMessageCount(userId: number, scopedDoctorPartyId?: n
  */
 export async function urgentUnreadMessageCount(userId: number, scopedDoctorPartyId?: number | null): Promise<number> {
   await ensureSchema();
+  return urgentUnreadMessageCountWith(getPool(), userId, scopedDoctorPartyId);
+}
+export async function urgentUnreadMessageCountWith(
+  q: Pick<DbClient, "query">, userId: number, scopedDoctorPartyId?: number | null,
+): Promise<number> {
   if (scopedDoctorPartyId !== undefined && (scopedDoctorPartyId === null || scopedDoctorPartyId <= 0)) {
     return 0;
   }
   const hasDocScope = typeof scopedDoctorPartyId === "number" && scopedDoctorPartyId > 0;
-  const { rows } = await getPool().query<{ c: number }>(
+  const { rows } = await q.query<{ c: number }>(
     `SELECT count(*)::int AS c FROM messages m
      WHERE m.recipient_type = 'staff_all' AND m.sender_type = 'patient'
        AND m.is_urgent AND m.deleted_at IS NULL
@@ -30721,7 +30842,12 @@ export async function voiceMessagePayload(id: number): Promise<{
 /** عضو طاقم بمعرفه — لتحقّق جهة الرسالة قبل الإدراج. */
 export async function getStaffUserById(id: number): Promise<StaffAccount | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return getStaffUserByIdWith(getPool(), id);
+}
+export async function getStaffUserByIdWith(
+  q: Pick<DbClient, "query">, id: number,
+): Promise<StaffAccount | null> {
+  const { rows } = await q.query<{
     id: number; username: string; display_name: string;
     role: string; is_active: boolean; created_at: Date; party_id: number | null;
   }>(

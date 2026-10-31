@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  messagesDeleteCanonicalResponse,
+  messagesGetCanonicalResponse,
+  messagesPatchCanonicalResponse,
+  messagesPostCanonicalResponse,
+} from "@/lib/canonical-messages-tasks";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import {
   broadcastMessages,
   deleteStaffMessage,
@@ -28,6 +36,8 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 
 /**
  * المراسلة الداخلية للطاقم — قراءة المحادثات وإرسال الرسائل النصية والصوتية.
@@ -37,6 +47,10 @@ const denied = () =>
  * يُجلب عند التشغيل من مساره الخاص بعد تحقق الوصول.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return messagesGetCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   const url = new URL(request.url);
@@ -106,6 +120,10 @@ export async function GET(request: Request) {
  * والردّ يقتبس رسالةً من الخيط نفسه — الاقتباس من محادثة أخرى مرفوض هنا.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return messagesPostCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
 
@@ -186,6 +204,10 @@ export async function POST(request: Request) {
  * زميل أو رسالة صوتية تفشل بnot-allowed لا برسالة غامضة.
  */
 export async function PATCH(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return messagesPatchCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
 
@@ -219,6 +241,10 @@ export async function PATCH(request: Request) {
  * الخيط أن كلامًا قيل فيه، ويبقى اقتباس الردود عليها شاهدًا على مكانها.
  */
 export async function DELETE(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return messagesDeleteCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
 

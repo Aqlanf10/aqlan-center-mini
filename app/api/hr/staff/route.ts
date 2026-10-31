@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  hrStaffGetCanonicalResponse,
+  hrStaffPostCanonicalResponse,
+} from "@/lib/canonical-hr";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createStaff, isHrContractKind, isHrDepartment, isHrWorkStatus, listStaff, validatePayTermsInput, type CreateStaffInput } from "@/lib/hr";
@@ -10,11 +16,17 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 const forbidden = () =>
   NextResponse.json({ message: "إدارة ملفات الطاقم وشروط الأجر للمدير وحده." }, { status: 403 });
 
 /** قائمة الطاقم — للمدير وحده: بها شروط الأجر فلا تخرج عنه. */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrStaffGetCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();
@@ -37,6 +49,10 @@ export async function GET(request: Request) {
 
 /** إنشاء ملف موظف — بلا حساب دخولٍ تلقائي ولا جهة طبيب: الربط اختياري لاحقًا. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return hrStaffPostCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageStaff(session.role)) return forbidden();

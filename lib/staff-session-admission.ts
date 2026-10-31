@@ -107,3 +107,48 @@ export async function admitCanonicalStaffSession(handle: VerifiedDurableSession)
  if (process.env.USE_LOCAL_DB === "true" || usesSharedLocalDatabaseConnection()) return null;
  return admitCanonicalStaffSessionIn(getPool(), "public", handle);
 }
+
+/** Same-transaction self-scoped execution: proves the caller's live canonical session
+ * under the shared lifecycle fence, executes `work(client, view)` on the same client/XID,
+ * and re-verifies session expiry and XID before commit. Used by `self` routes (`GET /api/hr/me`,
+ * own password change, own print log, own access projection) without capability grants. */
+export async function withCanonicalSelfSessionIn<T>(
+ pool: DbPool,
+ schema: string,
+ handle: VerifiedDurableSession,
+ work: (client: DbClient, view: CanonicalStaffView) => Promise<T>,
+): Promise<{ readonly ok: true; readonly view: CanonicalStaffView; readonly value: T } | { readonly ok: false }> {
+ const s = staffIdentitySchemaName(schema);
+ try {
+  return await withIsolation(pool, "READ COMMITTED", async client => {
+   const xid = await transactionId(client);
+   await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [staffLifecycleLockKey(s)]);
+   const proof = await loadLockedSessionAuthority(client, handle, s);
+   const claims = revalidateVerifiedDurableSession(handle);
+   if (!claims || await transactionId(client) !== xid) throw new Error("STAFF_OPERATION_SESSION_EXPIRED");
+   const view: CanonicalStaffView = Object.freeze({
+    userId: proof.user.id, username: proof.user.username, displayName: proof.user.displayName || proof.user.username,
+    roleLabel: proof.user.role, isOwner: proof.access.isOwner,
+    capabilities: Object.freeze(STAFF_CAPABILITIES.filter(capability => hasStaffCapability(proof.access, capability))),
+    patientScope: scopeOf(patientCapabilityConstraint(proof.access)), appointmentScope: scopeOf(appointmentCapabilityConstraint(proof.access)),
+    clinicianPartyId: proof.provider?.partyId ?? null, expiresAt: claims.expiresAt,
+   });
+   const value = await work(client, view);
+   if (!revalidateVerifiedDurableSession(handle) || await transactionId(client) !== xid) {
+    throw new Error("STAFF_OPERATION_SESSION_EXPIRED");
+   }
+   return Object.freeze({ ok: true as const, view, value });
+  });
+ } catch (error) {
+  if (error instanceof Error && /^STAFF_(OPERATION|RUNTIME)_[A-Z_]+$/.test(error.message)) return Object.freeze({ ok: false as const });
+  throw error;
+ }
+}
+
+export async function withCanonicalSelfSession<T>(
+ handle: VerifiedDurableSession,
+ work: (client: DbClient, view: CanonicalStaffView) => Promise<T>,
+): Promise<{ readonly ok: true; readonly view: CanonicalStaffView; readonly value: T } | { readonly ok: false }> {
+ if (process.env.USE_LOCAL_DB === "true" || usesSharedLocalDatabaseConnection()) return Object.freeze({ ok: false as const });
+ return withCanonicalSelfSessionIn(getPool(), "public", handle, work);
+}

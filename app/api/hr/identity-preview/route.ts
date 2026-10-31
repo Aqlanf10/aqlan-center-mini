@@ -1,4 +1,10 @@
 import { NextResponse } from 'next/server';
+import { NO_STORE } from '@/lib/canonical-patient-http';
+import {
+  hrIdentityPreviewGetCanonicalResponse,
+  hrIdentityPreviewPostCanonicalResponse,
+} from '@/lib/canonical-hr';
+import { selectRequestStaffEnvelope } from '@/lib/staff-session-admission';
 import { getPool } from '@/lib/db';
 import { readSessionPayload } from '@/lib/session';
 import { readHrIdentityPreview } from '@/lib/hr-identity-read';
@@ -22,5 +28,19 @@ async function preview(request?: Request) {
       { status: error instanceof IdentityPreviewError ? error.status : 503, headers });
   }
 }
-export async function GET() { return preview(); }
-export async function POST(request: Request) { return preview(request); }
+export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === 'denied') {
+    return NextResponse.json({ message: 'انتهت الجلسة. سجّل الدخول من جديد.' }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === 'canonical') return hrIdentityPreviewGetCanonicalResponse(selected.handle);
+  return preview();
+}
+export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === 'denied') {
+    return NextResponse.json({ message: 'انتهت الجلسة. سجّل الدخول من جديد.' }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === 'canonical') return hrIdentityPreviewPostCanonicalResponse(request, selected.handle);
+  return preview(request);
+}

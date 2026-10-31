@@ -1,4 +1,10 @@
 import { CLINIC_TIME_ZONE } from "@/lib/db";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  taskDetailGetCanonicalResponse,
+  taskDetailPatchCanonicalResponse,
+} from "@/lib/canonical-messages-tasks";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { parseTaskDeadline } from "@/lib/hr-task-time";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -10,9 +16,18 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 
 /** تفاصيل المهمة: غير المرئي 404 لا 403 — لا إفشاء بوجود ملفٍ خاص. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return taskDetailGetCanonicalResponse(rawId, selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canUseTasks(session.role)) {
@@ -34,6 +49,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 /** تحديث مهمة: الحالة للمسؤول والإدارة، والبيانات للإدارة والصاحب، والتحويل فعلٌ صريح. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return taskDetailPatchCanonicalResponse(request, rawId, selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canUseTasks(session.role)) {

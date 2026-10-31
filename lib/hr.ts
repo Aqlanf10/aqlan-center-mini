@@ -90,12 +90,15 @@ function staffRowMapper(row: Record<string, unknown>): HrStaffRow {
   return row as unknown as HrStaffRow;
 }
 
-export async function listStaff(options: {
-  department?: HrDepartment | null;
-  status?: HrWorkStatus | null;
-  search?: string | null;
-  includePayTerms: boolean;
-}): Promise<HrStaffView[]> {
+export async function listStaffWith(
+  client: Pick<DbClient, "query">,
+  options: {
+    department?: HrDepartment | null;
+    status?: HrWorkStatus | null;
+    search?: string | null;
+    includePayTerms: boolean;
+  },
+): Promise<HrStaffView[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
   if (options.department) {
@@ -107,31 +110,42 @@ export async function listStaff(options: {
     conditions.push(`(full_name ILIKE $${params.length} OR job_title ILIKE $${params.length})`);
   }
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  return withIsolation(getPool(), 'REPEATABLE READ', async client => {
-    const result = await client.query(`SELECT * FROM hr_staff ${where} ORDER BY full_name`, params);
-    const effective = await readOperationalEmployment(client, result.rows.map(row => Number(row.id)));
-    const views = result.rows.map(row => ({ ...staffToView(staffRowMapper(row), options.includePayTerms), operationalEmployment: effective.forStaff(staffRowMapper(row)) }));
-    const pay = options.includePayTerms ? await readCurrentStaffPay(client, views, effective.day) : null;
-    return views.map(staff => ({ ...staff, ...(pay ? { currentPay: pay.get(staff.id) } : {}) }))
-      .filter(staff => !options.status || staff.operationalEmployment.status === options.status);
-  });
+  const result = await client.query(`SELECT * FROM hr_staff ${where} ORDER BY full_name`, params);
+  const effective = await readOperationalEmployment(client, result.rows.map(row => Number(row.id)));
+  const views = result.rows.map(row => ({ ...staffToView(staffRowMapper(row), options.includePayTerms), operationalEmployment: effective.forStaff(staffRowMapper(row)) }));
+  const pay = options.includePayTerms ? await readCurrentStaffPay(client as DbClient, views, effective.day) : null;
+  return views.map(staff => ({ ...staff, ...(pay ? { currentPay: pay.get(staff.id) } : {}) }))
+    .filter(staff => !options.status || staff.operationalEmployment.status === options.status);
+}
+
+export async function listStaff(options: {
+  department?: HrDepartment | null;
+  status?: HrWorkStatus | null;
+  search?: string | null;
+  includePayTerms: boolean;
+}): Promise<HrStaffView[]> {
+  return withIsolation(getPool(), 'REPEATABLE READ', async client => listStaffWith(client, options));
 }
 
 /**
  * دليل الإسناد الآمن: اسمٌ ومسمًّى وقسمٌ وحالة عمل وحسب — لا مبالغ ولا عملات
  * ولا معرّفات مستخدمين: الرواتب لا تظهر بقائمة اختيار الموظفين مهما كان السائل.
  */
+export async function listStaffDirectoryWith(
+  client: Pick<DbClient, "query">,
+): Promise<{ id: number; fullName: string; jobTitle: string; department: HrDepartment; hasAccount: boolean }[]> {
+  const result = await client.query(`SELECT id, full_name, job_title, department, work_status, (user_id IS NOT NULL) AS has_account FROM hr_staff ORDER BY full_name`);
+  const effective = await readOperationalEmployment(client, result.rows.map(row => Number(row.id)));
+  return result.rows.filter(row => effective.forStaff(staffRowMapper(row)).status === 'active').map(row => ({
+    id: Number(row.id), fullName: String(row.full_name), jobTitle: String(row.job_title ?? ''),
+    department: String(row.department) as HrDepartment, hasAccount: Boolean(row.has_account),
+  }));
+}
+
 export async function listStaffDirectory(): Promise<
   { id: number; fullName: string; jobTitle: string; department: HrDepartment; hasAccount: boolean }[]
 > {
-  return withIsolation(getPool(), 'REPEATABLE READ', async client => {
-    const result = await client.query(`SELECT id, full_name, job_title, department, work_status, (user_id IS NOT NULL) AS has_account FROM hr_staff ORDER BY full_name`);
-    const effective = await readOperationalEmployment(client, result.rows.map(row => Number(row.id)));
-    return result.rows.filter(row => effective.forStaff(staffRowMapper(row)).status === 'active').map(row => ({
-      id: Number(row.id), fullName: String(row.full_name), jobTitle: String(row.job_title ?? ''),
-      department: String(row.department) as HrDepartment, hasAccount: Boolean(row.has_account),
-    }));
-  });
+  return withIsolation(getPool(), 'REPEATABLE READ', async client => listStaffDirectoryWith(client));
 }
 
 export interface HrStaffChangeView {
@@ -146,12 +160,14 @@ export interface HrStaffChangeView {
   createdAt: string;
 }
 
-export async function getStaffDetail(id: number): Promise<{
+export async function getStaffDetailWith(
+  client: Pick<DbClient, "query">,
+  id: number,
+): Promise<{
   staff: HrStaffView;
   changes: HrStaffChangeView[];
   linkedUser: { id: number; username: string; displayName: string; role: string; isActive: boolean } | null;
 } | null> {
-  return withIsolation(getPool(), 'REPEATABLE READ', async client => {
   const result = await client.query(`SELECT * FROM hr_staff WHERE id = $1`, [id]);
   if (result.rowCount === 0) return null;
   const changes = await client.query(
@@ -177,7 +193,7 @@ export async function getStaffDetail(id: number): Promise<{
   const effective = await readOperationalEmployment(client, [id]);
   const view = { ...staffToView(staff, true), operationalEmployment: effective.forStaff(staff) };
   return {
-    staff: { ...view, currentPay: (await readCurrentStaffPay(client, [view], effective.day)).get(id) },
+    staff: { ...view, currentPay: (await readCurrentStaffPay(client as DbClient, [view], effective.day)).get(id) },
     changes: changes.rows.map((row) => ({
       id: Number(row.id),
       actor: String(row.actor),
@@ -191,7 +207,14 @@ export async function getStaffDetail(id: number): Promise<{
     })),
     linkedUser,
   };
-  });
+}
+
+export async function getStaffDetail(id: number): Promise<{
+  staff: HrStaffView;
+  changes: HrStaffChangeView[];
+  linkedUser: { id: number; username: string; displayName: string; role: string; isActive: boolean } | null;
+} | null> {
+  return withIsolation(getPool(), 'REPEATABLE READ', async client => getStaffDetailWith(client, id));
 }
 
 /* ── ملفات الطاقم — الكتابة (كل فعلٍ يسجَّل مرتين: سجل الملف + التدقيق العام) ── */
@@ -210,37 +233,42 @@ export interface CreateStaffInput {
   note: string | null;
 }
 
-export async function createStaff(input: CreateStaffInput, session: SessionPayload): Promise<HrStaffView> {
-  const result = await withTransaction(getPool(), async (client) => {
-    const inserted = await client.query(
-      `INSERT INTO hr_staff
-         (full_name, job_title, department, work_status, hire_date, end_date, contract_kind,
-          salary_amount_minor, salary_currency, salary_period, salary_effective_on, phone, note, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-       RETURNING *`,
-      [input.fullName, input.jobTitle, input.department, input.workStatus, input.hireDate, input.endDate,
-       input.contractKind, input.payTerms?.amountMinor ?? null, input.payTerms?.currency ?? null,
-       input.payTerms?.period ?? null, input.payTerms?.effectiveOn ?? null,
-       input.phone, input.note, session.username],
-    );
-    const row = staffRowMapper(inserted.rows[0]);
-    await client.query(
-      `INSERT INTO hr_staff_changes (staff_id, actor, actor_role, action, field, new_value)
-       VALUES ($1, $2, $3, 'create', NULL, $4)`,
-      [row.id, session.username, session.role, input.fullName],
-    );
-    await insertAuditRow(client, {
-      action: "hr.staff.create",
-      entity: "hr_staff",
-      entityId: String(row.id),
-      entityLabel: `إنشاء ملف الموظف «${input.fullName}»`,
-      details: { department: input.department, contractKind: input.contractKind, workStatus: input.workStatus },
-      actor: session.username,
-      actorRole: session.role,
-    });
-    return row;
+export async function createStaffInTx(
+  client: DbClient,
+  input: CreateStaffInput,
+  actor: { username: string; role: string },
+): Promise<HrStaffView> {
+  const inserted = await client.query(
+    `INSERT INTO hr_staff
+       (full_name, job_title, department, work_status, hire_date, end_date, contract_kind,
+        salary_amount_minor, salary_currency, salary_period, salary_effective_on, phone, note, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     RETURNING *`,
+    [input.fullName, input.jobTitle, input.department, input.workStatus, input.hireDate, input.endDate,
+     input.contractKind, input.payTerms?.amountMinor ?? null, input.payTerms?.currency ?? null,
+     input.payTerms?.period ?? null, input.payTerms?.effectiveOn ?? null,
+     input.phone, input.note, actor.username],
+  );
+  const row = staffRowMapper(inserted.rows[0]);
+  await client.query(
+    `INSERT INTO hr_staff_changes (staff_id, actor, actor_role, action, field, new_value)
+     VALUES ($1, $2, $3, 'create', NULL, $4)`,
+    [row.id, actor.username, actor.role, input.fullName],
+  );
+  await insertAuditRow(client, {
+    action: "hr.staff.create",
+    entity: "hr_staff",
+    entityId: String(row.id),
+    entityLabel: `إنشاء ملف الموظف «${input.fullName}»`,
+    details: { department: input.department, contractKind: input.contractKind, workStatus: input.workStatus },
+    actor: actor.username,
+    actorRole: actor.role,
   });
-  return staffToView(result, true);
+  return staffToView(row, true);
+}
+
+export async function createStaff(input: CreateStaffInput, session: SessionPayload): Promise<HrStaffView> {
+  return withTransaction(getPool(), async (client) => createStaffInTx(client, input, session));
 }
 
 
@@ -270,267 +298,282 @@ export interface UpdateStaffPatch {
  * فوق نسخة أحدث (409).
  */
 
-export async function updateStaff(id: number, patch: UpdateStaffPatch, session: SessionPayload): Promise<StaffUpdateResult> {
-  /* التدقيق يُكتب **بعد** التزام المعاملة لا داخلها: سطر التدقيق يحتاج اتصالاً من
-     الـpool نفسه، وكتابته داخل معاملةٍ تحتفظ بقفل صفٍّ تنتظر عليه معاملاتٌ أخرى
-     يفتح جمودًا اتصاليًّا (كل اتصالٍ ينتظر قفلًا يحمله اتصالٌ ينتظر اتصالًا).
-     القاعدة: المعاملة تُعيد ما سيُدقَّق، والتدقيق يُطلق بعد الالتزام — فلا يُكتب
-     أبدًا لعمليةٍ فشلت، ولا يمسك اتصالًا وهو ينتظر. */
-  const outcome = await withTransaction(getPool(), async (client): Promise<
-    { missing: true }
-    | StaffUpdateResult
-    | { outcome: "none" | "updated"; row: HrStaffRow; changes: { field: string; oldValue: string; newValue: string }[] }
-  > => {
-    const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
-    if (current.rowCount === 0) return { missing: true as const };
-    const row = staffRowMapper(current.rows[0]);
-    if ((row.work_status === 'unconfirmed' || row.contract_kind === 'unspecified')
-      && ['workStatus','hireDate','endDate','contractKind','payTerms'].some(key => key in patch)) {
-      return { ok:false,error:'هوية غير موثقة تشغيليًا؛ وثّق تاريخ العمل والعقد من مساراتهما المعتمدة أولًا.',status:409 };
-    }
-    const changesHistoricalFields = (patch.workStatus !== undefined && patch.workStatus !== row.work_status)
-      || (patch.hireDate !== undefined && patch.hireDate !== row.hire_date)
-      || (patch.endDate !== undefined && patch.endDate !== row.end_date);
-    if (changesHistoricalFields && await hasDocumentedEmploymentHistory(client, id)) {
-      return { ok: false as const, status: 409, error: "للموظف تاريخ موثق؛ راجع سجل تاريخ العمل. تعديل الحالة والتواريخ من الملف القديم غير متاح، والحالة التشغيلية تُقرأ من السجل المؤرخ حسب يوم العيادة." };
-    }
+export async function updateStaffInTx(
+  client: DbClient,
+  id: number,
+  patch: UpdateStaffPatch,
+  actor: { username: string; role: string },
+): Promise<StaffUpdateResult> {
+  const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
+  if (current.rowCount === 0) return { ok: false, error: "ملف الموظف غير موجود.", status: 404 };
+  const row = staffRowMapper(current.rows[0]);
+  if ((row.work_status === 'unconfirmed' || row.contract_kind === 'unspecified')
+    && ['workStatus','hireDate','endDate','contractKind','payTerms'].some(key => key in patch)) {
+    return { ok:false,error:'هوية غير موثقة تشغيليًا؛ وثّق تاريخ العمل والعقد من مساراتهما المعتمدة أولًا.',status:409 };
+  }
+  const changesHistoricalFields = (patch.workStatus !== undefined && patch.workStatus !== row.work_status)
+    || (patch.hireDate !== undefined && patch.hireDate !== row.hire_date)
+    || (patch.endDate !== undefined && patch.endDate !== row.end_date);
+  if (changesHistoricalFields && await hasDocumentedEmploymentHistory(client, id)) {
+    return { ok: false as const, status: 409, error: "للموظف تاريخ موثق؛ راجع سجل تاريخ العمل. تعديل الحالة والتواريخ من الملف القديم غير متاح، والحالة التشغيلية تُقرأ من السجل المؤرخ حسب يوم العيادة." };
+  }
 
-    if (patch.expectedUpdatedAt !== undefined) {
-      const expected = new Date(patch.expectedUpdatedAt).getTime();
-      if (!Number.isFinite(expected) || expected !== new Date(row.updated_at).getTime()) {
-        return { ok: false as const, error: "غُيِّر ملف الموظف من جلسة أخرى بعد فتحك له — أعد التحميل ثم أعد المحاولة.", status: 409 };
+  if (patch.expectedUpdatedAt !== undefined) {
+    const expected = new Date(patch.expectedUpdatedAt).getTime();
+    if (!Number.isFinite(expected) || expected !== new Date(row.updated_at).getTime()) {
+      return { ok: false as const, error: "غُيِّر ملف الموظف من جلسة أخرى بعد فتحك له — أعد التحميل ثم أعد المحاولة.", status: 409 };
+    }
+  }
+
+  const changes: { field: string; oldValue: string; newValue: string }[] = [];
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  const pushChange = (field: string, oldValue: unknown, newValue: unknown) => {
+    changes.push({ field, oldValue: oldValue === null || oldValue === undefined ? "" : String(oldValue), newValue: newValue === null || newValue === undefined ? "" : String(newValue) });
+  };
+
+  if (patch.fullName !== undefined && patch.fullName !== row.full_name) {
+    params.push(patch.fullName);
+    sets.push(`full_name = $${params.length}`);
+    pushChange("full_name", row.full_name, patch.fullName);
+  }
+  if (patch.jobTitle !== undefined && patch.jobTitle !== row.job_title) {
+    params.push(patch.jobTitle);
+    sets.push(`job_title = $${params.length}`);
+    pushChange("job_title", row.job_title, patch.jobTitle);
+  }
+  if (patch.department !== undefined && patch.department !== row.department) {
+    params.push(patch.department);
+    sets.push(`department = $${params.length}`);
+    pushChange("department", row.department, patch.department);
+  }
+  if (patch.workStatus !== undefined && patch.workStatus !== row.work_status) {
+    params.push(patch.workStatus);
+    sets.push(`work_status = $${params.length}`);
+    pushChange("work_status", row.work_status, patch.workStatus);
+    // انتهاء الخدمة بتاريخ انتهاء: من غياب النظام فرُدّ إليه — ويُسجَّل كأي تعديل.
+    // «اليوم» من القاعدة بتوقيت المركز (CURRENT_DATE) لا من ساعة الخادم UTC.
+    if (patch.workStatus === "ended" && patch.endDate === undefined && row.end_date === null) {
+      const todayRows = await client.query<{ d: string }>(`SELECT CURRENT_DATE::text AS d`);
+      const today = todayRows.rows[0]?.d;
+      if (today) {
+        params.push(today);
+        sets.push(`end_date = $${params.length}`);
+        pushChange("end_date", row.end_date, today);
       }
     }
+  }
+  if (patch.hireDate !== undefined && patch.hireDate !== row.hire_date) {
+    params.push(patch.hireDate);
+    sets.push(`hire_date = $${params.length}`);
+    pushChange("hire_date", row.hire_date, patch.hireDate);
+  }
+  if (patch.endDate !== undefined && patch.endDate !== row.end_date) {
+    params.push(patch.endDate);
+    sets.push(`end_date = $${params.length}`);
+    pushChange("end_date", row.end_date, patch.endDate);
+  }
+  if (patch.contractKind !== undefined && patch.contractKind !== row.contract_kind) {
+    params.push(patch.contractKind);
+    sets.push(`contract_kind = $${params.length}`);
+    pushChange("contract_kind", row.contract_kind, patch.contractKind);
+  }
+  if (patch.phone !== undefined && patch.phone !== row.phone) {
+    params.push(patch.phone);
+    sets.push(`phone = $${params.length}`);
+    pushChange("phone", row.phone, patch.phone);
+  }
+  if (patch.note !== undefined && patch.note !== row.note) {
+    params.push(patch.note);
+    sets.push(`note = $${params.length}`);
+    pushChange("note", row.note, patch.note);
+  }
 
-    const changes: { field: string; oldValue: string; newValue: string }[] = [];
-    const sets: string[] = [];
-    const params: unknown[] = [];
+  // شروط الأجر: مجموعة واحدة — مبلغ وعملة ودورية وتاريخ سريان معًا،
+  // محسومة مع نوع التعاقد النهائي (بعد أي تغييرٍ له في هذا الطلب):
+  // «نسبة» تمسح الأربعة كلها، وراتب/راتب ونسبة يتطلب الأربعة مكتملة.
+  const nextKind = patch.contractKind ?? row.contract_kind;
+  const userPayTerms = patch.payTerms;
+  let nextPayTerms: PayTermsInput | null | undefined = userPayTerms;
+  if (nextKind === "commission") {
+    // لا راتب تحت نسبة — قيد القاعدة يرفضه، فالمسح هنا جزء من نفس التحديث.
+    nextPayTerms = null;
+  } else if (userPayTerms === null) {
+    // إلغاء راتبٍ صريح تحت نوعٍ براتب: رفضٌ بسببٍ واضح — الإلغاء بتحويل النوع إلى نسبة.
+    return { ok: false as const, error: "لا يُلغى الراتب مع بقاء نوع التعاقد براتبًا — حوّل النوع إلى «نسبة» ليُمسح الراتب.", status: 400 };
+  } else if (nextPayTerms === undefined) {
+    const hasExisting = row.salary_amount_minor !== null && row.salary_currency !== null
+      && row.salary_period !== null && row.salary_effective_on !== null;
+    if (!hasExisting) {
+      return { ok: false as const, error: "نوع التعاقد براتبٍ يتطلب المبلغ والعملة والدورية وتاريخ السريان معًا.", status: 400 };
+    }
+  }
+  if (patch.contractKind !== undefined || patch.payTerms !== undefined) {
+    const contract = await governingContractToday(client,id,CLINIC_TIME_ZONE);
+    if (contract) {
+      const pay = nextPayTerms === undefined ? {
+        amountMinor: Number(row.salary_amount_minor),currency: row.salary_currency,period: row.salary_period,effectiveOn: row.salary_effective_on,
+      } : nextPayTerms;
+      const matches = nextKind === contract.kind && (!hasSalary(contract.kind) || (
+        pay && pay.amountMinor === contract.salaryMinor && pay.currency === contract.currency && pay.period === contract.salaryPeriod && pay.effectiveOn === contract.startDate));
+      if (!matches) return { ok: false as const,error: "شروط الملف تخالف العقد الساري؛ أنشئ ملحق عقد معتمد لتغيير الأجر.",status: 409 };
+    }
+  }
+  const payChanged = nextPayTerms !== undefined && (
+    nextPayTerms === null
+      ? row.salary_amount_minor !== null || row.salary_currency !== null || row.salary_period !== null || row.salary_effective_on !== null
+      : nextPayTerms.amountMinor !== Number(row.salary_amount_minor)
+        || nextPayTerms.currency !== row.salary_currency
+        || nextPayTerms.period !== row.salary_period
+        || nextPayTerms.effectiveOn !== row.salary_effective_on
+  );
+  if (payChanged && nextPayTerms !== undefined) {
+    if (nextPayTerms === null) {
+      sets.push(`salary_amount_minor = NULL, salary_currency = NULL, salary_period = NULL, salary_effective_on = NULL`);
+      pushChange("pay_terms", `${row.salary_amount_minor ?? ""} ${row.salary_currency ?? ""} ${row.salary_period ?? ""} ${row.salary_effective_on ?? ""}`.trim(), "");
+    } else {
+      const pay = nextPayTerms;
+      params.push(pay.amountMinor, pay.currency, pay.period, pay.effectiveOn);
+      sets.push(`salary_amount_minor = $${params.length - 3}, salary_currency = $${params.length - 2}, salary_period = $${params.length - 1}, salary_effective_on = $${params.length}`);
+      pushChange("pay_terms", `${row.salary_amount_minor ?? ""} ${row.salary_currency ?? ""} ${row.salary_period ?? ""} ${row.salary_effective_on ?? ""}`.trim(),
+        `${pay.amountMinor} ${pay.currency} ${pay.period} ${pay.effectiveOn}`);
+    }
+  }
 
-    const pushChange = (field: string, oldValue: unknown, newValue: unknown) => {
-      changes.push({ field, oldValue: oldValue === null || oldValue === undefined ? "" : String(oldValue), newValue: newValue === null || newValue === undefined ? "" : String(newValue) });
-    };
+  if (sets.length === 0) return { ok: true, staff: staffToView(row, true), changed: false };
 
-    if (patch.fullName !== undefined && patch.fullName !== row.full_name) {
-      params.push(patch.fullName);
-      sets.push(`full_name = $${params.length}`);
-      pushChange("full_name", row.full_name, patch.fullName);
-    }
-    if (patch.jobTitle !== undefined && patch.jobTitle !== row.job_title) {
-      params.push(patch.jobTitle);
-      sets.push(`job_title = $${params.length}`);
-      pushChange("job_title", row.job_title, patch.jobTitle);
-    }
-    if (patch.department !== undefined && patch.department !== row.department) {
-      params.push(patch.department);
-      sets.push(`department = $${params.length}`);
-      pushChange("department", row.department, patch.department);
-    }
-    if (patch.workStatus !== undefined && patch.workStatus !== row.work_status) {
-      params.push(patch.workStatus);
-      sets.push(`work_status = $${params.length}`);
-      pushChange("work_status", row.work_status, patch.workStatus);
-      // انتهاء الخدمة بتاريخ انتهاء: من غياب النظام فرُدّ إليه — ويُسجَّل كأي تعديل.
-      // «اليوم» من القاعدة بتوقيت المركز (CURRENT_DATE) لا من ساعة الخادم UTC.
-      if (patch.workStatus === "ended" && patch.endDate === undefined && row.end_date === null) {
-        const todayRows = await client.query<{ d: string }>(`SELECT CURRENT_DATE::text AS d`);
-        const today = todayRows.rows[0]?.d;
-        if (today) {
-          params.push(today);
-          sets.push(`end_date = $${params.length}`);
-          pushChange("end_date", row.end_date, today);
-        }
-      }
-    }
-    if (patch.hireDate !== undefined && patch.hireDate !== row.hire_date) {
-      params.push(patch.hireDate);
-      sets.push(`hire_date = $${params.length}`);
-      pushChange("hire_date", row.hire_date, patch.hireDate);
-    }
-    if (patch.endDate !== undefined && patch.endDate !== row.end_date) {
-      params.push(patch.endDate);
-      sets.push(`end_date = $${params.length}`);
-      pushChange("end_date", row.end_date, patch.endDate);
-    }
-    if (patch.contractKind !== undefined && patch.contractKind !== row.contract_kind) {
-      params.push(patch.contractKind);
-      sets.push(`contract_kind = $${params.length}`);
-      pushChange("contract_kind", row.contract_kind, patch.contractKind);
-    }
-    if (patch.phone !== undefined && patch.phone !== row.phone) {
-      params.push(patch.phone);
-      sets.push(`phone = $${params.length}`);
-      pushChange("phone", row.phone, patch.phone);
-    }
-    if (patch.note !== undefined && patch.note !== row.note) {
-      params.push(patch.note);
-      sets.push(`note = $${params.length}`);
-      pushChange("note", row.note, patch.note);
-    }
-
-    // شروط الأجر: مجموعة واحدة — مبلغ وعملة ودورية وتاريخ سريان معًا،
-    // محسومة مع نوع التعاقد النهائي (بعد أي تغييرٍ له في هذا الطلب):
-    // «نسبة» تمسح الأربعة كلها، وراتب/راتب ونسبة يتطلب الأربعة مكتملة.
-    const nextKind = patch.contractKind ?? row.contract_kind;
-    const userPayTerms = patch.payTerms;
-    let nextPayTerms: PayTermsInput | null | undefined = userPayTerms;
-    if (nextKind === "commission") {
-      // لا راتب تحت نسبة — قيد القاعدة يرفضه، فالمسح هنا جزء من نفس التحديث.
-      nextPayTerms = null;
-    } else if (userPayTerms === null) {
-      // إلغاء راتبٍ صريح تحت نوعٍ براتب: رفضٌ بسببٍ واضح — الإلغاء بتحويل النوع إلى نسبة.
-      return { ok: false as const, error: "لا يُلغى الراتب مع بقاء نوع التعاقد براتبًا — حوّل النوع إلى «نسبة» ليُمسح الراتب.", status: 400 };
-    } else if (nextPayTerms === undefined) {
-      const hasExisting = row.salary_amount_minor !== null && row.salary_currency !== null
-        && row.salary_period !== null && row.salary_effective_on !== null;
-      if (!hasExisting) {
-        return { ok: false as const, error: "نوع التعاقد براتبٍ يتطلب المبلغ والعملة والدورية وتاريخ السريان معًا.", status: 400 };
-      }
-    }
-    if (patch.contractKind !== undefined || patch.payTerms !== undefined) {
-      const contract = await governingContractToday(client,id,CLINIC_TIME_ZONE);
-      if (contract) {
-        const pay = nextPayTerms === undefined ? {
-          amountMinor: Number(row.salary_amount_minor),currency: row.salary_currency,period: row.salary_period,effectiveOn: row.salary_effective_on,
-        } : nextPayTerms;
-        const matches = nextKind === contract.kind && (!hasSalary(contract.kind) || (
-          pay && pay.amountMinor === contract.salaryMinor && pay.currency === contract.currency && pay.period === contract.salaryPeriod && pay.effectiveOn === contract.startDate));
-        if (!matches) return { ok: false as const,error: "شروط الملف تخالف العقد الساري؛ أنشئ ملحق عقد معتمد لتغيير الأجر.",status: 409 };
-      }
-    }
-    const payChanged = nextPayTerms !== undefined && (
-      nextPayTerms === null
-        ? row.salary_amount_minor !== null || row.salary_currency !== null || row.salary_period !== null || row.salary_effective_on !== null
-        : nextPayTerms.amountMinor !== Number(row.salary_amount_minor)
-          || nextPayTerms.currency !== row.salary_currency
-          || nextPayTerms.period !== row.salary_period
-          || nextPayTerms.effectiveOn !== row.salary_effective_on
+  params.push(id);
+  sets.push(`updated_at = NOW()`);
+  const updated = await client.query(
+    `UPDATE hr_staff SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
+    params,
+  );
+  const updatedRow = staffRowMapper(updated.rows[0]);
+  for (const change of changes) {
+    await client.query(
+      `INSERT INTO hr_staff_changes (staff_id, actor, actor_role, action, field, old_value, new_value, reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, actor.username, actor.role,
+       change.field === "pay_terms" ? "pay_terms" : "update",
+       change.field, change.oldValue, change.newValue, patch.reason?.trim() || null],
     );
-    if (payChanged && nextPayTerms !== undefined) {
-      if (nextPayTerms === null) {
-        sets.push(`salary_amount_minor = NULL, salary_currency = NULL, salary_period = NULL, salary_effective_on = NULL`);
-        pushChange("pay_terms", `${row.salary_amount_minor ?? ""} ${row.salary_currency ?? ""} ${row.salary_period ?? ""} ${row.salary_effective_on ?? ""}`.trim(), "");
-      } else {
-        const pay = nextPayTerms;
-        params.push(pay.amountMinor, pay.currency, pay.period, pay.effectiveOn);
-        sets.push(`salary_amount_minor = $${params.length - 3}, salary_currency = $${params.length - 2}, salary_period = $${params.length - 1}, salary_effective_on = $${params.length}`);
-        pushChange("pay_terms", `${row.salary_amount_minor ?? ""} ${row.salary_currency ?? ""} ${row.salary_period ?? ""} ${row.salary_effective_on ?? ""}`.trim(),
-          `${pay.amountMinor} ${pay.currency} ${pay.period} ${pay.effectiveOn}`);
-      }
-    }
-
-    if (sets.length === 0) return { outcome: "none" as const, row, changes: [] };
-
-    params.push(id);
-    sets.push(`updated_at = NOW()`);
-    const updated = await client.query(
-      `UPDATE hr_staff SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
-      params,
-    );
-    const updatedRow = staffRowMapper(updated.rows[0]);
-    for (const change of changes) {
-      await client.query(
-        `INSERT INTO hr_staff_changes (staff_id, actor, actor_role, action, field, old_value, new_value, reason)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [id, session.username, session.role,
-         change.field === "pay_terms" ? "pay_terms" : "update",
-         change.field, change.oldValue, change.newValue, patch.reason?.trim() || null],
-      );
-    }
-    await insertAuditRow(client, {
-      action: "hr.staff.update",
-      entity: "hr_staff",
-      entityId: String(id),
-      entityLabel: `تعديل ملف الموظف «${updatedRow.full_name}» (${changes.map((c) => c.field).join("، ")})`,
-      details: { fields: changes.map((c) => c.field), reason: patch.reason?.trim() || null },
-      actor: session.username,
-      actorRole: session.role,
-    });
-    return { outcome: "updated" as const, row: updatedRow, changes };
+  }
+  await insertAuditRow(client, {
+    action: "hr.staff.update",
+    entity: "hr_staff",
+    entityId: String(id),
+    entityLabel: `تعديل ملف الموظف «${updatedRow.full_name}» (${changes.map((c) => c.field).join("، ")})`,
+    details: { fields: changes.map((c) => c.field), reason: patch.reason?.trim() || null },
+    actor: actor.username,
+    actorRole: actor.role,
   });
-  if ("missing" in outcome) return { ok: false, error: "ملف الموظف غير موجود.", status: 404 };
-  if ("ok" in outcome) return outcome; // رفض 409/400 بسببٍ واضح
-  return { ok: true, staff: staffToView(outcome.row, true), changed: outcome.outcome === "updated" };
+  return { ok: true, staff: staffToView(updatedRow, true), changed: true };
+}
+
+export async function updateStaff(id: number, patch: UpdateStaffPatch, session: SessionPayload): Promise<StaffUpdateResult> {
+  return withTransaction(getPool(), async (client) => updateStaffInTx(client, id, patch, session));
 }
 
 /**
  * ربط الملف بحسابٍ موجود أو فكّه — اختياريٌّ وفريد ويدوي: لا إنشاء حسابٍ من هنا،
  * ولا ربطٌ بتشابه الأسماء. الحساب المعطّل يُربط علمًا لكن الجلسات تُحكم بحالتها.
  */
-export async function setStaffUserLink(id: number, userId: number | null, reason: string, session: SessionPayload): Promise<
-  { ok: true; staff: HrStaffView } | { ok: false; error: string; status: number }
-> {
-  const outcome = await withTransaction(getPool(), async (client) => {
-    const identityInstalled = await lockPersonIdentityForOperation(client);
-    const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
-    if (current.rowCount === 0) return { ok: false as const, error: "ملف الموظف غير موجود.", status: 404 };
-    if (Number(current.rows[0].identity_revision ?? 0) > 0) {
-      return { ok:false as const,error:'انتقل الملف إلى روابط الهوية الصريحة؛ رابط الوصول القديم محفوظ ولا يُعدّل من هذا المسار.',status:409 };
+export async function setStaffUserLinkInTx(
+  client: DbClient,
+  id: number,
+  userId: number | null,
+  reason: string,
+  actor: { username: string; role: string },
+): Promise<{ ok: true; staff: HrStaffView } | { ok: false; error: string; status: number }> {
+  let identityInstalled: boolean;
+  try {
+    identityInstalled = await lockPersonIdentityForOperation(client);
+  } catch (error) {
+    if (error instanceof IdentityPreviewError) {
+      return { ok: false, error: error.message, status: error.status };
     }
-    const row = staffRowMapper(current.rows[0]);
+    throw error;
+  }
+  const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
+  if (current.rowCount === 0) return { ok: false, error: "ملف الموظف غير موجود.", status: 404 };
+  if (Number(current.rows[0].identity_revision ?? 0) > 0) {
+    return { ok: false, error: 'انتقل الملف إلى روابط الهوية الصريحة؛ رابط الوصول القديم محفوظ ولا يُعدّل من هذا المسار.', status: 409 };
+  }
+  const row = staffRowMapper(current.rows[0]);
 
-    if (userId === null) {
-      if (row.user_id === null) return { ok: false as const, error: "الملف غير مرتبط بحسابٍ أصلًا.", status: 400 };
-      await client.query(
-        `UPDATE hr_staff SET user_id = NULL, user_linked_at = NULL, updated_at = NOW() WHERE id = $1`, [id],
-      );
-      await client.query(
-        `INSERT INTO hr_staff_changes (staff_id, actor, actor_role, action, field, old_value, new_value, reason)
-         VALUES ($1, $2, $3, 'unlink_user', 'user_id', $4, NULL, $5)`,
-        [id, session.username, session.role, String(row.user_id), reason],
-      );
-      await insertAuditRow(client, {
-        action: "hr.staff.unlink_user",
-        entity: "hr_staff",
-        entityId: String(id),
-        entityLabel: `فكّ ربط حساب الدخول عن ملف الموظف «${row.full_name}»`,
-        details: { previousUserId: row.user_id, reason },
-        actor: session.username,
-        actorRole: session.role,
-      });
-      return { ok: true as const, kind: "unlink" as const, fullName: row.full_name, previousUserId: row.user_id } as const;
-    }
-
-    const user = await client.query(`SELECT id, username, display_name, is_active FROM users WHERE id = $1`, [userId]);
-    if (user.rowCount === 0) return { ok: false as const, error: "حساب الدخول غير موجود — أنشئه من شاشة المستخدمين أولًا.", status: 404 };
-    if (!user.rows[0].is_active) return { ok: false as const, error: "حساب الدخول معطّل — لا يمكن ربطه.", status: 400 };
-    if (identityInstalled && (await client.query(`SELECT id FROM hr_staff_account_links
-      WHERE user_id=$1 AND staff_id<>$2 AND closed_at IS NULL`, [userId, id])).rows.length) {
-      return { ok: false as const, error: 'الحساب مرتبط بهوية شخص آخر؛ لا يمكن نقله من مسار الربط القديم.', status: 409 };
-    }
-    // الفريدية بنيوية (UNIQUE) لكن الرسالة العربية هنا أوضح من خطأ القاعدة.
-    const taken = await client.query(`SELECT id, full_name FROM hr_staff WHERE user_id = $1 AND id <> $2`, [userId, id]);
-    if (taken.rowCount && taken.rowCount > 0) {
-      return { ok: false as const, error: `الحساب مرتبط مسبقًا بملف «${String(taken.rows[0].full_name)}» — الربط واحدٌ لكل حساب.`, status: 409 };
-    }
+  if (userId === null) {
+    if (row.user_id === null) return { ok: false, error: "الملف غير مرتبط بحسابٍ أصلًا.", status: 400 };
     await client.query(
-      `UPDATE hr_staff SET user_id = $1, user_linked_at = NOW(), updated_at = NOW() WHERE id = $2`, [userId, id],
+      `UPDATE hr_staff SET user_id = NULL, user_linked_at = NULL, updated_at = NOW() WHERE id = $1`, [id],
     );
     await client.query(
       `INSERT INTO hr_staff_changes (staff_id, actor, actor_role, action, field, old_value, new_value, reason)
-       VALUES ($1, $2, $3, 'link_user', 'user_id', $4, $5, $6)`,
-      [id, session.username, session.role, row.user_id === null ? null : String(row.user_id), String(userId), reason],
+       VALUES ($1, $2, $3, 'unlink_user', 'user_id', $4, NULL, $5)`,
+      [id, actor.username, actor.role, String(row.user_id), reason],
     );
     await insertAuditRow(client, {
-      action: "hr.staff.link_user",
+      action: "hr.staff.unlink_user",
       entity: "hr_staff",
       entityId: String(id),
-      entityLabel: `ربط ملف الموظف «${row.full_name}» بحساب الدخول «${String(user.rows[0].username)}»`,
-      details: { userId, reason },
-      actor: session.username,
-      actorRole: session.role,
+      entityLabel: `فكّ ربط حساب الدخول عن ملف الموظف «${row.full_name}»`,
+      details: { previousUserId: row.user_id, reason },
+      actor: actor.username,
+      actorRole: actor.role,
     });
-    return { ok: true as const, kind: "link" as const, fullName: row.full_name, userId, username: String(user.rows[0].username) } as const;
-  }).catch((error: unknown) => {
-    if (error instanceof IdentityPreviewError) return { ok: false as const, error: error.message, status: error.status };
+    const refreshedRow = staffRowMapper((await client.query(`SELECT * FROM hr_staff WHERE id = $1`, [id])).rows[0]);
+    return { ok: true, staff: staffToView(refreshedRow, true) };
+  }
+
+  const user = await client.query(`SELECT id, username, display_name, is_active FROM users WHERE id = $1`, [userId]);
+  if (user.rowCount === 0) return { ok: false, error: "حساب الدخول غير موجود — أنشئه من شاشة المستخدمين أولًا.", status: 404 };
+  if (!user.rows[0].is_active) return { ok: false, error: "حساب الدخول معطّل — لا يمكن ربطه.", status: 400 };
+  if (identityInstalled && (await client.query(`SELECT id FROM hr_staff_account_links
+    WHERE user_id=$1 AND staff_id<>$2 AND closed_at IS NULL`, [userId, id])).rows.length) {
+    return { ok: false, error: 'الحساب مرتبط بهوية شخص آخر؛ لا يمكن نقله من مسار الربط القديم.', status: 409 };
+  }
+  // الفريدية بنيوية (UNIQUE) لكن الرسالة العربية هنا أوضح من خطأ القاعدة.
+  const taken = await client.query(`SELECT id, full_name FROM hr_staff WHERE user_id = $1 AND id <> $2`, [userId, id]);
+  if (taken.rowCount && taken.rowCount > 0) {
+    return { ok: false, error: `الحساب مرتبط مسبقًا بملف «${String(taken.rows[0].full_name)}» — الربط واحدٌ لكل حساب.`, status: 409 };
+  }
+  await client.query("SAVEPOINT sp_hr_staff_user_link");
+  try {
+    await client.query(
+      `UPDATE hr_staff SET user_id = $1, user_linked_at = NOW(), updated_at = NOW() WHERE id = $2`, [userId, id],
+    );
+    await client.query("RELEASE SAVEPOINT sp_hr_staff_user_link");
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT sp_hr_staff_user_link").catch(() => {});
+    await client.query("RELEASE SAVEPOINT sp_hr_staff_user_link").catch(() => {});
     if (error && typeof error === 'object' && 'code' in error && error.code === '23505' && 'constraint' in error
       && ['hr_identity_account_person_unique', 'hr_staff_user_id_key'].includes(String(error.constraint))) {
-      return { ok: false as const, error: 'تغيّر ارتباط الحساب بالتزامن؛ راجع هوية الشخص قبل إعادة المحاولة.', status: 409 };
+      return { ok: false, error: 'تغيّر ارتباط الحساب بالتزامن؛ راجع هوية الشخص قبل إعادة المحاولة.', status: 409 };
     }
     throw error;
+  }
+  await client.query(
+    `INSERT INTO hr_staff_changes (staff_id, actor, actor_role, action, field, old_value, new_value, reason)
+     VALUES ($1, $2, $3, 'link_user', 'user_id', $4, $5, $6)`,
+    [id, actor.username, actor.role, row.user_id === null ? null : String(row.user_id), String(userId), reason],
+  );
+  await insertAuditRow(client, {
+    action: "hr.staff.link_user",
+    entity: "hr_staff",
+    entityId: String(id),
+    entityLabel: `ربط ملف الموظف «${row.full_name}» بحساب الدخول «${String(user.rows[0].username)}»`,
+    details: { userId, reason },
+    actor: actor.username,
+    actorRole: actor.role,
   });
-  if (!outcome.ok) return outcome;
-  const refreshedRow = staffRowMapper((await getPool().query(`SELECT * FROM hr_staff WHERE id = $1`, [id])).rows[0]);
+  const refreshedRow = staffRowMapper((await client.query(`SELECT * FROM hr_staff WHERE id = $1`, [id])).rows[0]);
   return { ok: true, staff: staffToView(refreshedRow, true) };
+}
+
+export async function setStaffUserLink(id: number, userId: number | null, reason: string, session: SessionPayload): Promise<
+  { ok: true; staff: HrStaffView } | { ok: false; error: string; status: number }
+> {
+  return withTransaction(getPool(), async (client) => setStaffUserLinkInTx(client, id, userId, reason, session));
 }
 
 

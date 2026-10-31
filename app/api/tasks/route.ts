@@ -1,4 +1,10 @@
 import { CLINIC_TIME_ZONE } from "@/lib/db";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  tasksGetCanonicalResponse,
+  tasksPostCanonicalResponse,
+} from "@/lib/canonical-messages-tasks";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { parseTaskDeadline } from "@/lib/hr-task-time";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -12,9 +18,15 @@ export const dynamic = "force-dynamic";
 
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+const canonicalDenied = () =>
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
 
 /** قائمة المهام كما يراها سائلها — الخصوصية تُبنى في WHERE على الخادم. */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return tasksGetCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canUseTasks(session.role)) {
@@ -46,6 +58,10 @@ export async function GET(request: Request) {
 
 /** إنشاء مهمة خاصة أو مشتركة مسندة — الخاصة لا تقبل مسؤولًا أصلًا. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return canonicalDenied();
+  if (selected.kind === "canonical") return tasksPostCanonicalResponse(request, selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!canUseTasks(session.role)) {

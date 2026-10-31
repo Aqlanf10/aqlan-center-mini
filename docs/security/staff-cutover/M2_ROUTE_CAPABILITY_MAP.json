@@ -1250,8 +1250,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission.",
+    "projection": {
+      "legacy": "admin or reception role reads attendance records.",
+      "groups": {
+        "attendance": "daily attendance records, punch times, and statuses ? hr.attendance.record"
+      }
+    }
   },
   {
     "route": "/api/hr/attendance",
@@ -1265,8 +1271,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/attendance/corrections",
@@ -1279,8 +1285,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/attendance/corrections",
@@ -1293,8 +1299,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "",
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission.",
     "branches": {
       "discriminator": "action",
       "values": {
@@ -1316,8 +1322,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/contracts",
@@ -1330,8 +1336,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/contracts/[id]",
@@ -1344,8 +1350,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/contracts/[id]",
@@ -1358,8 +1364,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "",
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission.",
     "branches": {
       "discriminator": "action",
       "values": {
@@ -1381,8 +1387,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/directory",
@@ -1396,8 +1402,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/identity-preview",
@@ -1410,8 +1416,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/identity-preview",
@@ -1424,8 +1430,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/leaves",
@@ -1440,8 +1446,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Own requests; approving and balance edits need hr.leaves.approve."
+    "status": "canonical-done",
+    "note": "Own requests; approving and balance edits need hr.leaves.approve. M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/leaves",
@@ -1456,8 +1462,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Own requests; approving and balance edits need hr.leaves.approve."
+    "status": "canonical-done",
+    "note": "Own requests; approving and balance edits need hr.leaves.approve. M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/leaves/[id]",
@@ -1472,8 +1478,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Own requests; approving and balance edits need hr.leaves.approve."
+    "status": "canonical-done",
+    "note": "Own requests; approving and balance edits need hr.leaves.approve. M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/leaves/[id]",
@@ -1486,8 +1492,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/leaves/balances",
@@ -1502,8 +1508,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Own requests; approving and balance edits need hr.leaves.approve."
+    "status": "canonical-done",
+    "note": "Own requests; approving and balance edits need hr.leaves.approve. M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/leaves/balances",
@@ -1512,12 +1518,12 @@
       "admin"
     ],
     "need": [
-      "hr.leaves.request"
+      "hr.leaves.approve"
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Own requests; approving and balance edits need hr.leaves.approve."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical leave balance adjustment via hr.leaves.approve with atomic audit."
   },
   {
     "route": "/api/hr/me",
@@ -1533,8 +1539,8 @@
     "need": [],
     "anyOf": [],
     "scope": null,
-    "status": "self",
-    "note": "Caller's own HR attendance, leaves and payroll summary; never reads another staff member."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical self-scoped HR attendance, leaves, and payroll summary via withCanonicalSelfSession; never reads another staff member."
   },
   {
     "route": "/api/hr/payroll/disburse",
@@ -1547,8 +1553,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Disbursement also requires an open cashier shift and the treasury rule."
+    "status": "canonical-done",
+    "note": "Disbursement also requires an open cashier shift and the treasury rule. M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/payroll/disburse",
@@ -1561,8 +1567,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Disbursement also requires an open cashier shift and the treasury rule.",
+    "status": "canonical-done",
+    "note": "Disbursement also requires an open cashier shift and the treasury rule. M2 slice 38: canonical HR admission.",
     "branches": {
       "discriminator": "action",
       "values": {
@@ -1584,8 +1590,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Disbursement also requires an open cashier shift and the treasury rule."
+    "status": "canonical-done",
+    "note": "Disbursement also requires an open cashier shift and the treasury rule. M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/payroll/periods",
@@ -1598,8 +1604,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Disbursement also requires an open cashier shift and the treasury rule."
+    "status": "canonical-done",
+    "note": "Disbursement also requires an open cashier shift and the treasury rule. M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/payroll/periods",
@@ -1612,8 +1618,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Disbursement also requires an open cashier shift and the treasury rule.",
+    "status": "canonical-done",
+    "note": "Disbursement also requires an open cashier shift and the treasury rule. M2 slice 38: canonical HR admission.",
     "branches": {
       "discriminator": "action",
       "values": {
@@ -1635,8 +1641,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Disbursement also requires an open cashier shift and the treasury rule."
+    "status": "canonical-done",
+    "note": "Disbursement also requires an open cashier shift and the treasury rule. M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/payroll/runs",
@@ -1649,8 +1655,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Disbursement also requires an open cashier shift and the treasury rule.",
+    "status": "canonical-done",
+    "note": "Disbursement also requires an open cashier shift and the treasury rule. M2 slice 38: canonical HR admission.",
     "branches": {
       "discriminator": "action",
       "values": {
@@ -1676,8 +1682,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/schedules",
@@ -1691,8 +1697,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission.",
+    "projection": {
+      "legacy": "admin or reception role reads work schedules.",
+      "groups": {
+        "schedules": "work schedules, shift hours, working days, and grace period ? hr.directory.view"
+      }
+    }
   },
   {
     "route": "/api/hr/schedules",
@@ -1705,8 +1717,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/schedules/[id]",
@@ -1720,8 +1732,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission.",
+    "projection": {
+      "legacy": "admin or reception role reads a single work schedule.",
+      "groups": {
+        "schedules": "work schedule detail ? hr.directory.view"
+      }
+    }
   },
   {
     "route": "/api/hr/schedules/[id]",
@@ -1734,8 +1752,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/settings",
@@ -1748,8 +1766,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/settings",
@@ -1762,8 +1780,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/settings/history",
@@ -1776,8 +1794,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/staff",
@@ -1790,8 +1808,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/staff",
@@ -1804,8 +1822,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/staff/[id]",
@@ -1818,8 +1836,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/staff/[id]",
@@ -1832,8 +1850,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "",
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission.",
     "branches": {
       "discriminator": "action",
       "values": {
@@ -1863,8 +1881,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/staff/[id]/history",
@@ -1877,8 +1895,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/staff/[id]/schedule-history",
@@ -1891,8 +1909,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/hr/staff/[id]/schedule-history",
@@ -1905,8 +1923,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical HR admission."
   },
   {
     "route": "/api/inventory",
@@ -2689,8 +2707,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Outbound patient messaging additionally needs messages.send-external."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical messaging admission via messages.use with patientScope filtering/enforcement on patient-linked messages and outbound reminders."
   },
   {
     "route": "/api/messages",
@@ -2705,8 +2723,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Outbound patient messaging additionally needs messages.send-external."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical messaging admission via messages.use with patientScope filtering/enforcement on patient-linked messages and outbound reminders.",
+    "projection": {
+      "legacy": "admin, reception, and doctor read internal messages; doctor role filters patient-linked threads to accessible patients.",
+      "groups": {
+        "messages": "internal staff messages and unread counts ? messages.use"
+      },
+      "rows": "recipient/sender messages where patientId is null or inside the actor current patientScope (all: every linked patient; own: patients inside clinicianPartyId scope; none: unlinked messages only)"
+    }
   },
   {
     "route": "/api/messages",
@@ -2721,8 +2746,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Outbound patient messaging additionally needs messages.send-external."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical messaging admission via messages.use with patientScope filtering/enforcement on patient-linked messages and outbound reminders."
   },
   {
     "route": "/api/messages",
@@ -2737,8 +2762,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Outbound patient messaging additionally needs messages.send-external."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical messaging admission via messages.use with patientScope filtering/enforcement on patient-linked messages and outbound reminders."
   },
   {
     "route": "/api/messages/outbound",
@@ -2752,8 +2777,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Outbound patient messaging additionally needs messages.send-external."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical messaging admission via messages.use with patientScope filtering/enforcement on patient-linked messages and outbound reminders."
   },
   {
     "route": "/api/messages/outbound",
@@ -2767,8 +2792,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Outbound patient messaging additionally needs messages.send-external."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical messaging admission via messages.use with patientScope filtering/enforcement on patient-linked messages and outbound reminders."
   },
   {
     "route": "/api/opening-balances",
@@ -6207,8 +6232,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical tasks admission via tasks.use with creator/assignee visibility (clinic-wide visibility via owner settings.security.change) and patientScope enforcement on patient links."
   },
   {
     "route": "/api/tasks",
@@ -6223,8 +6248,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical tasks admission via tasks.use with creator/assignee visibility (clinic-wide visibility via owner settings.security.change) and patientScope enforcement on patient links."
   },
   {
     "route": "/api/tasks/[id]",
@@ -6239,8 +6264,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical tasks admission via tasks.use with creator/assignee visibility (clinic-wide visibility via owner settings.security.change) and patientScope enforcement on patient links."
   },
   {
     "route": "/api/tasks/[id]",
@@ -6255,8 +6280,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical tasks admission via tasks.use with creator/assignee visibility (clinic-wide visibility via owner settings.security.change) and patientScope enforcement on patient links."
   },
   {
     "route": "/api/tasks/[id]/checklist",
@@ -6271,8 +6296,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Assignee/creator scope; managing others' tasks needs tasks.manage.",
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical tasks admission via tasks.use with creator/assignee visibility (clinic-wide visibility via owner settings.security.change) and patientScope enforcement on patient links.",
     "branches": {
       "discriminator": "op",
       "values": {
@@ -6304,8 +6329,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical tasks admission via tasks.use with creator/assignee visibility (clinic-wide visibility via owner settings.security.change) and patientScope enforcement on patient links."
   },
   {
     "route": "/api/tasks/[id]/links",
@@ -6320,8 +6345,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical tasks admission via tasks.use with creator/assignee visibility (clinic-wide visibility via owner settings.security.change) and patientScope enforcement on patient links."
   },
   {
     "route": "/api/tasks/[id]/links",
@@ -6336,8 +6361,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Assignee/creator scope; managing others' tasks needs tasks.manage."
+    "status": "canonical-done",
+    "note": "M2 slice 38: canonical tasks admission via tasks.use with creator/assignee visibility (clinic-wide visibility via owner settings.security.change) and patientScope enforcement on patient links."
   },
   {
     "route": "/api/users",
