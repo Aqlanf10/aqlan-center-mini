@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { patientFamilyCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { familyIdOfPatient } from "@/lib/db";
 import { idOf, json } from "@/lib/case-route";
 import { buildFamilyView, canEditFamilies } from "@/lib/family-view";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +15,9 @@ export const dynamic = "force-dynamic";
  * والأرصدة بحسب `buildFamilyView`. `family: null` = بلا عائلة.
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return patientFamilyCanonicalResponse(selected.handle, (await params).id);
   const session = await requireSession();
   if (!session) return json("انتهت الجلسة. سجّل الدخول من جديد.", 401);
   const patientId = idOf((await params).id);

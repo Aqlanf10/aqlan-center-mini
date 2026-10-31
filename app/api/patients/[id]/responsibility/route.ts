@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { responsibilityCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { patientResponsibilitySettings, ResponsibilityError, type ResponsibilityTarget } from "@/lib/patient-responsibility-settings";
 export const dynamic = "force-dynamic";
 async function handle(request: Request, context: { params: Promise<{ id: string }> }, write: boolean) {
+ const selected = await selectRequestStaffEnvelope();
+ if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401, headers: NO_STORE });
+ if (selected.kind === "canonical") return responsibilityCanonicalResponse(selected.handle, request, (await context.params).id, write);
  const session = await requireSession();
  if (!session) return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
  // No role-name gate: the library decides from the actor's current grants and patient access, inside its transaction.

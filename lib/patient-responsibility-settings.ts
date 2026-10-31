@@ -15,7 +15,12 @@ export interface ResponsibilitySettings extends ResponsibilityTarget {
  /** The actor's current grant, re-read in this transaction; the UI offers confirmation only when true. */
  canConfirm: boolean;
 }
-export class ResponsibilityError extends Error { constructor(public status: number, message: string) { super(message); } }
+export class ResponsibilityError extends Error {
+  readonly code = "responsibility_refused";
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
 function reject(status: number, message: string): never { throw new ResponsibilityError(status, message); }
 type Clinical = { id: number; patient_id: number; ortho_case_id: number | null; specialty: string; responsible_party_id: number | null; status: string };
 type Ortho = { id: number; patient_id: number; responsible_doctor_id: number | null; status: string };
@@ -69,6 +74,54 @@ async function authority(client: DbClient, admitted: SessionPayload, patientId: 
  if (need === "view" && !canConfirm && granted.canViewResponsibilitySuggestion !== true) reject(403, "عرض مسؤولية الحالة يحتاج صلاحية تمنحها الإدارة من الإعدادات.");
  if (!await canAccessPatient(session, patientId, undefined, client)) reject(403, "غير مصرّح لك بملف هذا المريض.");
  return { session, canConfirm };
+}
+export async function readCanonicalResponsibilityInSnapshot(
+ q: Pick<DbClient, "query">,
+ target: ResponsibilityTarget,
+ canConfirm: boolean,
+): Promise<ResponsibilitySettings> {
+ if (!Number.isSafeInteger(target.patientId) || target.patientId <= 0 || !Number.isSafeInteger(target.sourceId) || target.sourceId <= 0 || !["clinical", "ortho"].includes(target.kind)) {
+  reject(400, "مرجع الحالة غير صالح.");
+ }
+ const client = q as DbClient;
+ const after = await source(client, target, false);
+ const { rows: doctors } = canConfirm ? await client.query<{ id: number; name: string }>("SELECT id,name FROM parties WHERE kind='doctor' AND is_active ORDER BY name,id") : { rows: [] };
+ const { rows: names } = after.doctorId === null ? { rows: [] } : await client.query<{ name: string }>("SELECT name FROM parties WHERE id=$1", [after.doctorId]);
+ const proposal = after.doctorId === null ? await suggest(client, target.patientId, after.bridges.map(row => row.id)) : { suggestion: null, note: null };
+ return { ...target, doctorId: after.doctorId, doctorName: names[0]?.name ?? null, sourceFingerprint: after.sourceFingerprint, doctors,
+  suggestion: proposal.suggestion, suggestionNote: proposal.note, canConfirm };
+}
+export async function updateCanonicalResponsibilityInTx(
+ client: DbClient,
+ target: ResponsibilityTarget,
+ command: { expectedSourceFingerprint: string; doctorId: number; reason: string },
+ actor: { userId: number; username: string; role: string },
+): Promise<ResponsibilitySettings> {
+ if (!Number.isSafeInteger(target.patientId) || target.patientId <= 0 || !Number.isSafeInteger(target.sourceId) || target.sourceId <= 0 || !["clinical", "ortho"].includes(target.kind)) {
+  reject(400, "مرجع الحالة غير صالح.");
+ }
+ if (!/^[a-f0-9]{64}$/.test(command.expectedSourceFingerprint) || !Number.isSafeInteger(command.doctorId) || command.doctorId <= 0 || command.reason.trim().length < 3 || command.reason.trim().length > 500) {
+  reject(400, "اختر الطبيب واكتب سبب التغيير.");
+ }
+ try {
+  const before = await source(client, target, true);
+  if (before.sourceFingerprint !== command.expectedSourceFingerprint) reject(409, "تغيّرت المسؤولية منذ عرضها. حدّث البيانات وراجع اختيارك.");
+  const { rows: doctor } = await client.query("SELECT id FROM parties WHERE id=$1 AND kind='doctor' AND is_active FOR SHARE NOWAIT", [command.doctorId]);
+  if (!doctor.length) reject(409, "الطبيب المختار غير متاح. حدّث القائمة.");
+  if (before.ortho) await client.query("UPDATE ortho_cases SET responsible_doctor_id=$2 WHERE id=$1", [before.ortho.id, command.doctorId]);
+  if (before.bridges.length) await client.query("UPDATE clinical_cases SET responsible_party_id=$2 WHERE id=ANY($1::int[])", [before.bridges.map(row => row.id), command.doctorId]);
+  await insertAuditRow(client, { action: "case.responsibility_change", entity: "patient", entityId: target.patientId,
+   actor: actor.username, actorRole: actor.role, entityLabel: `الحالة ${target.kind}:${target.sourceId}`, details: { target, previous: { ortho: before.ortho, clinical: before.bridges }, doctorId: command.doctorId, reason: command.reason.trim(), actorUserId: actor.userId } });
+  const after = await source(client, target, false);
+  const { rows: doctors } = await client.query<{ id: number; name: string }>("SELECT id,name FROM parties WHERE kind='doctor' AND is_active ORDER BY name,id");
+  const { rows: names } = after.doctorId === null ? { rows: [] } : await client.query<{ name: string }>("SELECT name FROM parties WHERE id=$1", [after.doctorId]);
+  const proposal = after.doctorId === null ? await suggest(client, target.patientId, after.bridges.map(row => row.id)) : { suggestion: null, note: null };
+  return { ...target, doctorId: after.doctorId, doctorName: names[0]?.name ?? null, sourceFingerprint: after.sourceFingerprint, doctors,
+   suggestion: proposal.suggestion, suggestionNote: proposal.note, canConfirm: true };
+ } catch (error) {
+  if ((error as { code?: string }).code === "55P03") reject(409, "يجري تحديث الحالة. أعد المحاولة بعد لحظة.");
+  throw error;
+ }
 }
 export async function patientResponsibilitySettings(target: ResponsibilityTarget, admitted: SessionPayload,
  command?: { expectedSourceFingerprint: string; doctorId: number; reason: string }): Promise<ResponsibilitySettings> {

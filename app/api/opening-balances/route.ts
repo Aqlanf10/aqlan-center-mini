@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  clearOpeningBalanceCanonicalResponse,
+  listOpeningBalancesCanonicalResponse,
+  setOpeningBalanceCanonicalResponse,
+} from "@/lib/canonical-patient-finance-history";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, OpeningBalanceChanged, OpeningBalanceExists, OpeningCorrectionRefused, clearPatientOpeningBalance, previewOpeningCorrection, getPatientOpeningBalance, getSettings, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
@@ -6,6 +12,7 @@ import { parseAmount, CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { openingBalanceAccess } from "@/lib/opening-access";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +34,9 @@ const forbidden = () =>
   NextResponse.json({ message: "الأرصدة الافتتاحية للمدير وحده." }, { status: 403 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return listOpeningBalancesCanonicalResponse(selected.handle, request);
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewFinancialReports(session.role)) return forbidden();
@@ -77,6 +87,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return setOpeningBalanceCanonicalResponse(selected.handle, request);
   const session = await requireSession();
   if (!session) return denied();
   const settings = await getSettings().catch(() => null);
@@ -163,6 +176,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return clearOpeningBalanceCanonicalResponse(selected.handle, request);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();

@@ -1,7 +1,10 @@
 import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { collectDebtInstallmentCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { isCurrency, parseAmount } from "@/lib/money";
@@ -9,6 +12,12 @@ import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { collectDebtInstallment } from "@/lib/debt-installment-collection";
 export const dynamic="force-dynamic";
 export async function POST(request:Request,context:{params:Promise<{id:string;arrangementId:string}>}){
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const params = await context.params;
+    return collectDebtInstallmentCanonicalResponse(selected.handle, request, params.id, params.arrangementId);
+  }
   const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول من جديد."},{status:401});
   if(!["admin","reception"].includes(session.role))return NextResponse.json({message:"التحصيل للإدارة والاستقبال."},{status:403});
   try{

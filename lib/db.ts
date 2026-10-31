@@ -4274,8 +4274,18 @@ export async function patientLegacyHistory(patientId: number): Promise<{
   orphanPayments: LegacyTreatmentView["payments"];
 }> {
   await ensureSchema();
+  return patientLegacyHistoryWith(getPool(), patientId);
+}
+
+export async function patientLegacyHistoryWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<{
+  treatments: LegacyTreatmentView[];
+  orphanPayments: LegacyTreatmentView["payments"];
+}> {
   const [treatments, payments] = await Promise.all([
-    getPool().query<{
+    q.query<{
       id: number; legacy_number: number | null; treated_on: string | null; doctor_name: string | null; service: string | null;
       currency: string; price_minor: string; rate: string | null; paid_minor: string; remaining_minor: string;
       has_provenance: boolean; source_kind: string | null; historical_as_of: string | null;
@@ -4287,7 +4297,7 @@ export async function patientLegacyHistory(patientId: number): Promise<{
               to_jsonb(t)->>'historical_as_of' AS historical_as_of
          FROM legacy_treatments t WHERE patient_id = $1
         ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]),
-    getPool().query<{
+    q.query<{
       legacy_treatment_id: number | null; legacy_number: number; paid_on: string | null; currency: string;
       amount_minor: string; rate: string | null; method: string | null; cash_box: string | null;
     }>(
@@ -10698,10 +10708,14 @@ export async function listPatientPayments(patientId: number, client?: DbClient |
   return attachCurrencyReclassifications(client,rows.map(toPayment));
 }
 
+export async function getPaymentWith(q: Pick<DbClient, "query">, id: number): Promise<Payment | null> {
+  const { rows } = await q.query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.id = $1`, [id]);
+  return rows[0] ? toPayment(rows[0]) : null;
+}
+
 export async function getPayment(id: number): Promise<Payment | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.id = $1`, [id]);
-  return rows[0] ? toPayment(rows[0]) : null;
+  return getPaymentWith(getPool(), id);
 }
 
 /** Read-only recovery evidence. The caller still invokes the canonical writer,
@@ -11786,13 +11800,21 @@ async function runPaymentTransaction(
   }
 }
 
+/** Read-only UI targets over a caller-owned snapshot; the transaction writer revalidates all evidence. */
+export async function patientReversedInstallmentRecoveriesInSnapshot(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<PatientInstallmentRecoveryRead> {
+  return publicRecoveryRead(await readRecoveryDocumentStates(q as DbClient, patientId));
+}
+
 /** Read-only UI targets; the transaction writer revalidates all evidence. */
 export async function patientReversedInstallmentRecoveries(patientId: number): Promise<PatientInstallmentRecoveryRead> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const result = publicRecoveryRead(await readRecoveryDocumentStates(client, patientId));
+    const result = await patientReversedInstallmentRecoveriesInSnapshot(client, patientId);
     await client.query("COMMIT");
     return result;
   } catch (error) {
@@ -12100,9 +12122,11 @@ export async function patientLedgerInSnapshot(patientId: number, client: DbClien
  * (RC-1) ما بقي غير معكوسٍ من كل سند قبضٍ للمريض — بعملة السند نفسه. السند الذي عُكس كله لا يظهر
  * (لا شيء يُصحَّح فيه)، فتعرف الشاشة أيّ سندٍ يقبل «تصحيح السند» وبكم.
  */
-export async function patientReceiptRemainders(patientId: number): Promise<Record<number, number>> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ id: number; remaining: string }>(
+export async function patientReceiptRemaindersWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<Record<number, number>> {
+  const { rows } = await q.query<{ id: number; remaining: string }>(
     `SELECT y.id, (y.amount_minor - COALESCE(SUM(r.amount_minor), 0))::text AS remaining
        FROM payments y
        LEFT JOIN payments r ON r.reversal_of_id = y.id AND r.kind = 'refund'
@@ -12112,6 +12136,11 @@ export async function patientReceiptRemainders(patientId: number): Promise<Recor
     [patientId],
   );
   return Object.fromEntries(rows.map((row) => [row.id, toMinor(row.remaining)]));
+}
+
+export async function patientReceiptRemainders(patientId: number): Promise<Record<number, number>> {
+  await ensureSchema();
+  return patientReceiptRemaindersWith(getPool(), patientId);
 }
 
 /** يحوّل صفوف الدفعات إلى الشكل الذي تفهمه حسابات `lib/money`. */
@@ -16011,55 +16040,63 @@ async function lockOpeningParty(client: DbClient, partyId: number) {
   return rows[0] ?? null;
 }
 
+export async function createPartyOpeningPayableInTx(
+  client: DbClient,
+  input: PartyOpeningPayableInput,
+): Promise<PartyOpeningResult<Payable>> {
+  const party = await lockOpeningParty(client, input.partyId);
+  if (!party || !OPENING_PARTY_KINDS.has(party.kind)) {
+    return { ok: false, message: "اختر مختبرًا أو مورّدًا مسجَّلًا.", status: 400 };
+  }
+  const { rows: dup } = await client.query<{ id: number }>(
+    `SELECT id FROM payables
+      WHERE party_id = $1 AND source_type = 'opening' AND currency = $2 AND amount_minor = $3
+        AND as_of_date = $4::date AND COALESCE(reference, '') = COALESCE($5::text, '')`,
+    [input.partyId, input.currency, input.amountMinor, input.asOfDate, input.reference],
+  );
+  if (dup[0]) {
+    return { ok: false, message: "هذا الرصيد السابق مُدخلٌ من قبل لهذه الجهة (نفس المبلغ والعملة والتاريخ والمرجع).", status: 409 };
+  }
+  const baseAmount = toBaseAmount(input.amountMinor, input.currency, CLINIC_BASE_CURRENCY, input.exchangeRate);
+  const description = `رصيد سابق حتى ${input.asOfDate}${input.reference ? ` — ${input.reference}` : ""}${input.note ? ` — ${input.note}` : ""}`.slice(0, 300);
+  const { rows } = await client.query<{ id: number }>(
+    `INSERT INTO payables (party_id, category, description, amount_minor, currency, exchange_rate,
+                           base_amount_minor, base_currency, due_date, created_by,
+                           source_type, as_of_date, reference, opening_reason)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, 'opening', $11::date, $12::text, $13)
+     RETURNING id`,
+    [
+      input.partyId, party.kind, description, input.amountMinor, input.currency, input.exchangeRate,
+      baseAmount, CLINIC_BASE_CURRENCY, input.dueDate, input.actor,
+      input.asOfDate, input.reference, input.reason,
+    ],
+  );
+  await insertAuditRow(client, {
+    action: "party_opening.create", entity: "payable", entityId: rows[0].id, entityLabel: party.name,
+    details: {
+      الجهة: party.name, النوع: party.kind === "lab" ? "مختبر" : "مورد",
+      المبلغ: formatMoney(input.amountMinor, input.currency), العملة: input.currency,
+      حتى_تاريخ: input.asOfDate, الاستحقاق: input.dueDate ?? "غير معروف",
+      المرجع: input.reference ?? "—", السبب: input.reason,
+    },
+    actor: input.actor, actorRole: input.actorRole,
+  });
+  const { rows: full } = await client.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [rows[0].id]);
+  return { ok: true, value: toPayable(full[0]) };
+}
+
 export async function createPartyOpeningPayable(input: PartyOpeningPayableInput): Promise<PartyOpeningResult<Payable>> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const party = await lockOpeningParty(client, input.partyId);
-    if (!party || !OPENING_PARTY_KINDS.has(party.kind)) {
+    const result = await createPartyOpeningPayableInTx(client, input);
+    if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "اختر مختبرًا أو مورّدًا مسجَّلًا.", status: 400 };
+      return result;
     }
-    /* حارس الإدخال المكرر: الرصيد نفسه (الجهة والعملة والمبلغ والتاريخ والمرجع) لا يُدخل مرتين
-       بنقرةٍ مزدوجة أو إعادة إرسال — تحت قفل الجهة فلا يتسابق طلبان. */
-    const { rows: dup } = await client.query<{ id: number }>(
-      `SELECT id FROM payables
-        WHERE party_id = $1 AND source_type = 'opening' AND currency = $2 AND amount_minor = $3
-          AND as_of_date = $4::date AND COALESCE(reference, '') = COALESCE($5::text, '')`,
-      [input.partyId, input.currency, input.amountMinor, input.asOfDate, input.reference],
-    );
-    if (dup[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "هذا الرصيد السابق مُدخلٌ من قبل لهذه الجهة (نفس المبلغ والعملة والتاريخ والمرجع).", status: 409 };
-    }
-    const baseAmount = toBaseAmount(input.amountMinor, input.currency, CLINIC_BASE_CURRENCY, input.exchangeRate);
-    const description = `رصيد سابق حتى ${input.asOfDate}${input.reference ? ` — ${input.reference}` : ""}${input.note ? ` — ${input.note}` : ""}`.slice(0, 300);
-    const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO payables (party_id, category, description, amount_minor, currency, exchange_rate,
-                             base_amount_minor, base_currency, due_date, created_by,
-                             source_type, as_of_date, reference, opening_reason)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, 'opening', $11::date, $12::text, $13)
-       RETURNING id`,
-      [
-        input.partyId, party.kind, description, input.amountMinor, input.currency, input.exchangeRate,
-        baseAmount, CLINIC_BASE_CURRENCY, input.dueDate, input.actor,
-        input.asOfDate, input.reference, input.reason,
-      ],
-    );
-    await insertAuditRow(client, {
-      action: "party_opening.create", entity: "payable", entityId: rows[0].id, entityLabel: party.name,
-      details: {
-        الجهة: party.name, النوع: party.kind === "lab" ? "مختبر" : "مورد",
-        المبلغ: formatMoney(input.amountMinor, input.currency), العملة: input.currency,
-        حتى_تاريخ: input.asOfDate, الاستحقاق: input.dueDate ?? "غير معروف",
-        المرجع: input.reference ?? "—", السبب: input.reason,
-      },
-      actor: input.actor, actorRole: input.actorRole,
-    });
     await client.query("COMMIT");
-    const { rows: full } = await getPool().query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [rows[0].id]);
-    return { ok: true, value: toPayable(full[0]) };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -16072,6 +16109,80 @@ export async function createPartyOpeningPayable(input: PartyOpeningPayableInput)
  * تصحيح رصيدٍ افتتاحي لجهة — إلحاقيٌّ لا صامت: فرقٌ موقَّع بسببه وفاعله ووقته، والأصل كما أُدخل.
  * لا يُصحَّح إلى أقل مما سُدّد منه فعلًا (المال الخارج لا يُمحى بتصحيح).
  */
+export async function adjustPartyOpeningPayableInTx(
+  client: DbClient,
+  input: {
+    payableId: number;
+    reason: string;
+    actor: string;
+    actorRole: string | null;
+  } & (
+    | { newAmountMinor: number; amount?: never; expectedCurrency?: never }
+    | { amount: string; expectedCurrency?: Currency; newAmountMinor?: never }
+  ),
+): Promise<PartyOpeningResult<Payable>> {
+  const { rows } = await client.query<{
+    id: number; party_id: number; party_name: string; source_type: string; currency: string;
+    effective: string; settled: string; as_of_date: Date;
+  }>(
+    `SELECT b.id, b.party_id, t.name AS party_name, b.source_type, b.currency, b.as_of_date,
+            ${payableAmountSql("b")}::text AS effective, ${payableSettledTotalSql("b")}::text AS settled
+       FROM payables b JOIN parties t ON t.id = b.party_id
+      WHERE b.id = $1 FOR UPDATE OF b`,
+    [input.payableId],
+  );
+  const row = rows[0];
+  if (!row || row.source_type !== "opening") {
+    return { ok: false, message: "الرصيد الافتتاحي غير موجود.", status: 404 };
+  }
+  const lockedBefore = (await getSettingsInTransaction(client))["finance.locked_before"]?.trim();
+  if (lockedBefore && dateText(row.as_of_date) < lockedBefore) {
+    return { ok: false, status: 409, message: "الفترة مقفلة. لا يمكن تعديل رصيد افتتاحي في فترة مقفلة." };
+  }
+  const currency = requireCurrency(row.currency, "رصيد افتتاحي", `#${row.id}`);
+  const rawAmount = "amount" in input;
+  if ((rawAmount && "newAmountMinor" in input) || (!rawAmount && "expectedCurrency" in input)
+    || (rawAmount && input.expectedCurrency !== undefined && !isCurrency(input.expectedCurrency))) {
+    return { ok: false, status: 400, message: "اكتب القيمة الصحيحة للرصيد وعملته." };
+  }
+  if (rawAmount && input.expectedCurrency !== undefined && input.expectedCurrency !== currency) {
+    return { ok: false, status: 409, message: "عملة الطلب لا تطابق عملة الرصيد الافتتاحي. أعد تحميل الرصيد وراجع التصحيح." };
+  }
+  const newAmountMinor = rawAmount
+    ? (typeof input.amount === "string" ? parseAmount(input.amount, currency) : null)
+    : input.newAmountMinor;
+  if (typeof newAmountMinor !== "number" || !Number.isSafeInteger(newAmountMinor) || newAmountMinor < 0) {
+    return { ok: false, status: 400, message: "اكتب القيمة الصحيحة للرصيد." };
+  }
+  const effective = toMinor(row.effective);
+  const settled = toMinor(row.settled);
+  if (newAmountMinor < settled) {
+    return {
+      ok: false, status: 400,
+      message: `لا يُصحَّح الرصيد إلى أقل مما سُدّد منه فعلًا (${formatMoney(settled, currency)}).`,
+    };
+  }
+  const delta = newAmountMinor - effective;
+  if (delta === 0) {
+    return { ok: false, message: "القيمة الجديدة هي نفسها الحالية — لا تصحيح.", status: 400 };
+  }
+  await client.query(
+    `INSERT INTO payable_adjustments (payable_id, delta_minor, reason, created_by) VALUES ($1, $2, $3, $4)`,
+    [row.id, delta, input.reason, input.actor],
+  );
+  await insertAuditRow(client, {
+    action: "party_opening.adjust", entity: "payable", entityId: row.id, entityLabel: row.party_name,
+    details: {
+      الجهة: row.party_name, العملة: currency,
+      من: formatMoney(effective, currency), إلى: formatMoney(newAmountMinor, currency),
+      الفرق: formatMoney(delta, currency), المسدد: formatMoney(settled, currency), السبب: input.reason,
+    },
+    actor: input.actor, actorRole: input.actorRole,
+  });
+  const { rows: full } = await client.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [row.id]);
+  return { ok: true, value: toPayable(full[0]) };
+}
+
 export async function adjustPartyOpeningPayable(input: {
   payableId: number;
   reason: string;
@@ -16085,78 +16196,13 @@ export async function adjustPartyOpeningPayable(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{
-      id: number; party_id: number; party_name: string; source_type: string; currency: string;
-      effective: string; settled: string; as_of_date: Date;
-    }>(
-      `SELECT b.id, b.party_id, t.name AS party_name, b.source_type, b.currency, b.as_of_date,
-              ${payableAmountSql("b")}::text AS effective, ${payableSettledTotalSql("b")}::text AS settled
-         FROM payables b JOIN parties t ON t.id = b.party_id
-        WHERE b.id = $1 FOR UPDATE OF b`,
-      [input.payableId],
-    );
-    const row = rows[0];
-    if (!row || row.source_type !== "opening") {
+    const result = await adjustPartyOpeningPayableInTx(client, input);
+    if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "الرصيد الافتتاحي غير موجود.", status: 404 };
+      return result;
     }
-    // This operation changes the journal at the source opening date, not today.
-    // Read settings on this transaction: a process cache may predate period close.
-    const lockedBefore = (await getSettingsInTransaction(client))["finance.locked_before"]?.trim();
-    if (lockedBefore && dateText(row.as_of_date) < lockedBefore) {
-      await client.query("ROLLBACK");
-      return { ok: false, status: 409, message: "الفترة مقفلة. لا يمكن تعديل رصيد افتتاحي في فترة مقفلة." };
-    }
-    const currency = requireCurrency(row.currency, "رصيد افتتاحي", `#${row.id}`);
-    // Raw HTTP amounts are major units in the locked source currency. A body
-    // currency is only an expected identity, never authority for scaling money.
-    const rawAmount = "amount" in input;
-    if ((rawAmount && "newAmountMinor" in input) || (!rawAmount && "expectedCurrency" in input)
-      || (rawAmount && input.expectedCurrency !== undefined && !isCurrency(input.expectedCurrency))) {
-      await client.query("ROLLBACK");
-      return { ok: false, status: 400, message: "اكتب القيمة الصحيحة للرصيد وعملته." };
-    }
-    if (rawAmount && input.expectedCurrency !== undefined && input.expectedCurrency !== currency) {
-      await client.query("ROLLBACK");
-      return { ok: false, status: 409, message: "عملة الطلب لا تطابق عملة الرصيد الافتتاحي. أعد تحميل الرصيد وراجع التصحيح." };
-    }
-    const newAmountMinor = rawAmount
-      ? (typeof input.amount === "string" ? parseAmount(input.amount, currency) : null)
-      : input.newAmountMinor;
-    if (typeof newAmountMinor !== "number" || !Number.isSafeInteger(newAmountMinor) || newAmountMinor < 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, status: 400, message: "اكتب القيمة الصحيحة للرصيد." };
-    }
-    const effective = toMinor(row.effective);
-    const settled = toMinor(row.settled);
-    if (newAmountMinor < settled) {
-      await client.query("ROLLBACK");
-      return {
-        ok: false, status: 400,
-        message: `لا يُصحَّح الرصيد إلى أقل مما سُدّد منه فعلًا (${formatMoney(settled, currency)}).`,
-      };
-    }
-    const delta = newAmountMinor - effective;
-    if (delta === 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "القيمة الجديدة هي نفسها الحالية — لا تصحيح.", status: 400 };
-    }
-    await client.query(
-      `INSERT INTO payable_adjustments (payable_id, delta_minor, reason, created_by) VALUES ($1, $2, $3, $4)`,
-      [row.id, delta, input.reason, input.actor],
-    );
-    await insertAuditRow(client, {
-      action: "party_opening.adjust", entity: "payable", entityId: row.id, entityLabel: row.party_name,
-      details: {
-        الجهة: row.party_name, العملة: currency,
-        من: formatMoney(effective, currency), إلى: formatMoney(newAmountMinor, currency),
-        الفرق: formatMoney(delta, currency), المسدد: formatMoney(settled, currency), السبب: input.reason,
-      },
-      actor: input.actor, actorRole: input.actorRole,
-    });
     await client.query("COMMIT");
-    const { rows: full } = await getPool().query<PayableRow>(`${PAYABLE_SELECT} WHERE b.id = $1`, [row.id]);
-    return { ok: true, value: toPayable(full[0]) };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -16199,6 +16245,54 @@ const toAdvance = (row: AdvanceRow): PartyOpeningAdvance => ({
  * رصيدٌ مقدَّم سابق **لنا** عند الجهة (دفعناه قبل بدء النظام ولم يُستهلك) — ليس التزامًا
  * بإشارة سالبة: جدوله المستقل بمبلغٍ موجب ومعنًى صريح، ويُنقص ما علينا لها بعملته.
  */
+export async function createPartyOpeningAdvanceInTx(
+  client: DbClient,
+  input: {
+    partyId: number;
+    currency: Currency;
+    amountMinor: number;
+    exchangeRate: number;
+    asOfDate: string;
+    reference: string | null;
+    note: string | null;
+    reason: string;
+    actor: string;
+    actorRole: string | null;
+  },
+): Promise<PartyOpeningResult<PartyOpeningAdvance>> {
+  const party = await lockOpeningParty(client, input.partyId);
+  if (!party || !OPENING_PARTY_KINDS.has(party.kind)) {
+    return { ok: false, message: "اختر مختبرًا أو مورّدًا مسجَّلًا.", status: 400 };
+  }
+  const { rows: dup } = await client.query<{ id: number }>(
+    `SELECT id FROM party_opening_advances
+      WHERE party_id = $1 AND voided_at IS NULL AND currency = $2 AND amount_minor = $3
+        AND as_of_date = $4::date AND COALESCE(reference, '') = COALESCE($5::text, '')`,
+    [input.partyId, input.currency, input.amountMinor, input.asOfDate, input.reference],
+  );
+  if (dup[0]) {
+    return { ok: false, message: "هذا الرصيد المقدَّم مُدخلٌ من قبل لهذه الجهة.", status: 409 };
+  }
+  const baseAmount = toBaseAmount(input.amountMinor, input.currency, CLINIC_BASE_CURRENCY, input.exchangeRate);
+  const { rows } = await client.query<{ id: number }>(
+    `INSERT INTO party_opening_advances (party_id, currency, amount_minor, exchange_rate, base_amount_minor,
+                                         as_of_date, reference, note, reason, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6::date, $7::text, $8::text, $9, $10) RETURNING id`,
+    [input.partyId, input.currency, input.amountMinor, input.exchangeRate, baseAmount,
+      input.asOfDate, input.reference, input.note, input.reason, input.actor],
+  );
+  await insertAuditRow(client, {
+    action: "party_advance.create", entity: "party_opening_advance", entityId: rows[0].id, entityLabel: party.name,
+    details: {
+      الجهة: party.name, المبلغ: formatMoney(input.amountMinor, input.currency), العملة: input.currency,
+      حتى_تاريخ: input.asOfDate, المرجع: input.reference ?? "—", السبب: input.reason,
+    },
+    actor: input.actor, actorRole: input.actorRole,
+  });
+  const { rows: full } = await client.query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1`, [rows[0].id]);
+  return { ok: true, value: toAdvance(full[0]) };
+}
+
 export async function createPartyOpeningAdvance(input: {
   partyId: number;
   currency: Currency;
@@ -16215,40 +16309,13 @@ export async function createPartyOpeningAdvance(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const party = await lockOpeningParty(client, input.partyId);
-    if (!party || !OPENING_PARTY_KINDS.has(party.kind)) {
+    const result = await createPartyOpeningAdvanceInTx(client, input);
+    if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "اختر مختبرًا أو مورّدًا مسجَّلًا.", status: 400 };
+      return result;
     }
-    const { rows: dup } = await client.query<{ id: number }>(
-      `SELECT id FROM party_opening_advances
-        WHERE party_id = $1 AND voided_at IS NULL AND currency = $2 AND amount_minor = $3
-          AND as_of_date = $4::date AND COALESCE(reference, '') = COALESCE($5::text, '')`,
-      [input.partyId, input.currency, input.amountMinor, input.asOfDate, input.reference],
-    );
-    if (dup[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "هذا الرصيد المقدَّم مُدخلٌ من قبل لهذه الجهة.", status: 409 };
-    }
-    const baseAmount = toBaseAmount(input.amountMinor, input.currency, CLINIC_BASE_CURRENCY, input.exchangeRate);
-    const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO party_opening_advances (party_id, currency, amount_minor, exchange_rate, base_amount_minor,
-                                           as_of_date, reference, note, reason, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6::date, $7::text, $8::text, $9, $10) RETURNING id`,
-      [input.partyId, input.currency, input.amountMinor, input.exchangeRate, baseAmount,
-        input.asOfDate, input.reference, input.note, input.reason, input.actor],
-    );
-    await insertAuditRow(client, {
-      action: "party_advance.create", entity: "party_opening_advance", entityId: rows[0].id, entityLabel: party.name,
-      details: {
-        الجهة: party.name, المبلغ: formatMoney(input.amountMinor, input.currency), العملة: input.currency,
-        حتى_تاريخ: input.asOfDate, المرجع: input.reference ?? "—", السبب: input.reason,
-      },
-      actor: input.actor, actorRole: input.actorRole,
-    });
     await client.query("COMMIT");
-    const { rows: full } = await getPool().query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1`, [rows[0].id]);
-    return { ok: true, value: toAdvance(full[0]) };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -16258,6 +16325,43 @@ export async function createPartyOpeningAdvance(input: {
 }
 
 /** إلغاء رصيدٍ مقدَّم سابق أُدخل خطأً — بسببٍ وفاعلٍ ووقت، والسطر يبقى للتاريخ. */
+export async function voidPartyOpeningAdvanceInTx(
+  client: DbClient,
+  input: {
+    id: number;
+    reason: string;
+    actor: string;
+    actorRole: string | null;
+  },
+): Promise<PartyOpeningResult<PartyOpeningAdvance>> {
+  const { rows } = await client.query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1 FOR UPDATE OF o`, [input.id]);
+  const current = rows[0];
+  if (!current) {
+    return { ok: false, message: "الرصيد المقدَّم غير موجود.", status: 404 };
+  }
+  if (current.voided_at) {
+    return { ok: false, message: "الرصيد المقدَّم ملغى من قبل.", status: 409 };
+  }
+  const lockedBefore = (await getSettingsInTransaction(client))["finance.locked_before"]?.trim();
+  if (lockedBefore && dateText(current.as_of_date) < lockedBefore) {
+    return { ok: false, status: 409, message: "الفترة مقفلة. لا يمكن إلغاء رصيد افتتاحي في فترة مقفلة." };
+  }
+  await client.query(
+    `UPDATE party_opening_advances SET voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1`,
+    [input.id, input.actor, input.reason],
+  );
+  await insertAuditRow(client, {
+    action: "party_advance.void", entity: "party_opening_advance", entityId: input.id, entityLabel: current.party_name,
+    details: {
+      الجهة: current.party_name,
+      المبلغ: formatMoney(toMinor(current.amount_minor), current.currency as Currency), السبب: input.reason,
+    },
+    actor: input.actor, actorRole: input.actorRole,
+  });
+  const { rows: full } = await client.query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1`, [input.id]);
+  return { ok: true, value: toAdvance(full[0]) };
+}
+
 export async function voidPartyOpeningAdvance(input: {
   id: number;
   reason: string;
@@ -16268,37 +16372,13 @@ export async function voidPartyOpeningAdvance(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1 FOR UPDATE OF o`, [input.id]);
-    const current = rows[0];
-    if (!current) {
+    const result = await voidPartyOpeningAdvanceInTx(client, input);
+    if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "الرصيد المقدَّم غير موجود.", status: 404 };
+      return result;
     }
-    if (current.voided_at) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "الرصيد المقدَّم ملغى من قبل.", status: 409 };
-    }
-    // Voiding removes the source-date journal, so protect that date as well.
-    const lockedBefore = (await getSettingsInTransaction(client))["finance.locked_before"]?.trim();
-    if (lockedBefore && dateText(current.as_of_date) < lockedBefore) {
-      await client.query("ROLLBACK");
-      return { ok: false, status: 409, message: "الفترة مقفلة. لا يمكن إلغاء رصيد افتتاحي في فترة مقفلة." };
-    }
-    await client.query(
-      `UPDATE party_opening_advances SET voided_at = NOW(), voided_by = $2, void_reason = $3 WHERE id = $1`,
-      [input.id, input.actor, input.reason],
-    );
-    await insertAuditRow(client, {
-      action: "party_advance.void", entity: "party_opening_advance", entityId: input.id, entityLabel: current.party_name,
-      details: {
-        الجهة: current.party_name,
-        المبلغ: formatMoney(toMinor(current.amount_minor), current.currency as Currency), السبب: input.reason,
-      },
-      actor: input.actor, actorRole: input.actorRole,
-    });
     await client.query("COMMIT");
-    const { rows: full } = await getPool().query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.id = $1`, [input.id]);
-    return { ok: true, value: toAdvance(full[0]) };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -16308,20 +16388,18 @@ export async function voidPartyOpeningAdvance(input: {
 }
 
 /** كل الأرصدة الافتتاحية للجهات: الديون السابقة (بمسدَّدها ومتبقيها) وتصحيحاتها، والأرصدة المقدَّمة. */
-export async function listPartyOpenings(): Promise<{
+export async function listPartyOpeningsWith(q: Pick<DbClient, "query">): Promise<{
   payables: Payable[];
   adjustments: PayableAdjustment[];
   advances: PartyOpeningAdvance[];
 }> {
-  await ensureSchema();
-  const pool = getPool();
   const [payables, adjustments, advances] = await Promise.all([
-    pool.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.source_type = 'opening' ORDER BY t.name, b.currency, b.id`),
-    pool.query<{ id: number; payable_id: number; delta_minor: string; reason: string; created_by: string; created_at: Date }>(
+    q.query<PayableRow>(`${PAYABLE_SELECT} WHERE b.source_type = 'opening' ORDER BY t.name, b.currency, b.id`),
+    q.query<{ id: number; payable_id: number; delta_minor: string; reason: string; created_by: string; created_at: Date }>(
       `SELECT a.id, a.payable_id, a.delta_minor, a.reason, a.created_by, a.created_at
          FROM payable_adjustments a JOIN payables p ON p.id=a.payable_id WHERE p.source_type='opening' ORDER BY a.id`,
     ),
-    pool.query<AdvanceRow>(`${ADVANCE_SELECT} ORDER BY t.name, o.currency, o.id`),
+    q.query<AdvanceRow>(`${ADVANCE_SELECT} ORDER BY t.name, o.currency, o.id`),
   ]);
   return {
     payables: payables.rows.map(toPayable),
@@ -16331,6 +16409,15 @@ export async function listPartyOpenings(): Promise<{
     })),
     advances: advances.rows.map(toAdvance),
   };
+}
+
+export async function listPartyOpenings(): Promise<{
+  payables: Payable[];
+  adjustments: PayableAdjustment[];
+  advances: PartyOpeningAdvance[];
+}> {
+  await ensureSchema();
+  return listPartyOpeningsWith(getPool());
 }
 
 /** الأرصدة المقدَّمة السابقة لجهةٍ واحدة — لكشف حسابها. */
@@ -19801,6 +19888,60 @@ export interface VisitBillingPreview {
  * السطر المرتبط ببند خطة يُسعَّر ويُصنَّف بـ classifyLinkedProcedureLines (المصنِّف الذي يستعمله
  * التوقيع)، والسطر الحر مستحقٌّ بسعره. لا قفل ولا كتابة، ولا مدخل يجعل المستحق صفرًا يدويًا.
  */
+export async function previewVisitBillingWith(
+  q: Pick<DbClient, "query">,
+  visitId: number,
+): Promise<VisitBillingPreview | null> {
+  const { rows: [visit] } = await q.query<{ patient_id: number | null; billing_currency: string | null; doctor_id: number | null }>(
+    `SELECT v.patient_id, v.billing_currency,
+      (SELECT d.id FROM parties d WHERE d.id = v.doctor_id AND d.kind = 'doctor') AS doctor_id FROM visits v WHERE v.id = $1`, [visitId]);
+  if (!visit) return null;
+  const { rows: procedureRows } = await q.query<ProcedureRow>(
+    `SELECT p.id, p.service_id, s.name AS service_name, s.category, p.doctor_id,
+            p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note,
+            t.base_currency AS plan_currency
+       FROM visit_procedures p JOIN services s ON s.id = p.service_id
+       LEFT JOIN plan_items i ON i.id = p.plan_item_id
+       LEFT JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE p.visit_id = $1 ORDER BY p.id`, [visitId],
+  );
+  const procedures = procedureRows.map(toProcedureLine);
+  const decisions = await classifyLinkedProcedureLines(q as DbClient, procedures, visit.patient_id, false, visit.doctor_id);
+  const visitCurrency: Currency = isCurrency(visit.billing_currency) ? visit.billing_currency as Currency : CLINIC_BASE_CURRENCY;
+  const lines: VisitBillingPreviewLine[] = procedures.map((line) => {
+    const decision = decisions.get(line.id);
+    const planCurrency = procedureRows.find((row) => row.id === line.id)?.plan_currency ?? null;
+    return {
+      procedureId: line.id,
+      serviceName: line.serviceName,
+      toothCode: line.toothCode,
+      classification: decision?.classification ?? "NEW_BILLABLE",
+      amountMinor: decision ? decision.unitPriceMinor : visitTotal([line]),
+      currency: decision && isCurrency(planCurrency) ? planCurrency as Currency : visitCurrency,
+      planLinked: Boolean(decision),
+    };
+  });
+  const duesByCurrency: Partial<Record<Currency, number>> = {};
+  for (const line of lines) {
+    if (line.classification !== "NEW_BILLABLE") continue;
+    duesByCurrency[line.currency] = (duesByCurrency[line.currency] ?? 0) + line.amountMinor;
+  }
+  const billableCurrencies = [...new Set(lines.filter((line) => line.classification === "NEW_BILLABLE").map((line) => line.currency))];
+  let orthoAdjustment: BillingClassification | null = null;
+  if (visit.patient_id !== null) {
+    const open = await openOrthoCaseForWith(q, visit.patient_id, clinicDateString(new Date(), CLINIC_TIME_ZONE));
+    if (open) orthoAdjustment = await orthoAdjustmentBillingClass(q as DbClient, open.id, visit.patient_id);
+  }
+  const totalDue = Object.values(duesByCurrency).reduce((sum, value) => sum + (value ?? 0), 0);
+  return {
+    lines,
+    duesByCurrency,
+    mixedCurrencies: billableCurrencies.length > 1,
+    orthoAdjustment,
+    zeroReason: totalDue > 0 ? null : zeroDueReason(lines, orthoAdjustment),
+  };
+}
+
 export async function previewVisitBilling(visitId: number): Promise<VisitBillingPreview | null> {
   await ensureSchema();
   const pool = getPool();
@@ -21289,16 +21430,24 @@ const OPENING_SELECT = `SELECT o.patient_id, p.full_name, p.phone, o.currency, o
                           FROM patient_opening_balances o
                           JOIN patients p ON p.id = o.patient_id`;
 
+export async function getPatientOpeningBalanceWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+  currency: Currency = CLINIC_BASE_CURRENCY,
+): Promise<OpeningBalance | null> {
+  const { rows } = await q.query<OpeningRow>(
+    `${OPENING_SELECT} WHERE o.patient_id = $1 AND o.currency = $2`,
+    [patientId, currency],
+  );
+  return rows[0] ? toOpeningBalance(rows[0]) : null;
+}
+
 /** رصيدٌ افتتاحي بعملةٍ بعينها (الأساس افتراضًا). */
 export async function getPatientOpeningBalance(
   patientId: number, currency: Currency = CLINIC_BASE_CURRENCY,
 ): Promise<OpeningBalance | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<OpeningRow>(
-    `${OPENING_SELECT} WHERE o.patient_id = $1 AND o.currency = $2`,
-    [patientId, currency],
-  );
-  return rows[0] ? toOpeningBalance(rows[0]) : null;
+  return getPatientOpeningBalanceWith(getPool(), patientId, currency);
 }
 
 /** (P1-5ب) أرصدة المريض الافتتاحية بكل عملاته — صفٌّ لكل عملة. */
@@ -21355,12 +21504,16 @@ export function ledgerBalancesByCurrency(
   );
 }
 
-export async function listOpeningBalances(): Promise<OpeningBalance[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<OpeningRow>(
+export async function listOpeningBalancesWith(q: Pick<DbClient, "query">): Promise<OpeningBalance[]> {
+  const { rows } = await q.query<OpeningRow>(
     `${OPENING_SELECT} ORDER BY o.amount_minor DESC LIMIT 500`,
   );
   return rows.map(toOpeningBalance);
+}
+
+export async function listOpeningBalances(): Promise<OpeningBalance[]> {
+  await ensureSchema();
+  return listOpeningBalancesWith(getPool());
 }
 
 /**
@@ -21579,6 +21732,15 @@ async function openingCorrectionPreviewInTx(
   };
 }
 
+export async function openingCorrectionPreviewInSnapshot(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+  currency: Currency,
+  afterAmountMinor: number | null,
+): Promise<OpeningCorrectionPreview> {
+  return openingCorrectionPreviewInTx(q as DbClient, patientId, currency, afterAmountMinor);
+}
+
 /** Dry run: the same rule the correction applies, from one read-only snapshot. Nothing is written. */
 export async function previewOpeningCorrection(
   patientId: number, currency: Currency, afterAmountMinor: number | null,
@@ -21589,7 +21751,7 @@ export async function previewOpeningCorrection(
     openingCorrectionPreviewInTx(runner, patientId, currency, afterAmountMinor), usesSharedLocalDatabaseConnection());
 }
 
-async function assertOpeningCorrectionAllowedInTx(
+export async function assertOpeningCorrectionAllowedInTx(
   client: DbClient, patientId: number, currency: Currency, afterAmountMinor: number | null,
 ): Promise<void> {
   // The writer's own locks, taken first: a receipt against this balance waits behind them.
@@ -21645,9 +21807,11 @@ export async function clearPatientOpeningBalance(
   });
 }
 
-export async function listOpeningBalanceHistory(patientId: number): Promise<OpeningBalanceHistoryEntry[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+export async function listOpeningBalanceHistoryWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<OpeningBalanceHistoryEntry[]> {
+  const { rows } = await q.query<{
     id: number; action: "set" | "clear"; currency: string; before_amount_minor: string | null; before_as_of_date: string | null;
     after_amount_minor: string | null; after_as_of_date: string | null; note: string | null; reason: string | null;
     actor: string; created_at: Date;
@@ -21670,6 +21834,11 @@ export async function listOpeningBalanceHistory(patientId: number): Promise<Open
     actor: row.actor,
     createdAt: row.created_at.toISOString(),
   }));
+}
+
+export async function listOpeningBalanceHistory(patientId: number): Promise<OpeningBalanceHistoryEntry[]> {
+  await ensureSchema();
+  return listOpeningBalanceHistoryWith(getPool(), patientId);
 }
 
 // ─── خطط العلاج والأقساط ─────────────────────────────────────────────────────
@@ -21953,27 +22122,30 @@ export async function listPatientPlansWith(q: Pick<DbClient, "query">, patientId
  * from this same snapshot. Only the reader's own typed validation error is tolerated, never a database
  * error, so the snapshot transaction is never used after a failed statement. */
 import {readPatientStatementEvidence} from "./patient-statement-evidence";
+export async function patientStatementSnapshotInSnapshot(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+  today: string,
+  options: { historicalAgreements?: boolean | "tolerant"; patientFacing?: boolean } = {},
+) {
+  const client = q as DbClient;
+  const ledger = await patientLedgerInSnapshot(patientId, client);
+  const { rows } = await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`, [patientId]);
+  const planCurrencies = new Map(rows.map(row => [row.id, { patientId, currency: requireCurrency(row.base_currency, "خطة علاج", row.id) }]));
+  const plans = await hydratePlans(rows, today, client, true);
+  let historicalAgreements: HistoricalStatementAgreement[] | null | undefined;
+  if (options.historicalAgreements === "tolerant") {
+    try { historicalAgreements = await readStatementHistoricalAgreements(client, patientId); }
+    catch (error) { if (!(error instanceof StatementHistoricalDetailsError)) throw error; historicalAgreements = null; }
+  } else if (options.historicalAgreements) {
+    historicalAgreements = await readStatementHistoricalAgreements(client, patientId);
+  }
+  const statementEvidence = options.patientFacing ? await readPatientStatementEvidence(client, patientId, ledger) : undefined;
+  return { ledger, planCurrencies, plans, historicalAgreements, statementEvidence };
+}
 export async function patientStatementSnapshot(patientId:number,today:string,options:{historicalAgreements?:boolean|"tolerant";patientFacing?:boolean}={}){
   await ensureSchema();
-  return withFinancialReadSnapshot(getPool(),async runner=>{
-    const client=runner as DbClient;
-    const ledger=await patientLedgerInSnapshot(patientId,client);
-    const {rows}=await client.query<PlanRow>(`${PLAN_SELECT} ${PATIENT_PLANS_WHERE}`,[patientId]);
-    // The same complete patient plan set and fail-closed currency validation as
-    // patientPlanCurrencies; reuse rows already required for statement details.
-    const planCurrencies=new Map(rows.map(row=>[row.id,{patientId,currency:requireCurrency(row.base_currency,"خطة علاج",row.id)}]));
-    const plans=await hydratePlans(rows,today,client,true);
-    // Opt-in: historical agreements are saved facts read on this same snapshot client.
-    let historicalAgreements:HistoricalStatementAgreement[]|null|undefined;
-    if(options.historicalAgreements==="tolerant"){
-      try{historicalAgreements=await readStatementHistoricalAgreements(client,patientId);}
-      catch(error){if(!(error instanceof StatementHistoricalDetailsError))throw error;historicalAgreements=null;}
-    }else if(options.historicalAgreements){
-      historicalAgreements=await readStatementHistoricalAgreements(client,patientId);
-    }
-    const statementEvidence=options.patientFacing?await readPatientStatementEvidence(client,patientId,ledger):undefined;
-    return {ledger,planCurrencies,plans,historicalAgreements,statementEvidence};
-  });
+  return withFinancialReadSnapshot(getPool(),async runner=>patientStatementSnapshotInSnapshot(runner,patientId,today,options));
 }
 export async function listPatientPlans(patientId:number,today:string):Promise<TreatmentPlan[]> {
   return readPlans(PATIENT_PLANS_WHERE,[patientId],today);
@@ -33324,17 +33496,33 @@ function guarantorAuditText(guarantor: FamilyGuarantor | GuarantorDraft, label?:
 }
 
 /** العائلة بأفرادها وضامنها — null إن لم توجد. */
+export async function getPatientFamilyRecordWith(
+  q: Pick<DbClient, "query">,
+  familyId: number,
+): Promise<PatientFamilyRecord | null> {
+  return readFamilyRecord(q, familyId);
+}
+
 export async function getPatientFamilyRecord(familyId: number): Promise<PatientFamilyRecord | null> {
   await ensureSchema();
-  return readFamilyRecord(getPool(), familyId);
+  return getPatientFamilyRecordWith(getPool(), familyId);
 }
 
 /** عائلة المريض: رقمها، أو null بلا عائلة، أو undefined إن لم يوجد المريض. */
+export async function familyIdOfPatientWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<number | null | undefined> {
+  const { rows } = await q.query<{ family_id: number | null }>(
+    `SELECT family_id FROM patients WHERE id = $1`,
+    [patientId],
+  );
+  return rows[0] ? rows[0].family_id : undefined;
+}
+
 export async function familyIdOfPatient(patientId: number): Promise<number | null | undefined> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ family_id: number | null }>(
-    `SELECT family_id FROM patients WHERE id = $1`, [patientId]);
-  return rows[0] ? rows[0].family_id : undefined;
+  return familyIdOfPatientWith(getPool(), patientId);
 }
 
 /** يتحقق من الضامن المريض داخل المعاملة — لا ضامن بملفٍّ غير موجود. */
@@ -33349,6 +33537,50 @@ async function guarantorColumns(
   return { ok: true, values: [guarantor.patientId, null, null], label: rows[0].full_name };
 }
 
+export async function createPatientFamilyInTx(
+  client: DbClient,
+  draft: FamilyDraft,
+  ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure; patientId?: number }> {
+  const ids = draft.members.map((member) => member.patientId);
+  const { rows: locked } = ids.length
+    ? await client.query<{ id: number; full_name: string; family_id: number | null }>(
+      `SELECT id, full_name, family_id FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids])
+    : { rows: [] as { id: number; full_name: string; family_id: number | null }[] };
+  const byId = new Map(locked.map((row) => [row.id, row]));
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row) return { ok: false, reason: "patient_not_found", patientId: id };
+    if (row.family_id !== null) return { ok: false, reason: "already_in_family", patientId: id };
+  }
+  const guarantor = await guarantorColumns(client, draft.guarantor);
+  if (!guarantor.ok) return { ok: false, reason: "guarantor_not_found" };
+  const { rows: [created] } = await client.query<{ id: number }>(
+    `INSERT INTO patient_families (name, guarantor_patient_id, guarantor_name, guarantor_phone, note, created_by)
+     VALUES ($1, $2::int, $3::text, $4::text, $5::text, $6) RETURNING id`,
+    [draft.name, ...guarantor.values, draft.note, ctx.actor],
+  );
+  await insertAuditRow(client, {
+    action: "family.create", entity: "family", entityId: created.id, entityLabel: draft.name,
+    details: {
+      العائلة: created.id, الضامن: guarantorAuditText(draft.guarantor, guarantor.label),
+      الأفراد: draft.members.map((member) => `#${member.patientId}${member.role ? ` (${member.role})` : ""}`),
+    },
+    actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+  });
+  for (const member of draft.members) {
+    await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
+      [member.patientId, created.id, member.role]);
+    await insertAuditRow(client, {
+      action: "family.link", entity: "patient", entityId: member.patientId, entityLabel: byId.get(member.patientId)?.full_name ?? null,
+      details: { العائلة: `${created.id} — ${draft.name}`, الصلة: member.role ?? "—" },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
+  }
+  const family = await readFamilyRecord(client, created.id);
+  return { ok: true, family: family as PatientFamilyRecord };
+}
+
 /**
  * إنشاء عائلة باسمها وضامنها الاختياري وأفرادها الأوّلين — معاملةٌ واحدة: مريضٌ غير موجود أو في
  * عائلةٍ أخرى يُسقط الطلب كله (لا نقل صامت بين العائلات).
@@ -33360,50 +33592,50 @@ export async function createPatientFamily(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const ids = draft.members.map((member) => member.patientId);
-    const { rows: locked } = ids.length
-      ? await client.query<{ id: number; full_name: string; family_id: number | null }>(
-        `SELECT id, full_name, family_id FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [ids])
-      : { rows: [] as { id: number; full_name: string; family_id: number | null }[] };
-    const byId = new Map(locked.map((row) => [row.id, row]));
-    for (const id of ids) {
-      const row = byId.get(id);
-      if (!row) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found", patientId: id }; }
-      if (row.family_id !== null) { await client.query("ROLLBACK"); return { ok: false, reason: "already_in_family", patientId: id }; }
+    const result = await createPatientFamilyInTx(client, draft, ctx);
+    if (!result.ok) {
+      await client.query("ROLLBACK");
+      return result;
     }
-    const guarantor = await guarantorColumns(client, draft.guarantor);
-    if (!guarantor.ok) { await client.query("ROLLBACK"); return { ok: false, reason: "guarantor_not_found" }; }
-    const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO patient_families (name, guarantor_patient_id, guarantor_name, guarantor_phone, note, created_by)
-       VALUES ($1, $2::int, $3::text, $4::text, $5::text, $6) RETURNING id`,
-      [draft.name, ...guarantor.values, draft.note, ctx.actor],
-    );
-    await insertAuditRow(client, {
-      action: "family.create", entity: "family", entityId: created.id, entityLabel: draft.name,
-      details: {
-        العائلة: created.id, الضامن: guarantorAuditText(draft.guarantor, guarantor.label),
-        الأفراد: draft.members.map((member) => `#${member.patientId}${member.role ? ` (${member.role})` : ""}`),
-      },
-      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-    });
-    for (const member of draft.members) {
-      await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
-        [member.patientId, created.id, member.role]);
-      await insertAuditRow(client, {
-        action: "family.link", entity: "patient", entityId: member.patientId, entityLabel: byId.get(member.patientId)?.full_name ?? null,
-        details: { العائلة: `${created.id} — ${draft.name}`, الصلة: member.role ?? "—" },
-        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-      });
-    }
-    const family = await readFamilyRecord(client, created.id);
     await client.query("COMMIT");
-    return { ok: true, family: family as PatientFamilyRecord };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function linkPatientToFamilyInTx(
+  client: DbClient,
+  input: { familyId: number; patientId: number; role: FamilyRole | null },
+  ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  const { rows: [family] } = await client.query<{ name: string }>(
+    `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+  if (!family) return { ok: false, reason: "family_not_found" };
+  const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
+    `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+  if (!patient) return { ok: false, reason: "patient_not_found" };
+  if (patient.family_id !== null && patient.family_id !== input.familyId) {
+    return { ok: false, reason: "already_in_family" };
+  }
+  const unchanged = patient.family_id === input.familyId && (patient.family_role ?? null) === input.role;
+  if (!unchanged) {
+    await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
+      [input.patientId, input.familyId, input.role]);
+    await insertAuditRow(client, {
+      action: "family.link", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
+      details: {
+        العائلة: `${input.familyId} — ${family.name}`, الصلة: input.role ?? "—",
+        ...(patient.family_id === input.familyId ? { الصلة_السابقة: patient.family_role ?? "—" } : {}),
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
+  }
+  const record = await readFamilyRecord(client, input.familyId);
+  return { ok: true, family: record as PatientFamilyRecord };
 }
 
 /**
@@ -33417,38 +33649,41 @@ export async function linkPatientToFamily(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [family] } = await client.query<{ name: string }>(
-      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
-    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
-    const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
-      `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
-    if (!patient) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found" }; }
-    if (patient.family_id !== null && patient.family_id !== input.familyId) {
+    const result = await linkPatientToFamilyInTx(client, input, ctx);
+    if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, reason: "already_in_family" };
+      return result;
     }
-    const unchanged = patient.family_id === input.familyId && (patient.family_role ?? null) === input.role;
-    if (!unchanged) {
-      await client.query(`UPDATE patients SET family_id = $2, family_role = $3::text WHERE id = $1`,
-        [input.patientId, input.familyId, input.role]);
-      await insertAuditRow(client, {
-        action: "family.link", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
-        details: {
-          العائلة: `${input.familyId} — ${family.name}`, الصلة: input.role ?? "—",
-          ...(patient.family_id === input.familyId ? { الصلة_السابقة: patient.family_role ?? "—" } : {}),
-        },
-        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-      });
-    }
-    const record = await readFamilyRecord(client, input.familyId);
     await client.query("COMMIT");
-    return { ok: true, family: record as PatientFamilyRecord };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function unlinkPatientFromFamilyInTx(
+  client: DbClient,
+  input: { familyId: number; patientId: number },
+  ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  const { rows: [family] } = await client.query<{ name: string }>(
+    `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+  if (!family) return { ok: false, reason: "family_not_found" };
+  const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
+    `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+  if (!patient) return { ok: false, reason: "patient_not_found" };
+  if (patient.family_id !== input.familyId) return { ok: false, reason: "not_member" };
+  await client.query(`UPDATE patients SET family_id = NULL, family_role = NULL WHERE id = $1`, [input.patientId]);
+  await insertAuditRow(client, {
+    action: "family.unlink", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
+    details: { العائلة: `${input.familyId} — ${family.name}`, الصلة_السابقة: patient.family_role ?? "—" },
+    actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+  });
+  const record = await readFamilyRecord(client, input.familyId);
+  return { ok: true, family: record as PatientFamilyRecord };
 }
 
 /** فكّ مريضٍ من عائلته. آخر فردٍ يُفكّ تبقى العائلة بعده فارغةً — لا تُحذف. */
@@ -33459,28 +33694,46 @@ export async function unlinkPatientFromFamily(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [family] } = await client.query<{ name: string }>(
-      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
-    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
-    const { rows: [patient] } = await client.query<{ full_name: string; family_id: number | null; family_role: string | null }>(
-      `SELECT full_name, family_id, family_role FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
-    if (!patient) { await client.query("ROLLBACK"); return { ok: false, reason: "patient_not_found" }; }
-    if (patient.family_id !== input.familyId) { await client.query("ROLLBACK"); return { ok: false, reason: "not_member" }; }
-    await client.query(`UPDATE patients SET family_id = NULL, family_role = NULL WHERE id = $1`, [input.patientId]);
-    await insertAuditRow(client, {
-      action: "family.unlink", entity: "patient", entityId: input.patientId, entityLabel: patient.full_name,
-      details: { العائلة: `${input.familyId} — ${family.name}`, الصلة_السابقة: patient.family_role ?? "—" },
-      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-    });
-    const record = await readFamilyRecord(client, input.familyId);
+    const result = await unlinkPatientFromFamilyInTx(client, input, ctx);
+    if (!result.ok) {
+      await client.query("ROLLBACK");
+      return result;
+    }
     await client.query("COMMIT");
-    return { ok: true, family: record as PatientFamilyRecord };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function setFamilyGuarantorInTx(
+  client: DbClient,
+  input: { familyId: number; guarantor: GuarantorDraft },
+  ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  const { rows: [family] } = await client.query<{ name: string }>(
+    `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+  if (!family) return { ok: false, reason: "family_not_found" };
+  const before = await readFamilyRecord(client, input.familyId);
+  const guarantor = await guarantorColumns(client, input.guarantor);
+  if (!guarantor.ok) return { ok: false, reason: "guarantor_not_found" };
+  await client.query(
+    `UPDATE patient_families SET guarantor_patient_id = $2::int, guarantor_name = $3::text, guarantor_phone = $4::text WHERE id = $1`,
+    [input.familyId, ...guarantor.values],
+  );
+  await insertAuditRow(client, {
+    action: "family.guarantor", entity: "family", entityId: input.familyId, entityLabel: family.name,
+    details: {
+      قبل: before ? guarantorAuditText(before.guarantor, before.guarantor.name) : "—",
+      بعد: guarantorAuditText(input.guarantor, guarantor.label),
+    },
+    actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+  });
+  const record = await readFamilyRecord(client, input.familyId);
+  return { ok: true, family: record as PatientFamilyRecord };
 }
 
 /** تعيين الضامن أو تغييره أو إزالته — معلومةٌ لا تمسّ أي مال. */
@@ -33491,33 +33744,44 @@ export async function setFamilyGuarantor(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [family] } = await client.query<{ name: string }>(
-      `SELECT name FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
-    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
-    const before = await readFamilyRecord(client, input.familyId);
-    const guarantor = await guarantorColumns(client, input.guarantor);
-    if (!guarantor.ok) { await client.query("ROLLBACK"); return { ok: false, reason: "guarantor_not_found" }; }
-    await client.query(
-      `UPDATE patient_families SET guarantor_patient_id = $2::int, guarantor_name = $3::text, guarantor_phone = $4::text WHERE id = $1`,
-      [input.familyId, ...guarantor.values],
-    );
-    await insertAuditRow(client, {
-      action: "family.guarantor", entity: "family", entityId: input.familyId, entityLabel: family.name,
-      details: {
-        قبل: before ? guarantorAuditText(before.guarantor, before.guarantor.name) : "—",
-        بعد: guarantorAuditText(input.guarantor, guarantor.label),
-      },
-      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-    });
-    const record = await readFamilyRecord(client, input.familyId);
+    const result = await setFamilyGuarantorInTx(client, input, ctx);
+    if (!result.ok) {
+      await client.query("ROLLBACK");
+      return result;
+    }
     await client.query("COMMIT");
-    return { ok: true, family: record as PatientFamilyRecord };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function updateFamilyDetailsInTx(
+  client: DbClient,
+  input: { familyId: number; name?: string; note?: string | null },
+  ctx: FamilyActor,
+): Promise<{ ok: true; family: PatientFamilyRecord } | { ok: false; reason: FamilyWriteFailure }> {
+  const { rows: [family] } = await client.query<{ name: string; note: string | null }>(
+    `SELECT name, note FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
+  if (!family) return { ok: false, reason: "family_not_found" };
+  const name = input.name ?? family.name;
+  const note = input.note === undefined ? family.note : input.note;
+  if (name !== family.name || note !== family.note) {
+    await client.query(`UPDATE patient_families SET name = $2, note = $3::text WHERE id = $1`, [input.familyId, name, note]);
+    await insertAuditRow(client, {
+      action: "family.rename", entity: "family", entityId: input.familyId, entityLabel: name,
+      details: {
+        ...(name !== family.name ? { الاسم_السابق: family.name, الاسم: name } : {}),
+        ...(note !== family.note ? { الملاحظة_السابقة: family.note ?? "—", الملاحظة: note ?? "—" } : {}),
+      },
+      actor: ctx.actor, actorRole: ctx.actorRole ?? null,
+    });
+  }
+  const record = await readFamilyRecord(client, input.familyId);
+  return { ok: true, family: record as PatientFamilyRecord };
 }
 
 /** تغيير اسم العائلة أو ملاحظتها. */
@@ -33528,31 +33792,36 @@ export async function updateFamilyDetails(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [family] } = await client.query<{ name: string; note: string | null }>(
-      `SELECT name, note FROM patient_families WHERE id = $1 FOR UPDATE`, [input.familyId]);
-    if (!family) { await client.query("ROLLBACK"); return { ok: false, reason: "family_not_found" }; }
-    const name = input.name ?? family.name;
-    const note = input.note === undefined ? family.note : input.note;
-    if (name !== family.name || note !== family.note) {
-      await client.query(`UPDATE patient_families SET name = $2, note = $3::text WHERE id = $1`, [input.familyId, name, note]);
-      await insertAuditRow(client, {
-        action: "family.rename", entity: "family", entityId: input.familyId, entityLabel: name,
-        details: {
-          ...(name !== family.name ? { الاسم_السابق: family.name, الاسم: name } : {}),
-          ...(note !== family.note ? { الملاحظة_السابقة: family.note ?? "—", الملاحظة: note ?? "—" } : {}),
-        },
-        actor: ctx.actor, actorRole: ctx.actorRole ?? null,
-      });
+    const result = await updateFamilyDetailsInTx(client, input, ctx);
+    if (!result.ok) {
+      await client.query("ROLLBACK");
+      return result;
     }
-    const record = await readFamilyRecord(client, input.familyId);
     await client.query("COMMIT");
-    return { ok: true, family: record as PatientFamilyRecord };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function familyMemberBalancesInSnapshot(
+  q: Pick<DbClient, "query">,
+  patientIds: readonly number[],
+): Promise<Map<number, CurrencyBalance[]>> {
+  const client = q as DbClient;
+  const result = new Map<number, CurrencyBalance[]>();
+  for (const patientId of [...new Set(patientIds)]) {
+    const ledger = await patientLedgerInSnapshot(patientId, client);
+    const planCurrencies = await patientPlanCurrencies(patientId, client);
+    const byCurrency = ledgerBalancesByCurrency(patientId, ledger, planCurrencies);
+    result.set(patientId, CURRENCIES
+      .map((currency) => ({ currency, balanceMinor: byCurrency[currency].dueMinor }))
+      .filter((line) => line.balanceMinor !== 0));
+  }
+  return result;
 }
 
 /**
@@ -33580,30 +33849,36 @@ export interface FamilySuggestion {
   matchedBy: { patientId: number | null; fullName: string; role: FamilyRole | null };
 }
 
-/**
- * (التسجيل) عائلاتٌ يطابق جوالُ أحد أفرادها (أو ضامنها من خارج المرضى) الجوالَ المكتوب —
- * اقتراحٌ «ربط بعائلة …» لا ربطٌ تلقائي.
- */
-export async function findFamiliesByPhone(phone: string, limit = 5): Promise<FamilySuggestion[]> {
-  await ensureSchema();
+export async function findFamiliesByPhoneWith(
+  q: Pick<DbClient, "query">,
+  phone: string,
+  clinicianPartyId: number | null = null,
+  limit = 5,
+): Promise<FamilySuggestion[]> {
   const forms = phoneLookupForms(phone);
   if (forms.length === 0) return [];
-  const { rows } = await getPool().query<{
+  const ownCond = DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3");
+  const { rows } = await q.query<{
     family_id: number; name: string; member_count: number; patient_id: number | null; full_name: string; family_role: string | null;
   }>(
     `SELECT DISTINCT ON (f.id) f.id AS family_id, f.name,
-            (SELECT count(*)::int FROM patients m WHERE m.family_id = f.id) AS member_count,
+            (SELECT count(*)::int FROM patients patients WHERE patients.family_id = f.id
+              AND ($3::int IS NULL OR ${ownCond})) AS member_count,
             hit.patient_id, hit.full_name, hit.family_role
        FROM patient_families f
        JOIN LATERAL (
-         SELECT p.id AS patient_id, p.full_name, p.family_role, 0 AS rank FROM patients p
-          WHERE p.family_id = f.id AND (p.phone = ANY($1::text[]) OR p.alt_phone = ANY($1::text[]) OR p.guardian_phone = ANY($1::text[]))
+         SELECT patients.id AS patient_id, patients.full_name, patients.family_role, 0 AS rank FROM patients
+          WHERE patients.family_id = f.id
+            AND ($3::int IS NULL OR ${ownCond})
+            AND (patients.phone = ANY($1::text[]) OR patients.alt_phone = ANY($1::text[]) OR patients.guardian_phone = ANY($1::text[]))
          UNION ALL
-         SELECT NULL::int, f.guarantor_name, NULL::text, 1 WHERE f.guarantor_phone = ANY($1::text[])
+         SELECT NULL::int, f.guarantor_name, NULL::text, 1
+          WHERE f.guarantor_phone = ANY($1::text[])
+            AND ($3::int IS NULL OR EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ${ownCond}))
        ) hit ON TRUE
       ORDER BY f.id DESC, hit.rank, hit.patient_id
       LIMIT $2`,
-    [forms, limit],
+    [forms, limit, clinicianPartyId],
   );
   return rows.map((row) => ({
     familyId: row.family_id, name: row.name, memberCount: row.member_count,
@@ -33611,20 +33886,41 @@ export async function findFamiliesByPhone(phone: string, limit = 5): Promise<Fam
   }));
 }
 
+/**
+ * (التسجيل) عائلاتٌ يطابق جوالُ أحد أفرادها (أو ضامنها من خارج المرضى) الجوالَ المكتوب —
+ * اقتراحٌ «ربط بعائلة …» لا ربطٌ تلقائي.
+ */
+export async function findFamiliesByPhone(phone: string, limit = 5): Promise<FamilySuggestion[]> {
+  await ensureSchema();
+  return findFamiliesByPhoneWith(getPool(), phone, null, limit);
+}
+
+export async function searchPatientFamiliesWith(
+  q: Pick<DbClient, "query">,
+  term: string,
+  clinicianPartyId: number | null = null,
+  limit = 8,
+): Promise<{ id: number; name: string; memberCount: number }[]> {
+  const tokens = searchTokens(term);
+  if (tokens.length === 0) return [];
+  const ownCond = DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2");
+  const parts = tokens.map((_, index) => `(${normalizedSql("f.name")} LIKE $${index + 3} ESCAPE '!'
+      OR EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ($2::int IS NULL OR ${ownCond}) AND ${PATIENT_HAYSTACK_SQL} LIKE $${index + 3} ESCAPE '!'))`);
+  const { rows } = await q.query<{ id: number; name: string; member_count: number }>(
+    `SELECT f.id, f.name,
+            (SELECT count(*)::int FROM patients WHERE patients.family_id = f.id AND ($2::int IS NULL OR ${ownCond})) AS member_count
+       FROM patient_families f
+      WHERE ($2::int IS NULL OR EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ${ownCond}))
+        AND ${parts.join(" AND ")}
+      ORDER BY f.name, f.id
+      LIMIT $1`,
+    [limit, clinicianPartyId, ...tokens.map(likeContains)],
+  );
+  return rows.map((row) => ({ id: row.id, name: row.name, memberCount: row.member_count }));
+}
+
 /** بحثٌ عن عائلة باسمها أو باسم/جوال أحد أفرادها — لربط مريضٍ بعائلةٍ قائمة. */
 export async function searchPatientFamilies(term: string, limit = 8): Promise<{ id: number; name: string; memberCount: number }[]> {
   await ensureSchema();
-  const tokens = searchTokens(term);
-  if (tokens.length === 0) return [];
-  const parts = tokens.map((_, index) => `(${normalizedSql("f.name")} LIKE $${index + 2} ESCAPE '!'
-      OR EXISTS (SELECT 1 FROM patients WHERE patients.family_id = f.id AND ${PATIENT_HAYSTACK_SQL} LIKE $${index + 2} ESCAPE '!'))`);
-  const { rows } = await getPool().query<{ id: number; name: string; member_count: number }>(
-    `SELECT f.id, f.name, (SELECT count(*)::int FROM patients m WHERE m.family_id = f.id) AS member_count
-       FROM patient_families f
-      WHERE ${parts.join(" AND ")}
-      ORDER BY f.name, f.id
-      LIMIT $1`,
-    [limit, ...tokens.map(likeContains)],
-  );
-  return rows.map((row) => ({ id: row.id, name: row.name, memberCount: row.member_count }));
+  return searchPatientFamiliesWith(getPool(), term, null, limit);
 }

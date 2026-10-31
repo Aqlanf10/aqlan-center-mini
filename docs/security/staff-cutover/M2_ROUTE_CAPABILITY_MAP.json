@@ -121,7 +121,7 @@
     ],
     "anyOf": [],
     "scope": "appointment",
-    "status": "existing",
+    "status": "canonical-done",
     "note": "M2 slice 17: arrive, reminded, cancel, no_show, close_done and close_no_show are canonical (appointments.edit plus the branch capability; the appointment row locked then checked against the appointment scope, outside = missing 404; domain writers and status log on the admitted transaction; appointment.update audit atomic; the canonical response carries waiting: null). M2 slice 18: reschedule is canonical through the same cross-day capacity engine on the admitted transaction (reason required; own scope keeps its own party; reschedule and override audit atomic). Capacity override additionally requires appointments.override-capacity.",
     "branches": {
       "discriminator": "action",
@@ -824,8 +824,8 @@
     "need": [],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/families",
@@ -839,8 +839,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/families/[id]",
@@ -853,8 +853,8 @@
     "need": [],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/families/[id]",
@@ -868,8 +868,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/families/[id]/guarantor",
@@ -883,8 +883,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/families/[id]/members",
@@ -898,8 +898,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/families/[id]/members/[patientId]",
@@ -913,8 +913,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/finance/commission-overrides",
@@ -2672,8 +2672,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/opening-balances",
@@ -2687,8 +2687,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/opening-balances",
@@ -2702,8 +2702,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/opening-balances/access",
@@ -3092,8 +3092,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "canViewFinancialReports(role) with accountant viewSuppliers check; canEdit was role === 'admin'.",
+      "groups": {
+        "openings": "payables, adjustments, advances, and active lab/supplier parties ? finance.opening-balances.manage",
+        "canEdit": "canEdit boolean ? finance.opening-balances.manage"
+      }
+    }
   },
   {
     "route": "/api/party-openings",
@@ -3106,8 +3113,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "",
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
     "branches": {
       "discriminator": "action",
       "values": {
@@ -3133,8 +3140,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients",
@@ -3436,8 +3443,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/debt-repayments",
@@ -3451,7 +3458,7 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Arrangement creation and collection both move money obligations; collection also requires an open cashier shift."
   },
   {
@@ -3466,7 +3473,7 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Requires an open cashier shift (unchanged rule)."
   },
   {
@@ -3650,8 +3657,8 @@
     "need": [],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/historical-documents",
@@ -3664,8 +3671,15 @@
     "need": [],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "admin/reception or doctor with canViewPatientPayments on own patient; correctionAvailable required admin.",
+      "groups": {
+        "documents": "historical treatment documents, revisions, and opening-balance lineage ? finance.patient-ledger.view or patients.history.record inside patient scope; otherwise empty list []",
+        "correctionAvailable": "correctionAvailable flag ? patients.history.correct and opening.owned"
+      }
+    }
   },
   {
     "route": "/api/patients/[id]/historical-documents",
@@ -3679,8 +3693,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/historical-documents/[documentId]/correct",
@@ -3693,8 +3707,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/historical-documents/preview",
@@ -3708,8 +3722,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/intake-history",
@@ -3767,8 +3781,16 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "canViewMoney(role) or doctor with canViewPatientPayments on own patient; receiptRemaining for admin only; openingAccess and legacyArrangementAccess by role/settings.",
+      "groups": {
+        "ledger": "invoices, payments, openings, balances, plans, receiptProvenance, legacyBalanceArrangements, legacyOpeningPositions, installmentRecovery ? finance.patient-ledger.view inside patient scope",
+        "receiptRemaining": "per-receipt unreversed remainder map ? finance.payments.void or finance.payments.refund; omitted otherwise",
+        "accessFlags": "openingAccess from finance.opening-balances.manage; legacyArrangementAccess.manage from finance.legacy.record"
+      }
+    }
   },
   {
     "route": "/api/patients/[id]/legacy",
@@ -3781,8 +3803,8 @@
     "need": [],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/legacy-balance-arrangement",
@@ -3799,8 +3821,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/legacy-balance-arrangement",
@@ -3814,8 +3836,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/legacy-balance-arrangement",
@@ -3829,8 +3851,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/legacy-onboarding",
@@ -3843,8 +3865,15 @@
     "need": [],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "patient access gate; financialReference and non-baseline steps required admin/reception or owning doctor with canViewPlans !== false.",
+      "groups": {
+        "baseline": "caseId and baseline onboarding classification ? read:patients.record inside patient scope",
+        "financialReference": "financialReference sources and full onboarding steps ? clinical.plans.view or finance.patient-ledger.view; restricted otherwise"
+      }
+    }
   },
   {
     "route": "/api/patients/[id]/legacy-treatments",
@@ -3857,8 +3886,15 @@
     "need": [],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "admin/reception or doctor with canViewPatientPayments on own patient; access flags derived from role and reception opening-balance setting.",
+      "groups": {
+        "agreements": "standalone historical treatment agreements ? finance.patient-ledger.view or finance.legacy.record inside patient scope; otherwise []",
+        "access": "access.add from finance.legacy.record, access.edit from finance.opening-balances.manage, access.void from finance.legacy.void"
+      }
+    }
   },
   {
     "route": "/api/patients/[id]/legacy-treatments",
@@ -3872,8 +3908,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/legacy-treatments/[agreementId]/void",
@@ -3886,8 +3922,14 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "isAdmin(session.role) gated both ordinary and manager_authorized void impact previews.",
+      "groups": {
+        "preview": "void financial impact preview and fingerprint token ? finance.legacy.void inside patient scope"
+      }
+    }
   },
   {
     "route": "/api/patients/[id]/legacy-treatments/[agreementId]/void",
@@ -3900,8 +3942,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/legacy-treatments/preview",
@@ -3915,8 +3957,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/materials",
@@ -4193,8 +4235,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/responsibility",
@@ -4207,8 +4249,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/patients/[id]/return-booking-context",
@@ -4238,8 +4280,14 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "canViewMoney(role) and financeAccess.viewPatientLedger for cashier/accountant.",
+      "groups": {
+        "statement": "assembled patient account statement document from single RR snapshot ? finance.patient-ledger.view inside patient scope"
+      }
+    }
   },
   {
     "route": "/api/patients/[id]/timeline",
@@ -4278,8 +4326,14 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "canViewMoney(role) and financeAccess.viewPatientLedger for cashier/accountant.",
+      "groups": {
+        "references": "projected treatment financial lineage across plans, items, invoices, receipts, agreements, historical documents, and openings ? finance.patient-ledger.view inside patient scope"
+      }
+    }
   },
   {
     "route": "/api/patients/[id]/vitals",
@@ -6346,8 +6400,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/visits/[id]/clinical",
@@ -6442,8 +6496,14 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission.",
+    "projection": {
+      "legacy": "clinical visit patient/date gate with redactVisitFinancialContext(result, canViewMoney(session.role)).",
+      "groups": {
+        "context": "visit work-source financial context projected via redactVisitFinancialContext(result, scope.granted('finance.invoices.view')) inside patient scope"
+      }
+    }
   },
   {
     "route": "/api/visits/[id]/lab-work-command",
@@ -6534,8 +6594,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 36: canonical patient finance, family, historical agreement, debt repayment, and opening-balance admission."
   },
   {
     "route": "/api/visits/readiness",

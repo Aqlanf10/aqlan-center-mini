@@ -66,7 +66,16 @@ async function toHandoff(row: HandoffRow, walkout?: VisitWalkout | null): Promis
 /** Also serves the exact-visit checkout, including signatures outside today's window. */
 export async function readReceptionHandoff(visitId: number, walkout: VisitWalkout): Promise<ReceptionHandoff | null> {
   await ensureSchema();
-  const { rows: [row] } = await getPool().query<HandoffRow>(
+  return readReceptionHandoffWith(getPool(), visitId, walkout);
+}
+
+/** Snapshot-safe variant over a caller-owned query facade (no ensureSchema, no extra pool lease). */
+export async function readReceptionHandoffWith(
+  q: Pick<DbClient, "query">,
+  visitId: number,
+  walkout: VisitWalkout,
+): Promise<ReceptionHandoff | null> {
+  const { rows: [row] } = await q.query<HandoffRow>(
     `${HANDOFF_SELECT} WHERE v.id = $1 AND v.signed_at IS NOT NULL`, [visitId]);
   // A concurrent change cannot attach a different patient's/signature's decision
   // to a walkout payload already read by the caller.

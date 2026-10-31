@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { visitWalkoutCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { CLINIC_TIME_ZONE, getVisitOwner } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { readVisitCheckout } from "@/lib/checkout-db";
 import { authorizeVisit } from "@/lib/operational-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canSeeWalkout } from "@/lib/walkout-access";
 import { canReadReceptionHandoff } from "@/lib/reception-handoff";
 import { readReceptionHandoff } from "@/lib/reception-handoff-db";
@@ -16,6 +19,13 @@ export const dynamic = "force-dynamic";
  * بالخطة)، وفاتورتها، وسندات يومها، والرصيد بكل عملة، والموعد القادم.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    return visitWalkoutCanonicalResponse(selected.handle, (await context.params).id);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

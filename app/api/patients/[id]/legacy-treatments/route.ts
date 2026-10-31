@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  createLegacyTreatmentCanonicalResponse,
+  listLegacyTreatmentsCanonicalResponse,
+} from "@/lib/canonical-patient-finance-history";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, getSettings } from "@/lib/db";
@@ -8,6 +13,7 @@ import { openingBalanceAccess } from "@/lib/opening-access";
 import { canAccessPatient } from "@/lib/patient-access";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { effectiveTemplates } from "@/lib/specialty-templates";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 
@@ -25,6 +31,9 @@ function patientIdOf(raw: string): number | null {
  * مرضاه (كحساب المريض). الصندوق والمحاسبة لا يبلغون مسارات ملف المريض من الباب أصلًا.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return listLegacyTreatmentsCanonicalResponse(selected.handle, (await context.params).id);
   const session = await requireSession();
   if (!session) return denied();
   const patientId = patientIdOf((await context.params).id);
@@ -53,6 +62,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * الصلاحية صلاحية إضافة الرصيد السابق نفسها (المدير، والاستقبال إن فعّلها الإعداد) — قبل قراءة الطلب.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return createLegacyTreatmentCanonicalResponse(selected.handle, request, (await context.params).id);
   const session = await requireSession();
   if (!session) return denied();
   const settings = await getSettings().catch(() => null);

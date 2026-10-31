@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { getDebtRepaymentsCanonicalResponse, saveDebtRepaymentCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
@@ -10,12 +13,18 @@ export const dynamic="force-dynamic";
 type Context={params:Promise<{id:string}>};
 const denial=(status:number)=>NextResponse.json({message:status===401?"سجّل الدخول من جديد.":"إدارة ترتيب السداد للإدارة والاستقبال."},{status});
 export async function GET(_request:Request,context:Context){
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return getDebtRepaymentsCanonicalResponse(selected.handle, (await context.params).id);
   const session=await requireSession();if(!session)return denial(401);if(!["admin","reception"].includes(session.role))return denial(403);
   const patientId=Number((await context.params).id);if(!Number.isSafeInteger(patientId)||patientId<=0)return NextResponse.json({message:"رقم المريض غير صالح."},{status:400});
   try{return NextResponse.json(await debtRepaymentWorkspace(patientId,clinicDateString(new Date(),CLINIC_TIME_ZONE)),{headers:{"Cache-Control":"no-store"}});}
   catch{return NextResponse.json({message:"تعذّر قراءة ترتيب السداد؛ حدّث الحساب."},{status:500});}
 }
 export async function POST(request:Request,context:Context){
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return saveDebtRepaymentCanonicalResponse(selected.handle, request, (await context.params).id);
   const session=await requireSession();if(!session)return denial(401);if(!["admin","reception"].includes(session.role))return denial(403);
   const patientId=Number((await context.params).id);
   try{

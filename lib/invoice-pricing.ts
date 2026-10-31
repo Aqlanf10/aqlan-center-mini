@@ -10,7 +10,7 @@
  *  - الخصم على الفاتورة: بسببٍ مكتوب دائمًا، ولغير المدير حتى الحد نفسه من إجمالي البنود.
  * البند اليدوي بلا خدمة يبقى حرًّا — سعرٌ يُكتب لا يُقارن بشيء (ويُدقَّق في invoice.create).
  */
-import { decideProcedurePrice, type PriceOverrideKind } from "./price-authority";
+import { decideCanonicalProcedurePrice, decideProcedurePrice, type CanonicalPriceCapabilities, type PriceOverrideKind } from "./price-authority";
 import { type ForeignRates, type PricedService } from "./service-pricing";
 import { CLINIC_BASE_CURRENCY, type Currency } from "./money";
 import { invoiceCatalogPrice } from "./invoice-catalog-price";
@@ -38,7 +38,7 @@ export interface InvoicePriceOverride {
 
 export type InvoiceAuthorityDecision =
   | { ok: true; overrides: InvoicePriceOverride[]; discount: null | { percent: number; reason: string } }
-  | { ok: false; message: string };
+  | { ok: false; message: string; forbidden?: boolean };
 
 export function checkInvoiceAuthority(input: {
   lines: readonly InvoiceLineAuthorityInput[];
@@ -51,6 +51,8 @@ export function checkInvoiceAuthority(input: {
   discountReason: string | null;
   /** Invoice catalogue commands only. Plans/visits keep their existing policy. */
   requireInvoiceManualReason?: boolean;
+  /** Canonical capability proof when called from a canonical route/operation. */
+  capabilities?: CanonicalPriceCapabilities;
 }): InvoiceAuthorityDecision {
   const overrides: InvoicePriceOverride[] = [];
   /* مرجع الحد المجمَّع: كل بندٍ بسعر دليله المقرَّر إن كان له، وإلا بسعره المكتوب — فخصم
@@ -73,22 +75,40 @@ export function checkInvoiceAuthority(input: {
     }
     // An explicit native zero is a configured price, never an unpriced offer.
     if (input.requireInvoiceManualReason && priced.minor === 0 && line.requestedMinor > 0) {
-      if (input.role !== "admin") return { ok: false, message: `سعر «${line.description}» أعلى من سعر الدليل — رفع السعر للمدير وحده.` };
+      if (input.capabilities ? !input.capabilities.canIncreasePrice : input.role !== "admin") {
+        return {
+          ok: false,
+          ...(input.capabilities ? { forbidden: true } : {}),
+          message: input.capabilities
+            ? `سعر «${line.description}» أعلى من سعر الدليل — رفع السعر غير مفعّل لحسابك.`
+            : `سعر «${line.description}» أعلى من سعر الدليل — رفع السعر للمدير وحده.`,
+        };
+      }
       if ((line.reason?.trim().length ?? 0) < 3) return { ok: false, message: `اكتب سبب تغيير سعر «${line.description}» عن سعر الدليل.` };
       overrides.push({ description: line.description, kind: "increase", catalogMinor: 0, requestedMinor: line.requestedMinor,
         discountPercent: null, reason: line.reason!.trim().slice(0, 300) });
       referenceMinor += quantity * line.requestedMinor;
       continue;
     }
-    const decision = decideProcedurePrice({
-      serviceName: line.description,
-      catalogMinor: priced.minor ?? 0,
-      priceConfigured: configured,
-      requestedMinor: line.requestedMinor,
-      role: input.role,
-      reason: line.reason,
-      maxDiscountPercent: input.maxDiscountPercent,
-    });
+    const decision = input.capabilities
+      ? decideCanonicalProcedurePrice({
+          serviceName: line.description,
+          catalogMinor: priced.minor ?? 0,
+          priceConfigured: configured,
+          requestedMinor: line.requestedMinor,
+          capabilities: input.capabilities,
+          reason: line.reason,
+          maxDiscountPercent: input.maxDiscountPercent,
+        })
+      : decideProcedurePrice({
+          serviceName: line.description,
+          catalogMinor: priced.minor ?? 0,
+          priceConfigured: configured,
+          requestedMinor: line.requestedMinor,
+          role: input.role,
+          reason: line.reason,
+          maxDiscountPercent: input.maxDiscountPercent,
+        });
     if (!decision.ok) return decision;
     if (decision.override) overrides.push({ description: line.description, ...decision.override });
     const catalogUnit = configured && (priced.minor ?? 0) > 0 ? priced.minor! : Math.max(0, line.requestedMinor);
@@ -96,23 +116,29 @@ export function checkInvoiceAuthority(input: {
   }
 
   if (input.discountMinor <= 0) return { ok: true, overrides, discount: null };
+  if (input.capabilities && !input.capabilities.canApplyDiscount && !input.capabilities.canOverrideDiscount) {
+    return { ok: false, forbidden: true, message: "تطبيق الخصم على الفاتورة غير مفعّل لحسابك." };
+  }
   const reason = input.discountReason?.trim() ?? "";
   if (reason.length < 3) return { ok: false, message: "اكتب سبب الخصم على الفاتورة." };
   const total = Math.max(0, input.totalMinor);
   const percent = total > 0 ? Math.round((Math.min(input.discountMinor, total) / total) * 1000) / 10 : 100;
   const limit = Math.max(0, Number.isFinite(input.maxDiscountPercent) ? input.maxDiscountPercent : 0);
-  if (input.role !== "admin" && percent > limit) {
+  const canOverride = input.capabilities ? input.capabilities.canOverrideDiscount : input.role === "admin";
+  if (!canOverride && percent > limit) {
     return {
       ok: false,
+      ...(input.capabilities ? { forbidden: true } : {}),
       message: `الخصم على الفاتورة ${percent}٪ يتجاوز الحد المسموح (${limit}٪) — يحتاج موافقة المدير.`,
     };
   }
   /* خصم البنود عن الدليل + خصم الفاتورة معًا لا يتجاوزان الحد (لغير المدير). */
   const net = Math.max(0, total - Math.min(input.discountMinor, total));
   const combined = referenceMinor > 0 ? Math.round(((referenceMinor - net) / referenceMinor) * 1000) / 10 : 0;
-  if (input.role !== "admin" && combined > limit) {
+  if (!canOverride && combined > limit) {
     return {
       ok: false,
+      ...(input.capabilities ? { forbidden: true } : {}),
       message: `مجموع الخصم (على أسعار البنود والفاتورة معًا) ${combined}٪ يتجاوز الحد المسموح (${limit}٪) — يحتاج موافقة المدير.`,
     };
   }

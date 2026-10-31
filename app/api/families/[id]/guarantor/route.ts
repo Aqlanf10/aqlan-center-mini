@@ -1,7 +1,11 @@
+import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { setFamilyGuarantorCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { setFamilyGuarantor } from "@/lib/db";
 import { idOf, json, readBody } from "@/lib/case-route";
 import { familyFailure, familyResponse, familyWriter } from "@/lib/family-route";
 import { parseGuarantor } from "@/lib/patient-families";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +14,9 @@ export const dynamic = "force-dynamic";
  * دفتر أي فرد (قرار المالك).
  */
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return setFamilyGuarantorCanonicalResponse(selected.handle, request, (await params).id);
   const guard = await familyWriter();
   if (!guard.ok) return guard.response;
   const familyId = idOf((await params).id);

@@ -84,6 +84,18 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:appointments.availability": Object.freeze({ record: "appointment", need: Object.freeze([]), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]/number: patient number snapshot inside patient scope (M2 slice 35). */
   "read:patients.number": Object.freeze({ record: "patient", need: Object.freeze(["patients.number.manage"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/ledger, /statement, /treatment-financial-context, /debt-repayments, /legacy-balance-arrangement (M2 slice 36). */
+  "read:patients.ledger": Object.freeze({ record: "patient", need: Object.freeze(["finance.patient-ledger.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/responsibility (M2 slice 36). */
+  "read:patients.responsibility": Object.freeze({ record: "patient", need: Object.freeze(["finance.patient-ledger.manage"] as const), anyOf: Object.freeze([]) }),
+  /** POST /api/patients/[id]/historical-documents/preview (read-only snapshot, M2 slice 36). */
+  "read:patients.history-preview": Object.freeze({ record: "patient", need: Object.freeze(["patients.history.record"] as const), anyOf: Object.freeze([]) }),
+  /** POST /api/patients/[id]/legacy-treatments/preview (read-only snapshot, M2 slice 36). */
+  "read:patients.legacy-preview": Object.freeze({ record: "patient", need: Object.freeze(["finance.legacy.record"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/legacy-treatments/[agreementId]/void (M2 slice 36). */
+  "read:patients.legacy-void": Object.freeze({ record: "patient", need: Object.freeze(["finance.legacy.void"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/visits/[id]/walkout, /billing-preview, /financial-context (M2 slice 36). */
+  "read:visits.invoices": Object.freeze({ record: "patient", need: Object.freeze(["finance.invoices.view"] as const), anyOf: Object.freeze([]) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

@@ -1,6 +1,8 @@
 import { PATIENT_STATEMENT_TYPES, type PatientStatementType } from "./patient-statement-document";
 
-export class StatementInputError extends Error {}
+export class StatementInputError extends Error {
+  readonly code = "statement_input_invalid";
+}
 export interface PatientStatementOptions {
   type: PatientStatementType;
   from?: string;

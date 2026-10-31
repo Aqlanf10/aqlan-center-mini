@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { visitFinancialContextCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canAccessPatient } from "@/lib/patient-access";
 import { canViewMoney } from "@/lib/roles";
 import { getClinicalVisit, CLINIC_TIME_ZONE } from "@/lib/db";
@@ -10,6 +13,9 @@ import { redactVisitFinancialContext } from "@/lib/visit-financial-context";
 export const dynamic = "force-dynamic";
 /** Same patient/date gates as clinical GET; this read grants no command permissions. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return visitFinancialContextCanonicalResponse(selected.handle, (await context.params).id);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
   const id = Number((await context.params).id);

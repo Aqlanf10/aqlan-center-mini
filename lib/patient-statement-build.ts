@@ -1,6 +1,6 @@
-import type { TreatmentPlan } from "./db";
+import type { DbClient, TreatmentPlan } from "./db";
 import type { Patient } from "./patient";
-import { CLINIC_TIME_ZONE, getPatient, getSettingsSafe, ledgerBalancesByCurrency, patientStatementSnapshot } from "./db";
+import { CLINIC_TIME_ZONE, getPatient, getPatientWith, getSettingsSafe, getSettingsWith, ledgerBalancesByCurrency, patientStatementSnapshot, patientStatementSnapshotInSnapshot } from "./db";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "./money";
 import { clinicDateString } from "./schedule";
 import { historicalOpeningBuckets } from "./statement-historical-details";
@@ -178,6 +178,43 @@ export function assemblePatientStatement(patient: Pick<Patient, "fullName" | "pa
     if (buckets.some(bucket => bucket.agreements.length)) notices.push("تفاصيل العلاج السابق تفسّر الرصيد السابق؛ لا تضيف مديونية جديدة ولا تُعد الدفعات التاريخية تحصيلًا جديدًا.");
   }
   return document;
+}
+
+export async function loadPatientStatementDocumentInSnapshot(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+  options: PatientStatementOptions,
+) {
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const patient = await getPatientWith(q, patientId);
+  if (!patient) return null;
+  const settings = await getSettingsWith(q);
+  const snapshot = await patientStatementSnapshotInSnapshot(q, patientId, today, {
+    historicalAgreements: options.type !== "period",
+    patientFacing: true,
+  });
+  if (!snapshot.statementEvidence) throw new StatementProjectionError();
+  const projected = projectPatientStatement({
+    patientId,
+    ledger: snapshot.ledger,
+    planCurrencies: snapshot.planCurrencies,
+    evidence: snapshot.statementEvidence,
+  }, options);
+  if (
+    options.type !== "period"
+    && JSON.stringify(projected.balances) !== JSON.stringify(ledgerBalancesByCurrency(patientId, snapshot.ledger, snapshot.planCurrencies))
+  ) {
+    throw new StatementProjectionError();
+  }
+  return assemblePatientStatement(
+    patient,
+    settings,
+    snapshot,
+    projected,
+    options,
+    new Intl.DateTimeFormat("ar-YE", { timeZone: CLINIC_TIME_ZONE, dateStyle: "medium", timeStyle: "short" }).format(new Date()),
+    today,
+  );
 }
 
 export async function loadPatientStatementDocument(patientId: number, options: PatientStatementOptions) {

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { statementCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canViewMoney } from "@/lib/roles";
 import { financeAccessFor } from "@/lib/finance-permissions";
 import { loadPatientStatementDocument } from "@/lib/patient-statement-build";
@@ -8,6 +10,9 @@ import { parsePatientStatementOptions, StatementInputError } from "@/lib/patient
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store", "Vary": "Cookie", "X-Content-Type-Options": "nosniff" };
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
+  if (selected.kind === "canonical") return statementCanonicalResponse(selected.handle, request, (await context.params).id);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
   if (!canViewMoney(session.role) || ((session.role === "cashier" || session.role === "accountant")

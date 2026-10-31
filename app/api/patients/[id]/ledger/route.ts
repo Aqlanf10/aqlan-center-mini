@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { ledgerCanonicalResponse } from "@/lib/canonical-patient-finance-history";
 import {
   getSettings, listPatientPlans, patientLedger, patientReceiptRemainders, patientReversedInstallmentRecoveries,
 } from "@/lib/db";
@@ -11,6 +13,7 @@ import { canViewMoney } from "@/lib/roles";
 import { CLINIC_TIME_ZONE, openingMinorsOf } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canAccessPatient } from "@/lib/patient-access";
 import { listLegacyBalanceArrangements, listLegacyOpeningPositions } from "@/lib/legacy-balance-arrangements-db";
 import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
@@ -19,6 +22,13 @@ export const dynamic = "force-dynamic";
 
 /** حساب المريض: فواتيره ودفعاته ورصيده — الرقم الذي يُسأل عنه على الباب. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    return ledgerCanonicalResponse(selected.handle, (await context.params).id);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
