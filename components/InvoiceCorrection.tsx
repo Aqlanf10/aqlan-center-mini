@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 import { invoiceCurrencyReadiness } from "@/lib/invoice-currency-readiness";
 import { clinicDateString } from "@/lib/schedule";
@@ -54,7 +54,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
   // Only YER -> SAR reads the same numerals in SAR; any other direction needs amounts typed in the target currency.
   const retypeAmounts=changingCurrency&&!(view?.invoice.baseCurrency==="YER"&&currency==="SAR");
   const settledMinor=changingCurrency?currencyOption?.settledMinor??0:view?.settledMinor??0;
-  const preview=useMemo(()=>{
+  const preview=(()=>{
     if(!view)return null;const lines=[];let total=0;
     for(const item of view.invoice.items){const draft=drafts[item.id];if(!draft?.keep)continue;
       const quantity=Number(draft.quantity),unitPriceMinor=parseAmount(draft.price,currency);
@@ -74,7 +74,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
     const discountMinor=parseAmount(discount,currency);if(!lines.length||discountMinor===null||discountMinor>total)return null;
     const after=total-discountMinor,remaining=Math.max(0,after-settledMinor);
     return {lines,total,discountMinor,after,remaining,credit:Math.max(0,settledMinor-after),before:view.invoice.totalMinor-view.invoice.discountMinor};
-  },[view,drafts,discount,currency,settledMinor]);
+  })();
   const allowed=financialRecovery.ready&&session?.role==="admin";
   const currencyOptions=invoiceCurrencyReadiness({sourceCurrency:view?.invoice.baseCurrency,
     preview:recovery?"recovery":view?"ready":error?"unavailable":"loading",correction:view?.currencyCorrection});

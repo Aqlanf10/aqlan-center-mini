@@ -4,7 +4,7 @@ import { ClinicalVisit } from "../components/ClinicalVisit";
 import { normalizeSurfaces } from "../lib/dental";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
 
-// SOURCE-ONLY ownership regressions: not executed. Synthetic retained component owner changes. No routes,
+// Synthetic retained component owner changes. No routes,
 // database/bootstrap modules, credentials, browser, or actual network are used.
 // All peripheral components are stubbed. Actual ClinicalVisit handlers
 // and state/effects run in the reviewed lightweight hook-harness style.
@@ -20,7 +20,11 @@ vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   const slot = (initial: unknown) => {
     const index = hooks.cursor++;
-    if (!(index in hooks.values)) hooks.values[index] = initial;
+    if (!(index in hooks.values)) {
+      // Render identities must remain immutable even while effects retire them.
+      hooks.values[index] = initial && typeof initial === "object" && "key" in initial
+        ? Object.freeze(initial) : initial;
+    }
     return index;
   };
   const same = (a?: readonly unknown[], b?: readonly unknown[]) =>
@@ -29,11 +33,14 @@ vi.mock("react", async (original) => {
     ...react,
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
-      return [hooks.values[index], (value: unknown) => {
+      // React guarantees a stable state setter across renders.
+      const setter = hooks.memos.get(index)?.value ?? ((value: unknown) => {
         const next = typeof value === "function" ? value(hooks.values[index]) : value;
         if (!Object.is(next, hooks.values[index])) hooks.changed = true;
-        hooks.values[index] = next;
-      }];
+        hooks.values[index] = next && typeof next === "object" && "key" in next ? Object.freeze(next) : next;
+      });
+      hooks.memos.set(index, { value: setter });
+      return [hooks.values[index], setter];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
     useCallback: (callback: unknown, deps?: readonly unknown[]) => {

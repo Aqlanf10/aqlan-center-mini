@@ -153,7 +153,7 @@ export default function UsersAndDoctorsPage() {
     }
   }, []);
 
-  const handleAddSpecialRate = (override?: {
+  const handleAddSpecialRate = useCallback((override?: {
     name: string;
     percent: number;
     category?: string;
@@ -205,7 +205,7 @@ export default function UsersAndDoctorsPage() {
 
     // Reset input fields
     setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
-  };
+  }, [newSpecialRate, setEditForm, setNewSpecialRate]);
 
   const handleRemoveSpecialRate = (rateId: string, serviceName: string, serviceId?: number) => {
     setEditForm((c) => {

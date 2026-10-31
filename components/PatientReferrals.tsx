@@ -64,7 +64,7 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
   /** (REF-1) مواعيد المريض القادمة — «حجز الإحالة» يربط أحدها بالإحالة. */
   appointments?: Pick<Appointment, "id" | "scheduledDate" | "scheduledTime" | "status" | "doctorId" | "doctorName">[];
 }) {
-  const owner = useMemo(createReferralOwner, [patientId, canIssue]);
+  const owner = useMemo(() => createReferralOwner(), [patientId, canIssue]);
   useLayoutEffect(() => { owner.activate(); return owner.retire; }, [owner]);
   const [context, setContext] = useState(owner);
   const [items, setItems] = useState<Referral[]>([]);

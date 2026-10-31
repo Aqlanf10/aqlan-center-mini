@@ -1,12 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-type Slot={value?:unknown;deps?:unknown[];cleanup?:()=>void};type Frame={slots:Slot[];cursor:number;effects:(()=>void)[]};
+type Slot={value?:unknown;deps?:unknown[];cleanup?:()=>void};type Frame={slots:Slot[];cursor:number;effects:(()=>void)[];layouts:(()=>void)[]};
 const runtime=vi.hoisted(()=>({frame:null as Frame|null}));
 vi.mock("react",async original=>{const react=await original<typeof import("react")>();const slot=()=>{const f=runtime.frame!,i=f.cursor++;return f.slots[i]??(f.slots[i]={});};return{...react,
  useContext:()=>null,
  useState:(initial:unknown)=>{const s=slot();if(!("value" in s))s.value=typeof initial==="function"?initial():initial;return[s.value,(next:unknown)=>{s.value=typeof next==="function"?next(s.value):next;}];},
  useRef:(initial:unknown)=>{const s=slot();if(!s.value)s.value={current:initial};return s.value;},
  useEffect:(fn:()=>void|(()=>void),deps?:unknown[])=>{const s=slot();if(!s.deps||!deps||deps.some((v,i)=>!Object.is(v,s.deps![i]))){s.deps=deps;runtime.frame!.effects.push(()=>{s.cleanup?.();s.cleanup=fn()||undefined;});}},
+ useLayoutEffect:(fn:()=>void|(()=>void),deps?:unknown[])=>{const s=slot();if(!s.deps||!deps||deps.some((v,i)=>!Object.is(v,s.deps![i]))){s.deps=deps;runtime.frame!.layouts.push(()=>{s.cleanup?.();s.cleanup=fn()||undefined;});}},
 };});
 import {useLeadershipRead} from "../components/leadership/useLeadershipRead";
 import {MetricCard,LeadershipOverview} from "../components/leadership/LeadershipOverview";
@@ -15,8 +16,8 @@ const turns=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
 // The test scheduler is outside the pure hook-bearing harness; no production hook rules are disabled.
 function ReadHarness({url}:{url:string}) { return useLeadershipRead(url,v=>typeof v==="string"?v:null); }
 function mount(){
- const frame:Frame={slots:[],cursor:0,effects:[]};let url="/synthetic/first";
- const render=()=>{runtime.frame=frame;frame.cursor=0;const read=ReadHarness({url});frame.effects.splice(0).forEach(f=>f());return read;};
+ const frame:Frame={slots:[],cursor:0,effects:[],layouts:[]};let url="/synthetic/first";
+ const render=()=>{runtime.frame=frame;frame.cursor=0;const read=ReadHarness({url});frame.layouts.splice(0).forEach(f=>f());frame.effects.splice(0).forEach(f=>f());return read;};
  render();return{render,choose:(next:string)=>{url=next;},unmount:()=>frame.slots.forEach(s=>s.cleanup?.())};
 }
 beforeEach(()=>{vi.useFakeTimers();listeners.clear();vi.stubGlobal("window",{addEventListener:(k:string,fn:()=>void)=>listeners.set(k,fn),removeEventListener:(k:string)=>listeners.delete(k)});vi.stubGlobal("document",{visibilityState:"visible",addEventListener:(k:string,fn:()=>void)=>listeners.set(k,fn),removeEventListener:(k:string)=>listeners.delete(k)});});
@@ -42,8 +43,8 @@ it("refreshes server-today after midnight, retains manually selected/paged cohor
    items:Array.from({length:page===0?10:1},(_,i)=>({id:page*10+i+1,title:"Synthetic arrival",status:"waiting",patientId:null,eventAt:`${day}T09:00:00Z`,doctorName:null,assignee:null,dueAt:null,latestAction:null}))});
  });
  vi.stubGlobal("fetch",fetch);
- const frame:Frame={slots:[],cursor:0,effects:[]};
- const render=()=>{runtime.frame=frame;frame.cursor=0;const tree=LeadershipOverview({onSection:()=>{}});frame.effects.splice(0).forEach(effect=>effect());return tree;};
+ const frame:Frame={slots:[],cursor:0,effects:[],layouts:[]};
+ const render=()=>{runtime.frame=frame;frame.cursor=0;const tree=LeadershipOverview({onSection:()=>{}});frame.layouts.splice(0).forEach(f=>f());frame.effects.splice(0).forEach(effect=>effect());return tree;};
  type Element={type:unknown;props:Record<string,unknown>};
  const walk=(node:unknown):Element[]=>Array.isArray(node)?node.flatMap(walk):node&&typeof node==="object"&&"props"in node?[node as Element,...walk((node as Element).props.children)]:[];
  const click=async(label:string)=>{const button=walk(render()).find(e=>e.type==="button"&&e.props.children===label);expect(button,label).toBeDefined();(button!.props.onClick as ()=>void)();render();await turns();render();};
