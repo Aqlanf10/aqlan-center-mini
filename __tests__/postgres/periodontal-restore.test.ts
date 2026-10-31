@@ -303,7 +303,8 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
     const before = await state();
     const documentBefore = await readFile(path.join(stagingDir, DOCUMENT_KEY));
     const registryBefore = (await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows;
-    const relationsBefore = await publicRelations();
+    const catalogSql = "SELECT c.oid::text,c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.oid";
+    const catalogBefore = (await pool().query(catalogSql)).rows;
     const provenanceReadsBefore = vi.mocked(loadMigrationFiles).mock.calls.length;
     const result = await stagedRestore({ archivePath, targetUrl: fixture!.url, stagingDir });
     expect(result).toMatchObject({ ok: false, readyForCutover: false, validationErrors: [], migrationsApplied: [], documentsRestored: 0 });
@@ -311,7 +312,7 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
     expect(await state()).toEqual(before);
     expect(await readFile(path.join(stagingDir, DOCUMENT_KEY))).toEqual(documentBefore);
     expect((await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
-    expect(await publicRelations()).toBe(relationsBefore);
+    expect((await pool().query(catalogSql)).rows).toEqual(catalogBefore);
     // Filesystem-only provenance is checked before connecting, even when the
     // destination will subsequently be refused as nonempty. No migration runs.
     expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(provenanceReadsBefore + 1);

@@ -37,6 +37,49 @@ async function fixture(width = 390) {
 async function mount(page: Page, owner = "owner-a", view = "leaves") {
   await page.evaluate(({ owner, view }) => (window as unknown as { mount(owner: string, view: string): void }).mount(owner, view), { owner, view });
 }
+it.each(["1e2", "2.5", "0", "366", "0.01", "365.99"])("preserves valid numeric leave allocation %s through native browser submission", async value => {
+  const f = await fixture();
+  try {
+    await mount(f.page);
+    await f.page.getByRole("button", { name: "قبول", exact: true }).waitFor();
+    await f.page.getByRole("button", { name: "تعديل رصيد", exact: true }).click();
+    const form = f.page.locator("form");
+    await form.locator("select").nth(0).selectOption("1");
+    await form.locator("select").nth(1).selectOption("annual");
+    const input = form.locator('input[type="number"]');
+    await input.fill(value);
+    expect(await input.evaluate((element: HTMLInputElement) => ({ valid: element.validity.valid, stepMismatch: element.validity.stepMismatch }))).toEqual({ valid: true, stepMismatch: false });
+    const sent = f.page.waitForRequest(request => request.method() === "POST" && request.url().endsWith("/api/hr/leaves/balances"));
+    await form.locator('button[type="submit"]').click();
+    expect((await sent).postDataJSON().allocatedDays).toBe(Number(value));
+    expect(f.outside).toEqual([]);
+  } finally { await f.context.close(); }
+});
+it.each([
+  ["", "valueMissing"],
+  ["-0.01", "rangeUnderflow"],
+  ["366.01", "rangeOverflow"],
+] as const)("blocks invalid allocation %s before any POST", async (value, reason) => {
+  const f = await fixture();
+  try {
+    await mount(f.page);
+    await f.page.getByRole("button", { name: "قبول", exact: true }).waitFor();
+    await f.page.getByRole("button", { name: "تعديل رصيد", exact: true }).click();
+    const form = f.page.locator("form");
+    await form.locator("select").nth(0).selectOption("1");
+    await form.locator("select").nth(1).selectOption("annual");
+    const input = form.locator('input[type="number"]');
+    await input.fill(value);
+    expect(await input.evaluate((element: HTMLInputElement, key) => element.validity[key], reason)).toBe(true);
+    await input.evaluate((element: HTMLInputElement) => {
+      element.addEventListener("invalid", () => element.dataset.invalidObserved = "true", { once: true });
+    });
+    await form.locator('button[type="submit"]').click();
+    expect(await input.getAttribute("data-invalid-observed")).toBe("true");
+    expect(f.writes).toEqual([]);
+    expect(f.outside).toEqual([]);
+  } finally { await f.context.close(); }
+});
 for (const width of [390, 1280]) it(`canceling a leave or attendance decision sends no mutation at ${width}`, async () => {
   const f = await fixture(width);
   try {

@@ -62,6 +62,8 @@ describe('writer backup SQL boundaries', () => {
 
 describe('guarded restore migration provenance',()=>{
   const checksum='a'.repeat(64);
+  // Deliberately limited fixture inventory. This tests supplied-set semantics;
+  // the actual Rx chain's known0090 is covered by restore-migration-provenance.
   const migrationFiles=[{version:'0001',checksum},{version:'0080',checksum}];
   const record=(version:string,hash=checksum)=>`INSERT INTO schema_migrations (version,name,checksum) VALUES ('${version}','synthetic','${hash}');`;
   const guard=(body:string)=>prepareBackupSql(`BEGIN;${body}COMMIT;`,{migrationFiles});

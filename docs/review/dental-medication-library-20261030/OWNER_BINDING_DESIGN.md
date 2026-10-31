@@ -4,7 +4,7 @@ Status: binding schema and authority remain a proposal. The actual WORK SELECT-o
 
 ## Evidence and allocation
 
-Read-only comparison on 2026-10-30: candidate has migrations through 0091; WORK `0bc3a0c57f57a8d0ed9f3cebd1cf56a1e19b11a4` contains the canonical authority runtime and its identity substrate; #490 at `cba42c1c864fd900f6faf43b90ef2f894b1e137e` allocates 0080 for patient numbering. Neither inspected tree has 0092. **0092 is only a candidate number, not a reservation**: parent must coordinate allocation with other in-flight branches before any SQL file is created.
+Allocation update, 2026-10-31: migration 0092 is now allocated to the Rx prescribing-doctor name snapshot; it is unavailable to this owner-binding proposal. The earlier 0bc3a0c5 comparison inspected an intake branch, not the current WORK branch. The subsequent coordinated read-only checks used WORK 34b0d619a671f5b414fa0ccfea8d0489bf1721e5, #490 7377434dea25cd52ae2540c7e56ec8363a31a5de, and main 6a6bdc0cc705874fd4ff6d0f0ddc3fdcd314e9e6, none containing numbered 009x migrations. Any future owner-binding migration needs a separate allocation review; this proposal creates no schema.
 
 WORK `lib/legacy-staff-schema.mjs` selects canonical mode on ANY enumerated authority table/function/trigger or `users.authorization_mode`, `users.authorization_epoch`, `users.staff_subject_id`, `parties.clinical_authority_epoch`. No such artifact, ready seal, login marker or canonical permission document may be created by this proposal. Its `readStaffEntryMode` is SELECT-only and fails on unreadable state; selection is deployment-wide, not a fallback per failed request.
 
@@ -81,4 +81,4 @@ The minimal proposed witness is a non-secret random installation identifier held
 
 No safe placement/exclusion/rotation integration is approved in the current restore contract. Therefore no witness file, environment setting, schema migration or live binding is created, and issuance as another doctor remains closed. Restore tools are unchanged. A future patch must review backup exclusions, target-file ownership and all supported restore entry points together before enabling the adapter.
 
-Allocation remains unreserved. Open PR inventory includes #494/#493 HR changes and #483 canonical review in addition to WORK/#490; inspecting only the latter two is insufficient to claim 0092. Since no schema is introduced here, no migration number is consumed.
+No migration number is reserved for this owner-binding proposal. In particular, 0092 belongs to the prescribing-doctor snapshot. Future allocation must recheck all active branches and target history; this design introduces no schema.
