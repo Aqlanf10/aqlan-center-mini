@@ -10,6 +10,7 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
 import { canonicalOrthoPatientFilter, readCanonicalOrthoCases } from "@/lib/canonical-ortho-reads";
+import { canonicalOrthoFailure, commandCanonicalOrthoCreate } from "@/lib/canonical-ortho-operations";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +86,24 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const created = await commandCanonicalOrthoCreate(selected.handle, body);
+      return NextResponse.json(created, { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر فتح الحالة. تأكد من المريض.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
 

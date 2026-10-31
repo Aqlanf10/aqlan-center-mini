@@ -5,6 +5,9 @@ import {
 import { classifyFollowups, groupByBucket, BUCKET_ORDER } from "@/lib/ortho-followup";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalOrthoFailure, readCanonicalOrthoFollowups } from "@/lib/canonical-ortho-operations";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +23,17 @@ export const dynamic = "force-dynamic";
  * المرضى» — والفلترة في الخادم لا في الشاشة، والاستقبال والإدارة يريان الكل.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalOrthoFollowups(selected.handle), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر تحميل لوحة متابعة التقويم.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

@@ -2723,8 +2723,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: canonical case creation via withStaffOperation(clinical.ortho.edit) + patient scope (outside=missing 404), clinical.plans.view when planId is supplied, SAVEPOINT around unique open-case constraint + bridgeOrthoShell, and atomic insertAuditRow."
  },
  {
   "route": "/api/ortho/[id]",
@@ -2739,8 +2739,15 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: read:ortho.case in one owning RR read-only snapshot; outside patient scope reads as 404; photos redacted unless clinical.xrays.view is granted and planId redacted unless clinical.plans.view is granted.",
+  "projection": {
+   "legacy": "patient-scoped read; photosVisible and adjustments[].photos gated by canViewXrays.",
+   "groups": {
+    "photos": "clinical.xrays.view",
+    "planId": "clinical.plans.view"
+   }
+  }
  },
  {
   "route": "/api/ortho/[id]",
@@ -2755,8 +2762,20 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: canonical phase, retainer, close, and plan-link updates via withStaffOperation(clinical.ortho.edit) + patient scope; planId branch additionally requires clinical.plans.edit; atomic insertAuditRow on every mutation.",
+  "branches": {
+   "discriminator": "field",
+   "values": {},
+   "fields": [
+    {
+     "field": "planId",
+     "need": [
+      "clinical.plans.edit"
+     ]
+    }
+   ]
+  }
  },
  {
   "route": "/api/ortho/[id]",
@@ -2771,8 +2790,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: canonical adjustment session write via withStaffOperation(clinical.ortho.edit) + patient scope (outside=missing 404) and atomic insertAuditRow."
  },
  {
   "route": "/api/ortho/[id]/assessment",
@@ -2787,8 +2806,15 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: getCanonicalOrthoAssessment runs inside read:ortho.case RR read-only snapshot with zero row locks; clinicalWritable from clinical.ortho.edit and imagingVisible from clinical.xrays.view; outside scope reads as 404 case_missing.",
+  "projection": {
+   "legacy": "admin/doctor/reception patient-scoped read; clinicalWritable for doctor/admin; imagingVisible from canViewXrays.",
+   "groups": {
+    "clinicalWritable": "clinical.ortho.edit",
+    "imaging": "clinical.xrays.view"
+   }
+  }
  },
  {
   "route": "/api/ortho/[id]/assessment",
@@ -2802,8 +2828,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: appendCanonicalOrthoAssessment runs inside withStaffOperation(clinical.ortho.edit) + patient scope, preserving source-graph FOR SHARE locks, idempotent replay witness, and atomic insertAuditRow."
  },
  {
   "route": "/api/ortho/[id]/followup-coverage",
@@ -2816,8 +2842,14 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: readCanonicalFollowupCoverage runs inside read:ortho.followup-coverage (finance.agreements.manage + patient scope) in one owning RR read-only snapshot.",
+  "projection": {
+   "legacy": "admin-only patient-scoped agreement coverage read.",
+   "groups": {
+    "canEdit": "finance.agreements.manage"
+   }
+  }
  },
  {
   "route": "/api/ortho/[id]/followup-coverage",
@@ -2830,8 +2862,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: appendCanonicalFollowupCoverage runs inside withStaffOperation(finance.agreements.manage) + patient scope, committing durable rejection receipts and audit rows before surfacing 409 FollowupCoverageError."
  },
  {
   "route": "/api/ortho/[id]/followup-coverage",
@@ -2844,8 +2876,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: readCanonicalFollowupCoverageCommandStatus runs inside withStaffOperation(finance.agreements.manage) + patient scope so advisory lock serialization against in-flight POST commands is preserved."
  },
  {
   "route": "/api/ortho/[id]/strategy",
@@ -2860,8 +2892,16 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: getCanonicalOrthoTreatmentStrategy runs inside read:ortho.case RR read-only snapshot with zero row locks; planVisible from clinical.plans.view and planLinksWritable from clinical.ortho.edit + clinical.plans.edit; outside scope reads as 404.",
+  "projection": {
+   "legacy": "admin/doctor/reception patient-scoped read; planVisible from canViewPlans; planLinksWritable from clinicalWritable && canEditPlans.",
+   "groups": {
+    "clinicalWritable": "clinical.ortho.edit",
+    "planVisible": "clinical.plans.view",
+    "planLinksWritable": "clinical.ortho.edit + clinical.plans.view + clinical.plans.edit"
+   }
+  }
  },
  {
   "route": "/api/ortho/[id]/strategy",
@@ -2875,8 +2915,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: appendCanonicalOrthoTreatmentStrategy runs inside withStaffOperation(clinical.ortho.edit) + patient scope (requiring clinical.plans.view + clinical.plans.edit when plan links are present), idempotent replay witness, and atomic insertAuditRow."
  },
  {
   "route": "/api/ortho/adjustments/[id]/billing-decision",
@@ -2889,8 +2929,8 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 31: commandCanonicalOrthoBillingDecision selects finance.invoices.create for decision=billed and clinical.ortho.edit for decision=no_charge, enforcing patient scope (outside=missing 404) and atomic insertAuditRow.",
   "branches": {
    "discriminator": "decision",
    "values": {
@@ -2921,8 +2961,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: commandCanonicalOrthoBaseline runs inside withStaffOperation(clinical.ortho.edit) + patient scope, requiring clinical.plans.view when planId is supplied, defaulting responsibleDoctorId to clinicianPartyId, refusing cross-doctor assignment under own scope, and writing atomic insertAuditRow."
  },
  {
   "route": "/api/ortho/billing-decisions",
@@ -2937,8 +2977,14 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: read:ortho.billing-decisions in one owning RR read-only snapshot; own patient scope filters by visit doctor, case responsible doctor, or DOCTOR_PATIENT_CONDITION.",
+  "projection": {
+   "legacy": "admin and reception read all pending outside-contract adjustments; doctor reads adjustments where visit doctor or case responsible doctor matches partyId.",
+   "groups": {
+    "pendingRows": "patientScope (all vs own clinicianPartyId)"
+   }
+  }
  },
  {
   "route": "/api/ortho/followups",
@@ -2953,8 +2999,14 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 31: read:ortho.followups in one owning RR read-only snapshot; own patient scope filters orthoFollowupBoardWith in SQL via DOCTOR_PATIENT_CONDITION before bucket classification.",
+  "projection": {
+   "legacy": "admin, reception, and doctors with canViewAllPatients read all open ortho followups; restricted doctors read doctorOwnedPatientIds.",
+   "groups": {
+    "buckets": "patientScope (all vs own DOCTOR_PATIENT_CONDITION)"
+   }
+  }
  },
  {
   "route": "/api/parties",

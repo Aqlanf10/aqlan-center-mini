@@ -5,12 +5,18 @@ import { requireSession } from "@/lib/session";
 import { clinicDateString } from "@/lib/schedule";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { appendOrthoTreatmentStrategy, getOrthoTreatmentStrategy } from "@/lib/ortho-treatment-strategy-store";
+import {
+  appendCanonicalOrthoTreatmentStrategy,
+  appendOrthoTreatmentStrategy,
+  getCanonicalOrthoTreatmentStrategy,
+  getOrthoTreatmentStrategy,
+} from "@/lib/ortho-treatment-strategy-store";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
 const jsonError = (message: string, status: number, code?: string) =>
-  NextResponse.json({ message, ...(code ? { code } : {}) }, { status });
+  NextResponse.json({ message, ...(code ? { code } : {}) }, { status, headers: { "Cache-Control": "private, no-store" } });
 const idOf = (raw: string | null): number | null => {
   if (!raw || !/^[1-9]\d*$/.test(raw)) return null;
   const id = Number(raw);
@@ -37,6 +43,21 @@ async function scope(context: Context, write: boolean) {
 /** Authorized history/current or one exact saved revision. Never creates its bridge. */
 export async function GET(request: Request, context: Context) {
   try {
+    const selected = await selectRequestStaffEnvelope();
+    if (selected.kind === "denied") return jsonError("انتهت الجلسة. سجّل الدخول من جديد.", 401, "session_expired");
+    if (selected.kind === "canonical") {
+      const orthoCaseId = idOf((await context.params).id);
+      if (!orthoCaseId) return jsonError("رقم الحالة غير صالح.", 400, "invalid_scope");
+      const params = new URL(request.url).searchParams;
+      if ([...params.keys()].some(key => key !== "revisionId") || params.getAll("revisionId").length > 1) {
+        return jsonError("طلب المراجعة غير صالح.", 400, "invalid_query");
+      }
+      const revisionId = params.has("revisionId") ? idOf(params.get("revisionId")) : undefined;
+      if (revisionId === null) return jsonError("رقم المراجعة غير صالح.", 400, "invalid_revision");
+      const result = await getCanonicalOrthoTreatmentStrategy(selected.handle, orthoCaseId, { revisionId });
+      if (!result.ok) return jsonError(result.message, result.status, result.code);
+      return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
+    }
     const owner = await scope(context, false);
     if (!owner.ok) return owner.response;
     const params = new URL(request.url).searchParams;
@@ -56,6 +77,18 @@ export async function GET(request: Request, context: Context) {
 /** One explicit append-only documentation command; no treatment or financial side effects. */
 export async function POST(request: Request, context: Context) {
   try {
+    const selected = await selectRequestStaffEnvelope();
+    if (selected.kind === "denied") return jsonError("انتهت الجلسة. سجّل الدخول من جديد.", 401, "session_expired");
+    if (selected.kind === "canonical") {
+      const orthoCaseId = idOf((await context.params).id);
+      if (!orthoCaseId) return jsonError("رقم الحالة غير صالح.", 400, "invalid_scope");
+      let command: unknown;
+      try { command = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); }
+      catch (error) { return bodyErrorResponse(error) ?? jsonError("طلب غير صالح.", 400); }
+      const result = await appendCanonicalOrthoTreatmentStrategy(selected.handle, orthoCaseId, command);
+      if (!result.ok) return jsonError(result.message, result.status, result.code);
+      return NextResponse.json(result, { status: result.replayed ? 200 : 201, headers: { "Cache-Control": "private, no-store" } });
+    }
     const owner = await scope(context, true);
     if (!owner.ok) return owner.response;
     let command: unknown;

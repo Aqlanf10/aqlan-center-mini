@@ -9,6 +9,14 @@ import { PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalOrthoFailure,
+  commandCanonicalOrthoPatch,
+  commandCanonicalOrthoRecordAdjustment,
+  readCanonicalOrthoCaseDetail,
+} from "@/lib/canonical-ortho-operations";
 
 import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
 
@@ -30,6 +38,27 @@ const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الح�
 
 /** تسجيل شدّة. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      const result = await commandCanonicalOrthoRecordAdjustment(selected.handle, id, body);
+      return result.created
+        ? NextResponse.json({ id: result.id, visitId: result.visitId, attachedToToday: result.attachedToToday }, { status: 201, headers: NO_STORE })
+        : NextResponse.json({ id: result.id, existing: true, visitId: result.visitId, attachedToToday: result.attachedToToday }, { status: 200, headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر تسجيل الشدّة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);
@@ -77,6 +106,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
 /** تغيير المرحلة، أو تسجيل المثبّت، أو إغلاق الحالة. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      return NextResponse.json(await commandCanonicalOrthoPatch(selected.handle, id, body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر تنفيذ الإجراء.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);
@@ -160,6 +207,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      const { id } = await context.params;
+      return NextResponse.json(await readCanonicalOrthoCaseDetail(selected.handle, id), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر تحميل تفاصيل الحالة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);

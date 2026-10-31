@@ -22,6 +22,14 @@ export interface CanonicalRecordReadRule {
 export const CANONICAL_RECORD_READS = Object.freeze({
   /** GET /api/ortho: bounded case summaries, never funding or imaging (M2 slice 29). */
   "read:ortho.cases": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/ortho/[id], /api/ortho/[id]/assessment, /api/ortho/[id]/strategy (M2 slice 31). */
+  "read:ortho.case": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/ortho/followups: daily follow-up board inside patient scope (M2 slice 31). */
+  "read:ortho.followups": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/ortho/billing-decisions: pending outside-contract adjustment decisions inside patient scope (M2 slice 31). */
+  "read:ortho.billing-decisions": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/ortho/[id]/followup-coverage: agreement follow-up coverage read inside patient scope (M2 slice 31). */
+  "read:ortho.followup-coverage": Object.freeze({ record: "patient", need: Object.freeze(["finance.agreements.manage"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]/ceph, /api/ceph/[id], /api/ceph/compare, /api/ceph/superimpose (M2 slice 30). */
   "read:ceph": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients: search and browse the patient list. */

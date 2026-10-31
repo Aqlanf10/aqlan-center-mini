@@ -5,6 +5,9 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { canAccessPatient } from "@/lib/patient-access";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalOrthoFailure, commandCanonicalOrthoBillingDecision } from "@/lib/canonical-ortho-operations";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +16,24 @@ export const dynamic = "force-dynamic";
  * «بلا رسوم» للطبيب أو المدير (قرارٌ سريريّ-ماليّ مسبَّب)، و«فوتِرت» برقم فاتورةٍ قائمة للمدير والاستقبال.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const { id } = await context.params;
+      return NextResponse.json(await commandCanonicalOrthoBillingDecision(selected.handle, id, body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalOrthoFailure(error, "تعذّر حفظ قرار الشدّة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const adjustmentId = Number((await context.params).id);

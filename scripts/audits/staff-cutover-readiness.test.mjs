@@ -27,7 +27,8 @@ test('baseline has no canonical route readiness; finite domain actions are not r
   'inventory.custody.stocktake','inventory.custody.approve-waste','inventory.custody.settlement.propose',
   'inventory.custody.settlement.object','inventory.reconcile','inventory.costs.view','finance.suppliers.view',
   'patients.create','patients.edit','settings.view','visits.manage','appointments.edit','appointments.create','appointments.cancel','appointments.schedule.manage','finance.shifts.view','finance.shifts.operate',
-  'clinical.xrays.view','clinical.xrays.upload','clinical.ceph.analyze']);
+  'clinical.xrays.view','clinical.xrays.upload','clinical.ceph.analyze',
+  'clinical.ortho.view','clinical.ortho.edit','clinical.plans.edit','finance.agreements.manage','finance.invoices.create']);
 });
 
 test('unknown HTTP classes never become separate/public even on staff auth transport',async()=>{

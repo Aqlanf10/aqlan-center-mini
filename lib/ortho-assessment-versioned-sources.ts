@@ -34,7 +34,7 @@ export function decodeAssessmentStoredRow(row:AssessmentStoredRow,scope:Assessme
 /** Patient/current-user/access locks must already be held. Prior revisions are immutable;
  * external source locks are sorted and precede Ortho/bridge locks. No foreign-owner row is locked.
  */
-export async function collectAssessmentSourceClosure(client:DbClient,scope:AssessmentScope,direct:AssessmentSourceV2[]):Promise<{external:AssessmentSourceV2[];revisions:Map<number,AnyAssessmentRevision>}>{
+export async function collectAssessmentSourceClosure(client:Pick<DbClient,"query">,scope:AssessmentScope,direct:AssessmentSourceV2[]):Promise<{external:AssessmentSourceV2[];revisions:Map<number,AnyAssessmentRevision>}>{
   const wanted=new Map<string,AssessmentSourceV2>(),revisions=new Map<number,AnyAssessmentRevision>(),queue: {source:AssessmentSourceV2;parentVersion:number|null}[]=direct.map(source=>({source,parentVersion:null}));
   let storedBytes=0;
   while(queue.length){const {source,parentVersion}=queue.shift()!,existing=wanted.get(key(source));
@@ -58,22 +58,22 @@ export async function collectAssessmentSourceClosure(client:DbClient,scope:Asses
   if(external.length>128)assessmentFail(400,"source_reference_limit","عدد المراجع يتجاوز الحد.");
   return {external,revisions};
 }
-export async function resolveAssessmentSourceGraph(client:DbClient,scope:AssessmentScope,direct:AssessmentSourceV2[],imagingVisible:boolean):Promise<AssessmentSourceGraph>{
+export async function resolveAssessmentSourceGraph(client:Pick<DbClient,"query">,scope:AssessmentScope,direct:AssessmentSourceV2[],imagingVisible:boolean,lock=true):Promise<AssessmentSourceGraph>{
   const {external,revisions}=await collectAssessmentSourceClosure(client,scope,direct);
   if(!imagingVisible&&external.some(s=>s.kind==="document"||s.kind==="ceph_study"))assessmentFail(403,"imaging_restricted","المراجع المصورة مقيدة بالصلاحية الحالية.");
-  const current=await captureAssessmentExternalSources(client,scope,external,imagingVisible);
+  const current=await captureAssessmentExternalSources(client,scope,external,imagingVisible,lock);
   return {external,revisions,states:assessmentSourceStates({external,revisions},current),historicallyReadable:current.historicallyReadable};
 }
 /** Multi-document callers expand every immutable graph first, capture the union
  * once before any Ortho/bridge lock, then evaluate each expected version separately.
  * A union may contain two historical versions of one identity: that is not a new
  * write conflict and must not erase either graph's expected witness. */
-export async function captureAssessmentExternalSources(client:DbClient,scope:AssessmentScope,union:readonly Pick<AssessmentSourceV2,"kind"|"id">[],imagingVisible:boolean):Promise<AssessmentExternalCapture>{
+export async function captureAssessmentExternalSources(client:Pick<DbClient,"query">,scope:AssessmentScope,union:readonly Pick<AssessmentSourceV2,"kind"|"id">[],imagingVisible:boolean,lock=true):Promise<AssessmentExternalCapture>{
   if(union.some(s=>!positiveId(s.id)||!["document","ceph_study","patient_history","clinical_visit"].includes(s.kind)))assessmentFail(400,"invalid_source_target","هدف المرجع الخارجي غير صالح.");
   if(!imagingVisible&&union.some(s=>s.kind==="document"||s.kind==="ceph_study"))assessmentFail(403,"imaging_restricted","المراجع المصورة مقيدة بالصلاحية الحالية.");
   const unique=[...new Map(union.filter(s=>s.kind!=="assessment_revision").map(s=>[key(s),s])).values()];
   if(unique.length>128)assessmentFail(400,"source_reference_limit","عدد المراجع يتجاوز الحد.");
-  return currentAssessmentExternalSources(client,scope,unique,true);
+  return currentAssessmentExternalSources(client,scope,unique,lock);
 }
 export function assessmentSourceStates(closure:{external:AssessmentSourceV2[];revisions:Map<number,AnyAssessmentRevision>},current:Map<string,AssessmentSourceChoiceV2>):AssessmentSourceStateV2[]{
   const {external,revisions}=closure;
@@ -87,7 +87,7 @@ export const ASSESSMENT_CEPH_CLINICAL_V1 = "jsonb_build_object('projection','cep
 export const ASSESSMENT_HISTORY_CLINICAL_V1 = "jsonb_build_object('projection','patient-history-clinical-v1','answers',h.answers,'allergies',h.allergies,'medications',h.medications,'asaClass',h.asa_class,'bloodGroup',h.blood_group,'notes',h.notes,'patientConfirmed',h.patient_confirmed,'recordedBy',h.recorded_by,'recordedAt',h.recorded_at)";
 
 /** Only a minimal clinical projection enters source hashing; no invoice/price fields. */
-async function currentAssessmentExternalSources(client:DbClient,scope:AssessmentScope,sources:readonly Pick<AssessmentSourceV2,"kind"|"id">[],lock:boolean):Promise<AssessmentExternalCapture>{
+async function currentAssessmentExternalSources(client:Pick<DbClient,"query">,scope:AssessmentScope,sources:readonly Pick<AssessmentSourceV2,"kind"|"id">[],lock:boolean):Promise<AssessmentExternalCapture>{
   const readable=new Set<string>(),result:AssessmentExternalCapture=Object.assign(new Map<string,AssessmentSourceChoiceV2>(),{historicallyReadable:readable}),ids=(kind:AssessmentSourceV2["kind"])=>sources.filter(s=>s.kind===kind).map(s=>s.id);
   let admittedBytes=0;
   const admit=(raw:unknown)=>{const bytes=assessmentStoredByteCount(raw);if(bytes===null)assessmentFail(409,"invalid_source_budget","تعذّر التحقق من حجم المصدر.");admittedBytes+=bytes;if(admittedBytes>ASSESSMENT_EXTERNAL_SOURCE_MAX_BYTES)assessmentFail(409,"source_resource_limit","المصادر السريرية تتجاوز حد القراءة الآمنة.");};
@@ -144,7 +144,7 @@ export function validateAssessmentCopies(draft:AssessmentDraftV2,graph:Assessmen
   }
 }
 /** Choices are bounded hints, never save authority; POST revalidates every exact version. */
-export async function listAssessmentSourceChoices(client:DbClient,scope:AssessmentScope,imagingVisible:boolean,history:AnyAssessmentRevision[]):Promise<{items:AssessmentSourceChoiceV2[];truncated:boolean;imaging:"allowed"|"restricted"}>{
+export async function listAssessmentSourceChoices(client:Pick<DbClient,"query">,scope:AssessmentScope,imagingVisible:boolean,history:AnyAssessmentRevision[]):Promise<{items:AssessmentSourceChoiceV2[];truncated:boolean;imaging:"allowed"|"restricted"}>{
   const sources:AssessmentSourceV2[]=[];let truncated=false;
   const collect=async(kind:AssessmentSourceV2["kind"],sql:string,params:unknown[])=>{
     const rows=(await client.query<{id:number|string}>(sql,params)).rows;truncated ||= rows.length>100;

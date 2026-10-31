@@ -24188,10 +24188,14 @@ export async function listPatientOrthoCases(patientId: number, today: string): P
   return hydrateCases(rows, today);
 }
 
+export async function getOrthoCaseWith(q: Pick<DbClient, "query">, id: number, today: string): Promise<OrthoCase | null> {
+  const { rows } = await q.query<CaseRow>(`${CASE_SELECT} WHERE c.id = $1`, [id]);
+  return (await hydrateCasesWith(q, rows, today))[0] ?? null;
+}
+
 export async function getOrthoCase(id: number, today: string): Promise<OrthoCase | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<CaseRow>(`${CASE_SELECT} WHERE c.id = $1`, [id]);
-  return (await hydrateCases(rows, today))[0] ?? null;
+  return getOrthoCaseWith(getPool(), id, today);
 }
 
 /** الحالة المفتوحة لمريض — لشاشة الزيارة، فيرى الطبيب السلك قبل أن يبدأ. */
@@ -24325,6 +24329,58 @@ async function bridgeOrthoShell(client: DbClient, input: {
   return { ok: true };
 }
 
+export async function createOrthoCaseWith(client: DbClient, input: {
+  patientId: number;
+  appliance: Appliance;
+  arches: Arches;
+  slot: SlotSize;
+  bracketSystem: string | null;
+  startDate: string;
+  plannedMonths: number;
+  planId: number | null;
+  note: string | null;
+  createdBy: string;
+}): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
+  if (input.planId !== null) {
+    const problem = await orthoPlanProblem(client, input.planId, input.patientId);
+    if (problem) return { ok: false, message: problem };
+  }
+  await client.query("SAVEPOINT ortho_case_create_unique");
+  try {
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO ortho_cases
+         (patient_id, appliance, arches, slot, bracket_system, start_date,
+          planned_months, plan_id, note, created_by)
+       VALUES ($1, $2, $3, $4, $5::text, $6::date, $7, $8::int, $9::text, $10)
+       RETURNING id`,
+      [
+        input.patientId, input.appliance, input.arches, input.slot,
+        input.bracketSystem?.trim() || null, input.startDate,
+        Math.max(1, Math.min(120, Math.round(input.plannedMonths))),
+        input.planId, input.note?.trim() || null, input.createdBy,
+      ],
+    );
+    const bridge = await bridgeOrthoShell(client, {
+      patientId: input.patientId, orthoCaseId: rows[0].id, arches: input.arches, actor: input.createdBy,
+    });
+    if (!bridge.ok) {
+      await client.query("ROLLBACK TO SAVEPOINT ortho_case_create_unique");
+      await client.query("RELEASE SAVEPOINT ortho_case_create_unique");
+      return { ok: false, message: bridge.message };
+    }
+    await client.query("RELEASE SAVEPOINT ortho_case_create_unique");
+    return { ok: true, id: rows[0].id };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT ortho_case_create_unique").catch(() => undefined);
+    await client.query("RELEASE SAVEPOINT ortho_case_create_unique").catch(() => undefined);
+    if ((error as { code?: string }).code === "23505") {
+      return { ok: false, message: "للمريض حالة تقويم مفتوحة سلفًا. أغلقها قبل فتح حالة جديدة." };
+    }
+    throw error;
+  }
+}
+
 export async function createOrthoCase(input: {
   patientId: number;
   appliance: Appliance;
@@ -24345,36 +24401,12 @@ export async function createOrthoCase(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
-    if (input.planId !== null) {
-      const problem = await orthoPlanProblem(client, input.planId, input.patientId);
-      if (problem) { await client.query("ROLLBACK"); return { ok: false, message: problem }; }
-    }
-    const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO ortho_cases
-         (patient_id, appliance, arches, slot, bracket_system, start_date,
-          planned_months, plan_id, note, created_by)
-       VALUES ($1, $2, $3, $4, $5::text, $6::date, $7, $8::int, $9::text, $10)
-       RETURNING id`,
-      [
-        input.patientId, input.appliance, input.arches, input.slot,
-        input.bracketSystem?.trim() || null, input.startDate,
-        Math.max(1, Math.min(120, Math.round(input.plannedMonths))),
-        input.planId, input.note?.trim() || null, input.createdBy,
-      ],
-    );
-    const bridge = await bridgeOrthoShell(client, {
-      patientId: input.patientId, orthoCaseId: rows[0].id, arches: input.arches, actor: input.createdBy,
-    });
-    if (!bridge.ok) { await client.query("ROLLBACK"); return { ok: false, message: bridge.message }; }
+    const created = await createOrthoCaseWith(client, input);
+    if (!created.ok) { await client.query("ROLLBACK"); return created; }
     await client.query("COMMIT");
-    return { ok: true, id: rows[0].id };
+    return created;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
-    // الفهرس الفريد يمنع حالتين مفتوحتين — والرسالة تقول السبب لا رقم الخطأ.
-    if ((error as { code?: string }).code === "23505") {
-      return { ok: false, message: "للمريض حالة تقويم مفتوحة سلفًا. أغلقها قبل فتح حالة جديدة." };
-    }
     throw error;
   } finally {
     client.release();
@@ -24404,37 +24436,41 @@ export type OrthoPlanLinkResult =
  * فتُصنَّف كل شدّة «مشمولة» ما دام الاتفاق قائمًا. لا فاتورة تُنشأ ولا مبلغ يتغيّر هنا:
  * يتغيّر مصدر الفوترة للشدّات القادمة وحدها، والقرار مُدقَّق.
  */
+export async function linkOrthoCasePlanWith(client: DbClient, input: {
+  caseId: number; planId: number | null; actor: string; actorRole: string | null;
+}): Promise<OrthoPlanLinkResult> {
+  const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.caseId]);
+  if (!owner) return { ok: false, status: 404, message: "الحالة غير موجودة." };
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
+  const { rows: [found] } = await client.query<{ patient_id: number; status: string; plan_id: number | null }>(
+    `SELECT patient_id, status, plan_id FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.caseId]);
+  if (!found) return { ok: false, status: 404, message: "الحالة غير موجودة." };
+  if (found.status !== "active" && found.status !== "retention") {
+    return { ok: false, status: 409, message: "الحالة مغلقة — لا يُغيَّر اتفاقها." };
+  }
+  if (input.planId !== null) {
+    const problem = await orthoPlanProblem(client, input.planId, found.patient_id);
+    if (problem) return { ok: false, status: 409, message: problem };
+  }
+  const changed = found.plan_id !== input.planId;
+  if (changed) {
+    await client.query(`UPDATE ortho_cases SET plan_id = $2 WHERE id = $1`, [input.caseId, input.planId]);
+    await insertAuditRow(client, {
+      action: "ortho.plan_link", entity: "ortho_cases", entityId: input.caseId, entityLabel: null,
+      details: { المريض: found.patient_id, من_خطة: found.plan_id, إلى_خطة: input.planId },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+  }
+  const { rows: [funded] } = await client.query<{ funded: boolean }>(
+    `SELECT ${ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [input.caseId]);
+  return { ok: true, changed, funded: funded?.funded === true };
+}
+
 export async function linkOrthoCasePlan(input: {
   caseId: number; planId: number | null; actor: string; actorRole: string | null;
 }): Promise<OrthoPlanLinkResult> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client): Promise<OrthoPlanLinkResult> => {
-    const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.caseId]);
-    if (!owner) return { ok: false, status: 404, message: "الحالة غير موجودة." };
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
-    const { rows: [found] } = await client.query<{ patient_id: number; status: string; plan_id: number | null }>(
-      `SELECT patient_id, status, plan_id FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.caseId]);
-    if (!found) return { ok: false, status: 404, message: "الحالة غير موجودة." };
-    if (found.status !== "active" && found.status !== "retention") {
-      return { ok: false, status: 409, message: "الحالة مغلقة — لا يُغيَّر اتفاقها." };
-    }
-    if (input.planId !== null) {
-      const problem = await orthoPlanProblem(client, input.planId, found.patient_id);
-      if (problem) return { ok: false, status: 409, message: problem };
-    }
-    const changed = found.plan_id !== input.planId;
-    if (changed) {
-      await client.query(`UPDATE ortho_cases SET plan_id = $2 WHERE id = $1`, [input.caseId, input.planId]);
-      await insertAuditRow(client, {
-        action: "ortho.plan_link", entity: "ortho_cases", entityId: input.caseId, entityLabel: null,
-        details: { المريض: found.patient_id, من_خطة: found.plan_id, إلى_خطة: input.planId },
-        actor: input.actor, actorRole: input.actorRole,
-      });
-    }
-    const { rows: [funded] } = await client.query<{ funded: boolean }>(
-      `SELECT ${ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [input.caseId]);
-    return { ok: true, changed, funded: funded?.funded === true };
-  });
+  return withTransaction(getPool(), (client) => linkOrthoCasePlanWith(client, input));
 }
 
 /**
@@ -24481,9 +24517,17 @@ export interface PendingOrthoDecision {
   legacy: boolean;
 }
 
-export async function listPendingOrthoDecisions(options: { doctorPartyId: number | null } = { doctorPartyId: null }): Promise<PendingOrthoDecision[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+export async function listPendingOrthoDecisionsWith(
+  q: Pick<DbClient, "query">,
+  options: { doctorPartyId?: number | null; scopedClinicianPartyId?: number | null } = {},
+): Promise<PendingOrthoDecision[]> {
+  const canonicalOwn = options.scopedClinicianPartyId !== undefined;
+  const partyParam = canonicalOwn ? (options.scopedClinicianPartyId ?? null) : (options.doctorPartyId ?? null);
+  const scopeSql = canonicalOwn
+    ? `($1::int IS NULL OR v.doctor_id = $1 OR c.responsible_doctor_id = $1
+        OR EXISTS (SELECT 1 FROM patients WHERE patients.id = c.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")}))`
+    : `($1::int IS NULL OR v.doctor_id = $1 OR c.responsible_doctor_id = $1)`;
+  const { rows } = await q.query<{
     id: number; patient_id: number; full_name: string; visit_id: number | null; done_on: Date;
     doctor_name: string | null; baseline_kind: string | null;
   }>(
@@ -24494,15 +24538,20 @@ export async function listPendingOrthoDecisions(options: { doctorPartyId: number
        LEFT JOIN visits v ON v.id = a.visit_id
        LEFT JOIN parties d ON d.id = COALESCE(v.doctor_id, c.responsible_doctor_id)
       WHERE a.billing_class IN ('OUTSIDE_CONTRACT','REVIEW_REQUIRED') AND a.billing_decision IS NULL
-        AND ($1::int IS NULL OR v.doctor_id = $1 OR c.responsible_doctor_id = $1)
+        AND ${scopeSql}
       ORDER BY a.done_on ASC, a.id ASC
       LIMIT 300`,
-    [options.doctorPartyId],
+    [partyParam],
   );
   return rows.map((row) => ({
     adjustmentId: row.id, patientId: row.patient_id, patientName: row.full_name, visitId: row.visit_id,
     doneOn: dateText(row.done_on), doctorName: row.doctor_name, legacy: row.baseline_kind === "legacy",
   }));
+}
+
+export async function listPendingOrthoDecisions(options: { doctorPartyId: number | null } = { doctorPartyId: null }): Promise<PendingOrthoDecision[]> {
+  await ensureSchema();
+  return listPendingOrthoDecisionsWith(getPool(), { doctorPartyId: options.doctorPartyId });
 }
 
 export type OrthoDecisionResult =
@@ -24513,6 +24562,53 @@ export type OrthoDecisionResult =
  * (P1-C) قرار فوترة شدّةٍ خارج العقد بعد التوقيع — مرةً واحدة، مسبَّبًا ومُدقَّقًا:
  * «بلا رسوم» بسببٍ مكتوب، أو «فوتِرت» بفاتورةٍ قائمة لنفس المريض (رقمها). لا يُنشئ فاتورة ولا يغيّر مبلغًا.
  */
+export async function decideOrthoAdjustmentBillingWith(client: DbClient, input: {
+  adjustmentId: number; decision: OutsideContractDecision; reason: string | null;
+  invoiceNumber: string | null; actor: string; actorRole: string | null;
+}): Promise<OrthoDecisionResult> {
+  const reason = input.reason?.trim() || null;
+  if (input.decision === "no_charge" && (!reason || reason.length < 3 || reason.length > 300)) {
+    return { ok: false, status: 400, message: "اكتب سبب «بلا رسوم» (من ٣ أحرف إلى ٣٠٠)." };
+  }
+  if (input.decision === "billed" && !input.invoiceNumber?.trim()) {
+    return { ok: false, status: 400, message: "اكتب رقم الفاتورة التي فوترت الشدّة." };
+  }
+  const { rows: [row] } = await client.query<{
+    id: number; patient_id: number; billing_class: string | null; billing_decision: string | null; full_name: string;
+  }>(
+    `SELECT a.id, c.patient_id, a.billing_class, a.billing_decision, p.full_name
+       FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id JOIN patients p ON p.id = c.patient_id
+      WHERE a.id = $1 FOR UPDATE OF a`, [input.adjustmentId]);
+  if (!row) return { ok: false, status: 404, message: "الشدّة غير موجودة." };
+  if (!["OUTSIDE_CONTRACT", "REVIEW_REQUIRED"].includes(row.billing_class ?? "") || row.billing_decision !== null) {
+    return { ok: false, status: 409, message: "هذه الشدّة ليست بانتظار قرار فوترة — مشمولة أو حُسم قرارها." };
+  }
+  let invoiceId: number | null = null;
+  if (input.decision === "billed") {
+    const { rows: [invoice] } = await client.query<{ id: number }>(
+      `SELECT id FROM invoices WHERE invoice_number = $1 AND patient_id = $2 AND status <> 'cancelled'`,
+      [input.invoiceNumber!.trim(), row.patient_id]);
+    if (!invoice) return { ok: false, status: 409, message: "لا فاتورة سارية بهذا الرقم لهذا المريض." };
+    invoiceId = invoice.id;
+  }
+  await client.query(
+    `UPDATE ortho_adjustments
+        SET billing_decision = $2, billing_decision_reason = $3::text, billing_decided_by = $4,
+            billing_decided_at = NOW(), billing_invoice_id = $5::int
+      WHERE id = $1`,
+    [row.id, input.decision, input.decision === "no_charge" ? reason : null, input.actor, invoiceId]);
+  await insertAuditRow(client, {
+    action: "ortho.billing_decision", entity: "ortho_adjustments", entityId: row.id, entityLabel: row.full_name,
+    details: {
+      القرار: input.decision === "billed" ? "فوتِرت" : "بلا رسوم",
+      ...(reason && input.decision === "no_charge" ? { السبب: reason } : {}),
+      ...(invoiceId ? { الفاتورة: input.invoiceNumber!.trim() } : {}),
+    },
+    actor: input.actor, actorRole: input.actorRole,
+  });
+  return { ok: true, decision: input.decision };
+}
+
 export async function decideOrthoAdjustmentBilling(input: {
   adjustmentId: number; decision: OutsideContractDecision; reason: string | null;
   invoiceNumber: string | null; actor: string; actorRole: string | null;
@@ -24525,42 +24621,7 @@ export async function decideOrthoAdjustmentBilling(input: {
   if (input.decision === "billed" && !input.invoiceNumber?.trim()) {
     return { ok: false, status: 400, message: "اكتب رقم الفاتورة التي فوترت الشدّة." };
   }
-  return withTransaction(getPool(), async (client): Promise<OrthoDecisionResult> => {
-    const { rows: [row] } = await client.query<{
-      id: number; patient_id: number; billing_class: string | null; billing_decision: string | null; full_name: string;
-    }>(
-      `SELECT a.id, c.patient_id, a.billing_class, a.billing_decision, p.full_name
-         FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id JOIN patients p ON p.id = c.patient_id
-        WHERE a.id = $1 FOR UPDATE OF a`, [input.adjustmentId]);
-    if (!row) return { ok: false, status: 404, message: "الشدّة غير موجودة." };
-    if (!["OUTSIDE_CONTRACT", "REVIEW_REQUIRED"].includes(row.billing_class ?? "") || row.billing_decision !== null) {
-      return { ok: false, status: 409, message: "هذه الشدّة ليست بانتظار قرار فوترة — مشمولة أو حُسم قرارها." };
-    }
-    let invoiceId: number | null = null;
-    if (input.decision === "billed") {
-      const { rows: [invoice] } = await client.query<{ id: number }>(
-        `SELECT id FROM invoices WHERE invoice_number = $1 AND patient_id = $2 AND status <> 'cancelled'`,
-        [input.invoiceNumber!.trim(), row.patient_id]);
-      if (!invoice) return { ok: false, status: 409, message: "لا فاتورة سارية بهذا الرقم لهذا المريض." };
-      invoiceId = invoice.id;
-    }
-    await client.query(
-      `UPDATE ortho_adjustments
-          SET billing_decision = $2, billing_decision_reason = $3::text, billing_decided_by = $4,
-              billing_decided_at = NOW(), billing_invoice_id = $5::int
-        WHERE id = $1`,
-      [row.id, input.decision, input.decision === "no_charge" ? reason : null, input.actor, invoiceId]);
-    await insertAuditRow(client, {
-      action: "ortho.billing_decision", entity: "ortho_adjustments", entityId: row.id, entityLabel: row.full_name,
-      details: {
-        القرار: input.decision === "billed" ? "فوتِرت" : "بلا رسوم",
-        ...(reason && input.decision === "no_charge" ? { السبب: reason } : {}),
-        ...(invoiceId ? { الفاتورة: input.invoiceNumber!.trim() } : {}),
-      },
-      actor: input.actor, actorRole: input.actorRole,
-    });
-    return { ok: true, decision: input.decision };
-  });
+  return withTransaction(getPool(), (client) => decideOrthoAdjustmentBillingWith(client, input));
 }
 
 /**
@@ -24570,6 +24631,53 @@ export async function decideOrthoAdjustmentBilling(input: {
  * استعلامٍ ثانٍ. وثمن ذلك أن يبقى الاثنان متّفقين، ولذلك يُكتبان معًا: شدّةٌ تُسجَّل
  * بلا تحديث السلك تجعل الشاشة تقول سلكًا والسجل يقول آخر.
  */
+export async function recordAdjustmentWith(client: DbClient, input: {
+  caseId: number;
+  upperWireAction?: "remove";
+  lowerWireAction?: "remove";
+  visitId: number | null;
+  doneOn: string;
+  phase: OrthoPhase | null;
+  upperWire: string | null;
+  lowerWire: string | null;
+  elastics: ElasticClass;
+  elasticNote: string | null;
+  done: string | null;
+  nextWeeks: number;
+  note: string | null;
+  recordedBy: string;
+  actorRole?: string | null;
+}): Promise<
+  | { ok: true; id: number; created: boolean; visitId: number | null; attachedToToday: boolean }
+  | { ok: false; message: string }
+> {
+  let visitId = input.visitId;
+  let attachedToToday = false;
+  if (visitId === null) {
+    visitId = await openVisitTodayForOrthoCase(client, input.caseId, input.doneOn);
+    attachedToToday = visitId !== null;
+  } else {
+    const { rows } = await client.query<{ signed_at: Date | null }>(
+      `SELECT signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+    );
+    if (rows[0]?.signed_at) {
+      const existing = await client.query<{ id: number }>(
+        `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
+        [input.caseId, visitId],
+      );
+      if (existing.rows[0]) {
+        return { ok: true, id: existing.rows[0].id, created: false, visitId, attachedToToday: false };
+      }
+      return { ok: false, message: "الزيارة موقّعة — لا يمكن إضافة شدّة إليها." };
+    }
+  }
+  const result = await writeOrthoSessionInTx(client, { ...input, visitId, source: "ortho_tab" });
+  if (!result.ok) {
+    return { ok: false, message: ORTHO_SESSION_REFUSAL[result.reason] };
+  }
+  return { ok: true, id: result.id, created: result.created, visitId, attachedToToday };
+}
+
 export async function recordAdjustment(input: {
   caseId: number;
   upperWireAction?: "remove";
@@ -24594,45 +24702,13 @@ export async function recordAdjustment(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    /*
-     * (VISIT-FLOW-1) شدّة تبويب التقويم تعيش في زيارة اليوم.
-     *
-     * كانت تُسجَّل بلا زيارة، فيخرج المريض إلى الاستقبال وزيارته فارغة: لا توثيق ولا ما يُوقَّع،
-     * والشدّة في سجل التقويم وحده. الآن: شدّةٌ بتاريخ اليوم لمريضٍ له زيارةٌ غير موقّعة اليوم
-     * تُربط بها في الخادم، أيًّا كانت الشاشة التي أرسلتها. شدّةٌ بتاريخٍ سابق (إدخالٌ متأخر)
-     * أو لمريضٍ بلا زيارة اليوم تبقى كما كانت.
-     */
-    let visitId = input.visitId;
-    let attachedToToday = false;
-    if (visitId === null) {
-      visitId = await openVisitTodayForOrthoCase(client, input.caseId, input.doneOn);
-      attachedToToday = visitId !== null;
-    } else {
-      // The signer locks this row first too. Hold it until the adjustment commits,
-      // so a concurrent sign cannot make a once-open visit immutable mid-write.
-      const { rows } = await client.query<{ signed_at: Date | null }>(
-        `SELECT signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
-      );
-      if (rows[0]?.signed_at) {
-        const existing = await client.query<{ id: number }>(
-          `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
-          [input.caseId, visitId],
-        );
-        if (existing.rows[0]) {
-          await client.query("COMMIT");
-          return { ok: true, id: existing.rows[0].id, created: false, visitId, attachedToToday: false };
-        }
-        await client.query("ROLLBACK");
-        return { ok: false, message: "الزيارة موقّعة — لا يمكن إضافة شدّة إليها." };
-      }
-    }
-    const result = await writeOrthoSessionInTx(client, { ...input, visitId, source: "ortho_tab" });
+    const result = await recordAdjustmentWith(client, input);
     if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, message: ORTHO_SESSION_REFUSAL[result.reason] };
+      return result;
     }
     await client.query("COMMIT");
-    return { ok: true, id: result.id, created: result.created, visitId, attachedToToday };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -24641,23 +24717,25 @@ export async function recordAdjustment(input: {
   }
 }
 
-export async function setOrthoPhase(id: number, phase: OrthoPhase): Promise<boolean> {
-  await ensureSchema();
-  const { rowCount } = await getPool().query(
+export async function setOrthoPhaseWith(q: Pick<DbClient, "query">, id: number, phase: OrthoPhase): Promise<boolean> {
+  const { rowCount } = await q.query(
     `UPDATE ortho_cases SET phase = $2 WHERE id = $1 AND status IN ('active','retention')`,
     [id, phase],
   );
   return (rowCount ?? 0) > 0;
 }
 
+export async function setOrthoPhase(id: number, phase: OrthoPhase): Promise<boolean> {
+  await ensureSchema();
+  return setOrthoPhaseWith(getPool(), id, phase);
+}
+
 /** يسجّل المثبّت — وهو شرط إغلاق الحالة. */
-export async function setRetainer(input: {
+export async function setRetainerWith(q: Pick<DbClient, "query">, input: {
   id: number; retainer: RetainerType; deliveredOn: string | null;
-  /** Type-only saves preserve a known date only when the current stored type matches. */
   preserveExistingDeliveryDate?: boolean;
 }): Promise<boolean> {
-  await ensureSchema();
-  const { rowCount } = await getPool().query(
+  const { rowCount } = await q.query(
     `UPDATE ortho_cases SET retainer = $2,
             retainer_on = CASE
               WHEN $4::boolean AND $2::text <> 'none'
@@ -24672,12 +24750,50 @@ export async function setRetainer(input: {
   return (rowCount ?? 0) > 0;
 }
 
+export async function setRetainer(input: {
+  id: number; retainer: RetainerType; deliveredOn: string | null;
+  /** Type-only saves preserve a known date only when the current stored type matches. */
+  preserveExistingDeliveryDate?: boolean;
+}): Promise<boolean> {
+  await ensureSchema();
+  return setRetainerWith(getPool(), input);
+}
+
 /**
  * يُغلق الحالة.
  *
  * ويشترط المثبّت: حالةٌ تُغلق بلا مثبّت هي أكثر ما يُفسد نتيجة سنتين — الأسنان
  * ترتدّ، ويعود المريض بعد عامٍ فيجد النتيجة ضاعت فيلوم المركز بحق.
  */
+export async function closeOrthoCaseWith(client: DbClient, input: {
+  id: number; status: "completed" | "discontinued"; actor: string; note: string | null;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.id]);
+  if (!owner) return { ok: false, message: "الحالة غير موجودة." };
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
+  const { rows } = await client.query<{ status: string; retainer: string | null }>(
+    `SELECT status, retainer FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.id],
+  );
+  if (!rows[0]) return { ok: false, message: "الحالة غير موجودة." };
+
+  if (input.status === "completed") {
+    const guard = canComplete({
+      status: rows[0].status as CaseStatus,
+      retainer: (rows[0].retainer as RetainerType) ?? null,
+    });
+    if (!guard.ok) return guard;
+  } else if (rows[0].status === "completed" || rows[0].status === "discontinued") {
+    return { ok: false, message: "الحالة مغلقة سلفًا." };
+  }
+
+  await client.query(
+    `UPDATE ortho_cases SET status = $2, closed_at = NOW(), closed_by = $3, closed_note = $4::text
+      WHERE id = $1`,
+    [input.id, input.status, input.actor, input.note?.trim() || null],
+  );
+  return { ok: true };
+}
+
 export async function closeOrthoCase(input: {
   id: number; status: "completed" | "discontinued"; actor: string; note: string | null;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -24685,34 +24801,10 @@ export async function closeOrthoCase(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.id]);
-    if (!owner) { await client.query("ROLLBACK"); return { ok: false, message: "الحالة غير موجودة." }; }
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
-    const { rows } = await client.query<{ status: string; retainer: string | null }>(
-      `SELECT status, retainer FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الحالة غير موجودة." }; }
-
-    // التوقّف غير الإكمال: مريضٌ سافر أو انقطع تُغلق حالته بلا مثبّت — والشرط
-    // على الإكمال وحده، لأنه الادّعاء بأن العلاج انتهى كما يجب.
-    if (input.status === "completed") {
-      const guard = canComplete({
-        status: rows[0].status as CaseStatus,
-        retainer: (rows[0].retainer as RetainerType) ?? null,
-      });
-      if (!guard.ok) { await client.query("ROLLBACK"); return guard; }
-    } else if (rows[0].status === "completed" || rows[0].status === "discontinued") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "الحالة مغلقة سلفًا." };
-    }
-
-    await client.query(
-      `UPDATE ortho_cases SET status = $2, closed_at = NOW(), closed_by = $3, closed_note = $4::text
-        WHERE id = $1`,
-      [input.id, input.status, input.actor, input.note?.trim() || null],
-    );
+    const done = await closeOrthoCaseWith(client, input);
+    if (!done.ok) { await client.query("ROLLBACK"); return done; }
     await client.query("COMMIT");
-    return { ok: true };
+    return done;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -24741,9 +24833,18 @@ export interface OrthoFollowupRow extends FollowupCase {
  * periodic follow-up. Other/uncertain bookings remain visible for review.
  * Existing no-show history is intentionally independent of this selection.
  */
-export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRow[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+export async function orthoFollowupBoardWith(
+  q: Pick<DbClient, "query">,
+  today: string,
+  clinicianPartyId: number | null = null,
+): Promise<OrthoFollowupRow[]> {
+  const params: number[] = [];
+  let scopeClause = "";
+  if (clinicianPartyId !== null) {
+    params.push(clinicianPartyId);
+    scopeClause = ` AND EXISTS (SELECT 1 FROM patients WHERE patients.id = c.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")})`;
+  }
+  const { rows } = await q.query<{
     case_id: number; patient_id: number; full_name: string; phone: string | null;
     status: string; phase: string; start_date: Date; last_adjustment_date: string | null;
     next_weeks: number | null; upper_wire: string | null; lower_wire: string | null;
@@ -24827,7 +24928,8 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
        ) a ON TRUE
        LEFT JOIN bookings ON bookings.patient_id = c.patient_id
        LEFT JOIN noshow ns ON ns.patient_id = c.patient_id
-      WHERE c.status IN ('active', 'retention')`,
+      WHERE c.status IN ('active', 'retention')${scopeClause}`,
+    params,
   );
   return rows.map((row) => {
     const startDate = dateText(row.start_date);
@@ -24852,6 +24954,11 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
       lastWasNoShow: row.last_no_show,
     };
   });
+}
+
+export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRow[]> {
+  await ensureSchema();
+  return orthoFollowupBoardWith(getPool(), today, null);
 }
 
 /** Read projection only: suppress inconsistent legacy links, never rewrite them. */
@@ -30994,6 +31101,84 @@ export type OrthoBaselineRefusal = "no_patient" | "open_case" | "bad_doctor" | "
  * فاتورةً ولا زيارةً ولا شدّة ولا حركة مالية: المال السابق يُسجَّل من أبوابه (الرصيد الافتتاحي،
  * خطة الأقساط)، و`legacy_financial_mode` يقول للمستقبِل أيّها.
  */
+export async function recordOrthoBaselineWith(
+  client: DbClient,
+  input: BaselineDraft & {
+    patientId: number;
+    actor: string;
+    actorRole?: string | null;
+  },
+): Promise<{ ok: true; id: number } | { ok: false; reason: OrthoBaselineRefusal }> {
+  // يُقفل صفّ المريض كما في createOrthoCase: التجسير بالاتفاق التاريخي لا يتسابق مع كاتبٍ آخر لسياق التقويم.
+  const { rows: patients } = await client.query<{ full_name: string }>(
+    `SELECT full_name FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
+  if (!patients[0]) return { ok: false, reason: "no_patient" };
+
+  if (input.responsibleDoctorId !== null) {
+    const { rows } = await client.query(
+      `SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.responsibleDoctorId]);
+    if (!rows[0]) return { ok: false, reason: "bad_doctor" };
+  }
+  if (input.planId !== null) {
+    const { rows } = await client.query(
+      `SELECT 1 FROM treatment_plans WHERE id = $1 AND patient_id = $2`, [input.planId, input.patientId]);
+    if (!rows[0]) return { ok: false, reason: "bad_plan" };
+  }
+
+  await client.query("SAVEPOINT ortho_baseline_unique");
+  let caseId: number;
+  try {
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO ortho_cases
+         (patient_id, appliance, arches, slot, bracket_system, phase, start_date, planned_months,
+          upper_wire, lower_wire, plan_id, note, created_by,
+          baseline_kind, baseline_recorded_at, elastics, responsible_doctor_id,
+          legacy_financial_mode, remaining_objectives)
+       VALUES ($1, $2, $3, $4, $5::text, $6, $7::date, $8, $9::text, $10::text, $11::int, $12::text, $13,
+               'legacy', NOW(), $14::text, $15::int, $16, $17::text)
+       RETURNING id`,
+      [
+        input.patientId, input.appliance, input.arches, input.slot, input.bracketSystem, input.phase,
+        input.startDate, input.plannedMonths, input.upperWire, input.lowerWire, input.planId, input.note,
+        input.actor, input.elastics, input.responsibleDoctorId, input.financialMode, input.remainingObjectives,
+      ],
+    );
+    caseId = rows[0].id;
+    /* (ORTHO-ID) اللقطة السابقة تلتقي بحالة التقويم الأولية (فاتورة أو اتفاق تاريخي) في سياقٍ واحد — لا اتفاق
+       ولا رصيد ولا حالة عامة ثانية؛ نطاقٌ مختلف أو أكثر من حالة أولية يرفض ولا يكتب شيئًا. */
+    const bridge = await bridgeOrthoShell(client, {
+      patientId: input.patientId, orthoCaseId: caseId, arches: input.arches, actor: input.actor,
+    });
+    if (!bridge.ok) {
+      await client.query("ROLLBACK TO SAVEPOINT ortho_baseline_unique");
+      await client.query("RELEASE SAVEPOINT ortho_baseline_unique");
+      return { ok: false, reason: "bridge_conflict" };
+    }
+    await client.query("RELEASE SAVEPOINT ortho_baseline_unique");
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT ortho_baseline_unique").catch(() => undefined);
+    await client.query("RELEASE SAVEPOINT ortho_baseline_unique").catch(() => undefined);
+    // الفهرس الفريد ortho_cases_one_open: حالةٌ جاريةٌ واحدة لكل مريض.
+    if ((error as { code?: string }).code === "23505") {
+      return { ok: false, reason: "open_case" };
+    }
+    throw error;
+  }
+
+  await insertAuditRow(client, {
+    action: "ortho.baseline", entity: "patient", entityId: input.patientId, entityLabel: patients[0].full_name,
+    details: {
+      الحالة: caseId, المرحلة: input.phase, البدء: input.startDate,
+      الأشهر_المنقضية: input.monthsElapsed, الأشهر_المتبقية: input.monthsRemaining,
+      السلك_العلوي: input.upperWire ?? "—", السلك_السفلي: input.lowerWire ?? "—",
+      المطاطات: input.elastics ?? "—", الطبيب_المسؤول: input.responsibleDoctorId ?? "—",
+      النظام_المالي_السابق: input.financialMode, الخطة: input.planId ?? "—",
+    },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true, id: caseId };
+}
+
 export async function recordOrthoBaseline(input: BaselineDraft & {
   patientId: number;
   actor: string;
@@ -31009,69 +31194,13 @@ export async function recordOrthoBaseline(input: BaselineDraft & {
       if (!verified) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_doctor" }; }
       input = { ...input, actor: verified.username, actorRole: verified.role };
     }
-    // يُقفل صفّ المريض كما في createOrthoCase: التجسير بالاتفاق التاريخي لا يتسابق مع كاتبٍ آخر لسياق التقويم.
-    const { rows: patients } = await client.query<{ full_name: string }>(
-      `SELECT full_name FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
-    if (!patients[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
-
-    if (input.responsibleDoctorId !== null) {
-      const { rows } = await client.query(
-        `SELECT 1 FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.responsibleDoctorId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_doctor" }; }
+    const result = await recordOrthoBaselineWith(client, input);
+    if (!result.ok) {
+      await client.query("ROLLBACK");
+      return result;
     }
-    if (input.planId !== null) {
-      const { rows } = await client.query(
-        `SELECT 1 FROM treatment_plans WHERE id = $1 AND patient_id = $2`, [input.planId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_plan" }; }
-    }
-
-    let caseId: number;
-    try {
-      const { rows } = await client.query<{ id: number }>(
-        `INSERT INTO ortho_cases
-           (patient_id, appliance, arches, slot, bracket_system, phase, start_date, planned_months,
-            upper_wire, lower_wire, plan_id, note, created_by,
-            baseline_kind, baseline_recorded_at, elastics, responsible_doctor_id,
-            legacy_financial_mode, remaining_objectives)
-         VALUES ($1, $2, $3, $4, $5::text, $6, $7::date, $8, $9::text, $10::text, $11::int, $12::text, $13,
-                 'legacy', NOW(), $14::text, $15::int, $16, $17::text)
-         RETURNING id`,
-        [
-          input.patientId, input.appliance, input.arches, input.slot, input.bracketSystem, input.phase,
-          input.startDate, input.plannedMonths, input.upperWire, input.lowerWire, input.planId, input.note,
-          input.actor, input.elastics, input.responsibleDoctorId, input.financialMode, input.remainingObjectives,
-        ],
-      );
-      caseId = rows[0].id;
-    } catch (error) {
-      // الفهرس الفريد ortho_cases_one_open: حالةٌ جاريةٌ واحدة لكل مريض.
-      if ((error as { code?: string }).code === "23505") {
-        await client.query("ROLLBACK");
-        return { ok: false, reason: "open_case" };
-      }
-      throw error;
-    }
-
-    /* (ORTHO-ID) اللقطة السابقة تلتقي بحالة التقويم الأولية (فاتورة أو اتفاق تاريخي) في سياقٍ واحد — لا اتفاق
-       ولا رصيد ولا حالة عامة ثانية؛ نطاقٌ مختلف أو أكثر من حالة أولية يرفض ولا يكتب شيئًا. */
-    const bridge = await bridgeOrthoShell(client, {
-      patientId: input.patientId, orthoCaseId: caseId, arches: input.arches, actor: input.actor,
-    });
-    if (!bridge.ok) { await client.query("ROLLBACK"); return { ok: false, reason: "bridge_conflict" }; }
-
-    await insertAuditRow(client, {
-      action: "ortho.baseline", entity: "patient", entityId: input.patientId, entityLabel: patients[0].full_name,
-      details: {
-        الحالة: caseId, المرحلة: input.phase, البدء: input.startDate,
-        الأشهر_المنقضية: input.monthsElapsed, الأشهر_المتبقية: input.monthsRemaining,
-        السلك_العلوي: input.upperWire ?? "—", السلك_السفلي: input.lowerWire ?? "—",
-        المطاطات: input.elastics ?? "—", الطبيب_المسؤول: input.responsibleDoctorId ?? "—",
-        النظام_المالي_السابق: input.financialMode, الخطة: input.planId ?? "—",
-      },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
     await client.query("COMMIT");
-    return { ok: true, id: caseId };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
