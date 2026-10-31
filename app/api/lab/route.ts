@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { commandCanonicalCreateLabOrderResponse, readCanonicalLabResponse } from "@/lib/canonical-lab";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import { createLabOrder, doctorOwnedPatientIds, doctorOwnsPatient, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
 import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME, labToothInputProblem, parseLabTeeth } from "@/lib/lab";
 import { LabOrderPricingConflict } from "@/lib/lab-order-pricing";
@@ -11,6 +13,7 @@ import { toWhatsAppNumber } from "@/lib/reminders";
 import { rateFromSettings } from "@/lib/settings";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 import { parseLabShadeSpecification } from "@/lib/lab-shades";
@@ -22,6 +25,13 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    return readCanonicalLabResponse(selected.handle, request);
+  }
   const session = await requireSession();
   if (!session) return denied();
   const url = new URL(request.url);
@@ -96,6 +106,21 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return commandCanonicalCreateLabOrderResponse(selected.handle, body);
+  }
   const session = await requireSession();
   if (!session) return denied();
   let body: unknown;

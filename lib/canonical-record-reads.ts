@@ -40,6 +40,10 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:plans.agreement-amendment": Object.freeze({ record: "patient", need: Object.freeze(["finance.agreements.manage"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/plans/[id]/reconcile: approved-agreement reconciliation snapshot inside patient scope (M2 slice 32). */
   "read:plans.reconcile": Object.freeze({ record: "patient", need: Object.freeze(["finance.agreements.manage"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/lab: operational lab orders inside patient scope with cost projection (M2 slice 33). */
+  "read:lab.orders": Object.freeze({ record: "patient", need: Object.freeze(["clinical.lab.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/lab/backlog: whole-clinic open lab oversight inside whole patient scope (M2 slice 33). */
+  "read:lab.backlog": Object.freeze({ record: "patient", need: Object.freeze(["clinical.lab.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]/ceph, /api/ceph/[id], /api/ceph/compare, /api/ceph/superimpose (M2 slice 30). */
   "read:ceph": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients: search and browse the patient list. */

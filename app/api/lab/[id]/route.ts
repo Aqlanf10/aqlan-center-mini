@@ -4,6 +4,8 @@ import { parseLabShadeSpecification } from "@/lib/lab-shades";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { deleteCanonicalLabOrderResponse, patchCanonicalLabOrderResponse } from "@/lib/canonical-lab";
+import { NO_STORE } from "@/lib/canonical-patient-http";
 import {
   createLabOrderRemake,
   deleteLabOrder,
@@ -22,6 +24,7 @@ import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
 import { canAccessPatient } from "@/lib/patient-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import type { LabOrderStatus } from "@/lib/lab";
@@ -40,6 +43,26 @@ const STATUSES: LabOrderStatus[] = [
 ];
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "رقم العمل غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return patchCanonicalLabOrderResponse(selected.handle, id, (body ?? {}) as Record<string, unknown>);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -355,6 +378,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 /* حذف أمر مختبر نهائيًا — المدير وحده، والالتزام المسدَّد يمنعه (يُلغى سريريًا
  * بدله). الإلغاء للموقف الطبيعي، والحذف للسجل الخاطئ الذي لا مكان له أصلًا. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "رقم العمل غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    let reason: string | null = null;
+    try {
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      const source = (body ?? {}) as Record<string, unknown>;
+      if (typeof source.reason === "string" && source.reason.trim()) {
+        reason = source.reason.trim().slice(0, 300);
+      }
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+    }
+    return deleteCanonicalLabOrderResponse(selected.handle, id, reason);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
+  commandCanonicalDeleteLabServiceResponse,
+  commandCanonicalUpdateLabServiceResponse,
+  readCanonicalLabServiceResponse,
+} from "@/lib/canonical-lab";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
   deleteLabService,
   getLabService,
   recordAudit,
@@ -9,6 +15,7 @@ import {
 } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import type { LabServiceCategory, LabToothScope } from "@/lib/lab";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +27,18 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "معرّف الخدمة غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return readCanonicalLabServiceResponse(selected.handle, id);
+  }
   const session = await requireSession();
   if (!session) return denied();
 
@@ -45,6 +64,26 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "معرّف الخدمة غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return commandCanonicalUpdateLabServiceResponse(selected.handle, id, body);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {
@@ -164,6 +203,18 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return NextResponse.json({ message: "معرّف الخدمة غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return commandCanonicalDeleteLabServiceResponse(selected.handle, id);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

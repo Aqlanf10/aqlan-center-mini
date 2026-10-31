@@ -470,6 +470,26 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - Source boundary: one GET only. Existing writers, clinical/financial relationships, full legacy case readers, ceph and plans remain untouched. This is a read: no new mutation/audit policy or idempotency claim.
 - Evidence: `__tests__/postgres/ortho-canonical-cases.test.ts` and built `canonical-ortho-cases-journey` (portOffset 39); delivery report `docs/review/work-ortho-cases-slice29-20261030.md`.
 
+### Slice 30 — Cephalometrics (`ceph-reference-sets`, `patients/[id]/ceph`, `ceph/[id]`, `compare`, `superimpose`)
+- Registered record read `read:ceph` (`clinical.xrays.view` + patient scope) in one owning RR snapshot; reference sets via `clinical.xrays.view`. Both compared/superimposed analyses are checked against patient scope before cross-patient equality.
+- Writes (`POST /api/patients/[id]/ceph` with `clinical.xrays.upload`; `PATCH/DELETE /api/ceph/[id]`, `complete`, `duplicate` with `clinical.ceph.analyze`) lock `patients` then `ceph_analyses` with atomic `insertAuditRow`. AI analysis (`/api/ceph/[id]/ai-analyze`) stays excluded.
+- Evidence: `__tests__/postgres/ceph-canonical.test.ts`.
+
+### Slice 31 — Orthodontic Operations & Documentation (`/api/ortho/**`)
+- Registered record reads `read:ortho.case`, `read:ortho.followups`, `read:ortho.billing-decisions`, `read:ortho.followup-coverage` inside patient scope with explicit projections (`clinical` vs `finance.agreements.manage` / `finance.invoices.create`).
+- Writes across orthodontic case creation/updates, adjustments, appliances, elastics, photos, progress, relapse, retention, space analysis, assessments, strategies, follow-up coverage, and billing decisions (`no_charge` via `clinical.ortho.edit`, `billed` via `finance.invoices.create`) commit atomic `insertAuditRow`.
+- Evidence: `__tests__/postgres/ortho-canonical-operations.test.ts`.
+
+### Slice 32 — Treatment Plans, Approved Agreements & Clinical Cases (`/api/plans/**`, `/api/cases/**`, `/api/plan-items/**`, `/api/plan-templates`)
+- Registered record reads `read:patients.plans`, `read:plans`, `read:plans.proposals`, `read:plans.agreement-amendment`, `read:plans.reconcile` with clinical vs financial projection.
+- Writes cover plan templates, proposals, plan consent/status/items (with capability-based foreign-currency price authority), installment collection (`finance.payments.collect` + open shift), financial approval, agreement amendment, reconciliation, reminders, specialty clinical cases, and plan-item dependencies with atomic `insertAuditRow`.
+- Evidence: `__tests__/postgres/plans-cases-canonical.test.ts`.
+
+### Slice 33 — Laboratory Orders, Backlog, Pricing, Services & Directory (`/api/lab/**`, `/api/laboratories/**`)
+- Registered record reads `read:lab.orders` (patient scope + cost projection gated by `finance.cost-prices.view` / `finance.payables.record`) and `read:lab.backlog` (whole-clinic patient scope `all` + `scope.userId` private-task isolation); badge summary (`?summary=1`), pricing, services, and laboratories directory via `clinical.lab.view`; work-intent capability via `clinical.lab.order`.
+- Branch-exact writes on `PATCH /api/lab/[id]` (`complete_prescription` requires `clinical.visits.document` + `clinical.lab.order`; `post`/`unpost`/`update_accounting` require `finance.payables.record`; `remake`/`update_clinical`/`update_shade`/`dueDate`/`status` require `clinical.lab.order`, and cancelling a dispatched order requires `clinical.lab.cancel`); permanent delete via `clinical.lab.cancel` with mandatory reason; pricing/services CRUD via `finance.lab-prices.edit`; laboratories directory CRUD via `clinical.laboratories.manage`, all with atomic `insertAuditRow`.
+- Evidence: `__tests__/postgres/lab-canonical.test.ts`.
+
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
 

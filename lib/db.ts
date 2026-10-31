@@ -6563,15 +6563,17 @@ const LAB_SELECT = `
  * الصفوف على هاتف الاستقبال تُفتح مرة ثم تُهجَر. الأرشيف الكامل يظهر في ملف المريض.
  * الفلاتر (المختبرات V2) اختيارية — بلاها سلوك الشاشة اليومية كما كان.
  */
-export async function listLabOrders(filters?: {
-  status?: string;
-  patientId?: number;
-  doctorId?: number;
-  partyId?: number;
-  scopedDoctorPartyId?: number;
-  limit?: number;
-}): Promise<LabOrder[]> {
-  await ensureSchema();
+export async function listLabOrdersWith(
+  q: Pick<DbClient, "query">,
+  filters?: {
+    status?: string;
+    patientId?: number;
+    doctorId?: number;
+    partyId?: number;
+    scopedDoctorPartyId?: number;
+    limit?: number;
+  },
+): Promise<LabOrder[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
   let idx = 1;
@@ -6613,7 +6615,7 @@ export async function listLabOrders(filters?: {
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limitClause = `LIMIT ${filters?.limit ? Math.min(filters.limit, 500) : 300}`;
 
-  const { rows } = await getPool().query<LabOrderRow>(
+  const { rows } = await q.query<LabOrderRow>(
     `${LAB_SELECT}
       ${whereClause}
       ORDER BY
@@ -6626,17 +6628,32 @@ export async function listLabOrders(filters?: {
   return rows.map(toLabOrder);
 }
 
-/** أمر مختبر واحد بالمعرف — لشاشة التتبع وتاريخ الأحداث (المختبرات V2). */
-export async function getLabOrderById(id: number): Promise<LabOrder | null> {
+export async function listLabOrders(filters?: {
+  status?: string;
+  patientId?: number;
+  doctorId?: number;
+  partyId?: number;
+  scopedDoctorPartyId?: number;
+  limit?: number;
+}): Promise<LabOrder[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
+  return listLabOrdersWith(getPool(), filters);
+}
+
+/** أمر مختبر واحد بالمعرف — لشاشة التتبع وتاريخ الأحداث (المختبرات V2). */
+export async function getLabOrderByIdWith(q: Pick<DbClient, "query">, id: number): Promise<LabOrder | null> {
+  const { rows } = await q.query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
   return rows[0] ? toLabOrder(rows[0]) : null;
 }
 
-/** سجل أحداث أمر المختبر (المختبرات V2) — من حرّك الحالة ومتى وبأي ملاحظة. */
-export async function labOrderEvents(id: number): Promise<LabOrderTrackingEvent[]> {
+export async function getLabOrderById(id: number): Promise<LabOrder | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return getLabOrderByIdWith(getPool(), id);
+}
+
+/** سجل أحداث أمر المختبر (المختبرات V2) — من حرّك الحالة ومتى وبأي ملاحظة. */
+export async function labOrderEventsWith(q: Pick<DbClient, "query">, id: number): Promise<LabOrderTrackingEvent[]> {
+  const { rows } = await q.query<{
     id: number; lab_order_id: number; action: string; from_status: string | null;
     to_status: string | null; notes: string | null; actor: string; actor_role: string | null;
     created_at: Date;
@@ -6658,11 +6675,15 @@ export async function labOrderEvents(id: number): Promise<LabOrderTrackingEvent[
   }));
 }
 
+export async function labOrderEvents(id: number): Promise<LabOrderTrackingEvent[]> {
+  await ensureSchema();
+  return labOrderEventsWith(getPool(), id);
+}
+
 /** دليل خدمات المعمل (المختبرات V2): يُدرج معه عدد الطلبات الحية والكلية —
  * الدليل الذي يعرف أعماله يمنع تعطيل خدمةٍ تنبض تحتها طلبات. */
-export async function listLabServices(includeInactive = false): Promise<LabService[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+export async function listLabServicesWith(q: Pick<DbClient, "query">, includeInactive = false): Promise<LabService[]> {
+  const { rows } = await q.query<{
     id: number; name: string; code: string | null; category: string;
     tooth_scope: string; requires_shade: boolean;
     default_days: number; description: string | null; is_active: boolean;
@@ -6696,9 +6717,13 @@ export async function listLabServices(includeInactive = false): Promise<LabServi
   }));
 }
 
-export async function getLabService(id: number): Promise<LabService | null> {
+export async function listLabServices(includeInactive = false): Promise<LabService[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listLabServicesWith(getPool(), includeInactive);
+}
+
+export async function getLabServiceWith(q: Pick<DbClient, "query">, id: number): Promise<LabService | null> {
+  const { rows } = await q.query<{
     id: number; name: string; code: string | null; category: string;
     tooth_scope: string; requires_shade: boolean;
     default_days: number; description: string | null; is_active: boolean;
@@ -6734,19 +6759,26 @@ export async function getLabService(id: number): Promise<LabService | null> {
   };
 }
 
-export async function createLabService(input: {
-  name: string;
-  code?: string | null;
-  category?: LabService["category"];
-  toothScope?: LabService["toothScope"];
-  requiresShade?: boolean;
-  defaultDays?: number;
-  description?: string | null;
-  sortOrder?: number;
-  isActive?: boolean;
-}): Promise<LabService> {
+export async function getLabService(id: number): Promise<LabService | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return getLabServiceWith(getPool(), id);
+}
+
+export async function createLabServiceWith(
+  q: Pick<DbClient, "query">,
+  input: {
+    name: string;
+    code?: string | null;
+    category?: LabService["category"];
+    toothScope?: LabService["toothScope"];
+    requiresShade?: boolean;
+    defaultDays?: number;
+    description?: string | null;
+    sortOrder?: number;
+    isActive?: boolean;
+  },
+): Promise<LabService> {
+  const { rows } = await q.query<{
     id: number; name: string; code: string | null; category: string;
     tooth_scope: string; requires_shade: boolean;
     default_days: number; description: string | null; is_active: boolean;
@@ -6785,7 +6817,23 @@ export async function createLabService(input: {
   };
 }
 
-export async function updateLabService(
+export async function createLabService(input: {
+  name: string;
+  code?: string | null;
+  category?: LabService["category"];
+  toothScope?: LabService["toothScope"];
+  requiresShade?: boolean;
+  defaultDays?: number;
+  description?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
+}): Promise<LabService> {
+  await ensureSchema();
+  return createLabServiceWith(getPool(), input);
+}
+
+export async function updateLabServiceWith(
+  q: Pick<DbClient, "query">,
   id: number,
   input: Partial<{
     name: string;
@@ -6799,8 +6847,7 @@ export async function updateLabService(
     sortOrder: number;
   }>,
 ): Promise<LabService | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  const { rows } = await q.query<{ id: number }>(
     `UPDATE lab_services
         SET name           = COALESCE($2, name),
             code           = CASE WHEN $3::boolean THEN $4::text ELSE code END,
@@ -6829,18 +6876,38 @@ export async function updateLabService(
     ],
   );
   if (!rows[0]) return null;
-  return getLabService(id);
+  return getLabServiceWith(q, id);
+}
+
+export async function updateLabService(
+  id: number,
+  input: Partial<{
+    name: string;
+    code: string | null;
+    category: LabService["category"];
+    toothScope: LabService["toothScope"];
+    requiresShade: boolean;
+    defaultDays: number;
+    description: string | null;
+    isActive: boolean;
+    sortOrder: number;
+  }>,
+): Promise<LabService | null> {
+  await ensureSchema();
+  return updateLabServiceWith(getPool(), id, input);
 }
 
 /** حذف الخدمة: مرتبطة بطلبات أو قواعد تسعير؟ تُعطّل ولا تُمحى —
  * التكامل المالي يبدأ من بقاء أثر الخدمة في سجلات الالتزامات. */
-export async function deleteLabService(id: number): Promise<{ deleted: boolean; deactivated: boolean; message: string }> {
-  await ensureSchema();
-  const { rows: orderCheck } = await getPool().query<{ count: string }>(
+export async function deleteLabServiceWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<{ deleted: boolean; deactivated: boolean; message: string }> {
+  const { rows: orderCheck } = await q.query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM lab_orders WHERE lab_service_id = $1`,
     [id],
   );
-  const { rows: ruleCheck } = await getPool().query<{ count: string }>(
+  const { rows: ruleCheck } = await q.query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM lab_pricing_rules WHERE lab_service_id = $1`,
     [id],
   );
@@ -6848,7 +6915,7 @@ export async function deleteLabService(id: number): Promise<{ deleted: boolean; 
   const ruleCount = Number(ruleCheck[0]?.count ?? 0);
 
   if (orderCount > 0 || ruleCount > 0) {
-    await getPool().query(`UPDATE lab_services SET is_active = FALSE WHERE id = $1`, [id]);
+    await q.query(`UPDATE lab_services SET is_active = FALSE WHERE id = $1`, [id]);
     return {
       deleted: false,
       deactivated: true,
@@ -6856,7 +6923,7 @@ export async function deleteLabService(id: number): Promise<{ deleted: boolean; 
     };
   }
 
-  const { rowCount } = await getPool().query(`DELETE FROM lab_services WHERE id = $1`, [id]);
+  const { rowCount } = await q.query(`DELETE FROM lab_services WHERE id = $1`, [id]);
   return {
     deleted: (rowCount ?? 0) > 0,
     deactivated: false,
@@ -6864,12 +6931,16 @@ export async function deleteLabService(id: number): Promise<{ deleted: boolean; 
   };
 }
 
-/** يزرع دليل الخدمات الافتراضي — تحديثٌ لا ازدواج: ON CONFLICT (code). */
-export async function seedLabServicesCatalog(): Promise<{ count: number }> {
+export async function deleteLabService(id: number): Promise<{ deleted: boolean; deactivated: boolean; message: string }> {
   await ensureSchema();
+  return deleteLabServiceWith(getPool(), id);
+}
+
+/** يزرع دليل الخدمات الافتراضي — تحديثٌ لا ازدواج: ON CONFLICT (code). */
+export async function seedLabServicesCatalogWith(q: Pick<DbClient, "query">): Promise<{ count: number }> {
   let count = 0;
   for (const item of DEFAULT_LAB_SERVICES) {
-    const res = await getPool().query(
+    const res = await q.query(
       `INSERT INTO lab_services (name, code, category, tooth_scope, requires_shade, default_days, description, sort_order, is_active)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
        ON CONFLICT (code) DO UPDATE
@@ -6895,6 +6966,11 @@ export async function seedLabServicesCatalog(): Promise<{ count: number }> {
     if (res.rows[0]) count++;
   }
   return { count };
+}
+
+export async function seedLabServicesCatalog(): Promise<{ count: number }> {
+  await ensureSchema();
+  return seedLabServicesCatalogWith(getPool());
 }
 
 // ─── قواعد التسعير الفعالة للمختبرات (Lab Pricing Rules) ───────────────────
@@ -6929,11 +7005,11 @@ const toLabPricingRule = (r: LabPricingRuleRow): LabPricingRule => ({
   createdAt: r.created_at.toISOString(),
 });
 
-export async function listLabPricingRules(
+export async function listLabPricingRulesWith(
+  q: Pick<DbClient, "query">,
   partyId?: number,
   labServiceId?: number,
 ): Promise<LabPricingRule[]> {
-  await ensureSchema();
   const conditions: string[] = [];
   const params: unknown[] = [];
   let idx = 1;
@@ -6948,7 +7024,7 @@ export async function listLabPricingRules(
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const { rows } = await getPool().query<LabPricingRuleRow>(
+  const { rows } = await q.query<LabPricingRuleRow>(
     `SELECT r.id, r.party_id, p.name AS party_name, r.lab_service_id, ls.name AS service_name,
             r.cost_minor, r.cost_currency, r.effective_from, r.effective_to, r.note,
             r.created_by, r.created_at
@@ -6962,18 +7038,28 @@ export async function listLabPricingRules(
   return rows.map(toLabPricingRule);
 }
 
-export async function createLabPricingRule(input: {
-  partyId: number;
-  labServiceId: number;
-  costMinor: number;
-  costCurrency: LabPricingRule["costCurrency"];
-  effectiveFrom: string;
-  effectiveTo?: string | null;
-  note?: string | null;
-  createdBy: string;
-}): Promise<LabPricingRule> {
+export async function listLabPricingRules(
+  partyId?: number,
+  labServiceId?: number,
+): Promise<LabPricingRule[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<LabPricingRuleRow>(
+  return listLabPricingRulesWith(getPool(), partyId, labServiceId);
+}
+
+export async function createLabPricingRuleWith(
+  q: Pick<DbClient, "query">,
+  input: {
+    partyId: number;
+    labServiceId: number;
+    costMinor: number;
+    costCurrency: LabPricingRule["costCurrency"];
+    effectiveFrom: string;
+    effectiveTo?: string | null;
+    note?: string | null;
+    createdBy: string;
+  },
+): Promise<LabPricingRule> {
+  const { rows } = await q.query<LabPricingRuleRow>(
     `INSERT INTO lab_pricing_rules
        (party_id, lab_service_id, cost_minor, cost_currency, effective_from, effective_to, note, created_by)
      VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8)
@@ -6990,8 +7076,22 @@ export async function createLabPricingRule(input: {
       input.createdBy,
     ],
   );
-  const full = await listLabPricingRules(input.partyId, input.labServiceId);
-  return full[0] ?? toLabPricingRuleShallow(rows[0], input);
+  const full = await listLabPricingRulesWith(q, input.partyId, input.labServiceId);
+  return full.find((rule) => rule.id === rows[0].id) ?? full[0] ?? toLabPricingRuleShallow(rows[0], input);
+}
+
+export async function createLabPricingRule(input: {
+  partyId: number;
+  labServiceId: number;
+  costMinor: number;
+  costCurrency: LabPricingRule["costCurrency"];
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  note?: string | null;
+  createdBy: string;
+}): Promise<LabPricingRule> {
+  await ensureSchema();
+  return createLabPricingRuleWith(getPool(), input);
 }
 
 /** نسخة مبسطة حين يخلو الجدول من القاعدة الجديدة بعد الإدراج (لا يحدث عمليًا). */
@@ -7013,7 +7113,8 @@ function toLabPricingRuleShallow(
   };
 }
 
-export async function updateLabPricingRule(
+export async function updateLabPricingRuleWith(
+  q: Pick<DbClient, "query">,
   id: number,
   input: Partial<{
     costMinor: number;
@@ -7023,8 +7124,7 @@ export async function updateLabPricingRule(
     note: string | null;
   }>,
 ): Promise<LabPricingRule | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ party_id: number; lab_service_id: number }>(
+  const { rows } = await q.query<{ party_id: number; lab_service_id: number }>(
     `UPDATE lab_pricing_rules
         SET cost_minor     = COALESCE($2, cost_minor),
             cost_currency  = COALESCE($3, cost_currency),
@@ -7045,24 +7145,42 @@ export async function updateLabPricingRule(
     ],
   );
   if (!rows[0]) return null;
-  const full = await listLabPricingRules(rows[0].party_id, rows[0].lab_service_id);
+  const full = await listLabPricingRulesWith(q, rows[0].party_id, rows[0].lab_service_id);
   return full.find((rule) => rule.id === id) ?? null;
+}
+
+export async function updateLabPricingRule(
+  id: number,
+  input: Partial<{
+    costMinor: number;
+    costCurrency: LabPricingRule["costCurrency"];
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    note: string | null;
+  }>,
+): Promise<LabPricingRule | null> {
+  await ensureSchema();
+  return updateLabPricingRuleWith(getPool(), id, input);
+}
+
+export async function deleteLabPricingRuleWith(q: Pick<DbClient, "query">, id: number): Promise<boolean> {
+  const { rowCount } = await q.query(`DELETE FROM lab_pricing_rules WHERE id = $1`, [id]);
+  return (rowCount ?? 0) > 0;
 }
 
 export async function deleteLabPricingRule(id: number): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(`DELETE FROM lab_pricing_rules WHERE id = $1`, [id]);
-  return (rowCount ?? 0) > 0;
+  return deleteLabPricingRuleWith(getPool(), id);
 }
 
 /** سعر الخدمة عند مختبرٍ بعينه بتاريخ الإرسال — آخر قاعدةٍ سارية. */
-export async function resolveLabOrderPrice(
+export async function resolveLabOrderPriceWith(
+  q: Pick<DbClient, "query">,
   partyId: number,
   labServiceId: number,
   dateStr: string,
 ): Promise<{ costMinor: number; costCurrency: LabPricingRule["costCurrency"]; ruleId: number } | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+  const { rows } = await q.query<{
     id: number;
     cost_minor: string | number;
     cost_currency: string;
@@ -7083,6 +7201,15 @@ export async function resolveLabOrderPrice(
     costMinor: Number(rows[0].cost_minor),
     costCurrency: rows[0].cost_currency as LabPricingRule["costCurrency"],
   };
+}
+
+export async function resolveLabOrderPrice(
+  partyId: number,
+  labServiceId: number,
+  dateStr: string,
+): Promise<{ costMinor: number; costCurrency: LabPricingRule["costCurrency"]; ruleId: number } | null> {
+  await ensureSchema();
+  return resolveLabOrderPriceWith(getPool(), partyId, labServiceId, dateStr);
 }
 
 /** كتابة حدثٍ في سجل تتبع أمر المختبر — داخل معاملةٍ إن وُجد client. */
@@ -7110,7 +7237,7 @@ export async function addLabOrderTracking(
  * التكلفة والالتزام معًا أو لا شيء: أمرٌ سُجّل وتكلفته ضاعت يعني عملًا يُنتظر بلا
  * أثر مالي، ثم يأتي المختبر بحسابه آخر الشهر فلا يُقابَل بشيء يُراجَع.
  */
-export async function createLabOrder(input: {
+export interface CreateLabOrderInput {
   patientId: number;
   labName: string;
   labPhone: string | null;
@@ -7147,195 +7274,187 @@ export async function createLabOrder(input: {
   expenseAccountCode?: string | null;
   payableAccountCode?: string | null;
   isPosted?: boolean;
-}): Promise<LabOrder | null> {
+}
+
+export async function createLabOrderInTransaction(
+  client: DbClient,
+  input: CreateLabOrderInput,
+): Promise<LabOrder | null> {
+  const parsedShade = parseLabShadeSpecification(input.shadeSpecification ?? null, Object.keys(parseLabTeeth(input.toothNumbers)).map(Number));
+  if (!parsedShade.ok) throw new Error(parsedShade.error);
+
+  let resolvedPartyId = input.partyId ?? null;
+  if (!resolvedPartyId && input.labName && input.labName !== PENDING_LAB_NAME) {
+    const pRes = await client.query<{ id: number }>(
+      `SELECT id FROM parties WHERE kind = 'lab' AND (LOWER(TRIM(name)) = LOWER(TRIM($1)) OR id::text = $1) LIMIT 1`,
+      [input.labName],
+    );
+    if (pRes.rows[0]) {
+      resolvedPartyId = pRes.rows[0].id;
+    } else {
+      const newPartyRes = await client.query<{ id: number }>(
+        `INSERT INTO parties (name, kind, phone, currency, expense_account_code, payable_account_code, auto_post_journal)
+         VALUES ($1, 'lab', $2, $3, '5101', '2101', true)
+         RETURNING id`,
+        [input.labName, input.labPhone ?? null, input.costCurrency ?? input.baseCurrency],
+      );
+      resolvedPartyId = newPartyRes.rows[0]?.id ?? null;
+    }
+  }
+
+  let resolvedCost = input.costMinor ?? null;
+  let resolvedCurrency = input.costCurrency ?? null;
+  let resolvedExchangeRate = input.exchangeRate;
+  let automaticBaseAmount: number | null = null;
+  const effectiveStatus =
+    input.status === "needed" || (!resolvedPartyId && (!input.labName?.trim() || input.labName === PENDING_LAB_NAME))
+      ? "needed"
+      : "sent";
+  if (resolvedCost == null && resolvedPartyId && input.labServiceId && effectiveStatus !== "needed") {
+    const priceRes = await client.query<{
+      cost_minor: string | number;
+      cost_currency: string;
+      tooth_scope: string | null;
+    }>(
+      `SELECT r.cost_minor, r.cost_currency, s.tooth_scope
+         FROM lab_pricing_rules r
+         LEFT JOIN lab_services s ON s.id = $2
+        WHERE r.party_id = $1
+          AND r.lab_service_id = $2
+          AND r.effective_from <= $3::date
+          AND (r.effective_to IS NULL OR r.effective_to >= $3::date)
+        ORDER BY r.effective_from DESC, r.id DESC
+        LIMIT 1`,
+      [resolvedPartyId, input.labServiceId, input.sentDate],
+    );
+    if (priceRes.rows[0]) {
+      const quantity = labPricingQuantity(
+        input.toothNumbers ?? null,
+        (priceRes.rows[0].tooth_scope as LabService["toothScope"] | null) ?? null,
+      );
+      const automaticPrice = resolveAutomaticLabPrice({
+        costMinor: priceRes.rows[0].cost_minor,
+        costCurrency: priceRes.rows[0].cost_currency,
+        quantity,
+        baseCurrency: input.baseCurrency,
+        settings: await getSettingsInTransaction(client, { requireStoredExchangeRates: true }),
+      });
+      resolvedCost = automaticPrice.costMinor;
+      resolvedCurrency = automaticPrice.costCurrency;
+      resolvedExchangeRate = automaticPrice.exchangeRate;
+      automaticBaseAmount = automaticPrice.baseAmountMinor;
+    }
+  }
+  const effectiveBaseCurrency = input.baseCurrency ?? CLINIC_BASE_CURRENCY;
+  const effectiveExchangeRate = resolvedExchangeRate ?? (resolvedCurrency === effectiveBaseCurrency ? 1 : undefined);
+  const baseAmount = automaticBaseAmount ?? (resolvedCost != null && resolvedCurrency && effectiveExchangeRate != null
+    ? toBaseAmount(resolvedCost, resolvedCurrency, effectiveBaseCurrency, effectiveExchangeRate)
+    : null);
+
+  const isPosted = input.isPosted !== false;
+  const expenseCatId = input.expenseCategoryId ?? null;
+  let expenseAccCode = input.expenseAccountCode?.trim() || null;
+  if (expenseCatId && !expenseAccCode) {
+    const catRes = await client.query<{ account_code: string }>(
+      `SELECT account_code FROM expense_categories WHERE id = $1`, [expenseCatId],
+    );
+    if (catRes.rows[0]?.account_code) expenseAccCode = catRes.rows[0].account_code;
+  }
+  if (!expenseAccCode) expenseAccCode = "5101";
+  const payableAccCode = input.payableAccountCode?.trim() || "2101";
+
+  const { rows } = await client.query<{ id: number }>(
+    `INSERT INTO lab_orders (patient_id, lab_name, lab_phone, work_type, details, sent_date,
+                             due_date, status, note, party_id, cost_minor, cost_currency,
+                             visit_id, tooth_code, source,
+                             lab_service_id, doctor_id, tooth_numbers, shade, stump_shade,
+                             priority, impression_type, technician_name,
+                             base_amount_minor, exchange_rate, financial_status,
+                             expense_category_id, expense_account_code, payable_account_code,
+                             is_posted, posted_at, shade_specification)
+     VALUES ($1, $2, $3::text, $4, $5::text, $6::date, $7::date, $15, $8::text, $9::int, $10::bigint, $11::text,
+             $12::int, $13::int, $14,
+             $16::int, $17::int, $18::text, $19::text, $20::text,
+             $21::text, $22::text, $23::text,
+             $24::bigint, $25::numeric,
+             CASE WHEN $29 = FALSE THEN 'pending_post' ELSE 'pending_delivery' END,
+             $26::int, $27::text, $28::text, $29, CASE WHEN $29 THEN NOW() ELSE NULL END, $30::jsonb)
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      input.patientId, input.labName, input.labPhone, input.workType,
+      input.details, input.sentDate, input.dueDate, input.note,
+      resolvedPartyId, resolvedCost, resolvedCurrency,
+      input.visitId ?? null, input.toothCode ?? null, input.source === "auto" ? "auto" : "manual",
+      effectiveStatus,
+      input.labServiceId ?? null, input.doctorId ?? null,
+      input.toothNumbers ?? null, input.shade ?? null, input.stumpShade ?? null,
+      input.priority ?? "normal", input.impressionType ?? "physical",
+      input.technicianName ?? null,
+      baseAmount, effectiveExchangeRate ?? null,
+      expenseCatId, expenseAccCode, payableAccCode, isPosted,
+      parsedShade.value === null ? null : JSON.stringify(parsedShade.value),
+    ],
+  );
+  if (!rows[0]) {
+    return null;
+  }
+  const orderId = rows[0].id;
+
+  await client.query(
+    `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
+     VALUES ($1, 'create', NULL, $2, $3, $4, $5)`,
+    [orderId, effectiveStatus, input.workType,
+     input.createdBy, input.actorRole ?? null],
+  );
+
+  if (resolvedPartyId && resolvedCost && resolvedCurrency && effectiveStatus !== "needed") {
+    const { rows: payRows } = await client.query<{ id: number }>(
+      `INSERT INTO payables (party_id, category, description, amount_minor, currency,
+                             exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by,
+                             expense_category_id, expense_account_code, payable_account_code, is_posted)
+       VALUES ($1, 'lab', $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13, $14)
+       ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO UPDATE
+         SET amount_minor = EXCLUDED.amount_minor,
+             currency = EXCLUDED.currency,
+             exchange_rate = EXCLUDED.exchange_rate,
+             base_amount_minor = EXCLUDED.base_amount_minor,
+             base_currency = EXCLUDED.base_currency,
+             due_date = EXCLUDED.due_date,
+             expense_category_id = EXCLUDED.expense_category_id,
+             expense_account_code = EXCLUDED.expense_account_code,
+             payable_account_code = EXCLUDED.payable_account_code,
+             is_posted = EXCLUDED.is_posted
+       RETURNING id`,
+      [
+        resolvedPartyId,
+        `${input.workType}${input.toothNumbers ? ` [سن ${input.toothNumbers}]` : ""}${input.details ? ` — ${input.details}` : ""}`,
+        resolvedCost, resolvedCurrency, effectiveExchangeRate ?? 1, baseAmount,
+        effectiveBaseCurrency, orderId, input.dueDate, input.createdBy,
+        expenseCatId, expenseAccCode, payableAccCode, isPosted,
+      ],
+    );
+    if (payRows[0]) {
+      await client.query(
+        `UPDATE lab_orders SET payable_id = $1, financial_status = $3 WHERE id = $2`,
+        [payRows[0].id, orderId, isPosted ? "payable_created" : "pending_post"],
+      );
+    }
+  }
+
+  return getLabOrderByIdWith(client, orderId);
+}
+
+export async function createLabOrder(input: CreateLabOrderInput): Promise<LabOrder | null> {
   const parsedShade = parseLabShadeSpecification(input.shadeSpecification ?? null, Object.keys(parseLabTeeth(input.toothNumbers)).map(Number));
   if (!parsedShade.ok) throw new Error(parsedShade.error);
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-
-    // الربط المالي: المختبر جهةٌ محاسبية — إن أُرسل الطلب باسم مختبرٍ بلا جهة،
-    // نبحث عنها، فإن لم توجد وُلدت جهة جديدة بلا مخاطبة ولا حسابات مخصصة.
-    let resolvedPartyId = input.partyId ?? null;
-    if (!resolvedPartyId && input.labName && input.labName !== PENDING_LAB_NAME) {
-      const pRes = await client.query<{ id: number }>(
-        `SELECT id FROM parties WHERE kind = 'lab' AND (LOWER(TRIM(name)) = LOWER(TRIM($1)) OR id::text = $1) LIMIT 1`,
-        [input.labName],
-      );
-      if (pRes.rows[0]) {
-        resolvedPartyId = pRes.rows[0].id;
-      } else {
-        const newPartyRes = await client.query<{ id: number }>(
-          `INSERT INTO parties (name, kind, phone, currency, expense_account_code, payable_account_code, auto_post_journal)
-           VALUES ($1, 'lab', $2, $3, '5101', '2101', true)
-           RETURNING id`,
-          [input.labName, input.labPhone ?? null, input.costCurrency ?? input.baseCurrency],
-        );
-        resolvedPartyId = newPartyRes.rows[0]?.id ?? null;
-      }
-    }
-
-    // التسعير التلقائي: بلا تكلفةٍ صريحة، تُقرأ قيمة العمل من قواعد التسعير السارية
-    // يوم الإرسال — التكلفة المنسوخة في الصف تعيش بعدها مستقلة عن تعديل القواعد.
-    // والكمية من دليل الخدمة: خدمة السن المفرد والجسر تُسعَّران بالسنّ — سعر الوحدة
-    // × عدد الأسنان المحددة. هذا المسار الاحتياطي يوافق منطق الواجهة نفسه (حكم
-    // «٣ أسنان × ٢٠ = ٦٠» الذي حُسم من الجهتين بقاعدة واحدة: labPricingQuantity).
-    let resolvedCost = input.costMinor ?? null;
-    let resolvedCurrency = input.costCurrency ?? null;
-    let resolvedExchangeRate = input.exchangeRate;
-    let automaticBaseAmount: number | null = null;
-    const effectiveStatus =
-      input.status === "needed" || (!resolvedPartyId && (!input.labName?.trim() || input.labName === PENDING_LAB_NAME))
-        ? "needed"
-        : "sent";
-    if (resolvedCost == null && resolvedPartyId && input.labServiceId && effectiveStatus !== "needed") {
-      const priceRes = await client.query<{
-        cost_minor: string | number;
-        cost_currency: string;
-        tooth_scope: string | null;
-      }>(
-        `SELECT r.cost_minor, r.cost_currency, s.tooth_scope
-           FROM lab_pricing_rules r
-           LEFT JOIN lab_services s ON s.id = $2
-          WHERE r.party_id = $1
-            AND r.lab_service_id = $2
-            AND r.effective_from <= $3::date
-            AND (r.effective_to IS NULL OR r.effective_to >= $3::date)
-          ORDER BY r.effective_from DESC, r.id DESC
-          LIMIT 1`,
-        [resolvedPartyId, input.labServiceId, input.sentDate],
-      );
-      if (priceRes.rows[0]) {
-        const quantity = labPricingQuantity(
-          input.toothNumbers ?? null,
-          (priceRes.rows[0].tooth_scope as LabService["toothScope"] | null) ?? null,
-        );
-        const automaticPrice = resolveAutomaticLabPrice({
-          costMinor: priceRes.rows[0].cost_minor,
-          costCurrency: priceRes.rows[0].cost_currency,
-          quantity,
-          baseCurrency: input.baseCurrency,
-          settings: await getSettingsInTransaction(client, { requireStoredExchangeRates: true }),
-        });
-        resolvedCost = automaticPrice.costMinor;
-        resolvedCurrency = automaticPrice.costCurrency;
-        resolvedExchangeRate = automaticPrice.exchangeRate;
-        automaticBaseAmount = automaticPrice.baseAmountMinor;
-      }
-    }
-    const effectiveBaseCurrency = input.baseCurrency ?? CLINIC_BASE_CURRENCY;
-    const effectiveExchangeRate = resolvedExchangeRate ?? (resolvedCurrency === effectiveBaseCurrency ? 1 : undefined);
-    const baseAmount = automaticBaseAmount ?? (resolvedCost != null && resolvedCurrency && effectiveExchangeRate != null
-      ? toBaseAmount(resolvedCost, resolvedCurrency, effectiveBaseCurrency, effectiveExchangeRate)
-      : null);
-
-    // الترحيل المحاسبي: بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة،
-    // وحساب الذمم الافتراضي لطلبات المعامل هو 2101 ما لم يُخصص غيره.
-    const isPosted = input.isPosted !== false;
-    const expenseCatId = input.expenseCategoryId ?? null;
-    let expenseAccCode = input.expenseAccountCode?.trim() || null;
-    if (expenseCatId && !expenseAccCode) {
-      const catRes = await client.query<{ account_code: string }>(
-        `SELECT account_code FROM expense_categories WHERE id = $1`, [expenseCatId],
-      );
-      if (catRes.rows[0]?.account_code) expenseAccCode = catRes.rows[0].account_code;
-    }
-    if (!expenseAccCode) expenseAccCode = "5101";
-    const payableAccCode = input.payableAccountCode?.trim() || "2101";
-
-    // سنّ واحد في الزيارة طلبٌ واحد: الفهرس الفريد حارس التكرار، والطلب المتكرر
-    // يُلغى بصمت لا يفشل الطلب — الزر مضغوط مرتين لا يعني عملًا اثنين للمختبر.
-    // (معاملات الترقيم: 1-8 بيانات الطلب، 9-11 المختبر والتكلفة، 12-15 السياق
-    // والحالة، 16-23 الحقول السريرية، 24-25 المالية، 26-29 الربط المحاسبي.)
-    const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO lab_orders (patient_id, lab_name, lab_phone, work_type, details, sent_date,
-                               due_date, status, note, party_id, cost_minor, cost_currency,
-                               visit_id, tooth_code, source,
-                               lab_service_id, doctor_id, tooth_numbers, shade, stump_shade,
-                               priority, impression_type, technician_name,
-                               base_amount_minor, exchange_rate, financial_status,
-                               expense_category_id, expense_account_code, payable_account_code,
-                               is_posted, posted_at, shade_specification)
-       VALUES ($1, $2, $3::text, $4, $5::text, $6::date, $7::date, $15, $8::text, $9::int, $10::bigint, $11::text,
-               $12::int, $13::int, $14,
-               $16::int, $17::int, $18::text, $19::text, $20::text,
-               $21::text, $22::text, $23::text,
-               $24::bigint, $25::numeric,
-               CASE WHEN $29 = FALSE THEN 'pending_post' ELSE 'pending_delivery' END,
-               $26::int, $27::text, $28::text, $29, CASE WHEN $29 THEN NOW() ELSE NULL END, $30::jsonb)
-       ON CONFLICT DO NOTHING
-       RETURNING id`,
-      [
-        input.patientId, input.labName, input.labPhone, input.workType,
-        input.details, input.sentDate, input.dueDate, input.note,
-        resolvedPartyId, resolvedCost, resolvedCurrency,
-        input.visitId ?? null, input.toothCode ?? null, input.source === "auto" ? "auto" : "manual",
-        effectiveStatus,
-        input.labServiceId ?? null, input.doctorId ?? null,
-        input.toothNumbers ?? null, input.shade ?? null, input.stumpShade ?? null,
-        input.priority ?? "normal", input.impressionType ?? "physical",
-        input.technicianName ?? null,
-        baseAmount, effectiveExchangeRate ?? null,
-        expenseCatId, expenseAccCode, payableAccCode, isPosted,
-        parsedShade.value === null ? null : JSON.stringify(parsedShade.value),
-      ],
-    );
-    if (!rows[0]) {
-      await client.query("COMMIT");
-      return null;
-    }
-    const orderId = rows[0].id;
-
-    // سجل التتبع: الطلب يُولد بأثره الأول (المختبرات V2).
-    await client.query(
-      `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
-       VALUES ($1, 'create', NULL, $2, $3, $4, $5)`,
-      [orderId, effectiveStatus, input.workType,
-       input.createdBy, input.actorRole ?? null],
-    );
-
-    // الربط المالي (المختبرات V2): التكلفة تُسجّل التزامًا على العيادة في نفس المعاملة،
-    // ويُربط الالتزام بالطلب ربطًا صريحًا — أمرٌ بلا أثرٍ مالي يعني مختبرًا يأتي بحسابه
-    // آخر الشهر فلا يقابله شيء يُراجَع. الطلب غير المُرسل بعد (needed) بلا تكلفةٍ مسجلة.
-    // والالتزام يرث بند المصروف وحسابَيه وحالة الترحيل (مبدأ الطلب).
-    if (resolvedPartyId && resolvedCost && resolvedCurrency && effectiveStatus !== "needed") {
-      const { rows: payRows } = await client.query<{ id: number }>(
-        `INSERT INTO payables (party_id, category, description, amount_minor, currency,
-                               exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by,
-                               expense_category_id, expense_account_code, payable_account_code, is_posted)
-         VALUES ($1, 'lab', $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13, $14)
-         ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO UPDATE
-           SET amount_minor = EXCLUDED.amount_minor,
-               currency = EXCLUDED.currency,
-               exchange_rate = EXCLUDED.exchange_rate,
-               base_amount_minor = EXCLUDED.base_amount_minor,
-               base_currency = EXCLUDED.base_currency,
-               due_date = EXCLUDED.due_date,
-               expense_category_id = EXCLUDED.expense_category_id,
-               expense_account_code = EXCLUDED.expense_account_code,
-               payable_account_code = EXCLUDED.payable_account_code,
-               is_posted = EXCLUDED.is_posted
-         RETURNING id`,
-        [
-          resolvedPartyId,
-          `${input.workType}${input.toothNumbers ? ` [سن ${input.toothNumbers}]` : ""}${input.details ? ` — ${input.details}` : ""}`,
-          resolvedCost, resolvedCurrency, effectiveExchangeRate ?? 1, baseAmount,
-          effectiveBaseCurrency, orderId, input.dueDate, input.createdBy,
-          expenseCatId, expenseAccCode, payableAccCode, isPosted,
-        ],
-      );
-      if (payRows[0]) {
-        await client.query(
-          `UPDATE lab_orders SET payable_id = $1, financial_status = $3 WHERE id = $2`,
-          [payRows[0].id, orderId, isPosted ? "payable_created" : "pending_post"],
-        );
-      }
-    }
-
+    const created = await createLabOrderInTransaction(client, input);
     await client.query("COMMIT");
-    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
-    return full[0] ? toLabOrder(full[0]) : null;
+    return created;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -7353,6 +7472,35 @@ export async function createLabOrder(input: {
  * إن غاب ويحدّثه إن وُجد في معاملة واحدة، ويكتب أثره في سجل التتبع.
  */
 /** Shade edits are clinical-only, audited atomically, and compare against the exact observed specification. */
+export async function updateLabOrderShadesInTransaction(
+  client: DbClient,
+  id: number,
+  input: {
+    shadeSpecification: LabShadeSpecification | null;
+    expectedShadeSpecification: LabShadeSpecification | null;
+    actor: string;
+    actorRole: string | null;
+    checkAccess?: (patientId: number) => Promise<boolean>;
+  },
+): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid"> {
+  const { rows } = await client.query<{ patient_id: number; tooth_numbers: string | null; tooth_code: number | null }>(
+    "SELECT patient_id,tooth_numbers,tooth_code FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
+  if (!rows[0]) return "not_found";
+  if (input.checkAccess && !(await input.checkAccess(rows[0].patient_id))) return "forbidden";
+  const selected = Object.keys(parseLabTeeth(rows[0].tooth_numbers)).map(Number);
+  if (!selected.length && rows[0].tooth_code) selected.push(rows[0].tooth_code);
+  const parsed = parseLabShadeSpecification(input.shadeSpecification, selected);
+  const expected = parseLabShadeSpecification(input.expectedShadeSpecification);
+  if (!parsed.ok || !expected.ok) return "invalid";
+  const { rowCount } = await client.query(
+    "UPDATE lab_orders SET shade_specification=$3::jsonb WHERE id=$1 AND shade_specification IS NOT DISTINCT FROM $2::jsonb",
+    [id, expected.value === null ? null : JSON.stringify(expected.value), parsed.value === null ? null : JSON.stringify(parsed.value)]);
+  if (!rowCount) return "conflict";
+  await insertAuditRow(client, { action: "lab_order.shade", entity: "lab_orders", entityId: id,
+    details: { previous: expected.value, current: parsed.value }, actor: input.actor, actorRole: input.actorRole });
+  return "updated";
+}
+
 export async function updateLabOrderShades(id: number, input: {
   shadeSpecification: LabShadeSpecification | null;
   expectedShadeSpecification: LabShadeSpecification | null;
@@ -7360,79 +7508,361 @@ export async function updateLabOrderShades(id: number, input: {
 }): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid"> {
   if (!["admin", "doctor", "reception"].includes(input.session.role)) return "forbidden";
   await ensureSchema();
-  return withTransaction(getPool(), async client => {
-    const { rows } = await client.query<{ patient_id: number; tooth_numbers: string | null; tooth_code: number | null }>(
-      "SELECT patient_id,tooth_numbers,tooth_code FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
-    if (!rows[0]) return "not_found";
-    const allowed = await (await import("./patient-access")).canAccessPatient(input.session, rows[0].patient_id, undefined, client, "nowait");
-    if (!allowed) return "forbidden";
-    const selected = Object.keys(parseLabTeeth(rows[0].tooth_numbers)).map(Number);
-    if (!selected.length && rows[0].tooth_code) selected.push(rows[0].tooth_code);
-    const parsed = parseLabShadeSpecification(input.shadeSpecification, selected);
-    const expected = parseLabShadeSpecification(input.expectedShadeSpecification);
-    if (!parsed.ok || !expected.ok) return "invalid";
-    const { rowCount } = await client.query(
-      "UPDATE lab_orders SET shade_specification=$3::jsonb WHERE id=$1 AND shade_specification IS NOT DISTINCT FROM $2::jsonb",
-      [id, expected.value === null ? null : JSON.stringify(expected.value), parsed.value === null ? null : JSON.stringify(parsed.value)]);
-    if (!rowCount) return "conflict";
-    await insertAuditRow(client, { action: "lab_order.shade", entity: "lab_orders", entityId: id,
-      details: { previous: expected.value, current: parsed.value }, actor: input.session.username, actorRole: input.session.role });
-    return "updated";
-  });
+  return withTransaction(getPool(), async client =>
+    updateLabOrderShadesInTransaction(client, id, {
+      shadeSpecification: input.shadeSpecification,
+      expectedShadeSpecification: input.expectedShadeSpecification,
+      actor: input.session.username,
+      actorRole: input.session.role,
+      checkAccess: async (patientId) =>
+        (await import("./patient-access")).canAccessPatient(input.session, patientId, undefined, client, "nowait"),
+    }),
+  );
 }
 
 /** Explicit correction only; never recomputes or relinks a historical payable. */
+export async function updateLabOrderClinicalInTransaction(
+  client: DbClient,
+  id: number,
+  input: {
+    clinical: LabClinicalSnapshot;
+    expectedClinical: LabClinicalSnapshot;
+    actor: string;
+    actorRole: string | null;
+    restrictOwnDoctorPartyId?: number | null;
+    checkAccess?: (patientId: number) => Promise<boolean>;
+  },
+): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid" | "financial_lab_locked" | "financial_doctor_locked"> {
+  const { rows } = await client.query<{
+    patient_id: number; doctor_id: number | null; work_type: string; tooth_numbers: string | null;
+    shade: string | null; shade_specification: unknown; party_id: number | null; lab_name: string;
+    lab_phone: string | null; cost_minor: string | null; payable_id: number | null;
+  }>("SELECT patient_id,doctor_id,work_type,tooth_numbers,shade,shade_specification,party_id,lab_name,lab_phone,cost_minor,payable_id FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
+  const row = rows[0];
+  if (!row) return "not_found";
+  if (input.checkAccess && !(await input.checkAccess(row.patient_id))) return "forbidden";
+  const storedShades = parseLabShadeSpecification(row.shade_specification);
+  if (!storedShades.ok) return "invalid";
+  const previous: LabClinicalSnapshot = { doctorId: row.doctor_id, workType: row.work_type,
+    toothNumbers: row.tooth_numbers, shade: row.shade, shadeSpecification: storedShades.value,
+    partyId: row.party_id, labName: row.lab_name, labPhone: row.lab_phone };
+  if (!sameLabClinicalSnapshot(previous, input.expectedClinical)) return "conflict";
+  const next = input.clinical;
+  if (labClinicalEditProblem(next, previous)) return "invalid";
+  if (input.restrictOwnDoctorPartyId !== undefined && next.doctorId !== previous.doctorId && next.doctorId !== input.restrictOwnDoctorPartyId) return "forbidden";
+  if (next.doctorId !== null && next.doctorId !== previous.doctorId) {
+    const doctor = await client.query("SELECT id FROM parties WHERE id=$1 AND kind='doctor' AND is_active=TRUE FOR SHARE", [next.doctorId]);
+    if (!doctor.rowCount) return "invalid";
+  }
+  const labChanged = next.partyId !== previous.partyId || next.labName !== previous.labName || next.labPhone !== previous.labPhone;
+  const linked = await client.query("SELECT id FROM payables WHERE lab_order_id=$1 LIMIT 1", [id]);
+  const history = await client.query("SELECT id FROM lab_order_tracking WHERE lab_order_id=$1 AND action IN ('financial_settlement','financial_settlement_reversed') LIMIT 1", [id]);
+  if (next.doctorId !== previous.doctorId) {
+    const invoice = await client.query("SELECT v.invoice_id FROM lab_orders l JOIN visits v ON v.id=l.visit_id WHERE l.id=$1 AND v.invoice_id IS NOT NULL", [id]);
+    if (row.cost_minor !== null || row.payable_id !== null || linked.rowCount || history.rowCount || invoice.rowCount) return "financial_doctor_locked";
+  }
+  if (labChanged) {
+    if (row.cost_minor !== null || row.payable_id !== null || linked.rowCount || history.rowCount) return "financial_lab_locked";
+    if (!next.partyId) return "invalid";
+    const lab = await client.query<{ name: string; phone: string | null }>("SELECT name,phone FROM parties WHERE id=$1 AND kind='lab' AND is_active=TRUE FOR SHARE", [next.partyId]);
+    if (!lab.rows[0] || next.labName !== lab.rows[0].name || next.labPhone !== lab.rows[0].phone) return "invalid";
+  }
+  if (sameLabClinicalSnapshot(previous, next)) return "updated";
+  await client.query(`UPDATE lab_orders SET doctor_id=$2,work_type=$3,tooth_numbers=$4,shade=$5,
+    shade_specification=$6::jsonb,party_id=$7,lab_name=$8,lab_phone=$9 WHERE id=$1`,
+    [id,next.doctorId,next.workType,next.toothNumbers,next.shade,
+      next.shadeSpecification === null ? null : JSON.stringify(next.shadeSpecification),next.partyId,next.labName,next.labPhone]);
+  await insertAuditRow(client, { action: "lab_order.clinical", entity: "lab_orders", entityId: id,
+    details: { previous, current: next, financialSnapshotUnchanged: true }, actor: input.actor, actorRole: input.actorRole });
+  return "updated";
+}
+
 export async function updateLabOrderClinical(id: number, input: {
   clinical: LabClinicalSnapshot; expectedClinical: LabClinicalSnapshot;
   session: import("./auth").SessionPayload;
 }): Promise<"updated" | "conflict" | "not_found" | "forbidden" | "invalid" | "financial_lab_locked" | "financial_doctor_locked"> {
   if (!["admin", "doctor", "reception"].includes(input.session.role)) return "forbidden";
   await ensureSchema();
-  return withTransaction(getPool(), async client => {
-    const { rows } = await client.query<{
-      patient_id: number; doctor_id: number | null; work_type: string; tooth_numbers: string | null;
-      shade: string | null; shade_specification: unknown; party_id: number | null; lab_name: string;
-      lab_phone: string | null; cost_minor: string | null; payable_id: number | null;
-    }>("SELECT patient_id,doctor_id,work_type,tooth_numbers,shade,shade_specification,party_id,lab_name,lab_phone,cost_minor,payable_id FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
-    const row = rows[0];
-    if (!row) return "not_found";
-    const allowed = await (await import("./patient-access")).canAccessPatient(input.session, row.patient_id, undefined, client, "nowait");
-    if (!allowed) return "forbidden";
-    const storedShades = parseLabShadeSpecification(row.shade_specification);
-    if (!storedShades.ok) return "invalid";
-    const previous: LabClinicalSnapshot = { doctorId: row.doctor_id, workType: row.work_type,
-      toothNumbers: row.tooth_numbers, shade: row.shade, shadeSpecification: storedShades.value,
-      partyId: row.party_id, labName: row.lab_name, labPhone: row.lab_phone };
-    if (!sameLabClinicalSnapshot(previous, input.expectedClinical)) return "conflict";
-    const next = input.clinical;
-    if (labClinicalEditProblem(next, previous)) return "invalid";
-    if (input.session.role === "doctor" && next.doctorId !== previous.doctorId && next.doctorId !== input.session.partyId) return "forbidden";
-    if (next.doctorId !== null && next.doctorId !== previous.doctorId) {
-      const doctor = await client.query("SELECT id FROM parties WHERE id=$1 AND kind='doctor' AND is_active=TRUE FOR SHARE", [next.doctorId]);
-      if (!doctor.rowCount) return "invalid";
+  return withTransaction(getPool(), async client =>
+    updateLabOrderClinicalInTransaction(client, id, {
+      clinical: input.clinical,
+      expectedClinical: input.expectedClinical,
+      actor: input.session.username,
+      actorRole: input.session.role,
+      restrictOwnDoctorPartyId: input.session.role === "doctor" ? (input.session.partyId ?? null) : undefined,
+      checkAccess: async (patientId) =>
+        (await import("./patient-access")).canAccessPatient(input.session, patientId, undefined, client, "nowait"),
+    }),
+  );
+}
+
+export interface UpdateLabOrderAccountingInput {
+  expenseCategoryId?: number | null;
+  expenseAccountCode?: string | null;
+  payableAccountCode?: string | null;
+  isPosted?: boolean;
+  costMinor?: number | null;
+  costCurrency?: Currency | null;
+  exchangeRate?: number;
+  actor?: string;
+  actorRole?: string | null;
+  checkPatientMoneyAccess?: (patientId: number) => Promise<boolean>;
+  assertStillValid?: () => Promise<void>;
+}
+
+export async function updateLabOrderAccountingInTransaction(
+  client: DbClient,
+  orderId: number,
+  input: UpdateLabOrderAccountingInput,
+): Promise<LabOrder | null> {
+  const { rows: orderRows } = await client.query<{
+    id: number; patient_id: number;
+    party_id: number | null;
+    lab_name: string;
+    work_type: string;
+    details: string | null;
+    tooth_numbers: string | null;
+    due_date: Date;
+    sent_date: Date;
+    cost_minor: string | number | null;
+    cost_currency: string | null;
+    base_amount_minor: string | number | null;
+    exchange_rate: string | number | null;
+    payable_id: number | null;
+    is_posted: boolean | null;
+    status: string;
+    lab_work_intent_id: string | null;
+    financial_status: string;
+    expense_category_id: number | null;
+    expense_account_code: string | null;
+    payable_account_code: string | null;
+  }>(
+    `SELECT id, patient_id, party_id, lab_name, work_type, details, tooth_numbers, due_date, sent_date,
+            cost_minor, cost_currency, base_amount_minor, exchange_rate, payable_id, is_posted, status, lab_work_intent_id,
+            financial_status, expense_category_id, expense_account_code, payable_account_code
+       FROM lab_orders WHERE id = $1 FOR UPDATE`,
+    [orderId],
+  );
+
+  if (!orderRows[0]) {
+    return null;
+  }
+  const order = orderRows[0];
+  if (input.checkPatientMoneyAccess) {
+    const patient = (await client.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE NOWAIT", [order.patient_id])).rows[0];
+    if (!patient || !(await input.checkPatientMoneyAccess(order.patient_id))) {
+      throw new LabFinancialBoundaryError("lab_accounting_patient_forbidden", "لا تملك صلاحية مالية لهذا الملف.");
     }
-    const labChanged = next.partyId !== previous.partyId || next.labName !== previous.labName || next.labPhone !== previous.labPhone;
-    const linked = await client.query("SELECT id FROM payables WHERE lab_order_id=$1 LIMIT 1", [id]);
-    const history = await client.query("SELECT id FROM lab_order_tracking WHERE lab_order_id=$1 AND action IN ('financial_settlement','financial_settlement_reversed') LIMIT 1", [id]);
-    if (next.doctorId !== previous.doctorId) {
-      const invoice = await client.query("SELECT v.invoice_id FROM lab_orders l JOIN visits v ON v.id=l.visit_id WHERE l.id=$1 AND v.invoice_id IS NOT NULL", [id]);
-      if (row.cost_minor !== null || row.payable_id !== null || linked.rowCount || history.rowCount || invoice.rowCount) return "financial_doctor_locked";
+  }
+
+  const isPosted = input.isPosted !== undefined ? Boolean(input.isPosted) : (order.is_posted !== false);
+
+  const expenseCatId = input.expenseCategoryId !== undefined ? input.expenseCategoryId : (order.expense_category_id ?? null);
+  let expenseAccCode = input.expenseAccountCode?.trim() || null;
+  if (expenseCatId && !expenseAccCode && input.expenseCategoryId !== undefined
+    && input.expenseCategoryId !== order.expense_category_id) {
+    const catRes = await client.query<{ account_code: string }>(
+      `SELECT account_code FROM expense_categories WHERE id = $1`, [expenseCatId],
+    );
+    if (catRes.rows[0]?.account_code) {
+      expenseAccCode = catRes.rows[0].account_code;
     }
-    if (labChanged) {
-      if (row.cost_minor !== null || row.payable_id !== null || linked.rowCount || history.rowCount) return "financial_lab_locked";
-      if (!next.partyId) return "invalid";
-      const lab = await client.query<{ name: string; phone: string | null }>("SELECT name,phone FROM parties WHERE id=$1 AND kind='lab' AND is_active=TRUE FOR SHARE", [next.partyId]);
-      if (!lab.rows[0] || next.labName !== lab.rows[0].name || next.labPhone !== lab.rows[0].phone) return "invalid";
+  }
+  if (!expenseAccCode) expenseAccCode = order.expense_account_code || "5101";
+  const payableAccCode = input.payableAccountCode?.trim() || order.payable_account_code || "2101";
+
+  const resolvedCost = input.costMinor !== undefined
+    ? input.costMinor
+    : order.cost_minor != null ? Number(order.cost_minor) : null;
+  const resolvedCurrency = (input.costCurrency ?? order.cost_currency) as Currency;
+  const resolvedRate = input.exchangeRate != null
+    ? input.exchangeRate
+    : order.exchange_rate != null ? Number(order.exchange_rate) : NaN;
+  const hasMoneyUpdate = input.costMinor !== undefined
+    || input.costCurrency != null || input.exchangeRate != null;
+  const hasPositiveMoneyUpdate = hasMoneyUpdate && resolvedCost != null && resolvedCost > 0;
+  const wouldCreatePayable = !order.payable_id && order.party_id !== null && resolvedCost != null && resolvedCost > 0;
+  if (order.lab_work_intent_id && order.status === "cancelled" && (hasMoneyUpdate || input.isPosted === true || wouldCreatePayable)) {
+    throw new LabFinancialBoundaryError("lab_cancelled_money_review", "العمل ملغى؛ لا تُعاد تكلفته أو يُنشأ التزام له من محرر الربط. راجع القرار المالي أولًا.");
+  }
+  if (!hasMoneyUpdate && !order.payable_id && resolvedCost != null && resolvedCost > 0) {
+    savedLabPayableSnapshot(order);
+  }
+  if (hasMoneyUpdate && !hasPositiveMoneyUpdate) {
+    throw new Error("lab_order_accounting_price_invalid");
+  }
+  if (hasPositiveMoneyUpdate) {
+    if (!Number.isSafeInteger(resolvedCost) || !isCurrency(resolvedCurrency)) {
+      throw new Error("lab_order_accounting_price_invalid");
     }
-    if (sameLabClinicalSnapshot(previous, next)) return "updated";
-    await client.query(`UPDATE lab_orders SET doctor_id=$2,work_type=$3,tooth_numbers=$4,shade=$5,
-      shade_specification=$6::jsonb,party_id=$7,lab_name=$8,lab_phone=$9 WHERE id=$1`,
-      [id,next.doctorId,next.workType,next.toothNumbers,next.shade,
-        next.shadeSpecification === null ? null : JSON.stringify(next.shadeSpecification),next.partyId,next.labName,next.labPhone]);
-    await insertAuditRow(client, { action: "lab_order.clinical", entity: "lab_orders", entityId: id,
-      details: { previous, current: next, financialSnapshotUnchanged: true }, actor: input.session.username, actorRole: input.session.role });
-    return "updated";
+    if (!Number.isFinite(resolvedRate) || resolvedRate <= 0 || resolvedRate > 1_000_000
+      || (resolvedCurrency === CLINIC_BASE_CURRENCY && resolvedRate !== 1)
+      || Number(resolvedRate.toFixed(6)) !== resolvedRate) {
+      throw new Error("lab_order_exchange_rate_invalid");
+    }
+  }
+  const baseAmount = !hasMoneyUpdate && order.base_amount_minor != null
+    ? Number(order.base_amount_minor)
+    : resolvedCost != null && resolvedCost > 0
+      ? toBaseAmount(resolvedCost, resolvedCurrency, "YER", resolvedRate)
+      : null;
+  if (hasPositiveMoneyUpdate && (baseAmount == null || !Number.isSafeInteger(baseAmount) || baseAmount < 0)) {
+    throw new Error("lab_order_accounting_price_invalid");
+  }
+
+  const moneyChanged = hasMoneyUpdate && (
+    resolvedCost !== (order.cost_minor == null ? null : Number(order.cost_minor))
+    || resolvedCurrency !== (order.cost_currency || "YER")
+    || resolvedRate !== Number(order.exchange_rate ?? 1)
+    || baseAmount !== (order.base_amount_minor == null ? null : Number(order.base_amount_minor)));
+  const accountingChanged = expenseCatId !== (order.expense_category_id ?? null)
+    || expenseAccCode !== (order.expense_account_code || "5101")
+    || payableAccCode !== (order.payable_account_code || "2101")
+    || isPosted !== (order.is_posted !== false);
+  const needsPayable = !order.payable_id && order.party_id && resolvedCost != null && resolvedCost > 0;
+  if (!moneyChanged && !accountingChanged && !needsPayable) {
+    return getLabOrderByIdWith(client, orderId);
+  }
+
+  let linked: { id: number; party_id: number; lab_order_id: number | null; source_type: string; created_date: string }[];
+  try {
+    linked = (await client.query<{ id: number; party_id: number; lab_order_id: number | null; source_type: string; created_date: string }>(
+      `SELECT id, party_id, lab_order_id, source_type, (created_at AT TIME ZONE $3)::date::text AS created_date
+         FROM payables WHERE id = $1 OR lab_order_id = $2 ORDER BY id FOR UPDATE NOWAIT`,
+      [order.payable_id, orderId, CLINIC_TIME_ZONE],
+    )).rows;
+    await client.query("LOCK TABLE settings IN SHARE MODE NOWAIT");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "55P03") {
+      throw new Error("lab_order_accounting_busy");
+    }
+    throw error;
+  }
+  if (linked.length > 1 || linked.some(row => row.party_id !== order.party_id
+    || row.lab_order_id !== orderId || row.source_type !== "operational")
+    || (order.payable_id != null && linked[0]?.id !== order.payable_id)) {
+    throw new Error("lab_order_accounting_link_invalid");
+  }
+  const { rows: settlementRows } = await client.query<{ has_settlement: boolean }>(
+    `SELECT (EXISTS (SELECT 1 FROM expenses WHERE payable_id = ANY($1::int[]))
+      OR EXISTS (SELECT 1 FROM expense_payable_allocations WHERE payable_id = ANY($1::int[]))
+      OR EXISTS (SELECT 1 FROM lab_order_tracking WHERE lab_order_id = $2
+        AND action IN ('financial_settlement', 'financial_settlement_reversed'))) AS has_settlement`,
+    [linked.map(row => row.id), orderId],
+  );
+  if (order.financial_status === "paid" || settlementRows[0]?.has_settlement) {
+    throw new Error("lab_order_accounting_settled");
+  }
+  const { rows: cutoffRows } = await client.query<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'finance.locked_before'",
+  );
+  const lockedBefore = cutoffRows[0]?.value?.trim() || "";
+  if (lockedBefore) {
+    const { rows: invoiceDates } = await client.query<{ invoice_date: string }>(
+      `SELECT (i.created_at AT TIME ZONE $2)::date::text AS invoice_date
+         FROM lab_orders l JOIN visits v ON v.id = l.visit_id AND v.patient_id = l.patient_id
+         JOIN invoices i ON i.id = v.invoice_id AND i.patient_id = l.patient_id WHERE l.id = $1`,
+      [orderId, CLINIC_TIME_ZONE],
+    );
+    if ([dateText(order.sent_date), ...linked.map(row => row.created_date), ...invoiceDates.map(row => row.invoice_date)]
+      .some(date => date < lockedBefore)) throw new Error("lab_order_accounting_period_locked");
+  }
+
+  await client.query(
+    `UPDATE lab_orders
+        SET expense_category_id = $1,
+            expense_account_code = $2,
+            payable_account_code = $3,
+            is_posted = $4,
+            posted_at = CASE WHEN $4 = TRUE THEN COALESCE(posted_at, NOW()) ELSE NULL END,
+            financial_status = CASE
+              WHEN financial_status = 'paid' THEN financial_status
+              WHEN $4 = FALSE THEN 'pending_post'
+              WHEN payable_id IS NOT NULL THEN 'payable_created'
+              WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN 'payable_created'
+              ELSE financial_status
+            END,
+            cost_minor = CASE WHEN $8::boolean THEN COALESCE($5, cost_minor) ELSE cost_minor END,
+            cost_currency = CASE WHEN $8::boolean THEN COALESCE($6, cost_currency) ELSE cost_currency END,
+            base_amount_minor = CASE WHEN $8::boolean AND $5::bigint > 0 THEN $9::bigint ELSE base_amount_minor END,
+            exchange_rate = CASE WHEN $8::boolean AND $5::bigint > 0 THEN $10::numeric ELSE exchange_rate END
+      WHERE id = $7`,
+    [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, orderId,
+      hasMoneyUpdate, baseAmount, resolvedRate],
+  );
+
+  if (order.payable_id) {
+    await client.query(
+      `UPDATE payables
+          SET expense_category_id = $1,
+              expense_account_code = $2,
+              payable_account_code = $3,
+              is_posted = $4,
+              amount_minor = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $5 ELSE amount_minor END,
+              currency = CASE WHEN $9::boolean THEN COALESCE($6, currency) ELSE currency END,
+              base_amount_minor = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $7::bigint ELSE base_amount_minor END,
+              exchange_rate = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $10::numeric ELSE exchange_rate END
+        WHERE id = $8`,
+      [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, baseAmount, order.payable_id,
+        hasMoneyUpdate, resolvedRate],
+    );
+  } else if (order.party_id && resolvedCost != null && resolvedCost > 0) {
+    const { rows: payRows } = await client.query<{ id: number }>(
+      `INSERT INTO payables (party_id, category, description, amount_minor, currency,
+                             exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by, created_at,
+                             expense_category_id, expense_account_code, payable_account_code, is_posted)
+       VALUES ($1, 'lab', $2, $3, $4, $5, $6, 'YER', $7, $8::date, $9, NOW(), $10, $11, $12, $13)
+       ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [
+        order.party_id,
+        `${order.work_type}${order.tooth_numbers ? ` [سن ${order.tooth_numbers}]` : ""}${order.details ? ` — ${order.details}` : ""}`,
+        resolvedCost, resolvedCurrency, resolvedRate, baseAmount,
+        orderId, dateText(order.due_date), input.actor || "system",
+        expenseCatId, expenseAccCode, payableAccCode, isPosted,
+      ],
+    );
+    if (!payRows[0]) throw new LabFinancialBoundaryError("lab_payable_link_review");
+    if (payRows[0]) {
+      await client.query(
+        `UPDATE lab_orders SET payable_id = $1, financial_status = $2 WHERE id = $3`,
+        [payRows[0].id, isPosted ? "payable_created" : "pending_post", orderId],
+      );
+    }
+  }
+
+  const action = isPosted && order.is_posted !== true ? "accounting_posted" : "accounting_updated";
+  const note = isPosted && order.is_posted !== true
+    ? `تم الترحيل المحاسبي النهائي لأمر المختبر (${order.lab_name} - ${order.work_type}) بحساب مصروف [${expenseAccCode}] وذمم [${payableAccCode}]`
+    : `تم تحديث الربط المحاسبي وبند المصروف لأمر المختبر (${order.lab_name} - ${order.work_type}) إلى حساب [${expenseAccCode}]`;
+
+  await addLabOrderTracking(
+    orderId,
+    action,
+    null,
+    null,
+    note,
+    input.actor || "system",
+    input.actorRole || "accountant",
+    client,
+  );
+
+  if (input.assertStillValid) {
+    await input.assertStillValid();
+  }
+  await insertAuditRow(client, {
+    action: "lab_order.accounting", entity: "lab_order", entityId: orderId,
+    actor: input.actor || "system", actorRole: input.actorRole ?? null,
+    details: {
+      previous: { costMinor: order.cost_minor, currency: order.cost_currency, exchangeRate: order.exchange_rate,
+        baseAmountMinor: order.base_amount_minor, expenseCategoryId: order.expense_category_id,
+        expenseAccountCode: order.expense_account_code, payableAccountCode: order.payable_account_code, isPosted: order.is_posted },
+      current: { costMinor: resolvedCost, currency: resolvedCurrency, exchangeRate: resolvedRate,
+        baseAmountMinor: baseAmount, expenseCategoryId: expenseCatId, expenseAccountCode: expenseAccCode,
+        payableAccountCode: payableAccCode, isPosted },
+    },
   });
+  return getLabOrderByIdWith(client, orderId);
 }
 
 export async function updateLabOrderAccounting(
@@ -7460,281 +7890,33 @@ export async function updateLabOrderAccounting(
     if (input.session && (!activeSession || !(await import("./roles")).canHandleMoney(activeSession.role))) {
       throw new LabFinancialBoundaryError("lab_accounting_forbidden", "انتهت الجلسة أو تغيّرت صلاحية العملية المالية؛ لم تتغير التكلفة.");
     }
-    const { rows: orderRows } = await client.query<{
-      id: number; patient_id: number;
-      party_id: number | null;
-      lab_name: string;
-      work_type: string;
-      details: string | null;
-      tooth_numbers: string | null;
-      due_date: Date;
-      sent_date: Date;
-      cost_minor: string | number | null;
-      cost_currency: string | null;
-      base_amount_minor: string | number | null;
-      exchange_rate: string | number | null;
-      payable_id: number | null;
-      is_posted: boolean | null;
-      status: string;
-      lab_work_intent_id: string | null;
-      financial_status: string;
-      expense_category_id: number | null;
-      expense_account_code: string | null;
-      payable_account_code: string | null;
-    }>(
-      `SELECT id, patient_id, party_id, lab_name, work_type, details, tooth_numbers, due_date, sent_date,
-              cost_minor, cost_currency, base_amount_minor, exchange_rate, payable_id, is_posted, status, lab_work_intent_id,
-              financial_status, expense_category_id, expense_account_code, payable_account_code
-         FROM lab_orders WHERE id = $1 FOR UPDATE`,
-      [orderId],
-    );
-
-    if (!orderRows[0]) {
+    const updated = await updateLabOrderAccountingInTransaction(client, orderId, {
+      expenseCategoryId: input.expenseCategoryId,
+      expenseAccountCode: input.expenseAccountCode,
+      payableAccountCode: input.payableAccountCode,
+      isPosted: input.isPosted,
+      costMinor: input.costMinor,
+      costCurrency: input.costCurrency,
+      exchangeRate: input.exchangeRate,
+      actor: input.actor,
+      actorRole: input.actorRole,
+      checkPatientMoneyAccess: activeSession
+        ? async (patientId) => (await import("./patient-access")).canViewPatientMoney(activeSession, patientId)
+        : undefined,
+      assertStillValid: activeSession
+        ? async () => {
+            if (activeSession.expiresAt < Date.now()) {
+              throw new LabFinancialBoundaryError("lab_accounting_forbidden", "انتهت الجلسة أثناء الانتظار؛ لم تُحفظ العملية المالية.");
+            }
+          }
+        : undefined,
+    });
+    if (!updated) {
       await client.query("ROLLBACK");
       return null;
     }
-    const order = orderRows[0];
-    if (activeSession) {
-      // Money roles retain their canonical financial access, not new clinical access.
-      const patient = (await client.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE NOWAIT", [order.patient_id])).rows[0];
-      if (!patient || !await (await import("./patient-access")).canViewPatientMoney(activeSession, order.patient_id)) {
-        throw new LabFinancialBoundaryError("lab_accounting_patient_forbidden", "لا تملك صلاحية مالية لهذا الملف.");
-      }
-    }
-
-    const isPosted = input.isPosted !== undefined ? Boolean(input.isPosted) : (order.is_posted !== false);
-
-    // بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة — سلسلة أولوية واحدة.
-    const expenseCatId = input.expenseCategoryId !== undefined ? input.expenseCategoryId : (order.expense_category_id ?? null);
-    let expenseAccCode = input.expenseAccountCode?.trim() || null;
-    if (expenseCatId && !expenseAccCode && input.expenseCategoryId !== undefined
-      && input.expenseCategoryId !== order.expense_category_id) {
-      const catRes = await client.query<{ account_code: string }>(
-        `SELECT account_code FROM expense_categories WHERE id = $1`, [expenseCatId],
-      );
-      if (catRes.rows[0]?.account_code) {
-        expenseAccCode = catRes.rows[0].account_code;
-      }
-    }
-    if (!expenseAccCode) expenseAccCode = order.expense_account_code || "5101";
-    const payableAccCode = input.payableAccountCode?.trim() || order.payable_account_code || "2101";
-
-    // تحديث التكلفة اختياري: تغيّر التكلفة يستبدل المكافئ الأساسي بسعر المرسَل.
-    const resolvedCost = input.costMinor !== undefined
-      ? input.costMinor
-      : order.cost_minor != null ? Number(order.cost_minor) : null;
-    const resolvedCurrency = (input.costCurrency ?? order.cost_currency) as Currency;
-    const resolvedRate = input.exchangeRate != null
-      ? input.exchangeRate
-      : order.exchange_rate != null ? Number(order.exchange_rate) : NaN;
-    // A posting/category-only change must not revalue an existing snapshot.
-    // Positive cost edits carry amount, currency, rate and converted base together.
-    const hasMoneyUpdate = input.costMinor !== undefined
-      || input.costCurrency != null || input.exchangeRate != null;
-    const hasPositiveMoneyUpdate = hasMoneyUpdate && resolvedCost != null && resolvedCost > 0;
-    const wouldCreatePayable = !order.payable_id && order.party_id !== null && resolvedCost != null && resolvedCost > 0;
-    if (order.lab_work_intent_id && order.status === "cancelled" && (hasMoneyUpdate || input.isPosted === true || wouldCreatePayable)) {
-      throw new LabFinancialBoundaryError("lab_cancelled_money_review", "العمل ملغى؛ لا تُعاد تكلفته أو يُنشأ التزام له من محرر الربط. راجع القرار المالي أولًا.");
-    }
-    if (!hasMoneyUpdate && !order.payable_id && resolvedCost != null && resolvedCost > 0) {
-      savedLabPayableSnapshot(order);
-    }
-    if (hasMoneyUpdate && !hasPositiveMoneyUpdate) {
-      throw new Error("lab_order_accounting_price_invalid");
-    }
-    if (hasPositiveMoneyUpdate) {
-      if (!Number.isSafeInteger(resolvedCost) || !isCurrency(resolvedCurrency)) {
-        throw new Error("lab_order_accounting_price_invalid");
-      }
-      // Both columns are NUMERIC(18,6): never calculate with precision that
-      // disappears on storage, or admit rates above the settings maximum.
-      if (!Number.isFinite(resolvedRate) || resolvedRate <= 0 || resolvedRate > 1_000_000
-        || (resolvedCurrency === CLINIC_BASE_CURRENCY && resolvedRate !== 1)
-        || Number(resolvedRate.toFixed(6)) !== resolvedRate) {
-        throw new Error("lab_order_exchange_rate_invalid");
-      }
-    }
-    const baseAmount = !hasMoneyUpdate && order.base_amount_minor != null
-      ? Number(order.base_amount_minor)
-      : resolvedCost != null && resolvedCost > 0
-        ? toBaseAmount(resolvedCost, resolvedCurrency, "YER", resolvedRate)
-        : null;
-    if (hasPositiveMoneyUpdate && (baseAmount == null || !Number.isSafeInteger(baseAmount) || baseAmount < 0)) {
-      throw new Error("lab_order_accounting_price_invalid");
-    }
-
-    // Accounting categories/accounts and posting affect historical reporting too:
-    // they are financial changes, not harmless display metadata. An exact no-op
-    // is allowed even on paid/closed orders, without rewriting status or audit.
-    const moneyChanged = hasMoneyUpdate && (
-      resolvedCost !== (order.cost_minor == null ? null : Number(order.cost_minor))
-      || resolvedCurrency !== (order.cost_currency || "YER")
-      || resolvedRate !== Number(order.exchange_rate ?? 1)
-      || baseAmount !== (order.base_amount_minor == null ? null : Number(order.base_amount_minor)));
-    const accountingChanged = expenseCatId !== (order.expense_category_id ?? null)
-      || expenseAccCode !== (order.expense_account_code || "5101")
-      || payableAccCode !== (order.payable_account_code || "2101")
-      || isPosted !== (order.is_posted !== false);
-    const needsPayable = !order.payable_id && order.party_id && resolvedCost != null && resolvedCost > 0;
-    if (!moneyChanged && !accountingChanged && !needsPayable) {
-      await client.query("COMMIT");
-      const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
-      return full[0] ? toLabOrder(full[0]) : null;
-    }
-
-    // Payment writers lock the payable before inserting their settlement. NOWAIT
-    // avoids a cycle with writers that subsequently update the lab-order row.
-    // Include the reverse link so a stale/missing payable_id cannot bypass guards.
-    let linked: { id: number; party_id: number; lab_order_id: number | null; source_type: string; created_date: string }[];
-    try {
-      linked = (await client.query<{ id: number; party_id: number; lab_order_id: number | null; source_type: string; created_date: string }>(
-        `SELECT id, party_id, lab_order_id, source_type, (created_at AT TIME ZONE $3)::date::text AS created_date
-           FROM payables WHERE id = $1 OR lab_order_id = $2 ORDER BY id FOR UPDATE NOWAIT`,
-        [order.payable_id, orderId, CLINIC_TIME_ZONE],
-      )).rows;
-      // Fence absent as well as existing cutoff settings against concurrent upsert.
-      await client.query("LOCK TABLE settings IN SHARE MODE NOWAIT");
-    } catch (error) {
-      if (typeof error === "object" && error !== null && "code" in error && error.code === "55P03") {
-        throw new Error("lab_order_accounting_busy");
-      }
-      throw error;
-    }
-    if (linked.length > 1 || linked.some(row => row.party_id !== order.party_id
-      || row.lab_order_id !== orderId || row.source_type !== "operational")
-      || (order.payable_id != null && linked[0]?.id !== order.payable_id)) {
-      throw new Error("lab_order_accounting_link_invalid");
-    }
-    // Fresh READ COMMITTED statement AFTER the locks: never use a snapshot
-    // taken before a competing settlement committed. Any history (including a
-    // reversal) requires the dedicated correction workflow, not an in-place edit.
-    // Older batch settlements may only have tracking expense_id or voucher text;
-    // the order-scoped event itself is evidence even after paid was reopened.
-    const { rows: settlementRows } = await client.query<{ has_settlement: boolean }>(
-      `SELECT (EXISTS (SELECT 1 FROM expenses WHERE payable_id = ANY($1::int[]))
-        OR EXISTS (SELECT 1 FROM expense_payable_allocations WHERE payable_id = ANY($1::int[]))
-        OR EXISTS (SELECT 1 FROM lab_order_tracking WHERE lab_order_id = $2
-          AND action IN ('financial_settlement', 'financial_settlement_reversed'))) AS has_settlement`,
-      [linked.map(row => row.id), orderId],
-    );
-    if (order.financial_status === "paid" || settlementRows[0]?.has_settlement) {
-      throw new Error("lab_order_accounting_settled");
-    }
-    const { rows: cutoffRows } = await client.query<{ value: string }>(
-      "SELECT value FROM settings WHERE key = 'finance.locked_before'",
-    );
-    const lockedBefore = cutoffRows[0]?.value?.trim() || "";
-    if (lockedBefore) {
-      // Lab cost is also attributed to the linked visit invoice for commission.
-      // A later dispatch must not revalue an invoice from an already closed month.
-      const { rows: invoiceDates } = await client.query<{ invoice_date: string }>(
-        `SELECT (i.created_at AT TIME ZONE $2)::date::text AS invoice_date
-           FROM lab_orders l JOIN visits v ON v.id = l.visit_id AND v.patient_id = l.patient_id
-           JOIN invoices i ON i.id = v.invoice_id AND i.patient_id = l.patient_id WHERE l.id = $1`,
-        [orderId, CLINIC_TIME_ZONE],
-      );
-      if ([dateText(order.sent_date), ...linked.map(row => row.created_date), ...invoiceDates.map(row => row.invoice_date)]
-        .some(date => date < lockedBefore)) throw new Error("lab_order_accounting_period_locked");
-    }
-
-    await client.query(
-      `UPDATE lab_orders
-          SET expense_category_id = $1,
-              expense_account_code = $2,
-              payable_account_code = $3,
-              is_posted = $4,
-              posted_at = CASE WHEN $4 = TRUE THEN COALESCE(posted_at, NOW()) ELSE NULL END,
-              financial_status = CASE
-                WHEN financial_status = 'paid' THEN financial_status
-                WHEN $4 = FALSE THEN 'pending_post'
-                WHEN payable_id IS NOT NULL THEN 'payable_created'
-                WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN 'payable_created'
-                ELSE financial_status
-              END,
-              cost_minor = CASE WHEN $8::boolean THEN COALESCE($5, cost_minor) ELSE cost_minor END,
-              cost_currency = CASE WHEN $8::boolean THEN COALESCE($6, cost_currency) ELSE cost_currency END,
-              base_amount_minor = CASE WHEN $8::boolean AND $5::bigint > 0 THEN $9::bigint ELSE base_amount_minor END,
-              exchange_rate = CASE WHEN $8::boolean AND $5::bigint > 0 THEN $10::numeric ELSE exchange_rate END
-        WHERE id = $7`,
-      [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, orderId,
-        hasMoneyUpdate, baseAmount, resolvedRate],
-    );
-
-    // الالتزام المرتبط: يحدَّث بالربط المحاسبي نفسه، أو يُنشأ إن غاب وثمة تكلفة.
-    if (order.payable_id) {
-      await client.query(
-        `UPDATE payables
-            SET expense_category_id = $1,
-                expense_account_code = $2,
-                payable_account_code = $3,
-                is_posted = $4,
-                amount_minor = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $5 ELSE amount_minor END,
-                currency = CASE WHEN $9::boolean THEN COALESCE($6, currency) ELSE currency END,
-                base_amount_minor = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $7::bigint ELSE base_amount_minor END,
-                exchange_rate = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $10::numeric ELSE exchange_rate END
-          WHERE id = $8`,
-        [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, baseAmount, order.payable_id,
-          hasMoneyUpdate, resolvedRate],
-      );
-    } else if (order.party_id && resolvedCost != null && resolvedCost > 0) {
-      const { rows: payRows } = await client.query<{ id: number }>(
-        `INSERT INTO payables (party_id, category, description, amount_minor, currency,
-                               exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by, created_at,
-                               expense_category_id, expense_account_code, payable_account_code, is_posted)
-         VALUES ($1, 'lab', $2, $3, $4, $5, $6, 'YER', $7, $8::date, $9, NOW(), $10, $11, $12, $13)
-         ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO NOTHING
-         RETURNING id`,
-        [
-          order.party_id,
-          `${order.work_type}${order.tooth_numbers ? ` [سن ${order.tooth_numbers}]` : ""}${order.details ? ` — ${order.details}` : ""}`,
-          resolvedCost, resolvedCurrency, resolvedRate, baseAmount,
-          orderId, dateText(order.due_date), input.actor || "system",
-          expenseCatId, expenseAccCode, payableAccCode, isPosted,
-        ],
-      );
-      if (!payRows[0]) throw new LabFinancialBoundaryError("lab_payable_link_review");
-      if (payRows[0]) {
-        await client.query(
-          `UPDATE lab_orders SET payable_id = $1, financial_status = $2 WHERE id = $3`,
-          [payRows[0].id, isPosted ? "payable_created" : "pending_post", orderId],
-        );
-      }
-    }
-
-    const action = isPosted && order.is_posted !== true ? "accounting_posted" : "accounting_updated";
-    const note = isPosted && order.is_posted !== true
-      ? `تم الترحيل المحاسبي النهائي لأمر المختبر (${order.lab_name} - ${order.work_type}) بحساب مصروف [${expenseAccCode}] وذمم [${payableAccCode}]`
-      : `تم تحديث الربط المحاسبي وبند المصروف لأمر المختبر (${order.lab_name} - ${order.work_type}) إلى حساب [${expenseAccCode}]`;
-
-    await addLabOrderTracking(
-      orderId,
-      action,
-      null,
-      null,
-      note,
-      input.actor || "system",
-      input.actorRole || "accountant",
-      client,
-    );
-
-    if (activeSession && activeSession.expiresAt < Date.now()) {
-      throw new LabFinancialBoundaryError("lab_accounting_forbidden", "انتهت الجلسة أثناء الانتظار؛ لم تُحفظ العملية المالية.");
-    }
-    await insertAuditRow(client, {
-      action: "lab_order.accounting", entity: "lab_order", entityId: orderId,
-      actor: input.actor || "system", actorRole: input.actorRole ?? null,
-      details: {
-        previous: { costMinor: order.cost_minor, currency: order.cost_currency, exchangeRate: order.exchange_rate,
-          baseAmountMinor: order.base_amount_minor, expenseCategoryId: order.expense_category_id,
-          expenseAccountCode: order.expense_account_code, payableAccountCode: order.payable_account_code, isPosted: order.is_posted },
-        current: { costMinor: resolvedCost, currency: resolvedCurrency, exchangeRate: resolvedRate,
-          baseAmountMinor: baseAmount, expenseCategoryId: expenseCatId, expenseAccountCode: expenseAccCode,
-          payableAccountCode: payableAccCode, isPosted },
-      },
-    });
     await client.query("COMMIT");
-    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
-    return full[0] ? toLabOrder(full[0]) : null;
+    return updated;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -7743,16 +7925,155 @@ export async function updateLabOrderAccounting(
   }
 }
 
-/**
- * ينقل العمل بين حالاته، ولا يسمح بقفزة إلى الوراء، ويكتب الأثر والاعتراف المالي.
- *
- * الشرط على الحالة الحالية داخل الاستعلام: ضغطتان على «وصل» من جهازين — الاستقبال
- * على الشاشة والطبيب على هاتفه — كانتا ستكتبان تاريخ وصول ثانيًا يمحو الأول، فيبدو
- * العمل كأنه وصل اليوم وهو واصل منذ ثلاثة أيام.
- *
- * الربط المالي: الاستلام أو التركيب اعترافٌ بأن المختبر أدى عمله — فإن لم يكن
- * للطلب التزامٌ مسجل يُولد هنا في نفس المعاملة، لا يبقى العمل بلا أثرٍ مالي.
- */
+export async function setLabOrderStatusInTransaction(
+  client: DbClient,
+  id: number,
+  status: LabOrderStatus,
+  context?: {
+    actor?: string;
+    actorRole?: string | null;
+    notes?: string | null;
+    qualityCheck?: "passed" | "rejected" | "pending";
+    qualityNotes?: string | null;
+    technicianName?: string | null;
+    canCancelDispatched?: boolean;
+    checkPatientAccess?: (patientId: number) => Promise<boolean>;
+    assertStillValid?: () => Promise<void>;
+  },
+): Promise<LabOrder | null> {
+  const allowedFrom: Record<LabOrderStatus, string[]> = {
+    needed: [],
+    sent: ["needed", "received", "in_progress"],
+    in_progress: ["sent"],
+    received: ["sent", "in_progress", "remake"],
+    delivered: ["received"],
+    remake: ["received", "delivered"],
+    cancelled: ["needed", "sent", "in_progress", "received"],
+  };
+  const { rows: currentRows } = await client.query<{
+    status: string; party_id: number | null; lab_name: string | null; cost_minor: string | null;
+    cost_currency: string | null; base_amount_minor: string | null;
+    payable_id: number | null; work_type: string; details: string | null;
+    due_date: Date; patient_id: number; exchange_rate: string | null; lab_work_intent_id: string | null;
+  }>(
+    `SELECT status, party_id, lab_name, cost_minor, cost_currency, base_amount_minor, payable_id,
+            work_type, details, due_date, patient_id, exchange_rate, lab_work_intent_id
+       FROM lab_orders WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  if (!currentRows[0] || !allowedFrom[status].includes(currentRows[0].status)) {
+    return null;
+  }
+  const current = currentRows[0];
+  const prevStatus = current.status;
+  if (context?.checkPatientAccess && !(await context.checkPatientAccess(current.patient_id))) {
+    throw new LabFinancialBoundaryError("lab_patient_forbidden", "لا تملك صلاحية متابعة ملف هذا المريض.");
+  }
+  if (status === "sent" && current.status === "needed") {
+    throw new LabFinancialBoundaryError("lab_prescription_required", "استكمل مواصفات الإرسالية وراجعها قبل تسجيل الإرسال.");
+  }
+  if (status === "sent" && !current.party_id && (!current.lab_name || current.lab_name === PENDING_LAB_NAME)) {
+    throw new LabFinancialBoundaryError("lab_party_required", "اختر مختبرًا مسجلًا قبل تسجيل إرسال الطلب.");
+  }
+  if (status === "cancelled" && context?.canCancelDispatched === false && current.status !== "needed") {
+    throw new LabFinancialBoundaryError("lab_cancel_forbidden", "إلغاء إرسالية أُرسلت للمختبر للمدير وحده.");
+  }
+  if (status === "cancelled" && current.lab_work_intent_id && current.payable_id) {
+    throw new LabFinancialBoundaryError("lab_cancel_financial_review", "هذا العمل مرتبط بالتزام مالي؛ راجع الإلغاء المالي قبل إلغاء الإرسالية. لم يُحذف الالتزام أو يتغير.");
+  }
+  if (status === "remake" && current.lab_work_intent_id) {
+    throw new LabFinancialBoundaryError("lab_remake_review_required", "إعادة تصنيع العمل المرتبط تحتاج أمرًا مستقلًا يحفظ مصدره؛ راجع الإرسالية ولا تنشئ نسخة مكررة.");
+  }
+
+  const { rows } = await client.query<{ id: number }>(
+    `UPDATE lab_orders SET
+       status = $2,
+       sent_date = CASE WHEN $2 = 'sent' AND status = 'needed' THEN CURRENT_DATE ELSE sent_date END,
+       received_at  = CASE WHEN $2 = 'received'  THEN NOW() ELSE received_at  END,
+       delivered_at = CASE WHEN $2 = 'delivered' THEN NOW() ELSE delivered_at END,
+       quality_check   = COALESCE($3, quality_check),
+       quality_notes   = CASE WHEN $4::boolean THEN $5::text ELSE quality_notes END,
+       technician_name = CASE WHEN $6::boolean THEN $7::text ELSE technician_name END
+     WHERE id = $1
+     RETURNING id`,
+    [
+      id, status,
+      context?.qualityCheck ?? null,
+      context?.qualityNotes !== undefined,
+      context?.qualityNotes ?? null,
+      context?.technicianName !== undefined,
+      context?.technicianName ?? null,
+    ],
+  );
+  if (!rows[0]) {
+    return null;
+  }
+  await client.query(
+    `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
+     VALUES ($1, 'status_change', $2, $3, $4, $5, $6)`,
+    [id, prevStatus, status, context?.notes ?? null,
+     context?.actor ?? "system", context?.actorRole ?? null],
+  );
+
+  if (status === "cancelled" && current.payable_id) {
+    const { rows: paidRows } = await client.query<{ count: string }>(
+      `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
+             + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
+      [current.payable_id],
+    );
+    const paidCount = Number(paidRows[0]?.count ?? 0);
+    if (paidCount === 0) {
+      await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
+      await client.query(
+        `UPDATE lab_orders SET payable_id = NULL, financial_status = 'exempt' WHERE id = $1`,
+        [id],
+      );
+    } else {
+      await client.query(
+        `UPDATE lab_orders SET financial_status = 'paid' WHERE id = $1 AND financial_status <> 'paid'`,
+        [id],
+      );
+    }
+  }
+
+  if (
+    (status === "received" || status === "delivered") &&
+    !current.payable_id &&
+    current.party_id &&
+    current.cost_minor != null && Number(current.cost_minor) > 0
+  ) {
+    const savedMoney = savedLabPayableSnapshot(current);
+    const { costMinor, currency: costCurrency, baseAmountMinor: baseAmount, exchangeRate } = savedMoney;
+    const { rows: payRows } = await client.query<{ id: number }>(
+      `INSERT INTO payables (party_id, category, description, amount_minor, currency,
+                             exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by)
+       VALUES ($1, 'lab', $2, $3, $4, $9, $5, 'YER', $6, $7::date, $8)
+       ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [
+        current.party_id,
+        `${current.work_type}${current.details ? ` — ${current.details}` : ""}`,
+        costMinor, costCurrency, baseAmount,
+        id, dateText(current.due_date),
+        context?.actor ?? "system", exchangeRate,
+      ],
+    );
+    if (!payRows[0]) {
+      throw new LabFinancialBoundaryError("lab_payable_link_review", "يوجد التزام لهذا العمل دون ربط مطابق؛ راجع الربط المالي قبل الاستلام. لم يتغير الطلب.");
+    }
+    if (payRows[0]) {
+      await client.query(
+        `UPDATE lab_orders SET payable_id = $1, financial_status = 'payable_created' WHERE id = $2`,
+        [payRows[0].id, id],
+      );
+    }
+  }
+  if (context?.assertStillValid) {
+    await context.assertStillValid();
+  }
+  return getLabOrderByIdWith(client, id);
+}
+
 export async function setLabOrderStatus(
   id: number,
   status: LabOrderStatus,
@@ -7770,169 +8091,43 @@ export async function setLabOrderStatus(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // HTTP always supplies the actual session. Legacy trusted internal callers
-    // retain their existing actor contract; they cannot use the HTTP boundary.
     const activeSession = context?.session
       ? await (await import("./session")).revalidateSessionInTransaction(context.session, client)
       : null;
     if (context?.session && (!activeSession || !["admin", "doctor", "reception", "assistant"].includes(activeSession.role))) {
       throw new LabFinancialBoundaryError("lab_status_forbidden", "انتهت الجلسة أو لا تملك صلاحية متابعة هذا العمل.");
     }
-    // خريطة "إلى أين يحقّ الانتقال" — مصدرها الحالات نفسها:
-    // - `sent` يُحقّ من `needed` (أُرسل فعلًا) ومن `received` (عاد للمعمل للتعديل).
-    // - `needed` لا يُصار إليه يدويًا: يولّده توقيع الزيارة فقط.
-    // - `in_progress` (المختبرات V2): المختبر بدأ العمل — من المرسَل فقط.
-    // - `remake` (المختبرات V2): إعادة تصنيع — من المستلَم/المركّب، والسبب يُكتب.
-    const allowedFrom: Record<LabOrderStatus, string[]> = {
-      needed: [],
-      sent: ["needed", "received", "in_progress"],
-      in_progress: ["sent"],
-      received: ["sent", "in_progress", "remake"],
-      delivered: ["received"],
-      remake: ["received", "delivered"],
-      cancelled: ["needed", "sent", "in_progress", "received"],
-    };
-    // قفل الصف أولًا: قراءة الحالة والمال معًا بلا سباق — ضغطتان متزامنتان
-    // لن تمرّا كلتاهما من بوابة الحالة، والالتزام لا يُولد مرتين.
-    const { rows: currentRows } = await client.query<{
-      status: string; party_id: number | null; lab_name: string | null; cost_minor: string | null;
-      cost_currency: string | null; base_amount_minor: string | null;
-      payable_id: number | null; work_type: string; details: string | null;
-      due_date: Date; patient_id: number; exchange_rate: string | null; lab_work_intent_id: string | null;
-    }>(
-      `SELECT status, party_id, lab_name, cost_minor, cost_currency, base_amount_minor, payable_id,
-              work_type, details, due_date, patient_id, exchange_rate, lab_work_intent_id
-         FROM lab_orders WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    if (!currentRows[0] || !allowedFrom[status].includes(currentRows[0].status)) {
+    const updated = await setLabOrderStatusInTransaction(client, id, status, {
+      actor: activeSession?.username ?? context?.actor ?? "system",
+      actorRole: activeSession?.role ?? context?.actorRole ?? null,
+      notes: context?.notes,
+      qualityCheck: context?.qualityCheck,
+      qualityNotes: context?.qualityNotes,
+      technicianName: context?.technicianName,
+      canCancelDispatched: activeSession ? activeSession.role === "admin" : undefined,
+      checkPatientAccess: activeSession
+        ? async (patientId) => (await import("./patient-access")).canAccessPatient(activeSession, patientId, undefined, client, "nowait")
+        : undefined,
+      assertStillValid: activeSession
+        ? async () => {
+            if (activeSession.expiresAt < Date.now()) {
+              throw new LabFinancialBoundaryError("lab_status_forbidden", "انتهت الجلسة أثناء الانتظار؛ لم تُحفظ العملية.");
+            }
+          }
+        : undefined,
+    });
+    if (!updated) {
       await client.query("ROLLBACK");
       return null;
-    }
-    const current = currentRows[0];
-    const prevStatus = current.status;
-    if (activeSession && !await (await import("./patient-access")).canAccessPatient(activeSession, current.patient_id, undefined, client, "nowait")) {
-      throw new LabFinancialBoundaryError("lab_patient_forbidden", "لا تملك صلاحية متابعة ملف هذا المريض.");
-    }
-    if (status === "sent" && current.status === "needed") {
-      throw new LabFinancialBoundaryError("lab_prescription_required", "استكمل مواصفات الإرسالية وراجعها قبل تسجيل الإرسال.");
-    }
-    if (status === "sent" && !current.party_id && (!current.lab_name || current.lab_name === PENDING_LAB_NAME)) {
-      throw new LabFinancialBoundaryError("lab_party_required", "اختر مختبرًا مسجلًا قبل تسجيل إرسال الطلب.");
-    }
-    if (status === "cancelled" && activeSession && current.status !== "needed" && activeSession.role !== "admin") {
-      throw new LabFinancialBoundaryError("lab_cancel_forbidden", "إلغاء إرسالية أُرسلت للمختبر للمدير وحده.");
-    }
-    if (status === "cancelled" && current.lab_work_intent_id && current.payable_id) {
-      throw new LabFinancialBoundaryError("lab_cancel_financial_review", "هذا العمل مرتبط بالتزام مالي؛ راجع الإلغاء المالي قبل إلغاء الإرسالية. لم يُحذف الالتزام أو يتغير.");
-    }
-    if (status === "remake" && current.lab_work_intent_id) {
-      throw new LabFinancialBoundaryError("lab_remake_review_required", "إعادة تصنيع العمل المرتبط تحتاج أمرًا مستقلًا يحفظ مصدره؛ راجع الإرسالية ولا تنشئ نسخة مكررة.");
-    }
-
-    const { rows } = await client.query<{ id: number }>(
-      `UPDATE lab_orders SET
-         status = $2,
-         -- حين يُرسل الطلب فعلًا يبدأ عدّ مهلته من يوم إرساله لا يوم الزيارة.
-         sent_date = CASE WHEN $2 = 'sent' AND status = 'needed' THEN CURRENT_DATE ELSE sent_date END,
-         received_at  = CASE WHEN $2 = 'received'  THEN NOW() ELSE received_at  END,
-         delivered_at = CASE WHEN $2 = 'delivered' THEN NOW() ELSE delivered_at END,
-         quality_check   = COALESCE($3, quality_check),
-         quality_notes   = CASE WHEN $4::boolean THEN $5::text ELSE quality_notes END,
-         technician_name = CASE WHEN $6::boolean THEN $7::text ELSE technician_name END
-       WHERE id = $1
-       RETURNING id`,
-      [
-        id, status,
-        context?.qualityCheck ?? null,
-        context?.qualityNotes !== undefined,
-        context?.qualityNotes ?? null,
-        context?.technicianName !== undefined,
-        context?.technicianName ?? null,
-      ],
-    );
-    if (!rows[0]) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    // سجل التتبع: كل انتقال يترك أثرًا بفاعله وتاريخه وملاحظته (المختبرات V2).
-    await client.query(
-      `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role)
-       VALUES ($1, 'status_change', $2, $3, $4, $5, $6)`,
-      [id, prevStatus, status, context?.notes ?? null,
-       activeSession?.username ?? context?.actor ?? "system", activeSession?.role ?? context?.actorRole ?? null],
-    );
-
-    /* الإلغاء يعيد الاعتراف المالي: إرساليةٌ أُلغيت قبل سدادها لا تبقى دَينًا على
-     * العيادة — الالتزام غير المسدد (لا سند صرف يشير إليه) يُمحى معها ويصير العمل
-     * «معفى»، والمسدَّد يبقى أثرًا للتدقيق فالمال خرج فعلًا ولا يُمحو الإلغاءُ السريري
-     * سجلَه المحاسبي. */
-    if (status === "cancelled" && current.payable_id) {
-      const { rows: paidRows } = await client.query<{ count: string }>(
-        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
-               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
-        [current.payable_id],
-      );
-      const paidCount = Number(paidRows[0]?.count ?? 0);
-      if (paidCount === 0) {
-        await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
-        await client.query(
-          `UPDATE lab_orders SET payable_id = NULL, financial_status = 'exempt' WHERE id = $1`,
-          [id],
-        );
-      } else {
-        await client.query(
-          `UPDATE lab_orders SET financial_status = 'paid' WHERE id = $1 AND financial_status <> 'paid'`,
-          [id],
-        );
-      }
-    }
-
-    // الاعتراف بالالتزام عند الاستلام أو التركيب — إن لم يكن قد وُلد عند الإنشاء.
-    if (
-      (status === "received" || status === "delivered") &&
-      !current.payable_id &&
-      current.party_id &&
-      current.cost_minor != null && Number(current.cost_minor) > 0
-    ) {
-      const savedMoney = savedLabPayableSnapshot(current);
-      const { costMinor, currency: costCurrency, baseAmountMinor: baseAmount, exchangeRate } = savedMoney;
-      const { rows: payRows } = await client.query<{ id: number }>(
-        `INSERT INTO payables (party_id, category, description, amount_minor, currency,
-                               exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by)
-         VALUES ($1, 'lab', $2, $3, $4, $9, $5, 'YER', $6, $7::date, $8)
-         ON CONFLICT (lab_order_id) WHERE lab_order_id IS NOT NULL DO NOTHING
-         RETURNING id`,
-        [
-          current.party_id,
-          `${current.work_type}${current.details ? ` — ${current.details}` : ""}`,
-          costMinor, costCurrency, baseAmount,
-          id, dateText(current.due_date),
-          activeSession?.username ?? context?.actor ?? "system", exchangeRate,
-        ],
-      );
-      if (!payRows[0]) {
-        throw new LabFinancialBoundaryError("lab_payable_link_review", "يوجد التزام لهذا العمل دون ربط مطابق؛ راجع الربط المالي قبل الاستلام. لم يتغير الطلب.");
-      }
-      if (payRows[0]) {
-        await client.query(
-          `UPDATE lab_orders SET payable_id = $1, financial_status = 'payable_created' WHERE id = $2`,
-          [payRows[0].id, id],
-        );
-      }
-    }
-    if (activeSession && activeSession.expiresAt < Date.now()) {
-      throw new LabFinancialBoundaryError("lab_status_forbidden", "انتهت الجلسة أثناء الانتظار؛ لم تُحفظ العملية.");
     }
     await client.query("COMMIT");
+    return updated;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
-  const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
-  return full[0] ? toLabOrder(full[0]) : null;
 }
 
 /** تسجيل نتيجة فحص الجودة والمطابقة السريرية عند استلام العمل (المختبرات V2). */
@@ -7968,6 +8163,116 @@ export async function recordLabOrderQualityCheck(
 }
 
 /** إنشاء طلب إعادة تصنيع (Remake) مرتبط بالطلب الأصلي — الإعادة بلا تكلفة على العيادة. */
+export async function createLabOrderRemakeInTransaction(
+  client: DbClient,
+  originalId: number,
+  input: {
+    remakeReason: string;
+    newDueDate: string;
+    details?: string | null;
+    shade?: string | null;
+    stumpShade?: string | null;
+    actor: string;
+    actorRole?: string | null;
+    checkPatientAccess?: (patientId: number) => Promise<boolean>;
+  },
+  preloadedOriginal?: LabOrder | null,
+): Promise<LabOrder | null> {
+  const linked = (
+    await client.query<{ lab_work_intent_id: string | null; patient_id: number }>(
+      "SELECT lab_work_intent_id, patient_id FROM lab_orders WHERE id=$1 FOR UPDATE",
+      [originalId],
+    )
+  ).rows[0];
+  if (!linked) return null;
+  if (input.checkPatientAccess && !(await input.checkPatientAccess(linked.patient_id))) {
+    throw new LabFinancialBoundaryError("lab_patient_forbidden", "لا تملك صلاحية متابعة ملف هذا المريض.");
+  }
+  const original = preloadedOriginal ?? (await getLabOrderByIdWith(client, originalId));
+  if (!original) return null;
+  if (original.shadeSpecificationWarning) throw new Error("Review malformed lab shades before remake");
+  if (linked.lab_work_intent_id) {
+    throw new LabFinancialBoundaryError(
+      "lab_remake_review_required",
+      "إعادة تصنيع العمل المرتبط تحتاج أمرًا مستقلًا يحفظ مصدره؛ لم تُنشأ إرسالية مكررة.",
+    );
+  }
+
+  // تحديث الطلب الأصلي لبيان حالة الإعادة
+  await client.query(
+    `UPDATE lab_orders SET status = 'remake', remake_reason = $2 WHERE id = $1`,
+    [originalId, input.remakeReason],
+  );
+
+  await addLabOrderTracking(
+    originalId,
+    "marked_for_remake",
+    original.status,
+    "remake",
+    `تم طلب إعادة تصنيع العمل (Remake): ${input.remakeReason}`,
+    input.actor,
+    input.actorRole,
+    client,
+  );
+
+  // إنشاء طلب الإعادة الجديد: الأولوية عاجلة، والتكلفة صفر — إعادة خطأ المختبر
+  // لا تُحسب على العيادة، فحالتها المالية «معفاة» من البداية.
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const { rows: newRows } = await client.query<{ id: number }>(
+    `INSERT INTO lab_orders (
+       patient_id, lab_name, lab_phone, work_type, details, tooth_numbers,
+       shade, stump_shade, priority, impression_type, sent_date, due_date,
+       note, doctor_id, visit_id, party_id, lab_service_id,
+       cost_minor, cost_currency, base_amount_minor, exchange_rate,
+       financial_status, status, remake_original_id, remake_reason, source, shade_specification
+     )
+     VALUES (
+       $1, $2, $3, $4, $5, $6,
+       $7, $8, 'urgent', $9, $10::date, $11::date,
+       $12, $13, $14, $15, $16,
+       0, $17, 0, 1,
+       'exempt', 'sent', $18, $19, 'manual', $20::jsonb
+     )
+     RETURNING id`,
+    [
+      original.patientId,
+      original.labName,
+      original.labPhone,
+      `${original.workType} (إعادة)`,
+      input.details || original.details,
+      original.toothNumbers,
+      input.shade || original.shade,
+      input.stumpShade || original.stumpShade,
+      original.impressionType,
+      today,
+      input.newDueDate,
+      `طلب إعادة بناءً على الطلب #${originalId}: ${input.remakeReason}`,
+      original.doctorId,
+      original.visitId,
+      original.partyId,
+      original.labServiceId,
+      CLINIC_BASE_CURRENCY,
+      originalId,
+      input.remakeReason,
+      original.shadeSpecification == null ? null : JSON.stringify(original.shadeSpecification),
+    ],
+  );
+
+  const newOrderId = newRows[0].id;
+  await addLabOrderTracking(
+    newOrderId,
+    "created_as_remake",
+    null,
+    "sent",
+    `أمر إعادة تصنيع جديد مرتبط بالأمر الأصلي #${originalId}`,
+    input.actor,
+    input.actorRole,
+    client,
+  );
+
+  return getLabOrderByIdWith(client, newOrderId);
+}
+
 export async function createLabOrderRemake(
   originalId: number,
   input: {
@@ -7988,94 +8293,39 @@ export async function createLabOrderRemake(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const linked = (await client.query<{ lab_work_intent_id: string | null }>("SELECT lab_work_intent_id FROM lab_orders WHERE id=$1 FOR UPDATE", [originalId])).rows[0];
-    if (!linked) { await client.query("ROLLBACK"); return null; }
-    if (linked.lab_work_intent_id) {
-      throw new LabFinancialBoundaryError("lab_remake_review_required", "إعادة تصنيع العمل المرتبط تحتاج أمرًا مستقلًا يحفظ مصدره؛ لم تُنشأ إرسالية مكررة.");
+    const created = await createLabOrderRemakeInTransaction(client, originalId, input, original);
+    if (!created) {
+      await client.query("ROLLBACK");
+      return null;
     }
-
-
-    // تحديث الطلب الأصلي لبيان حالة الإعادة
-    await client.query(
-      `UPDATE lab_orders SET status = 'remake', remake_reason = $2 WHERE id = $1`,
-      [originalId, input.remakeReason],
-    );
-
-    await addLabOrderTracking(
-      originalId,
-      "marked_for_remake",
-      original.status,
-      "remake",
-      `تم طلب إعادة تصنيع العمل (Remake): ${input.remakeReason}`,
-      input.actor,
-      input.actorRole,
-      client,
-    );
-
-    // إنشاء طلب الإعادة الجديد: الأولوية عاجلة، والتكلفة صفر — إعادة خطأ المختبر
-    // لا تُحسب على العيادة، فحالتها المالية «معفاة» من البداية.
-    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-    const { rows: newRows } = await client.query<{ id: number }>(
-      `INSERT INTO lab_orders (
-         patient_id, lab_name, lab_phone, work_type, details, tooth_numbers,
-         shade, stump_shade, priority, impression_type, sent_date, due_date,
-         note, doctor_id, visit_id, party_id, lab_service_id,
-         cost_minor, cost_currency, base_amount_minor, exchange_rate,
-         financial_status, status, remake_original_id, remake_reason, source, shade_specification
-       )
-       VALUES (
-         $1, $2, $3, $4, $5, $6,
-         $7, $8, 'urgent', $9, $10::date, $11::date,
-         $12, $13, $14, $15, $16,
-         0, $17, 0, 1,
-         'exempt', 'sent', $18, $19, 'manual', $20::jsonb
-       )
-       RETURNING id`,
-      [
-        original.patientId,
-        original.labName,
-        original.labPhone,
-        `${original.workType} (إعادة)`,
-        input.details || original.details,
-        original.toothNumbers,
-        input.shade || original.shade,
-        input.stumpShade || original.stumpShade,
-        original.impressionType,
-        today,
-        input.newDueDate,
-        `طلب إعادة بناءً على الطلب #${originalId}: ${input.remakeReason}`,
-        original.doctorId,
-        original.visitId,
-        original.partyId,
-        original.labServiceId,
-        CLINIC_BASE_CURRENCY,
-        originalId,
-        input.remakeReason,
-        original.shadeSpecification == null ? null : JSON.stringify(original.shadeSpecification),
-      ],
-    );
-
-    const newOrderId = newRows[0].id;
-    await addLabOrderTracking(
-      newOrderId,
-      "created_as_remake",
-      null,
-      "sent",
-      `أمر إعادة تصنيع جديد مرتبط بالأمر الأصلي #${originalId}`,
-      input.actor,
-      input.actorRole,
-      client,
-    );
-
     await client.query("COMMIT");
-    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [newOrderId]);
-    return full[0] ? toLabOrder(full[0]) : null;
+    return created;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function setLabOrderDueDateInTransaction(
+  client: DbClient,
+  id: number,
+  dueDate: string,
+  actor = "system",
+  actorRole: string | null = null,
+): Promise<LabOrder | null> {
+  const { rows } = await client.query<{ id: number }>(
+    `UPDATE lab_orders SET due_date = $2::date
+      WHERE id = $1 AND status IN ('sent', 'needed') RETURNING id`,
+    [id, dueDate],
+  );
+  if (!rows[0]) return null;
+  await addLabOrderTracking(
+    id, "due_date_change", null, null,
+    `تأجيل موعد التسليم إلى ${dueDate}`, actor, actorRole, client,
+  );
+  return getLabOrderByIdWith(client, id);
 }
 
 /** يؤجّل موعد التسليم حين يعد المختبر بموعد جديد — بلا هذا يبقى «متأخرًا» بلا معنى. */
@@ -8099,6 +8349,88 @@ export async function setLabOrderDueDate(
   return full[0] ? toLabOrder(full[0]) : null;
 }
 
+export async function deleteLabOrderInTransaction(
+  client: DbClient,
+  id: number,
+  context: {
+    actor: string;
+    actorRole?: string | null;
+    reason?: string | null;
+    checkPatientAccess?: (patientId: number) => Promise<boolean>;
+    auditInTransaction?: boolean;
+  },
+): Promise<{
+  ok: boolean;
+  reason?: "not_found" | "forbidden" | "settled" | "reason_required" | "source_linked";
+  snapshot?: Record<string, unknown> | null;
+}> {
+  const { rows: currentRows } = await client.query<{
+    id: number; patient_id: number; lab_name: string; work_type: string;
+    status: string; cost_minor: string | null; cost_currency: string | null;
+    lab_work_intent_id: string | null; payable_id: number | null; tooth_numbers: string | null; sent_date: Date;
+  }>(
+    `SELECT id, patient_id, lab_name, work_type, status, cost_minor, cost_currency,
+            payable_id, tooth_numbers, sent_date, lab_work_intent_id
+       FROM lab_orders WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  if (!currentRows[0]) {
+    return { ok: false, reason: "not_found" };
+  }
+  const current = currentRows[0];
+  if (context.checkPatientAccess && !(await context.checkPatientAccess(current.patient_id))) {
+    return { ok: false, reason: "forbidden" };
+  }
+  if (current.lab_work_intent_id) {
+    return { ok: false, reason: "source_linked" };
+  }
+  const snapshot: Record<string, unknown> = {
+    patientId: current.patient_id,
+    labName: current.lab_name,
+    workType: current.work_type,
+    status: current.status,
+    toothNumbers: current.tooth_numbers,
+    sentDate: current.sent_date,
+    costMinor: current.cost_minor != null ? Number(current.cost_minor) : null,
+    costCurrency: current.cost_currency,
+    reason: context.reason ?? null,
+  };
+
+  if (current.payable_id) {
+    const { rows: paidRows } = await client.query<{ count: string }>(
+      `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
+             + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
+      [current.payable_id],
+    );
+    if (Number(paidRows[0]?.count ?? 0) > 0) {
+      return { ok: false, reason: "settled" };
+    }
+  }
+  if ((context.reason?.trim().length ?? 0) < 3) {
+    return { ok: false, reason: "reason_required" };
+  }
+  if (current.payable_id) {
+    await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = $1`, [
+      current.payable_id,
+    ]);
+    await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
+  }
+  await client.query(`DELETE FROM lab_order_tracking WHERE lab_order_id = $1`, [id]);
+  await client.query(`DELETE FROM lab_orders WHERE id = $1`, [id]);
+  if (context.auditInTransaction) {
+    await insertAuditRow(client, {
+      action: "lab_order.delete",
+      entity: "lab_order",
+      entityId: id,
+      entityLabel: `#${id}`,
+      details: snapshot,
+      actor: context.actor,
+      actorRole: context.actorRole ?? null,
+    });
+  }
+  return { ok: true, snapshot };
+}
+
 /**
  * حذف أمر مختبر نهائيًا — سلطة المدير وحده (الطلب الخاطئ المكرر مثلًا).
  *
@@ -8116,65 +8448,15 @@ export async function deleteLabOrder(
   let snapshot: Record<string, unknown> | null = null;
   try {
     await client.query("BEGIN");
-    const { rows: currentRows } = await client.query<{
-      id: number; patient_id: number; lab_name: string; work_type: string;
-      status: string; cost_minor: string | null; cost_currency: string | null;
-      lab_work_intent_id: string | null; payable_id: number | null; tooth_numbers: string | null; sent_date: Date;
-    }>(
-      `SELECT id, patient_id, lab_name, work_type, status, cost_minor, cost_currency,
-              payable_id, tooth_numbers, sent_date, lab_work_intent_id
-         FROM lab_orders WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    if (!currentRows[0]) {
+    const outcome = await deleteLabOrderInTransaction(client, id, context);
+    if (!outcome.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
+      return {
+        ok: false,
+        reason: outcome.reason === "forbidden" ? "not_found" : outcome.reason,
+      };
     }
-    const current = currentRows[0];
-    if (current.lab_work_intent_id) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "source_linked" };
-    }
-    snapshot = {
-      patientId: current.patient_id,
-      labName: current.lab_name,
-      workType: current.work_type,
-      status: current.status,
-      toothNumbers: current.tooth_numbers,
-      sentDate: current.sent_date,
-      costMinor: current.cost_minor != null ? Number(current.cost_minor) : null,
-      costCurrency: current.cost_currency,
-      reason: context.reason ?? null,
-    };
-
-    if (current.payable_id) {
-      const { rows: paidRows } = await client.query<{ count: string }>(
-        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
-               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
-        [current.payable_id],
-      );
-      if (Number(paidRows[0]?.count ?? 0) > 0) {
-        await client.query("ROLLBACK");
-        return { ok: false, reason: "settled" };
-      }
-    }
-    /* (FIA-3) الحذف النهائي يمحو أمرًا وأثره المالي غير المسدَّد — سببه إلزاميٌّ في الخادم نفسه لا
-       في الشاشة وحدها (الإلغاء الطبيعي ليس حذفًا وله مساره). بعد فحص الوجود والتسوية: رسالتهما أدق. */
-    if ((context.reason?.trim().length ?? 0) < 3) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "reason_required" };
-    }
-    if (current.payable_id) {
-      /* سندات الصرف تشير إلى الالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار) —
-         نُفرغ الإشارة أولًا ثم يُحذف الالتزام نفسه. */
-      await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = $1`, [
-        current.payable_id,
-      ]);
-      await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
-    }
-    // أحداث التتبع والطلب نفسه (التتالي يشيل الأول لكن الصريح أوضح للقارئ).
-    await client.query(`DELETE FROM lab_order_tracking WHERE lab_order_id = $1`, [id]);
-    await client.query(`DELETE FROM lab_orders WHERE id = $1`, [id]);
+    snapshot = outcome.snapshot ?? null;
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -8201,15 +8483,17 @@ export async function deleteLabOrder(
  * وثلاثون صفًّا في الجدول، ويصير حِملًا بلا سبب بعد سنة — والعدّ هنا لا يحتاج صفًّا
  * واحدًا في الذاكرة. «اليوم» بتوقيت العيادة لا بـUTC، وإلا حُسب عمل يستحق غدًا متأخرًا.
  */
-export async function labCounts(options?: { mode: "workflow"; today: string }): Promise<{
+export async function labCountsWith(
+  q: Pick<DbClient, "query">,
+  options?: { mode: "workflow"; today: string },
+): Promise<{
   outstanding: number; late: number; dueToday: number; waitingFitting: number;
 }> {
-  await ensureSchema();
   // Reports use the full workflow and one captured clinic day; badges keep their sent-only SQL clock.
   const workflow = options?.mode === "workflow";
   const outstanding = workflow ? "status IN ('sent', 'in_progress', 'remake')" : "status = 'sent'";
   const today = workflow ? "$1::date" : "(NOW() AT TIME ZONE $1)::date";
-  const { rows } = await getPool().query<{
+  const { rows } = await q.query<{
     outstanding: string; late: string; due_today: string; waiting_fitting: string;
   }>(
     `SELECT
@@ -8228,14 +8512,27 @@ export async function labCounts(options?: { mode: "workflow"; today: string }): 
   };
 }
 
-/** أسماء المختبرات المستخدمة سابقًا — تُختصر الكتابة وتمنع «النور» و«مختبر النور». */
-export async function listLabNames(): Promise<{ labName: string; labPhone: string | null }[]> {
+export async function labCounts(options?: { mode: "workflow"; today: string }): Promise<{
+  outstanding: number; late: number; dueToday: number; waitingFitting: number;
+}> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ lab_name: string; lab_phone: string | null }>(
+  return labCountsWith(getPool(), options);
+}
+
+/** أسماء المختبرات المستخدمة سابقًا — تُختصر الكتابة وتمنع «النور» و«مختبر النور». */
+export async function listLabNamesWith(
+  q: Pick<DbClient, "query">,
+): Promise<{ labName: string; labPhone: string | null }[]> {
+  const { rows } = await q.query<{ lab_name: string; lab_phone: string | null }>(
     `SELECT lab_name, MAX(lab_phone) AS lab_phone FROM lab_orders
       GROUP BY lab_name ORDER BY MAX(created_at) DESC LIMIT 10`,
   );
   return rows.map((row) => ({ labName: row.lab_name, labPhone: row.lab_phone }));
+}
+
+export async function listLabNames(): Promise<{ labName: string; labPhone: string | null }[]> {
+  await ensureSchema();
+  return listLabNamesWith(getPool());
 }
 
 // ─── الاستدعاء ومتابعة المتغيّبين ────────────────────────────────────────────
@@ -12217,9 +12514,8 @@ function currentCommissionPercent(policies: {
   return value.config ? value.config.defaultPercent : value.percent;
 }
 
-export async function listParties(kind?: PartyKind): Promise<Party[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PartyRow>(
+export async function listPartiesWith(q: Pick<DbClient, "query">, kind?: PartyKind): Promise<Party[]> {
+  const { rows } = await q.query<PartyRow>(
     `SELECT ${PARTY_COLUMNS} FROM parties
       WHERE ($1::text IS NULL OR kind = $1::text)
       ORDER BY is_active DESC, name`,
@@ -12228,11 +12524,20 @@ export async function listParties(kind?: PartyKind): Promise<Party[]> {
   return rows.map(toParty);
 }
 
+export async function listParties(kind?: PartyKind): Promise<Party[]> {
+  await ensureSchema();
+  return listPartiesWith(getPool(), kind);
+}
+
+export async function getPartyWith(q: Pick<DbClient, "query">, id: number): Promise<Party | null> {
+  const { rows } = await q.query<PartyRow>(`SELECT ${PARTY_COLUMNS} FROM parties WHERE id = $1`, [id]);
+  return rows[0] ? toParty(rows[0]) : null;
+}
+
 /** (P1-4) جهةٌ واحدة — لقطة «قبل» في تدقيق التعديل. */
 export async function getParty(id: number): Promise<Party | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<PartyRow>(`SELECT ${PARTY_COLUMNS} FROM parties WHERE id = $1`, [id]);
-  return rows[0] ? toParty(rows[0]) : null;
+  return getPartyWith(getPool(), id);
 }
 
 export async function createParty(input: {
@@ -12398,9 +12703,8 @@ const toLaboratory = (r: LaboratoryRow): Laboratory => ({
   totalOrdersCount: Number(r.total_orders) || 0,
 });
 
-export async function listLaboratories(): Promise<Laboratory[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<LaboratoryRow>(
+export async function listLaboratoriesWith(q: Pick<DbClient, "query">): Promise<Laboratory[]> {
+  const { rows } = await q.query<LaboratoryRow>(
     `${LAB_LIST_SELECT}
      WHERE p.kind = 'lab'
      GROUP BY p.id
@@ -12409,9 +12713,13 @@ export async function listLaboratories(): Promise<Laboratory[]> {
   return rows.map(toLaboratory);
 }
 
-export async function getLaboratory(id: number): Promise<Laboratory | null> {
+export async function listLaboratories(): Promise<Laboratory[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<LaboratoryRow>(
+  return listLaboratoriesWith(getPool());
+}
+
+export async function getLaboratoryWith(q: Pick<DbClient, "query">, id: number): Promise<Laboratory | null> {
+  const { rows } = await q.query<LaboratoryRow>(
     `${LAB_LIST_SELECT}
      WHERE p.id = $1 AND p.kind = 'lab'
      GROUP BY p.id`,
@@ -12420,23 +12728,30 @@ export async function getLaboratory(id: number): Promise<Laboratory | null> {
   return rows[0] ? toLaboratory(rows[0]) : null;
 }
 
-export async function createLaboratory(input: {
-  name: string;
-  phone?: string | null;
-  whatsapp?: string | null;
-  address?: string | null;
-  contactPerson?: string | null;
-  currency?: Currency;
-  deliveryDays?: number;
-  note?: string | null;
-  isActive?: boolean;
-  expenseAccountCode?: string | null;
-  payableAccountCode?: string | null;
-  autoPostJournal?: boolean;
-  customAccountName?: string | null;
-}): Promise<Laboratory> {
+export async function getLaboratory(id: number): Promise<Laboratory | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<LaboratoryRow>(
+  return getLaboratoryWith(getPool(), id);
+}
+
+export async function createLaboratoryWith(
+  q: Pick<DbClient, "query">,
+  input: {
+    name: string;
+    phone?: string | null;
+    whatsapp?: string | null;
+    address?: string | null;
+    contactPerson?: string | null;
+    currency?: Currency;
+    deliveryDays?: number;
+    note?: string | null;
+    isActive?: boolean;
+    expenseAccountCode?: string | null;
+    payableAccountCode?: string | null;
+    autoPostJournal?: boolean;
+    customAccountName?: string | null;
+  },
+): Promise<Laboratory> {
+  const { rows } = await q.query<LaboratoryRow>(
     `INSERT INTO parties (name, kind, phone, whatsapp, address, contact_person, currency, delivery_days,
                           note, is_active, expense_account_code, payable_account_code, auto_post_journal, custom_account_name)
      VALUES ($1, 'lab', $2::text, $3::text, $4::text, $5::text, $6::text, $7, $8::text, $9, $10, $11, $12, $13::text)
@@ -12462,8 +12777,8 @@ export async function createLaboratory(input: {
   return toLaboratory(rows[0]);
 }
 
-export async function updateLaboratory(id: number, input: {
-  name?: string;
+export async function createLaboratory(input: {
+  name: string;
   phone?: string | null;
   whatsapp?: string | null;
   address?: string | null;
@@ -12476,9 +12791,31 @@ export async function updateLaboratory(id: number, input: {
   payableAccountCode?: string | null;
   autoPostJournal?: boolean;
   customAccountName?: string | null;
-}): Promise<Laboratory | null> {
+}): Promise<Laboratory> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+  return createLaboratoryWith(getPool(), input);
+}
+
+export async function updateLaboratoryWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+  input: {
+    name?: string;
+    phone?: string | null;
+    whatsapp?: string | null;
+    address?: string | null;
+    contactPerson?: string | null;
+    currency?: Currency;
+    deliveryDays?: number;
+    note?: string | null;
+    isActive?: boolean;
+    expenseAccountCode?: string | null;
+    payableAccountCode?: string | null;
+    autoPostJournal?: boolean;
+    customAccountName?: string | null;
+  },
+): Promise<Laboratory | null> {
+  const { rows } = await q.query<{ id: number }>(
     `UPDATE parties SET
        name                 = COALESCE($2::text, name),
        phone                = CASE WHEN $3::boolean THEN $4::text ELSE phone END,
@@ -12513,23 +12850,49 @@ export async function updateLaboratory(id: number, input: {
     ],
   );
   if (!rows[0]) return null;
-  return getLaboratory(id);
+  return getLaboratoryWith(q, id);
+}
+
+export async function updateLaboratory(id: number, input: {
+  name?: string;
+  phone?: string | null;
+  whatsapp?: string | null;
+  address?: string | null;
+  contactPerson?: string | null;
+  currency?: Currency;
+  deliveryDays?: number;
+  note?: string | null;
+  isActive?: boolean;
+  expenseAccountCode?: string | null;
+  payableAccountCode?: string | null;
+  autoPostJournal?: boolean;
+  customAccountName?: string | null;
+}): Promise<Laboratory | null> {
+  await ensureSchema();
+  return updateLaboratoryWith(getPool(), id, input);
+}
+
+export async function deleteLaboratoryWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<{ ok: boolean; reason?: string }> {
+  const { rows: orderCount } = await q.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM lab_orders WHERE party_id = $1`,
+    [id],
+  );
+  if (Number(orderCount[0]?.count || 0) > 0) {
+    const { rowCount } = await q.query(`UPDATE parties SET is_active = FALSE WHERE id = $1 AND kind = 'lab'`, [id]);
+    if (!rowCount) return { ok: false };
+    return { ok: true, reason: "deactivated" };
+  }
+  const { rowCount } = await q.query(`DELETE FROM parties WHERE id = $1 AND kind = 'lab'`, [id]);
+  return { ok: (rowCount ?? 0) > 0 };
 }
 
 /** حذف المختبر: له طلبات؟ يُعطّل ولا يُمحى — سجل الالتزامات المالية فوق رغبة الحذف. */
 export async function deleteLaboratory(id: number): Promise<{ ok: boolean; reason?: string }> {
   await ensureSchema();
-  const pool = getPool();
-  const { rows: orderCount } = await pool.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM lab_orders WHERE party_id = $1`,
-    [id],
-  );
-  if (Number(orderCount[0]?.count || 0) > 0) {
-    await pool.query(`UPDATE parties SET is_active = FALSE WHERE id = $1 AND kind = 'lab'`, [id]);
-    return { ok: true, reason: "deactivated" };
-  }
-  const { rowCount } = await pool.query(`DELETE FROM parties WHERE id = $1 AND kind = 'lab'`, [id]);
-  return { ok: (rowCount ?? 0) > 0 };
+  return deleteLaboratoryWith(getPool(), id);
 }
 
 // ─── الربط المالي: كل مختبر بحساب مصروفٍ والتزام (Lab Accounting) ───────────

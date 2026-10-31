@@ -2188,9 +2188,17 @@
    "clinical.lab.view"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 33: summary=1 via clinical.lab.view; orders list via read:lab.orders in one owning RR snapshot; cost fields projected by finance.cost-prices.view / finance.payables.record.",
+  "projection": {
+   "legacy": "admin and reception read all orders and cost fields; a doctor without canViewAllPatients reads orders for its own patients or assigned to its partyId; a doctor without canViewCostPrices has costMinor, costCurrency, baseAmountMinor, exchangeRate and payableId masked to null.",
+   "groups": {
+    "identity": "the lab order clinical and operational fields (patient, workType, teeth, shade, labName, status, dueDate) — every actor admitted to read:lab.orders",
+    "costs": "costMinor, costCurrency, baseAmountMinor, exchangeRate, payableId — finance.cost-prices.view or finance.payables.record; otherwise null"
+   },
+   "rows": "summary=1: badge counts via clinical.lab.view; orders list via read:lab.orders: patient scope all reads clinic orders, own reads orders for patients in clinician scope or assigned to clinicianPartyId"
+  }
  },
  {
   "route": "/api/lab",
@@ -2205,8 +2213,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.lab.order + patient scope + own-clinician binding; atomic insertAuditRow; cost fields projected by finance.cost-prices.view / finance.payables.record."
  },
  {
   "route": "/api/lab/[id]",
@@ -2219,8 +2227,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.lab.cancel + patient scope + mandatory delete reason; atomic insertAuditRow."
  },
  {
   "route": "/api/lab/[id]",
@@ -2230,24 +2238,25 @@
    "reception",
    "doctor"
   ],
-  "need": [
-   "clinical.lab.order"
-  ],
+  "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 33: branch-exact capabilities with patient scope; dueDate/status require clinical.lab.order, and cancelling an already-dispatched order requires clinical.lab.cancel.",
   "branches": {
    "discriminator": "action",
    "values": {
     "complete_prescription": {
      "need": [
-      "clinical.visits.document"
+      "clinical.visits.document",
+      "clinical.lab.order"
      ],
      "note": "Clinical prescription content."
     },
     "events": {
-     "need": [],
+     "need": [
+      "clinical.lab.view"
+     ],
      "note": "Order tracking events."
     },
     "post": {
@@ -2308,9 +2317,9 @@
    "clinical.lab.view"
   ],
   "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
+  "scope": "patient",
+  "status": "canonical-done",
+  "note": "M2 slice 33: read:lab.backlog in one owning RR snapshot; requires whole-clinic patient scope (all) and passes scope.userId for task privacy."
  },
  {
   "route": "/api/lab/pricing",
@@ -2325,8 +2334,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.lab.view in one owning RR snapshot."
  },
  {
   "route": "/api/lab/pricing",
@@ -2339,8 +2348,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: finance.lab-prices.edit with atomic insertAuditRow."
  },
  {
   "route": "/api/lab/pricing/[id]",
@@ -2353,8 +2362,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: finance.lab-prices.edit with atomic insertAuditRow."
  },
  {
   "route": "/api/lab/pricing/[id]",
@@ -2367,8 +2376,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: finance.lab-prices.edit with atomic insertAuditRow."
  },
  {
   "route": "/api/lab/services",
@@ -2383,8 +2392,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.lab.view in one owning RR snapshot."
  },
  {
   "route": "/api/lab/services",
@@ -2397,13 +2406,15 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 33: finance.lab-prices.edit with atomic insertAuditRow.",
   "branches": {
    "discriminator": "action",
    "values": {
     "seed_defaults": {
-     "need": [],
+     "need": [
+      "finance.lab-prices.edit"
+     ],
      "note": ""
     }
    }
@@ -2420,8 +2431,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: finance.lab-prices.edit with atomic insertAuditRow."
  },
  {
   "route": "/api/lab/services/[id]",
@@ -2436,8 +2447,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.lab.view in one owning RR snapshot."
  },
  {
   "route": "/api/lab/services/[id]",
@@ -2450,8 +2461,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: finance.lab-prices.edit with atomic insertAuditRow."
  },
  {
   "route": "/api/lab/work-intents/capability",
@@ -2465,8 +2476,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.lab.order in one owning RR snapshot; structured { supported: false, message } refusals."
  },
  {
   "route": "/api/laboratories",
@@ -2481,8 +2492,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.lab.view in one owning RR snapshot."
  },
  {
   "route": "/api/laboratories",
@@ -2495,8 +2506,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.laboratories.manage with atomic insertAuditRow."
  },
  {
   "route": "/api/laboratories/[id]",
@@ -2509,8 +2520,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.laboratories.manage with atomic insertAuditRow."
  },
  {
   "route": "/api/laboratories/[id]",
@@ -2525,8 +2536,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.lab.view in one owning RR snapshot."
  },
  {
   "route": "/api/laboratories/[id]",
@@ -2539,8 +2550,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: clinical.laboratories.manage with atomic insertAuditRow."
  },
  {
   "route": "/api/messages",

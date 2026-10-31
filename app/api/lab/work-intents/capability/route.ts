@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { readCanonicalLabWorkCapabilityResponse } from "@/lib/canonical-lab";
 import { getPool, type DbClient } from "@/lib/db";
 import { requireSession, revalidateSessionInTransaction } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { labWorkIntentSupported } from "@/lib/lab-work-intent-db";
 export const dynamic = "force-dynamic";
 const json = (body: { supported: boolean; message?: string }, status = 200) =>
@@ -8,6 +10,9 @@ const json = (body: { supported: boolean; message?: string }, status = 200) =>
 const unauthenticated = () => json({ supported: false, message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
 /** Read only feature detection. A missing proposal never triggers schema installation. */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return unauthenticated();
+  if (selected.kind === "canonical") return readCanonicalLabWorkCapabilityResponse(selected.handle);
   let client: DbClient | undefined;
   let discardClient = false;
   const rollback = async () => {
