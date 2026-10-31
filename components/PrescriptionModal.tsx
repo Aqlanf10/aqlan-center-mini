@@ -1,4 +1,5 @@
 "use client";
+import { prescriberUnavailableMessage } from "@/lib/prescription-prescriber-feedback";
 import { createManualMedicationSelection, manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
 
 import { useEffect, useMemo, useState } from "react";
@@ -79,7 +80,7 @@ export function PrescriptionModal({
   const session = useSession();
   const prescriberKey = JSON.stringify([isOpen, patientId, visitId, session?.username, session?.role, session?.permissions]);
   type PrescriberOptions = { issuerId: number; canChooseAnyDoctor: boolean; doctors: { id: number; name: string }[] };
-  const [prescriberRead, setPrescriberRead] = useState<{ key: string; status: "loading" | "error" | "ready"; options: PrescriberOptions | null } | null>(null);
+  const [prescriberRead, setPrescriberRead] = useState<{ key: string; status: "loading" | "error" | "ready"; options: PrescriberOptions | null; unavailableMessage?: string } | null>(null);
   const [prescriberRetry, setPrescriberRetry] = useState(0);
   const prescriberStatus = prescriberRead?.key === prescriberKey ? prescriberRead.status : "loading";
   const prescriberOptions = prescriberStatus === "ready" ? prescriberRead?.options ?? null : null;
@@ -140,6 +141,14 @@ export function PrescriptionModal({
         if (!response.ok) throw new Error("Prescriber lookup refused");
         const payload = await response.json();
         const options = payload?.prescriberOptions;
+        if (options?.issuerId === null && options.canChooseAnyDoctor === false
+          && Array.isArray(options.doctors) && options.doctors.length === 0) {
+          const unavailableMessage = prescriberUnavailableMessage(options.unavailableReason);
+          if (unavailableMessage) {
+            if (!cancelled) setPrescriberRead({ key: prescriberKey, status: "error", options: null, unavailableMessage });
+            return;
+          }
+        }
         if (!options || !Number.isSafeInteger(options.issuerId) || options.issuerId <= 0
           || typeof options.canChooseAnyDoctor !== "boolean" || !Array.isArray(options.doctors)
           || !options.doctors.some((doctor: { id: number }) => doctor.id === options.issuerId)
@@ -746,7 +755,8 @@ export function PrescriptionModal({
 
           {prescriberStatus === "loading" && <p role="status" className="text-sm">جارٍ التحقق من هوية الطبيب الواصف…</p>}
           {prescriberStatus === "error" && <div role="alert" className="rounded border border-red-200 p-3 text-sm">
-            <p>تعذر التحقق من هوية الطبيب الواصف. الإصدار والمعاينة متوقفان حتى ينجح التحقق.</p>
+            <p>{prescriberRead?.key === prescriberKey && prescriberRead.unavailableMessage
+              ? prescriberRead.unavailableMessage : "تعذر التحقق من هوية الطبيب الواصف."} الإصدار والمعاينة متوقفان حتى ينجح التحقق.</p>
             <button type="button" onClick={() => setPrescriberRetry(value => value + 1)} className="mt-2 rounded border px-3 py-2">إعادة التحقق من الطبيب</button>
           </div>}
           {session?.role === "admin" && !prescriberOptions?.canChooseAnyDoctor && <p role="status" className="rounded border border-amber-200 p-3 text-xs">
