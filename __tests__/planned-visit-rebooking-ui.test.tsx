@@ -9,13 +9,15 @@ const runtime = vi.hoisted(() => ({ frame: null as Frame | null }));
 vi.mock("react", async original => {
   const react = await original<typeof import("react")>();
   const slot = () => { const f = runtime.frame!; const i = f.cursor++; return f.slots[i] ?? (f.slots[i] = {}); };
+  const effect = (fn: () => void | (() => void), deps?: unknown[]) => { const s = slot();
+    if (!s.deps || !deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) { s.deps = deps;
+      runtime.frame!.effects.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; }); } };
   return { ...react,
     useState: (initial: unknown) => { const s = slot(); if (!("value" in s)) s.value = typeof initial === "function" ? initial() : initial;
       return [s.value, (next: unknown) => { s.value = typeof next === "function" ? next(s.value) : next; }]; },
     useRef: (initial: unknown) => { const s = slot(); if (!s.value) s.value = { current: initial }; return s.value; },
-    useEffect: (fn: () => void | (() => void), deps?: unknown[]) => { const s = slot();
-      if (!s.deps || !deps || deps.some((v, i) => !Object.is(v, s.deps![i]))) { s.deps = deps;
-        runtime.frame!.effects.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; }); } },
+    useEffect: effect,
+    useLayoutEffect: effect,
   };
 });
 vi.mock("../components/CollectPaymentModal", () => ({ CollectPaymentModal: () => null }));
@@ -157,5 +159,18 @@ describe("explicit planned-session rebooking UI", () => {
     const f = mount(); f.change("reason", "طلب المريض"); f.props.workflowIsCurrent = () => false; f.submit(); expect(fetch).not.toHaveBeenCalled();
     f.props.workflowIsCurrent = () => true; f.submit(); f.unmount(); resolve(reply({ appointmentId: 102 })); await turns();
     expect(f.props.onChanged).not.toHaveBeenCalled();
+  });
+  it("retires the committed patient owner across A to B to A before a late response", async () => {
+    let resolve!: (value: unknown) => void;
+    const fetch = vi.fn(() => new Promise(done => { resolve = done; })); vi.stubGlobal("fetch", fetch);
+    const f = mount(); f.change("reason", "طلب المريض"); f.submit();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    f.props.patientId = 8; f.render();
+    f.props.patientId = 7; f.render();
+    resolve(reply({ appointmentId: 102, title: "جلسة اختبار", replayed: false }, 201)); await turns();
+    expect(f.props.onChanged).not.toHaveBeenCalled();
+    expect(f.props.onVisitStarted).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    f.unmount();
   });
 });

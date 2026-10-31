@@ -390,7 +390,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
     setMoneyRecoveries(current=>{const next=new Map(current);if(money)next.set(recoveryKey,money);else next.delete(recoveryKey);return next;});
     setReconciliationRecoveries(current => { const next = new Map(current); if (reconciliation) next.set(recoveryKey, reconciliation); else next.delete(recoveryKey); return next; });
     setRestoredCommandKey(invoice ? command!.key : "");
-  }, [patientId, principal, recoveryKey, recoveryOwner, session?.username, setRecoveries, setDebtRecoveries,setRevisionRecoveries,setHistoricalRecoveries,setMoneyRecoveries]);
+  }, [patientId, principal, recoveryKey, recoveryOwner, session?.username, setRecoveries, setDebtRecoveries,setRevisionRecoveries,setHistoricalRecoveries,setMoneyRecoveries,setReconciliationRecoveries]);
   useEffect(() => {
     if (!session?.username) return;
     let active = true,generation=0;

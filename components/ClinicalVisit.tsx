@@ -258,6 +258,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const liveOwner = useRef<typeof owner | null>(owner);
   const loadSequence = useRef(0);
   const lastAppliedOwner = useRef<typeof owner | null>(null);
+  const [appliedOwner, setAppliedOwner] = useState<typeof owner | null>(null);
   const command = useRef<{ owner: typeof owner } | null>(null);
   const [loadedOwner, setLoadedOwner] = useState<typeof owner | null>(null);
   // A route/principal owner is not permission to reuse an old accepted clinical read.
@@ -266,6 +267,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   // An accepted signature is a receipt, never another read/write grant. Keep
   // its one-way status across retries, but never display it after access denial.
   const confirmedSignOwner = useRef<typeof owner | null>(null);
+  const [displayedSignOwner, setDisplayedSignOwner] = useState<typeof owner | null>(null);
   const [deniedOwner, setDeniedOwner] = useState<typeof owner | null>(null);
   useLayoutEffect(() => {
     liveOwner.current = owner;
@@ -309,6 +311,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const [autoFilled, setAutoFilled] = useState<Set<NoteKey | "doctor">>(new Set());
   /* آخر نصٍّ ولّدته الإجراءات في «ما نُفّذ» — ما دام الحقل عليه (أو فارغًا) يتبع الإجراءات. */
   const lastAutoTreatment = useRef("");
+  const [displayedAutoTreatment, setDisplayedAutoTreatment] = useState("");
   // Explicitly authored text, including an intentional blank, survives reads.
   // A later local procedure edit may resume auto-fill only while it is blank.
   const explicitTreatmentOwner = useRef<typeof owner | null>(null);
@@ -355,11 +358,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const referenceKey = JSON.stringify([owner.key, owner.generation,
     ownsVisit ? visit?.patientId : null, ownsVisit ? visit?.ortho?.caseId : null,
     ownsVisit && visit?.status !== "signed" && Boolean(visit?.ortho && (orthoSession || visit.ortho.visitAdjustmentId != null))]);
-  const [referenceOwner, setReferenceOwner] = useState({ key: referenceKey, generation: 0, active: false });
-  if (referenceOwner.key !== referenceKey) setReferenceOwner({ key: referenceKey, generation: referenceOwner.generation + 1, active: false });
+  const [referenceOwner, setReferenceOwner] = useState({ key: referenceKey, generation: 0 });
+  if (referenceOwner.key !== referenceKey) setReferenceOwner({ key: referenceKey, generation: referenceOwner.generation + 1 });
+  const liveReferenceOwner = useRef<typeof referenceOwner | null>(null);
   useLayoutEffect(() => {
-    referenceOwner.active = true;
-    return () => { referenceOwner.active = false; };
+    liveReferenceOwner.current = referenceOwner;
+    return () => { if (liveReferenceOwner.current === referenceOwner) liveReferenceOwner.current = null; };
   }, [referenceOwner]);
   const [referenceOpen, setReferenceOpen] = useState<{ owner: typeof referenceOwner; open: boolean } | null>(null);
   /* (P3) منتقي الدليل السريع لإضافة إجراءٍ حرّ — نفس مسار الإضافة من القائمة. */
@@ -398,11 +402,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const contextPatientId = ownsVisit && typeof visit?.patientId === "number"
     && Number.isSafeInteger(visit.patientId) && visit.patientId > 0 ? visit.patientId : null;
   const patientContextKey = JSON.stringify([owner.key, owner.generation, contextPatientId, rxOpen]);
-  const [patientContextOwner, setPatientContextOwner] = useState({ key: patientContextKey, active: false });
-  if (patientContextOwner.key !== patientContextKey) setPatientContextOwner({ key: patientContextKey, active: false });
+  const [patientContextOwner, setPatientContextOwner] = useState({ key: patientContextKey });
+  if (patientContextOwner.key !== patientContextKey) setPatientContextOwner({ key: patientContextKey });
+  const livePatientContextOwner = useRef<typeof patientContextOwner | null>(null);
   useLayoutEffect(() => {
-    patientContextOwner.active = true;
-    return () => { patientContextOwner.active = false; };
+    livePatientContextOwner.current = patientContextOwner;
+    return () => { if (livePatientContextOwner.current === patientContextOwner) livePatientContextOwner.current = null; };
   }, [patientContextOwner]);
   const [patientContext, setPatientContext] = useState<
     | { owner: typeof patientContextOwner; status: "ready"; medicalAlert: string | null; phone: string | null }
@@ -418,7 +423,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     const patientId = contextPatientId;
     if (!rxOpen || !patientId || !ownsVisit) return;
     const controller = new AbortController();
-    const stillCurrent = () => !controller.signal.aborted && patientContextOwner.active && currentOwner();
+    const stillCurrent = () => !controller.signal.aborted && livePatientContextOwner.current === patientContextOwner && currentOwner();
     void (async () => {
       try {
         const response = await fetch(`/api/patients/${patientId}`, { cache: "no-store", signal: controller.signal });
@@ -547,11 +552,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         setOrthoSession(null); setAddendum(""); setReviewOpen(false);
         setBillingPreview(null); setOverrideReason(""); setNoChargeAdjustment(false); setNoChargeReason("");
         setServerUnmet([]); setRxOpen(false); setPostOpOpen(false); setPatientContext(null);
-        setBusy(false); autoReviewDone.current = false; lastAutoTreatment.current = "";
+        setBusy(false); autoReviewDone.current = false; lastAutoTreatment.current = ""; setDisplayedAutoTreatment("");
         explicitTreatmentOwner.current = null;
       }
-      lastAppliedOwner.current = owner;
-      if (loaded.status === "signed") confirmedSignOwner.current = owner;
+      lastAppliedOwner.current = owner; setAppliedOwner(owner);
+      if (loaded.status === "signed") { confirmedSignOwner.current = owner; setDisplayedSignOwner(owner); }
       acceptedReadOwner.current = owner;
       setLoadedOwner(owner); setVisit(loaded); setDeniedOwner(null);
       const savedDraftMatches = submitted !== undefined && matchesSubmittedVisit(loaded, submitted.body);
@@ -584,7 +589,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       }
       return false;
     }
-  }, [visitId, expectedPatientId, currentOwner, owner]);
+  }, [visitId, expectedPatientId, currentOwner, owner, setRxOpen, setPostOpOpen]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -599,7 +604,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       toothCode: draft.toothCode, quantity: draft.quantity,
     })));
     const previous = lastAutoTreatment.current;
-    lastAutoTreatment.current = text;
+    lastAutoTreatment.current = text; setDisplayedAutoTreatment(text);
     setNotes((current) => (current.treatmentDone.trim() === "" || current.treatmentDone === previous)
       ? { ...current, treatmentDone: text } : current);
   }, [drafts, services, visitOpen, visit?.outstanding, ownsVisit, currentOwner, owner]);
@@ -690,7 +695,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         return;
       }
       if (!isClinicalSignResult(payload, visitId, expectedPatientId ?? visit?.patientId)) { unknownOutcome(); return; }
-      confirmedSignOwner.current = owner;
+      confirmedSignOwner.current = owner; setDisplayedSignOwner(owner);
       setServerUnmet([]);
       setReviewOpen(false);
       setOrthoSession(null); setOverrideReason(""); setNoChargeAdjustment(false); setNoChargeReason("");
@@ -796,11 +801,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   if (!visit || !ownsVisit) {
     const ownedError = errorOwner === owner ? error : null;
     return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-      {confirmedSignOwner.current === owner && deniedOwner !== owner ? (
+      {displayedSignOwner === owner && deniedOwner !== owner ? (
         <p role="status" data-testid="clinical-sign-confirmed" className="mb-2 font-bold text-success-700">وُقّعت الزيارة بنجاح. تعذّر تأكيد عرض السجل؛ لن يُعاد التوقيع.</p>
       ) : null}
       <p role={ownedError ? "alert" : undefined}>{ownedError ?? "جارٍ تحميل الزيارة الحالية…"}</p>
-      {lastAppliedOwner.current === owner && draftForLeave.current.dirty && confirmedSignOwner.current !== owner ? (
+      {appliedOwner === owner && hasDraft && displayedSignOwner !== owner ? (
         <p className="mt-2 text-xs">احتُفظ بمسودة الزيارة لهذه الجلسة؛ التعديل والحفظ متوقفان حتى نجاح إعادة التحميل.</p>
       ) : null}
       {ownedError ? <button type="button" onClick={() => void load()}
@@ -1172,7 +1177,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                   phrases={phrases.diagnosis} onPhrase={(phrase) => setNote("diagnosis", appendPhrase(notes.diagnosis, phrase))}
                   onChange={(value) => setNote("diagnosis", value)} />
                 <Field label="توثيق عمل إضافي اليوم" value={notes.treatmentDone} disabled={busy || !canWrite}
-                  hint={notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
+                  hint={notes.treatmentDone && notes.treatmentDone === displayedAutoTreatment ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
                   onChange={(value) => setNote("treatmentDone", value)} />
               </div>
             </details>
@@ -1189,7 +1194,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             onChange={(value) => setNote(key, value)} />
         ))}
         <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed || busy || !canWrite}
-          hint={!signed && notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
+          hint={!signed && notes.treatmentDone && notes.treatmentDone === displayedAutoTreatment ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
           onChange={(value) => setNote("treatmentDone", value)} />
         <Field label="الخطة القادمة" maxLength={500} value={notes.nextPlan} disabled={signed || busy || !canWrite}
           auto={autoFilled.has("nextPlan")} phrases={signed ? [] : phrases.nextPlan}
@@ -1312,7 +1317,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             open={referenceOwner.key === referenceKey && referenceOpen?.owner === referenceOwner && referenceOpen.open}
             onToggle={(event) => {
               if (event.target !== event.currentTarget || !ownsVisit || !currentOwner()
-                || !referenceOwner.active || referenceOwner.key !== referenceKey) return;
+                || liveReferenceOwner.current !== referenceOwner || referenceOwner.key !== referenceKey) return;
               const open = event.currentTarget.open;
               setReferenceOpen((previous) => previous?.owner === referenceOwner && previous.open === open
                 ? previous : { owner: referenceOwner, open });
@@ -1892,6 +1897,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         isOpen={rxOpen}
         onClose={() => { if (currentOwner()) setRxOpen(false); }}
         patientId={visit?.patientId ?? undefined}
+        visitId={visit?.id ?? undefined}
         patientName={visit?.patientName ?? ""}
         /* التنبيه الطبي والهاتف يمرّان ليُفحص أمان الدواء داخل الزيارة نفسها —
            فحص السلامة بلا بيانات المريض نصٌّ فارغ (P0.10). */
@@ -1899,6 +1905,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         patientPhone={readyPatientContext?.phone ?? null}
         patientContextStatus={patientContextStatus}
         defaultDiagnosis={notes.diagnosis}
+        defaultDoctorPartyId={doctorId}
         defaultDoctorName={doctors.find((d) => d.id === doctorId)?.name ?? ""}
       />
 

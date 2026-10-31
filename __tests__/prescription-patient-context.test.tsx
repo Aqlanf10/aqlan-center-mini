@@ -44,11 +44,14 @@ vi.mock("react", async (original) => {
     ...react,
     useState: (initial: unknown) => {
       const scope = active(); const index = slot(scope, typeof initial === "function" ? initial() : initial);
-      return [scope.values[index], (value: unknown) => {
+      // React guarantees a stable state setter across renders.
+      const setter = scope.memos.get(index)?.value ?? ((value: unknown) => {
         const next = typeof value === "function" ? value(scope.values[index]) : value;
         if (!Object.is(next, scope.values[index])) { scope.changed = true; scope.changes += 1; }
         scope.values[index] = next;
-      }];
+      });
+      scope.memos.set(index, { value: setter });
+      return [scope.values[index], setter];
     },
     useRef: (initial: unknown) => { const scope = active(); return scope.values[slot(scope, { current: initial })]; },
     useCallback: (callback: unknown, deps?: readonly unknown[]) => {
@@ -150,7 +153,7 @@ beforeEach(() => {
     if (clinical) return response(200, options?.method === "POST" ? { ok: true } : structuredClone(visits.get(Number(clinical[1]))));
     const patient = url.match(/^\/api\/patients\/(\d+)$/);
     if (patient) return readPatient(Number(patient[1]));
-    if (/^\/api\/patients\/\d+\/prescriptions$/.test(url)) return response(200, { prescriptions: [], suggestions: [] });
+    if (/^\/api\/patients\/\d+\/prescriptions$/.test(url)) return response(200, { prescriptions: [], suggestions: [], prescriberOptions: { issuerId: 94001, canChooseAnyDoctor: false, doctors: [{ id: 94001, name: "Synthetic clinician" }] } });
     if (url === "/api/services") return response(200, []);
     if (url === "/api/parties?kind=doctor") return response(200, [{ id: 94001, name: "Synthetic clinician" }]);
     throw new Error(`Unexpected request blocked: ${url}`);
@@ -171,7 +174,9 @@ describe("prescription patient context contract", () => {
     change(find(renderModal(), (node) => node.props.placeholder === "Drug name (e.g. Augmentin / Brufen)"), "Amoxicillin");
     expect(text(renderModal())).toContain("خطر تحسسي حرج (Penicillin Allergy)");
     click(button(renderModal(), "💬إرسال واتساب"));
-    expect(openMock).toHaveBeenCalledWith(expect.stringContaining("https://wa.me/967777100099?"), "_blank");
+    // Incomplete new medication cannot escape issuance review through sharing.
+    expect(openMock).not.toHaveBeenCalled();
+    expect(text(renderModal())).toContain("أكمل اسم الدواء");
     expect(readCalls()[0][1]).toMatchObject({ cache: "no-store", signal: expect.any(AbortSignal) });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   });

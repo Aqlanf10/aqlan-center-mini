@@ -44,6 +44,7 @@ export function OperationalOverviewPanel() {
   const [stale, setStale] = useState(false);
   const sequence = useRef(0);
   const initialDay = useRef("");
+  const [resolvedDay, setResolvedDay] = useState("");
   const requestKey = JSON.stringify([day, lane, pages.appointments, pages.referrals, revision]);
   const current = read.key === requestKey;
   const data = current ? read.data : null;
@@ -69,6 +70,7 @@ export function OperationalOverviewPanel() {
         if (!verified) throw new Error("تعذّر التحقق من نتيجة القراءة. أعد المحاولة.");
         if (request === sequence.current && !controller.signal.aborted) {
           initialDay.current = verified.day;
+          setResolvedDay(verified.day);
           setRead({ key: requestKey, data: verified, error: null });
         }
       } catch (failure) {
@@ -107,8 +109,8 @@ export function OperationalOverviewPanel() {
     <div className="mt-4 flex flex-wrap items-end gap-3">
       <label className="flex flex-col gap-1 text-sm font-bold text-slate-700" htmlFor="operational-day">
         يوم الموعد / اكتمال الإحالة
-        <input id="operational-day" type="date" value={day || initialDay.current || data?.day || ""} className="min-h-11 rounded-lg border border-slate-200 px-3 py-2"
-          onChange={event => { initialDay.current = ""; setDay(event.target.value); setPages({ appointments: 0, referrals: 0 }); }} aria-describedby="operational-scope" />
+        <input id="operational-day" type="date" value={day || resolvedDay || data?.day || ""} className="min-h-11 rounded-lg border border-slate-200 px-3 py-2"
+          onChange={event => { initialDay.current = ""; setResolvedDay(""); setDay(event.target.value); setPages({ appointments: 0, referrals: 0 }); }} aria-describedby="operational-scope" />
       </label>
       <fieldset className="min-w-0">
         <legend className="mb-1 text-sm font-bold text-slate-700">نوع السجلات</legend>
