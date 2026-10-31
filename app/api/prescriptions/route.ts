@@ -1,7 +1,8 @@
+import { getPrescriptionOwnerAuthority } from "@/lib/prescription-owner";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getClinicalVisit, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
+import { getClinicalVisit, getParty, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { checkPrescriptionDraft } from "@/lib/prescription";
@@ -56,7 +57,10 @@ export async function POST(request: Request) {
   }
   /* الفحص المركزي الموحّد للقدرة السريرية (lib/clinical-identity.ts) —
      نفس الفحص الذي تحرس به أدوات AI السريرية وإبطال الوصفات. */
-  const capability = clinicalCapabilityOf({ role: session.role, doctorPartyId: user.partyId });
+  if (session.userId !== user.id || session.username !== user.username || session.role !== user.role) {
+    return NextResponse.json({ message: "تغيّرت هوية الحساب؛ أعد تسجيل الدخول." }, { status: 403 });
+  }
+  const capability = clinicalCapabilityOf({ role: user.role, doctorPartyId: user.partyId });
   if (!capability.ok) {
     return NextResponse.json({ message: capability.reason }, { status: 403 });
   }
@@ -69,12 +73,36 @@ export async function POST(request: Request) {
 
   const patientId = Number(body.patientId);
   const rawVisit = Number(body.visitId);
-  const visitId = Number.isInteger(rawVisit) && rawVisit > 0 ? rawVisit : null;
+  if (body.visitId !== undefined && body.visitId !== null && (!Number.isSafeInteger(rawVisit) || rawVisit <= 0)) {
+    return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
+  }
+  const visitId = Number.isSafeInteger(rawVisit) && rawVisit > 0 ? rawVisit : null;
   const acknowledgedSafetyToken =
     typeof body.acknowledgedSafetyToken === "string" && body.acknowledgedSafetyToken.length > 0
       ? body.acknowledgedSafetyToken
       : null;
+  // Keep the existing issuer ID/void contract; prescribing identity is separate.
+  const issuerDoctor = await getParty(doctorPartyId!).catch(() => null);
+  if (!issuerDoctor || issuerDoctor.kind !== "doctor" || !issuerDoctor.isActive || !issuerDoctor.name.trim()) {
+    return NextResponse.json({ message: "هوية الحساب السريرية غير نشطة أو غير صالحة." }, { status: 403 });
+  }
+  const selectedId = body.prescribingDoctorPartyId === undefined ? doctorPartyId! : Number(body.prescribingDoctorPartyId);
+  if (!Number.isSafeInteger(selectedId) || selectedId <= 0) {
+    return NextResponse.json({ message: "اختر طبيبًا صالحًا من القائمة." }, { status: 400 });
+  }
+  const ownerAuthority = selectedId !== doctorPartyId ? await getPrescriptionOwnerAuthority(user) : null;
+  if (selectedId !== doctorPartyId && !ownerAuthority) {
+    return NextResponse.json({ message: "اختيار طبيب آخر لإصدار الوصفة متاح للمالك الطبيب المرتبط بهوية موثوقة فقط." }, { status: 403 });
+  }
+  const selectedDoctor = selectedId === doctorPartyId ? issuerDoctor : await getParty(selectedId).catch(() => null);
+  if (!selectedDoctor || selectedDoctor.kind !== "doctor" || !selectedDoctor.isActive || !selectedDoctor.name.trim()) {
+    return NextResponse.json({ message: "الطبيب المحدد غير موجود أو غير نشط." }, { status: 400 });
+  }
+  const prescribingDoctorName = selectedDoctor.name;
   const draft = checkPrescriptionDraft({
+    ownerAuthority,
+    prescribingDoctorName,
+    prescribingDoctorPartyId: selectedId,
     patientId,
     visitId,
     diagnosis: body.diagnosis,
@@ -109,7 +137,15 @@ export async function POST(request: Request) {
      أو بوصفةٍ بديلة). والتحذيرات غير الحرجة لا تُحفظ وتُنسى: تُعرض، ويُقرّها
      الطبيب صراحةً، وربطُ الإقرار بالوصفة نفسها **وبالتحذيرات التي رآها**
      برمزٍ خادمي قصير العمر (Blocker B ثم الجولة الثالثة). */
-  const patient = await getPatient(draft.value.patientId).catch(() => null);
+  let patient: Awaited<ReturnType<typeof getPatient>>;
+  try {
+    patient = await getPatient(draft.value.patientId);
+  } catch {
+    return NextResponse.json({ message: "تعذر تحميل ملف المريض للتحقق من السلامة؛ أعد المحاولة." }, { status: 503 });
+  }
+  if (!patient) {
+    return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
+  }
   if (patient) {
     /* دائمًا يُعاد التقييم من الملف الحالي وقت كل طلب — لا حالة عميل. */
     const alerts = evaluatePrescriptionSafety(

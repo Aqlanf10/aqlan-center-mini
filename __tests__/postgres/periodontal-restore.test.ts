@@ -134,7 +134,7 @@ beforeAll(async () => {
   const candidateVersion = periodontalCandidateMigrationVersion(shipped);
   // The shared validator checks exact filenames and the reviewed branch gaps.
   shippedCount = shipped.length;
-  expect(candidateVersion).toBe(["0063","0064","0065","0066","0067","0068","0069","0078","0087","0089"].includes(shipped.at(-1)!.version) ? "9000" : String(Number(shipped[shippedCount-1].version)+1).padStart(4,"0"));
+  expect(candidateVersion).toBe(["0063","0064","0065","0066","0067","0068","0069","0078","0087","0089","0090","0091","0092"].includes(shipped.at(-1)!.version) ? "9000" : String(Number(shipped[shippedCount-1].version)+1).padStart(4,"0"));
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
   const candidatePath = path.resolve("__tests__/postgres/fixtures/0041_periodontal_candidate.sql");
   expect(await readFile(candidatePath, "utf8")).toBe(PERIODONTAL_SQL);
@@ -302,11 +302,19 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
   it("refuses a nonempty target by default without changing records, audit or files", async () => {
     const before = await state();
     const documentBefore = await readFile(path.join(stagingDir, DOCUMENT_KEY));
+    const registryBefore = (await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows;
+    const catalogSql = "SELECT c.oid::text,c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.oid";
+    const catalogBefore = (await pool().query(catalogSql)).rows;
+    const provenanceReadsBefore = vi.mocked(loadMigrationFiles).mock.calls.length;
     const result = await stagedRestore({ archivePath, targetUrl: fixture!.url, stagingDir });
     expect(result).toMatchObject({ ok: false, readyForCutover: false, validationErrors: [], migrationsApplied: [], documentsRestored: 0 });
     expect(result.errors.join(" ")).toContain("الهدف ليس فارغًا");
     expect(await state()).toEqual(before);
     expect(await readFile(path.join(stagingDir, DOCUMENT_KEY))).toEqual(documentBefore);
-    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(1);
+    expect((await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
+    expect((await pool().query(catalogSql)).rows).toEqual(catalogBefore);
+    // Filesystem-only provenance is checked before connecting, even when the
+    // destination will subsequently be refused as nonempty. No migration runs.
+    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(provenanceReadsBefore + 1);
   });
 });

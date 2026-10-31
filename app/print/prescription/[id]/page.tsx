@@ -1,8 +1,10 @@
+import { manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
+import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
+import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { getPatient, getPrescription, getSettingsSafe } from "@/lib/db";
+import { getPatient, getPrescription, getPrescriptionPrintSettings } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
-import { isAdmin } from "@/lib/roles";
 import { sanitizeRxItems } from "@/lib/prescription";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -13,6 +15,7 @@ import { requireSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 interface RxItem {
+  selection?: import("@/lib/prescription-medication-selection").ManualMedicationSelection;
   name: string;
   dose?: string; // 500mg, 1g
   form?: string; // Tablets, Capsules, Syrup, Mouthwash, Ointment — English
@@ -44,6 +47,8 @@ export default async function PrescriptionPrintPage({
 }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
+    doctorName?: string; // Ignored legacy query; never a clinical identity.
+    doctorPartyId?: string;
     diagnosis?: string;
     items?: string;
     notes?: string;
@@ -58,9 +63,9 @@ export default async function PrescriptionPrintPage({
   const session = await requireSession();
   if (!session) notFound();
 
-  /* وثيقة سريرية رسمية: مستخدمٌ سريري (طبيب، أو مدير) لا استقبال — ومن يفتحها
-     يملك المريض (P0.9): الطبيب A لا يطبع وصفة مريض الطبيب B. */
-  if (!isAdmin(session.role) && session.role !== "doctor") notFound();
+  /* Existing clinicians and explicitly granted reception reprints; patient
+     scope and stored-only reception restrictions are checked independently. */
+  if (!await canPrintSavedPrescription(session)) notFound();
 
   const { id: rawId } = await params;
   const patientId = Number(rawId);
@@ -72,7 +77,7 @@ export default async function PrescriptionPrintPage({
 
   const [patient, settings] = await Promise.all([
     getPatient(patientId),
-    getSettingsSafe(),
+    getPrescriptionPrintSettings(),
   ]);
 
   if (!patient) notFound();
@@ -84,10 +89,12 @@ export default async function PrescriptionPrintPage({
     ? await getPrescription(storedRx) : null;
   if (sParams.rx && !stored) notFound();
   if (stored && stored.patientId !== patientId) notFound();
+  // Reception receives only an active stored record, never a query-only draft.
+  if (session.role === "reception" && (!stored || stored.status !== "active" || sParams.draft !== undefined)) notFound();
 
   /* الوثيقة الرسمية تُطبع من السجل المحفوظ كما صدرت — وما لم يُحفظ فلا وصفة:
    * صفحةٌ بلا وصفةٍ محفوظة لا تطبع أدوية «مثالًا» لم يصفها أحد (P0.9)، ولا
-   * يُطبع اسم طبيبٍ من معاملات الرابط. المسودة المعزولة (?draft=1) وحدها
+   * يُستبدل اسم طبيبها المحفوظ بمعاملات الرابط. المسودة المعزولة (?draft=1) وحدها
    * تعرض بياناتٍ مرسلة — منقّاة، وبعلامة «غير معتمدة» لا تصرف بها صيدلية. */
   const isDraftMode = !stored && sParams.draft === "1" && typeof sParams.items === "string";
 
@@ -96,7 +103,8 @@ export default async function PrescriptionPrintPage({
     rxItems = stored.items;
   } else if (isDraftMode) {
     try {
-      rxItems = sanitizeRxItems(JSON.parse(decodeURIComponent(sParams.items!)));
+      const rawItems = JSON.parse(decodeURIComponent(sParams.items!));
+      rxItems = manualMedicationSelectionError(rawItems) ? [] : sanitizeRxItems(rawItems);
     } catch {
       rxItems = [];
     }
@@ -114,12 +122,23 @@ export default async function PrescriptionPrintPage({
       ? sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
       : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const age = ageFromBirthYear(patient.birthYear, dateStr);
+  let prescribingDoctorName = stored
+    ? stored.prescribingDoctorName || "اسم الطبيب غير موثق في الوصفة القديمة"
+    : "اسم الطبيب غير موثق في المسودة";
+  if (isDraftMode && sParams.doctorPartyId !== undefined) {
+    const selectedId = Number(sParams.doctorPartyId);
+    if (!Number.isSafeInteger(selectedId) || selectedId <= 0) notFound();
+    const policy = await prescriptionPrescriberOptions(session);
+    const selected = policy.doctors.find(doctor => doctor.id === selectedId);
+    if (!selected || (!policy.canChooseAnyDoctor && selectedId !== policy.issuerId)) notFound();
+    prescribingDoctorName = selected.name;
+  }
 
   return (
     <>
-      {stored ? <PrintButton docType="prescription" docId={stored.id} /> : null}
+      {stored ? <PrintButton docType="prescription" docId={stored.id} patientId={patientId} /> : null}
       <div className="sheet sheet-a5">
-        <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact />
+        <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact strictIdentity />
 
         {/* معلومات المريض */}
         <PrintMetadata>
@@ -163,18 +182,13 @@ export default async function PrescriptionPrintPage({
 
         {/* التشخيص إن وُجد */}
         {isDraftMode ? (
-          <div style={{
-            border: "2px dashed #b45309",
-            backgroundColor: "#fffbeb",
-            color: "#92400e",
-            padding: "2mm 3mm",
-            borderRadius: "2mm",
-            fontSize: "10pt",
-            fontWeight: 900,
+          <div data-prescription-status="draft" style={{
+            color: "#64748b",
+            fontSize: "8pt",
             textAlign: "center",
             marginTop: "2mm",
           }}>
-            مسودة غير معتمدة — لا تُصرف من الصيدلية · UNAPPROVED DRAFT
+            مسودة للمراجعة
           </div>
         ) : null}
 
@@ -194,16 +208,17 @@ export default async function PrescriptionPrintPage({
           </div>
         ) : null}
 
+        <section dir="ltr" data-prescription-body="ltr" style={{ textAlign: "left" }}>
         {diagnosisText ? (
           <div className="line" style={{ marginTop: "2.5mm", fontSize: "9pt" }}>
             <span style={{ color: "#475569" }}>التشخيص الطبي:</span>
-            <span style={{ fontWeight: 700 }}>{diagnosisText}</span>
+            <span dir="auto" style={{ fontWeight: 700 }}>{diagnosisText}</span>
           </div>
         ) : null}
 
         <div className="rule" />
 
-        {/* علامة Rx وقائمة الأدوية */}
+        {/* Entire medication section starts LTR; Arabic instructions remain isolated RTL. */}
         <div style={{ display: "flex", alignItems: "center", gap: "2mm", margin: "2mm 0" }}>
           <span style={{
             fontSize: "18pt",
@@ -215,7 +230,7 @@ export default async function PrescriptionPrintPage({
             ℞
           </span>
           <span style={{ fontSize: "8.5pt", color: "#64748b", fontWeight: 600 }}>
-            الوصفة العلاجية والجرعات · <span dir="ltr">Prescription &amp; Dosage</span>
+            <span dir="ltr">Prescription &amp; Dosage</span> · <span dir="rtl">الوصفة العلاجية والجرعات</span>
           </span>
         </div>
 
@@ -257,6 +272,7 @@ export default async function PrescriptionPrintPage({
                   )}
                 </div>
 
+                {item.selection?.amount && <p dir="ltr" className="mt-1 text-sm">Dose: {item.selection.amount}</p>}
                 {item.frequency && (
                   <div style={{ marginTop: "1mm", fontSize: "8.5pt", color: "#334155" }}>
                     💊 {item.frequency}
@@ -266,7 +282,7 @@ export default async function PrescriptionPrintPage({
                 {(showAr || showEn) && (
                   <div style={{ marginTop: "1mm", display: "grid", gap: "0.8mm" }}>
                     {showAr && (
-                      <div style={{ fontSize: "8.5pt", color: "#475569" }} dir="rtl">
+                      <div style={{ fontSize: "8.5pt", color: "#475569", textAlign: "right" }} dir="rtl">
                         <span style={{ fontWeight: 700 }}>التعليمات: </span>
                         {ar}
                       </div>
@@ -285,19 +301,19 @@ export default async function PrescriptionPrintPage({
         </div>
 
         {notesText && (
-          <div style={{ marginTop: "3mm", fontSize: "8pt", color: "#475569", lineHeight: "1.5" }}>
+          <div dir="auto" style={{ marginTop: "3mm", fontSize: "8pt", color: "#475569", lineHeight: "1.5" }}>
             <span style={{ fontWeight: 700 }}>إرشادات إضافية: </span>
             <span>{notesText}</span>
           </div>
         )}
 
-        <div className="sign-row" style={{ marginTop: "12mm", alignItems: "flex-end" }}>
+        <div className="sign-row" dir="ltr" style={{ textAlign: "left", marginTop: "12mm", alignItems: "flex-end" }}>
           <div>
-            <div style={{ fontSize: "8pt", color: "#64748b" }}>الطبيب المعالج · <span dir="ltr">Physician</span></div>
+            <div style={{ fontSize: "8pt", color: "#64748b" }}><span dir="ltr">Physician</span> · <span dir="rtl">الطبيب المعالج</span></div>
             <div style={{ fontWeight: 800, fontSize: "9pt", marginTop: "1mm" }}>
-              {stored ? stored.createdBy : session.username}
+              <bdi>{prescribingDoctorName}</bdi>
             </div>
-            <div style={{ fontSize: "7.5pt", color: "#94a3b8" }}>طب وجراحة الفم والأسنان · <span dir="ltr">Oral Medicine &amp; Dental Surgery</span></div>
+
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: "8pt", color: "#64748b" }}>التوقيع والختم · <span dir="ltr">Signature &amp; Stamp</span></div>
@@ -305,7 +321,8 @@ export default async function PrescriptionPrintPage({
           </div>
         </div>
 
-        <PrintFooter settings={settings} />
+        </section>
+        <PrintFooter settings={settings} strictIdentity />
       </div>
     </>
   );

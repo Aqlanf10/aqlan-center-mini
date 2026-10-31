@@ -38,6 +38,7 @@ import { PatientReferrals } from "@/components/PatientReferrals";
 import { PatientCases } from "@/components/PatientCases";
 import { PatientMaterials } from "@/components/PatientMaterials";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
+import { SavedPrescriptions } from "@/components/SavedPrescriptions";
 import { PrescriptionModal } from "@/components/PrescriptionModal";
 import { ConsentModal } from "@/components/ConsentModal";
 import { PostOpModal } from "@/components/PostOpModal";
@@ -1047,6 +1048,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           onError={setError}
         />
       ) : null}
+
+      <SavedPrescriptions key={`${patient.id}:${checkoutVisitRequest}`} patientId={patient.id} visitId={typeof checkoutVisitRequest === "number" ? checkoutVisitRequest : undefined} />
 
       <PrescriptionModal
         isOpen={showRxModal}
