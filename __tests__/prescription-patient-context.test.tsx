@@ -44,11 +44,14 @@ vi.mock("react", async (original) => {
     ...react,
     useState: (initial: unknown) => {
       const scope = active(); const index = slot(scope, typeof initial === "function" ? initial() : initial);
-      return [scope.values[index], (value: unknown) => {
+      // React guarantees a stable state setter across renders.
+      const setter = scope.memos.get(index)?.value ?? ((value: unknown) => {
         const next = typeof value === "function" ? value(scope.values[index]) : value;
         if (!Object.is(next, scope.values[index])) { scope.changed = true; scope.changes += 1; }
         scope.values[index] = next;
-      }];
+      });
+      scope.memos.set(index, { value: setter });
+      return [scope.values[index], setter];
     },
     useRef: (initial: unknown) => { const scope = active(); return scope.values[slot(scope, { current: initial })]; },
     useCallback: (callback: unknown, deps?: readonly unknown[]) => {

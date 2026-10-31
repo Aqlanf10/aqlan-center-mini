@@ -8,20 +8,36 @@ const parserPaths = [
   "node_modules/postcss-nested/node_modules/postcss-selector-parser",
   "node_modules/tailwindcss/node_modules/postcss-selector-parser",
 ];
-const overrides = {
+const historicalParserOverrides = {
   "tailwindcss@3.4.19": { "postcss-selector-parser": "7.1.6" },
   "postcss-nested@6.2.0": { "postcss-selector-parser": "7.1.6" },
 };
 
-describe.each(["", "scripts/dependency-review/consumer-fixture/"])("official dependency repair: %s", (prefix) => {
+// Keep the historical isolated consumer fixture pinned; only the application
+// root has the separately reviewed modern lint-tooling dependency repair.
+const modernRootOverrides = {
+  ...historicalParserOverrides,
+  "eslint@10.14.0": { minimatch: "11.0.3" },
+  "@eslint/config-array@0.23.5": { minimatch: "11.0.3" },
+  "@typescript-eslint/typescript-estree@8.70.0": { minimatch: "11.0.3" },
+};
+
+describe.each([
+  { prefix: "", overrides: modernRootOverrides, eslintVersion: "10.14.0" },
+  { prefix: "scripts/dependency-review/consumer-fixture/", overrides: historicalParserOverrides, eslintVersion: "9.39.5" },
+])("official dependency repair: $prefix", ({ prefix, overrides, eslintVersion }) => {
   const manifest = read(prefix + "package.json");
   const lock = read(prefix + "package-lock.json");
-  it("pins the existing Tailwind version without a major toolchain migration", () => {
+  it("pins unchanged Tailwind and the exact context-specific reviewed tooling overrides", () => {
     expect(manifest.devDependencies.tailwindcss).toBe("3.4.19");
     expect(lock.packages[""].devDependencies.tailwindcss).toBe("3.4.19");
     expect(lock.packages["node_modules/tailwindcss"].version).toBe("3.4.19");
     expect(lock.packages["node_modules/postcss-nested"].version).toBe("6.2.0");
     expect(manifest.overrides).toEqual(overrides);
+    expect(manifest.devDependencies.eslint).toBe(eslintVersion);
+    expect(lock.packages[""].devDependencies.eslint).toBe(eslintVersion);
+    expect(lock.packages["node_modules/eslint"].version).toBe(eslintVersion);
+    if (prefix) expect(manifest.name).toBe("aqlan-braces-consumer-review");
   });
   it("contains only the two exact official patched parser copies", () => {
     const copies = Object.keys(lock.packages).filter(path => path.endsWith("/postcss-selector-parser"));

@@ -777,3 +777,54 @@ describe("PatientCases orthodontic navigation containment", () => {
     expect(confirmMock).not.toHaveBeenCalled();
   });
 });
+
+
+describe("PatientCases treatment-entry callback ownership", () => {
+  const entryLabel = "فاتورة / اتفاق علاج";
+
+  it("opens treatment entry from the ready live owner without writing clinical data", async () => {
+    const openEntry = vi.fn(); props = { ...props, onOpenTreatmentEntry: openEntry };
+    await mount(); const entry = button(entryLabel);
+    expect(entry.props.disabled).toBe(false);
+    clickHandler(entry)();
+    expect(openEntry).toHaveBeenCalledTimes(1); expect(writes()).toHaveLength(0);
+  });
+
+  it("retains standalone dirty-draft confirmation before opening treatment entry", async () => {
+    const openEntry = vi.fn();
+    props = { ...props, onNavigationGuardChange: undefined, onOpenTreatmentEntry: openEntry };
+    await mount(); clickHandler(button("+ حالة جديدة"))();
+    change(field("placeholder", "علاج عصب — سن ٣٦"), "Unsaved treatment context");
+    clickHandler(button(entryLabel))();
+    expect(confirmMock).toHaveBeenCalledTimes(1); expect(openEntry).not.toHaveBeenCalled();
+    confirmMock.mockReturnValue(true); clickHandler(button(entryLabel))();
+    expect(openEntry).toHaveBeenCalledTimes(1); expect(writes()).toHaveLength(0);
+  });
+
+  it("keeps treatment entry blocked while a case write is pending", async () => {
+    const openEntry = vi.fn(); props = { ...props, onOpenTreatmentEntry: openEntry };
+    await mount(); clickHandler(button("+ حالة جديدة"))();
+    change(field("placeholder", "علاج عصب — سن ٣٦"), "Pending clinical case");
+    nextWrite = deferred<Response>(); const saving = clickHandler(button("حفظ الحالة"))();
+    const entry = button(entryLabel); expect(entry.props.disabled).toBe(true);
+    clickHandler(entry)(); expect(openEntry).not.toHaveBeenCalled(); expect(writes()).toHaveLength(1);
+    nextWrite.resolve(successfulMutation(writes()[0][0], writes()[0][1])); await saving; await settle();
+    clickHandler(button(entryLabel))(); expect(openEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["patient", "principal", "unmount"])("rejects the retained treatment-entry callback after %s retirement", async (replacement) => {
+    const openEntry = vi.fn(); props = { ...props, onOpenTreatmentEntry: openEntry };
+    await mount(); const retainedClick = clickHandler(button(entryLabel));
+    if (replacement === "unmount") unmount();
+    else {
+      if (replacement === "patient") { props = { ...props, patientId: 92 }; payload = validPayload(92); }
+      else hooks.session = { ...hooks.session!, username: "synthetic-b" };
+      render(); await settle();
+    }
+    retainedClick();
+    expect(openEntry).not.toHaveBeenCalled(); expect(confirmMock).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
+    if (replacement !== "unmount") {
+      clickHandler(button(entryLabel))(); expect(openEntry).toHaveBeenCalledTimes(1);
+    }
+  });
+});

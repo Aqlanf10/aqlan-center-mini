@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   CASE_STATUS_LABEL, CASE_TERMINAL, DEPENDENCY_REQUIREMENT_LABEL, PROBLEM_STATUS_LABEL, SPECIALTY_LABEL,
-  type CaseStatus, type DependencyRequirement, type ProblemStatus,
+  type CaseStatus, type DependencyRequirement,
 } from "@/lib/cases";
 import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import { useSession } from "./SessionProvider";
@@ -63,16 +63,20 @@ function linkedOrthoRow(row: SpecialtyCase, patientId: number) {
     && ["active", "completed", "closed"].includes(row.status)
     && (row.kind === "ortho" ? row.id === null : row.kind === "specialty" && positiveId(row.id));
 }
-function useCaseDraft<T>(owner: CasesOwner, key: string): [T | null, (next: T | null) => void, () => void] {
+function useCaseDraft<T>(ownerRef: RefObject<CasesOwner>, key: string, readSequence: number, publishUncertainDrafts: (value: ReadonlySet<string>) => void): [T | null, (next: T | null) => void, () => void] {
   const [value, publish] = useState<T | null>(null);
-  const readSequence = owner.readSequence;
   return [value, (next) => {
+    const owner = ownerRef.current;
     if (!owner.active || owner.writes > 0 || owner.uncertain || owner.readSequence !== readSequence
       || (next !== null && owner.uncertainDrafts.has(key))
       || (value === null ? owner.drafts.has(key) : owner.drafts.get(key) !== value)) return;
-    if (next === null) { owner.drafts.delete(key); owner.uncertainDrafts.delete(key); } else owner.drafts.set(key, next);
+    if (next === null) {
+      owner.drafts.delete(key); owner.uncertainDrafts.delete(key);
+      publishUncertainDrafts(new Set(owner.uncertainDrafts));
+    } else owner.drafts.set(key, next);
     publish(next);
   }, () => {
+    const owner = ownerRef.current;
     // Only the already-confirmed send completion invokes this branch. Its
     // authoritative refresh retires old editors, but must still close the exact
     // successfully saved draft; a changed/cancelled owner or draft never qualifies.
@@ -97,27 +101,34 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
   const [ready, setReady] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
-  const owner = useRef<CasesOwner>({ active: false, ready: false, writes: 0, readSequence: 0,
-    controller: null, drafts: new Map(), priorities: new Map(), uncertain: false, hadUncertain: false, uncertainDrafts: new Set() }).current;
-  const [caseForm, setCaseForm, clearCaseFormAfterSave] = useCaseDraft<{ specialty: ServiceSpecialty; title: string; site: string; problem: string; responsiblePartyId: string }>(owner, "case");
-  const [problemForm, setProblemForm, clearProblemFormAfterSave] = useCaseDraft<{ label: string; site: string; specialty: string; caseId: string }>(owner, "problem");
-  const [closing, setClosing, clearClosingAfterSave] = useCaseDraft<{ id: number; status: CaseStatus; outcome: string }>(owner, "closing");
-  const [depForm, setDepForm, clearDepFormAfterSave] = useCaseDraft<{ itemId: number; requiresItemId: string; requirement: DependencyRequirement }>(owner, "dependency");
+  // Publish render snapshots separately from the synchronous event/read latches.
+  const [renderRead, setRenderRead] = useState(0);
+  const [uncertainDrafts, setUncertainDrafts] = useState<ReadonlySet<string>>(() => new Set());
+  const ownerRef = useRef<CasesOwner>({ active: false, ready: false, writes: 0, readSequence: 0,
+    controller: null, drafts: new Map(), priorities: new Map(), uncertain: false, hadUncertain: false, uncertainDrafts: new Set() });
+  const [caseForm, setCaseForm, clearCaseFormAfterSave] = useCaseDraft<{ specialty: ServiceSpecialty; title: string; site: string; problem: string; responsiblePartyId: string }>(ownerRef, "case", renderRead, setUncertainDrafts);
+  const [problemForm, setProblemForm, clearProblemFormAfterSave] = useCaseDraft<{ label: string; site: string; specialty: string; caseId: string }>(ownerRef, "problem", renderRead, setUncertainDrafts);
+  const [closing, setClosing, clearClosingAfterSave] = useCaseDraft<{ id: number; status: CaseStatus; outcome: string }>(ownerRef, "closing", renderRead, setUncertainDrafts);
+  const [depForm, setDepForm, clearDepFormAfterSave] = useCaseDraft<{ itemId: number; requiresItemId: string; requirement: DependencyRequirement }>(ownerRef, "dependency", renderRead, setUncertainDrafts);
   useLayoutEffect(() => {
+    const owner = ownerRef.current;
     owner.active = true;
     return () => { owner.active = false; owner.ready = false; owner.readSequence++; owner.controller?.abort(); };
-  }, [owner]);
+  }, []);
   const canLeave = useCallback(() => {
+    const owner = ownerRef.current;
     if (!owner.active || owner.writes > 0) return false;
     if (owner.hadUncertain) return window.confirm("نتيجة الحفظ غير مؤكدة؛ قد يكون الطلب نُفّذ. المغادرة لا تلغي الطلب ولا تعيد إرساله، وستُترك أي مسودة غير محفوظة. هل تريد مغادرة القسم؟");
     return (owner.drafts.size === 0 && owner.priorities.size === 0)
       || window.confirm("هناك عمل غير محفوظ في الحالات والمشاكل. هل تريد تجاهله؟");
-  }, [owner]);
+  }, []);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
 
   const load = useCallback(async (manualReview = false) => {
+    const owner = ownerRef.current;
     if (!owner.active || (manualReview && owner.writes > 0)) return;
     const sequence = ++owner.readSequence;
+    setRenderRead(sequence);
     owner.controller?.abort();
     const controller = new AbortController(); owner.controller = controller;
     owner.ready = false; setReady(false);
@@ -147,10 +158,11 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
     } catch (failure) {
       if (current()) setError(failure instanceof Error ? failure.message : "تعذّر الاتصال بالخادم.");
     }
-  }, [patientId, canRead, owner]);
+  }, [patientId, canRead]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
+    const owner = ownerRef.current;
     if (!canWrite) return;
     let active = true;
     void fetch("/api/parties?kind=doctor", { cache: "no-store" })
@@ -158,13 +170,15 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
       .then((rows: unknown) => { if (active && owner.active) setDoctors(Array.isArray(rows) ? (rows as Doctor[]) : []); })
       .catch(() => { if (active && owner.active) setDoctors([]); });
     return () => { active = false; };
-  }, [canWrite, owner]);
+  }, [canWrite]);
 
   const markUncertain = (draftKey?: string) => {
+    const owner = ownerRef.current;
     if (!owner.active) return;
     owner.uncertain = true; owner.hadUncertain = true; owner.ready = false;
-    owner.readSequence++; owner.controller?.abort();
+    owner.readSequence++; setRenderRead(owner.readSequence); owner.controller?.abort();
     if (draftKey) owner.uncertainDrafts.add(draftKey);
+    setUncertainDrafts(new Set(owner.uncertainDrafts));
     setUncertain(true); setReady(false); setError(null);
     setReviewNotice("تعذّر تأكيد نتيجة الحفظ. قد يكون الطلب نُفّذ. الكتابة متوقفة حتى إعادة تحميل السجل ومراجعته. المسودة غير المؤكدة لا تُرسل مجددًا؛ ألغها بعد المراجعة قبل بدء طلب جديد. لن يُعاد إرسال الطلب تلقائيًا.");
   };
@@ -190,6 +204,7 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
   };
   /** The synchronous latch also covers an existing priority onBlur write before a navigation click. */
   const send = async (url: string, method: string, body?: unknown, draftKey?: string, draftIdentity?: unknown): Promise<boolean> => {
+    const owner = ownerRef.current;
     if (!owner.active || !owner.ready || owner.uncertain || !canWrite || owner.writes > 0 || owner.readSequence !== renderRead
       || (draftKey !== undefined && (!owner.drafts.has(draftKey) || owner.uncertainDrafts.has(draftKey)
         || owner.drafts.get(draftKey) !== draftIdentity))) return false;
@@ -221,8 +236,8 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
     }
   };
   const writeBlocked = busy || uncertain || !ready;
-  const renderRead = owner.readSequence;
   const openOrtho = (row: SpecialtyCase) => {
+    const owner = ownerRef.current;
     if (!owner.active || !owner.ready || owner.writes > 0 || owner.readSequence !== renderRead
       || !data?.cases.includes(row) || !linkedOrthoRow(row, patientId)) return;
     // Navigation belongs to the page; it invokes the registered Cases guard.
@@ -253,7 +268,7 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
 
       <p className="text-xs text-slate-600">تسجيل التقييم والحالة السريرية لا ينشئ اتفاقًا ماليًا أو دَينًا.
         {onOpenTreatmentEntry ? <button type="button" disabled={writeBlocked}
-          onClick={() => { if (!owner.active || writeBlocked) return; if (!onNavigationGuardChange && !canLeave()) return; onOpenTreatmentEntry(); }}
+          onClick={() => { const owner = ownerRef.current; if (!owner.active || writeBlocked) return; if (!onNavigationGuardChange && !canLeave()) return; onOpenTreatmentEntry(); }}
           className="mr-2 min-h-11 rounded-lg border px-3 font-bold">فاتورة / اتفاق علاج</button> : null}
       </p>
       {/* ── الحالات التخصصية ── */}
@@ -269,32 +284,32 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
         {caseForm ? (
           <div className="mb-3 grid gap-2 rounded-xl border border-navy-100 bg-navy-50/40 p-2 sm:grid-cols-2">
             <label className="text-xs font-bold text-slate-600">التخصص
-              <select disabled={writeBlocked || owner.uncertainDrafts.has("case")} value={caseForm.specialty} onChange={(event) => setCaseForm({ ...caseForm, specialty: event.target.value as ServiceSpecialty })}
+              <select disabled={writeBlocked || uncertainDrafts.has("case")} value={caseForm.specialty} onChange={(event) => setCaseForm({ ...caseForm, specialty: event.target.value as ServiceSpecialty })}
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm">
                 {SPECIALTIES.map((key) => <option key={key} value={key}>{SPECIALTY_LABEL[key]}</option>)}
               </select>
             </label>
             <label className="text-xs font-bold text-slate-600">العنوان
-              <input disabled={writeBlocked || owner.uncertainDrafts.has("case")} value={caseForm.title} onChange={(event) => setCaseForm({ ...caseForm, title: event.target.value })}
+              <input disabled={writeBlocked || uncertainDrafts.has("case")} value={caseForm.title} onChange={(event) => setCaseForm({ ...caseForm, title: event.target.value })}
                 placeholder="علاج عصب — سن ٣٦" className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
             </label>
             <label className="text-xs font-bold text-slate-600">الموضع (الأسنان / المنطقة)
-              <input disabled={writeBlocked || owner.uncertainDrafts.has("case")} value={caseForm.site} onChange={(event) => setCaseForm({ ...caseForm, site: event.target.value })}
+              <input disabled={writeBlocked || uncertainDrafts.has("case")} value={caseForm.site} onChange={(event) => setCaseForm({ ...caseForm, site: event.target.value })}
                 placeholder="36" className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
             </label>
             <label className="text-xs font-bold text-slate-600">الطبيب المسؤول
-              <select disabled={writeBlocked || owner.uncertainDrafts.has("case")} value={caseForm.responsiblePartyId} onChange={(event) => setCaseForm({ ...caseForm, responsiblePartyId: event.target.value })}
+              <select disabled={writeBlocked || uncertainDrafts.has("case")} value={caseForm.responsiblePartyId} onChange={(event) => setCaseForm({ ...caseForm, responsiblePartyId: event.target.value })}
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm">
                 <option value="">—</option>
                 {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
               </select>
             </label>
             <label className="text-xs font-bold text-slate-600 sm:col-span-2">المشكلة / التشخيص
-              <textarea disabled={writeBlocked || owner.uncertainDrafts.has("case")} value={caseForm.problem} onChange={(event) => setCaseForm({ ...caseForm, problem: event.target.value })}
+              <textarea disabled={writeBlocked || uncertainDrafts.has("case")} value={caseForm.problem} onChange={(event) => setCaseForm({ ...caseForm, problem: event.target.value })}
                 rows={2} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
             </label>
             <div className="flex gap-2 sm:col-span-2">
-              <button type="button" disabled={writeBlocked || owner.uncertainDrafts.has("case") || !caseForm.title.trim()}
+              <button type="button" disabled={writeBlocked || uncertainDrafts.has("case") || !caseForm.title.trim()}
                 onClick={async () => {
                   if (await send(`/api/patients/${patientId}/cases`, "POST", {
                     ...caseForm, responsiblePartyId: caseForm.responsiblePartyId || null,
@@ -333,7 +348,7 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
                   </p>
                 ) : null}
                 {onOpenClinicalContext && item.id !== null ? <button type="button" className="min-h-11 rounded-lg border px-3 text-xs" disabled={busy || !ready}
-                  onClick={() => { if (owner.active && owner.ready && owner.writes === 0 && owner.readSequence === renderRead && data.cases.includes(item)) onOpenClinicalContext({ patientId, clinicalCaseId: item.id! }, "plans"); }}>
+                  onClick={() => { const owner = ownerRef.current; if (owner.active && owner.ready && owner.writes === 0 && owner.readSequence === renderRead && data.cases.includes(item)) onOpenClinicalContext({ patientId, clinicalCaseId: item.id! }, "plans"); }}>
                   بنود خطة هذه الحالة
                 </button> : null}
                 {item.problem ? <p className="mt-1 text-xs text-slate-500">{item.problem}</p> : null}
@@ -363,11 +378,11 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
                 {canWrite && item.id !== null && item.orthoCaseId === null && !CASE_TERMINAL.includes(item.status) ? (
                   closing?.id === item.id ? (
                     <div className="mt-2 space-y-1">
-                      <textarea disabled={writeBlocked || owner.uncertainDrafts.has("closing")} value={closing.outcome} onChange={(event) => setClosing({ ...closing, outcome: event.target.value })}
+                      <textarea disabled={writeBlocked || uncertainDrafts.has("closing")} value={closing.outcome} onChange={(event) => setClosing({ ...closing, outcome: event.target.value })}
                         rows={2} placeholder={closing.status === "cancelled" ? "سبب الإلغاء (مطلوب)" : "النتيجة (اختياري)"}
                         className="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs" />
                       <div className="flex gap-2">
-                        <button type="button" disabled={writeBlocked || owner.uncertainDrafts.has("closing") || (closing.status === "cancelled" && !closing.outcome.trim())}
+                        <button type="button" disabled={writeBlocked || uncertainDrafts.has("closing") || (closing.status === "cancelled" && !closing.outcome.trim())}
                           onClick={async () => {
                             if (await send(`/api/cases/${item.id}`, "PATCH", { status: closing.status, outcome: closing.outcome || null }, "closing", closing)) clearClosingAfterSave();
                           }}
@@ -410,17 +425,17 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
         </div>
         {problemForm ? (
           <div className="mb-3 grid gap-2 rounded-xl border border-navy-100 bg-navy-50/40 p-2 sm:grid-cols-4">
-            <input disabled={writeBlocked || owner.uncertainDrafts.has("problem")} value={problemForm.label} onChange={(event) => setProblemForm({ ...problemForm, label: event.target.value })}
+            <input disabled={writeBlocked || uncertainDrafts.has("problem")} value={problemForm.label} onChange={(event) => setProblemForm({ ...problemForm, label: event.target.value })}
               placeholder="التهاب لب غير عكوس" aria-label="المشكلة" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm sm:col-span-2" />
-            <input disabled={writeBlocked || owner.uncertainDrafts.has("problem")} value={problemForm.site} onChange={(event) => setProblemForm({ ...problemForm, site: event.target.value })}
+            <input disabled={writeBlocked || uncertainDrafts.has("problem")} value={problemForm.site} onChange={(event) => setProblemForm({ ...problemForm, site: event.target.value })}
               placeholder="36" aria-label="الموضع" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
-            <select disabled={writeBlocked || owner.uncertainDrafts.has("problem")} value={problemForm.caseId} onChange={(event) => setProblemForm({ ...problemForm, caseId: event.target.value })}
+            <select disabled={writeBlocked || uncertainDrafts.has("problem")} value={problemForm.caseId} onChange={(event) => setProblemForm({ ...problemForm, caseId: event.target.value })}
               aria-label="الحالة" className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm">
               <option value="">بلا حالة</option>
               {openCases.map((item) => <option key={item.id} value={item.id as number}>{item.title}</option>)}
             </select>
             <div className="flex gap-2 sm:col-span-4">
-              <button type="button" disabled={writeBlocked || owner.uncertainDrafts.has("problem") || !problemForm.label.trim()}
+              <button type="button" disabled={writeBlocked || uncertainDrafts.has("problem") || !problemForm.label.trim()}
                 onClick={async () => {
                   const linked = openCases.find((item) => String(item.id) === problemForm.caseId);
                   if (await send(`/api/patients/${patientId}/problems`, "POST", {
@@ -445,15 +460,21 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="text-[11px] text-slate-500">{PROBLEM_STATUS_LABEL[problem.status]}</span>
-                  {canWrite ? (["active", "resolved", "inactive"] as ProblemStatus[])
-                    .filter((status) => status !== problem.status)
-                    .map((status) => (
-                      <button key={status} type="button" disabled={writeBlocked}
-                        onClick={() => void send(`/api/problems/${problem.id}`, "PATCH", { status })}
-                        className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
-                        {status === "resolved" ? "حُلّت" : status === "inactive" ? "غير نشطة" : "إعادة تنشيط"}
-                      </button>
-                    )) : null}
+                  {canWrite && problem.status !== "active" ? (
+                    <button type="button" disabled={writeBlocked}
+                      onClick={() => { void send(`/api/problems/${problem.id}`, "PATCH", { status: "active" }); }}
+                      className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">إعادة تنشيط</button>
+                  ) : null}
+                  {canWrite && problem.status !== "resolved" ? (
+                    <button type="button" disabled={writeBlocked}
+                      onClick={() => { void send(`/api/problems/${problem.id}`, "PATCH", { status: "resolved" }); }}
+                      className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">حُلّت</button>
+                  ) : null}
+                  {canWrite && problem.status !== "inactive" ? (
+                    <button type="button" disabled={writeBlocked}
+                      onClick={() => { void send(`/api/problems/${problem.id}`, "PATCH", { status: "inactive" }); }}
+                      className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">غير نشطة</button>
+                  ) : null}
                 </span>
               </li>
             ))}
@@ -491,12 +512,14 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
                         </select>
                         <input type="number" min={1} max={999} disabled={writeBlocked} defaultValue={item.priority ?? ""} aria-label={`أولوية ${item.serviceName}`}
                           onChange={(event) => {
+                            const owner = ownerRef.current;
                             if (!owner.active || !owner.ready || owner.uncertain || owner.writes > 0 || owner.readSequence !== renderRead) return;
                             const value = event.target.value.trim();
                             if (value === String(item.priority ?? "")) owner.priorities.delete(item.id);
                             else owner.priorities.set(item.id, { value, readSequence: renderRead });
                           }}
                           onBlur={(event) => {
+                            const owner = ownerRef.current;
                             if (!owner.active || !owner.ready || owner.uncertain || owner.writes > 0 || owner.readSequence !== renderRead) return;
                             const value = event.target.value.trim();
                             if (value === String(item.priority ?? "")) { owner.priorities.delete(item.id); return; }
@@ -530,7 +553,7 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
                   ) : null}
                   {depForm?.itemId === item.id ? (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <select disabled={writeBlocked || owner.uncertainDrafts.has("dependency")} value={depForm.requiresItemId} aria-label="البند المطلوب قبله"
+                      <select disabled={writeBlocked || uncertainDrafts.has("dependency")} value={depForm.requiresItemId} aria-label="البند المطلوب قبله"
                         onChange={(event) => setDepForm({ ...depForm, requiresItemId: event.target.value })}
                         className="rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs">
                         <option value="">اختر البند المطلوب قبله</option>
@@ -538,13 +561,13 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
                           <option key={other.id} value={other.id}>{itemLabel(other)}</option>
                         ))}
                       </select>
-                      <select disabled={writeBlocked || owner.uncertainDrafts.has("dependency")} value={depForm.requirement} aria-label="نوع الاعتماد"
+                      <select disabled={writeBlocked || uncertainDrafts.has("dependency")} value={depForm.requirement} aria-label="نوع الاعتماد"
                         onChange={(event) => setDepForm({ ...depForm, requirement: event.target.value as DependencyRequirement })}
                         className="rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs">
                         <option value="completed">{DEPENDENCY_REQUIREMENT_LABEL.completed}</option>
                         <option value="clearance">{DEPENDENCY_REQUIREMENT_LABEL.clearance}</option>
                       </select>
-                      <button type="button" disabled={writeBlocked || owner.uncertainDrafts.has("dependency") || !depForm.requiresItemId}
+                      <button type="button" disabled={writeBlocked || uncertainDrafts.has("dependency") || !depForm.requiresItemId}
                         onClick={async () => {
                           if (await send(`/api/plan-items/${item.id}/dependencies`, "POST", {
                             requiresItemId: depForm.requiresItemId, requirement: depForm.requirement,

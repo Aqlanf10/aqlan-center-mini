@@ -164,10 +164,10 @@ export function PatientCeph({
   // Same canonical principal/role/permission scope as the orthodontic parent.
   // Display-name-only changes must not dismiss an ordinary same-owner draft.
   const authority = JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
-  const owner = useMemo(createWriteOwner, [patientId, propOrthoCaseId, authority]);
+  const owner = useMemo(() => createWriteOwner(), [patientId, propOrthoCaseId, authority]);
   // These endpoints and image options are patient-wide; case changes only
   // retire writes and change the summary projection, without another read.
-  const readOwner = useMemo(createReadOwner, [patientId, authority]);
+  const readOwner = useMemo(() => createReadOwner(), [patientId, authority]);
   const mayCreate = !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"
     || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
   useLayoutEffect(() => {

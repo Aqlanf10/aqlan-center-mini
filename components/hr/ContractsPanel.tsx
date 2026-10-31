@@ -87,6 +87,14 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
     const lease = saveAdmissionLease.current;
     return lease?.view === saveAdmission && lease.canAdmit() ? lease : undefined;
   };
+  const [observedAt, setObservedAt] = useState<number | null>(null);
+  useEffect(() => {
+    const update = () => setObservedAt(Date.now());
+    update();
+    const timer = setInterval(update, 60_000);
+    window.addEventListener("focus", update);
+    return () => { clearInterval(timer); window.removeEventListener("focus", update); };
+  }, []);
   const [contracts, setContracts] = useState<ContractItem[]>([]);
   const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("");
@@ -500,9 +508,9 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
             <tbody className="divide-y divide-navy-100">
               {filteredContracts.map((c) => {
                 const isExpiringSoon =
-                  c.endDate &&
-                  new Date(c.endDate).getTime() - Date.now() < 30 * 24 * 3600 * 1000 &&
-                  new Date(c.endDate).getTime() > Date.now();
+                  c.endDate && observedAt !== null &&
+                  new Date(c.endDate).getTime() - observedAt < 30 * 24 * 3600 * 1000 &&
+                  new Date(c.endDate).getTime() > observedAt;
 
                 return (
                   <tr key={c.id} className="transition hover:bg-navy-50/40">

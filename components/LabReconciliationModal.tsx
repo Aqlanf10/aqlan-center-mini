@@ -46,21 +46,33 @@ function readComparison(value: unknown, partyId: number | null): ComparisonSnaps
   return { party: { id: value.party.id, name: value.party.name }, orders };
 }
 
-type ReadOwner<T> = { scope: readonly unknown[]; active: boolean; sequence: number; controller: AbortController | null; snapshot: T | null };
-type ReadState<T> = { owner: ReadOwner<T>; phase: "loading" | "ready" | "error"; data: T | null };
-/** Owner identity, rather than a reusable party key, retires A → B → A reads. */
+type ReadOwner<T> = { scope: object; active: boolean; sequence: number; controller: AbortController | null; snapshot: T | null };
+type ReadState<T> = { scope: object; phase: "loading" | "ready" | "error"; data: T | null };
+/** Immutable scope identity hides old data during render; only committed effects/events own mutable requests. */
 function useComparisonRead<T>(url: string | null, authorityKey: string | null, decode: (value: unknown) => T) {
-  const owner = useMemo<ReadOwner<T>>(() => ({ scope: [url, authorityKey, decode], active: false, sequence: 0, controller: null, snapshot: null }), [url, authorityKey, decode]);
+  const scope = useMemo(() => ({ url, authorityKey, decode }), [url, authorityKey, decode]);
+  const lease = useRef<ReadOwner<T> | null>(null);
   const [state, setState] = useState<ReadState<T> | null>(null);
-  const retire = useCallback(() => { owner.active = false; owner.sequence++; owner.snapshot = null; owner.controller?.abort(); }, [owner]);
-  useLayoutEffect(() => { owner.active = true; return retire; }, [owner, retire]);
+  const retire = useCallback(() => {
+    const owner = lease.current;
+    if (owner?.scope !== scope) return;
+    owner.active = false; owner.sequence++; owner.snapshot = null; owner.controller?.abort();
+    lease.current = null; setState(null);
+  }, [scope]);
+  useLayoutEffect(() => {
+    const owner: ReadOwner<T> = { scope, active: true, sequence: 0, controller: null, snapshot: null };
+    lease.current = owner;
+    return () => { owner.active = false; owner.sequence++; owner.snapshot = null; owner.controller?.abort();
+      if (lease.current === owner) lease.current = null; };
+  }, [scope]);
   const reload = useCallback(async () => {
-    if (!owner.active || !url || !authorityKey) return;
+    const owner = lease.current;
+    if (!owner?.active || owner.scope !== scope || !url || !authorityKey) return;
     const sequence = ++owner.sequence;
     owner.controller?.abort(); owner.snapshot = null;
     const controller = new AbortController(); owner.controller = controller;
-    const current = () => owner.active && owner.sequence === sequence && !controller.signal.aborted;
-    setState({ owner, phase: "loading", data: null });
+    const current = () => lease.current === owner && owner.active && owner.sequence === sequence && !controller.signal.aborted;
+    setState({ scope, phase: "loading", data: null });
     try {
       const response = await fetch(url, { cache: "no-store", signal: controller.signal });
       if (!current()) return;
@@ -68,15 +80,18 @@ function useComparisonRead<T>(url: string | null, authorityKey: string | null, d
       const payload: unknown = await response.json();
       if (!current()) return;
       const data = decode(payload);
-      owner.snapshot = data; setState({ owner, phase: "ready", data });
+      owner.snapshot = data; setState({ scope, phase: "ready", data });
     } catch {
-      if (current()) setState({ owner, phase: "error", data: null });
+      if (current()) setState({ scope, phase: "error", data: null });
     }
-  }, [owner, url, authorityKey, decode]);
+  }, [scope, url, authorityKey, decode]);
   useEffect(() => { void reload(); }, [reload]);
-  const current = state?.owner === owner && owner.active && url && authorityKey ? state : null;
-  const data = current?.phase === "ready" && owner.snapshot === current.data ? current.data : null;
-  const isCurrent = (snapshot: T | null) => owner.active && snapshot !== null && owner.snapshot === snapshot;
+  const current = state?.scope === scope && url && authorityKey ? state : null;
+  const data = current?.phase === "ready" ? current.data : null;
+  const isCurrent = (snapshot: T | null) => {
+    const owner = lease.current;
+    return owner?.scope === scope && owner.active && snapshot !== null && owner.snapshot === snapshot;
+  };
   return { data, phase: current?.phase ?? "loading", reload, retire, isCurrent };
 }
 

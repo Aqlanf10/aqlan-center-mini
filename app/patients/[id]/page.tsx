@@ -151,35 +151,38 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const [showProfitability, setShowProfitability] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreMenu = useDismissibleDetails(moreOpen, setMoreOpen);
+  const { ref: moreMenuRef, onKeyDown: onMoreMenuKeyDown, onSummaryClick: onMoreSummaryClick, onActionClick: onMoreActionClick } = useDismissibleDetails(moreOpen, setMoreOpen);
   const [patientDetailsOpen, setPatientDetailsOpen] = useState(false);
   const alertScope = patientAlertScope(Number(id), session);
-  const alertOwner = useMemo(() => ({ scope: alertScope, active: false, revision: 0,
-    confirmed: undefined as ConfirmedPatientAlert | undefined }), [alertScope]);
+  const alertOwner = useMemo(() => ({ scope: alertScope }), [alertScope]);
+  // Render identity is immutable; synchronous command/lifetime facts belong to refs.
+  const liveAlertOwner = useRef<typeof alertOwner | null>(null);
+  const confirmedAlertSnapshot = useRef<{ owner: typeof alertOwner; alert: ConfirmedPatientAlert } | null>(null);
   const [confirmedAlert, setConfirmedAlert] = useState<{ owner: typeof alertOwner; alert: ConfirmedPatientAlert }>();
   const [fileOwner, setFileOwner] = useState<typeof alertOwner | null>(null);
   const [summaryOwner, setSummaryOwner] = useState<typeof alertOwner | null>(null);
-  const summarySnapshotOwner = useRef<typeof alertOwner | null>(null);
+  const [summarySnapshotOwner, setSummarySnapshotOwner] = useState<typeof alertOwner | null>(null);
   const workflowAuthority = useRef<{ owner: typeof alertOwner; ready: boolean } | null>(null);
   const acceptedFileOwner = useRef<typeof alertOwner | null>(null);
   const file = fileOwner === alertOwner ? fileSnapshot : null;
   const summary = summaryOwner === alertOwner ? summarySnapshot : null;
   // Same-owner editor state survives ordinary refresh failure, without display/action authority.
   const accountHeader = readPatientAccountHeader(summary?.financial, summary?.canSeeFinancial === true && workflowState === "ready");
-  const retainedSummary = summarySnapshotOwner.current === alertOwner ? summarySnapshot : null;
+  const retainedSummary = summarySnapshotOwner === alertOwner ? summarySnapshot : null;
   const draftVisit = retainedSummary?.openVisit ?? null;
-  const workflowIsCurrent = useCallback(() => alertOwner.active
+  const workflowIsCurrent = useCallback(() => liveAlertOwner.current === alertOwner
     && workflowAuthority.current?.owner === alertOwner && workflowAuthority.current.ready, [alertOwner]);
   const loadSequence = useRef(0);
   const retireLoads = useCallback(() => { ++loadSequence.current; }, []);
   useLayoutEffect(() => {
-    alertOwner.active = true;
-    return () => { alertOwner.active = false; retireLoads(); };
+    liveAlertOwner.current = alertOwner;
+    return () => { if (liveAlertOwner.current === alertOwner) liveAlertOwner.current = null; retireLoads(); };
   }, [alertOwner, retireLoads]);
   const confirmPatientAlert = (value: string | null) => {
-    if (!alertOwner.active) return false;
-    const saved = { scope: alertOwner.scope, revision: ++alertOwner.revision, value };
-    alertOwner.confirmed = saved;
+    if (liveAlertOwner.current !== alertOwner) return false;
+    const previous = confirmedAlertSnapshot.current;
+    const saved = { scope: alertOwner.scope, revision: (previous?.owner === alertOwner ? previous.alert.revision : 0) + 1, value };
+    confirmedAlertSnapshot.current = { owner: alertOwner, alert: saved };
     setConfirmedAlert({ owner: alertOwner, alert: saved });
     setFile((previous) => previous?.patient.id === Number(id)
       ? { ...previous, patient: { ...previous.patient, medicalAlert: value } } : previous);
@@ -228,23 +231,23 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const [treatmentEntryRequest, setTreatmentEntryRequest] = useState<{ owner: typeof alertOwner; key: number } | null>(null);
   const trackAccountGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
-    if (alertOwner.active) accountLeaveGuard.current = lease;
+    if (liveAlertOwner.current === alertOwner) accountLeaveGuard.current = lease;
     return () => { if (accountLeaveGuard.current === lease) accountLeaveGuard.current = null; };
   }, [alertOwner]);
   const orthoLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const trackCasesGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
-    if (alertOwner.active) casesLeaveGuard.current = lease;
+    if (liveAlertOwner.current === alertOwner) casesLeaveGuard.current = lease;
     return () => { if (casesLeaveGuard.current === lease) casesLeaveGuard.current = null; };
   }, [alertOwner]);
   const trackPlansGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
-    if (alertOwner.active) plansLeaveGuard.current = lease;
+    if (liveAlertOwner.current === alertOwner) plansLeaveGuard.current = lease;
     return () => { if (plansLeaveGuard.current === lease) plansLeaveGuard.current = null; };
   }, [alertOwner]);
   const trackOrthoGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
-    if (alertOwner.active) orthoLeaveGuard.current = lease;
+    if (liveAlertOwner.current === alertOwner) orthoLeaveGuard.current = lease;
     return () => { if (orthoLeaveGuard.current === lease) orthoLeaveGuard.current = null; };
   }, [alertOwner]);
   const navigation = useRef<ReturnType<typeof createPatientNavigation> | null>(null);
@@ -256,13 +259,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       canLeave: () => {
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
         const account = accountLeaveGuard.current;
-        if (account?.owner.active && !account.guard()) return false;
+        if (account && liveAlertOwner.current === account.owner && !account.guard()) return false;
         const cases = casesLeaveGuard.current;
-        if (cases?.owner.active && !cases.guard()) return false;
+        if (cases && liveAlertOwner.current === cases.owner && !cases.guard()) return false;
         const plans = plansLeaveGuard.current;
-        if (plans?.owner.active && !plans.guard()) return false;
+        if (plans && liveAlertOwner.current === plans.owner && !plans.guard()) return false;
         const ortho = orthoLeaveGuard.current;
-        if (ortho?.owner.active && !ortho.guard()) return false;
+        if (ortho && liveAlertOwner.current === ortho.owner && !ortho.guard()) return false;
         return endoLeaveGuard.current ? endoLeaveGuard.current()
           : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟");
       },
@@ -278,28 +281,28 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   };
   const openClinicalContext = async (context: ClinicalNavigationContext, target?: string) => {
     if (session?.role === "assistant" && context.patientId !== undefined && context.patientId !== Number(id)) return false;
-    if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
+    if (liveAlertOwner.current !== alertOwner || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
     const ticket = ++contextRequest.current;
     const capturedOwner = alertOwner;
     setContextNavigationError(null);
     try {
       const accepted = await readVerifiedClinicalContext(Number(id), { ...context, patientId: Number(id) }, undefined, clinicalNavigationVerificationMode(session, target ?? location.tab));
-      if (!capturedOwner.active || ticket !== contextRequest.current) return false;
+      if (liveAlertOwner.current !== capturedOwner || ticket !== contextRequest.current) return false;
       const destination = patientDestination(target ?? (session?.role === "assistant" ? "today" : accepted.sub), { ...location, contextError: undefined }, accepted.context);
       return navigation.current?.navigate(destination) ?? false;
     } catch {
-      if (capturedOwner.active && ticket === contextRequest.current) setContextNavigationError("تعذّر فتح العلاج المحدد. لم يتم اختيار حالة بديلة.");
+      if (liveAlertOwner.current === capturedOwner && ticket === contextRequest.current) setContextNavigationError("تعذّر فتح العلاج المحدد. لم يتم اختيار حالة بديلة.");
       return false;
     }
   };
   const canStartTreatmentEntry = summary?.canSeeFinancial === true && !!session && canHandleMoney(session.role);
   const openExistingAccount = () => {
-    if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !summary?.canSeeFinancial) return false;
+    if (liveAlertOwner.current !== alertOwner || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !summary?.canSeeFinancial) return false;
     // Review existing sources without opening a new invoice/agreement chooser.
     return goTo("account");
   };
   const openTreatmentEntry = () => {
-    if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !canStartTreatmentEntry) return false;
+    if (liveAlertOwner.current !== alertOwner || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !canStartTreatmentEntry) return false;
     // The same controller asks every current clinical draft owner before leaving.
     const accepted = goTo("account");
     if (accepted) setTreatmentEntryRequest({ owner: alertOwner, key: ++treatmentEntrySequence.current });
@@ -321,12 +324,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
   const load = useCallback(async (workflowOnly = false) => {
-    if (!alertOwner.active || (workflowOnly && acceptedFileOwner.current !== alertOwner)) return;
+    if (liveAlertOwner.current !== alertOwner || (workflowOnly && acceptedFileOwner.current !== alertOwner)) return;
     workflowAuthority.current = { owner: alertOwner, ready: false };
     setSummaryOwner(null); setWorkflowState("loading");
     const sequence = ++loadSequence.current;
-    const startedRevision = alertOwner.revision;
-    const current = () => alertOwner.active && sequence === loadSequence.current;
+    const startingAlert = confirmedAlertSnapshot.current;
+    const startedRevision = startingAlert?.owner === alertOwner ? startingAlert.alert.revision : 0;
+    const current = () => liveAlertOwner.current === alertOwner && sequence === loadSequence.current;
     let denied = false;
     const read = async (url: string) => {
       const response = await fetch(url, { cache: "no-store" });
@@ -353,8 +357,9 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         if (!patientRes.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
         if (payload?.patient?.id !== Number(id)) throw new Error("تعذّر التحقق من سياق المريض.");
         // A read begun before a confirmed save cannot restore its editable warning.
-        if (startedRevision !== alertOwner.revision && alertOwner.confirmed) {
-          payload.patient.medicalAlert = alertOwner.confirmed.value;
+        const confirmed = confirmedAlertSnapshot.current;
+        if (confirmed?.owner === alertOwner && startedRevision !== confirmed.alert.revision) {
+          payload.patient.medicalAlert = confirmed.alert.value;
         }
         setFile(payload as PatientFile);
         setFileOwner(alertOwner); acceptedFileOwner.current = alertOwner;
@@ -392,7 +397,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           assessmentCases: projections.assessmentCases,
           legacyCases: projections.legacyCases,
         });
-        summarySnapshotOwner.current = alertOwner;
+        setSummarySnapshotOwner(alertOwner);
         workflowAuthority.current = { owner: alertOwner, ready: true };
         setSummaryOwner(alertOwner); setWorkflowState("ready");
       }
@@ -409,7 +414,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   }, [id, alertOwner]);
 
   const refreshWorkflow = useCallback(() => {
-    if (alertOwner.active && acceptedFileOwner.current === alertOwner) void load(true);
+    if (liveAlertOwner.current === alertOwner && acceptedFileOwner.current === alertOwner) void load(true);
   }, [alertOwner, load]);
   useEffect(() => {
     void load();
@@ -549,46 +554,49 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     .map((w) => w[0])
     .join("");
 
-  const workflowAction = (() => {
+  // Presentation is pure data; navigation/ref authority is consulted only by the click handler.
+  const primaryAction = (() => {
     if (tab === "today" && checkoutVisitRequest !== null) {
       return typeof checkoutVisitRequest === "number" ? {
-        label: `عرض تحصيل الزيارة #${checkoutVisitRequest}`,
-        run: () => document.getElementById("requested-visit-checkout")?.scrollIntoView({ behavior: "smooth", block: "start" }), primary: true,
+        label: `عرض تحصيل الزيارة #${checkoutVisitRequest}`, kind: "checkout" as const,
       } : null;
     }
     if (!step) return null;
     switch (step.kind) {
       case "continue_visit":
-        return { label: "استكمال زيارة اليوم", run: () => setTab("today"), primary: true };
+        return { label: "استكمال زيارة اليوم", kind: step.kind };
       case "start_today_visit":
-        return { label: "بدء زيارة اليوم", run: () => void startTodayVisit(), primary: true };
+        return { label: "بدء زيارة اليوم", kind: step.kind };
       case "collect_payment":
-        return summary?.canSeeFinancial
-          ? { label: "تحصيل دفعة", run: () => setShowCollect(true), primary: true }
-          : null;
+        return summary?.canSeeFinancial ? { label: "تحصيل دفعة", kind: step.kind } : null;
       case "clinical_assessment": {
-        /* (INV-LINK D) علاجٌ مفوترٌ ينتظر تقييم الطبيب — يفتح مكانه في التخصص لا «إنشاء خطة». */
         const pending = summary?.assessmentCases?.find((one) => one.id === step.targetId);
         const specialty = pending?.specialty ?? "";
         const label = specialty in SPECIALTY_LABEL ? SPECIALTY_LABEL[specialty as keyof typeof SPECIALTY_LABEL] : "";
-        return {
-          label: `بدء التقييم السريري${label ? ` — ${label}` : ""}`,
-          run: () => {
-            setTab("treatment");
-            setTreatmentSubTab(specialty === "orthodontics" ? "ortho" : specialty === "endodontics" ? "endo" : "cases");
-          },
-          primary: true,
-        };
+        return { label: `بدء التقييم السريري${label ? ` — ${label}` : ""}`, kind: step.kind, specialty };
       }
       case "schedule_next_visit":
-        return { label: "حجز الجلسة القادمة", run: () => setTab("summary"), primary: true };
+        return { label: "حجز الجلسة القادمة", kind: step.kind };
       default:
         return null;
     }
   })();
-  const primaryAction = workflowAction ? { ...workflowAction, run: () => {
-    if (workflowIsCurrent()) workflowAction.run();
-  } } : null;
+  const runPrimaryAction = () => {
+    if (!primaryAction || !workflowIsCurrent()) return;
+    switch (primaryAction.kind) {
+      case "checkout":
+        document.getElementById("requested-visit-checkout")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        break;
+      case "continue_visit": setTab("today"); break;
+      case "start_today_visit": void startTodayVisit(); break;
+      case "collect_payment": setShowCollect(true); break;
+      case "clinical_assessment":
+        setTab("treatment");
+        setTreatmentSubTab(primaryAction.specialty === "orthodontics" ? "ortho" : primaryAction.specialty === "endodontics" ? "endo" : "cases");
+        break;
+      case "schedule_next_visit": setTab("summary"); break;
+    }
+  };
   const DetailsHeading = compactWorkspace ? "h2" : "h1";
 
   // Clinical warnings remain visible independently of the optional details disclosure.
@@ -656,7 +664,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           </div>
         ) : undefined}
         primaryAction={compactWorkspace && primaryAction ? (
-          <button type="button" onClick={primaryAction.run} disabled={busyAction}
+          <button type="button" onClick={runPrimaryAction} disabled={busyAction}
             className="rounded-lg bg-brand-orange px-3 py-2 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
             {primaryAction.label}
           </button>
@@ -800,7 +808,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             {!compactWorkspace && primaryAction ? (
               <button
                 type="button"
-                onClick={primaryAction.run}
+                onClick={runPrimaryAction}
                 disabled={busyAction}
                 className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-50"
               >
@@ -861,12 +869,12 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             </button>
 
             {/* القائمة المنسدلة: المزيد */}
-            <details ref={moreMenu.ref} className="relative" open={moreOpen} onKeyDown={moreMenu.onKeyDown} data-testid="patient-more-actions">
-              <summary onClick={moreMenu.onSummaryClick} aria-expanded={moreOpen} aria-controls="patient-more-actions-panel"
+            <details ref={moreMenuRef} className="relative" open={moreOpen} onKeyDown={onMoreMenuKeyDown} data-testid="patient-more-actions">
+              <summary onClick={onMoreSummaryClick} aria-expanded={moreOpen} aria-controls="patient-more-actions-panel"
                 className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
                 المزيد ⋯
               </summary>
-              <div id="patient-more-actions-panel" onClick={moreMenu.onActionClick}
+              <div id="patient-more-actions-panel" onClick={onMoreActionClick}
                 className="absolute end-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
                 {whatsApp ? (
                   <a href={`https://wa.me/${whatsApp}`} target="_blank" rel="noopener"
@@ -1269,7 +1277,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <PatientCases onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} canWrite={session?.role === "doctor" || admin}
                 onNavigationGuardChange={trackCasesGuard}
                 onOpenOrtho={(context) => {
-                  if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
+                  if (liveAlertOwner.current !== alertOwner || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
                   return openClinicalContext(context, "ortho");
                 }} />
             </section>

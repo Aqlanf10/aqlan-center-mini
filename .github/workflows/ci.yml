@@ -43,7 +43,7 @@ jobs:
       # vulnerability at all. npm v11 uses the replacement bulk advisory
       # endpoint, so the audit keeps guarding dependencies as before.
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
 
       - name: Install locked dependencies
         run: npm ci
@@ -121,11 +121,16 @@ jobs:
       - name: Verify braces absence in actual runtime artifacts
         run: node scripts/verify-braces-runtime.mjs
 
+      - name: Verify lint tooling absence in actual runtime artifacts
+        run: node scripts/dependency-security/verify-lint-tooling-runtime.mjs
+
       - name: Upload exact runtime dependency proof
         uses: actions/upload-artifact@v4
         with:
           name: braces-runtime-absence
-          path: .dependency-audit/runtime-proof.json
+          path: |
+            .dependency-audit/runtime-proof.json
+            .dependency-audit/lint-tooling-runtime-proof.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -174,7 +179,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
       - name: Install locked dependencies
         run: npm ci
       - name: Verify environment contract
@@ -322,13 +327,19 @@ jobs:
           node-version: 22
           cache: npm
       - name: Upgrade npm to bulk advisory endpoint
-        run: npm install -g npm@11
+        run: npm install -g npm@11.21.1
       - name: Install locked dependencies
         run: npm ci
       - name: Verify environment contract
         run: npm run verify:environment
       - name: Production build for built-app HTTP tests
         run: npm run build
+      - name: Build read-only preflight artifact for HTTP runtime verification
+        run: npm run build:preflight
+      - name: Verify built-app runtime dependency boundaries
+        run: |
+          node scripts/verify-braces-runtime.mjs
+          node scripts/dependency-security/verify-lint-tooling-runtime.mjs
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
