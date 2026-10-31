@@ -1,4 +1,4 @@
-import { materializeInvoiceLabWorkInTransaction, readLabWorkForPlanItems } from "./lab-work-intent-db";
+import { materializeInvoiceLabWorkInTransaction, readLabWorkForPlanItems, type CanonicalLabOperation } from "./lab-work-intent-db";
 import { invoiceLabWorkReceiptInTransaction, type InvoiceLabWorkReceipt } from "./lab-invoice-source-links";
 import type { LabWorkDraft, LabWorkRetirement } from "./lab-work-intent-contract";
 /**
@@ -242,7 +242,7 @@ async function existingLinks(client: Pick<DbClient, "query">, invoiceId: number)
 
 /** Build the canonical DTO and its links coherently under the caller's patient lock. */
 async function lockedInvoiceReceipt(client: DbClient, invoiceId: number,
-  input: { patientId: number; createdBy: string; requestHash: string | null; idempotencyKey?:string|null; session?:SessionPayload }) {
+  input: { patientId: number; createdBy: string; requestHash: string | null; idempotencyKey?:string|null; session?:SessionPayload; actorUserId?: number | null }) {
   // Same lock order as cancellation/correction: patient -> sorted plans/items -> invoice.
   await client.query(`SELECT t.id FROM treatment_plans t WHERE t.id IN (
     SELECT i.plan_id FROM plan_items i JOIN invoice_items ii ON ii.plan_item_id = i.id WHERE ii.invoice_id = $1)
@@ -268,7 +268,8 @@ async function lockedInvoiceReceipt(client: DbClient, invoiceId: number,
   if (!invoice || invoice.id !== invoiceId || invoice.patientId !== input.patientId || invoice.items.length !== receipt.links.length
     || invoice.items.some((item, line) => (item.planItemId ?? null) !== receipt.links[line].planItemId
       || (item.caseId ?? null) !== receipt.links[line].caseId)) throw new Refusal("idempotency_conflict", null);
-  const labWork = input.session?.userId && input.idempotencyKey && input.requestHash ? await invoiceLabWorkReceiptInTransaction(client,{patientId:input.patientId,invoiceId,actorUserId:input.session.userId,requestKey:input.idempotencyKey,requestHash:input.requestHash}) : undefined;
+  const actorUserId = input.actorUserId ?? input.session?.userId ?? null;
+  const labWork = actorUserId && input.idempotencyKey && input.requestHash ? await invoiceLabWorkReceiptInTransaction(client,{patientId:input.patientId,invoiceId,actorUserId,requestKey:input.idempotencyKey,requestHash:input.requestHash}) : undefined;
   return { invoice, planId: receipt.planId, links: receipt.links,...(labWork ? {labWork} : {}) };
 }
 
@@ -303,6 +304,54 @@ export async function recoverLinkedInvoice(input: {
   } finally { client.release(); }
 }
 
+export async function recoverLinkedInvoiceInTransaction(client: DbClient, input: {
+  patientId: number;
+  idempotencyKey: string;
+  requestHash: string;
+  createdBy: string;
+  actorRole: string | null;
+  actorUserId: number | null;
+  verifyLiveSession: (client: DbClient) => Promise<void>;
+  visitId?: number;
+}): Promise<CreateLinkedInvoiceResult | null> {
+  const canonical = {
+    userId: input.actorUserId,
+    username: input.createdBy,
+    role: input.actorRole ?? "",
+    canDocumentLabWork: false,
+    priceCapabilities: { canIncreasePrice: false, canApplyDiscount: false, canOverrideDiscount: false },
+    verifyLiveSession: input.verifyLiveSession,
+  };
+  await client.query("SAVEPOINT recover_linked_invoice");
+  try {
+    const { rows: patient } = await client.query("SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE", [input.patientId]);
+    if (!patient[0]) throw new Refusal("no_patient", null);
+    await assertInvoiceTemplateSession(client, undefined, { createdBy: input.createdBy, actorRole: input.actorRole }, canonical);
+    const { rows: [prior] } = await client.query<{ id: number; patient_id: number; created_by: string; idempotency_request_hash: string | null }>(
+      "SELECT id, patient_id, created_by, idempotency_request_hash FROM invoices WHERE idempotency_key = $1", [input.idempotencyKey]);
+    if (!prior) {
+      await client.query("ROLLBACK TO SAVEPOINT recover_linked_invoice");
+      await client.query("RELEASE SAVEPOINT recover_linked_invoice");
+      return null;
+    }
+    if (prior.patient_id !== input.patientId || prior.created_by !== input.createdBy || prior.idempotency_request_hash !== input.requestHash) {
+      throw new Refusal("idempotency_conflict", null);
+    }
+    if (input.visitId !== undefined) await readInvoiceVisitContext(client, input.patientId, input.visitId, prior.id);
+    const receipt = await lockedInvoiceReceipt(client, prior.id, { ...input, actorUserId: input.actorUserId });
+    await assertInvoiceTemplateSession(client, undefined, { createdBy: input.createdBy, actorRole: input.actorRole }, canonical);
+    await client.query("ROLLBACK TO SAVEPOINT recover_linked_invoice");
+    await client.query("RELEASE SAVEPOINT recover_linked_invoice");
+    return { ok: true, ...receipt, replayed: true, ...(input.visitId !== undefined ? { visitId: input.visitId } : {}) };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT recover_linked_invoice").catch(() => undefined);
+    await client.query("RELEASE SAVEPOINT recover_linked_invoice").catch(() => undefined);
+    if (error instanceof InvoiceVisitContextError) return { ok: false, reason: "visit_context_invalid", line: null };
+    if (error instanceof Refusal) return { ok: false, reason: error.reason, line: error.line };
+    throw error;
+  }
+}
+
 export type LinkedInvoiceInput = {
   patientId: number;visitId?:number;
   existingPlanId?: number | null;
@@ -320,6 +369,8 @@ export type LinkedInvoiceInput = {
   templateAuthority?: InvoiceTemplateAuthority;
   /** Ordinary invoice commands receive the same locked catalogue/session checks. */
   catalogueAuthority?: InvoiceTemplateAuthority;
+  /** Canonical lab-work authority when called inside an admitted canonical staff operation. */
+  canonicalOperation?: CanonicalLabOperation;
   /** تفاصيل سطر تدقيق `invoice.create` (السلطة السعرية) — يُكتب داخل المعاملة نفسها. */
   auditDetails: Record<string, unknown>;
 };
@@ -372,15 +423,19 @@ export async function createLinkedInvoiceInTransaction(client: DbClient, input: 
       const { rows: [prior] } = await client.query<{ id: number; idempotency_request_hash: string | null; patient_id: number }>(
         `SELECT id, idempotency_request_hash, patient_id FROM invoices WHERE idempotency_key = $1`, [input.idempotencyKey]);
       if (prior) {
-        if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
+        if (authority) await assertInvoiceTemplateSession(client, authority.session, input, authority.canonical);
         if (prior.idempotency_request_hash !== input.requestHash || prior.patient_id !== input.patientId) {
           throw new Refusal("idempotency_conflict", null);
         }
         if(input.visitId!==undefined)await readInvoiceVisitContext(client,input.patientId,input.visitId,prior.id);
         const replay = authority
-          ? await lockedInvoiceReceipt(client, prior.id, {...input,session:authority.session})
+          ? await lockedInvoiceReceipt(client, prior.id, {
+              ...input,
+              session: authority.session,
+              actorUserId: authority.canonical ? authority.canonical.userId : authority.session?.userId ?? null,
+            })
           : await existingLinks(client, prior.id);
-        if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
+        if (authority) await assertInvoiceTemplateSession(client, authority.session, input, authority.canonical);
         return { ok: true, invoiceId: prior.id, replayed: true, ...replay };
       }
     }
@@ -390,7 +445,7 @@ export async function createLinkedInvoiceInTransaction(client: DbClient, input: 
     }
     if(input.visitId!==undefined){
       if(!authority||!input.idempotencyKey)throw new InvoiceVisitContextError();
-      await assertInvoiceTemplateSession(client,authority.session,input);
+      await assertInvoiceTemplateSession(client,authority.session,input,authority.canonical);
       await lockInvoiceVisitContext(client,input.patientId,input.visitId);
     }
     await validateInvoiceTemplateInTransaction(client, input);
@@ -637,7 +692,19 @@ export async function createLinkedInvoiceInTransaction(client: DbClient, input: 
       const knownLabWork=await readLabWorkForPlanItems(client,input.patientId,persistedLabRows.flatMap(row=>row.planItemId ? [row.planItemId] : []));
       if(knownLabWork.size) throw new Refusal("idempotency_conflict",null);
     }
-    const labWork = authority && input.idempotencyKey && input.requestHash ? await materializeInvoiceLabWorkInTransaction(client,{patientId:input.patientId,invoiceId,visitId:input.visitId,session:authority.session,requestKey:input.idempotencyKey,requestHash:input.requestHash,rows:persistedLabRows,retirements:input.labRetirements}) : undefined;
+    const labWork = authority && input.idempotencyKey && input.requestHash
+      ? await materializeInvoiceLabWorkInTransaction(client,{
+          patientId:input.patientId,
+          invoiceId,
+          visitId:input.visitId,
+          session:authority.session,
+          canonicalOperation:input.canonicalOperation,
+          requestKey:input.idempotencyKey,
+          requestHash:input.requestHash,
+          rows:persistedLabRows,
+          retirements:input.labRetirements,
+        })
+      : undefined;
     const clinical = links.filter((link) => link.kind === "clinical");
     await audit(client, {
       action: "invoice.create", entity: "invoice", entityId: invoiceId, entityLabel: created.invoice_number,
@@ -653,18 +720,24 @@ export async function createLinkedInvoiceInTransaction(client: DbClient, input: 
       actor: input.createdBy, actorRole: input.actorRole,
     });
     if (authority && Object.hasOwn(authority.source,"repaymentTerms")) {
+      const debtSession = authority.session ?? ({
+        userId: authority.canonical?.userId ?? 0,
+        username: input.createdBy,
+        role: input.actorRole ?? "",
+      } as unknown as SessionPayload);
       await writeDebtRepaymentInTransaction(client,{
         target:{patientId:input.patientId,currency:input.baseCurrency,invoiceId,openingCurrency:null},
         terms:authority.source.repaymentTerms,expectedVersion:0,
         expectedRemainingMinor:input.items.reduce((sum,item)=>sum+item.quantity*item.unitPriceMinor,0)-input.discountMinor,
-        reason:"طريقة السداد عند إنشاء الاتفاق",idempotencyKey:`invoice:${invoiceId}:repayment`,session:authority.session,
+        reason:"طريقة السداد عند إنشاء الاتفاق",idempotencyKey:`invoice:${invoiceId}:repayment`,session:debtSession,
+        ...(authority.canonical ? { canonicalAdmitted: true } : {}),
       });
     }
     const templateInvoice = authority ? await getInvoice(invoiceId, client) : null;
     if (authority && (!templateInvoice || templateInvoice.id !== invoiceId || templateInvoice.patientId !== input.patientId
       || templateInvoice.items.length !== links.length || templateInvoice.items.some((item, line) =>
         (item.planItemId ?? null) !== links[line].planItemId || (item.caseId ?? null) !== links[line].caseId))) throw new Refusal("idempotency_conflict", null);
-    if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
+    if (authority) await assertInvoiceTemplateSession(client, authority.session, input, authority.canonical);
     return { ok: true, invoiceId, ...(templateInvoice ? { invoice: templateInvoice } : {}), replayed: false, planId, links,...(labWork?.length ? {labWork} : {}) };
 }
 

@@ -96,6 +96,10 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:patients.legacy-void": Object.freeze({ record: "patient", need: Object.freeze(["finance.legacy.void"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/visits/[id]/walkout, /billing-preview, /financial-context (M2 slice 36). */
   "read:visits.invoices": Object.freeze({ record: "patient", need: Object.freeze(["finance.invoices.view"] as const), anyOf: Object.freeze([]) }),
+  /** POST /api/invoices/clinical-preview (read-only snapshot, M2 slice 37a). */
+  "read:invoices.clinical-preview": Object.freeze({ record: "patient", need: Object.freeze(["finance.invoices.create"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/inventory/patient-cost (M2 slice 37a). */
+  "read:inventory.patient-cost": Object.freeze({ record: "patient", need: Object.freeze(["inventory.costs.view"] as const), anyOf: Object.freeze([]) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

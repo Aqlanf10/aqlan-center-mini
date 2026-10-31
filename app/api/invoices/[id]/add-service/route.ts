@@ -3,6 +3,9 @@ import {requireSession} from "@/lib/session";
 import {readJsonBody,bodyErrorResponse} from "@/lib/http-body";
 import {JSON_BODY_LIMIT_BYTES} from "@/lib/security-limits";
 import {readInvoiceAddService,previewInvoiceAddService,addInvoiceService,InvoiceAddServiceError} from "@/lib/invoice-add-service-db";
+import {NO_STORE} from "@/lib/canonical-patient-http";
+import {invoiceAddServiceGetCanonicalResponse,invoiceAddServicePreviewCanonicalResponse,invoiceAddServicePostCanonicalResponse} from "@/lib/canonical-invoices-payments-services";
+import {selectRequestStaffEnvelope} from "@/lib/staff-session-admission";
 export const dynamic="force-dynamic";
 type Context={params:Promise<{id:string}>};
 async function owner(context:Context){
@@ -17,6 +20,6 @@ function failure(error:unknown){
   {status:error.code==="unauthorized"?403:error.code==="missing"?404:error.code==="invalid"?400:409});
  return NextResponse.json({message:"تعذّر تأكيد إضافة الخدمة؛ احتفظ بالطلب نفسه وأعد المحاولة للتحقق من النتيجة."},{status:500});
 }
-export async function GET(_request:Request,context:Context){try{const {id,session}=await owner(context);return NextResponse.json(await readInvoiceAddService(id,session),{headers:{"Cache-Control":"no-store"}});}catch(error){return failure(error);}}
-export async function PUT(request:Request,context:Context){try{const {id,session}=await owner(context);const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);return NextResponse.json(await previewInvoiceAddService(id,body,session),{headers:{"Cache-Control":"no-store"}});}catch(error){return failure(error);}}
-export async function POST(request:Request,context:Context){try{const {id,session}=await owner(context);const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);const result=await addInvoiceService(id,body,session);return NextResponse.json(result,{status:result.replayed?200:201});}catch(error){return failure(error);}}
+export async function GET(_request:Request,context:Context){const selected=await selectRequestStaffEnvelope();if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});if(selected.kind==="canonical")return invoiceAddServiceGetCanonicalResponse((await context.params).id,selected.handle);try{const {id,session}=await owner(context);return NextResponse.json(await readInvoiceAddService(id,session),{headers:{"Cache-Control":"no-store"}});}catch(error){return failure(error);}}
+export async function PUT(request:Request,context:Context){const selected=await selectRequestStaffEnvelope();if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});if(selected.kind==="canonical")return invoiceAddServicePreviewCanonicalResponse(request,(await context.params).id,selected.handle);try{const {id,session}=await owner(context);const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);return NextResponse.json(await previewInvoiceAddService(id,body,session),{headers:{"Cache-Control":"no-store"}});}catch(error){return failure(error);}}
+export async function POST(request:Request,context:Context){const selected=await selectRequestStaffEnvelope();if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});if(selected.kind==="canonical")return invoiceAddServicePostCanonicalResponse(request,(await context.params).id,selected.handle);try{const {id,session}=await owner(context);const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);const result=await addInvoiceService(id,body,session);return NextResponse.json(result,{status:result.replayed?200:201});}catch(error){return failure(error);}}

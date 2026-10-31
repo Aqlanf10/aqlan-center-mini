@@ -6,6 +6,9 @@ import { inventoryDetailWithLinks } from "@/lib/inventory-domain/read";
 import { inventoryMovementForRead } from "@/lib/inventory-domain/presentation";
 import { canManageInventory, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { inventoryDetailCanonicalResponse, inventoryUpdateCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,9 @@ const readId = (raw: string): number | null => {
 
 /** تفصيل بند: الرصيد المشتق، وسجل الحركات، ودفعات الصلاحية بما بقي فيها. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return inventoryDetailCanonicalResponse((await context.params).id, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   const { id: rawId } = await context.params;
@@ -38,6 +44,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * لا رصيدًا هنا ولا في أي مسار: الرصيد حصيلةُ حركاتٍ أو مرفوض الدستور (ZONE_D).
  */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return inventoryUpdateCanonicalResponse(request, (await context.params).id, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageInventory(session.role)) {

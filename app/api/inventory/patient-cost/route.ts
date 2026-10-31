@@ -3,6 +3,9 @@ import { findUserByUsername, issuedCostForPatient } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { inventoryPatientCostCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,9 @@ export const dynamic = "force-dynamic";
  * العمل سريري.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return inventoryPatientCostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

@@ -10,6 +10,9 @@ import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { createInventoryPurchase } from "@/lib/inventory-purchase-db";
 import { normalizePurchaseReason, canonicalPurchaseRequest, INVENTORY_PURCHASE_KEY_HEADER, isPurchaseKey, isPurchaseRecord, purchaseEnvelope, isUnwrappedFinancialPurchase } from "@/lib/inventory-purchase-protocol";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { inventoryMovementsCreateCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +30,9 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  * الدستور يمنع تسوية بلا مبرر موثَّق.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return inventoryMovementsCreateCanonicalResponse(request, (await context.params).id, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   const { id: rawId } = await context.params;

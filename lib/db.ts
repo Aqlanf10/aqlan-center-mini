@@ -9648,6 +9648,18 @@ export async function getService(id: number): Promise<Service | null> {
   return getServiceWith(getPool(), id);
 }
 
+export async function createServiceInTx(client: DbClient, input: {
+  name: string; category: string | null; priceMinor: number;
+  priceSarMinor?: number | null; priceUsdMinor?: number | null;
+}): Promise<Service> {
+  const { rows } = await client.query<ServiceRow>(
+    `INSERT INTO services (name, category, price_minor, price_configured, price_sar_minor, price_usd_minor)
+     VALUES ($1, $2::text, $3, $4, $5::bigint, $6::bigint) RETURNING ${SERVICE_COLUMNS}`,
+    [input.name, input.category, input.priceMinor, input.priceMinor > 0, input.priceSarMinor ?? null, input.priceUsdMinor ?? null],
+  );
+  return toService(rows[0]);
+}
+
 export async function createService(input: {
   name: string; category: string | null; priceMinor: number;
   priceSarMinor?: number | null; priceUsdMinor?: number | null;
@@ -9659,6 +9671,34 @@ export async function createService(input: {
     [input.name, input.category, input.priceMinor, input.priceMinor > 0, input.priceSarMinor ?? null, input.priceUsdMinor ?? null],
   );
   return toService(rows[0]);
+}
+
+export async function updateServiceInTx(client: DbClient, id: number, input: {
+  name?: string; category?: string | null; priceMinor?: number; isActive?: boolean;
+  priceSarMinor?: number | null; priceUsdMinor?: number | null;
+}): Promise<Service | null> {
+  const { rows } = await client.query<ServiceRow>(
+    `UPDATE services SET
+       name             = COALESCE($2::text, name),
+       category         = CASE WHEN $3::boolean THEN $4::text ELSE category END,
+       price_minor      = COALESCE($5::bigint, price_minor),
+       price_configured = CASE WHEN $5::bigint IS NULL THEN price_configured
+                                ELSE ($5::bigint > 0) END,
+       price_provisional = CASE WHEN $5::bigint IS NULL THEN price_provisional ELSE FALSE END,
+       is_active        = COALESCE($6::boolean, is_active),
+       price_sar_minor  = CASE WHEN $7::boolean THEN $8::bigint ELSE price_sar_minor END,
+       price_usd_minor  = CASE WHEN $9::boolean THEN $10::bigint ELSE price_usd_minor END
+     WHERE id = $1
+     RETURNING ${SERVICE_COLUMNS}`,
+    [
+      id, input.name ?? null,
+      input.category !== undefined, input.category ?? null,
+      input.priceMinor ?? null, input.isActive ?? null,
+      input.priceSarMinor !== undefined, input.priceSarMinor ?? null,
+      input.priceUsdMinor !== undefined, input.priceUsdMinor ?? null,
+    ],
+  );
+  return rows[0] ? toService(rows[0]) : null;
 }
 
 export async function updateService(id: number, input: {
@@ -9731,6 +9771,52 @@ export async function servicePricingStats(): Promise<ServicePricingStats> {
  * فالدفعة تُقبَل كاملةً مُصدَّرةً من `readPriceBatch` (lib/servicePricing.ts)،
  * ورقمٌ خاطئ في سطرٍ واحد يردّها كلَّها قبل أن تلمس القاعدة.
  */
+export async function priceServiceBatchInTx(
+  client: DbClient,
+  prices: { id: number; priceMinor: number }[],
+  actor: string,
+  actorRole: string | null = null,
+): Promise<{ ok: true; updated: number } | { ok: false; message: string }> {
+  if (prices.length === 0) return { ok: false, message: "لا أسعار في الدفعة." };
+  await client.query("SAVEPOINT price_service_batch_in_tx");
+  try {
+    const { rows: found } = await client.query<{ id: number; name: string }>(
+      `SELECT id, name FROM services WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
+      [prices.map((price) => price.id)],
+    );
+    const nameById = new Map(found.map((row) => [row.id, row.name]));
+    for (const price of prices) {
+      if (!nameById.has(price.id)) {
+        await client.query("ROLLBACK TO SAVEPOINT price_service_batch_in_tx");
+        await client.query("RELEASE SAVEPOINT price_service_batch_in_tx");
+        return { ok: false, message: `خدمة رقم ${price.id} غير موجودة.` };
+      }
+    }
+    for (const price of prices) {
+      await client.query(
+        `UPDATE services SET price_minor = $2, price_configured = TRUE, price_provisional = FALSE
+          WHERE id = $1`,
+        [price.id, price.priceMinor],
+      );
+    }
+    await insertAuditRow(client, {
+      action: "services.price_batch",
+      entity: "services",
+      entityId: 0,
+      entityLabel: "تسعير دفعة واحدة",
+      details: { عدد_الخدمات: prices.length },
+      actor,
+      actorRole,
+    });
+    await client.query("RELEASE SAVEPOINT price_service_batch_in_tx");
+    return { ok: true, updated: prices.length };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT price_service_batch_in_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT price_service_batch_in_tx").catch(() => {});
+    throw error;
+  }
+}
+
 export async function priceServiceBatch(
   prices: { id: number; priceMinor: number }[],
   actor: string,
@@ -9779,6 +9865,32 @@ export async function priceServiceBatch(
  *
  * **وما سُعّر لا يُمسّ**: من سعّر خدمةً بيده قرّر، وكتابةُ تخمينٍ فوقه تمحو قراره.
  */
+export async function fillProvisionalServicePricesInTx(
+  client: DbClient,
+  fills: { id: number; priceMinor: number }[],
+  actor: string,
+  actorRole: string | null = null,
+): Promise<{ ok: true; filled: number } | { ok: false; message: string }> {
+  if (fills.length === 0) return { ok: false, message: "لا خدمات بلا سعر تناسب التخميني." };
+  for (const fill of fills) {
+    await client.query(
+      `UPDATE services SET price_minor = $2, price_provisional = TRUE
+        WHERE id = $1 AND NOT price_configured`,
+      [fill.id, fill.priceMinor],
+    );
+  }
+  await insertAuditRow(client, {
+    action: "services.provisional",
+    entity: "services",
+    entityId: 0,
+    entityLabel: "أسعار تخمينية موسومة",
+    details: { عدد_الخدمات: fills.length },
+    actor,
+    actorRole,
+  });
+  return { ok: true, filled: fills.length };
+}
+
 export async function fillProvisionalServicePrices(
   fills: { id: number; priceMinor: number }[],
   actor: string,
@@ -10494,6 +10606,41 @@ export async function cancelActiveInvoiceDebtArrangementInTx(
   });
 }
 
+export async function setInvoiceStatusInTx(
+  client: DbClient,
+  id: number,
+  status: "open" | "paid" | "cancelled",
+  ctx: { actor: string; actorRole: string | null },
+): Promise<Invoice | null> {
+  await lockPlanItemsBilledBy(client, id);
+  const { rows: [invoice] } = await client.query<{
+    status: string; invoice_number: string; total_minor: string; discount_minor: string; base_currency: string;
+  }>(
+    `SELECT status, invoice_number, total_minor, discount_minor, base_currency
+       FROM invoices WHERE id = $1 AND status <> 'cancelled' FOR UPDATE`, [id],
+  );
+  if (!invoice) return null;
+  if (invoice.status !== status) {
+    await client.query(`UPDATE invoices SET status = $2 WHERE id = $1`, [id, status]);
+    if (status === "cancelled") {
+      await reopenOrthoDecisionsForInvoice(client, id, ctx.actor, ctx.actorRole);
+      await releasePlanItemFinancialLinks(client, id, ctx.actor, ctx.actorRole, "أُلغيت الفاتورة");
+      await cancelActiveInvoiceDebtArrangementInTx(client, id, ctx.actor, ctx.actorRole, "أُلغيت الفاتورة المرتبطة بجدول السداد");
+    } else {
+      const currency = requireCurrency(invoice.base_currency, "فاتورة", id);
+      await insertAuditRow(client, {
+        action: "invoice.status", entity: "invoice", entityId: id, entityLabel: invoice.invoice_number,
+        details: {
+          من: invoice.status, إلى: status,
+          الصافي: formatMoney(Math.max(0, toMinor(invoice.total_minor) - toMinor(invoice.discount_minor)), currency),
+        },
+        actor: ctx.actor, actorRole: ctx.actorRole,
+      });
+    }
+  }
+  return getInvoice(id, client);
+}
+
 export async function setInvoiceStatus(
   id: number, status: "open" | "paid" | "cancelled",
   ctx: { actor: string; actorRole: string | null },
@@ -10539,9 +10686,11 @@ export async function setInvoiceStatus(
  * (P2-4) صافي ما دُفع على فاتورةٍ بعينها لكل عملة (القبض − الاسترداد) — ليُقال عند
  * إلغائها إنّ هذا المال يبقى رصيدًا للمريض، لا أن يختفي بصمت.
  */
-export async function invoiceLinkedPaymentsByCurrency(invoiceId: number): Promise<{ currency: Currency; netMinor: number }[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ currency: string; net: string }>(
+export async function invoiceLinkedPaymentsByCurrencyWith(
+  q: Pick<DbClient, "query">,
+  invoiceId: number,
+): Promise<{ currency: Currency; netMinor: number }[]> {
+  const { rows } = await q.query<{ currency: string; net: string }>(
     `SELECT currency,
             SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END)::text AS net
        FROM payments WHERE invoice_id = $1
@@ -10551,6 +10700,11 @@ export async function invoiceLinkedPaymentsByCurrency(invoiceId: number): Promis
   return rows
     .map((row) => ({ currency: requireCurrency(row.currency, "دفعة فاتورة", invoiceId), netMinor: toMinor(row.net) }))
     .filter((row) => row.netMinor !== 0);
+}
+
+export async function invoiceLinkedPaymentsByCurrency(invoiceId: number): Promise<{ currency: Currency; netMinor: number }[]> {
+  await ensureSchema();
+  return invoiceLinkedPaymentsByCurrencyWith(getPool(), invoiceId);
 }
 
 export type InvoiceCorrectionResult =
@@ -10720,10 +10874,14 @@ export async function getPayment(id: number): Promise<Payment | null> {
 
 /** Read-only recovery evidence. The caller still invokes the canonical writer,
  * whose complete fingerprint rejects changed intent; this supplies the saved FX snapshot only. */
+export async function getPaymentByIdempotencyKeyWith(q: Pick<DbClient, "query">, key: string): Promise<Payment | null> {
+  const { rows } = await q.query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.idempotency_key=$1`, [key]);
+  return rows[0] ? toPayment(rows[0]) : null;
+}
+
 export async function getPaymentByIdempotencyKey(key:string):Promise<Payment|null>{
   await ensureSchema();
-  const {rows}=await getPool().query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.idempotency_key=$1`,[key]);
-  return rows[0]?toPayment(rows[0]):null;
+  return getPaymentByIdempotencyKeyWith(getPool(), key);
 }
 
 export async function listShiftPayments(shiftId: number): Promise<Payment[]> {
@@ -10743,15 +10901,19 @@ export async function listShiftPaymentsWith(q: Pick<DbClient, "query">, shiftId:
   return rows.map(toPayment);
 }
 
-export async function listPaymentsByDate(date: string): Promise<Payment[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(
+export async function listPaymentsByDateWith(q: Pick<DbClient, "query">, date: string): Promise<Payment[]> {
+  const { rows } = await q.query<PaymentRow>(
     `${PAYMENT_SELECT}
       WHERE (y.created_at AT TIME ZONE $1)::date = $2::date
       ORDER BY y.created_at DESC`,
     [CLINIC_TIME_ZONE, date],
   );
   return rows.map(toPayment);
+}
+
+export async function listPaymentsByDate(date: string): Promise<Payment[]> {
+  await ensureSchema();
+  return listPaymentsByDateWith(getPool(), date);
 }
 
 /**
@@ -11182,6 +11344,287 @@ export async function correctPayment(input: {
   };
 }
 
+export async function recordPaymentInTx(
+  client: DbClient,
+  input: Parameters<typeof recordPayment>[0],
+): Promise<Awaited<ReturnType<typeof recordPayment>>> {
+  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+    throw new Error("مبلغ السند يجب أن يكون عددًا صحيحًا أكبر من صفر.");
+  }
+  const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
+  const reversalOfId = input.reversalOfId ?? null;
+  if (input.kind === "refund" && reversalOfId === null) {
+    return { payment: null, reason: "refund_requires_origin" };
+  }
+  if (input.kind !== "refund" && reversalOfId !== null) {
+    return { payment: null, reason: "invalid_reversal" };
+  }
+  await client.query("SAVEPOINT record_payment_in_tx");
+  try {
+    const outcome = await runPaymentTransaction(
+      { ...input, planId: input.planId ?? null, openingCurrency: input.openingCurrency ?? null },
+      {
+        idempotencyKey,
+        reversalOfId,
+        receiptAudit: { actorRole: input.actorRole ?? null },
+        ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}),
+      },
+      client,
+    );
+    if (outcome.kind === "reason") {
+      await client.query("ROLLBACK TO SAVEPOINT record_payment_in_tx");
+      await client.query("RELEASE SAVEPOINT record_payment_in_tx");
+      return { payment: null, reason: outcome.reason };
+    }
+    await client.query("RELEASE SAVEPOINT record_payment_in_tx");
+    const payment = await getPaymentWith(client, outcome.paymentId);
+    if (outcome.kind === "replay") return { payment, reason: null, replayed: true };
+    return { payment, reason: null };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT record_payment_in_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT record_payment_in_tx").catch(() => {});
+    throw error;
+  }
+}
+
+export async function recordSettingsOwnedPaymentInTx(
+  client: DbClient,
+  input: Omit<Parameters<typeof recordPayment>[0], "kind" | "exchangeRate" | "reversalOfId">,
+  settings: SettingsMap,
+): Promise<Awaited<ReturnType<typeof recordSettingsOwnedPayment>>> {
+  const observedExchangeRate = rateFromSettings(settings, input.currency, input.baseCurrency);
+  if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+    throw new Error("مبلغ السند يجب أن يكون عددًا صحيحًا أكبر من صفر.");
+  }
+  const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
+  await client.query("SAVEPOINT record_settings_payment_in_tx");
+  try {
+    const outcome = await runPaymentTransaction(
+      {
+        ...input,
+        kind: "payment",
+        exchangeRate: observedExchangeRate,
+        planId: input.planId ?? null,
+        openingCurrency: input.openingCurrency ?? null,
+      },
+      {
+        idempotencyKey,
+        reversalOfId: null,
+        settingsOwnedFx: true,
+        receiptAudit: { actorRole: input.actorRole ?? null },
+        ...(input.similarityReview ? { similarityReview: input.similarityReview } : {}),
+      },
+      client,
+    );
+    if (outcome.kind === "reason") {
+      await client.query("ROLLBACK TO SAVEPOINT record_settings_payment_in_tx");
+      await client.query("RELEASE SAVEPOINT record_settings_payment_in_tx");
+      return { payment: null, reason: outcome.reason };
+    }
+    await client.query("RELEASE SAVEPOINT record_settings_payment_in_tx");
+    return {
+      payment: await getPaymentWith(client, outcome.paymentId),
+      reason: null,
+      ...(outcome.kind === "replay" ? { replayed: true } : {}),
+      ...(outcome.acknowledgmentEvidence ? { acknowledgmentEvidence: outcome.acknowledgmentEvidence } : {}),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT record_settings_payment_in_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT record_settings_payment_in_tx").catch(() => {});
+    throw error;
+  }
+}
+
+export async function correctPaymentInTx(
+  client: DbClient,
+  input: Parameters<typeof correctPayment>[0],
+  acknowledgment?: { observedExchangeRate: number | null },
+): Promise<Awaited<ReturnType<typeof correctPayment>>> {
+  const why = input.reason.trim();
+  if (why.length < 3) return { reason: "missing_reason" };
+  const key = input.idempotencyKey ?? null;
+  let reversalId: number | null = null;
+  let replacementId: number | null = null;
+  let replayed = false;
+  let acknowledgmentEvidence: AcknowledgmentEvidence | undefined;
+  let original: { id: number; receiptNumber: string; patientId: number } | null = null;
+  const abortRefusal = async (reason: CorrectPaymentRefusal): Promise<{ reason: CorrectPaymentRefusal }> => {
+    await client.query("ROLLBACK TO SAVEPOINT correct_payment_in_tx");
+    await client.query("RELEASE SAVEPOINT correct_payment_in_tx");
+    return { reason };
+  };
+  await client.query("SAVEPOINT correct_payment_in_tx");
+  try {
+    const { rows } = await client.query<{
+      id: number; patient_id: number; kind: string; amount_minor: string; currency: string;
+      method: string | null; receipt_number: string;
+      invoice_id: number | null; plan_id: number | null; opening_currency: string | null;
+    }>(
+      `SELECT id, patient_id, kind, amount_minor, currency, method, receipt_number, invoice_id, plan_id, opening_currency
+         FROM payments WHERE id = $1 FOR UPDATE`, [input.paymentId],
+    );
+    const origin = rows[0];
+    if (!origin) return abortRefusal("not_found");
+    if (origin.kind !== "payment") return abortRefusal("not_a_receipt");
+    original = { id: origin.id, receiptNumber: origin.receipt_number, patientId: origin.patient_id };
+    const reversalNote = `تصحيح السند ${origin.receipt_number}: ${why}`.slice(0, 300);
+    const replacementNote = `بدل السند ${origin.receipt_number}`.slice(0, 300);
+    const next = input.replacement;
+    const target = next === null ? null
+      : next.target.kind === "original"
+        ? {
+          invoiceId: origin.invoice_id, planId: origin.plan_id,
+          openingCurrency: origin.opening_currency === null ? null : requireCurrency(origin.opening_currency, "سند قبض", origin.id),
+          inherited: true,
+        }
+        : { ...next.target, inherited: false };
+
+    let reclassifiedTargetIds: number[] = [];
+    if (target?.inherited && origin.invoice_id !== null) {
+      const proof = (await readCurrencyReclassificationEvidence(client, origin.patient_id)).find(row => row.paymentId === origin.id);
+      if (proof) {
+        const { rows: descendants } = await client.query<{ id: number; status: string }>(`WITH RECURSIVE descendants(id) AS (
+          SELECT corrected_invoice_id FROM invoice_corrections WHERE id=$1 UNION
+          SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN descendants d ON c.original_invoice_id=d.id)
+          SELECT i.id,i.status FROM invoices i JOIN descendants d ON d.id=i.id WHERE i.patient_id=$2 AND i.base_currency='SAR' ORDER BY i.id`, [proof.correctionId, origin.patient_id]);
+        reclassifiedTargetIds = descendants.map(row => row.id);
+        const active = descendants.filter(row => row.status !== "cancelled");
+        if (active.length !== 1) return abortRefusal("invalid_invoice");
+        target.invoiceId = active[0].id;
+      }
+    }
+    const proveAcknowledgment = async (isNew: boolean): Promise<AcknowledgmentEvidence | undefined> => {
+      if (!acknowledgment || key === null || reversalId === null) return undefined;
+      const correction = await proveCorrectionAcknowledgment(client, {
+        originId: origin.id, reversalId, replacementId, key, actor: input.actor, reason: why,
+        originalTarget: next?.target.kind === "original",
+        replacementExpected: next && target ? {
+          amountMinor: next.amountMinor, currency: next.currency, method: next.method,
+          invoiceId: next.target.kind === "original" ? origin.invoice_id : target.invoiceId,
+          planId: target.planId, openingCurrency: target.openingCurrency,
+        } : null,
+        calculationRates: next ? [next.exchangeRate, acknowledgment.observedExchangeRate] : [],
+        replacementHashAtRate: (rate, receipt) => idempotencyRequestHash({
+          patientId: origin.patient_id, kind: "payment", amountMinor: next!.amountMinor,
+          currency: next!.currency, method: next!.method, note: replacementNote, createdBy: input.actor,
+        }, { idempotencyKey: key, reversalOfId: null }, receipt.invoice_id, target!.planId,
+          rate, CLINIC_BASE_CURRENCY, target!.openingCurrency),
+      });
+      if (!correction) {
+        if (isNew) throw new Error("Receipt acknowledgment evidence unavailable");
+        return { version: 1, status: "unconfirmed" };
+      }
+      return { version: 1, operation: next === null ? "void" : "correct", requestKey: key, correction };
+    };
+
+    if (key !== null) {
+      const { rows: keyed } = await client.query<{
+        id: number; kind: string; patient_id: number; reversal_of_id: number | null; note: string | null;
+        amount_minor: string; currency: string; method: string; exchange_rate: string; created_by: string | null;
+        invoice_id: number | null; plan_id: number | null; opening_currency: string | null;
+      }>(
+        `SELECT id, kind, patient_id, reversal_of_id, note, amount_minor, currency, method, exchange_rate, created_by,
+                invoice_id, plan_id, opening_currency
+           FROM payments WHERE idempotency_key = $1`, [key],
+      );
+      const hit = keyed[0];
+      if (hit) {
+        const { rows: recoveryAudit } = await client.query(
+          `SELECT id FROM audit_log WHERE action = 'payment.recover_installment'
+             AND entity = 'payment' AND entity_id = $1 LIMIT 1`, [String(hit.id)]);
+        if (recoveryAudit.length) return abortRefusal("idempotency_conflict");
+        let same = false;
+        if (next === null) {
+          same = hit.kind === "refund" && hit.reversal_of_id === origin.id && hit.note === reversalNote && hit.created_by === input.actor;
+          if (same) reversalId = hit.id;
+        } else if (target) {
+          same = hit.kind === "payment" && hit.patient_id === origin.patient_id && hit.note === replacementNote
+            && hit.created_by === input.actor && toMinor(hit.amount_minor) === next.amountMinor && hit.currency === next.currency
+            && hit.method === next.method && Number(hit.exchange_rate) === next.exchangeRate
+            && (hit.invoice_id === target.invoiceId || next.target.kind === "original" && hit.invoice_id !== null && reclassifiedTargetIds.includes(hit.invoice_id)) && hit.plan_id === target.planId
+            && (hit.opening_currency ?? null) === (target.openingCurrency ?? null);
+          if (same) {
+            const { rows: pair } = await client.query<{ id: number }>(
+              `SELECT id FROM payments WHERE reversal_of_id = $1 AND kind = 'refund' AND note = $2 AND created_by = $3
+                ORDER BY id DESC LIMIT 1`, [origin.id, reversalNote, input.actor]);
+            same = pair.length > 0;
+            if (same) { reversalId = pair[0].id; replacementId = hit.id; }
+          }
+        }
+        if (!same) return abortRefusal("idempotency_conflict");
+        acknowledgmentEvidence = await proveAcknowledgment(false);
+        replayed = true;
+      }
+    }
+
+    if (!replayed) {
+      const currency = requireCurrency(origin.currency, "سند قبض", origin.id);
+      const budget = await readRefundBaseBudget(client, origin.id);
+      if (!budget) return abortRefusal("refund_snapshot_review_required");
+      const remaining = budget.originalAmountMinor - budget.refundedAmountMinor;
+      if (remaining <= 0) return abortRefusal("already_reversed");
+
+      const reversal = await runPaymentTransaction({
+        patientId: origin.patient_id, invoiceId: null, planId: null, openingCurrency: null,
+        kind: "refund", amountMinor: remaining, currency, baseCurrency: CLINIC_BASE_CURRENCY, exchangeRate: 1,
+        method: origin.method ?? "cash", note: reversalNote, createdBy: input.actor,
+      }, { idempotencyKey: next === null ? key : null, reversalOfId: origin.id }, client);
+      if (reversal.kind === "reason") return abortRefusal(reversal.reason);
+      if (reversal.kind === "replay") return abortRefusal("idempotency_conflict");
+      reversalId = reversal.paymentId;
+
+      if (next && target) {
+        const issued = await runPaymentTransaction({
+          patientId: origin.patient_id, invoiceId: target.invoiceId, planId: target.planId, openingCurrency: target.openingCurrency,
+          kind: "payment", amountMinor: next.amountMinor, currency: next.currency, baseCurrency: CLINIC_BASE_CURRENCY,
+          exchangeRate: next.exchangeRate, method: next.method, note: replacementNote, createdBy: input.actor,
+        }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: target.inherited }, client);
+        if (issued.kind === "reason") return abortRefusal(issued.reason);
+        if (issued.kind === "replay") return abortRefusal("idempotency_conflict");
+        replacementId = issued.paymentId;
+      }
+
+      const { rows: made } = await client.query<{ id: number; receipt_number: string; amount_minor: string; currency: string }>(
+        `SELECT id, receipt_number, amount_minor, currency FROM payments WHERE id = ANY($1::int[])`,
+        [[reversalId, replacementId].filter((id): id is number => id !== null)],
+      );
+      const byId = new Map(made.map((row) => [row.id, row]));
+      const rev = reversalId === null ? undefined : byId.get(reversalId);
+      const rep = replacementId === null ? undefined : byId.get(replacementId);
+      await insertAuditRow(client, {
+        action: "payment.correct", entity: "payment", entityId: origin.id, entityLabel: origin.receipt_number,
+        details: {
+          الطريقة: next === null ? "إبطال" : "تصحيح",
+          السبب: why,
+          المريض: origin.patient_id,
+          سند_العكس: rev?.receipt_number ?? null,
+          المبلغ_المعكوس: rev ? toMinor(rev.amount_minor) : null,
+          العملة_المعكوسة: rev?.currency ?? null,
+          السند_الصحيح: rep?.receipt_number ?? null,
+          المبلغ_الصحيح: rep ? toMinor(rep.amount_minor) : null,
+          العملة_الصحيحة: rep?.currency ?? null,
+        },
+        actor: input.actor, actorRole: input.actorRole ?? null,
+      });
+      acknowledgmentEvidence = await proveAcknowledgment(true);
+    }
+    await client.query("RELEASE SAVEPOINT correct_payment_in_tx");
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT correct_payment_in_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT correct_payment_in_tx").catch(() => {});
+    if (error instanceof ReclassificationProofError) return { reason: "refund_snapshot_review_required" };
+    throw error;
+  }
+  return {
+    reason: null,
+    replayed,
+    original,
+    reversal: reversalId === null ? null : await getPaymentWith(client, reversalId),
+    replacement: replacementId === null ? null : await getPaymentWith(client, replacementId),
+    ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}),
+  };
+}
+
 type PaymentOutcome =
   | { kind: "inserted"; paymentId: number; acknowledgmentEvidence?: AcknowledgmentEvidence }
   | { kind: "replay"; paymentId: number; acknowledgmentEvidence?: AcknowledgmentEvidence }
@@ -11319,6 +11762,7 @@ function runPaymentTransaction(
   prepared: PaymentTransactionPrepared & {
     settingsOwnedFx: true; reversalOfId: null; requestHashOverride?: never; inheritedTarget?: never;
   },
+  outer?: DbClient,
 ): Promise<SettingsPaymentOutcome>;
 /** A caller-owned correction/debt/recovery transaction owns commit and rollback. */
 async function runPaymentTransaction(
@@ -11998,6 +12442,41 @@ async function runRecoveryTransaction(
 /** Explicit, append-only recovery on an already issued invoice. Ordinary receipts
  * retain their existing target, fingerprint, overpayment and manual-status semantics.
  */
+export async function recordReversedInstallmentRecoveryInTx(
+  client: DbClient,
+  input: RecoveryWriteInput & { idempotencyKey: string },
+  options: { similarityReview?: SimilarCollectionReview } = {},
+): Promise<{
+  payment: Payment | null; reason: RecoveryPaymentRefusal | null; replayed?: boolean;
+}> {
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0 || !isCurrency(input.currency)
+    || typeof input.createdBy !== "string" || !input.createdBy.trim()) return { payment: null, reason: "invalid_recovery_request" };
+  const parsed = parseRecoveryIntent({ ...input, amount: toInputAmount(input.amountMinor, input.currency) }, input.idempotencyKey);
+  if (parsed.kind !== "recovery") return { payment: null, reason: "invalid_recovery_request" };
+  const canonical: RecoveryWriteInput = { ...parsed.intent, createdBy: input.createdBy, actorRole: input.actorRole };
+  const requestHash = createHash("sha256").update(recoveryIntentFingerprintSource(canonical, canonical.createdBy), "utf8").digest("hex");
+  await client.query("SAVEPOINT recovery_payment_in_tx");
+  try {
+    const outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash, options.similarityReview);
+    if (outcome.kind === "reason") {
+      await client.query("ROLLBACK TO SAVEPOINT recovery_payment_in_tx");
+      await client.query("RELEASE SAVEPOINT recovery_payment_in_tx");
+      return { payment: null, reason: outcome.reason };
+    }
+    await client.query("RELEASE SAVEPOINT recovery_payment_in_tx");
+    return {
+      payment: await getPaymentWith(client, outcome.paymentId),
+      reason: null,
+      ...(outcome.kind === "replay" ? { replayed: true } : {}),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT recovery_payment_in_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT recovery_payment_in_tx").catch(() => {});
+    if (error instanceof FinancialCurrencyIntegrityError) return { payment: null, reason: "recovery_review_required" };
+    throw error;
+  }
+}
+
 export async function recordReversedInstallmentRecovery(input: RecoveryWriteInput & { idempotencyKey: string },
   options: { similarityReview?: SimilarCollectionReview } = {}): Promise<{
   payment: Payment | null; reason: RecoveryPaymentRefusal | null; replayed?: boolean;
@@ -17580,6 +18059,15 @@ export async function createManualEntry(input: {
  * أن قُرئ وصُدّق. وبلا قفل يستطيع قيدٌ يُكتب اليوم أن يغيّر ربح مارس الذي بُنيت عليه
  * قرارات — وهو ما يجعل أي محاسب يرفض النظام كله.
  */
+export async function isPeriodLockedWith(q: Pick<DbClient, "query">, date: string): Promise<boolean> {
+  const { rows: [setting] } = await q.query<{ value: string }>(
+    `SELECT value FROM settings WHERE key = 'finance.locked_before'`,
+  );
+  const lockedBefore = (setting?.value ?? "").trim();
+  if (!lockedBefore) return false;
+  return date < lockedBefore;
+}
+
 export async function isPeriodLocked(date: string): Promise<boolean> {
   const settings = await getSettings();
   const lockedBefore = (settings["finance.locked_before"] ?? "").trim();
@@ -19723,14 +20211,22 @@ export const PLAN_FUNDED_BY_AGREEMENT_SQL =
  */
 // Funding classification survives closure: an inactive installment plan must not
 // fall through to an un-invoiced receipt, and successful retries keep the same path.
-export async function isPlanFundedByAgreement(planId: number, patientId: number): Promise<boolean> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ funded: boolean }>(
+export async function isPlanFundedByAgreementWith(
+  q: Pick<DbClient, "query">,
+  planId: number,
+  patientId: number,
+): Promise<boolean> {
+  const { rows } = await q.query<{ funded: boolean }>(
     `SELECT ${PLAN_FUNDED_BY_AGREEMENT_SQL} AS funded
        FROM treatment_plans t WHERE t.id = $1 AND t.patient_id = $2`,
     [planId, patientId],
   );
   return rows[0]?.funded === true;
+}
+
+export async function isPlanFundedByAgreement(planId: number, patientId: number): Promise<boolean> {
+  await ensureSchema();
+  return isPlanFundedByAgreementWith(getPool(), planId, patientId);
 }
 
 /** سعر جلسة بندٍ مرتبط: صفرٌ إن كانت خطته ممولة بالاتفاق (مشمولة)، وإلا قاعدة فوترة البند. */
@@ -27386,10 +27882,8 @@ function toMovement(row: InventoryMovementRow): InventoryMovement {
 const INVENTORY_BALANCE_SELECT = `
   COALESCE(SUM(CASE m.kind WHEN 'in' THEN m.qty WHEN 'out' THEN -m.qty ELSE m.qty END), 0)`;
 
-/** كل بنود المخزون بأرصدتها المشتقة وحالتها من حد الطلب. */
-export async function listInventoryItems(): Promise<InventoryItem[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<InventoryItemRow>(
+export async function listInventoryItemsWith(q: Pick<DbClient, "query">): Promise<InventoryItem[]> {
+  const { rows } = await q.query<InventoryItemRow>(
     `SELECT i.id, i.name, i.category, i.unit, i.min_level, i.note, i.is_active,
             i.created_by, i.created_at, ${INVENTORY_BALANCE_SELECT} AS balance
        FROM inventory_items i
@@ -27398,6 +27892,43 @@ export async function listInventoryItems(): Promise<InventoryItem[]> {
       ORDER BY i.is_active DESC, i.name`,
   );
   return rows.map(toItem);
+}
+
+/** كل بنود المخزون بأرصدتها المشتقة وحالتها من حد الطلب. */
+export async function listInventoryItems(): Promise<InventoryItem[]> {
+  await ensureSchema();
+  return listInventoryItemsWith(getPool());
+}
+
+export async function createInventoryItemInTx(
+  client: DbClient,
+  input: {
+    name: string;
+    category: string;
+    unit: string;
+    minLevel: number;
+    note: string | null;
+    createdBy: string;
+  },
+  actorRole: string | null = null,
+): Promise<InventoryItem> {
+  const { rows } = await client.query<InventoryItemRow>(
+    `INSERT INTO inventory_items (name, category, unit, min_level, note, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING
+       id, name, category, unit, min_level, note, is_active, created_by, created_at`,
+    [input.name, input.category, input.unit, input.minLevel, input.note, input.createdBy],
+  );
+  const item = toItem({ ...rows[0], balance: "0" });
+  await insertAuditRow(client, {
+    action: "inventory.item",
+    entity: "inventory_item",
+    entityId: item.id,
+    entityLabel: item.name,
+    details: { العملية: "إنشاء", التصنيف: item.category, الوحدة: item.unit, حد_الطلب: item.minLevel },
+    actor: input.createdBy,
+    actorRole,
+  });
+  return item;
 }
 
 /** بند جديد — بلا رصيد ابتدائي عمدًا: البداية بحركة إدخال موثَّقة لا برقمٍ مفتعل. */
@@ -27422,6 +27953,66 @@ export async function createInventoryItem(input: {
     entityLabel: item.name,
     details: { العملية: "إنشاء", التصنيف: item.category, الوحدة: item.unit, حد_الطلب: item.minLevel },
     actor: input.createdBy,
+  });
+  return item;
+}
+
+export async function updateInventoryItemInTx(
+  client: DbClient,
+  id: number,
+  patch: { name?: string; category?: string; unit?: string; minLevel?: number; note?: string | null; isActive?: boolean },
+  actor: string,
+  actorRole: string | null = null,
+): Promise<InventoryItem | null> {
+  const { rows: currentRows } = await client.query<{ id: number; unit: string }>(
+    `SELECT id, unit FROM inventory_items WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  if (!currentRows[0]) return null;
+  if (patch.unit !== undefined) {
+    const { rows: countRows } = await client.query<{ c: number }>(
+      `SELECT COUNT(*)::int AS c FROM inventory_movements WHERE item_id = $1`,
+      [id],
+    );
+    assertBaseUnitEdit(currentRows[0].unit, patch.unit, countRows[0]?.c ?? 0);
+  }
+  const { rows } = await client.query<InventoryItemRow>(
+    `UPDATE inventory_items SET
+       name       = COALESCE($2, name),
+       category   = COALESCE($3, category),
+       unit       = COALESCE($4, unit),
+       min_level  = COALESCE($5, min_level),
+       note       = CASE WHEN $6::text IS NULL THEN note ELSE $6 END,
+       is_active  = COALESCE($7, is_active)
+     WHERE id = $1 RETURNING
+       id, name, category, unit, min_level, note, is_active, created_by, created_at`,
+    [
+      id, patch.name ?? null, patch.category ?? null, patch.unit ?? null,
+      patch.minLevel ?? null, patch.note === undefined ? null : patch.note,
+      patch.isActive ?? null,
+    ],
+  );
+  const updatedRow = rows[0] ?? null;
+  if (!updatedRow) return null;
+  const { rows: balRows } = await client.query<{ balance: string }>(
+    `SELECT ${INVENTORY_BALANCE_SELECT} AS balance
+       FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
+      WHERE i.id = $1 GROUP BY i.id`, [id],
+  );
+  const item = toItem({ ...updatedRow, balance: balRows[0]?.balance ?? "0" });
+  await insertAuditRow(client, {
+    action: "inventory.item",
+    entity: "inventory_item",
+    entityId: id,
+    entityLabel: item.name,
+    details: {
+      العملية: "تعديل",
+      التغييرات: Object.entries(patch)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => `${k}: ${String(v)}`).join("، "),
+    },
+    actor,
+    actorRole,
   });
   return item;
 }
@@ -27820,16 +28411,50 @@ export async function patientMaterialMovementsWith(
   }));
 }
 
-/** سجل حركات بند — الأحدث أولًا، بلا حدٍّ يخفي. */
-export async function listInventoryMovements(itemId: number, limit: number | null = 200): Promise<InventoryMovement[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<InventoryMovementRow>(
+export async function listInventoryMovementsWith(
+  q: Pick<DbClient, "query">,
+  itemId: number,
+  limit: number | null = 200,
+): Promise<InventoryMovement[]> {
+  const { rows } = await q.query<InventoryMovementRow>(
     `SELECT id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at,
             unit_cost_minor, is_return
        FROM inventory_movements WHERE item_id = $1 ORDER BY id DESC LIMIT $2`,
     [itemId, limit],
   );
   return rows.map(toMovement);
+}
+
+/** سجل حركات بند — الأحدث أولًا، بلا حدٍّ يخفي. */
+export async function listInventoryMovements(itemId: number, limit: number | null = 200): Promise<InventoryMovement[]> {
+  await ensureSchema();
+  return listInventoryMovementsWith(getPool(), itemId, limit);
+}
+
+export async function getInventoryItemDetailWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<{
+  item: InventoryItem;
+  movements: InventoryMovement[];
+  batches: BatchResult;
+} | null> {
+  const { rows } = await q.query<InventoryItemRow>(
+    `SELECT i.id, i.name, i.category, i.unit, i.min_level, i.note, i.is_active,
+            i.created_by, i.created_at, ${INVENTORY_BALANCE_SELECT} AS balance
+       FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
+      WHERE i.id = $1 GROUP BY i.id`, [id],
+  );
+  if (!rows[0]) return null;
+  const allMovements = await listInventoryMovementsWith(q, id, null);
+  const movements = allMovements.slice(0, 200);
+  const batches = batchRemaining(
+    [...allMovements].reverse().map((m) => ({
+      id: m.id, kind: m.kind, qty: m.qty,
+      expiryDate: m.expiryDate, createdAt: m.createdAt.toISOString(),
+    })),
+  );
+  return { item: toItem(rows[0]), movements, batches };
 }
 
 /** بند بأرشيفه: الرصيد المشتق، وسجل الحركات، ودفعات الصلاحية بما بقي فيها (FEFO). */
@@ -27839,22 +28464,7 @@ export async function getInventoryItemDetail(id: number): Promise<{
   batches: BatchResult;
 } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<InventoryItemRow>(
-    `SELECT i.id, i.name, i.category, i.unit, i.min_level, i.note, i.is_active,
-            i.created_by, i.created_at, ${INVENTORY_BALANCE_SELECT} AS balance
-       FROM inventory_items i LEFT JOIN inventory_movements m ON m.item_id = i.id
-      WHERE i.id = $1 GROUP BY i.id`, [id],
-  );
-  if (!rows[0]) return null;
-  const allMovements = await listInventoryMovements(id, null);
-  const movements = allMovements.slice(0, 200);
-  const batches = batchRemaining(
-    [...allMovements].reverse().map((m) => ({
-      id: m.id, kind: m.kind, qty: m.qty,
-      expiryDate: m.expiryDate, createdAt: m.createdAt.toISOString(),
-    })),
-  );
-  return { item: toItem(rows[0]), movements, batches };
+  return getInventoryItemDetailWith(getPool(), id);
 }
 
 export interface InventoryBatchAlert {
@@ -27871,25 +28481,16 @@ export interface InventoryAlerts {
   soon: InventoryBatchAlert[];
 }
 
-/**
- * ما يستحق انتباهًا اليوم: بنود تحت حد الطلب أو منتهية، ودفعات انتهت وما زال
- * فيها بقيّة، ودفعات تقارب انتهاءها خلال ثلاثين يومًا. البقايا تُشتق FEFO على
- * الحركات نفسها — فلا يُنذر النظام عن دفعة استُهلكت أصلًا.
- */
-export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
-  await ensureSchema();
-  /* مهلة «يقارب الانتهاء» من الإعداد `inventory.expiry_soon_days`. */
-  const settings = await getSettings();
+export async function inventoryAlertsWith(q: Pick<DbClient, "query">, today: string): Promise<InventoryAlerts> {
+  const settings = await getSettingsInTransaction(q as DbClient);
   const expirySoonDays = Number(settings["inventory.expiry_soon_days"]);
-  const items = await listInventoryItems();
+  const items = await listInventoryItemsWith(q);
   const lowItems = items
     .filter((i) => i.isActive && i.status !== "ok")
     .map((i) => ({ id: i.id, name: i.name, balance: i.balance, minLevel: i.minLevel, status: i.status }));
 
-  /* (INV-AUDIT) نافذة البحث هي مهلة الإعداد نفسها — كانت ٣٠ يومًا ثابتة فتضيع دفعاتٌ
-     تقع بين ٣٠ والمهلة المضبوطة. */
   const windowDays = Number.isFinite(expirySoonDays) && expirySoonDays > 0 ? Math.ceil(expirySoonDays) : 30;
-  const withExpiry = await getPool().query<{ item_id: number }>(
+  const withExpiry = await q.query<{ item_id: number }>(
     `SELECT DISTINCT m.item_id
        FROM inventory_movements m
        JOIN inventory_items i ON i.id = m.item_id
@@ -27904,7 +28505,7 @@ export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
   if (withExpiry.rows.length > 0) {
     const candidateIds = withExpiry.rows.map((r) => r.item_id);
     const activeById = new Map(items.filter((i) => i.isActive).map((i) => [i.id, i]));
-    const { rows: moveRows } = await getPool().query<{
+    const { rows: moveRows } = await q.query<{
       id: number; item_id: number; kind: string; qty: string; expiry_date: string | null; created_at: Date;
     }>(
       `SELECT id, item_id, kind, qty, expiry_date::text AS expiry_date, created_at
@@ -27942,6 +28543,16 @@ export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
     }
   }
   return { lowItems, expired, soon };
+}
+
+/**
+ * ما يستحق انتباهًا اليوم: بنود تحت حد الطلب أو منتهية، ودفعات انتهت وما زال
+ * فيها بقيّة، ودفعات تقارب انتهاءها خلال ثلاثين يومًا. البقايا تُشتق FEFO على
+ * الحركات نفسها — فلا يُنذر النظام عن دفعة استُهلكت أصلًا.
+ */
+export async function inventoryAlerts(today: string): Promise<InventoryAlerts> {
+  await ensureSchema();
+  return inventoryAlertsWith(getPool(), today);
 }
 
 // ─── قيمة المخزون وتكلفته (WAC — من مستودع الوكيل الآخر) ─────────────────────
@@ -28013,17 +28624,11 @@ export interface PatientIssuedCost {
   firstIssuedAt: string | null;
 }
 
-/**
- * تكلفةُ ما صُرف على مريضٍ بعينه — لربحية الحالة.
- *
- * تُحسب من حال ما **قبل** كل صرف: الصرف يُقوَّم بمتوسّط الرفّ لحظة خروجه —
- * وحسابُه بالمتوسّط اللاحق يجعل شراءً وقع بعد الصرف يغيّر تكلفة الماضي.
- * والمطابقة **بمعرّف الحركة** لا بتشابه القيم: حركتان متطابقتان رقميًّا
- * لمريضين مختلفين لا تُخلطان أبدًا.
- */
-export async function issuedCostForPatient(patientId: number): Promise<PatientIssuedCost> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+export async function issuedCostForPatientWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<PatientIssuedCost> {
+  const { rows } = await q.query<{
     id: number; item_id: number; kind: string; is_return: boolean | null; created_at: Date;
   }>(
     `SELECT id, item_id, kind, is_return, created_at
@@ -28041,7 +28646,7 @@ export async function issuedCostForPatient(patientId: number): Promise<PatientIs
       .map((row) => row.id),
   );
   const itemIds = [...new Set(rows.map((row) => row.item_id))];
-  const { rows: fullRows } = await getPool().query<{
+  const { rows: fullRows } = await q.query<{
     id: number; item_id: number; kind: string; qty: string; unit_cost_minor: string | null; is_return: boolean | null;
   }>(
     `SELECT id, item_id, kind, qty, unit_cost_minor, is_return FROM inventory_movements
@@ -28079,6 +28684,19 @@ export async function issuedCostForPatient(patientId: number): Promise<PatientIs
     issuedCount: issued.length,
     firstIssuedAt: first ? new Date(first).toISOString() : null,
   };
+}
+
+/**
+ * تكلفةُ ما صُرف على مريضٍ بعينه — لربحية الحالة.
+ *
+ * تُحسب من حال ما **قبل** كل صرف: الصرف يُقوَّم بمتوسّط الرفّ لحظة خروجه —
+ * وحسابُه بالمتوسّط اللاحق يجعل شراءً وقع بعد الصرف يغيّر تكلفة الماضي.
+ * والمطابقة **بمعرّف الحركة** لا بتشابه القيم: حركتان متطابقتان رقميًّا
+ * لمريضين مختلفين لا تُخلطان أبدًا.
+ */
+export async function issuedCostForPatient(patientId: number): Promise<PatientIssuedCost> {
+  await ensureSchema();
+  return issuedCostForPatientWith(getPool(), patientId);
 }
 
 // ─── بوابة المريض ────────────────────────────────────────────────────────────

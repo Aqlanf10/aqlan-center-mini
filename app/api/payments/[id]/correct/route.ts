@@ -6,6 +6,9 @@ import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import { DebtRepaymentError } from "@/lib/debt-installments-db";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { paymentCorrectCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +42,9 @@ const MESSAGES: Record<CorrectPaymentRefusal, { status: number; message: string 
 };
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return paymentCorrectCanonicalResponse(request, (await context.params).id, selected.handle);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (session.role !== "admin") {

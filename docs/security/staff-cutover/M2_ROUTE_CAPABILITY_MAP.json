@@ -1856,7 +1856,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -1871,7 +1871,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Legacy foundation writer is guarded; canonical item writes go through reference setup."
   },
   {
@@ -1887,8 +1887,16 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "",
+    "projection": {
+      "legacy": "every admitted role reads item detail and movements; unitCostMinor and payable links are exposed only when isAdmin(session.role).",
+      "groups": {
+        "operational": "item identity, balance, batches and movement quantities ? inventory.references.view",
+        "cost": "unitCostMinor and supplier payable linkage on movements ? inventory.costs.view"
+      },
+      "fields": "movements[].unitCostMinor and payable metadata projected by scope.granted('inventory.costs.view')"
+    }
   },
   {
     "route": "/api/inventory/[id]",
@@ -1902,7 +1910,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Legacy foundation writer is guarded; canonical item writes go through reference setup."
   },
   {
@@ -1918,7 +1926,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Live legacy movement writer is guarded; canonical movements are procurement/custody commands."
   },
   {
@@ -1934,8 +1942,15 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "",
+    "projection": {
+      "legacy": "admitted staff with patient access read issued counts; doctors without cost-price grant receive materialCostMinor: null, costHidden: true.",
+      "groups": {
+        "cost": "issuedCount, firstIssuedAt and materialCostMinor ? read:inventory.patient-cost (inventory.costs.view + patient scope)"
+      },
+      "rows": "patientScope all: any patient; own: patients inside clinicianPartyId scope (else 403)"
+    }
   },
   {
     "route": "/api/inventory/procurement",
@@ -1976,8 +1991,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "",
+    "projection": {
+      "legacy": "admin-only whole-clinic inventory valuation in base currency.",
+      "groups": {
+        "cost": "valued inventory items and clinic total valuation ? inventory.costs.view"
+      }
+    }
   },
   {
     "route": "/api/invoices",
@@ -1993,8 +2014,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "",
+    "projection": {
+      "legacy": "canViewMoney roles read patient invoices unless cashier/accountant has financeAccess.viewPatientLedger === false.",
+      "groups": {
+        "financial": "patient invoices and line items ? finance.invoices.view"
+      },
+      "rows": "clinic finance actors read requested patient invoices; own-scoped clinicians are restricted to patients inside clinicianPartyId scope"
+    }
   },
   {
     "route": "/api/invoices",
@@ -2008,7 +2036,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -2025,8 +2053,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "",
+    "projection": {
+      "legacy": "canViewMoney roles read a single invoice unless cashier/accountant has financeAccess.viewPatientLedger === false.",
+      "groups": {
+        "financial": "single invoice and line items ? finance.invoices.view"
+      },
+      "rows": "clinic finance actors read requested invoice; own-scoped clinicians are restricted to patients inside clinicianPartyId scope"
+    }
   },
   {
     "route": "/api/invoices/[id]",
@@ -2035,13 +2070,15 @@
       "admin",
       "reception"
     ],
-    "need": [
-      "finance.invoices.create"
+    "need": [],
+    "anyOf": [
+      "finance.invoices.create",
+      "finance.invoices.mark-paid",
+      "finance.invoices.cancel"
     ],
-    "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "Canonical admission branches on requested status: open -> finance.invoices.create, paid -> finance.invoices.mark-paid, cancelled -> finance.invoices.cancel."
   },
   {
     "route": "/api/invoices/[id]/add-service",
@@ -2054,7 +2091,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Admin-only today; appending to a posted invoice."
   },
   {
@@ -2068,7 +2105,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Admin-only today; appending to a posted invoice."
   },
   {
@@ -2082,7 +2119,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Admin-only today; appending to a posted invoice."
   },
   {
@@ -2099,7 +2136,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -2113,7 +2150,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -2127,7 +2164,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -2141,7 +2178,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -2158,8 +2195,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "",
+    "projection": {
+      "legacy": "canViewMoney roles read patient invoice archive views.",
+      "groups": {
+        "financial": "invoice archive readiness and archived invoice list ? finance.invoices.view"
+      },
+      "rows": "clinic finance actors read requested patient archive; own-scoped clinicians are restricted to patients inside clinicianPartyId scope"
+    }
   },
   {
     "route": "/api/invoices/clinical-preview",
@@ -2173,7 +2217,7 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "existing",
+    "status": "canonical-done",
     "note": "",
     "branches": {
       "discriminator": "none",
@@ -4501,8 +4545,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "",
+    "projection": {
+      "legacy": "canViewMoney roles read daily receipts unless cashier/accountant has both viewPatientLedger and collectPayments disabled.",
+      "groups": {
+        "financial": "clinic-day payment and refund receipts ? finance.payments.view"
+      },
+      "rows": "clinic finance actors read all receipts of the requested date; own-scoped clinicians receive only receipts of patients in their clinicianPartyId scope"
+    }
   },
   {
     "route": "/api/payments",
@@ -4512,13 +4563,14 @@
       "reception",
       "cashier"
     ],
-    "need": [
-      "finance.payments.collect"
+    "need": [],
+    "anyOf": [
+      "finance.payments.collect",
+      "finance.payments.refund"
     ],
-    "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Requires an open cashier shift."
+    "status": "canonical-done",
+    "note": "Requires an open cashier shift. Canonical admission branches on kind: payment/recovery -> finance.payments.collect, refund -> finance.payments.refund."
   },
   {
     "route": "/api/payments/[id]/correct",
@@ -4531,7 +4583,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": "Requires an open cashier shift.",
     "branches": {
       "discriminator": "mode",
@@ -4562,7 +4614,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -5279,7 +5331,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -5295,7 +5347,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -5310,7 +5362,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -5327,8 +5379,16 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "",
+    "projection": {
+      "legacy": "canViewMoney roles read services (plus invoiceQuotes when canHandleMoney); doctors require canViewServicePrices.",
+      "groups": {
+        "catalog": "service catalogue and converted/foreign prices ? finance.service-prices.view",
+        "quoting": "invoiceQuotes per currency from stored FX ? scope.granted('finance.invoices.create')"
+      },
+      "fields": "invoiceQuotes included only when scope.granted('finance.invoices.create')"
+    }
   },
   {
     "route": "/api/services",
@@ -5341,7 +5401,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -5355,7 +5415,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -5369,7 +5429,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {
@@ -5383,7 +5443,7 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
+    "status": "canonical-done",
     "note": ""
   },
   {

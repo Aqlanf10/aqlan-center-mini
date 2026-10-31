@@ -199,3 +199,122 @@ export async function changeInvoiceArchive(invoiceId: number, source: unknown, s
   } catch (error) { if (!committed) try { await client.query("ROLLBACK"); } catch { destroy = true; } throw error; }
   finally { client.release(destroy); }
 }
+
+export async function readCanonicalInvoiceArchiveWith(q: Pick<DbClient, "query">, invoiceId: number): Promise<InvoiceArchiveView> {
+  if (!positiveId(invoiceId)) throw new InvoiceArchiveError("invalid", "رقم الفاتورة غير صالح.");
+  const client = q as DbClient;
+  const invoice = await getInvoice(invoiceId, client);
+  if (!invoice) throw new InvoiceArchiveError("missing", "الفاتورة غير موجودة.");
+  return view(client, invoice, await invoiceArchiveReady(client));
+}
+
+export async function listCanonicalInvoiceArchiveWith(q: Pick<DbClient, "query">, patientId: number): Promise<{
+  readiness: "ready" | "migration_pending"; invoices: InvoiceArchiveView[]; archivedInvoices: { invoice: Invoice; archive: InvoiceArchiveView }[];
+}> {
+  if (!positiveId(patientId)) throw new InvoiceArchiveError("invalid", "رقم المريض غير صالح.");
+  const client = q as DbClient;
+  const ready = await invoiceArchiveReady(client), documents = await listPatientInvoices(patientId, client);
+  const states: InvoiceArchiveView[] = [];
+  for (const invoice of documents) states.push(await view(client, invoice, ready));
+  return {
+    readiness: ready ? "ready" : "migration_pending",
+    invoices: states,
+    archivedInvoices: states.flatMap((state, index) => state.archived ? [{ invoice: documents[index], archive: state }] : []),
+  };
+}
+
+export async function changeCanonicalInvoiceArchiveInTx(
+  client: DbClient,
+  invoiceId: number,
+  source: unknown,
+  actor: { userId: number; username: string; role: string; verifyLiveSession: (client: DbClient) => Promise<void> },
+): Promise<{ committedRejection: InvoiceArchiveError } | { result: InvoiceArchiveResult }> {
+  if (!positiveId(invoiceId)) throw new InvoiceArchiveError("invalid", "رقم الفاتورة غير صالح.");
+  const command = parseInvoiceArchiveCommand(source);
+  const hash = debtRequestHash({ purpose: "invoice-archive-v1", invoiceId, command, actor: { id: actor.userId, username: actor.username } });
+  await actor.verifyLiveSession(client);
+  if (!await invoiceArchiveReady(client)) throw new InvoiceArchiveError("migration_pending", INVOICE_ARCHIVE_MIGRATION_MESSAGE);
+  await client.query("SELECT pg_advisory_xact_lock(hashtext('invoice-archive:' || $1))", [command.idempotencyKey]);
+  const { rows: [owner] } = await client.query<{ patient_id: number }>("SELECT patient_id FROM invoices WHERE id=$1", [invoiceId]);
+  if (!owner) throw new InvoiceArchiveError("missing", "الفاتورة غير موجودة.");
+  await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [owner.patient_id]);
+  await client.query("SELECT id FROM invoices WHERE id=$1 FOR UPDATE", [invoiceId]);
+  const invoice = await getInvoice(invoiceId, client);
+  if (!invoice || invoice.patientId !== owner.patient_id) throw new InvoiceArchiveError("conflict", "تغيرت هوية الفاتورة؛ حدّث المعاينة.");
+  const acknowledgment = {
+    idempotencyKey: command.idempotencyKey,
+    action: command.action,
+    expectedVersion: command.expectedVersion,
+    actor: actor.username,
+    invoiceId,
+    patientId: invoice.patientId,
+  };
+  const { rows: [saved] } = await client.query<EventRow>("SELECT *,id::text FROM invoice_archive_events WHERE idempotency_key=$1", [command.idempotencyKey]);
+  if (saved) {
+    if (saved.request_hash !== hash || saved.invoice_id !== invoiceId || saved.actor_user_id !== actor.userId || saved.actor !== actor.username) {
+      throw new InvoiceArchiveError("conflict", "مفتاح الأرشفة استُعمل بطلب أو مستخدم مختلف.");
+    }
+    const current = await view(client, invoice, true);
+    await actor.verifyLiveSession(client);
+    return { result: { receipt: receipt(saved), current, replayed: true, noop: false, acknowledgment } };
+  }
+  const refusal = { ...command, kind: "durable_rejection" as const, invoiceId, patientId: invoice.patientId, actor: actor.username, currentVersion: command.expectedVersion };
+  const { rows: [rejected] } = await client.query<{ invoice_id: number; actor_user_id: number; request_hash: string; code: "period_locked" | "policy_decision_required"; message: string }>(
+    "SELECT * FROM invoice_archive_rejections WHERE idempotency_key=$1", [command.idempotencyKey],
+  );
+  if (rejected) {
+    if (rejected.invoice_id !== invoiceId || rejected.actor_user_id !== actor.userId || rejected.request_hash !== hash) {
+      throw new InvoiceArchiveError("conflict", "مفتاح المحاولة المرفوضة يخص طلبًا أو مستخدمًا مختلفًا.");
+    }
+    throw new InvoiceArchiveError(rejected.code, rejected.message, refusal);
+  }
+  const reject = async (code: "period_locked" | "policy_decision_required", message: string): Promise<{ committedRejection: InvoiceArchiveError }> => {
+    await client.query(
+      `INSERT INTO invoice_archive_rejections (idempotency_key,invoice_id,actor_user_id,request_hash,code,message)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [command.idempotencyKey, invoiceId, actor.userId, hash, code, message],
+    );
+    await actor.verifyLiveSession(client);
+    return { committedRejection: new InvoiceArchiveError(code, message, refusal) };
+  };
+  const current = await view(client, invoice, true);
+  if (command.expectedVersion !== current.version) {
+    throw new InvoiceArchiveError(
+      "stale",
+      "تغيرت حالة الأرشفة؛ حدّث المعاينة قبل طلب جديد.",
+      current.version > command.expectedVersion
+        ? { ...command, kind: "version_advanced", invoiceId, patientId: invoice.patientId, actor: actor.username, currentVersion: current.version }
+        : undefined,
+    );
+  }
+  if (current.archived === (command.action === "archive")) {
+    await actor.verifyLiveSession(client);
+    return { result: { receipt: current.latest, current, replayed: false, noop: true, acknowledgment } };
+  }
+  await client.query("LOCK TABLE settings IN SHARE MODE");
+  if (await locked(client, invoice)) return reject("period_locked", "الفاتورة في فترة مقفلة؛ الأرشفة والاسترجاع غير متاحين لهذه الفترة.");
+  if (command.action === "archive" && !current.eligibility.canArchive) {
+    return reject(current.eligibility.code === "period_locked" ? "period_locked" : "policy_decision_required", current.eligibility.message ?? "تسوية الفاتورة تحتاج مراجعة.");
+  }
+  const { rows: [event] } = await client.query<EventRow>(
+    `INSERT INTO invoice_archive_events
+      (invoice_id,patient_id,invoice_number,invoice_created_at,currency,version,action,reason,idempotency_key,request_hash,actor_user_id,actor)
+      SELECT id,patient_id,invoice_number,created_at,base_currency,$2,$3,$4,$5,$6,$7,$8 FROM invoices WHERE id=$1 RETURNING *,id::text`,
+    [invoiceId, current.version + 1, command.action, command.reason, command.idempotencyKey, hash, actor.userId, actor.username],
+  );
+  if (command.action === "archive") {
+    await cancelActiveInvoiceDebtArrangementInTx(client, invoiceId, actor.username, actor.role, `أرشفة الفاتورة: ${command.reason}`);
+  }
+  await insertAuditRow(client, {
+    action: command.action === "archive" ? "invoice.archive" : "invoice.restore",
+    entity: "invoice",
+    entityId: invoiceId,
+    entityLabel: invoice.invoiceNumber,
+    actor: actor.username,
+    actorRole: actor.role,
+    details: { السبب: command.reason, المريض: invoice.patientId, النسخة: event.version, الإجراء: command.action, أثر_محاسبي: "لا تغيير في الفاتورة أو الدين أو السندات" },
+  });
+  const result = { receipt: receipt(event), current: await view(client, invoice, true), replayed: false, noop: false, acknowledgment };
+  await actor.verifyLiveSession(client);
+  return { result };
+}

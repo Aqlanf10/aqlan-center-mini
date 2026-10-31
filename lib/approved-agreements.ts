@@ -2,7 +2,7 @@ import {assertSimilarCollectionReviewed,type SimilarCollectionReview} from "./si
 import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
 import {clinicDateString} from "./schedule";
 import {CLINIC_TIME_ZONE} from "./db";
-import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, patientInDoctorScopeWith, writeDebtCollectionReceipt, type DbClient, type DbPool } from "./db";
+import { ensureSchema, getPool, getPayment, getPaymentWith, getSettingsInTransaction, insertAuditRow, patientInDoctorScopeWith, writeDebtCollectionReceipt, type DbClient, type DbPool } from "./db";
 import { canHandleMoney } from "./roles";
 import { revalidateSessionInTransaction } from "./session";
 import type { SessionPayload } from "./auth";
@@ -563,14 +563,14 @@ export async function collectCanonicalApprovedAgreementInTransaction(
     note: string | null;
     idempotencyKey: string;
   },
-  options: { similarityReview?: SimilarCollectionReview } = {},
+  options: { similarityReview?: SimilarCollectionReview; enforcePatientScope?: boolean } = {},
 ) {
   if (!positive(input.planId) || !positive(input.amountMinor) || !isCurrency(input.currency) || !validKey(input.idempotencyKey) || !["cash", "transfer"].includes(input.method)) {
     fail("راجع بيانات التحصيل.");
   }
   const identity = await staffOperationIdentity(client, handle, action);
   const patientScope = await staffOperationPatientScope(client, handle, action);
-  if (patientScope.kind === "none") {
+  if (options.enforcePatientScope !== false && patientScope.kind === "none") {
     throw new DebtRepaymentError("unauthorized", "لا تملك صلاحية الوصول لملفات المرضى.");
   }
   const granted = await staffOperationCapabilities(client, handle, action, ["finance.payments.collect"] as const);
@@ -757,15 +757,16 @@ export async function collectCanonicalApprovedAgreementInTransaction(
 
 export async function hydrateCollectedAgreementPayments(
   receipt: Awaited<ReturnType<typeof collectCanonicalApprovedAgreementInTransaction>>,
+  q: Pick<DbClient, "query"> = getPool(),
 ) {
-  const payment = await getPayment(receipt.paymentId);
+  const payment = await getPaymentWith(q, receipt.paymentId);
   if (!payment) throw new Error("Committed agreement payment unavailable; retain original key for reconciliation.");
   if ("collection" in receipt && receipt.collection) {
     const group = receipt.collection as {
       planId: number; patientId: number; currency: Currency; amountMinor: number;
       paymentIds: number[]; allocations: { invoiceId: number; paymentId: number; amountMinor: number }[];
     };
-    const payments = await Promise.all(group.paymentIds.map(id => getPayment(id)));
+    const payments = await Promise.all(group.paymentIds.map(id => getPaymentWith(q, id)));
     if (payments.some(p => !p) || payments.some((p, index) => p!.id !== group.paymentIds[index]
       || p!.invoiceId !== group.allocations[index]?.invoiceId
       || p!.amountMinor !== group.allocations[index]?.amountMinor

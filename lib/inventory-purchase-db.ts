@@ -2,7 +2,7 @@ import { PURCHASE_RESET_FENCE } from "./clinic-reset";
 import { createHash } from "node:crypto";
 import {
   createInventoryMovementInTransaction, ensureSchema, getPool,
-  type InventoryMovement, type InventoryMovementInput,
+  type DbClient, type InventoryMovement, type InventoryMovementInput,
 } from "./db";
 import type { SessionPayload } from "./auth";
 import { revalidateSessionInTransaction } from "./session";
@@ -134,4 +134,87 @@ export async function createInventoryPurchase(command: Command) {
     );
     return response(outcome, JSON.parse(encoded), movementId, false);
   });
+}
+
+export async function createCanonicalInventoryPurchaseInTx(
+  client: DbClient,
+  command: {
+    actor: { userId: number; username: string; canViewCosts: boolean };
+    requestKey: string;
+    itemId: number;
+    purchase: Record<string, unknown>;
+  } & ({ input: InventoryMovementInput; rejection?: never } | { input?: never; rejection: Rejection }),
+) {
+  if (!isPurchaseKey(command.requestKey)) throw new Error("Invalid purchase key");
+  const requestKey = command.requestKey.toLowerCase();
+  const requestDigest = createHash("sha256").update(canonicalPurchaseRequest(command.itemId, command.purchase)).digest("hex");
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))", [PURCHASE_RESET_FENCE]);
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`inventory-purchase:${requestKey}`]);
+  const { rows: [receipt] } = await client.query<ReceiptRow>(
+    `SELECT actor_user_id, fingerprint_version, request_digest, outcome, movement_id, result_version, result_snapshot
+     FROM inventory_purchase_receipts WHERE request_key=$1::uuid`, [requestKey],
+  );
+  const identity = {
+    protocol: INVENTORY_PURCHASE_PROTOCOL,
+    requestKey,
+    requestDigest,
+    itemId: command.itemId,
+    actorUserId: command.actor.userId,
+  };
+  const response = (outcome: "committed" | "rejected", data: unknown, movementId: number | null, replayed: boolean) => {
+    if (outcome === "rejected") {
+      const rejected = rejectionSnapshot(data);
+      return { httpStatus: rejected.httpStatus, body: { ...identity, status: "rejected" as const, replayed, message: rejected.message } };
+    }
+    if (!movementId) throw new Error("Missing committed purchase movement");
+    const original = snapshot(data, movementId);
+    if (original.movement.itemId !== command.itemId) throw new Error("Mismatched stored purchase item");
+    return {
+      httpStatus: 201,
+      body: {
+        ...identity,
+        status: "committed" as const,
+        replayed,
+        movementId,
+        payableCreated: original.movement.payableId !== null,
+        result: {
+          ok: true as const,
+          balance: original.balance,
+          movement: inventoryMovementForRead(original.movement, command.actor.canViewCosts),
+        },
+      },
+    };
+  };
+  if (receipt) {
+    if (receipt.actor_user_id !== command.actor.userId || receipt.fingerprint_version !== 1
+      || receipt.result_version !== 1 || receipt.request_digest !== requestDigest) return conflict;
+    return response(receipt.outcome, receipt.result_snapshot, receipt.movement_id, true);
+  }
+  let result: Snapshot | Rejection;
+  let outcome: "committed" | "rejected";
+  let movementId: number | null = null;
+  if (command.rejection) {
+    outcome = "rejected";
+    result = rejectionSnapshot(command.rejection);
+  } else {
+    if (command.input.itemId !== command.itemId || command.input.kind !== "in" || command.input.isReturn
+      || command.input.patientId != null || command.input.visitId != null) throw new Error("Unsupported keyed purchase");
+    const written = await createInventoryMovementInTransaction(client, { ...command.input, createdBy: command.actor.username });
+    if (!written.ok) {
+      outcome = "rejected";
+      result = { httpStatus: 409, message: written.message };
+    } else {
+      outcome = "committed";
+      movementId = written.movement.id;
+      result = allowlistedSnapshot(written);
+    }
+  }
+  const encoded = JSON.stringify(result);
+  await client.query(
+    `INSERT INTO inventory_purchase_receipts
+     (request_key,actor_user_id,fingerprint_version,request_digest,outcome,movement_id,result_version,result_snapshot)
+     VALUES ($1::uuid,$2,1,$3,$4,$5,1,$6::jsonb)`,
+    [requestKey, command.actor.userId, requestDigest, outcome, movementId, encoded],
+  );
+  return response(outcome, JSON.parse(encoded), movementId, false);
 }

@@ -7,7 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import type { SessionPayload } from "./auth";
-import { getPool, insertAuditRow } from "./db";
+import { getPool, insertAuditRow, type DbClient } from "./db";
 import { IDEMPOTENCY_KEY_PATTERN } from "./idempotency-key";
 import { canHandleMoney } from "./roles";
 import { revalidateSessionInTransaction } from "./session";
@@ -17,7 +17,11 @@ export const COLLECTION_KEY_RETIRED = "collection key was retired";
 export const RETIRED_COLLECTION_MESSAGE = "أُلغيت هذه المحاولة بعد التحقق من أنها لم تُحفظ. ابدأ تحصيلًا جديدًا إن كان مقصودًا.";
 export type CollectionAttemptOutcome = "retired" | "committed";
 export class CollectionAttemptError extends Error {
-  constructor(readonly status: 400 | 403 | 409, message: string) { super(message); }
+  readonly code: "invalid" | "unauthorized" | "conflict";
+  constructor(readonly status: 400 | 403 | 409, message: string) {
+    super(message);
+    this.code = status === 400 ? "invalid" : status === 403 ? "unauthorized" : "conflict";
+  }
 }
 /** The attempt as the client saved it: the proof is bound to exactly this, never to the current screen. */
 export interface CollectionAttemptIdentity {
@@ -87,4 +91,53 @@ export async function retireCollectionAttempt(attempt: CollectionAttemptIdentity
     try { await client.query("ROLLBACK"); } catch { destroy = true; }
     throw error;
   } finally { client.release(destroy); }
+}
+
+export async function retireCanonicalCollectionAttemptInTx(
+  client: DbClient,
+  attempt: CollectionAttemptIdentity,
+  actor: { username: string; role: string },
+): Promise<CollectionAttemptOutcome> {
+  const { idempotencyKey: key, patientId, operation, requestBody, originalActor } = attempt;
+  if (typeof key !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(key)) throw new CollectionAttemptError(400, "مفتاح المحاولة غير صالح.");
+  if (typeof patientId !== "number" || !Number.isSafeInteger(patientId) || patientId <= 0) throw new CollectionAttemptError(400, "حدّد المريض صاحب المحاولة.");
+  if (operation !== "payment" && operation !== "installment") throw new CollectionAttemptError(400, "نوع المحاولة غير صالح.");
+  if (typeof requestBody !== "string" || !requestBody || requestBody.length > REQUEST_BODY_LIMIT) throw new CollectionAttemptError(400, "الطلب المحفوظ للمحاولة غير صالح.");
+  if (typeof originalActor !== "string" || !originalActor.trim()) throw new CollectionAttemptError(400, "صاحب المحاولة غير محدد.");
+  let parsed: unknown;
+  try { parsed = JSON.parse(requestBody); } catch { throw new CollectionAttemptError(400, "الطلب المحفوظ للمحاولة غير صالح."); }
+  if (!parsed || typeof parsed !== "object" || (parsed as { patientId?: unknown }).patientId !== patientId) throw new CollectionAttemptError(400, "الطلب المحفوظ للمحاولة يخص مريضًا آخر.");
+  const requestHash = createHash("sha256").update(requestBody).digest("hex");
+  if (actor.username !== originalActor) throw new CollectionAttemptError(409, ATTEMPT_OWNER_CHANGED);
+  if (!(await client.query("SELECT 1 FROM patients WHERE id=$1", [patientId])).rows.length) {
+    throw new CollectionAttemptError(400, "المريض صاحب المحاولة غير موجود.");
+  }
+  await client.query("SAVEPOINT canonical_retire_attempt");
+  try {
+    await client.query(`INSERT INTO collection_attempt_retirements(idempotency_key,patient_id,operation,request_hash,retired_by)
+      VALUES($1,$2,$3,$4,$5)`, [key, patientId, operation, requestHash, actor.username]);
+    await client.query("RELEASE SAVEPOINT canonical_retire_attempt");
+  } catch (error) {
+    if (error instanceof Error && error.message === COLLECTION_KEY_COMMITTED) {
+      await client.query("ROLLBACK TO SAVEPOINT canonical_retire_attempt");
+      await client.query("RELEASE SAVEPOINT canonical_retire_attempt");
+      return "committed";
+    }
+    if ((error as { code?: string }).code === "23505") {
+      await client.query("ROLLBACK TO SAVEPOINT canonical_retire_attempt");
+      await client.query("RELEASE SAVEPOINT canonical_retire_attempt");
+      const { rows: [prior] } = await client.query<{ patient_id: number; operation: string; request_hash: string; retired_by: string }>(
+        "SELECT patient_id,operation,request_hash,retired_by FROM collection_attempt_retirements WHERE idempotency_key=$1", [key]);
+      if (prior?.patient_id !== patientId || prior.operation !== operation || prior.request_hash !== requestHash || prior.retired_by !== actor.username) {
+        throw new CollectionAttemptError(409, "مفتاح المحاولة أُلغي لطلب أو مستخدم مختلف؛ لا يُعاد استعماله.");
+      }
+      return "retired";
+    }
+    throw error;
+  }
+  await insertAuditRow(client, {
+    action: "payment.attempt_retire", entity: "payment_attempt", entityId: null,
+    details: { idempotencyKey: key, patientId, operation, requestHash }, actor: actor.username, actorRole: actor.role,
+  });
+  return "retired";
 }

@@ -130,7 +130,7 @@ function handlerAudits(local: Map<string, string>, handler: string, audited: Set
 const REFUSAL_ONLY = {
   "POST /api/plans": {
     reason: "إنشاء الخطط القديم موقوف: رفض 409 بعد الصلاحيات، بلا كتابة أو تدقيق نجاح.",
-    sha256: "cd5aa5ddddd9ccb7aba89bbdb3d060c96113a7a6226e1167f67634612a23ac2e",
+    sha256: "130a982ec3bde235950cf9158df95dacf370a9b2300ad0912108a76fa458068b",
   },
 };
 const audited = auditingLibFunctions();

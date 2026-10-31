@@ -3,9 +3,15 @@ import { requireSession } from "@/lib/session";
 import { listInvoiceArchive } from "@/lib/invoice-archive-db";
 import { InvoiceArchiveError } from "@/lib/invoice-archive";
 import { canViewMoney } from "@/lib/roles";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { invoiceArchiveListCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة؛ سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return invoiceArchiveListCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة؛ سجّل الدخول من جديد." }, { status: 401 });
   if (!canViewMoney(session.role)) return NextResponse.json({ message: "الأرشيف يحتاج صلاحية قراءة الفواتير." }, { status: 403 });

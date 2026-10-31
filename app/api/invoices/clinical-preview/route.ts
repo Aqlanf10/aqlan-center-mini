@@ -12,11 +12,17 @@ import { checkInvoiceAuthority } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { invoiceClinicalPreviewCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
 /** Read-only linkage preview uses the exact save parser and price-authority engine. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return invoiceClinicalPreviewCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canHandleMoney(session.role)) return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });

@@ -4,6 +4,9 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { requireSession } from "@/lib/session";
 import { readInvoiceArchive, changeInvoiceArchive } from "@/lib/invoice-archive-db";
 import { InvoiceArchiveError } from "@/lib/invoice-archive";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { invoiceArchiveGetCanonicalResponse, invoiceArchivePostCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
@@ -21,10 +24,16 @@ async function owner(context: Context) {
   return { id, session };
 }
 export async function GET(_request: Request, context: Context) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة؛ سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return invoiceArchiveGetCanonicalResponse((await context.params).id, selected.handle);
   try { const { id, session } = await owner(context); return NextResponse.json(await readInvoiceArchive(id, session)); }
   catch (error) { return failure(error); }
 }
 export async function POST(request: Request, context: Context) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة؛ سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return invoiceArchivePostCanonicalResponse(request, (await context.params).id, selected.handle);
   try {
     const { id, session } = await owner(context);
     if (session.role !== "admin") throw new InvoiceArchiveError("unauthorized", "الأرشفة والاسترجاع للمدير وحده.");

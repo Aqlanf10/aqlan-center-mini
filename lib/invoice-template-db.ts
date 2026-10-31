@@ -4,20 +4,43 @@ import type { LabWorkRetirement } from "./lab-work-intent-contract";
 import type { LinkedInvoiceLineInput } from "./invoice-linkage-db";
 import { invoiceCommandFingerprint, invoiceTemplateRequestFingerprint, parseInvoiceCommand, hasInvoiceCatalogQuote, invoiceCatalogRequestFingerprint } from "./invoice-template";
 import { checkInvoiceAuthority } from "./invoice-pricing";
+import type { CanonicalPriceCapabilities } from "./price-authority";
 import { foreignRatesFromSettings } from "./service-pricing";
 import type { SessionPayload } from "./auth";
 import { revalidateSessionInTransaction } from "./session";
 import { canHandleMoney } from "./roles";
 import { invoicePricingAudit } from "./invoice-price-settings-db";
 
-export type InvoiceTemplateAuthority = { source: Record<string, unknown>; fingerprint: string; session: SessionPayload };
+export type CanonicalInvoiceTemplateAuthority = {
+  userId: number | null;
+  username: string;
+  role: string;
+  canDocumentLabWork: boolean;
+  priceCapabilities: CanonicalPriceCapabilities;
+  verifyLiveSession: (client: DbClient) => Promise<void>;
+};
+export type InvoiceTemplateAuthority = {
+  source: Record<string, unknown>;
+  fingerprint: string;
+  session?: SessionPayload;
+  canonical?: CanonicalInvoiceTemplateAuthority;
+};
 export class InvoiceTemplateAuthorizationError extends Error {
   readonly code = "INVOICE_SESSION_REVOKED";
   constructor() { super("انتهت صلاحية الجلسة أثناء انتظار الطلب؛ سجّل الدخول قبل استعادة نتيجته."); }
 }
 /** Only an already admitted signed payload from the route, never client JSON. */
 export async function assertInvoiceTemplateSession(client: DbClient, session: SessionPayload | undefined,
-  actor: { createdBy: string; actorRole: string | null }): Promise<void> {
+  actor: { createdBy: string; actorRole: string | null }, canonical?: CanonicalInvoiceTemplateAuthority): Promise<void> {
+  if (canonical) {
+    if (canonical.username !== actor.createdBy || canonical.role !== actor.actorRole) throw new InvoiceTemplateAuthorizationError();
+    try {
+      await canonical.verifyLiveSession(client);
+    } catch {
+      throw new InvoiceTemplateAuthorizationError();
+    }
+    return;
+  }
   if (!session) throw new InvoiceTemplateAuthorizationError();
   const current = await revalidateSessionInTransaction(session, client);
   if (!current || !canHandleMoney(current.role) || current.username !== actor.createdBy || current.role !== actor.actorRole) throw new InvoiceTemplateAuthorizationError();
@@ -56,12 +79,17 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     return;
   }
   const authority = usesTemplate ? input.templateAuthority : input.catalogueAuthority;
-  if (!authority?.session) throw new InvoiceTemplateAuthorizationError();
-  if (usesTemplate && (input.idempotencyKey === null || input.requestHash !== invoiceTemplateRequestFingerprint(authority.source,
-    { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session.userId ?? null }))) throw new InvoiceTemplateAuthorityError();
+  if (!authority?.session && !authority?.canonical) throw new InvoiceTemplateAuthorizationError();
+  const principal = authority.canonical
+    ? { username: input.createdBy, role: input.actorRole ?? "", userId: authority.canonical.userId }
+    : { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session!.userId ?? null };
+  if (usesTemplate && (input.idempotencyKey === null || input.requestHash !== invoiceTemplateRequestFingerprint(authority.source, principal))) {
+    throw new InvoiceTemplateAuthorityError();
+  }
   if (!usesTemplate && input.idempotencyKey !== null && hasInvoiceCatalogQuote(authority.source)
-    && input.requestHash !== invoiceCatalogRequestFingerprint(authority.source,
-      { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session.userId ?? null })) throw new InvoiceTemplateAuthorityError();
+    && input.requestHash !== invoiceCatalogRequestFingerprint(authority.source, principal)) {
+    throw new InvoiceTemplateAuthorityError();
+  }
   // SHARE settings covers missing/default keys too. Template service references
   // are explicit, so new catalogue inserts cannot change the selected services.
   // This path performs only same-client DB work and synchronous validation under
@@ -84,8 +112,13 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     if ((error as { code?: string }).code === "55P03") throw new InvoiceTemplateBusyError();
     throw error;
   }
-  await assertInvoiceTemplateSession(client, authority.session, input);
-  if ((input.items.some(item=>item.labWork) || input.labRetirements !== undefined) && authority.session.role !== "admin" && authority.session.role !== "doctor") throw new InvoiceTemplateAuthorizationError();
+  await assertInvoiceTemplateSession(client, authority.session, input, authority.canonical);
+  if (input.items.some(item => item.labWork) || input.labRetirements !== undefined) {
+    const allowedLab = authority.canonical
+      ? authority.canonical.canDocumentLabWork
+      : authority.session!.role === "admin" || authority.session!.role === "doctor";
+    if (!allowedLab) throw new InvoiceTemplateAuthorizationError();
+  }
   const minor = (value: string): number => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number < 0) throw new InvoiceTemplateAuthorityError();
@@ -107,7 +140,9 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     || itemsFingerprint(current.items) !== itemsFingerprint(input.items)) throw new InvoiceTemplateAuthorityError();
   const pricing = checkInvoiceAuthority({ requireInvoiceManualReason:true,
     lines: current.authorityLines, currency: current.baseCurrency, rates: foreignRatesFromSettings(settings),
-    role: input.actorRole ?? "", maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
+    role: input.actorRole ?? "",
+    ...(authority.canonical ? { capabilities: authority.canonical.priceCapabilities } : {}),
+    maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
     totalMinor: current.items.reduce((sum, item) => sum + item.quantity * item.unitPriceMinor, 0),
     discountMinor: current.discountMinor,
     discountReason: typeof authority.source.discountReason === "string" ? authority.source.discountReason : null,

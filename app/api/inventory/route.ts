@@ -9,6 +9,9 @@ import { clinicDateString } from "@/lib/schedule";
 import { canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { inventoryCreateCanonicalResponse, inventoryListCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +20,9 @@ const denied = () =>
 
 /** قائمة المخزون مع التنبيهات — القراءة لكل من دخول البرنامج: المخزون ليس سرًّا. */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return inventoryListCanonicalResponse(selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   try {
@@ -32,6 +38,9 @@ export async function GET() {
 
 /** بند جديد — للمدير والاستقبال. البداية بلا رصيد: أول حركة إدخال موثَّق. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return inventoryCreateCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageInventory(session.role)) {

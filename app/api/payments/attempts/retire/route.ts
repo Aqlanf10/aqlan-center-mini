@@ -4,11 +4,17 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { canHandleMoney } from "@/lib/roles";
 import { CollectionAttemptError, retireCollectionAttempt } from "@/lib/collection-attempts";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { paymentAttemptRetireCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
 /** Prove a collection attempt key's outcome: "committed" (replay it) or "retired" (it can never land). */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return paymentAttemptRetireCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canHandleMoney(session.role)) return NextResponse.json({ message: "التحقق من محاولة التحصيل للإدارة والاستقبال والصندوق." }, { status: 403 });

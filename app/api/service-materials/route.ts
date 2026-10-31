@@ -4,6 +4,9 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getPool, ensureSchema, listServices, recordAudit } from "@/lib/db";
 import { canManageInventory } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { serviceMaterialsCreateCanonicalResponse, serviceMaterialsDeleteCanonicalResponse, serviceMaterialsListCanonicalResponse } from "@/lib/canonical-invoices-payments-services";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,9 @@ const denied = () =>
  */
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return serviceMaterialsListCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   const serviceIdRaw = Number(new URL(request.url).searchParams.get("serviceId"));
@@ -57,6 +63,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return serviceMaterialsCreateCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageInventory(session.role)) {
@@ -120,6 +129,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return serviceMaterialsDeleteCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canManageInventory(session.role)) {
