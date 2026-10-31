@@ -6,6 +6,9 @@ import { resolveCommissionViewer } from "@/lib/commission-access";
 import { isCurrency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { commissionsGetCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,9 @@ const CATEGORY_PATTERN = /^[a-z_]{1,40}$/;
 const COMMISSION_BALANCE_EPOCH = "1970-01-01";
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return commissionsGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

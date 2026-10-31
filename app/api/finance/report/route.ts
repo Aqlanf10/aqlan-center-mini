@@ -3,12 +3,18 @@ import { CLINIC_TIME_ZONE, financeSummary, findUserByUsername } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { financeReportAccess, projectFinanceSummary } from "@/lib/finance-report-visibility";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { financeReportGetCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return financeReportGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

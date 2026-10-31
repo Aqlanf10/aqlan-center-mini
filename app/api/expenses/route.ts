@@ -10,6 +10,13 @@ import { canHandleMoney, canViewMoney, isAdmin } from "@/lib/roles";
 import { canDoctorViewExpenses } from "@/lib/doctor-permissions";
 import { withHttpIdempotency } from "@/lib/http-idempotency";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  expensesDeleteCanonicalResponse,
+  expensesGetCanonicalResponse,
+  expensesPostCanonicalResponse,
+} from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +26,9 @@ const denied = () =>
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expensesGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   /* صلاحيات الوكيل المساعد: المصروفات من «المالية المخفية» — تُفتح للطبيب
@@ -46,6 +56,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expensesPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
@@ -92,6 +105,9 @@ export async function POST(request: Request) {
 
 /* حذف سند صرف — المدير وحده، وضمن ورديةٍ مفتوحة، ولا لسند يسدّد التزامًا. */
 export async function DELETE(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expensesDeleteCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

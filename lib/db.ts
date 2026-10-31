@@ -12923,12 +12923,12 @@ function describeCommissionSnapshot(value: CommissionSnapshotValue | null): stri
 }
 
 /** سجل سياسات الأطباء لتقرير العمولة — خطٌّ زمني لكل طبيب + الحالة الحيّة احتياطًا. */
-export async function loadCommissionPolicyTimelines(queryRunner?: DbClient | DbPool): Promise<{
+export async function loadCommissionPolicyTimelines(queryRunner?: Pick<DbClient, "query">): Promise<{
   timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
   names: Map<number, string>;
 }> {
-  await ensureSchema();
+  if (!queryRunner) await ensureSchema();
   const pool = queryRunner ?? getPool();
   const [{ rows: historyRows }, { rows: liveRows }] = await Promise.all([
     pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date; effective_from_us: string }>(
@@ -13028,6 +13028,60 @@ export async function getParty(id: number): Promise<Party | null> {
   return getPartyWith(getPool(), id);
 }
 
+export async function createPartyInTx(
+  client: DbClient,
+  input: {
+    name: string; kind: PartyKind; phone: string | null;
+    whatsapp?: string | null; address?: string | null; contactPerson?: string | null;
+    currency?: Currency; deliveryDays?: number;
+    commissionPercent: number; note: string | null;
+  },
+  ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT,
+): Promise<Party> {
+  const defaultAccounts = defaultAccountsForPartyKind(input.kind);
+  const { result } = await doctorCommissionChangeOn(
+    client,
+    ctx,
+    "party",
+    async () => [],
+    async (c) => (await c.query<PartyRow>(
+      `INSERT INTO parties (
+         name, kind, phone, whatsapp, address, contact_person, currency, delivery_days,
+         commission_percent, note, expense_account_code, payable_account_code
+       )
+       VALUES ($1, $2, $3::text, $4::text, $5::text, $6::text, $7::text, $8, $9, $10::text, $11::text, $12::text)
+       RETURNING ${PARTY_COLUMNS}`,
+      [
+        input.name, input.kind, input.phone,
+        input.whatsapp ?? null, input.address ?? null, input.contactPerson ?? null,
+        input.currency ?? "YER", input.deliveryDays ?? 7,
+        input.commissionPercent, input.note,
+        defaultAccounts.expenseAccountCode, defaultAccounts.payableAccountCode,
+      ],
+    )).rows[0],
+    async (_c, row) => (row.kind === "doctor" ? [row.id] : []),
+  );
+  if (result.kind === "doctor") {
+    await insertAuditRow(client, {
+      action: "doctor.commission.update",
+      entity: "party",
+      entityId: result.id,
+      entityLabel: result.name,
+      details: {
+        الطبيب: result.name,
+        المصدر: "نسبة الجهة",
+        قبل: "—",
+        بعد: `نسبة عادية ${Number(result.commission_percent)}%`,
+        نافذ_من: "الشروط الأولى للطبيب",
+        السبب: ctx.reason ?? "إنشاء جهة طبيب",
+      },
+      actor: ctx.actor,
+      actorRole: ctx.actorRole ?? null,
+    });
+  }
+  return toParty(result);
+}
+
 export async function createParty(input: {
   name: string; kind: PartyKind; phone: string | null;
   whatsapp?: string | null; address?: string | null; contactPerson?: string | null;
@@ -13077,6 +13131,57 @@ export async function createParty(input: {
     });
   }
   return toParty(result);
+}
+
+export async function updatePartyInTx(
+  client: DbClient,
+  id: number,
+  input: {
+    name?: string; phone?: string | null;
+    whatsapp?: string | null; address?: string | null; contactPerson?: string | null;
+    currency?: Currency; deliveryDays?: number;
+    commissionPercent?: number;
+    note?: string | null; isActive?: boolean;
+  },
+  ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT,
+): Promise<Party | null> {
+  const { result: rows, changes } = await doctorCommissionChangeOn(
+    client,
+    ctx,
+    "party",
+    async () => (input.commissionPercent !== undefined ? [id] : []),
+    async (c) => (await c.query<PartyRow>(
+      `UPDATE parties SET
+         name               = COALESCE($2::text, name),
+         phone              = CASE WHEN $3::boolean THEN $4::text ELSE phone END,
+         whatsapp           = CASE WHEN $5::boolean THEN $6::text ELSE whatsapp END,
+         address            = CASE WHEN $7::boolean THEN $8::text ELSE address END,
+         contact_person     = CASE WHEN $9::boolean THEN $10::text ELSE contact_person END,
+         currency           = COALESCE($11::text, currency),
+         delivery_days      = COALESCE($12::int, delivery_days),
+         commission_percent = COALESCE($13::numeric, commission_percent),
+         note               = CASE WHEN $14::boolean THEN $15::text ELSE note END,
+         is_active          = COALESCE($16::boolean, is_active)
+       WHERE id = $1
+       RETURNING ${PARTY_COLUMNS}`,
+      [
+        id, input.name ?? null,
+        input.phone !== undefined, input.phone ?? null,
+        input.whatsapp !== undefined, input.whatsapp ?? null,
+        input.address !== undefined, input.address ?? null,
+        input.contactPerson !== undefined, input.contactPerson ?? null,
+        input.currency ?? null,
+        input.deliveryDays ?? null,
+        input.commissionPercent ?? null,
+        input.note !== undefined, input.note ?? null,
+        input.isActive ?? null,
+      ],
+    )).rows,
+  );
+  for (const change of changes) {
+    await insertAuditRow(client, doctorCommissionAuditInput(change, ctx));
+  }
+  return rows[0] ? toParty(rows[0]) : null;
 }
 
 export async function updateParty(id: number, input: {
@@ -13405,9 +13510,8 @@ export interface LabAccountingMappingDTO {
   lastOrderDate: string | null;
 }
 
-export async function listLabAccountingMappings(): Promise<LabAccountingMappingDTO[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+export async function listLabAccountingMappingsWith(q: Pick<DbClient, "query">): Promise<LabAccountingMappingDTO[]> {
+  const { rows } = await q.query<{
     id: number; name: string; currency: string | null; is_active: boolean;
     delivery_days: number | null; expense_account_code: string | null;
     payable_account_code: string | null; auto_post_journal: boolean | null;
@@ -13464,7 +13568,13 @@ export async function listLabAccountingMappings(): Promise<LabAccountingMappingD
   });
 }
 
-export async function updateLabAccountingMapping(
+export async function listLabAccountingMappings(): Promise<LabAccountingMappingDTO[]> {
+  await ensureSchema();
+  return listLabAccountingMappingsWith(getPool());
+}
+
+export async function updateLabAccountingMappingWith(
+  q: Pick<DbClient, "query">,
   id: number,
   input: {
     expenseAccountCode?: string;
@@ -13473,8 +13583,7 @@ export async function updateLabAccountingMapping(
     customAccountName?: string | null;
   },
 ): Promise<boolean> {
-  await ensureSchema();
-  const { rowCount } = await getPool().query(
+  const { rowCount } = await q.query(
     `UPDATE parties SET
        expense_account_code = COALESCE($2::text, expense_account_code),
        payable_account_code = COALESCE($3::text, payable_account_code),
@@ -13492,6 +13601,37 @@ export async function updateLabAccountingMapping(
   return (rowCount ?? 0) > 0;
 }
 
+export async function updateLabAccountingMapping(
+  id: number,
+  input: {
+    expenseAccountCode?: string;
+    payableAccountCode?: string;
+    autoPostJournal?: boolean;
+    customAccountName?: string | null;
+  },
+): Promise<boolean> {
+  await ensureSchema();
+  return updateLabAccountingMappingWith(getPool(), id, input);
+}
+
+export async function batchUpdateLabAccountingMappingsInTx(
+  q: Pick<DbClient, "query">,
+  updates: {
+    id: number;
+    expenseAccountCode?: string;
+    payableAccountCode?: string;
+    autoPostJournal?: boolean;
+    customAccountName?: string | null;
+  }[],
+): Promise<{ updatedCount: number }> {
+  let updatedCount = 0;
+  for (const item of updates) {
+    const ok = await updateLabAccountingMappingWith(q, item.id, item);
+    if (ok) updatedCount++;
+  }
+  return { updatedCount };
+}
+
 export async function batchUpdateLabAccountingMappings(
   updates: {
     id: number;
@@ -13502,12 +13642,7 @@ export async function batchUpdateLabAccountingMappings(
   }[],
 ): Promise<{ updatedCount: number }> {
   await ensureSchema();
-  let updatedCount = 0;
-  for (const item of updates) {
-    const ok = await updateLabAccountingMapping(item.id, item);
-    if (ok) updatedCount++;
-  }
-  return { updatedCount };
+  return batchUpdateLabAccountingMappingsInTx(getPool(), updates);
 }
 
 // ─── بنود المصروفات التشغيلية والموازنات التقديرية ────────────────────────────
@@ -13557,12 +13692,13 @@ export interface ExpenseBudgetSummary {
  * بند المصروف — الميزانية بلا مقارنةٍ بالفعيّ رقمٌ على ورقة، والمقارنة بلا
  * الفعلي الشهري تُخفي تجاوزًا حصل وانتهى.
  */
-export async function listExpenseCategories(options?: {
-  month?: string; // YYYY-MM
-  includeInactive?: boolean;
-}): Promise<{ categories: ExpenseCategoryDTO[]; summary: ExpenseBudgetSummary }> {
-  await ensureSchema();
-  const pool = getPool();
+export async function listExpenseCategoriesWith(
+  q: Pick<DbClient, "query">,
+  options?: {
+    month?: string; // YYYY-MM
+    includeInactive?: boolean;
+  },
+): Promise<{ categories: ExpenseCategoryDTO[]; summary: ExpenseBudgetSummary }> {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const targetMonth = options?.month && /^\d{4}-\d{2}$/.test(options.month.trim())
     ? options.month.trim()
@@ -13570,7 +13706,7 @@ export async function listExpenseCategories(options?: {
 
   const filterInactive = options?.includeInactive ? "" : "WHERE ec.is_active = TRUE";
 
-  const { rows } = await pool.query<{
+  const { rows } = await q.query<{
     id: number;
     key: string;
     name: string;
@@ -13605,7 +13741,7 @@ export async function listExpenseCategories(options?: {
     [CLINIC_TIME_ZONE, targetMonth],
   );
 
-  const rates = ratesFromSettings(await getSettings());
+  const rates = ratesFromSettings(await readSettings(q));
   const categories: ExpenseCategoryDTO[] = rows.map((r) => {
     const budgetCurrency = ((r.budget_currency as Currency) || CLINIC_BASE_CURRENCY);
     const rawMonthly = toMinor(r.monthly_budget_minor);
@@ -13676,6 +13812,14 @@ export async function listExpenseCategories(options?: {
   };
 
   return { categories, summary };
+}
+
+export async function listExpenseCategories(options?: {
+  month?: string; // YYYY-MM
+  includeInactive?: boolean;
+}): Promise<{ categories: ExpenseCategoryDTO[]; summary: ExpenseBudgetSummary }> {
+  await ensureSchema();
+  return listExpenseCategoriesWith(getPool(), options);
 }
 
 /** A safe settings refusal: history is unchanged and the transaction is rolled back. */
@@ -13768,6 +13912,67 @@ async function guardExpenseCategoryConfiguration(
   }
 }
 
+async function withExpenseCategoryConfigurationInTx<T>(client: DbClient, work: (client: DbClient) => Promise<T>): Promise<T> {
+  await client.query("SAVEPOINT expense_category_cfg_tx");
+  try {
+    await client.query("SET LOCAL lock_timeout = '10s'");
+    await client.query("LOCK TABLE expenses IN SHARE MODE");
+    await client.query("LOCK TABLE expense_categories IN SHARE ROW EXCLUSIVE MODE");
+    const result = await work(client);
+    await client.query("RELEASE SAVEPOINT expense_category_cfg_tx");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT expense_category_cfg_tx").catch(() => undefined);
+    await client.query("RELEASE SAVEPOINT expense_category_cfg_tx").catch(() => undefined);
+    if ((error as { code?: string })?.code === "55P03") {
+      throw new ExpenseCategoryConflictError("يجري تسجيل أو تعديل بيانات مرتبطة ببنود المصروفات. لم يُحفظ التغيير؛ أعد المحاولة بعد اكتمال العملية.");
+    }
+    throw error;
+  }
+}
+
+export async function createExpenseCategoryInTx(
+  client: DbClient,
+  input: {
+    key?: string;
+    name: string;
+    categoryGroup?: string;
+    accountCode: string;
+    monthlyBudgetMinor?: number;
+    annualBudgetMinor?: number;
+    budgetCurrency?: Currency;
+    autoPostJournal?: boolean;
+    description?: string | null;
+    displayOrder?: number;
+  },
+): Promise<ExpenseCategoryDTO> {
+  let key = (input.key || "").trim().toLowerCase();
+  if (!key) key = "cat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
+  key = key.replace(/[^a-z0-9_-]/g, "_").slice(0, 50);
+  const proposed = {
+    key, name: input.name.trim(), accountCode: (input.accountCode || "5901").trim(),
+    autoPostJournal: input.autoPostJournal !== false,
+  };
+  const id = await withExpenseCategoryConfigurationInTx(client, async (c) => {
+    await guardExpenseCategoryConfiguration(c, null, proposed);
+    const { rows } = await c.query<{ id: number }>(
+      `INSERT INTO expense_categories (
+         key, name, category_group, account_code, monthly_budget_minor, annual_budget_minor,
+         budget_currency, is_active, is_system, auto_post_journal, description, display_order
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, FALSE, $8, $9, $10)
+       RETURNING id`,
+      [proposed.key, proposed.name, (input.categoryGroup || "تشغيلية ومرافق").trim(), proposed.accountCode,
+        Math.max(0, input.monthlyBudgetMinor ?? 0), Math.max(0, input.annualBudgetMinor ?? 0),
+        input.budgetCurrency || "YER", proposed.autoPostJournal, input.description?.trim() || null, input.displayOrder ?? 50],
+    );
+    return rows[0].id;
+  });
+  const { categories } = await listExpenseCategoriesWith(client, { includeInactive: true });
+  const created = categories.find((c) => c.id === id);
+  if (!created) throw new Error("تعذّر قراءة البند بعد الإنشاء.");
+  return created;
+}
+
 export async function createExpenseCategory(input: {
   key?: string;
   name: string;
@@ -13843,8 +14048,34 @@ async function updateExpenseCategoryInTx(client: DbClient, id: number, input: Ex
   return true;
 }
 
+export async function updateExpenseCategoryOnTx(client: DbClient, id: number, input: ExpenseCategoryUpdate): Promise<boolean> {
+  return withExpenseCategoryConfigurationInTx(client, (c) => updateExpenseCategoryInTx(c, id, input));
+}
+
 export async function updateExpenseCategory(id: number, input: ExpenseCategoryUpdate): Promise<boolean> {
   return withExpenseCategoryConfiguration((client) => updateExpenseCategoryInTx(client, id, input));
+}
+
+export async function batchUpdateExpenseCategoriesInTx(
+  client: DbClient,
+  updates: Array<{
+    id: number;
+    name?: string;
+    categoryGroup?: string;
+    accountCode?: string;
+    monthlyBudgetMinor?: number;
+    annualBudgetMinor?: number;
+    isActive?: boolean;
+    autoPostJournal?: boolean;
+  }>,
+): Promise<{ updatedCount: number }> {
+  return withExpenseCategoryConfigurationInTx(client, async (c) => {
+    let updatedCount = 0;
+    for (const update of updates) {
+      if (await updateExpenseCategoryInTx(c, update.id, update)) updatedCount++;
+    }
+    return { updatedCount };
+  });
 }
 
 export async function batchUpdateExpenseCategories(
@@ -13868,34 +14099,62 @@ export async function batchUpdateExpenseCategories(
   });
 }
 
+const STANDARD_EXPENSE_CATEGORY_MAPPING: Record<string, { code: string; group?: string }> = {
+  electricity: { code: "5502", group: "تشغيلية ومرافق" },
+  maintenance: { code: "5601", group: "صيانة وتجهيزات" },
+  equipment_parts: { code: "5602", group: "صيانة وتجهيزات" },
+  internet: { code: "5503", group: "تشغيلية ومرافق" },
+  rent: { code: "5501", group: "تشغيلية ومرافق" },
+  cleaning_hospitality: { code: "5901", group: "إدارية وتشغيلية" },
+  facility_maintenance: { code: "5504", group: "صيانة وتجهيزات" },
+  marketing: { code: "5902", group: "إدارية وتسويقية" },
+  materials: { code: "5201", group: "مواد ومستلزمات" },
+  lab: { code: "5101", group: "تكاليف مهنية" },
+  salary: { code: "5401", group: "أجور وكادر" },
+  commission: { code: "5301", group: "أجور وكادر" },
+  other: { code: "5901", group: "عامة وطوارئ" },
+};
+
+export async function syncExpenseCategoriesAccountingMappingInTx(client: DbClient): Promise<{
+  totalSynced: number;
+  fixedCount: number;
+  categories: ExpenseCategoryDTO[];
+}> {
+  const fixedCount = await withExpenseCategoryConfigurationInTx(client, async (c) => {
+    const { rows } = await c.query<ExpenseCategoryConfigurationRow>(
+      `SELECT id, key, name, account_code, auto_post_journal, is_system FROM expense_categories ORDER BY id`,
+    );
+    let fixed = 0;
+    for (const row of rows) {
+      const std = STANDARD_EXPENSE_CATEGORY_MAPPING[row.key];
+      const needsCodeFix = std && (!row.account_code || (row.account_code === "5901" && std.code !== "5901"));
+      const needsPostFix = row.auto_post_journal !== true;
+      if (needsCodeFix || needsPostFix) {
+        await updateExpenseCategoryInTx(c, row.id, {
+          accountCode: needsCodeFix && std ? std.code : (row.account_code || "5901"), autoPostJournal: true,
+        });
+        fixed++;
+      }
+    }
+    return fixed;
+  });
+  const { categories } = await listExpenseCategoriesWith(client, { includeInactive: true });
+  return { totalSynced: categories.length, fixedCount, categories };
+}
+
 /** Standardize unused settings only; never reinterpret an already-recorded voucher. */
 export async function syncExpenseCategoriesAccountingMapping(): Promise<{
   totalSynced: number;
   fixedCount: number;
   categories: ExpenseCategoryDTO[];
 }> {
-  const standardMapping: Record<string, { code: string; group?: string }> = {
-    electricity: { code: "5502", group: "تشغيلية ومرافق" },
-    maintenance: { code: "5601", group: "صيانة وتجهيزات" },
-    equipment_parts: { code: "5602", group: "صيانة وتجهيزات" },
-    internet: { code: "5503", group: "تشغيلية ومرافق" },
-    rent: { code: "5501", group: "تشغيلية ومرافق" },
-    cleaning_hospitality: { code: "5901", group: "إدارية وتشغيلية" },
-    facility_maintenance: { code: "5504", group: "صيانة وتجهيزات" },
-    marketing: { code: "5902", group: "إدارية وتسويقية" },
-    materials: { code: "5201", group: "مواد ومستلزمات" },
-    lab: { code: "5101", group: "تكاليف مهنية" },
-    salary: { code: "5401", group: "أجور وكادر" },
-    commission: { code: "5301", group: "أجور وكادر" },
-    other: { code: "5901", group: "عامة وطوارئ" },
-  };
   const fixedCount = await withExpenseCategoryConfiguration(async (client) => {
     const { rows } = await client.query<ExpenseCategoryConfigurationRow>(
       `SELECT id, key, name, account_code, auto_post_journal, is_system FROM expense_categories ORDER BY id`,
     );
     let fixed = 0;
     for (const row of rows) {
-      const std = standardMapping[row.key];
+      const std = STANDARD_EXPENSE_CATEGORY_MAPPING[row.key];
       const needsCodeFix = std && (!row.account_code || (row.account_code === "5901" && std.code !== "5901"));
       const needsPostFix = row.auto_post_journal !== true;
       if (needsCodeFix || needsPostFix) {
@@ -13909,6 +14168,27 @@ export async function syncExpenseCategoriesAccountingMapping(): Promise<{
   });
   const { categories } = await listExpenseCategories({ includeInactive: true });
   return { totalSynced: categories.length, fixedCount, categories };
+}
+
+export async function deleteExpenseCategoryInTx(client: DbClient, id: number): Promise<{ success: boolean; deactivated?: boolean }> {
+  return withExpenseCategoryConfigurationInTx(client, async (c) => {
+    const { rows } = await c.query<ExpenseCategoryConfigurationRow>(
+      `SELECT id, key, name, account_code, auto_post_journal, is_system
+         FROM expense_categories WHERE id = $1 FOR UPDATE NOWAIT`, [id],
+    );
+    const current = rows[0];
+    if (!current) return { success: false };
+    const { rows: references } = await c.query<{ used: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM lab_orders WHERE expense_category_id = $1)
+           OR EXISTS (SELECT 1 FROM payables WHERE expense_category_id = $1) AS used`, [id],
+    );
+    if (current.is_system || references[0].used || await expenseCategoryHasVouchers(c, [current.key, current.name])) {
+      await c.query(`UPDATE expense_categories SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [id]);
+      return { success: true, deactivated: true };
+    }
+    await c.query(`DELETE FROM expense_categories WHERE id = $1`, [id]);
+    return { success: true, deactivated: false };
+  });
 }
 
 export async function deleteExpenseCategory(id: number): Promise<{ success: boolean; deactivated?: boolean }> {
@@ -14008,10 +14288,14 @@ const EXPENSE_SELECT = `
          e.payable_settled_minor, e.rate_override_reason, e.reversal_of_id
     FROM expenses e LEFT JOIN parties t ON t.id = e.party_id`;
 
+export async function getExpenseWith(q: Pick<DbClient, "query">, id: number): Promise<Expense | null> {
+  const { rows } = await q.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [id]);
+  return rows[0] ? toExpense(rows[0]) : null;
+}
+
 export async function getExpense(id: number): Promise<Expense | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [id]);
-  return rows[0] ? toExpense(rows[0]) : null;
+  return getExpenseWith(getPool(), id);
 }
 
 /** (P3-6) مرفقٌ على سند صرف — صورة الإيصال أو فاتورة المورّد. */
@@ -14040,12 +14324,14 @@ const toExpenseAttachment = (row: ExpenseAttachmentRow): ExpenseAttachment => ({
   uploadedAt: row.uploaded_at.toISOString(),
 });
 
-export async function recordExpenseAttachment(input: {
-  expenseId: number; title: string; mimeType: string; sizeBytes: number;
-  sha256: string; storageKey: string; uploadedBy: string;
-}): Promise<ExpenseAttachment | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<ExpenseAttachmentRow>(
+export async function recordExpenseAttachmentWith(
+  q: Pick<DbClient, "query">,
+  input: {
+    expenseId: number; title: string; mimeType: string; sizeBytes: number;
+    sha256: string; storageKey: string; uploadedBy: string;
+  },
+): Promise<ExpenseAttachment | null> {
+  const { rows } = await q.query<ExpenseAttachmentRow>(
     `INSERT INTO expense_attachments (expense_id, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
      SELECT $1, $2, $3, $4, $5, $6, $7 WHERE EXISTS (SELECT 1 FROM expenses WHERE id = $1)
      RETURNING *`,
@@ -14054,20 +14340,39 @@ export async function recordExpenseAttachment(input: {
   return rows[0] ? toExpenseAttachment(rows[0]) : null;
 }
 
-export async function listExpenseAttachments(expenseId: number): Promise<ExpenseAttachment[]> {
+export async function recordExpenseAttachment(input: {
+  expenseId: number; title: string; mimeType: string; sizeBytes: number;
+  sha256: string; storageKey: string; uploadedBy: string;
+}): Promise<ExpenseAttachment | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ExpenseAttachmentRow>(
+  return recordExpenseAttachmentWith(getPool(), input);
+}
+
+export async function listExpenseAttachmentsWith(q: Pick<DbClient, "query">, expenseId: number): Promise<ExpenseAttachment[]> {
+  const { rows } = await q.query<ExpenseAttachmentRow>(
     `SELECT * FROM expense_attachments WHERE expense_id = $1 ORDER BY id`, [expenseId],
   );
   return rows.map(toExpenseAttachment);
 }
 
-export async function getExpenseAttachment(id: number): Promise<{ attachment: ExpenseAttachment; storageKey: string } | null> {
+export async function listExpenseAttachments(expenseId: number): Promise<ExpenseAttachment[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ExpenseAttachmentRow>(
+  return listExpenseAttachmentsWith(getPool(), expenseId);
+}
+
+export async function getExpenseAttachmentWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<{ attachment: ExpenseAttachment; storageKey: string } | null> {
+  const { rows } = await q.query<ExpenseAttachmentRow>(
     `SELECT * FROM expense_attachments WHERE id = $1`, [id],
   );
   return rows[0] ? { attachment: toExpenseAttachment(rows[0]), storageKey: rows[0].storage_key } : null;
+}
+
+export async function getExpenseAttachment(id: number): Promise<{ attachment: ExpenseAttachment; storageKey: string } | null> {
+  await ensureSchema();
+  return getExpenseAttachmentWith(getPool(), id);
 }
 
 export async function listShiftExpenses(shiftId: number): Promise<Expense[]> {
@@ -14082,9 +14387,8 @@ export async function listShiftExpensesWith(q: Pick<DbClient, "query">, shiftId:
   return rows.map(toExpense);
 }
 
-export async function listExpensesBetween(from: string, to: string): Promise<Expense[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<ExpenseRow>(
+export async function listExpensesBetweenWith(q: Pick<DbClient, "query">, from: string, to: string): Promise<Expense[]> {
+  const { rows } = await q.query<ExpenseRow>(
     `${EXPENSE_SELECT}
       WHERE (e.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
       ORDER BY e.created_at DESC LIMIT 1000`,
@@ -14093,9 +14397,16 @@ export async function listExpensesBetween(from: string, to: string): Promise<Exp
   return rows.map(toExpense);
 }
 
-export async function listPartyExpenses(partyId: number): Promise<(Expense & { allocatedPaidMinor: number; payableExists: boolean })[]> {
+export async function listExpensesBetween(from: string, to: string): Promise<Expense[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<ExpenseRow & { allocated_paid_minor: string; payable_exists: boolean }>(
+  return listExpensesBetweenWith(getPool(), from, to);
+}
+
+export async function listPartyExpensesWith(
+  q: Pick<DbClient, "query">,
+  partyId: number,
+): Promise<(Expense & { allocatedPaidMinor: number; payableExists: boolean })[]> {
+  const { rows } = await q.query<ExpenseRow & { allocated_paid_minor: string; payable_exists: boolean }>(
     `SELECT statement_expense.*,
             EXISTS (SELECT 1 FROM payables p WHERE p.id = statement_expense.payable_id) AS payable_exists,
             COALESCE((SELECT SUM(a.paid_minor) FROM expense_payable_allocations a
@@ -14103,9 +14414,12 @@ export async function listPartyExpenses(partyId: number): Promise<(Expense & { a
        FROM (${EXPENSE_SELECT} WHERE e.party_id = $1) statement_expense
       ORDER BY statement_expense.created_at DESC, statement_expense.id DESC`, [partyId],
   );
-  // paid_minor is signed and belongs to the expense currency; settled_minor is
-  // denominated in the payable currency and must never be deducted here.
   return rows.map((row) => ({ ...toExpense(row), allocatedPaidMinor: toMinor(row.allocated_paid_minor), payableExists: row.payable_exists }));
+}
+
+export async function listPartyExpenses(partyId: number): Promise<(Expense & { allocatedPaidMinor: number; payableExists: boolean })[]> {
+  await ensureSchema();
+  return listPartyExpensesWith(getPool(), partyId);
 }
 
 /**
@@ -14201,7 +14515,7 @@ function partyBucketEntriesSql(): string {
         WHERE e.payable_id IS NULL OR NOT EXISTS (SELECT 1 FROM payables p WHERE p.id = e.payable_id)`;
 }
 
-async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBucket[]> {
+async function partyBuckets(client: Pick<DbClient, "query">, partyId: number): Promise<PartyBucket[]> {
   const { rows } = await client.query<{ currency: string; net: string }>(
     `WITH party_scope AS (SELECT $1::int AS id)
      SELECT currency, SUM(net)::text AS net FROM (${partyBucketEntriesSql()}) x GROUP BY currency`,
@@ -14526,6 +14840,214 @@ export async function recordExpense(input: RecordExpenseInput): Promise<RecordEx
   }
 }
 
+export async function quoteExpenseWith(
+  q: Pick<DbClient, "query">,
+  input: RecordExpenseInput,
+  settingsRates: RateMap,
+): Promise<{ reason: SupplierPaymentRefusal | null; quote: SettlementQuote | null }> {
+  const baseAmount = toBaseAmount(input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate);
+  const rates: RateMap = { ...settingsRates, [input.currency]: input.exchangeRate };
+  let partyId = input.partyId;
+
+  if (input.payableId !== null) {
+    const { rows } = await q.query<{ party_id: number }>(
+      `SELECT party_id FROM payables WHERE id = $1`, [input.payableId],
+    );
+    const payableHead = rows[0] ?? null;
+    if (!payableHead) return { reason: "payable_not_found", quote: null };
+    if (partyId !== null && partyId !== payableHead.party_id) {
+      return { reason: "payable_party_mismatch", quote: null };
+    }
+    partyId = payableHead.party_id;
+  }
+
+  let partyKind: string | null = null;
+  if (partyId !== null) {
+    const { rows } = await q.query<{ kind: string }>(
+      `SELECT kind FROM parties WHERE id = $1`, [partyId],
+    );
+    if (!rows[0]) return { reason: "party_not_found", quote: null };
+    partyKind = rows[0].kind;
+  }
+
+  if (input.payableId !== null) {
+    const hrClaim = await q.query(
+      `SELECT id FROM hr_payroll_items WHERE payable_id=$1 OR commission_payable_id=$1`,
+      [input.payableId],
+    );
+    if (hrClaim.rows.length && !hrClaim.rows.some((row) => Number(row.id) === input.hrPayrollItemId)) {
+      return { reason: "hr_payroll_settlement_required", quote: null };
+    }
+  }
+  if (input.category === "commission" && partyKind === "doctor" && partyId !== null) {
+    const legacyClaim = await q.query(
+      `SELECT i.id
+      FROM hr_payroll_items i JOIN hr_payroll_runs r ON r.id=i.run_id
+      JOIN hr_payroll_periods p ON p.id=r.period_id JOIN hr_staff s ON s.id=i.staff_id
+      LEFT JOIN users u ON u.id=s.user_id LEFT JOIN payables b ON b.id=i.payable_id
+      WHERE r.status IN ('approved','closed') AND i.currency=$2 AND i.commissions_minor>0
+        AND (i.commission_payable_id IS NULL OR COALESCE(i.pay_terms_snapshot->>'source','') NOT IN ('contract','staff_profile'))
+        AND (b.party_id=$1 OR u.party_id=$1 OR i.pay_terms_snapshot->>'doctorPartyId'=$1::text
+          OR EXISTS (SELECT 1 FROM hr_contracts c WHERE c.staff_id=i.staff_id AND c.doctor_party_id=$1
+            AND c.status IN ('approved','active','expired','terminated')
+            AND c.start_date<=p.end_date AND (c.end_date IS NULL OR c.end_date>=p.start_date)))
+      LIMIT 1`,
+      [partyId, input.currency],
+    );
+    if (legacyClaim.rows.length) return { reason: "hr_payroll_reconciliation_required", quote: null };
+    const claims = await q.query(
+      `SELECT i.id, (${payableAmountSql("b")}-${payableSettledTotalSql("b")}) AS remaining
+      FROM hr_payroll_items i JOIN hr_payroll_runs r ON r.id=i.run_id JOIN payables b ON b.id=i.commission_payable_id
+      WHERE b.party_id=$1 AND i.currency=$2 AND r.status IN ('approved','closed')`,
+      [partyId, input.currency],
+    );
+    if (claims.rows.length) {
+      const earned = (await commissionReport("0001-01-01", "9999-12-31", undefined, q)).find(
+        (row) => row.doctorId === partyId && row.currency === input.currency,
+      );
+      if (input.amountMinor > Math.max(0, earned?.dueMinor ?? 0)) return { reason: "exceeds_party_balance", quote: null };
+      if (claims.rows.some((row) => Number(row.remaining) > 0) && !claims.rows.some((row) => Number(row.id) === input.hrPayrollItemId)) {
+        return { reason: "hr_payroll_settlement_required", quote: null };
+      }
+    }
+  }
+
+  const quote: SettlementQuote = {
+    paymentCurrency: input.currency,
+    amountMinor: input.amountMinor,
+    paymentExchangeRate: input.exchangeRate,
+    baseAmountMinor: baseAmount,
+    rateText: null,
+    rateOverridden: Boolean(input.rateOverrideReason),
+    payable: null,
+    party: null,
+  };
+
+  let snapshot: { currency: Currency; amountMinor: number; exchangeRate: number; settledMinor: number } | null = null;
+  if (input.payableId !== null) {
+    const { rows } = await q.query<{ currency: string; amount_minor: string; settled: string }>(
+      `SELECT b.currency, ${payableAmountSql("b")}::text AS amount_minor, ${payableSettledTotalSql("b")}::text AS settled
+         FROM payables b WHERE b.id = $1`,
+      [input.payableId],
+    );
+    const billCurrency = requireCurrency(rows[0].currency, "التزام", `#${input.payableId}`);
+    const billAmount = toMinor(rows[0].amount_minor);
+    const remainingBefore = billAmount - toMinor(rows[0].settled);
+    if (billCurrency !== input.currency && input.payableExchangeRate) {
+      rates[billCurrency] = input.payableExchangeRate;
+    }
+    const billRate = rateOf(billCurrency, rates);
+    const settled = convertMinor(input.amountMinor, input.currency, billCurrency, rates);
+    if (billRate === null || settled === null) return { reason: "missing_rate", quote };
+    quote.rateText = crossRateText(input.currency, billCurrency, rates);
+    quote.payable = {
+      id: input.payableId,
+      currency: billCurrency,
+      amountMinor: billAmount,
+      exchangeRate: billRate,
+      remainingBeforeMinor: remainingBefore,
+      settledMinor: settled,
+      remainingAfterMinor: remainingBefore - settled,
+      maxPaymentMinor: maxPaymentFor(Math.max(0, remainingBefore), input.currency, billCurrency, rates),
+    };
+    if (settled <= 0) return { reason: "zero_settlement", quote };
+    if (settled > remainingBefore) return { reason: "exceeds_payable", quote };
+    snapshot = { currency: billCurrency, amountMinor: billAmount, exchangeRate: billRate, settledMinor: settled };
+  }
+
+  if (partyId !== null) {
+    const guarded = isGuardedPartyKind(partyKind);
+    quote.party = {
+      id: partyId, kind: partyKind ?? "", guarded,
+      outstandingBeforeMinor: null, outstandingAfterMinor: null,
+      prepayment: false,
+    };
+    if (guarded) {
+      const buckets = await partyBuckets(q, partyId);
+      const outstanding = partyOutstandingIn(input.currency, buckets, rates);
+      if (outstanding === null) return { reason: "missing_rate", quote };
+      quote.party.outstandingBeforeMinor = outstanding;
+      quote.party.outstandingAfterMinor = outstanding - input.amountMinor;
+      const exceeds = snapshot
+        ? (() => {
+            const inBill = partyOutstandingIn(snapshot.currency, buckets, rates);
+            return inBill === null || snapshot.settledMinor > inBill;
+          })()
+        : input.amountMinor > outstanding;
+      if (exceeds) {
+        if (!input.prepaymentReason?.trim()) return { reason: "exceeds_party_balance", quote };
+        quote.party.prepayment = true;
+      }
+    }
+  }
+
+  return { reason: null, quote };
+}
+
+export async function recordExpenseCanonicalInTx(
+  client: DbClient,
+  input: RecordExpenseInput,
+  settingsRates: RateMap,
+): Promise<RecordExpenseResult> {
+  await client.query("SAVEPOINT record_expense_tx");
+  try {
+    const result = await recordExpenseInTx(client, input, settingsRates);
+    if (result.id === null) {
+      await client.query("ROLLBACK TO SAVEPOINT record_expense_tx");
+      await client.query("RELEASE SAVEPOINT record_expense_tx");
+      return { expense: null, reason: result.reason, quote: result.quote };
+    }
+    const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [result.id]);
+    if (!rows[0]) throw new Error("Expense receipt missing inside its transaction");
+    const expense = toExpense(rows[0]);
+    const quote = result.quote;
+    const context = {
+      entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+      actor: input.createdBy, actorRole: input.actorRole ?? null,
+    };
+    await insertAuditRow(client, {
+      ...context, action: "expense.create",
+      details: {
+        البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
+        سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
+        الجهة: expense.partyId ?? expense.payeeText,
+        ...(expense.payableId !== null ? {
+          الالتزام: expense.payableId, عملة_الفاتورة: expense.payableCurrency,
+          قيمة_الفاتورة: expense.payableAmountMinor, سعر_الفاتورة: expense.payableExchangeRate,
+          المخصوم_من_الفاتورة: expense.payableSettledMinor,
+          المتبقي_بعد: quote?.payable?.remainingAfterMinor,
+        } : {}),
+      },
+    });
+    if (expense.rateOverrideReason) {
+      await insertAuditRow(client, {
+        ...context, action: "expense.rate_override",
+        details: {
+          العملة: expense.currency, سعر_الإعدادات: rateOf(expense.currency, settingsRates),
+          السعر_المستعمل: expense.exchangeRate, عملة_الفاتورة: expense.payableCurrency,
+          سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
+          سعر_الفاتورة_المستعمل: expense.payableExchangeRate, السبب: expense.rateOverrideReason,
+        },
+      });
+    }
+    if (quote?.party?.prepayment) {
+      await insertAuditRow(client, {
+        ...context, action: "expense.prepayment",
+        details: {
+          الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
+          المستحق_قبل: quote.party.outstandingBeforeMinor, السبب: input.prepaymentReason,
+        },
+      });
+    }
+    await client.query("RELEASE SAVEPOINT record_expense_tx");
+    return { expense, reason: null, quote };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT record_expense_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT record_expense_tx").catch(() => {});
+    throw error;
+  }
+}
+
 /**
  * إبطال سند صرف (P1-FIX-3) — الحذف لم يعد مسارًا في النظام إطلاقًا.
  *
@@ -14559,18 +15081,55 @@ export async function voidExpense(
   reopenedLabOrderIds?: number[];
 }> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
-    const linked = await client.query("SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1 UNION SELECT 1 FROM hr_payroll_disbursements WHERE expense_id=$1 LIMIT 1",[id]);
-    if (linked.rows.length) throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
-    // READ COMMITTED can see a payout committed after the early lookup. Lock
-    // the voucher first, then read its linkage again in a fresh statement.
-    // Hold this lock through the reversal; HR uses its own atomic reversal path.
+  return withTransaction(getPool(), async (client) => voidExpenseCanonicalInTx(client, id, context));
+}
+
+export async function voidExpenseCanonicalInTx(
+  client: DbClient,
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{
+  ok: boolean;
+  reason?: "not_found" | "closed_shift" | "no_shift" | "already_voided" | "missing_reason";
+  voidedId?: number;
+  voidedVoucherNumber?: string;
+  reopenedLabOrderIds?: number[];
+}> {
+  await client.query("SAVEPOINT void_expense_tx");
+  try {
+    const linked = await client.query(
+      "SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1 UNION SELECT 1 FROM hr_payroll_disbursements WHERE expense_id=$1 LIMIT 1",
+      [id],
+    );
+    if (linked.rows.length) {
+      throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
+    }
     const lockedExpense = await client.query("SELECT id FROM expenses WHERE id=$1 FOR UPDATE", [id]);
-    if (!lockedExpense.rows.length) return { ok: false, reason: "not_found" as const };
-    const lockedLink = await client.query("SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1 UNION SELECT 1 FROM hr_payroll_disbursements WHERE expense_id=$1 LIMIT 1", [id]);
-    if (lockedLink.rows.length) throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
-    return voidExpenseInTx(client,id,context);
-  });
+    if (!lockedExpense.rows.length) {
+      await client.query("ROLLBACK TO SAVEPOINT void_expense_tx");
+      await client.query("RELEASE SAVEPOINT void_expense_tx");
+      return { ok: false, reason: "not_found" as const };
+    }
+    const lockedLink = await client.query(
+      "SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1 UNION SELECT 1 FROM hr_payroll_disbursements WHERE expense_id=$1 LIMIT 1",
+      [id],
+    );
+    if (lockedLink.rows.length) {
+      throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
+    }
+    const result = await voidExpenseInTx(client, id, context);
+    if (!result.ok) {
+      await client.query("ROLLBACK TO SAVEPOINT void_expense_tx");
+      await client.query("RELEASE SAVEPOINT void_expense_tx");
+      return result;
+    }
+    await client.query("RELEASE SAVEPOINT void_expense_tx");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT void_expense_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT void_expense_tx").catch(() => {});
+    throw error;
+  }
 }
 
 export async function voidExpenseInTx(
@@ -14998,6 +15557,219 @@ export async function settleLabOrdersBatch(input: {
   }
 }
 
+export async function settleLabOrdersBatchInTx(
+  client: DbClient,
+  input: {
+    partyId: number;
+    orderIds: number[];
+    amountMinor: number;
+    currency: Currency;
+    baseCurrency: Currency;
+    exchangeRate: number;
+    note: string | null;
+    monthLabel?: string | null;
+    createdBy: string;
+    actorRole?: string | null;
+    rates?: RateMap;
+    rateOverrideReason?: string | null;
+    prepaymentReason?: string | null;
+  },
+): Promise<
+  | { ok: true; expense: Expense; orderIds: number[]; partyName: string; quote: SettlementQuote | null }
+  | { ok: false; reason: LabBatchRefusal; quote: SettlementQuote | null; orderIds?: number[] }
+> {
+  const validId = (value: number) => Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647;
+  if (!validId(input.partyId) || !Array.isArray(input.orderIds) || input.orderIds.length === 0
+    || !input.orderIds.every(validId)) {
+    return { ok: false, reason: "orders_invalid", quote: null };
+  }
+  if (!isCurrency(input.currency)) return { ok: false, reason: "batch_currency_mismatch", quote: null };
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0
+    || input.baseCurrency !== CLINIC_BASE_CURRENCY
+    || !Number.isFinite(input.exchangeRate) || input.exchangeRate <= 0
+    || (input.currency === CLINIC_BASE_CURRENCY && input.exchangeRate !== 1)) {
+    return { ok: false, reason: "batch_requires_full_allocation", quote: null };
+  }
+  const settingsRates = input.rates ?? ratesFromSettings(await getSettingsInTransaction(client));
+  const orderIds = [...new Set(input.orderIds)].sort((a, b) => a - b);
+  await client.query("SAVEPOINT lab_batch_tx");
+  const refuse = async (reason: LabBatchRefusal, ids?: number[], quote: SettlementQuote | null = null) => {
+    await client.query("ROLLBACK TO SAVEPOINT lab_batch_tx");
+    await client.query("RELEASE SAVEPOINT lab_batch_tx");
+    return { ok: false as const, reason, quote, orderIds: ids };
+  };
+  const acquire = async <T>(sql: string, values: unknown[] = []): Promise<T[] | null> => {
+    await client.query("SAVEPOINT lab_batch_nowait");
+    try {
+      const res = await client.query<T>(sql, values);
+      await client.query("RELEASE SAVEPOINT lab_batch_nowait");
+      return res.rows;
+    } catch (error) {
+      await client.query("ROLLBACK TO SAVEPOINT lab_batch_nowait").catch(() => {});
+      await client.query("RELEASE SAVEPOINT lab_batch_nowait").catch(() => {});
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "55P03") return null;
+      throw error;
+    }
+  };
+  try {
+    const { rows: partyRows } = await client.query<{ name: string; kind: string }>(
+      `SELECT name, kind FROM parties WHERE id = $1 FOR UPDATE`, [input.partyId],
+    );
+    const party = partyRows[0];
+    if (!party || party.kind !== "lab") return await refuse("not_lab");
+
+    const orders = await acquire<{
+      id: number; party_id: number | null; lab_name: string; status: string; financial_status: string;
+      payable_id: number | null;
+    }>(
+      `SELECT id, party_id, lab_name, status, financial_status, payable_id
+         FROM lab_orders WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE NOWAIT`,
+      [orderIds],
+    );
+    if (orders === null) return await refuse("batch_busy");
+    const found = new Map(orders.map((order) => [order.id, order]));
+    const foreign = orderIds.filter((id) => {
+      const order = found.get(id);
+      return !order || !(order.party_id === input.partyId || (order.party_id === null && order.lab_name === party.name));
+    });
+    if (foreign.length > 0) return await refuse("orders_invalid", foreign);
+    const cancelled = orders.filter((order) => order.status === "cancelled").map((order) => order.id);
+    if (cancelled.length > 0) return await refuse("orders_cancelled", cancelled);
+    const alreadyPaid = orders.filter((order) => order.financial_status === "paid").map((order) => order.id);
+    if (alreadyPaid.length > 0) return await refuse("orders_already_paid", alreadyPaid);
+
+    const payableIds: number[] = [];
+    for (const order of orders) {
+      if (order.payable_id === null) return await refuse("batch_link_invalid");
+      payableIds.push(order.payable_id);
+    }
+    if (new Set(payableIds).size !== orders.length) return await refuse("batch_link_invalid");
+    payableIds.sort((a, b) => a - b);
+    const linked = await acquire<{ id: number; lab_order_id: number | null; source_type: string }>(
+      `SELECT id, lab_order_id, source_type FROM payables
+        WHERE id = ANY($1::int[]) AND party_id = $2 ORDER BY id FOR UPDATE NOWAIT`,
+      [payableIds, input.partyId],
+    );
+    if (linked === null) return await refuse("batch_busy");
+    const links = new Map(linked.map((row) => [row.id, row]));
+    if (linked.length !== payableIds.length || orders.some((order) => {
+      const row = links.get(order.payable_id!);
+      return !row || row.source_type !== "operational" || row.lab_order_id !== order.id;
+    })) return await refuse("batch_link_invalid");
+
+    const { rows: ambiguous } = await client.query(
+      `SELECT 1 FROM expenses e
+        WHERE e.payable_id = ANY($1::int[]) AND e.party_id IS DISTINCT FROM $2::int
+       UNION ALL
+       SELECT 1 FROM expense_payable_allocations a
+         JOIN expenses e ON e.id = a.expense_id
+        WHERE a.payable_id = ANY($1::int[]) AND e.party_id IS DISTINCT FROM $2::int
+       UNION ALL
+       SELECT 1 FROM expense_payable_allocations a
+         JOIN expenses e ON e.id = a.expense_id
+         JOIN payables p ON p.id = a.payable_id
+        WHERE a.payable_id = ANY($1::int[]) AND e.reversal_of_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM lab_order_tracking t
+             WHERE t.lab_order_id = p.lab_order_id AND t.action = 'financial_settlement'
+               AND (t.expense_id = e.id
+                    OR (t.expense_id IS NULL AND t.notes LIKE '%رقم ' || e.voucher_number || ' بمبلغ%')))
+       LIMIT 1`, [payableIds, input.partyId],
+    );
+    if (ambiguous.length > 0) return await refuse("batch_link_invalid");
+
+    const { rows: balances } = await client.query<{
+      id: number; currency: string; amount_minor: string; settled: string;
+    }>(
+      `SELECT b.id, b.currency, ${payableAmountSql("b")}::text AS amount_minor,
+              ${payableSettledTotalSql("b")}::text AS settled
+         FROM payables b WHERE b.id = ANY($1::int[]) AND b.party_id = $2 ORDER BY b.id`,
+      [payableIds, input.partyId],
+    );
+    if (balances.length !== payableIds.length) return await refuse("batch_link_invalid");
+    const plan: { payableId: number; remaining: number }[] = [];
+    let selectedTotal = 0;
+    for (const bill of balances) {
+      if (!isCurrency(bill.currency) || bill.currency !== input.currency) return await refuse("batch_currency_mismatch");
+      const amount = Number(bill.amount_minor);
+      const settled = Number(bill.settled);
+      const remaining = amount - settled;
+      if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(settled)
+        || !Number.isSafeInteger(remaining) || remaining <= 0) return await refuse("batch_requires_full_allocation");
+      selectedTotal += remaining;
+      if (!Number.isSafeInteger(selectedTotal)) return await refuse("batch_requires_full_allocation");
+      plan.push({ payableId: bill.id, remaining });
+    }
+    if (selectedTotal !== input.amountMinor) return await refuse("batch_requires_full_allocation");
+    const baseAmount = toBaseAmount(input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate);
+    if (!Number.isSafeInteger(baseAmount) || baseAmount < 0) return await refuse("batch_requires_full_allocation");
+
+    const openShift = await acquire<{ id: number }>(
+      `SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1 FOR SHARE NOWAIT`,
+    );
+    if (openShift === null) return await refuse("batch_busy");
+    if (openShift.length === 0) return await refuse("no_shift");
+
+    const note = input.note?.trim()
+      || `تسوية وسداد كشف حساب مختبر [${party.name}]${input.monthLabel ? ` (${input.monthLabel})` : ""} لعدد (${orderIds.length}) أوامر عمل: [${orderIds.map((id) => `RX-${id}`).join(", ")}]`;
+    const result = await recordExpenseInTx(client, {
+      category: "lab", partyId: input.partyId, payeeText: party.name,
+      amountMinor: input.amountMinor, currency: input.currency, baseCurrency: input.baseCurrency,
+      exchangeRate: input.exchangeRate, payableId: null, note, createdBy: input.createdBy,
+      rateOverrideReason: input.rateOverrideReason, prepaymentReason: input.prepaymentReason,
+    }, settingsRates);
+    if (result.id === null) return await refuse(result.reason ?? "no_shift", undefined, result.quote);
+
+    let allocated = 0;
+    for (const item of plan) {
+      const { rows: saved } = await client.query<{ payable_id: number; paid_minor: string; settled_minor: string }>(
+        `INSERT INTO expense_payable_allocations
+           (expense_id, payable_id, paid_minor, payable_currency, payable_exchange_rate, settled_minor)
+         VALUES ($1, $2, $3, $4, $5, $3) RETURNING payable_id, paid_minor, settled_minor`,
+        [result.id, item.payableId, item.remaining, input.currency, input.exchangeRate],
+      );
+      if (saved.length !== 1 || saved[0].payable_id !== item.payableId
+        || Number(saved[0].paid_minor) !== item.remaining || Number(saved[0].settled_minor) !== item.remaining) {
+        throw new Error("Lab batch allocation coverage changed");
+      }
+      allocated += item.remaining;
+    }
+    if (plan.length !== orderIds.length || allocated !== input.amountMinor) {
+      throw new Error("Lab batch full allocation was not completed");
+    }
+
+    const { rows: voucher } = await client.query<{ voucher_number: string }>(
+      `SELECT voucher_number FROM expenses WHERE id = $1`, [result.id],
+    );
+    const { rows: marked } = await client.query<{ id: number }>(
+      `UPDATE lab_orders SET financial_status = 'paid' WHERE id = ANY($1::int[]) RETURNING id`, [orderIds],
+    );
+    if (marked.length !== orderIds.length || marked.some((row) => !found.has(row.id))) {
+      throw new Error("Lab batch selected order coverage changed");
+    }
+    const { rows: tracked } = await client.query<{ lab_order_id: number }>(
+      `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role, expense_id)
+       SELECT id, 'financial_settlement', status, status, $1, $2, $3, $4
+         FROM lab_orders WHERE id = ANY($5::int[]) RETURNING lab_order_id`,
+      [
+        `تمت التسوية المالية المجمعة بسند صرف رقم ${voucher[0].voucher_number} بمبلغ ${input.amountMinor} ${input.currency}`,
+        input.createdBy, input.actorRole ?? "manager", result.id, orderIds,
+      ],
+    );
+    if (tracked.length !== orderIds.length || tracked.some((row) => !found.has(row.lab_order_id))) {
+      throw new Error("Lab batch tracking coverage changed");
+    }
+    const expense = await getExpenseWith(client, result.id);
+    if (!expense) throw new Error("Lab batch expense receipt missing inside transaction");
+    await client.query("RELEASE SAVEPOINT lab_batch_tx");
+    return { ok: true, expense, orderIds, partyName: party.name, quote: result.quote };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT lab_batch_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT lab_batch_tx").catch(() => {});
+    throw error;
+  }
+}
+
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
 import {
@@ -15046,11 +15818,13 @@ export async function commissionReport(
   to: string,
   /** (COMM-DETAIL-1) مجمِّع التفصيل — اختياري؛ لا يغيّر أي رقم من المجاميع. */
   detail?: CommissionDetailCollector,
-  queryRunner?: DbClient | DbPool,
+  queryRunner?: Pick<DbClient, "query">,
 ): Promise<CommissionRow[]> {
-  await ensureSchema();
-  if(!queryRunner)return withFinancialReadSnapshot(getPool(),runner=>commissionReport(from,to,detail,runner),pgliteInstance!==null);
-  const pool = queryRunner ?? getPool();
+  if (!queryRunner) {
+    await ensureSchema();
+    return withFinancialReadSnapshot(getPool(), runner => commissionReport(from, to, detail, runner), pgliteInstance !== null);
+  }
+  const pool = queryRunner;
 
   const [{ rows: doctorRows }, { rows: invoiceRows }, { rows: paidRows }] = await Promise.all([
     pool.query<{ id: number; name: string; commission_percent: string }>(
@@ -15699,7 +16473,7 @@ export async function commissionReport(
 
 /** (P1-FIX-6) سجل النسب كخط زمني لكل فئة — للقراءة وقت الحدث في تقرير العمولة. */
 export async function materialRateTimeline(queryRunner?:Pick<DbClient,"query">): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
-  await ensureSchema();
+  if (!queryRunner) await ensureSchema();
   const { rows } = await (queryRunner??getPool()).query<{ category: string; rate_bp: number; effective_from: Date }>(
     /* الترتيب بالمعرّف عند تساوي السريان: تغييران في اللحظة نفسها — الأحدث إدراجًا هو الساري. */
     `SELECT category, rate_bp, effective_from FROM material_rate_history ORDER BY category, effective_from, id`,
@@ -15780,6 +16554,10 @@ export interface DebtRow {
 export async function patientDebtReport(): Promise<DebtRow[]> {
   // التقرير يعرض أول ٥٠٠ صفّ؛ الحساب نفسه في `computeDebtRows` بلا قصّ.
   return (await computeDebtRows(null)).slice(0, 500);
+}
+
+export async function patientDebtReportWith(q: Pick<DbClient, "query">): Promise<DebtRow[]> {
+  return (await computeDebtRowsInSnapshot(null, false, q)).slice(0, 500);
 }
 
 /**
@@ -16042,7 +16820,14 @@ export interface FinanceSummary {
  */
 export async function financeSummary(from: string, to: string): Promise<FinanceSummary> {
   await ensureSchema();
-  const pool = getPool();
+  return financeSummaryWith(getPool(), from, to);
+}
+
+export async function financeSummaryWith(
+  pool: Pick<DbClient, "query">,
+  from: string,
+  to: string,
+): Promise<FinanceSummary> {
 
   const [payments, expenses, invoices, invoicePatients, services] = await Promise.all([
     pool.query<{ currency: string; kind: string; amount: string; base: string; count: string }>(
@@ -16340,10 +17125,14 @@ export interface PartyBalance {
  */
 export async function partyBalances(): Promise<PartyBalance[]> {
   await ensureSchema();
+  return partyBalancesWith(getPool());
+}
+
+export async function partyBalancesWith(q: Pick<DbClient, "query">): Promise<PartyBalance[]> {
   // الأطباء مستثنون: مستحقهم لا يأتي من التزامات مسجّلة بل يُحسب من نسبتهم على
   // المحصّل، وهو حسابٌ بمدى تاريخي مكانه تقرير العمولات. إدراجهم هنا كان يُظهر
   // «دُفع زيادة» لطبيب مستحقُّه محسوب في مكان آخر — رقمٌ صحيح حسابيًا وكاذب معنى.
-  const { rows } = await getPool().query<{
+  const { rows } = await q.query<{
     id: number; name: string; kind: string; owed: string; paid: string;
   }>(
     `SELECT t.id, t.name, t.kind,
@@ -16445,12 +17234,21 @@ export async function partyStatement(partyId: number): Promise<{
   payables: Payable[]; expenses: (Expense & { allocatedPaidMinor: number; payableExists: boolean })[]; advances: PartyOpeningAdvance[]; totals: PartyCurrencyTotals[];
 }> {
   await ensureSchema();
+  return partyStatementWith(getPool(), partyId);
+}
+
+export async function partyStatementWith(
+  q: Pick<DbClient, "query">,
+  partyId: number,
+): Promise<{
+  payables: Payable[]; expenses: (Expense & { allocatedPaidMinor: number; payableExists: boolean })[]; advances: PartyOpeningAdvance[]; totals: PartyCurrencyTotals[];
+}> {
   const [{ rows }, expenses, advances] = await Promise.all([
-    getPool().query<PayableRow>(
+    q.query<PayableRow>(
       `${PAYABLE_SELECT} WHERE b.party_id = $1 ORDER BY b.created_at DESC, b.id DESC`, [partyId],
     ),
-    listPartyExpenses(partyId),
-    listPartyAdvances(partyId),
+    listPartyExpensesWith(q, partyId),
+    listPartyAdvancesWith(q, partyId),
   ]);
   const payables = rows.map(toPayable);
   const activeAdvances = advances.filter((advance) => advance.voidedAt === null);
@@ -16902,7 +17700,14 @@ export async function listPartyOpenings(): Promise<{
 /** الأرصدة المقدَّمة السابقة لجهةٍ واحدة — لكشف حسابها. */
 export async function listPartyAdvances(partyId: number): Promise<PartyOpeningAdvance[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.party_id = $1 ORDER BY o.id`, [partyId]);
+  return listPartyAdvancesWith(getPool(), partyId);
+}
+
+export async function listPartyAdvancesWith(
+  q: Pick<DbClient, "query">,
+  partyId: number,
+): Promise<PartyOpeningAdvance[]> {
+  const { rows } = await q.query<AdvanceRow>(`${ADVANCE_SELECT} WHERE o.party_id = $1 ORDER BY o.id`, [partyId]);
   return rows.map(toAdvance);
 }
 
@@ -17436,9 +18241,11 @@ function clinicDayOf(iso: string): string {
  * الدفاتر والمستندات، ولا ترحيل خلفي للبيانات القائمة، ولا قيد يتيم. وما لا يُشتقّ
  * من مستند — التسويات وإعادة التقييم — يأتي من `journal_manual` ويُدمج هنا.
  */
-export async function journalEntries(from: string, to: string, queryRunner?:DbClient|DbPool): Promise<JournalEntry[]> {
-  await ensureSchema();
-  if(!queryRunner)return withFinancialReadSnapshot(getPool(),runner=>journalEntries(from,to,runner),pgliteInstance!==null);
+export async function journalEntries(from: string, to: string, queryRunner?: Pick<DbClient, "query">): Promise<JournalEntry[]> {
+  if (!queryRunner) {
+    await ensureSchema();
+    return withFinancialReadSnapshot(getPool(), runner => journalEntries(from, to, runner), pgliteInstance !== null);
+  }
   const pool = queryRunner;
 
   const [invoices, payments, expenses, allocations, payables, shifts, manual, openings, partyOpenings, partyAdvances] = await Promise.all([
@@ -18052,6 +18859,52 @@ export async function createManualEntry(input: {
   }
 }
 
+export async function createManualEntryInTx(
+  client: DbClient,
+  input: {
+    date: string;
+    description: string;
+    lines: ManualEntryLine[];
+    createdBy: string;
+  },
+): Promise<number> {
+  const lines = input.lines.map((line) => ({ ...line }));
+  validateManualEntryLines(lines);
+  const touchesCash = hasManualCashLine(lines);
+  await client.query("SAVEPOINT manual_entry_tx");
+  try {
+    if (touchesCash) {
+      await client.query("SET LOCAL lock_timeout = '5s'");
+      await client.query("LOCK TABLE cashier_shifts IN SHARE MODE");
+      const { rows: open } = await client.query<{ id: number }>(
+        "SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1",
+      );
+      if (open.length) throw new ManualCashEntryConflictError();
+    }
+    const { rows } = await client.query<{ id: number }>(
+      `INSERT INTO journal_manual (entry_date, description, created_by)
+       VALUES ($1::date, $2, $3) RETURNING id`,
+      [input.date, input.description, input.createdBy],
+    );
+    for (const line of lines) {
+      await client.query(
+        `INSERT INTO journal_manual_lines (entry_id, account_code, currency, amount_minor, side)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [rows[0].id, line.accountCode, line.currency, line.amountMinor, line.side],
+      );
+    }
+    await client.query("RELEASE SAVEPOINT manual_entry_tx");
+    return rows[0].id;
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT manual_entry_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT manual_entry_tx").catch(() => {});
+    if (touchesCash && (error as { code?: string })?.code === "55P03") {
+      throw new ManualCashEntryConflictError("manual_cash_shift_busy");
+    }
+    throw error;
+  }
+}
+
 /**
  * هل الفترة مقفلة عند هذا التاريخ؟
  *
@@ -18345,13 +19198,20 @@ export interface FxReport {
  */
 export async function fxReport(asOf: string): Promise<FxReport> {
   await ensureSchema();
-  const settings = await getSettings();
+  return fxReportWith(getPool(), asOf);
+}
+
+export async function fxReportWith(
+  q: Pick<DbClient, "query">,
+  asOf: string,
+): Promise<FxReport> {
+  const settings = await readSettings(q);
   // (TD-05) الأساس دستوري من الكود لا من الإعدادات — والإعدادات تبقى لأسعار الصرف.
   const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
 
   const [entries, { rows: historical }] = await Promise.all([
-    journalEntries(FX_EPOCH, asOf),
-    getPool().query<{ id: number; entry_date: Date; description: string; account_code: string; currency: string; amount_minor: string; side: string }>(
+    journalEntries(FX_EPOCH, asOf, q),
+    q.query<{ id: number; entry_date: Date; description: string; account_code: string; currency: string; amount_minor: string; side: string }>(
       `SELECT m.id, m.entry_date, m.description, l.account_code, l.currency, l.amount_minor, l.side
          FROM journal_manual m JOIN journal_manual_lines l ON l.entry_id = m.id
         WHERE m.description LIKE 'إعادة تقييم %' AND m.entry_date <= $1::date
@@ -22019,7 +22879,7 @@ export async function listOpeningBalances(): Promise<OpeningBalance[]> {
  */
 export async function openingBalanceAmounts(patientIds: number[],queryRunner?:Pick<DbClient,"query">): Promise<Map<number, OpeningByCurrency>> {
   if (patientIds.length === 0) return new Map();
-  await ensureSchema();
+  if (!queryRunner) await ensureSchema();
   const { rows } = await (queryRunner??getPool()).query<{ patient_id: number; currency: string; amount_minor: string }>(
     `SELECT patient_id, currency, amount_minor FROM patient_opening_balances WHERE patient_id = ANY($1::int[])`,
     [patientIds],
@@ -32334,11 +33194,20 @@ export async function commissionDetailReport(
   to: string,
   filter: CommissionDetailFilter = {},
 ): Promise<CommissionDetailReport> {
+  await ensureSchema();
+  return commissionDetailReportWith(getPool(), from, to, filter);
+}
+
+export async function commissionDetailReportWith(
+  pool: Pick<DbClient, "query">,
+  from: string,
+  to: string,
+  filter: CommissionDetailFilter = {},
+): Promise<CommissionDetailReport> {
   const collector: CommissionDetailCollector = {
     lines: [], unallocatedMaterials: [], serviceRateFindings: [], invoiceClinicDate: new Map(),
   };
-  const allRows = await commissionReport(from, to, collector);
-  const pool = getPool();
+  const allRows = await commissionReport(from, to, collector, pool);
 
   const lines = collector.lines.filter((line) =>
     (filter.doctorId == null || line.doctorId === filter.doctorId)
@@ -32435,7 +33304,14 @@ export interface CaseOverrideView {
 /** (F-11) سجل النسب الخاصة للقراءة الإدارية — الأحدث أولًا. */
 export async function listCaseOverrides(filter: { patientId?: number | null } = {}): Promise<CaseOverrideView[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listCaseOverridesWith(getPool(), filter);
+}
+
+export async function listCaseOverridesWith(
+  q: Pick<DbClient, "query">,
+  filter: { patientId?: number | null } = {},
+): Promise<CaseOverrideView[]> {
+  const { rows } = await q.query<{
     id: number; doctor_id: number; doctor_name: string; case_id: number | null; plan_id: number | null;
     case_title: string | null; case_specialty: string | null; plan_title: string | null;
     patient_id: number | null; patient_name: string | null; percent: string | null; action: "set" | "void";
@@ -32486,7 +33362,17 @@ export async function caseOverrideTargets(patientId: number): Promise<{
   doctors: Array<{ id: number; name: string }>;
 }> {
   await ensureSchema();
-  const pool = getPool();
+  return caseOverrideTargetsWith(getPool(), patientId);
+}
+
+export async function caseOverrideTargetsWith(
+  pool: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<{
+  cases: Array<{ id: number; title: string; specialty: string; status: string }>;
+  plans: Array<{ id: number; title: string | null; status: string | null }>;
+  doctors: Array<{ id: number; name: string }>;
+}> {
   const [cases, plans, doctors] = await Promise.all([
     pool.query<{ id: number; title: string; specialty: string; status: string }>(
       `SELECT id, title, specialty, status FROM clinical_cases WHERE patient_id = $1 ORDER BY id DESC`, [patientId]),
@@ -32527,19 +33413,41 @@ export async function createCaseOverride(input: CaseOverrideInput): Promise<Case
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const fail = async (status: 400 | 404 | 409, message: string): Promise<CaseOverrideResult> => {
+    const result = await createCaseOverrideInTx(client, input);
+    if (!result.ok) {
       await client.query("ROLLBACK");
-      return { ok: false, status, message };
-    };
+      return result;
+    }
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function createCaseOverrideInTx(
+  client: DbClient,
+  input: CaseOverrideInput,
+): Promise<CaseOverrideResult> {
+  await client.query("SAVEPOINT case_override_tx");
+  const fail = async (status: 400 | 404 | 409, message: string): Promise<CaseOverrideResult> => {
+    await client.query("ROLLBACK TO SAVEPOINT case_override_tx");
+    await client.query("RELEASE SAVEPOINT case_override_tx");
+    return { ok: false, status, message };
+  };
+  try {
     const { rows: doctorRows } = await client.query<{ name: string }>(
       `SELECT name FROM parties WHERE id = $1 AND kind = 'doctor'`, [input.doctorId]);
-    if (!doctorRows[0]) return fail(404, "الطبيب غير موجود.");
+    if (!doctorRows[0]) return await fail(404, "الطبيب غير موجود.");
     const { rows: targetRows } = input.caseId !== null
       ? await client.query<{ label: string; patient_id: number }>(
         `SELECT title AS label, patient_id FROM clinical_cases WHERE id = $1`, [input.caseId])
       : await client.query<{ label: string; patient_id: number }>(
         `SELECT COALESCE(title, 'خطة علاج') AS label, patient_id FROM treatment_plans WHERE id = $1`, [input.planId]);
-    if (!targetRows[0]) return fail(404, input.caseId !== null ? "الحالة غير موجودة." : "خطة العلاج غير موجودة.");
+    if (!targetRows[0]) return await fail(404, input.caseId !== null ? "الحالة غير موجودة." : "خطة العلاج غير موجودة.");
 
     const targetKey = input.caseId !== null ? `c:${input.caseId}` : `p:${input.planId}`;
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`commission_case_override:${input.doctorId}:${targetKey}`]);
@@ -32553,10 +33461,10 @@ export async function createCaseOverride(input: CaseOverrideInput): Promise<Case
     );
     const head = headRows[0];
     if ((head?.id ?? null) !== input.supersedesId) {
-      return fail(409, "تغيّرت النسبة الخاصة لهذه الحالة منذ فتحت الصفحة — حدّثها ثم أعد المحاولة.");
+      return await fail(409, "تغيّرت النسبة الخاصة لهذه الحالة منذ فتحت الصفحة — حدّثها ثم أعد المحاولة.");
     }
     if (input.action === "void" && (!head || head.action !== "set")) {
-      return fail(400, "لا نسبة خاصة سارية لإلغائها.");
+      return await fail(400, "لا نسبة خاصة سارية لإلغائها.");
     }
     const { rows: timeRows } = await client.query<{ at: Date }>(
       input.effectiveDate
@@ -32566,7 +33474,7 @@ export async function createCaseOverride(input: CaseOverrideInput): Promise<Case
     );
     const effectiveFrom = timeRows[0].at;
     if (head && new Date(effectiveFrom).getTime() < new Date(head.effective_from).getTime()) {
-      return fail(400, "تاريخ السريان يسبق سريان النسبة السابقة لهذه الحالة — اختر تاريخًا لاحقًا.");
+      return await fail(400, "تاريخ السريان يسبق سريان النسبة السابقة لهذه الحالة — اختر تاريخًا لاحقًا.");
     }
     const { rows: inserted } = await client.query<{ id: number }>(
       `INSERT INTO commission_case_overrides
@@ -32593,14 +33501,13 @@ export async function createCaseOverride(input: CaseOverrideInput): Promise<Case
       actor: input.actor,
       actorRole: input.actorRole ?? null,
     });
-    await client.query("COMMIT");
-    const [view] = (await listCaseOverrides()).filter((row) => row.id === inserted[0].id);
+    const [view] = (await listCaseOverridesWith(client)).filter((row) => row.id === inserted[0].id);
+    await client.query("RELEASE SAVEPOINT case_override_tx");
     return { ok: true, override: view };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    await client.query("ROLLBACK TO SAVEPOINT case_override_tx").catch(() => undefined);
+    await client.query("RELEASE SAVEPOINT case_override_tx").catch(() => undefined);
     throw error;
-  } finally {
-    client.release();
   }
 }
 

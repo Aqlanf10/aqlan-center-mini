@@ -14,7 +14,7 @@ import type { StaffCapability } from "./staff-capability-catalogue";
  * Keys are a closed set and never collide with operation actions (`read:` prefix).
  */
 export interface CanonicalRecordReadRule {
-  readonly record: "patient" | "appointment";
+  readonly record: "patient" | "appointment" | null;
   readonly need: readonly StaffCapability[];
   readonly anyOf: readonly StaffCapability[];
 }
@@ -100,6 +100,12 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:invoices.clinical-preview": Object.freeze({ record: "patient", need: Object.freeze(["finance.invoices.create"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/inventory/patient-cost (M2 slice 37a). */
   "read:inventory.patient-cost": Object.freeze({ record: "patient", need: Object.freeze(["inventory.costs.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/finance/commissions: whole-clinic or own clinician commission report (M2 slice 37b). */
+  "read:finance.commissions": Object.freeze({ record: null, need: Object.freeze([]), anyOf: Object.freeze(["finance.commissions.view-all", "finance.commissions.view-own"] as const) }),
+  /** GET /api/finance/expense-categories: full budget/actuals with finance.expenses.view, or operational catalogue labels for lab ordering (M2 slice 37b). */
+  "read:finance.expense-categories": Object.freeze({ record: null, need: Object.freeze([]), anyOf: Object.freeze(["finance.expenses.view", "clinical.lab.order"] as const) }),
+  /** GET /api/parties: operational/financial party directory with field/row projection (M2 slice 37b). */
+  "read:parties": Object.freeze({ record: null, need: Object.freeze([]), anyOf: Object.freeze(["finance.suppliers.view", "finance.payments.view", "inventory.references.view", "clinical.visits.document", "clinical.plans.view", "clinical.lab.view", "appointments.create"] as const) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

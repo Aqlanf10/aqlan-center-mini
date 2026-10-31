@@ -5,6 +5,12 @@ import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  commissionOverridesGetCanonicalResponse,
+  commissionOverridesPostCanonicalResponse,
+} from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +22,9 @@ export const dynamic = "force-dynamic";
 const FORBIDDEN = "النسب الخاصة بالحالات للمدير وحده.";
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return commissionOverridesGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!isAdmin(session.role)) return NextResponse.json({ message: FORBIDDEN }, { status: 403 });
@@ -33,6 +42,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return commissionOverridesPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!isAdmin(session.role)) return NextResponse.json({ message: FORBIDDEN }, { status: 403 });

@@ -5,10 +5,19 @@ import { getParty, recordAudit, updateParty } from "@/lib/db";
 import { PARTY_AUDIT_FIELDS, auditChanges } from "@/lib/audit-diff";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { partyPatchCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return partyPatchCanonicalResponse(request, rawId, selected.handle);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

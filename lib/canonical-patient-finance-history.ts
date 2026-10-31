@@ -328,7 +328,7 @@ export async function ledgerCanonicalResponse(
           legacyArrangementAccess: { manage: scope.granted("finance.legacy.record") },
         };
       },
-      { errorPrefix: "PATIENT_LEDGER", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(payload, { headers: NO_STORE });
   } catch (error) {
@@ -372,7 +372,7 @@ export async function statementCanonicalResponse(
         if (!(await patientVisibleInSnapshot(query, scope, id))) return null;
         return loadPatientStatementDocumentInSnapshot(query, id, options);
       },
-      { errorPrefix: "PATIENT_STATEMENT", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!document) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404, headers });
@@ -402,7 +402,7 @@ export async function treatmentFinancialContextCanonicalResponse(
         if (!(await patientVisibleInSnapshot(query, scope, patientId))) return null;
         return listTreatmentFinancialReferencesInSnapshot(query, patientId);
       },
-      { errorPrefix: "TREATMENT_FIN_CONTEXT", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!result) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404, headers: NO_STORE });
@@ -456,7 +456,7 @@ export async function responsibilityCanonicalResponse(
             scope.granted("finance.patient-ledger.manage"),
           );
         },
-        { errorPrefix: "PATIENT_RESPONSIBILITY", maxBytes: SNAPSHOT_MAX_BYTES },
+        { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
       );
       return NextResponse.json(result, { headers: NO_STORE });
     }
@@ -535,7 +535,7 @@ export async function visitWalkoutCanonicalResponse(
             : {}),
         };
       },
-      { errorPrefix: "VISIT_WALKOUT", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!payload) {
       return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404, headers: NO_STORE });
@@ -566,7 +566,7 @@ export async function visitBillingPreviewCanonicalResponse(
         if (!visit) return null;
         return previewVisitBillingWith(query, visitId);
       },
-      { errorPrefix: "VISIT_BILLING_PREVIEW", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!preview) {
       return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404, headers: NO_STORE });
@@ -602,7 +602,7 @@ export async function visitFinancialContextCanonicalResponse(
         if (!result) return null;
         return redactVisitFinancialContext(result, scope.granted("finance.invoices.view"));
       },
-      { errorPrefix: "VISIT_FIN_CONTEXT", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!projected) {
       return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404, headers: NO_STORE });
@@ -733,7 +733,7 @@ export async function familiesSearchCanonicalResponse(
         }
         return { families: [] };
       },
-      { errorPrefix: "FAMILY_SEARCH", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(payload, { headers: NO_STORE });
   } catch (error) {
@@ -836,7 +836,7 @@ export async function getFamilyCanonicalResponse(
           canEdit: scope.granted("patients.edit"),
         });
       },
-      { errorPrefix: "FAMILY_READ", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!view) {
       return NextResponse.json({ message: "لا توجد عائلة بهذا الرقم." }, { status: 404, headers: NO_STORE });
@@ -1167,7 +1167,7 @@ export async function patientFamilyCanonicalResponse(
         });
         return { family: view, canEdit };
       },
-      { errorPrefix: "PATIENT_FAMILY_READ", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!payload) {
       return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404, headers: NO_STORE });
@@ -1209,7 +1209,7 @@ export async function getDebtRepaymentsCanonicalResponse(
           clinicDateString(new Date(), CLINIC_TIME_ZONE),
         );
       },
-      { errorPrefix: "DEBT_REPAYMENTS_READ", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!workspace) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404, headers: NO_STORE });
@@ -1458,7 +1458,7 @@ export async function listHistoricalDocumentsCanonicalResponse(
           scope.granted("patients.history.correct"),
         );
       },
-      { errorPrefix: "HISTORICAL_DOCS_READ", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json({ documents }, { headers: NO_STORE });
   } catch (error) {
@@ -1516,7 +1516,7 @@ export async function previewHistoricalDocumentCanonicalResponse(
           actorCtx,
         );
       },
-      { errorPrefix: "HISTORICAL_DOC_PREVIEW", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(preview, { headers: NO_STORE });
   } catch (error) {
@@ -1679,7 +1679,7 @@ export async function patientLegacyArchiveCanonicalResponse(
         }
         return patientLegacyHistoryWith(query, id);
       },
-      { errorPrefix: "PATIENT_LEGACY_ARCHIVE", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(archive, { headers: NO_STORE });
   } catch (error) {
@@ -1723,7 +1723,7 @@ export async function patientLegacyOnboardingCanonicalResponse(
         }
         return loaded;
       },
-      { errorPrefix: "PATIENT_LEGACY_ONBOARDING", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json({ onboarding }, { headers: NO_STORE });
   } catch (error) {
@@ -1751,7 +1751,7 @@ export async function listLegacyBalanceArrangementCanonicalResponse(
           canManage: scope.granted("finance.legacy.record"),
         };
       },
-      { errorPrefix: "LEGACY_BALANCE_ARRANGEMENTS", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!payload) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404, headers: NO_STORE });
@@ -1978,7 +1978,7 @@ export async function listLegacyTreatmentsCanonicalResponse(
           },
         };
       },
-      { errorPrefix: "LEGACY_TREATMENTS_READ", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!payload) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404, headers: NO_STORE });
@@ -2030,7 +2030,7 @@ export async function previewLegacyTreatmentCanonicalResponse(
           canEditOpening: scope.granted("finance.opening-balances.manage"),
         });
       },
-      { errorPrefix: "LEGACY_TREATMENT_PREVIEW", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!result.ok) {
       if (result.reason === "no_patient") {
@@ -2164,7 +2164,7 @@ export async function previewLegacyVoidCanonicalResponse(
           actorRole: scope.role,
         });
       },
-      { errorPrefix: "LEGACY_VOID_PREVIEW", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     if (!result.ok) return legacyVoidRefusalResponse(result.reason);
     return NextResponse.json({ preview: result.preview }, { headers: NO_STORE });
@@ -2258,7 +2258,7 @@ export async function listOpeningBalancesCanonicalResponse(
         "finance.reconciliation.view",
         async (query) =>
           openingCorrectionPreviewInSnapshot(query, patientId, currency, clear ? null : amountMinor),
-        { errorPrefix: "OPENING_CORRECTION_PREVIEW", maxBytes: SNAPSHOT_MAX_BYTES },
+        { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
       );
       return NextResponse.json({ preview }, { headers: NO_STORE });
     } catch (error) {
@@ -2273,7 +2273,7 @@ export async function listOpeningBalancesCanonicalResponse(
         session,
         "finance.reconciliation.view",
         async (query) => listOpeningBalanceHistoryWith(query, historyFor),
-        { errorPrefix: "OPENING_BALANCE_HISTORY", maxBytes: SNAPSHOT_MAX_BYTES },
+        { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
       );
       return NextResponse.json({ history }, { headers: NO_STORE });
     } catch (error) {
@@ -2298,7 +2298,7 @@ export async function listOpeningBalancesCanonicalResponse(
           totalsByCurrency,
         };
       },
-      { errorPrefix: "OPENING_BALANCES_LIST", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(payload, { headers: NO_STORE });
   } catch (error) {
@@ -2557,7 +2557,7 @@ export async function listPartyOpeningsCanonicalResponse(
           canEdit: scope.granted("finance.opening-balances.manage"),
         };
       },
-      { errorPrefix: "PARTY_OPENINGS_READ", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(payload, { headers: NO_STORE });
   } catch (error) {

@@ -174,7 +174,7 @@ export async function runCanonicalReadSnapshot<T>(
    : await loadCanonicalSnapshotAuthority({query}, session, action as StaffRuntimeAction);
   const patientScope = patientCapabilityConstraint(proof.access);
   const appointmentScope = appointmentCapabilityConstraint(proof.access);
-  if (rule && (rule.record === "patient" ? patientScope : appointmentScope).kind === "none") {
+  if (rule && rule.record !== null && (rule.record === "patient" ? patientScope : appointmentScope).kind === "none") {
    throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
   }
   await assertIdentity();

@@ -17,6 +17,9 @@ import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { ManualCashEntryConflictError } from "@/lib/manual-cash-entry";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { accountingGetCanonicalResponse, accountingPostCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +31,9 @@ const forbidden = () =>
   NextResponse.json({ message: "الدفاتر المحاسبية للمدير وحده." }, { status: 403 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return accountingGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewFinancialReports(session.role)) return forbidden();
@@ -87,6 +93,9 @@ export async function GET(request: Request) {
 
 /** قيد يدوي — للتسويات وإعادة تقييم العملات والأرصدة الافتتاحية. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return accountingPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();

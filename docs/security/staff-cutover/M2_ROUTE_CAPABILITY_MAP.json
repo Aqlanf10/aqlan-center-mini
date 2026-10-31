@@ -11,8 +11,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/accounting",
@@ -25,8 +25,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Manual journal entry; cash lines also require no open shift (unchanged rule)."
+    "status": "canonical-done",
+    "note": "Manual journal entry; cash lines also require no open shift (unchanged rule). M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/ai/chat",
@@ -700,8 +700,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "canViewMoney(session.role) downloads or previews expense voucher attachment bytes.",
+      "groups": {
+        "attachment": "binary voucher attachment stream — finance.expenses.view"
+      }
+    }
   },
   {
     "route": "/api/expenses",
@@ -714,8 +720,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/expenses",
@@ -732,8 +738,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "canViewMoney(session.role) or doctor with canDoctorViewExpenses(permissions) reads period expense vouchers.",
+      "groups": {
+        "expenses": "expense vouchers between from and to — finance.expenses.view"
+      }
+    }
   },
   {
     "route": "/api/expenses",
@@ -748,8 +760,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Paying from the treasury also requires an open cashier shift."
+    "status": "canonical-done",
+    "note": "Paying from the treasury also requires an open cashier shift. M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/expenses/[id]/attachments",
@@ -765,8 +777,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "canViewMoney(session.role) lists voucher attachment metadata.",
+      "groups": {
+        "attachments": "expense attachment metadata rows — finance.expenses.view"
+      }
+    }
   },
   {
     "route": "/api/expenses/[id]/attachments",
@@ -781,8 +799,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Paying from the treasury also requires an open cashier shift."
+    "status": "canonical-done",
+    "note": "Paying from the treasury also requires an open cashier shift. M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/expenses/quote",
@@ -797,8 +815,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Paying from the treasury also requires an open cashier shift."
+    "status": "canonical-done",
+    "note": "Paying from the treasury also requires an open cashier shift. M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/export",
@@ -927,8 +945,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "isAdmin(session.role) lists append-only case commission overrides and optional patient targets.",
+      "groups": {
+        "overrides": "case commission overrides and patient override targets — finance.commissions.manage-rates"
+      }
+    }
   },
   {
     "route": "/api/finance/commission-overrides",
@@ -941,8 +965,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/finance/commissions",
@@ -958,8 +982,8 @@
       "finance.commissions.view-own"
     ],
     "scope": null,
-    "status": "existing",
-    "note": "view-own restricts rows to the validated clinician link."
+    "status": "canonical-done",
+    "note": "view-own restricts rows to the validated clinician link. M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/finance/debts",
@@ -975,8 +999,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "canViewMoney(session.role) reads clinic-wide patient debt report.",
+      "groups": {
+        "debts": "patient debt summary rows and baseCurrency — finance.patient-ledger.view"
+      }
+    }
   },
   {
     "route": "/api/finance/expense-categories",
@@ -989,8 +1019,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/finance/expense-categories",
@@ -1002,13 +1032,21 @@
       "cashier",
       "accountant"
     ],
-    "need": [
-      "finance.expenses.view"
+    "need": [],
+    "anyOf": [
+      "finance.expenses.view",
+      "clinical.lab.order"
     ],
-    "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "expenseCatalogueAccess(role, permissions, financeAccess) returns full budgets/spent for financial viewers or catalogue-only labels for lab ordering.",
+      "groups": {
+        "catalogue": "active operational category labels and visibility=catalogue — clinical.lab.order or finance.expenses.view",
+        "budgets": "account codes, monthly/annual budgets, spentMinor, and summary — finance.expenses.view"
+      }
+    }
   },
   {
     "route": "/api/finance/expense-categories",
@@ -1021,8 +1059,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/finance/expense-categories",
@@ -1035,8 +1073,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "",
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
     "branches": {
       "discriminator": "action",
       "values": {
@@ -1063,8 +1101,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/finance/fx",
@@ -1077,8 +1115,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/finance/lab-accounting",
@@ -1093,8 +1131,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "canViewMoney(session.role) reads laboratory chart-of-accounts mappings and summary balances.",
+      "groups": {
+        "mappings": "laboratory accounting mappings, standard account lists, and summary — finance.reconciliation.view"
+      }
+    }
   },
   {
     "route": "/api/finance/lab-accounting",
@@ -1107,8 +1151,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/finance/lab-reconciliation",
@@ -1124,8 +1168,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "authenticated staff read operational lab reconciliation; ?view=lab-balances-v1 restricted to isAdmin(session.role).",
+      "groups": {
+        "operational": "lab order counts, unsettled counts, and upcoming appointment mismatch risks (respecting own patient/appointment scope when applicable) — finance.reconciliation.view",
+        "balances": "?view=lab-balances-v1 native lab due balances — finance.reconciliation.view + finance.suppliers.view"
+      }
+    }
   },
   {
     "route": "/api/finance/lab-reconciliation",
@@ -1138,8 +1189,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/finance/reconciliation",
@@ -1154,8 +1205,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "canViewMoney(session.role) reads open shift drawer breakdown and recent closed shifts.",
+      "groups": {
+        "reconciliation": "open shift cash/non-cash summary and past 30 shifts — finance.reconciliation.view"
+      }
+    }
   },
   {
     "route": "/api/finance/report",
@@ -1170,8 +1227,16 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "financeReportAccess(role, permissions, financeAccess) projects revenue, expenses, and net profit.",
+      "groups": {
+        "revenue": "collected revenue and daily breakdown — reports.financial.view",
+        "expenses": "expense totals and category breakdown — reports.financial.view + finance.expenses.view",
+        "profit": "net profit figures — reports.financial.view + finance.expenses.view + finance.profits.view"
+      }
+    }
   },
   {
     "route": "/api/hr/attendance",
@@ -3091,11 +3156,23 @@
     "anyOf": [
       "finance.suppliers.view",
       "finance.payments.view",
-      "inventory.references.view"
+      "inventory.references.view",
+      "clinical.visits.document",
+      "clinical.plans.view",
+      "clinical.lab.view",
+      "appointments.create"
     ],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "authenticated staff list parties; employee parties restricted to admin or accountant with viewReports; other doctors' commissionPercent masked to 0 for non-admin.",
+      "groups": {
+        "directory": "active/listed supplier, lab, and doctor directory rows — anyOf read:parties capabilities",
+        "employees": "employee party rows — hr.payroll.manage, reports.financial.view, or finance.parties.manage",
+        "commissionRates": "other doctors' commissionPercent (own clinicianPartyId always sees own rate) — finance.commissions.manage-rates, finance.commissions.view-all, or finance.parties.manage"
+      }
+    }
   },
   {
     "route": "/api/parties",
@@ -3108,8 +3185,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/parties/[id]",
@@ -3122,8 +3199,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/party-openings",
@@ -4513,8 +4590,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission.",
+    "projection": {
+      "legacy": "canViewMoney(session.role) reads supplier/lab balances, party statements, or ?view=party-balances-v1.",
+      "groups": {
+        "payables": "party balances, party statements, and native party-balances-v1 snapshot — finance.suppliers.view"
+      }
+    }
   },
   {
     "route": "/api/payables",
@@ -4528,8 +4611,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 37b: canonical clinic finance, accounting, expenses, commissions, reconciliation, parties, and payables admission."
   },
   {
     "route": "/api/payments",

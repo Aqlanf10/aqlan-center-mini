@@ -7,6 +7,12 @@ import { requireSession } from "@/lib/session";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
 import { UPLOAD_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "@/lib/magic-bytes";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  expenseAttachmentsCreateCanonicalResponse,
+  expenseAttachmentsListCanonicalResponse,
+} from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +36,12 @@ const expenseIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return expenseAttachmentsListCanonicalResponse(rawId, selected.handle);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canViewMoney(session.role)) return forbidden();
@@ -43,6 +55,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return expenseAttachmentsCreateCanonicalResponse(request, rawId, selected.handle);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!canHandleMoney(session.role)) return forbidden();

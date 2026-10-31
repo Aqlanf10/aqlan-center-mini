@@ -6,6 +6,9 @@ import { PARTY_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { isPartyKind } from "@/lib/expenses";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { partiesGetCanonicalResponse, partiesPostCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +16,9 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return partiesGetCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   const kind = new URL(request.url).searchParams.get("kind");
@@ -41,6 +47,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return partiesPostCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) return denied();
   // نسبة العمولة تحكم ما يُصرف للأطباء شهريًا، فإنشاء الجهات وتعديلها للمدير وحده.

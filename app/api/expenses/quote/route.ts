@@ -7,6 +7,9 @@ import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { refusalMessage } from "@/lib/supplier-payments";
 import { requireSession } from "@/lib/session";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { expensesQuoteCanonicalResponse } from "@/lib/canonical-clinic-finance";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +19,9 @@ export const dynamic = "force-dynamic";
  * والمتبقي بعده، ورصيد الجهة. فما يراه المستخدم هو ما سيُحفظ حرفيًّا.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") return expensesQuoteCanonicalResponse(request, selected.handle);
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

@@ -251,7 +251,7 @@ export async function invoicesListCanonicalResponse(
         }
         return listPatientInvoices(patientId, query as DbClient);
       },
-      { errorPrefix: "CANONICAL_INVOICES_LIST", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(invoices, { headers: NO_STORE });
   } catch (error) {
@@ -554,7 +554,7 @@ export async function invoiceGetCanonicalResponse(
         }
         return found;
       },
-      { errorPrefix: "CANONICAL_INVOICE_GET", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(invoice, { headers: NO_STORE });
   } catch (error) {
@@ -718,7 +718,7 @@ export async function invoiceAddServiceGetCanonicalResponse(
         }
         return data;
       },
-      { errorPrefix: "CANONICAL_INVOICE_ADD_SERVICE_READ", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(view, { headers: NO_STORE });
   } catch (error) {
@@ -761,7 +761,7 @@ export async function invoiceAddServicePreviewCanonicalResponse(
         }
         return result;
       },
-      { errorPrefix: "CANONICAL_INVOICE_ADD_SERVICE_PREVIEW", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(preview, { headers: NO_STORE });
   } catch (error) {
@@ -879,7 +879,7 @@ export async function invoiceArchiveGetCanonicalResponse(
         }
         return result;
       },
-      { errorPrefix: "CANONICAL_INVOICE_ARCHIVE_GET", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(view, { headers: NO_STORE });
   } catch (error) {
@@ -964,7 +964,7 @@ export async function invoiceArchiveListCanonicalResponse(
         }
         return listCanonicalInvoiceArchiveWith(query, patientId);
       },
-      { errorPrefix: "CANONICAL_INVOICE_ARCHIVE_LIST", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(list, { headers: NO_STORE });
   } catch (error) {
@@ -1018,7 +1018,7 @@ export async function invoiceCorrectGetCanonicalResponse(
         }
         return result;
       },
-      { errorPrefix: "CANONICAL_INVOICE_CORRECT_READ", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(view, { headers: NO_STORE });
   } catch (error) {
@@ -1171,7 +1171,7 @@ export async function invoiceClinicalPreviewCanonicalResponse(
           },
         };
       },
-      { errorPrefix: "CANONICAL_INVOICE_CLINICAL_PREVIEW", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(preview.body, { status: preview.status, headers: NO_STORE });
   } catch (error) {
@@ -1212,7 +1212,7 @@ export async function paymentsListCanonicalResponse(
         }
         return filtered;
       },
-      { errorPrefix: "CANONICAL_PAYMENTS_LIST", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json({ date, payments }, { headers: NO_STORE });
   } catch (error) {
@@ -2026,7 +2026,7 @@ export async function serviceMaterialsListCanonicalResponse(
           createdBy: row.created_by,
         }));
       },
-      { errorPrefix: "CANONICAL_SERVICE_MATERIALS_LIST", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(rows, { headers: NO_STORE });
   } catch (error) {
@@ -2192,7 +2192,7 @@ export async function servicesListCanonicalResponse(
             : {}),
         }));
       },
-      { errorPrefix: "CANONICAL_SERVICES_LIST", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(list, { headers: NO_STORE });
   } catch (error) {
@@ -2465,7 +2465,7 @@ export async function inventoryListCanonicalResponse(
         const alerts = await inventoryAlertsWith(query, today);
         return { items, alerts };
       },
-      { errorPrefix: "CANONICAL_INVENTORY_LIST", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(data, { headers: NO_STORE });
   } catch (error) {
@@ -2543,7 +2543,7 @@ export async function inventoryDetailCanonicalResponse(
           ),
         };
       },
-      { errorPrefix: "CANONICAL_INVENTORY_DETAIL", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(detail, { headers: NO_STORE });
   } catch (error) {
@@ -2916,7 +2916,7 @@ export async function inventoryPatientCostCanonicalResponse(
         }
         return issuedCostForPatientWith(query, patientId);
       },
-      { errorPrefix: "CANONICAL_INVENTORY_PATIENT_COST", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(cost, { headers: NO_STORE });
   } catch (error) {
@@ -2932,7 +2932,7 @@ export async function inventoryValuationCanonicalResponse(
       session,
       "inventory.costs.view",
       async (query) => readInventoryValuation(query),
-      { errorPrefix: "CANONICAL_INVENTORY_VALUATION", maxBytes: SNAPSHOT_MAX_BYTES },
+      { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(
       { ...valuation, baseCurrency: CLINIC_BASE_CURRENCY },
