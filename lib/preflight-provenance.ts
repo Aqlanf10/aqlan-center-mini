@@ -7,6 +7,7 @@ export const PREFLIGHT_SOURCE_FILES = [
   "lib/database-scope.ts", "lib/migration-files.ts", "lib/schema-manifest.ts", "lib/schema-preflight.ts",
   "lib/schema-fingerprint.ts", "lib/preflight-artifact.ts", "lib/preflight-provenance.ts",
   "schema/preflight-disclosure.pg18.json",
+  "lib/patient-numbering-readiness.ts",
   "lib/purchase-schema-readiness.ts", "schema/purchase-receipts-readiness.pg18.json",
 ] as const;
 

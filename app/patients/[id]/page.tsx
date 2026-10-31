@@ -1036,6 +1036,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         </p>
       ) : null}
 
+      {/* Separate identity command; owner-keyed to discard stale patient/session requests. */}
+
       {editing ? (
         <PatientEditor
           patient={patient}

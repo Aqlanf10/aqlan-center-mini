@@ -314,10 +314,18 @@ describe("PAT-4 families — merge, delete and reset keep working", () => {
     expect(await familyIdOfPatient(member)).toBe(created.family.id);
   });
 
-  it("clinic reset wipes the families table", async () => {
+  it("clinic reset preserves populated families and immutable patient aliases before backup", async () => {
     expect(Number((await q<{ n: string }>(`SELECT count(*)::text AS n FROM patient_families`))[0].n)).toBeGreaterThan(0);
-    const result = await resetClinicData({ actor: "owner", actorRole: "admin" }, async () => ({ ok: true, backupId: null }));
-    expect(result.ok).toBe(true);
-    expect(Number((await q<{ n: string }>(`SELECT count(*)::text AS n FROM patient_families`))[0].n)).toBe(0);
+    const tables=["patient_families","patients","retired_patient_numbers","invoices","payments","audit_log"];
+    const snapshot=async()=>{
+      const rows:Record<string,unknown[]>={};
+      for(const table of tables)rows[table]=await q(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY to_jsonb(t)::text`);
+      return rows;
+    };
+    const before=await snapshot();let backupCalled=false;
+    await expect(resetClinicData({actor:"owner",actorRole:"admin"},async()=>{
+      backupCalled=true;return {ok:true,backupId:null};
+    })).rejects.toMatchObject({name:"ProtectedPatientNumberHistoryError"});
+    expect(backupCalled).toBe(false);expect(await snapshot()).toEqual(before);
   });
 });

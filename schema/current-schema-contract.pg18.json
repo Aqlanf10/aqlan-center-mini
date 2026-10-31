@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 133,
-    "columns": 1693,
-    "constraints": 1956,
-    "indexes": 413,
-    "triggers": 100
+    "tables": 135,
+    "columns": 1700,
+    "constraints": 1969,
+    "indexes": 419,
+    "triggers": 107
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -11885,6 +11885,55 @@
         }
       }
     },
+    "patient_numbering_policy": {
+      "columns": {
+        "minimum_next": {
+          "type": "int8",
+          "nullable": false
+        },
+        "singleton": {
+          "type": "bool",
+          "nullable": false
+        },
+        "version": {
+          "type": "int8",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "singleton"
+      ],
+      "unique": [],
+      "checks": [
+        "patient_numbering_policy_minimum_next_check",
+        "patient_numbering_policy_singleton_check",
+        "patient_numbering_policy_version_check"
+      ],
+      "foreignKeys": [],
+      "indexes": {
+        "patient_numbering_policy_pkey": {
+          "columns": [
+            "singleton"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "patient_number_policy_monotonic": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "patient_number_policy_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
+    },
     "patient_opening_balance_history": {
       "columns": {
         "action": {
@@ -12616,6 +12665,10 @@
           "type": "text",
           "nullable": false
         },
+        "patient_number_version": {
+          "type": "int8",
+          "nullable": false
+        },
         "phone": {
           "type": "text",
           "nullable": true
@@ -12655,6 +12708,7 @@
       ],
       "checks": [
         "patients_family_role_check",
+        "patients_patient_number_version_check",
         "patients_preferred_channel_check"
       ],
       "foreignKeys": [
@@ -12687,6 +12741,14 @@
         }
       ],
       "indexes": {
+        "patient_number_alias_key_idx": {
+          "columns": [],
+          "unique": true
+        },
+        "patient_number_numeric_idx": {
+          "columns": [],
+          "unique": false
+        },
         "patients_family_idx": {
           "columns": [
             "family_id"
@@ -12730,7 +12792,22 @@
           "unique": false
         }
       },
-      "triggers": {}
+      "triggers": {
+        "patient_number_identity_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "patient_number_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "payable_adjustments": {
       "columns": {
@@ -13888,6 +13965,65 @@
         }
       },
       "triggers": {}
+    },
+    "retired_patient_numbers": {
+      "columns": {
+        "patient_id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "patient_number": {
+          "type": "text",
+          "nullable": false
+        },
+        "retired_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "patient_number"
+      ],
+      "unique": [],
+      "checks": [],
+      "foreignKeys": [],
+      "indexes": {
+        "retired_patient_number_alias_key_idx": {
+          "columns": [],
+          "unique": true
+        },
+        "retired_patient_number_numeric_idx": {
+          "columns": [],
+          "unique": false
+        },
+        "retired_patient_numbers_pkey": {
+          "columns": [
+            "patient_number"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "retired_patient_number_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "retired_patient_number_insert_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "retired_patient_number_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "saved_reports": {
       "columns": {

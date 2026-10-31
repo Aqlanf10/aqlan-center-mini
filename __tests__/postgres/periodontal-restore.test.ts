@@ -301,12 +301,21 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
   });
   it("refuses a nonempty target by default without changing records, audit or files", async () => {
     const before = await state();
+    const provenanceReadsBefore = vi.mocked(loadMigrationFiles).mock.calls.length;
+    const registryBefore = (await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows;
+    const catalogSql = "SELECT c.oid::text,c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.oid";
+    const catalogBefore = (await pool().query(catalogSql)).rows;
     const documentBefore = await readFile(path.join(stagingDir, DOCUMENT_KEY));
     const result = await stagedRestore({ archivePath, targetUrl: fixture!.url, stagingDir });
     expect(result).toMatchObject({ ok: false, readyForCutover: false, validationErrors: [], migrationsApplied: [], documentsRestored: 0 });
     expect(result.errors.join(" ")).toContain("الهدف ليس فارغًا");
     expect(await state()).toEqual(before);
     expect(await readFile(path.join(stagingDir, DOCUMENT_KEY))).toEqual(documentBefore);
-    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(1);
+    // Provenance is now read from disk before connecting, even for a nonempty
+    // target. This read is not migration execution: durable history/catalog and
+    // the existing clinical/audit/document witnesses must remain unchanged.
+    expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledTimes(provenanceReadsBefore + 1);
+    expect((await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
+    expect((await pool().query(catalogSql)).rows).toEqual(catalogBefore);
   });
 });

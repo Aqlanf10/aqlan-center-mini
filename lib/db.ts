@@ -4,6 +4,7 @@ import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
+import { PATIENT_NUMBERING_SQL } from "./patient-numbering-schema";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
 import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
@@ -109,7 +110,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedPatientNumberHistoryError, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
 import {
   planFromRows, planLegacyImport,
@@ -2106,6 +2107,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0068", name: "collection_attempt_retirements", filename: "0068_collection_attempt_retirements.sql", sql: COLLECTION_ATTEMPT_RETIREMENT_SQL, checksum: checksumOf(COLLECTION_ATTEMPT_RETIREMENT_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0069", name: "unpaid_currency_transitions", filename: "0069_unpaid_currency_transitions.sql", sql: UNPAID_CURRENCY_TRANSITION_SQL, checksum: checksumOf(UNPAID_CURRENCY_TRANSITION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0080", name: "patient_numbering", filename: "0080_patient_numbering.sql", sql: PATIENT_NUMBERING_SQL, checksum: checksumOf(PATIENT_NUMBERING_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
@@ -16249,6 +16251,7 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
+import { patientNumberSequenceRestoreSql } from "./patient-numbering-backup";
 import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
 
 /**
@@ -16307,6 +16310,8 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'`,
   )) as { rows: { child: string; parent: string }[] };
   const dependsOn = new Map(tables.map((table) => [table, new Set<string>()]));
+  // Retired aliases have no cascading FK, but replay follows current identities.
+  dependsOn.get("retired_patient_numbers")?.add("patients");
   for (const row of fkRows) {
     // A patient's optional photo points back to a document owned by that patient.
     // Restore patients first with this one column null, then restore the link below.
@@ -16405,6 +16410,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
+  if (tables.includes("patient_numbering_policy")) {
+    const {rows: [patientSequence]} = await pool.query("SELECT last_value::text, is_called FROM patient_number_seq");
+    yield `${patientNumberSequenceRestoreSql(patientSequence?.last_value, patientSequence?.is_called)}\n`;
+  }
   yield `COMMIT;\n`;
 }
 
@@ -27395,6 +27404,10 @@ export async function resetClinicData<F>(
         `SELECT ${COLLECTION_ATTEMPT_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (attemptHistory.exists) throw new ProtectedCollectionAttemptHistoryError();
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('patient_import'))`);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_numbering'))");
+      await client.query("LOCK TABLE retired_patient_numbers IN EXCLUSIVE MODE");
+      const {rows: [numberHistory]} = await client.query<{exists: boolean}>("SELECT EXISTS(SELECT 1 FROM retired_patient_numbers) OR EXISTS(SELECT 1 FROM patients) AS exists");
+      if (numberHistory.exists) throw new ProtectedPatientNumberHistoryError();
       await client.query(`LOCK TABLE ${RESET_WIPE_TABLES.join(", ")} IN EXCLUSIVE MODE`);
 
       const backed = await backup(backupClient);
