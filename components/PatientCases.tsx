@@ -268,7 +268,7 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
 
       <p className="text-xs text-slate-600">تسجيل التقييم والحالة السريرية لا ينشئ اتفاقًا ماليًا أو دَينًا.
         {onOpenTreatmentEntry ? <button type="button" disabled={writeBlocked}
-          onClick={() => { if (!owner.active || writeBlocked) return; if (!onNavigationGuardChange && !canLeave()) return; onOpenTreatmentEntry(); }}
+          onClick={() => { const owner = ownerRef.current; if (!owner.active || writeBlocked) return; if (!onNavigationGuardChange && !canLeave()) return; onOpenTreatmentEntry(); }}
           className="mr-2 min-h-11 rounded-lg border px-3 font-bold">فاتورة / اتفاق علاج</button> : null}
       </p>
       {/* ── الحالات التخصصية ── */}
