@@ -83,6 +83,15 @@ describe("عقد Node — صريحٌ ومُفحَص (TD-REG-019)", () => {
     expect(checkNodeContract(`v${SUPPORTED_NODE_MAJOR}.20.0`)).toBeNull();
   });
 
+  it("enforces the modern lint toolchain Node 22.13 minimum without widening the major", () => {
+    expect(checkNodeContract("v22.12.0")?.rule).toBe("node.minor.unsupported");
+    expect(checkNodeContract("v22.0.0")?.rule).toBe("node.minor.unsupported");
+    expect(checkNodeContract("v22.13.0")).toBeNull();
+    expect(checkNodeContract("v22.23.3")).toBeNull();
+    expect(checkNodeContract("v23.0.0")?.rule).toBe("node.major.unsupported");
+    expect(checkNodeContract("v22")?.rule).toBe("node.version.unparseable");
+  });
+
   it("نصٌّ لا يُفسَّر كإصدار يُرفض لا يُتجاهَل", () => {
     expect(checkNodeContract("نثّة")?.rule).toBe("node.version.unparseable");
   });
