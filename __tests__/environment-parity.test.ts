@@ -121,12 +121,28 @@ describe("عقد npm — التثبيت والتدقيق (المرحلة C)", ()
 
 describe("توافق Docker وCI وengines على إصدار Node واحد", () => {
   it("مراحل Dockerfile كلها على الصورة التعاقدية node:22-alpine", () => {
+    const stagesUseSupportedNode = (dockerfile: string) => {
+      const supportedStages = new Set<string>();
+      const fromLines = dockerfile.split("\n").filter((line) => /^\s*FROM\s+/i.test(line));
+      for (const line of fromLines) {
+        const parsed = /^\s*FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$/i.exec(line);
+        if (!parsed) return false;
+        const [, base, name] = parsed;
+        if (base !== `node:${SUPPORTED_NODE_MAJOR}-alpine` && !supportedStages.has(base)) return false;
+        if (name) {
+          if (supportedStages.has(name)) return false;
+          supportedStages.add(name);
+        }
+      }
+      return fromLines.length >= 3;
+    };
     const dockerfile = readRepoFile("Dockerfile");
-    const fromLines = dockerfile.split("\n").filter((line) => /^\s*FROM\s+/i.test(line));
-    expect(fromLines.length).toBeGreaterThanOrEqual(3);
-    for (const line of fromLines) {
-      expect(line).toMatch(new RegExp(`^\\s*FROM\\s+node:${SUPPORTED_NODE_MAJOR}-alpine\\s`, "i"));
+    expect(stagesUseSupportedNode(dockerfile)).toBe(true);
+    for (const unsupported of ["node:20-alpine", "unknown-stage", "busybox:latest"]) {
+      expect(stagesUseSupportedNode(dockerfile.replace("FROM toolchain AS builder", `FROM ${unsupported} AS builder`))).toBe(false);
     }
+    expect(dockerfile).toContain("RUN npm install -g npm@11.21.1");
+    expect(dockerfile).toContain("FROM node:22-alpine AS runner");
   });
 
   it("setup-node في CI على الإصدار التعاقدي نفسه", () => {

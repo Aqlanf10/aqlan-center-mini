@@ -59,3 +59,25 @@ exclusion, independent review and Stage validation before merge or deployment.
 A development-only node_modules symlink used for initial focused tests is not a
 clean-install or installed-tree integrity proof. Resource failures must be reported
 as incomplete gates, never converted to success or worked around by weaker checks.
+
+## Build and runtime proof contract
+
+CI and Docker dependency/build stages use official npm11.21.1 exactly (its Node
+engine range includes the project Node22.13 minimum). The final Docker runner
+remains independent and unchanged. npm10.9.9 clean installation preserves the
+lock but reports two pre-existing, lock-listed optional Sharp wasm packages as
+extraneous; the same diagnostic reproduces on original main. No graph waiver is
+added: build/release graph validation uses the clean npm11 graph.
+
+The separate read-only lint-tooling runtime verifier reuses the existing braces
+artifact inventory and inspects canonical package identities, NFT traces, available
+source maps and preflight provenance, plus actual production npm reachability. It
+requires all expected build roots and fails malformed or empty metadata. Its proof
+is bounded to identifiable shipped packages/declared inputs; without complete
+bundler attribution it does not claim arbitrary opaque minified-code absence.
+Both independently built CI applications and Docker run the additional gate.
+
+This audit/proof scope is the application's dependency graph and emitted artifacts,
+not all packages bundled inside the global npm CLI or the Node base image. npm11.21.1
+itself declares a bundled minimatch10 range; this task does not patch global npm or
+claim a clean whole-container vulnerability scan.
