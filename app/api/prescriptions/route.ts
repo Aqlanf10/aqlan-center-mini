@@ -1,5 +1,8 @@
 import { getPrescriptionOwnerAuthority } from "@/lib/prescription-owner";
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { commandCanonicalPrescriptionCreate } from "@/lib/canonical-clinical-records";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getClinicalVisit, getParty, getPatient, findUserByUsername, listMedicalHistory, savePrescription } from "@/lib/db";
@@ -46,6 +49,22 @@ export const dynamic = "force-dynamic";
  *   يرها. وانتهاء الصلاحية (١٠ دقائق) يُسقط الرمز أيضًا.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: Record<string, unknown>;
+    try {
+      const raw = await readJsonBody<Record<string, unknown>>(request, JSON_BODY_LIMIT_BYTES);
+      body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return commandCanonicalPrescriptionCreate(request, selected.handle, body);
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

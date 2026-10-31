@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import { canonicalPatientGet, NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalClinicalRecordsFailure,
+  commandCanonicalDocumentUpload,
+  readCanonicalPatientDocuments,
+} from "@/lib/canonical-clinical-records";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import {
   DocumentAssociationError, getSettings, listPatientDocuments, recordAudit, recordDocument,
   validateDocumentAssociations,
@@ -38,6 +45,12 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const canonical = await canonicalPatientGet(
+    (await context.params).id,
+    readCanonicalPatientDocuments,
+    "تعذّر تحميل المستندات.",
+  );
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -63,6 +76,27 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let form: FormData;
+    try {
+      form = await readBoundedFormData(request, UPLOAD_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      const outcome = await commandCanonicalDocumentUpload(selected.handle, (await context.params).id, form);
+      if (outcome.kind === "rejected_signature") {
+        return NextResponse.json({ message: outcome.message }, { status: 400, headers: NO_STORE });
+      }
+      return NextResponse.json(outcome.document, { status: 201, headers: NO_STORE });
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر حفظ الملف. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);

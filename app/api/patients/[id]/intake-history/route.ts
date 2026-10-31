@@ -1,5 +1,7 @@
-import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { canonicalPatientGet, NO_STORE as CANONICAL_NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalClinicalRecordsFailure, commandCanonicalIntakeCreate } from "@/lib/canonical-clinical-records";
 import { readCanonicalIntakeHistory } from "@/lib/canonical-patient-reads";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NextResponse } from "next/server";
 import { createIntakeForm, getPatient, listIntakeForms } from "@/lib/db";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -48,6 +50,28 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: CANONICAL_NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try {
+      body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: CANONICAL_NO_STORE });
+    }
+    try {
+      return NextResponse.json(
+        await commandCanonicalIntakeCreate(selected.handle, (await context.params).id, body),
+        { status: 201, headers: CANONICAL_NO_STORE },
+      );
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر حفظ الاستمارة.");
+    }
+  }
   const checked = await guard(context);
   if ("error" in checked) return checked.error;
   let body: unknown;

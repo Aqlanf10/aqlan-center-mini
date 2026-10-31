@@ -1,5 +1,7 @@
 import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
 import { NextResponse } from "next/server";
+import { canonicalPatientGet } from "@/lib/canonical-patient-http";
+import { readCanonicalPatientPrescriptions } from "@/lib/canonical-clinical-records";
 import { listMedicalHistory, listPatientPrescriptions, prescribedBefore } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { isAdmin } from "@/lib/roles";
@@ -14,6 +16,12 @@ export const dynamic = "force-dynamic";
  * ولا تُفرض: التكرار الإداري المريح ليس قرارًا سريريًّا.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const canonical = await canonicalPatientGet(
+    (await context.params).id,
+    readCanonicalPatientPrescriptions,
+    "تعذّرت قراءة الوصفات.",
+  );
+  if (canonical) return canonical;
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

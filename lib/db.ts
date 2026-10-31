@@ -5986,24 +5986,32 @@ export type PatientPhotoResult =
  * صورة المريض = مستندٌ صوريٌّ قائمٌ من مستنداته هو — لا صورة مريضٍ آخر ولا ملفٌّ مخفي.
  * `documentId = null` يزيل الصورة (المستند نفسه يبقى في مستنداته).
  */
-export async function setPatientPhoto(patientId: number, documentId: number | null): Promise<PatientPhotoResult> {
-  await ensureSchema();
+export async function setPatientPhotoWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+  documentId: number | null,
+): Promise<PatientPhotoResult> {
   if (documentId !== null) {
-    const { rows: [document] } = await getPool().query<{ mime_type: string }>(
+    const { rows: [document] } = await q.query<{ mime_type: string }>(
       `SELECT mime_type FROM patient_documents WHERE id = $1 AND patient_id = $2 AND removed_at IS NULL`,
       [documentId, patientId],
     );
     if (!document) {
-      const exists = await getPool().query(`SELECT 1 FROM patients WHERE id = $1`, [patientId]);
+      const exists = await q.query(`SELECT 1 FROM patients WHERE id = $1`, [patientId]);
       return { ok: false, reason: exists.rowCount ? "document_not_found" : "not_found" };
     }
     if (!document.mime_type.startsWith("image/")) return { ok: false, reason: "not_image" };
   }
-  const { rows } = await getPool().query<PatientRow>(
+  const { rows } = await q.query<PatientRow>(
     `UPDATE patients SET photo_document_id = $2 WHERE id = $1 RETURNING ${PATIENT_COLUMNS}`,
     [patientId, documentId],
   );
   return rows[0] ? { ok: true, patient: toPatient(rows[0]) } : { ok: false, reason: "not_found" };
+}
+
+export async function setPatientPhoto(patientId: number, documentId: number | null): Promise<PatientPhotoResult> {
+  await ensureSchema();
+  return setPatientPhotoWith(getPool(), patientId, documentId);
 }
 
 export interface ContactConsentEvent {
@@ -20978,13 +20986,15 @@ const toToothRecord = (row: ToothRow): ToothRecord => ({
   recordedAt: row.recorded_at.toISOString(),
 });
 
-export async function patientChart(patientId: number): Promise<{
+export async function patientChartWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<{
   records: ToothRecord[];
   chart: [number, ToothState][];
   summary: ChartSummary;
 }> {
-  await ensureSchema();
-  const { rows } = await getPool().query<ToothRow>(
+  const { rows } = await q.query<ToothRow>(
     `SELECT id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by, recorded_at
        FROM tooth_conditions WHERE patient_id = $1 ORDER BY recorded_at, id`,
     [patientId],
@@ -20994,11 +21004,105 @@ export async function patientChart(patientId: number): Promise<{
   return { records, chart: [...chart.entries()], summary: chartSummary(chart) };
 }
 
+export async function patientChart(patientId: number): Promise<{
+  records: ToothRecord[];
+  chart: [number, ToothState][];
+  summary: ChartSummary;
+}> {
+  await ensureSchema();
+  return patientChartWith(getPool(), patientId);
+}
+
 export class ToothVisitConflict extends Error {
   constructor() {
     super("الزيارة غير موجودة أو لا تخص هذا المريض.");
     this.name = "ToothVisitConflict";
   }
+}
+
+export async function recordToothConditionInTransaction(
+  client: DbClient,
+  input: {
+    patientId: number;
+    toothCode: number;
+    condition: ToothCondition;
+    stage: ConditionStage;
+    surfaces?: string | null;
+    note?: string | null;
+    visitId?: number | null;
+    recordedBy: string;
+  },
+): Promise<ToothRecord | null> {
+  if (!isValidTooth(input.toothCode)) return null;
+  const visitId = input.visitId ?? null;
+  if (visitId !== null && (!Number.isInteger(visitId) || visitId <= 0 || visitId > 2_147_483_647)) {
+    throw new ToothVisitConflict();
+  }
+  // Match the patient-merge lock order: patient first, then its visit. Keep the
+  // patient stable until the chart event is inserted (including standalone events).
+  const { rows: patients } = await client.query(
+    `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
+  );
+  if (!patients[0]) return null;
+  if (visitId !== null) {
+    // Lock ownership through the insert; a read outside the transaction would
+    // permit reassignment between validation and recording. Do not disclose
+    // whether a rejected visit is missing, unlinked, or belongs to another patient.
+    const { rows: visits } = await client.query(
+      `SELECT id FROM visits WHERE id = $1 AND patient_id = $2 FOR SHARE`,
+      [visitId, input.patientId],
+    );
+    if (!visits[0]) throw new ToothVisitConflict();
+  }
+  const normalizedSurf = normalizeSurfaces(input.surfaces);
+  const { rows } = await client.query<ToothRow>(
+    `INSERT INTO tooth_conditions
+       (patient_id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by)
+     VALUES ($1, $2, $3, $4, $5::text, $6::text, $7::int, $8)
+     RETURNING id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by, recorded_at`,
+    [
+      input.patientId, input.toothCode, input.condition, input.stage,
+      normalizedSurf, input.note?.trim() || null,
+      visitId, input.recordedBy,
+    ],
+  );
+  if (input.stage === "completed") {
+    const { rows: candidates } = await client.query<{
+      id: number; plan_id: number; category: string | null; surfaces: string | null; session_count: number;
+    }>(
+      `SELECT i.id, i.plan_id, i.category, i.surfaces, i.session_count
+         FROM plan_items i
+         JOIN treatment_plans t ON t.id = i.plan_id
+        WHERE t.patient_id = $1
+          AND i.tooth_code = $2
+          AND t.status = 'active'
+          AND i.status IN ('planned', 'in_progress')`,
+      [input.patientId, input.toothCode],
+    );
+    const matched = candidates.filter((c) =>
+      conditionForCategory(c.category) === input.condition
+      && c.session_count <= 1
+      && (normalizedSurf === null || normalizeSurfaces(c.surfaces) === normalizedSurf),
+    );
+    if (matched.length > 0) {
+      await client.query(
+        `UPDATE plan_items SET status = 'done', visit_id = COALESCE(visit_id, $2::int), done_at = NOW()
+          WHERE id = ANY($1::int[]) AND status <> 'done'`,
+        [matched.map((m) => m.id), visitId],
+      );
+      const touchedPlans = [...new Set(matched.map((m) => m.plan_id))];
+      await client.query(
+        `UPDATE treatment_plans t SET status = 'completed'
+          WHERE t.id = ANY($1::int[]) AND t.status = 'active'
+            AND NOT EXISTS (
+              SELECT 1 FROM plan_items i
+               WHERE i.plan_id = t.id AND i.status NOT IN ('done', 'cancelled')
+            )`,
+        [touchedPlans],
+      );
+    }
+  }
+  return rows[0] ? toToothRecord(rows[0]) : null;
 }
 
 /**
@@ -21024,73 +21128,7 @@ export async function recordToothCondition(input: {
     throw new ToothVisitConflict();
   }
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
-    // Match the patient-merge lock order: patient first, then its visit. Keep the
-    // patient stable until the chart event is inserted (including standalone events).
-    const { rows: patients } = await client.query(
-      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
-    );
-    if (!patients[0]) return null;
-    if (visitId !== null) {
-      // Lock ownership through the insert; a read outside the transaction would
-      // permit reassignment between validation and recording. Do not disclose
-      // whether a rejected visit is missing, unlinked, or belongs to another patient.
-      const { rows: visits } = await client.query(
-        `SELECT id FROM visits WHERE id = $1 AND patient_id = $2 FOR SHARE`,
-        [visitId, input.patientId],
-      );
-      if (!visits[0]) throw new ToothVisitConflict();
-    }
-    const normalizedSurf = normalizeSurfaces(input.surfaces);
-    const { rows } = await client.query<ToothRow>(
-      `INSERT INTO tooth_conditions
-         (patient_id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by)
-       VALUES ($1, $2, $3, $4, $5::text, $6::text, $7::int, $8)
-       RETURNING id, tooth_code, condition, stage, surfaces, note, visit_id, recorded_by, recorded_at`,
-      [
-        input.patientId, input.toothCode, input.condition, input.stage,
-        normalizedSurf, input.note?.trim() || null,
-        visitId, input.recordedBy,
-      ],
-    );
-    if (input.stage === "completed") {
-      const { rows: candidates } = await client.query<{
-        id: number; plan_id: number; category: string | null; surfaces: string | null; session_count: number;
-      }>(
-        `SELECT i.id, i.plan_id, i.category, i.surfaces, i.session_count
-           FROM plan_items i
-           JOIN treatment_plans t ON t.id = i.plan_id
-          WHERE t.patient_id = $1
-            AND i.tooth_code = $2
-            AND t.status = 'active'
-            AND i.status IN ('planned', 'in_progress')`,
-        [input.patientId, input.toothCode],
-      );
-      const matched = candidates.filter((c) =>
-        conditionForCategory(c.category) === input.condition
-        && c.session_count <= 1
-        && (normalizedSurf === null || normalizeSurfaces(c.surfaces) === normalizedSurf),
-      );
-      if (matched.length > 0) {
-        await client.query(
-          `UPDATE plan_items SET status = 'done', visit_id = COALESCE(visit_id, $2::int), done_at = NOW()
-            WHERE id = ANY($1::int[]) AND status <> 'done'`,
-          [matched.map((m) => m.id), visitId],
-        );
-        const touchedPlans = [...new Set(matched.map((m) => m.plan_id))];
-        await client.query(
-          `UPDATE treatment_plans t SET status = 'completed'
-            WHERE t.id = ANY($1::int[]) AND t.status = 'active'
-              AND NOT EXISTS (
-                SELECT 1 FROM plan_items i
-                 WHERE i.plan_id = t.id AND i.status NOT IN ('done', 'cancelled')
-              )`,
-          [touchedPlans],
-        );
-      }
-    }
-    return rows[0] ? toToothRecord(rows[0]) : null;
-  });
+  return withTransaction(getPool(), (client) => recordToothConditionInTransaction(client, input));
 }
 
 // ─── طبعات المستندات ─────────────────────────────────────────────────────────
@@ -24324,12 +24362,12 @@ const DOCUMENT_COLUMNS = `id, patient_id, visit_id, kind, title, mime_type, size
  * المخفيّة تُعرض للمدير وحده ومعلَّمةً بذلك: إخفاءُ صورةٍ قرارٌ يُراجَع، وإخفاؤها
  * عن المراجِع نفسه يجعل الإخفاء محوًا.
  */
-export async function listPatientDocuments(
+export async function listPatientDocumentsWith(
+  q: Pick<DbClient, "query">,
   patientId: number,
   includeRemoved = false,
 ): Promise<PatientDocument[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<DocumentRow>(
+  const { rows } = await q.query<DocumentRow>(
     `SELECT ${DOCUMENT_COLUMNS} FROM patient_documents
       WHERE patient_id = $1 ${includeRemoved ? "" : "AND removed_at IS NULL"}
       ORDER BY COALESCE(taken_on, uploaded_at::date) DESC, id DESC`,
@@ -24338,17 +24376,32 @@ export async function listPatientDocuments(
   return rows.map(toDocument);
 }
 
-/** الوصف مع مفتاح التخزين — للتنزيل وحده، ولا يخرج المفتاح إلى المتصفّح أبدًا. */
-export async function getDocumentForDownload(id: number): Promise<
-  { document: PatientDocument; storageKey: string } | null
-> {
+export async function listPatientDocuments(
+  patientId: number,
+  includeRemoved = false,
+): Promise<PatientDocument[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<DocumentRow & { storage_key: string }>(
+  return listPatientDocumentsWith(getPool(), patientId, includeRemoved);
+}
+
+/** الوصف مع مفتاح التخزين — للتنزيل وحده، ولا يخرج المفتاح إلى المتصفّح أبدًا. */
+export async function getDocumentForDownloadWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<{ document: PatientDocument; storageKey: string } | null> {
+  const { rows } = await q.query<DocumentRow & { storage_key: string }>(
     `SELECT ${DOCUMENT_COLUMNS}, storage_key FROM patient_documents WHERE id = $1`,
     [id],
   );
   if (!rows[0]) return null;
   return { document: toDocument(rows[0]), storageKey: rows[0].storage_key };
+}
+
+export async function getDocumentForDownload(id: number): Promise<
+  { document: PatientDocument; storageKey: string } | null
+> {
+  await ensureSchema();
+  return getDocumentForDownloadWith(getPool(), id);
 }
 
 /** One opaque refusal for nonexistent, unlinked, foreign, or inconsistent references. */
@@ -24382,7 +24435,7 @@ export async function validateDocumentAssociations(
   input: DocumentAssociations,
   client?: DbClient,
 ): Promise<void> {
-  await ensureSchema();
+  if (!client) await ensureSchema();
   const db = client ?? getPool();
   const lock = client ? " FOR SHARE" : "";
   const validId = (id: number) => Number.isSafeInteger(id) && id > 0 && id <= 2147483647;
@@ -24428,6 +24481,49 @@ export async function validateDocumentAssociations(
   }
 }
 
+export async function recordDocumentInTransaction(
+  client: DbClient,
+  input: {
+    patientId: number;
+    visitId: number | null;
+    kind: DocumentKind;
+    title: string;
+    mimeType: string;
+    sizeBytes: number;
+    sha256: string;
+    storageKey: string;
+    note: string | null;
+    takenOn: string | null;
+    uploadedBy: string;
+    orthoCaseId?: number | null;
+    adjustmentId?: number | null;
+    photoStage?: string | null;
+    photoView?: string | null;
+    width?: number | null;
+    height?: number | null;
+  },
+): Promise<PatientDocument> {
+  await validateDocumentAssociations(input, client);
+  const { rows } = await client.query<DocumentRow>(
+    `INSERT INTO patient_documents
+       (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
+        note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
+        width, height)
+     VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
+             $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
+     RETURNING ${DOCUMENT_COLUMNS}`,
+    [
+      input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
+      input.sizeBytes, input.sha256, input.storageKey,
+      input.note?.trim() || null, input.takenOn, input.uploadedBy,
+      input.orthoCaseId ?? null, input.adjustmentId ?? null,
+      input.photoStage ?? null, input.photoView ?? null,
+      input.width ?? null, input.height ?? null,
+    ],
+  );
+  return toDocument(rows[0]);
+}
+
 export async function recordDocument(input: {
   patientId: number;
   visitId: number | null;
@@ -24448,27 +24544,7 @@ export async function recordDocument(input: {
   height?: number | null;
 }): Promise<PatientDocument> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
-    await validateDocumentAssociations(input, client);
-    const { rows } = await client.query<DocumentRow>(
-      `INSERT INTO patient_documents
-         (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
-          note, taken_on, uploaded_by, ortho_case_id, adjustment_id, photo_stage, photo_view,
-          width, height)
-       VALUES ($1, $2::int, $3, $4, $5, $6, $7, $8, $9::text, $10::date, $11,
-               $12::int, $13::int, $14::text, $15::text, $16::int, $17::int)
-       RETURNING ${DOCUMENT_COLUMNS}`,
-      [
-        input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
-        input.sizeBytes, input.sha256, input.storageKey,
-        input.note?.trim() || null, input.takenOn, input.uploadedBy,
-        input.orthoCaseId ?? null, input.adjustmentId ?? null,
-        input.photoStage ?? null, input.photoView ?? null,
-        input.width ?? null, input.height ?? null,
-      ],
-    );
-    return toDocument(rows[0]);
-  });
+  return withTransaction(getPool(), (client) => recordDocumentInTransaction(client, input));
 }
 
 /**
@@ -24478,21 +24554,28 @@ export async function recordDocument(input: {
  * الملف، ويُسجَّل من أخفاه ومتى **ولماذا** — والسبب إلزامي: «أُخفي بلا سبب» ليس
  * تفسيرًا يُقرأ بعد سنة.
  */
-export async function removeDocument(input: {
-  id: number; actor: string; note: string;
-}): Promise<{ ok: true } | { ok: false; message: string }> {
-  await ensureSchema();
+export async function removeDocumentInTransaction(
+  client: DbClient,
+  input: { id: number; actor: string; note: string },
+): Promise<{ ok: true } | { ok: false; message: string }> {
   const reason = input.note.trim();
   if (reason.length < 3) return { ok: false, message: "اكتب سبب الإخفاء." };
-  const { rowCount } = await getPool().query(
+  const { rowCount } = await client.query(
     `UPDATE patient_documents SET removed_at = NOW(), removed_by = $2, removed_note = $3
       WHERE id = $1 AND removed_at IS NULL`,
     [input.id, input.actor, reason],
   );
   if ((rowCount ?? 0) === 0) return { ok: false, message: "المستند غير موجود أو مخفيٌّ سلفًا." };
   // (PAT-3) صورةٌ أُخفيت لا تبقى صورة المريض.
-  await getPool().query(`UPDATE patients SET photo_document_id = NULL WHERE photo_document_id = $1`, [input.id]);
+  await client.query(`UPDATE patients SET photo_document_id = NULL WHERE photo_document_id = $1`, [input.id]);
   return { ok: true };
+}
+
+export async function removeDocument(input: {
+  id: number; actor: string; note: string;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  await ensureSchema();
+  return withTransaction(getPool(), (client) => removeDocumentInTransaction(client, input));
 }
 
 /** كل المستندات القائمة مع ما يكفي لتسميتها في الأرشيف بلا البرنامج. */
@@ -25623,6 +25706,59 @@ const validDiagnosisId = (id: number) => Number.isSafeInteger(id) && id > 0 && i
  * A visit and case independently belong to the patient; neither implies a session
  * association, and closed cases/signed visits remain valid historical references.
  */
+export async function recordPatientDiagnosisInTransaction(
+  client: DbClient,
+  input: {
+    patientId: number;
+    content: Record<string, unknown>;
+    label: string | null;
+    orthoCaseId: number | null;
+    visitId: number | null;
+    createdBy: string;
+  },
+): Promise<{ id: number; version: number }> {
+  if (!validDiagnosisId(input.patientId)
+    || [input.orthoCaseId, input.visitId].some(id => id !== null && !validDiagnosisId(id))) {
+    throw new DiagnosisAssociationError();
+  }
+  // Dedicated two-integer namespace; all diagnosis versions share this lock,
+  // whether standalone or attached to one of the patient's historical cases.
+  await client.query(`SELECT pg_advisory_xact_lock(73127, $1::int)`, [input.patientId]);
+  const { rows: patients } = await client.query(
+    `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
+  );
+  if (!patients[0]) throw new DiagnosisAssociationError();
+  if (input.visitId !== null) {
+    const { rows } = await client.query<{ patient_id: number | null }>(
+      `SELECT patient_id FROM visits WHERE id = $1 FOR SHARE`, [input.visitId],
+    );
+    if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
+  }
+  if (input.orthoCaseId !== null) {
+    const { rows } = await client.query<{ patient_id: number }>(
+      `SELECT patient_id FROM ortho_cases WHERE id = $1 FOR SHARE`, [input.orthoCaseId],
+    );
+    if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
+  }
+  const { rows: latest } = await client.query<{ id: number; version: number }>(
+    `SELECT id, version FROM patient_diagnoses WHERE patient_id = $1
+      ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+    [input.patientId],
+  );
+  const nextVersion = (latest[0]?.version ?? 0) + 1;
+  const { rows } = await client.query<{ id: number; version: number }>(
+    `INSERT INTO patient_diagnoses
+       (patient_id, version, content, label, ortho_case_id, visit_id, supersedes, created_by)
+     VALUES ($1, $2, $3::jsonb, $4::text, $5::int, $6::int, $7::int, $8)
+     RETURNING id, version`,
+    [
+      input.patientId, nextVersion, JSON.stringify(input.content), input.label,
+      input.orthoCaseId, input.visitId, latest[0]?.id ?? null, input.createdBy,
+    ],
+  );
+  return { id: rows[0].id, version: rows[0].version };
+}
+
 export async function recordPatientDiagnosis(input: {
   patientId: number;
   content: Record<string, unknown>;
@@ -25636,52 +25772,7 @@ export async function recordPatientDiagnosis(input: {
     throw new DiagnosisAssociationError();
   }
   await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    // Dedicated two-integer namespace; all diagnosis versions share this lock,
-    // whether standalone or attached to one of the patient's historical cases.
-    await client.query(`SELECT pg_advisory_xact_lock(73127, $1::int)`, [input.patientId]);
-    const { rows: patients } = await client.query(
-      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
-    );
-    if (!patients[0]) throw new DiagnosisAssociationError();
-    if (input.visitId !== null) {
-      const { rows } = await client.query<{ patient_id: number | null }>(
-        `SELECT patient_id FROM visits WHERE id = $1 FOR SHARE`, [input.visitId],
-      );
-      if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
-    }
-    if (input.orthoCaseId !== null) {
-      const { rows } = await client.query<{ patient_id: number }>(
-        `SELECT patient_id FROM ortho_cases WHERE id = $1 FOR SHARE`, [input.orthoCaseId],
-      );
-      if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
-    }
-    const { rows: latest } = await client.query<{ id: number; version: number }>(
-      `SELECT id, version FROM patient_diagnoses WHERE patient_id = $1
-        ORDER BY id DESC LIMIT 1 FOR UPDATE`,
-      [input.patientId],
-    );
-    const nextVersion = (latest[0]?.version ?? 0) + 1;
-    const { rows } = await client.query<{ id: number; version: number }>(
-      `INSERT INTO patient_diagnoses
-         (patient_id, version, content, label, ortho_case_id, visit_id, supersedes, created_by)
-       VALUES ($1, $2, $3::jsonb, $4::text, $5::int, $6::int, $7::int, $8)
-       RETURNING id, version`,
-      [
-        input.patientId, nextVersion, JSON.stringify(input.content), input.label,
-        input.orthoCaseId, input.visitId, latest[0]?.id ?? null, input.createdBy,
-      ],
-    );
-    await client.query("COMMIT");
-    return { id: rows[0].id, version: rows[0].version };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+  return withTransaction(getPool(), (client) => recordPatientDiagnosisInTransaction(client, input));
 }
 
 /* ═══════════════════════════════ السيفالومتري ═══════════════════════════════
@@ -26087,6 +26178,33 @@ const PRESCRIPTION_COLUMNS = `id, patient_id, visit_id, diagnosis, notes, instru
  * الفحص جرى في المنطق الخالص (`checkPrescriptionDraft`) قبل الوصول هنا، فما
  * يصل إمّا سليمٌ أو يُرفض بالرسالة نفسها التي تقول ما نقص.
  */
+export async function savePrescriptionInTransaction(
+  client: DbClient,
+  draft: PrescriptionDraft,
+  actor: string,
+  actorRole: string | null,
+  doctorPartyId?: number | null,
+): Promise<PrescriptionRecord> {
+  const { rows } = await client.query<PrescriptionRow>(
+    `INSERT INTO prescriptions
+       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by, doctor_party_id, prescribing_doctor_name, prescribing_doctor_party_id)
+     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7, $8::int, $9, $10::int)
+     RETURNING ${PRESCRIPTION_COLUMNS}`,
+    [draft.patientId, draft.visitId, draft.diagnosis, draft.notes,
+      draft.instructionsLang, JSON.stringify(draft.items), actor,
+      Number.isInteger(doctorPartyId) && (doctorPartyId as number) > 0 ? doctorPartyId : null,
+      draft.prescribingDoctorName || null, draft.prescribingDoctorPartyId ?? null],
+  );
+  const record = toPrescription(rows[0]);
+  await insertAuditRow(client, {
+    action: "prescription.create", entity: "prescription", entityId: record.id,
+    entityLabel: `وصفة للمريض #${record.patientId}`,
+    details: { نسخة_ربط_المالك: draft.ownerAuthority?.bindingVersion ?? null, بصمة_صلاحية_المالك: draft.ownerAuthority?.fingerprint ?? null, معرف_الطبيب_الواصف: record.prescribingDoctorPartyId ?? null, معرف_المصدر: record.doctorPartyId, الطبيب_المدون: record.prescribingDoctorName ?? null, المريض: record.patientId, الأدوية: record.items.map((item) => item.name).join("، ") },
+    actor, actorRole,
+  });
+  return record;
+}
+
 export async function savePrescription(
   draft: PrescriptionDraft,
   actor: string,
@@ -26113,22 +26231,29 @@ export async function savePrescription(
   return record;
 }
 
-export async function getPrescription(id: number): Promise<PrescriptionRecord | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PrescriptionRow>(
+export async function getPrescriptionWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<PrescriptionRecord | null> {
+  const { rows } = await q.query<PrescriptionRow>(
     `SELECT ${PRESCRIPTION_COLUMNS} FROM prescriptions WHERE id = $1`,
     [id],
   );
   return rows[0] ? toPrescription(rows[0]) : null;
 }
 
+export async function getPrescription(id: number): Promise<PrescriptionRecord | null> {
+  await ensureSchema();
+  return getPrescriptionWith(getPool(), id);
+}
+
 /** وصفات المريض — الفاعلة ثم المبطلة، الأحدث أولًا. */
-export async function listPatientPrescriptions(
+export async function listPatientPrescriptionsWith(
+  q: Pick<DbClient, "query">,
   patientId: number,
   limit = 50,
 ): Promise<PrescriptionRecord[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PrescriptionRow>(
+  const { rows } = await q.query<PrescriptionRow>(
     `SELECT ${PRESCRIPTION_COLUMNS} FROM prescriptions
       WHERE patient_id = $1 ORDER BY created_at DESC LIMIT $2`,
     [patientId, limit],
@@ -26136,13 +26261,25 @@ export async function listPatientPrescriptions(
   return rows.map(toPrescription);
 }
 
+export async function listPatientPrescriptions(
+  patientId: number,
+  limit = 50,
+): Promise<PrescriptionRecord[]> {
+  await ensureSchema();
+  return listPatientPrescriptionsWith(getPool(), patientId, limit);
+}
+
 /** Minimal print picker; scope/status and exact microsecond keyset precede limit. */
-export async function listSavedPrescriptionPrints(patientId: number, visitId: number | null = null, cursor: PrescriptionPrintCursor | null = null): Promise<{
+export async function listSavedPrescriptionPrintsWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+  visitId: number | null = null,
+  cursor: PrescriptionPrintCursor | null = null,
+): Promise<{
   prescriptions: { id: number; visitId: number | null; createdAt: string; prescribingDoctorName: string | null }[];
   nextCursor: string | null;
 }> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ id: number; visit_id: number | null; created_at: Date; cursor_created_at: string; prescribing_doctor_name: string | null }>(
+  const { rows } = await q.query<{ id: number; visit_id: number | null; created_at: Date; cursor_created_at: string; prescribing_doctor_name: string | null }>(
     `SELECT id, visit_id, created_at, prescribing_doctor_name,
       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at
       FROM prescriptions WHERE patient_id=$1 AND status='active' AND ($2::int IS NULL OR visit_id=$2::int)
@@ -26156,12 +26293,63 @@ export async function listSavedPrescriptionPrints(patientId: number, visitId: nu
   };
 }
 
+export async function listSavedPrescriptionPrints(patientId: number, visitId: number | null = null, cursor: PrescriptionPrintCursor | null = null): Promise<{
+  prescriptions: { id: number; visitId: number | null; createdAt: string; prescribingDoctorName: string | null }[];
+  nextCursor: string | null;
+}> {
+  await ensureSchema();
+  return listSavedPrescriptionPrintsWith(getPool(), patientId, visitId, cursor);
+}
+
 /**
  * إبطالٌ موثَّق بسببه — لا حذف ولا تعديل.
  *
  * المريض خرج بنسخته، فتعديل المحفوظ يجعل نسختين تقولان شيئين؛ والصحيح أن تبقى
  * الأولى في السجل مع سبب إبطالها واسم من أبطلها، وتُكتب وصفةٌ جديدة مكانها.
  */
+export async function voidPrescriptionInTransaction(
+  client: DbClient,
+  input: {
+    id: number;
+    reason: string;
+    actor: string;
+    actorRole?: string | null;
+    patientId?: number | null;
+    issuingDoctorPartyId?: number | null;
+  },
+  voidingDoctorPartyId?: number | null,
+): Promise<{ ok: true } | { ok: false; reason: "not_found" | "already_void"; message: string }> {
+  const { rows } = await client.query<{ status: string; patient_id: number }>(
+    `SELECT status, patient_id FROM prescriptions WHERE id = $1 FOR UPDATE`,
+    [input.id],
+  );
+  if (!rows[0]) {
+    return { ok: false, reason: "not_found", message: "الوصفة غير موجودة." };
+  }
+  if (rows[0].status === "void") {
+    return { ok: false, reason: "already_void", message: "هذه الوصفة مُبطلة أصلًا." };
+  }
+  await client.query(
+    `UPDATE prescriptions SET status = 'void', void_reason = $2, voided_by = $3, voided_at = NOW()
+      WHERE id = $1`,
+    [input.id, input.reason, input.actor],
+  );
+  await insertAuditRow(client, {
+    action: "prescription.void", entity: "prescription", entityId: input.id,
+    entityLabel: `وصفة للمريض #${rows[0].patient_id}`,
+    details: {
+      السبب: input.reason,
+      المريض: input.patientId ?? rows[0].patient_id,
+      جهة_المصدر: input.issuingDoctorPartyId ?? null,
+      جهة_المبطل: Number.isInteger(voidingDoctorPartyId) ? voidingDoctorPartyId : null,
+      مستخدم_المبطل: input.actor,
+    },
+    actor: input.actor,
+    actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
 export async function voidPrescription(input: {
   id: number; reason: string; actor: string;
   patientId?: number | null;
@@ -26216,12 +26404,20 @@ export async function voidPrescription(input: {
  * تُرتّب بالأحدث أولًا ثم بالأكثر تكرارًا، وتُعرض للطبيب كرقائقٍ يقلّل بها
  * النقر. **ولا تُفرض**: التكرار الإداري المريح ليس قرارًا سريريًّا.
  */
-export async function prescribedBefore(patientId: number): Promise<SuggestionItem[]> {
-  const active = (await listPatientPrescriptions(patientId))
+export async function prescribedBeforeWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<SuggestionItem[]> {
+  const active = (await listPatientPrescriptionsWith(q, patientId))
     .filter((record) => record.status === "active" && record.items.length > 0);
   return buildSuggestions(
     active.map((record) => ({ items: record.items, createdAt: record.createdAt })),
   );
+}
+
+export async function prescribedBefore(patientId: number): Promise<SuggestionItem[]> {
+  await ensureSchema();
+  return prescribedBeforeWith(getPool(), patientId);
 }
 
 // ─── مواعيد بطاقة المريض (من مستودع الوكيل الآخر) ────────────────────────────
@@ -27744,6 +27940,30 @@ export async function portalConfirmAttendance(
  */
 export async function portalStatement(patientId: number) {
   return patientLedger(patientId);
+}
+
+export async function createIntakeFormInTransaction(
+  client: DbClient,
+  patientId: number,
+  answers: IntakeAnswers,
+  recordedBy: { actor: string; actorRole: string | null },
+): Promise<{ id: number; createdAt: string } | null> {
+  const { rows: patients } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [patientId]);
+  if (!patients[0]) return null;
+  const { rows } = await client.query<{ id: number; created_at: Date }>(
+    `INSERT INTO patient_intake_forms (patient_id, answers) VALUES ($1, $2::jsonb)
+      RETURNING id, created_at`,
+    [patientId, JSON.stringify(answers)],
+  );
+  await insertAuditRow(client, {
+    action: "intake.staff",
+    entity: "patient",
+    entityId: patientId,
+    details: { الاستمارة: rows[0].id, الحالات: answers.conditions.length, ملاحظة: Boolean(answers.note) },
+    actor: recordedBy.actor,
+    actorRole: recordedBy.actorRole,
+  });
+  return { id: rows[0].id, createdAt: rows[0].created_at.toISOString() };
 }
 
 /** إرسال استمارة صحية — نسخة جديدة تُضاف إلى سجل الصحة. */
@@ -29873,10 +30093,39 @@ export async function listPatientReferralsWith(q: Pick<DbClient, "query">, patie
   return rows.map(toReferral);
 }
 
+export async function getReferralWith(q: Pick<DbClient, "query">, id: number): Promise<Referral | null> {
+  const { rows } = await q.query<ReferralRow>(`${REFERRAL_SELECT} WHERE r.id = $1`, [id]);
+  return rows[0] ? toReferral(rows[0]) : null;
+}
+
 export async function getReferral(id: number): Promise<Referral | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<ReferralRow>(`${REFERRAL_SELECT} WHERE r.id = $1`, [id]);
-  return rows[0] ? toReferral(rows[0]) : null;
+  return getReferralWith(getPool(), id);
+}
+
+export async function createReferralInTransaction(
+  client: DbClient,
+  input: ReferralDraft & {
+    patientId: number; doctorPartyId: number | null; actor: string; actorRole?: string | null;
+  },
+): Promise<Referral | null> {
+  const { rows } = await client.query<{ id: number }>(
+    /* اسم الطبيب يُنسخ وقت الإصدار — الخطاب المطبوع لاحقًا يحمل الاسم الذي صدر به. */
+    `INSERT INTO patient_referrals (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by)
+     SELECT $1, $2, $3, $4, $5, $6, $7, (SELECT name FROM parties WHERE id = $7), $8
+      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+     RETURNING id`,
+    [input.patientId, input.toName, input.toSpecialty, input.reason, input.teeth, input.urgency,
+      input.doctorPartyId, input.actor],
+  );
+  if (!rows[0]) return null;
+  await insertAuditRow(client, {
+    action: "referral.create", entity: "patient", entityId: input.patientId,
+    entityLabel: `${input.toName}`,
+    details: { إلى: input.toName, التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth ?? "—", الاستعجال: input.urgency },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return getReferralWith(client, rows[0].id);
 }
 
 export async function createReferral(input: ReferralDraft & {
@@ -29907,6 +30156,34 @@ export async function createReferral(input: ReferralDraft & {
  * إغلاق الإحالة مرة واحدة: المفتوحة وحدها تُغلق (الشرط في UPDATE نفسه، فلا يُغلقها
  * اثنان معًا ولا تُعاد فتحها).
  */
+export async function closeReferralInTransaction(
+  client: DbClient,
+  input: {
+    id: number; status: "completed" | "cancelled"; note: string | null; actor: string; actorRole?: string | null;
+  },
+): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "already_closed" | "internal" }> {
+  const { rows } = await client.query<{ id: number; patient_id: number; to_name: string }>(
+    `UPDATE patient_referrals
+        SET status = $2, outcome_note = $3, closed_by = $4, closed_at = NOW()
+      WHERE id = $1 AND status = 'sent' AND kind = 'external'
+      RETURNING id, patient_id, to_name`,
+    [input.id, input.status, input.note, input.actor],
+  );
+  if (!rows[0]) {
+    const existing = await getReferralWith(client, input.id);
+    if (!existing) return { ok: false, reason: "not_found" };
+    return { ok: false, reason: existing.kind === "internal" ? "internal" : "already_closed" };
+  }
+  await insertAuditRow(client, {
+    action: input.status === "completed" ? "referral.complete" : "referral.cancel",
+    entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].to_name,
+    details: { الإحالة: input.id, الملاحظة: input.note ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  const referral = await getReferralWith(client, input.id);
+  return { ok: true, referral: referral! };
+}
+
 export async function closeReferral(input: {
   id: number; status: "completed" | "cancelled"; note: string | null; actor: string; actorRole?: string | null;
 }): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "not_found" | "already_closed" | "internal" }> {
@@ -30111,10 +30388,13 @@ const toMedicalHistory = (row: MedicalHistoryRow): MedicalHistoryRecord => ({
   recordedAt: row.recorded_at.toISOString(),
 });
 
-/** نسخةٌ جديدة من التاريخ الطبي — لا يُعدَّل ما قبلها. null إن لم يوجد المريض. */
-export async function saveMedicalHistory(patientId: number, input: MedicalHistoryInput, recordedBy: string): Promise<MedicalHistoryRecord | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<MedicalHistoryRow>(
+export async function saveMedicalHistoryInTransaction(
+  client: DbClient,
+  patientId: number,
+  input: MedicalHistoryInput,
+  recordedBy: string,
+): Promise<MedicalHistoryRecord | null> {
+  const { rows } = await client.query<MedicalHistoryRow>(
     `INSERT INTO patient_medical_history
        (patient_id, answers, allergies, medications, asa_class, blood_group, notes, patient_confirmed, recorded_by)
      SELECT $1, $2::jsonb, $3::jsonb, $4::jsonb, $5::text, $6::text, $7::text, $8, $9
@@ -30124,6 +30404,12 @@ export async function saveMedicalHistory(patientId: number, input: MedicalHistor
       input.asaClass, input.bloodGroup, input.notes, input.patientConfirmed, recordedBy],
   );
   return rows[0] ? toMedicalHistory(rows[0]) : null;
+}
+
+/** نسخةٌ جديدة من التاريخ الطبي — لا يُعدَّل ما قبلها. null إن لم يوجد المريض. */
+export async function saveMedicalHistory(patientId: number, input: MedicalHistoryInput, recordedBy: string): Promise<MedicalHistoryRecord | null> {
+  await ensureSchema();
+  return saveMedicalHistoryInTransaction(getPool() as unknown as DbClient, patientId, input, recordedBy);
 }
 
 /** آخر نسخ التاريخ الطبي (الأحدث أولًا). */
@@ -30162,21 +30448,16 @@ const toVitals = (row: VitalsRow): VitalsRecord => ({
   recordedBy: row.recorded_by, recordedAt: row.recorded_at.toISOString(),
 });
 
-/** قراءة علاماتٍ حيوية — تُربط بزيارة المريض المفتوحة اليوم إن وُجدت. */
-export async function recordVitals(
-  patientId: number, input: VitalsInput, recordedBy: string,
+export async function recordVitalsInTransaction(
+  client: DbClient,
+  patientId: number,
+  input: VitalsInput,
+  recordedBy: string,
   options: { recordedDate?: string; medicalAlert?: string | null } = {},
 ): Promise<VitalsRecord | null> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const patient = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
-    if (!patient.rowCount) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    const { rows } = await client.query<VitalsRow>(
+  const patient = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
+  if (!patient.rowCount) return null;
+  const { rows } = await client.query<VitalsRow>(
     `INSERT INTO patient_vitals
        (patient_id, visit_id, bp_systolic, bp_diastolic, pulse, temperature, spo2, glucose, weight_kg, recorded_by, recorded_at)
      SELECT $1,
@@ -30188,18 +30469,20 @@ export async function recordVitals(
      RETURNING *`,
     [patientId, input.bpSystolic, input.bpDiastolic, input.pulse, input.temperature, input.spo2, input.glucose,
       input.weightKg, recordedBy, CLINIC_TIME_ZONE, options.recordedDate ?? null],
-    );
-    if (options.medicalAlert !== undefined) {
-      await client.query("UPDATE patients SET medical_alert = $2 WHERE id = $1", [patientId, options.medicalAlert]);
-    }
-    await client.query("COMMIT");
-    return toVitals(rows[0]);
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
+  );
+  if (options.medicalAlert !== undefined) {
+    await client.query("UPDATE patients SET medical_alert = $2 WHERE id = $1", [patientId, options.medicalAlert]);
   }
+  return toVitals(rows[0]);
+}
+
+/** قراءة علاماتٍ حيوية — تُربط بزيارة المريض المفتوحة اليوم إن وُجدت. */
+export async function recordVitals(
+  patientId: number, input: VitalsInput, recordedBy: string,
+  options: { recordedDate?: string; medicalAlert?: string | null } = {},
+): Promise<VitalsRecord | null> {
+  await ensureSchema();
+  return withTransaction(getPool(), (client) => recordVitalsInTransaction(client, patientId, input, recordedBy, options));
 }
 
 export async function listVitals(patientId: number, limit = 10): Promise<VitalsRecord[]> {
@@ -30559,6 +30842,32 @@ export async function listPatientProblemsWith(q: Pick<DbClient, "query">, patien
   return rows.map(toProblem);
 }
 
+export async function createPatientProblemInTransaction(
+  client: DbClient,
+  input: ProblemDraft & {
+    patientId: number; actor: string; actorRole?: string | null;
+  },
+): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "no_patient" | "bad_case" }> {
+  const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+  if (!patient[0]) return { ok: false, reason: "no_patient" };
+  if (input.caseId !== null) {
+    const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, input.patientId]);
+    if (!rows[0]) return { ok: false, reason: "bad_case" };
+  }
+  const { rows: [created] } = await client.query<{ id: number }>(
+    `INSERT INTO patient_problems (patient_id, label, site, specialty, case_id, noted_by)
+     VALUES ($1, $2, $3::text, $4::text, $5::int, $6) RETURNING id`,
+    [input.patientId, input.label, input.site, input.specialty, input.caseId, input.actor],
+  );
+  await insertAuditRow(client, {
+    action: "problem.create", entity: "patient", entityId: input.patientId, entityLabel: input.label,
+    details: { المشكلة: created.id, الموضع: input.site ?? "—", التخصص: input.specialty ?? "—", الحالة: input.caseId ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  const { rows } = await client.query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [created.id]);
+  return { ok: true, problem: toProblem(rows[0]) };
+}
+
 export async function createPatientProblem(input: ProblemDraft & {
   patientId: number; actor: string; actorRole?: string | null;
 }): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "no_patient" | "bad_case" }> {
@@ -30566,25 +30875,10 @@ export async function createPatientProblem(input: ProblemDraft & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
-    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
-    if (input.caseId !== null) {
-      const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
-    }
-    const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO patient_problems (patient_id, label, site, specialty, case_id, noted_by)
-       VALUES ($1, $2, $3::text, $4::text, $5::int, $6) RETURNING id`,
-      [input.patientId, input.label, input.site, input.specialty, input.caseId, input.actor],
-    );
-    await insertAuditRow(client, {
-      action: "problem.create", entity: "patient", entityId: input.patientId, entityLabel: input.label,
-      details: { المشكلة: created.id, الموضع: input.site ?? "—", التخصص: input.specialty ?? "—", الحالة: input.caseId ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await createPatientProblemInTransaction(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
-    const { rows } = await getPool().query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [created.id]);
-    return { ok: true, problem: toProblem(rows[0]) };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -30593,10 +30887,42 @@ export async function createPatientProblem(input: ProblemDraft & {
   }
 }
 
+export async function getPatientProblemOwnerWith(q: Pick<DbClient, "query">, id: number): Promise<number | null> {
+  const { rows } = await q.query<{ patient_id: number }>(`SELECT patient_id FROM patient_problems WHERE id = $1`, [id]);
+  return rows[0]?.patient_id ?? null;
+}
+
 export async function getPatientProblemOwner(id: number): Promise<number | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number }>(`SELECT patient_id FROM patient_problems WHERE id = $1`, [id]);
-  return rows[0]?.patient_id ?? null;
+  return getPatientProblemOwnerWith(getPool(), id);
+}
+
+export async function changePatientProblemStatusInTransaction(
+  client: DbClient,
+  input: {
+    id: number; status: ProblemStatus; actor: string; actorRole?: string | null;
+  },
+): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "not_found" | "unchanged" }> {
+  const { rows } = await client.query<{ patient_id: number; status: string; label: string }>(
+    `SELECT patient_id, status, label FROM patient_problems WHERE id = $1 FOR UPDATE`, [input.id]);
+  if (!rows[0]) return { ok: false, reason: "not_found" };
+  if (rows[0].status === input.status) return { ok: false, reason: "unchanged" };
+  const resolved = input.status === "resolved";
+  await client.query(
+    `UPDATE patient_problems
+        SET status = $2,
+            resolved_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+            resolved_by = CASE WHEN $3 THEN $4 ELSE NULL END
+      WHERE id = $1`,
+    [input.id, input.status, resolved, input.actor],
+  );
+  await insertAuditRow(client, {
+    action: "problem.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].label,
+    details: { المشكلة: input.id, من: rows[0].status, إلى: input.status },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  const { rows: fresh } = await client.query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [input.id]);
+  return { ok: true, problem: toProblem(fresh[0]) };
 }
 
 export async function changePatientProblemStatus(input: {
@@ -30606,27 +30932,10 @@ export async function changePatientProblemStatus(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; status: string; label: string }>(
-      `SELECT patient_id, status, label FROM patient_problems WHERE id = $1 FOR UPDATE`, [input.id]);
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (rows[0].status === input.status) { await client.query("ROLLBACK"); return { ok: false, reason: "unchanged" }; }
-    const resolved = input.status === "resolved";
-    await client.query(
-      `UPDATE patient_problems
-          SET status = $2,
-              resolved_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
-              resolved_by = CASE WHEN $3 THEN $4 ELSE NULL END
-        WHERE id = $1`,
-      [input.id, input.status, resolved, input.actor],
-    );
-    await insertAuditRow(client, {
-      action: "problem.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].label,
-      details: { المشكلة: input.id, من: rows[0].status, إلى: input.status },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await changePatientProblemStatusInTransaction(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
-    const { rows: fresh } = await getPool().query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [input.id]);
-    return { ok: true, problem: toProblem(fresh[0]) };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -31386,6 +31695,54 @@ import {
  * المحيل هو الطبيب صاحب الجلسة (نفس هوية الخطاب الخارجي)، والعودة إليه افتراضًا. سطر التدقيق
  * في المعاملة نفسها.
  */
+export async function createInternalReferralInTransaction(
+  client: DbClient,
+  input: InternalReferralDraft & {
+    patientId: number; doctorPartyId: number | null; actor: string; actorRole?: string | null;
+  },
+): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "no_patient" | "bad_receiver" | "self" | "bad_link" }> {
+  const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+  if (!patient[0]) return { ok: false, reason: "no_patient" };
+  const { rows: receiver } = await client.query<{ name: string }>(
+    `SELECT name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.toPartyId]);
+  if (!receiver[0]) return { ok: false, reason: "bad_receiver" };
+  if (input.doctorPartyId !== null && input.doctorPartyId === input.toPartyId) {
+    return { ok: false, reason: "self" };
+  }
+  for (const caseId of [input.caseId, input.blocksCaseId]) {
+    if (caseId === null) continue;
+    const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [caseId, input.patientId]);
+    if (!rows[0]) return { ok: false, reason: "bad_link" };
+  }
+  if (input.planItemId !== null) {
+    const { rows } = await client.query(
+      `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 AND t.patient_id = $2`,
+      [input.planItemId, input.patientId]);
+    if (!rows[0]) return { ok: false, reason: "bad_link" };
+  }
+  if (input.requestedServiceId !== null) {
+    const { rows } = await client.query(`SELECT 1 FROM services WHERE id = $1 AND is_active`, [input.requestedServiceId]);
+    if (!rows[0]) return { ok: false, reason: "bad_link" };
+  }
+  const { rows: [created] } = await client.query<{ id: number }>(
+    `INSERT INTO patient_referrals
+       (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by,
+        kind, to_party_id, workflow_state, case_id, blocks_case_id, plan_item_id, return_to_party_id, requested_service_id)
+     VALUES ($1, $2, $3, $4, $5::text, $6, $7::int, (SELECT name FROM parties WHERE id = $7::int), $8,
+             'internal', $9, 'requested', $10::int, $11::int, $12::int, $7::int, $13::int)
+     RETURNING id`,
+    [input.patientId, receiver[0].name, input.toSpecialty, input.reason, input.teeth, input.urgency,
+      input.doctorPartyId, input.actor, input.toPartyId, input.caseId, input.blocksCaseId, input.planItemId,
+      input.requestedServiceId],
+  );
+  await insertAuditRow(client, {
+    action: "referral.create", entity: "patient", entityId: input.patientId, entityLabel: receiver[0].name,
+    details: { الإحالة: created.id, النوع: "داخلية", إلى: receiver[0].name, التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth ?? "—", الاستعجال: input.urgency },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true, referral: (await getReferralWith(client, created.id))! };
+}
+
 export async function createInternalReferral(input: InternalReferralDraft & {
   patientId: number; doctorPartyId: number | null; actor: string; actorRole?: string | null;
 }): Promise<{ ok: true; referral: Referral } | { ok: false; reason: "no_patient" | "bad_receiver" | "self" | "bad_link" }> {
@@ -31393,47 +31750,10 @@ export async function createInternalReferral(input: InternalReferralDraft & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
-    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
-    const { rows: receiver } = await client.query<{ name: string }>(
-      `SELECT name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active`, [input.toPartyId]);
-    if (!receiver[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_receiver" }; }
-    if (input.doctorPartyId !== null && input.doctorPartyId === input.toPartyId) {
-      await client.query("ROLLBACK"); return { ok: false, reason: "self" };
-    }
-    for (const caseId of [input.caseId, input.blocksCaseId]) {
-      if (caseId === null) continue;
-      const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [caseId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
-    }
-    if (input.planItemId !== null) {
-      const { rows } = await client.query(
-        `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 AND t.patient_id = $2`,
-        [input.planItemId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
-    }
-    if (input.requestedServiceId !== null) {
-      const { rows } = await client.query(`SELECT 1 FROM services WHERE id = $1 AND is_active`, [input.requestedServiceId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_link" }; }
-    }
-    const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO patient_referrals
-         (patient_id, to_name, to_specialty, reason, teeth, urgency, doctor_party_id, doctor_name, created_by,
-          kind, to_party_id, workflow_state, case_id, blocks_case_id, plan_item_id, return_to_party_id, requested_service_id)
-       VALUES ($1, $2, $3, $4, $5::text, $6, $7::int, (SELECT name FROM parties WHERE id = $7::int), $8,
-               'internal', $9, 'requested', $10::int, $11::int, $12::int, $7::int, $13::int)
-       RETURNING id`,
-      [input.patientId, receiver[0].name, input.toSpecialty, input.reason, input.teeth, input.urgency,
-        input.doctorPartyId, input.actor, input.toPartyId, input.caseId, input.blocksCaseId, input.planItemId,
-        input.requestedServiceId],
-    );
-    await insertAuditRow(client, {
-      action: "referral.create", entity: "patient", entityId: input.patientId, entityLabel: receiver[0].name,
-      details: { الإحالة: created.id, النوع: "داخلية", إلى: receiver[0].name, التخصص: input.toSpecialty, السبب: input.reason, الأسنان: input.teeth ?? "—", الاستعجال: input.urgency },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await createInternalReferralInTransaction(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
-    return { ok: true, referral: (await getReferral(created.id))! };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -31560,25 +31880,34 @@ export async function transitionInternalReferral(input: InternalReferralTransiti
  * «عملي السريري» من جهة الإحالات: ما أُحيل إليّ ولم يكتمل، وما أحلتُه ولم يعد، وما عاد إليّ ولم
  * أطّلع عليه. مرشّحٌ على بياناتٍ قائمة، لا وحدةٌ جديدة.
  */
+export async function listMyReferralsWith(
+  q: Pick<DbClient, "query">,
+  partyId: number,
+): Promise<{
+  toMe: (Referral & { patientName: string })[];
+  sentOpen: (Referral & { patientName: string })[];
+  returnedToMe: (Referral & { patientName: string })[];
+}> {
+  const query = async (where: string) => {
+    const { rows } = await q.query<ReferralRow & { patient_name: string }>(
+      `SELECT x.*, p.full_name AS patient_name FROM (${REFERRAL_SELECT}) x JOIN patients p ON p.id = x.patient_id
+        WHERE x.kind = 'internal' AND ${where}
+        ORDER BY x.created_at, x.id LIMIT 200`, [partyId]);
+    return rows.map((row) => ({ ...toReferral(row), patientName: row.patient_name }));
+  };
+  const toMe = await query(`x.to_party_id = $1 AND x.status = 'sent'`);
+  const sentOpen = await query(`x.doctor_party_id = $1 AND x.status = 'sent'`);
+  const returnedToMe = await query(`COALESCE(x.return_to_party_id, x.doctor_party_id) = $1 AND x.workflow_state = 'completed'`);
+  return { toMe, sentOpen, returnedToMe };
+}
+
 export async function listMyReferrals(partyId: number): Promise<{
   toMe: (Referral & { patientName: string })[];
   sentOpen: (Referral & { patientName: string })[];
   returnedToMe: (Referral & { patientName: string })[];
 }> {
   await ensureSchema();
-  const query = async (where: string) => {
-    const { rows } = await getPool().query<ReferralRow & { patient_name: string }>(
-      `SELECT x.*, p.full_name AS patient_name FROM (${REFERRAL_SELECT}) x JOIN patients p ON p.id = x.patient_id
-        WHERE x.kind = 'internal' AND ${where}
-        ORDER BY x.created_at, x.id LIMIT 200`, [partyId]);
-    return rows.map((row) => ({ ...toReferral(row), patientName: row.patient_name }));
-  };
-  const [toMe, sentOpen, returnedToMe] = await Promise.all([
-    query(`x.to_party_id = $1 AND x.status = 'sent'`),
-    query(`x.doctor_party_id = $1 AND x.status = 'sent'`),
-    query(`COALESCE(x.return_to_party_id, x.doctor_party_id) = $1 AND x.workflow_state = 'completed'`),
-  ]);
-  return { toMe, sentOpen, returnedToMe };
+  return listMyReferralsWith(getPool(), partyId);
 }
 
 /* ═════════════════ (CASE-1) الحالة التقويمية السابقة وجلسة التقويم داخل التوقيع ═════════════════
@@ -32061,26 +32390,26 @@ export interface MyClinicalWorkToday {
  * «عملي السريري» (§8): الإحالات (إليّ، مني المفتوحة، العائدة إليّ) + مرضاي اليوم مع سياق الإحالة.
  * مرشّحٌ على بياناتٍ قائمة، استعلامٌ واحد لليوم بفهرس المواعيد على التاريخ.
  */
-export async function myClinicalWork(partyId: number): Promise<Awaited<ReturnType<typeof listMyReferrals>> & {
+export async function myClinicalWorkWith(
+  q: Pick<DbClient, "query">,
+  partyId: number,
+  todayDate = clinicDateString(new Date(), CLINIC_TIME_ZONE),
+): Promise<Awaited<ReturnType<typeof listMyReferrals>> & {
   today: MyClinicalWorkToday[];
 }> {
-  await ensureSchema();
-  const todayDate = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const [referrals, { rows }] = await Promise.all([
-    listMyReferrals(partyId),
-    getPool().query<{
-      id: number; patient_id: number; full_name: string; time: string; status: string;
-      referral_id: number | null; reason: string | null; doctor_name: string | null;
-    }>(
-      `SELECT a.id, a.patient_id, p.full_name, to_char(a.scheduled_time, 'HH24:MI') AS time, a.status,
-              r.id AS referral_id, r.reason, r.doctor_name
-         FROM appointments a JOIN patients p ON p.id = a.patient_id
-         LEFT JOIN patient_referrals r ON r.id = a.referral_id AND r.kind = 'internal'
-        WHERE a.doctor_id = $1 AND a.scheduled_date = $2::date AND a.status <> 'cancelled'
-        ORDER BY a.scheduled_time, a.id LIMIT 200`,
-      [partyId, todayDate],
-    ),
-  ]);
+  const referrals = await listMyReferralsWith(q, partyId);
+  const { rows } = await q.query<{
+    id: number; patient_id: number; full_name: string; time: string; status: string;
+    referral_id: number | null; reason: string | null; doctor_name: string | null;
+  }>(
+    `SELECT a.id, a.patient_id, p.full_name, to_char(a.scheduled_time, 'HH24:MI') AS time, a.status,
+            r.id AS referral_id, r.reason, r.doctor_name
+       FROM appointments a JOIN patients p ON p.id = a.patient_id
+       LEFT JOIN patient_referrals r ON r.id = a.referral_id AND r.kind = 'internal'
+      WHERE a.doctor_id = $1 AND a.scheduled_date = $2::date AND a.status <> 'cancelled'
+      ORDER BY a.scheduled_time, a.id LIMIT 200`,
+    [partyId, todayDate],
+  );
   return {
     ...referrals,
     today: rows.map((row) => ({
@@ -32088,6 +32417,13 @@ export async function myClinicalWork(partyId: number): Promise<Awaited<ReturnTyp
       referralId: row.referral_id, referralReason: row.reason, referredBy: row.doctor_name,
     })),
   };
+}
+
+export async function myClinicalWork(partyId: number): Promise<Awaited<ReturnType<typeof listMyReferrals>> & {
+  today: MyClinicalWorkToday[];
+}> {
+  await ensureSchema();
+  return myClinicalWorkWith(getPool(), partyId);
 }
 
 // ─── (CHAIR-1) الاستقبال ← الكرسي ← الشبّاك ─────────────────────────────────

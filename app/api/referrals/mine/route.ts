@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalClinicalRecordsFailure, readCanonicalMyReferrals } from "@/lib/canonical-clinical-records";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { findUserByUsername, myClinicalWork } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
@@ -9,6 +12,15 @@ export const dynamic = "force-dynamic";
  * ومرضاي اليوم مع سياق إحالتهم.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalMyReferrals(selected.handle), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر تحميل الإحالات.");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (session.role !== "doctor" && session.role !== "admin") {

@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalClinicalRecordsFailure,
+  commandCanonicalDocumentDelete,
+  readCanonicalDocumentDownload,
+} from "@/lib/canonical-clinical-records";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getDocumentForDownload, recordAudit, removeDocument } from "@/lib/db";
@@ -28,6 +35,16 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const download = new URL(request.url).searchParams.get("download") === "1";
+      return await readCanonicalDocumentDownload(selected.handle, (await context.params).id, download);
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر فتح المستند.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const id = await idFrom(context);
@@ -73,6 +90,24 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
 /** إخفاء مستند — للمدير وحده، وبسببٍ مكتوب. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let body: Record<string, unknown>;
+    try {
+      const raw = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await commandCanonicalDocumentDelete(selected.handle, (await context.params).id, body), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalClinicalRecordsFailure(error, "تعذّر إخفاء المستند.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

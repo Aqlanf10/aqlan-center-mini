@@ -44,6 +44,12 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:lab.orders": Object.freeze({ record: "patient", need: Object.freeze(["clinical.lab.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/lab/backlog: whole-clinic open lab oversight inside whole patient scope (M2 slice 33). */
   "read:lab.backlog": Object.freeze({ record: "patient", need: Object.freeze(["clinical.lab.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/documents and /api/documents/[id]: active documents inside patient scope (M2 slice 34). */
+  "read:patients.documents": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/prescriptions: prescriptions, suggestions, prescriber options inside patient scope (M2 slice 34). */
+  "read:patients.prescriptions": Object.freeze({ record: "patient", need: Object.freeze(["clinical.prescriptions.write"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/prescriptions/saved: minimal stored-prescription print picker inside patient scope (M2 slice 34). */
+  "read:patients.prescriptions-saved": Object.freeze({ record: "patient", need: Object.freeze([]), anyOf: Object.freeze(["clinical.prescriptions.write", "patients.operational-summary.view"] as const) }),
   /** GET /api/patients/[id]/ceph, /api/ceph/[id], /api/ceph/compare, /api/ceph/superimpose (M2 slice 30). */
   "read:ceph": Object.freeze({ record: "patient", need: Object.freeze(["clinical.xrays.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients: search and browse the patient list. */

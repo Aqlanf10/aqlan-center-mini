@@ -3,7 +3,7 @@ import { parseDoctorPermissions } from "../lib/doctor-permissions";
 const m = vi.hoisted(() => ({ session: vi.fn(), user: vi.fn(), access: vi.fn(), patient: vi.fn(), visit: vi.fn(), list: vi.fn(), rx: vi.fn(), print: vi.fn(), audit: vi.fn(), settings: vi.fn() }));
 vi.mock("@/lib/session", () => ({ requireSession: m.session }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: m.access }));
-vi.mock("@/lib/db", () => ({ findUserByUsername: m.user, getPatient: m.patient, getClinicalVisit: m.visit, listSavedPrescriptionPrints: m.list, getPrescription: m.rx, recordPrint: m.print, recordAudit: m.audit, getPrescriptionPrintSettings: m.settings }));
+vi.mock("@/lib/db", () => ({ findUserByUsername: m.user, getPatient: m.patient, getClinicalVisit: m.visit, listSavedPrescriptionPrints: m.list, getPrescription: m.rx, recordPrint: m.print, printCount: m.print, recordAudit: m.audit, getPrescriptionPrintSettings: m.settings }));
 vi.mock("@/lib/prescription-prescriber", () => ({ prescriptionPrescriberOptions: vi.fn() }));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND"); } }));
 import { GET } from "../app/api/patients/[id]/prescriptions/saved/route";
