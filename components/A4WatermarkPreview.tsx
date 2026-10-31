@@ -26,7 +26,7 @@ function CanvasPreview({ canvas, src }: { canvas: HTMLElement; src: string }) {
   const [long, setLong] = useState(false);
   const [failed, setFailed] = useState(false);
   const [hasAction, setHasAction] = useState(false);
-  const notice = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     const landscape = canvas.matches(".sheet-report-landscape, .hr-staff-sheet")
       || Boolean(canvas.closest('[data-a4-orientation="landscape"]'));
@@ -36,10 +36,7 @@ function CanvasPreview({ canvas, src }: { canvas: HTMLElement; src: string }) {
     canvas.setAttribute("data-a4-preview-paper", String(paperCanvas));
     const measure = () => {
       setHasAction(Boolean(associatedPrintAction(canvas)));
-      // The screen-only notice is not document content. Exclude its box to
-      // avoid toggling a short page into a long one merely by adding the note.
-      const noteHeight = notice.current?.getBoundingClientRect().height ?? 0;
-      const height = Math.max(canvas.scrollHeight, canvas.getBoundingClientRect().height) - noteHeight;
+      const height = Math.max(canvas.scrollHeight, canvas.getBoundingClientRect().height);
       setLong(!paperCanvas || height > (landscape ? 210 : 297) * MM + 2);
     };
     const observer = new ResizeObserver(measure);
@@ -57,15 +54,24 @@ function CanvasPreview({ canvas, src }: { canvas: HTMLElement; src: string }) {
     // Preserve existing print logging/permission workflows, when supplied.
     associatedPrintAction(canvas)?.click();
   };
-  return createPortal(<>
-    {!long && !failed && <div className="a4-preview-watermark" aria-hidden="true">
+  // Preview guidance is UI, never authoritative report text. Keep it outside
+  // every nested report wrapper, including screen-first dashboard adapters.
+  let reportBoundary = canvas;
+  let ancestor = canvas.parentElement?.closest<HTMLElement>(CANVASES);
+  while (ancestor) {
+    reportBoundary = ancestor;
+    ancestor = ancestor.parentElement?.closest<HTMLElement>(CANVASES);
+  }
+  const noticeOwner = reportBoundary.parentElement;
+  return <>
+    {createPortal(!long && !failed ? <div className="a4-preview-watermark" aria-hidden="true">
       <img src={src} alt="" draggable={false} onError={() => setFailed(true)} />
-    </div>}
-    {long && <aside ref={notice} className="a4-preview-notice" role="note">
+    </div> : null, canvas)}
+    {long && noticeOwner && createPortal(<aside className="a4-preview-notice" role="note">
       <span>هذا عرض متصل للمستند، وليس تقسيم الصفحات النهائي. استخدم زر الطباعة الخاص بهذا المستند لمعاينة الصفحات الفعلية وشعارها الثابت.</span>
       {hasAction && <button type="button" onClick={preview}>معاينة صفحات الطباعة</button>}
-    </aside>}
-  </>, canvas);
+    </aside>, noticeOwner)}
+  </>;
 }
 
 /** Reuses the body-owned asset; no per-table logo and no changes to document

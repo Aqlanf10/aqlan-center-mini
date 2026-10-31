@@ -73,11 +73,14 @@ describe("one physical A4 preview logo, independent of table count/content", () 
       await mount(page, "sheet sheet-a4", 3, 28);
       await page.getByRole("button", { name: "معاينة صفحات الطباعة" }).waitFor();
       expect(await page.locator(".a4-preview-watermark").count()).toBe(0);
+      expect(await page.locator("#canvas .a4-preview-notice").count()).toBe(0);
+      const documentText = await page.locator("#canvas").innerText();
       await page.getByRole("button", { name: "معاينة صفحات الطباعة" }).click();
       expect(await page.evaluate(() => (window as unknown as { previewClicks: number }).previewClicks)).toBe(1);
       expect(await page.evaluate(() => (window as unknown as { unrelatedClicks?: number }).unrelatedClicks || 0)).toBe(0);
       await page.emulateMedia({ media: "print" });
       expect(await page.locator(".a4-preview-notice").isVisible()).toBe(false);
+      expect(await page.locator("#canvas").innerText()).toBe(documentText);
       expect(await page.locator(".print-table-watermark").evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display === "none"))).toBe(true);
       const pdf = resolve(output, "a4-preview-long.pdf");
       await page.pdf({ path: pdf, preferCSSPageSize: true, printBackground: true });
@@ -140,6 +143,30 @@ describe("one physical A4 preview logo, independent of table count/content", () 
       expect(await page.locator(".print-table-watermark").evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display === "none"))).toBe(true);
       await page.emulateMedia({ media: "print" });
       expect(await page.locator(".a4-preview-notice").isVisible()).toBe(false);
+    } finally { await browser.close(); }
+  });
+  it("keeps report text and report lifetime intact during PDF calibration replacement", async () => {
+    const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
+    try {
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
+      await mount(page, "print-document-on-print", 2, 2);
+      await page.locator(".a4-preview-notice").waitFor();
+      expect(await page.locator("#canvas .a4-preview-notice").count()).toBe(0);
+      const saved = await page.locator("#canvas").evaluate(report => {
+        const html = report.innerHTML;
+        const reference = document.createElement("p");
+        reference.textContent = "PDF CALIBRATION REFERENCE";
+        report.replaceChildren(reference);
+        return html;
+      });
+      await page.locator(".a4-preview-notice").waitFor({ state: "detached" });
+      expect(await page.locator("#canvas").innerText()).toBe("PDF CALIBRATION REFERENCE");
+      await page.locator("#canvas").evaluate((report, html) => { report.innerHTML = html; }, saved);
+      await page.locator(".a4-preview-notice").waitFor();
+      expect(await page.locator("#canvas .print-brand-header").count()).toBe(1);
+      expect(errors).toEqual([]);
     } finally { await browser.close(); }
   });
   it.each(["sheet sheet-a5", "sheet sheet-a6"])("leaves %s geometry and previews untouched", async kind => {
