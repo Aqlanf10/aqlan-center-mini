@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/roles";
 import { requireBackupAdminReadOnly } from "@/lib/backupReadOnly";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { admitCanonicalBackupOwner } from "@/lib/canonical-backup-readonly";
 import { runVerifiedManualBackup } from "@/lib/manual-backup";
 
 export const dynamic = "force-dynamic";
@@ -30,17 +32,28 @@ const noStore = (body: unknown, status: number): NextResponse =>
   NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 export async function POST() {
-  const auth = await requireBackupAdminReadOnly();
-  if (!auth.ok) {
-    // الجلسة الغائبة أو الحساب المُبدَّل رفضٌ مصادقة عادي (401 كما كان) —
-    // أما جدول users غير المقروء ففشلٌ مغلق (503): لا جلسة ولا إصلاح ضمني.
-    return noStore(
-      { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن — يلزم تدخّل يدوي." : "سجّل الدخول من جديد." },
-      auth.reason === "users-unreadable" ? 503 : 401,
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") {
+    const admitted = await admitCanonicalBackupOwner(
+      selected.handle,
+      "نسخ «الآن» اليدوي للمدير وحده.",
+      "المصادقة غير متاحة الآن — يلزم تدخّل يدوي.",
     );
-  }
-  if (!isAdmin(auth.session.role)) {
-    return noStore({ message: "نسخ «الآن» اليدوي للمدير وحده." }, 403);
+    if ("response" in admitted) return admitted.response;
+  } else {
+    const auth = await requireBackupAdminReadOnly();
+    if (!auth.ok) {
+      // الجلسة الغائبة أو الحساب المُبدَّل رفضٌ مصادقة عادي (401 كما كان) —
+      // أما جدول users غير المقروء ففشلٌ مغلق (503): لا جلسة ولا إصلاح ضمني.
+      return noStore(
+        { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن — يلزم تدخّل يدوي." : "سجّل الدخول من جديد." },
+        auth.reason === "users-unreadable" ? 503 : 401,
+      );
+    }
+    if (!isAdmin(auth.session.role)) {
+      return noStore({ message: "نسخ «الآن» اليدوي للمدير وحده." }, 403);
+    }
   }
 
   const result = await runVerifiedManualBackup();

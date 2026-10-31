@@ -5,6 +5,8 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createStaffUser, findUserByUsername, listUsers, recordAudit } from "@/lib/db";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalUsersGet, canonicalUsersPost } from "@/lib/canonical-users-self";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
 import { validateDoctorCommissionConfigInput } from "@/lib/doctor-permissions";
 
@@ -16,6 +18,10 @@ const forbidden = () =>
   NextResponse.json({ message: "إدارة المستخدمين للمدير وحده." }, { status: 403 });
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalUsersGet(selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();
@@ -27,6 +33,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalUsersPost(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return forbidden();

@@ -10,6 +10,8 @@ import { looksLikeBrokenEncoding, parseCsv } from "@/lib/patient-import";
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientsLegacyImportPost } from "@/lib/canonical-owner-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,10 @@ function assignmentsOf(value: unknown): Record<number, number> {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  if (selected.kind === "canonical") return canonicalPatientsLegacyImportPost(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!isAdmin(session.role)) return NextResponse.json({ message: "استيراد النظام القديم للمدير وحده." }, { status: 403 });

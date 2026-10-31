@@ -4,6 +4,8 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { listDisplayAnnouncements, recordAudit, reorderDisplayAnnouncements } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalDisplayAnnouncementsReorderPatch } from "@/lib/canonical-admin-reports-settings";
 import { parseAnnouncementReorder } from "@/lib/waiting-room";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +22,10 @@ const denied = () =>
  * إلى الحقيقة — لا يُدفن إعلانٌ جديدٌ في ترتيبٍ لم يُسأل عنه.
  */
 export async function PATCH(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalDisplayAnnouncementsReorderPatch(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

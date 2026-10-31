@@ -4,6 +4,11 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { deleteDisplayAnnouncement, recordAudit, updateDisplayAnnouncement } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalDisplayAnnouncementsDelete,
+  canonicalDisplayAnnouncementsPatch,
+} from "@/lib/canonical-admin-reports-settings";
 import { parseAnnouncementId, validateAnnouncementPatch } from "@/lib/waiting-room";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +30,13 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    const { id } = await params;
+    return canonicalDisplayAnnouncementsPatch(selected.handle, request, id);
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return adminOnly();
@@ -76,6 +88,13 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") {
+    const { id } = await params;
+    return canonicalDisplayAnnouncementsDelete(selected.handle, id);
+  }
+
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) return adminOnly();

@@ -33,7 +33,7 @@ async function transaction<T>(session: SessionPayload, work: (client: DbClient) 
     throw error;
   }
 }
-async function preview(client: DbClient): Promise<NumberingPreview> {
+async function preview(client: Pick<DbClient, "query">): Promise<NumberingPreview> {
   const {rows} = await client.query<{
     minimum_next: string; version: string; last_value: string; is_called: boolean;
     maximum_current: string; maximum_retired: string; next_number: string;
@@ -48,6 +48,51 @@ async function preview(client: DbClient): Promise<NumberingPreview> {
   return {minimumNext: row.minimum_next, version: row.version, sequenceValue: row.last_value,
     sequenceCalled: row.is_called, maximumCurrent: row.maximum_current, maximumRetired: row.maximum_retired,
     nextNumber: exhausted ? null : parsePatientNumber(row.next_number), exhausted};
+}
+export function readCanonicalNumberingPreviewWith(runner: Pick<DbClient, "query">): Promise<NumberingPreview> {
+  return preview(runner);
+}
+export async function changeCanonicalNumberingFloorWith(
+  client: DbClient,
+  actor: { readonly username: string; readonly role: string },
+  input: { minimumNext: unknown; expectedVersion: unknown; expectedNextNumber: unknown; reason: unknown },
+): Promise<NumberingPreview> {
+  const floor = parseNumberingFloor(input.minimumNext), version = parseNumberingVersion(input.expectedVersion), reason = numberingReason(input.reason);
+  if (!floor || !version || !reason || typeof input.expectedNextNumber !== "string") {
+    throw new PatientNumberingError("invalid", "أدخل حدًا أدنى صحيحًا من 7000 وسبب التغيير ومعاينة حديثة.");
+  }
+  try {
+    await numberingLocks(client);
+    const before = await preview(client);
+    if (before.version !== version || before.nextNumber !== input.expectedNextNumber) {
+      throw new PatientNumberingError("stale", "تغيّر الترقيم منذ المعاينة؛ حدّثها قبل الحفظ.");
+    }
+    if (BigInt(floor) <= BigInt(before.minimumNext)) {
+      throw new PatientNumberingError("invalid", "الحد الأدنى الجديد يجب أن يزيد عن الحد الحالي؛ لا يمكن إرجاع العداد للخلف.");
+    }
+    await client.query(
+      "INSERT INTO patient_numbering_policy(singleton,minimum_next,version) VALUES(true,$1::bigint,2) ON CONFLICT(singleton) DO UPDATE SET minimum_next=EXCLUDED.minimum_next, version=patient_numbering_policy.version+1",
+      [floor],
+    );
+    const after = await preview(client);
+    await insertAuditRow(client, {
+      action: "patient.numbering.configure",
+      entity: "patient_numbering",
+      entityId: "policy",
+      actor: actor.username,
+      actorRole: actor.role,
+      details: { before, after, reason },
+    });
+    return after;
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      throw new PatientNumberingError("duplicate", "رقم الملف مستخدم حاليًا أو سبق استخدامه؛ اختر رقمًا آخر.");
+    }
+    if (["55P03", "40P01"].includes((error as { code?: string }).code ?? "")) {
+      throw new PatientNumberingError("busy", "هناك عملية ترقيم أخرى؛ حدّث المعاينة وأعد المحاولة.");
+    }
+    throw error;
+  }
 }
 export function readNumberingPreview(session: SessionPayload) { return transaction(session, preview); }
 export async function changeNumberingFloor(session: SessionPayload, input: {

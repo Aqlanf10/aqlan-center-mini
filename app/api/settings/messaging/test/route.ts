@@ -6,11 +6,17 @@ import { isChannel } from "@/lib/messaging-channels";
 import { sendOutbound } from "@/lib/messaging-send";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalMessagingTestPost } from "@/lib/canonical-backup-readonly";
 
 export const dynamic = "force-dynamic";
 
 /** (MSG-1) إرسال رسالة اختبار عبر قناة — ولو قبل تفعيلها — وتسجيل نتيجته في القناة. للمدير وحده. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  if (selected.kind === "canonical") return canonicalMessagingTestPost(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!isAdmin(session.role)) return NextResponse.json({ message: "اختبار القنوات للمدير وحده." }, { status: 403 });

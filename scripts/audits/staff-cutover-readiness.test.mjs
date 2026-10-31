@@ -35,7 +35,8 @@ test('baseline has no canonical route readiness; finite domain actions are not r
   'finance.reconciliation.view','finance.opening-balances.manage','finance.patient-ledger.manage','patients.history.record','patients.history.correct','finance.legacy.record','finance.legacy.void',
   'finance.invoices.view','finance.invoices.cancel','finance.invoices.mark-paid','finance.invoices.correct','finance.payments.view','finance.payments.refund','finance.payments.void','finance.service-prices.view','finance.service-prices.edit','finance.cost-prices.view','settings.operational.edit',
   'reports.financial.view','finance.journal.post','finance.expenses.view','finance.expenses.create','finance.expenses.void','finance.commissions.manage-rates','finance.commissions.view-all','finance.commissions.view-own','finance.patient-ledger.view','settings.finance.edit','finance.fx.manage','finance.reconciliation.manage','finance.parties.manage',
-  'hr.directory.view','hr.attendance.record','hr.attendance.correct','hr.staff.manage','hr.leaves.request','hr.leaves.approve','hr.schedules.manage','hr.payroll.manage','hr.reports.view','hr.settings.edit','staff.profile.edit','tasks.use','messages.use']);
+  'hr.directory.view','hr.attendance.record','hr.attendance.correct','hr.staff.manage','hr.leaves.request','hr.leaves.approve','hr.schedules.manage','hr.payroll.manage','hr.reports.view','hr.settings.edit','staff.profile.edit','tasks.use','messages.use',
+  'patients.export','appointments.override-capacity','finance.discounts.apply','finance.discounts.override','finance.price-increases.apply','finance.revenue.view','finance.profits.view','finance.export','reports.operational.view','reports.clinical.view','reports.export','staff.accounts.create','staff.accounts.disable','audit.view','audit.export','patients.operational-summary.view']);
 });
 
 test('unknown HTTP classes never become separate/public even on staff auth transport',async()=>{

@@ -9,6 +9,11 @@ import {
 } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalDisplayAnnouncementsGet,
+  canonicalDisplayAnnouncementsPost,
+} from "@/lib/canonical-admin-reports-settings";
 import { validateAnnouncementInput } from "@/lib/waiting-room";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +29,10 @@ const denied = () =>
  * لكل من يعرف كلمة السر أن يقولها. نفس حدود إعدادات النظام كلها.
  */
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalDisplayAnnouncementsGet(selected.handle);
+
   const session = await requireSession();
   if (!session) return denied();
 
@@ -40,6 +49,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalDisplayAnnouncementsPost(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

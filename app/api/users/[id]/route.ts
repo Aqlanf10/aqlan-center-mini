@@ -5,12 +5,23 @@ import { UserGovernanceError, countActiveAdmins, linkUserDoctor, listUsers, reco
 import { MAX_PASSWORD_LENGTH, hashPassword, legacySessionEvidence } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalUsersPatch } from "@/lib/canonical-users-self";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
 import { validateDoctorCommissionConfigInput } from "@/lib/doctor-permissions";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return canonicalUsersPatch(selected.handle, request, rawId);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

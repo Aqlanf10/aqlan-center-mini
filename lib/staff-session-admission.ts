@@ -2,14 +2,14 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import type { DbClient, DbPool } from "./db";
 import { getPool, usesSharedLocalDatabaseConnection } from "./db";
-import { SESSION_COOKIE, hasCanonicalSessionMarker, readSignedSessionEnvelope } from "./auth";
+import { SESSION_COOKIE, hasCanonicalSessionMarker, readSignedSessionEnvelope, verifyPassword } from "./auth";
 import { withIsolation } from "./transactions";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { staffLifecycleLockKey } from "./legacy-staff-schema.mjs";
 import { readVerifiedDurableSession, revalidateVerifiedDurableSession, type VerifiedDurableSession } from "./staff-durable-session";
-import { loadLockedSessionAuthority } from "./staff-authority-proof-internal";
+import { loadLockedOwnerSessionAuthority, loadLockedSessionAuthority, loadReadOnlyOwnerSessionAuthority } from "./staff-authority-proof-internal";
 import { hasStaffCapability, patientCapabilityConstraint, appointmentCapabilityConstraint } from "./staff-capabilities";
-import { STAFF_CAPABILITIES, type StaffCapability } from "./staff-capability-catalogue";
+import { STAFF_CAPABILITIES, type OwnerOnlyOperation, type StaffCapability } from "./staff-capability-catalogue";
 
 /**
  * قاعدة اختيار واحدة لمغلّف الجلسة، وقبول الجلسة الموحّدة الحالي.
@@ -151,4 +151,141 @@ export async function withCanonicalSelfSession<T>(
 ): Promise<{ readonly ok: true; readonly view: CanonicalStaffView; readonly value: T } | { readonly ok: false }> {
  if (process.env.USE_LOCAL_DB === "true" || usesSharedLocalDatabaseConnection()) return Object.freeze({ ok: false as const });
  return withCanonicalSelfSessionIn(getPool(), "public", handle, work);
+}
+
+export type CanonicalOwnerAdmissionOutcome<T> =
+ | { readonly ok: true; readonly view: CanonicalStaffView; readonly value: T }
+ | { readonly ok: false; readonly reason: "unauthenticated" | "forbidden" | "unavailable" };
+
+/** Same-transaction owner-only operation execution (`READ COMMITTED` + shared lifecycle fence).
+ * Distinguishes unauthenticated/stale sessions (`401`) from non-owner canonical staff (`403`). */
+export async function withCanonicalOwnerOperationIn<T>(
+ pool: DbPool,
+ schema: string,
+ handle: VerifiedDurableSession,
+ operation: OwnerOnlyOperation,
+ work: (
+  client: DbClient,
+  view: CanonicalStaffView,
+  verifyOwnPassword: (candidatePassword: string) => Promise<boolean>,
+ ) => Promise<T>,
+): Promise<CanonicalOwnerAdmissionOutcome<T>> {
+ const s = staffIdentitySchemaName(schema);
+ try {
+  return await withIsolation(pool, "READ COMMITTED", async client => {
+   const xid = await transactionId(client);
+   await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [staffLifecycleLockKey(s)]);
+   const proof = await loadLockedOwnerSessionAuthority(client, handle, s, operation);
+   const claims = revalidateVerifiedDurableSession(handle);
+   if (!claims || await transactionId(client) !== xid) throw new Error("STAFF_OPERATION_SESSION_EXPIRED");
+   const view: CanonicalStaffView = Object.freeze({
+    userId: proof.user.id, username: proof.user.username, displayName: proof.user.displayName || proof.user.username,
+    roleLabel: proof.user.role, isOwner: proof.access.isOwner,
+    capabilities: Object.freeze(STAFF_CAPABILITIES.filter(capability => hasStaffCapability(proof.access, capability))),
+    patientScope: scopeOf(patientCapabilityConstraint(proof.access)), appointmentScope: scopeOf(appointmentCapabilityConstraint(proof.access)),
+    clinicianPartyId: proof.provider?.partyId ?? null, expiresAt: claims.expiresAt,
+   });
+   const value = await work(client, view, candidate => verifyPassword(candidate, proof.user.passwordHash));
+   const finalProof = await loadLockedOwnerSessionAuthority(client, handle, s, operation);
+   if (finalProof.user.authorizationEpoch !== proof.user.authorizationEpoch || !revalidateVerifiedDurableSession(handle) || await transactionId(client) !== xid) {
+    throw new Error("STAFF_OPERATION_SESSION_EXPIRED");
+   }
+   return Object.freeze({ ok: true as const, view, value });
+  });
+ } catch (error) {
+  if (error instanceof Error && error.message === "STAFF_OPERATION_CAPABILITY_DENIED") {
+   return Object.freeze({ ok: false as const, reason: "forbidden" as const });
+  }
+  if (error instanceof Error && /^STAFF_RUNTIME_[A-Z_]+$/.test(error.message)) {
+   return Object.freeze({ ok: false as const, reason: "unavailable" as const });
+  }
+  if (error instanceof Error && /^STAFF_OPERATION_[A-Z_]+$/.test(error.message)) {
+   return Object.freeze({ ok: false as const, reason: "unauthenticated" as const });
+  }
+  throw error;
+ }
+}
+
+export async function withCanonicalOwnerOperation<T>(
+ handle: VerifiedDurableSession,
+ operation: OwnerOnlyOperation,
+ work: (
+  client: DbClient,
+  view: CanonicalStaffView,
+  verifyOwnPassword: (candidatePassword: string) => Promise<boolean>,
+ ) => Promise<T>,
+): Promise<CanonicalOwnerAdmissionOutcome<T>> {
+ if (process.env.USE_LOCAL_DB === "true" || usesSharedLocalDatabaseConnection()) {
+  return Object.freeze({ ok: false as const, reason: "unavailable" as const });
+ }
+ return withCanonicalOwnerOperationIn(getPool(), "public", handle, operation, work);
+}
+
+/** Zero-write `READ ONLY` owner-only admission for filesystem/archive backup endpoints
+ * that must never mutate PostgreSQL (`lib/backupReadOnly.ts`). */
+export async function admitCanonicalOwnerReadOnlyIn(
+ pool: DbPool,
+ schema: string,
+ handle: VerifiedDurableSession,
+ operation: OwnerOnlyOperation,
+): Promise<CanonicalOwnerAdmissionOutcome<null>> {
+ const s = staffIdentitySchemaName(schema);
+ let client: DbClient | undefined;
+ let inTx = false;
+ let discard = false;
+ try {
+  client = await pool.connect();
+  await client.query("ROLLBACK");
+  await client.query("BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED READ ONLY");
+  inTx = true;
+  await client.query("SET LOCAL statement_timeout = '5s'");
+  await client.query("SET LOCAL lock_timeout = '5s'");
+  const { rows: [ro] } = await client.query<{ read_only: string; in_recovery: boolean }>(
+   "SELECT current_setting('transaction_read_only') AS read_only, pg_catalog.pg_is_in_recovery() AS in_recovery",
+  );
+  if (!ro || ro.read_only !== "on" || ro.in_recovery !== false) {
+   throw new Error("STAFF_RUNTIME_READ_ONLY_REQUIRED");
+  }
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [staffLifecycleLockKey(s)]);
+  const proof = await loadReadOnlyOwnerSessionAuthority(client, handle, s, operation);
+  const claims = revalidateVerifiedDurableSession(handle);
+  if (!claims) throw new Error("STAFF_OPERATION_SESSION_EXPIRED");
+  const view: CanonicalStaffView = Object.freeze({
+   userId: proof.user.id, username: proof.user.username, displayName: proof.user.displayName || proof.user.username,
+   roleLabel: proof.user.role, isOwner: proof.access.isOwner,
+   capabilities: Object.freeze(STAFF_CAPABILITIES.filter(capability => hasStaffCapability(proof.access, capability))),
+   patientScope: scopeOf(patientCapabilityConstraint(proof.access)), appointmentScope: scopeOf(appointmentCapabilityConstraint(proof.access)),
+   clinicianPartyId: proof.provider?.partyId ?? null, expiresAt: claims.expiresAt,
+  });
+  await client.query("COMMIT");
+  inTx = false;
+  return Object.freeze({ ok: true as const, view, value: null });
+ } catch (error) {
+  if (inTx && client) {
+   try { await client.query("ROLLBACK"); inTx = false; } catch { discard = true; }
+  }
+  if (error instanceof Error && error.message === "STAFF_OPERATION_CAPABILITY_DENIED") {
+   return Object.freeze({ ok: false as const, reason: "forbidden" as const });
+  }
+  if (error instanceof Error && /^STAFF_OPERATION_[A-Z_]+$/.test(error.message)) {
+   return Object.freeze({ ok: false as const, reason: "unauthenticated" as const });
+  }
+  return Object.freeze({ ok: false as const, reason: "unavailable" as const });
+ } finally {
+  if (client) {
+   try { client.release(discard); } catch { /* ignore release failure */ }
+  }
+ }
+}
+
+export async function admitCanonicalOwnerReadOnly(
+ handle: VerifiedDurableSession,
+ operation: OwnerOnlyOperation,
+): Promise<CanonicalOwnerAdmissionOutcome<null>> {
+ if (process.env.USE_LOCAL_DB === "true" || usesSharedLocalDatabaseConnection()) {
+  return Object.freeze({ ok: false as const, reason: "unavailable" as const });
+ }
+ let pool: DbPool;
+ try { pool = getPool(); } catch { return Object.freeze({ ok: false as const, reason: "unavailable" as const }); }
+ return admitCanonicalOwnerReadOnlyIn(pool, "public", handle, operation);
 }

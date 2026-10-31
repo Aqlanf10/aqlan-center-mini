@@ -6,7 +6,8 @@
  * نفسه الذي يفرض الصلاحية خادميًّا — فالقالب لا يتجاوزها أبدًا.
  */
 
-import { canAccessUnifiedReport, type UnifiedReportId } from "./report-access";
+import { canAccessUnifiedReport, canCanonicalAccessUnifiedReport, type UnifiedReportId } from "./report-access";
+import type { StaffCapability } from "./staff-capability-catalogue";
 import type { ReportSectionId } from "./saved-reports";
 
 export interface ReportTemplate {
@@ -67,4 +68,10 @@ export function templatesForRole(
   access?: { viewCommissions?: boolean } | null,
 ): ReportTemplate[] {
   return REPORT_TEMPLATES.filter((template) => canAccessUnifiedReport(role, template.reportId, access));
+}
+
+export function templatesForCanonical(
+  granted: (capability: StaffCapability) => boolean,
+): ReportTemplate[] {
+  return REPORT_TEMPLATES.filter((template) => canCanonicalAccessUnifiedReport(template.reportId, granted));
 }

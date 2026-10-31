@@ -9,6 +9,11 @@ import { removeFileByKey } from "@/lib/files";
 import { runVerifiedManualBackup } from "@/lib/manual-backup";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalClinicResetGet,
+  canonicalClinicResetPost,
+} from "@/lib/canonical-owner-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +37,10 @@ async function adminSession() {
 }
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") return canonicalClinicResetGet(selected.handle);
+
   const auth = await adminSession();
   if ("error" in auth) return auth.error;
   try {
@@ -46,6 +55,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") return canonicalClinicResetPost(selected.handle, request);
+
   const auth = await adminSession();
   if ("error" in auth) return auth.error;
   let body: Record<string, unknown>;

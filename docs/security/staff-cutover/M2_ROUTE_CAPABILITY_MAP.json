@@ -228,8 +228,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin reads every non-private-task audit entry and distinct actor list.",
+      "groups": {
+        "audit": "filtered audit_log entries (hiding private hr_task rows) and distinct actors ? audit.view"
+      },
+      "rows": "every non-private-task audit entry matching the query filters"
+    }
   },
   {
     "route": "/api/auth/login",
@@ -281,8 +288,8 @@
     "need": [],
     "anyOf": [],
     "scope": null,
-    "status": "self",
-    "note": "Own credential change; every other credential reset is owner-only (staff.credentials.reset)."
+    "status": "canonical-done",
+    "note": "Own credential change; every other credential reset is owner-only (staff.credentials.reset). M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/auth/setup",
@@ -308,7 +315,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": ""
+    "note": "M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/backup/documents",
@@ -322,7 +329,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": ""
+    "note": "M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/backup/full",
@@ -336,7 +343,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": ""
+    "note": "M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/booking-requests",
@@ -655,8 +662,14 @@
       "finance.commissions.view-own"
     ],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin reads clinic-wide executive KPIs (and CSV export); doctor role is refused under the hidden-finance policy.",
+      "groups": {
+        "financial": "clinic-wide executive KPIs (revenue, expenses, net profit, collections, unpaid, daily cashflow, top services, doctors) ? reports.financial.view or finance.profits.view (403 when only finance.commissions.view-own is held); CSV export additionally requires finance.export, reports.export, or reports.financial.view"
+      }
+    }
   },
   {
     "route": "/api/executive/operations",
@@ -669,8 +682,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/executive/pulse",
@@ -683,8 +696,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/expense-attachments/[id]",
@@ -830,7 +843,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": ""
+    "note": "M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/families",
@@ -2850,8 +2863,8 @@
     "need": [],
     "anyOf": [],
     "scope": null,
-    "status": "self",
-    "note": "Projection of the caller's own opening-balance rights."
+    "status": "canonical-done",
+    "note": "Projection of the caller's own opening-balance rights. M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/ortho",
@@ -4560,7 +4573,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Bulk import is owner-only (proposed owner operation).",
+    "note": "Bulk import is owner-only (proposed owner operation). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope.",
     "branches": {
       "discriminator": "mode",
       "values": {
@@ -4587,7 +4600,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Bulk import is owner-only (proposed owner operation).",
+    "note": "Bulk import is owner-only (proposed owner operation). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope.",
     "branches": {
       "discriminator": "mode",
       "values": {
@@ -5160,8 +5173,8 @@
     "need": [],
     "anyOf": [],
     "scope": null,
-    "status": "self",
-    "note": "Any admitted canonical session records its own print; no grant."
+    "status": "canonical-done",
+    "note": "Any admitted canonical session records its own print; no grant. M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/problems/[id]",
@@ -5330,8 +5343,15 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin and reception read clinic-wide daily operational report, tomorrow load, lab workflow counts, and planned visits; doctor reads own visits/appointments/plannedToday.",
+      "groups": {
+        "operational": "daily visit/appointment operational summary, tomorrow load, chair count, lab workflow counts, and planned visits ? reports.operational.view"
+      },
+      "rows": "visits and plannedToday follow patientScope (all/own/none); appointments and tomorrow load follow appointmentScope (all/own/none)"
+    }
   },
   {
     "route": "/api/reports",
@@ -5345,8 +5365,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin and accountant read every unified report; reception reads operational unified reports only.",
+      "groups": {
+        "reports": "unified report payload or filter options ? reports.financial.view plus the per-report capability required by canCanonicalAccessUnifiedReport"
+      }
+    }
   },
   {
     "route": "/api/reports/daily-clinic",
@@ -5359,8 +5385,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin reads the full daily clinic closing report (financials, collections, expenses, visits, appointments).",
+      "groups": {
+        "closing": "daily clinic operational and financial closing snapshot ? requires both reports.operational.view and reports.financial.view"
+      }
+    }
   },
   {
     "route": "/api/reports/saved",
@@ -5375,8 +5407,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Saved reports belong to their author."
+    "status": "canonical-done",
+    "note": "Saved reports belong to their author. M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/reports/saved",
@@ -5392,8 +5424,16 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Saved reports belong to their author."
+    "status": "canonical-done",
+    "note": "Saved reports belong to their author. M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "every admitted role reads own and shared saved reports filtered by canAccessUnifiedReport plus role templates; only admin has canShare=true.",
+      "groups": {
+        "saved": "caller-owned and shared saved reports plus report templates filtered by canCanonicalAccessUnifiedReport ? reports.operational.view",
+        "sharing": "canShare boolean ? true only when ownerMay(settings.security.change)"
+      },
+      "rows": "caller's own saved reports and shared reports whose reportId is permitted by the caller's canonical capabilities"
+    }
   },
   {
     "route": "/api/reports/saved",
@@ -5408,8 +5448,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Saved reports belong to their author."
+    "status": "canonical-done",
+    "note": "Saved reports belong to their author. M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/reports/saved",
@@ -5424,8 +5464,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Saved reports belong to their author."
+    "status": "canonical-done",
+    "note": "Saved reports belong to their author. M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/service-materials",
@@ -5727,8 +5767,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/appointment-services",
@@ -5741,8 +5781,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/appointment-services/[id]",
@@ -5755,8 +5795,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/backup",
@@ -5770,7 +5810,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/backup/archive/[backupId]",
@@ -5784,7 +5824,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/backup/config",
@@ -5800,7 +5840,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/backup/config",
@@ -5814,7 +5854,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/backup/restore",
@@ -5830,7 +5870,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/backup/restore",
@@ -5844,7 +5884,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/backup/run",
@@ -5860,7 +5900,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/backup/run",
@@ -5874,7 +5914,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/display/announcements",
@@ -5889,8 +5929,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin reads every waiting-room announcement (active and inactive).",
+      "groups": {
+        "announcements": "ordered waiting-room announcements with active state and audit timestamps ? settings.view"
+      }
+    }
   },
   {
     "route": "/api/settings/display/announcements",
@@ -5903,8 +5949,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/display/announcements/[id]",
@@ -5917,8 +5963,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/display/announcements/[id]",
@@ -5931,8 +5977,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/display/announcements/reorder",
@@ -5945,8 +5991,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/history",
@@ -5959,8 +6005,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/login-photo",
@@ -5973,8 +6019,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Private preview of the login photograph before or after publication."
+    "status": "canonical-done",
+    "note": "Private preview of the login photograph before or after publication. M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/login-photo",
@@ -5987,8 +6033,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "CAS toggle of login photograph public visibility with transactional audit."
+    "status": "canonical-done",
+    "note": "CAS toggle of login photograph public visibility with transactional audit. M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/login-photo",
@@ -6001,8 +6047,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Upload validated JPEG/PNG login photograph (stored private until published) with transactional audit."
+    "status": "canonical-done",
+    "note": "Upload validated JPEG/PNG login photograph (stored private until published) with transactional audit. M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/material-rates",
@@ -6017,8 +6063,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/material-rates",
@@ -6031,8 +6077,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/messaging",
@@ -6045,8 +6091,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "owner-only",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical owner-only messaging integration admission (withCanonicalOwnerOperation)."
   },
   {
     "route": "/api/settings/messaging",
@@ -6059,8 +6105,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "owner-only",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical owner-only messaging integration admission (withCanonicalOwnerOperation)."
   },
   {
     "route": "/api/settings/messaging/test",
@@ -6073,8 +6119,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "owner-only",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical owner-only messaging integration admission (withCanonicalOwnerOperation)."
   },
   {
     "route": "/api/settings/patient-numbering",
@@ -6087,8 +6133,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin reads canonical patient numbering floor, next number, and concurrency version.",
+      "groups": {
+        "numbering": "patient numbering preview (floor, nextNumber, version) ? settings.operational.edit"
+      }
+    }
   },
   {
     "route": "/api/settings/patient-numbering",
@@ -6101,8 +6153,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/settings/production-backup",
@@ -6116,7 +6168,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4)."
+    "note": "Backup/restore stays owner-only and is gated by the restore protocol (M4). M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/readiness",
@@ -6129,8 +6181,14 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin reads clinic operational, financial, clinical, storage, and security readiness checks.",
+      "groups": {
+        "readiness": "sanitized clinic readiness check cards and pass/warn/fail summary ? audit.view"
+      }
+    }
   },
   {
     "route": "/api/settings/reset",
@@ -6144,7 +6202,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": ""
+    "note": "M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/settings/reset",
@@ -6158,7 +6216,7 @@
     "anyOf": [],
     "scope": null,
     "status": "owner-only",
-    "note": ""
+    "note": "M2 slice 39: canonical owner-only runtime admission wired via selectRequestStaffEnvelope."
   },
   {
     "route": "/api/shifts",
@@ -6375,8 +6433,16 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission.",
+    "projection": {
+      "legacy": "admin reads every staff user row including commissionConfig; passwordHash and legacy permissions JSON are omitted or separate.",
+      "groups": {
+        "identity": "staff directory row (id, username, displayName, role, isActive, createdAt, partyId, partyName, specialty, branch, isOwner; never passwordHash or legacy permissions) ? staff.view",
+        "commission": "commissionConfig ? finance.commissions.view-all or finance.commissions.manage-rates"
+      },
+      "fields": "commissionConfig omitted unless the caller holds finance.commissions.view-all or finance.commissions.manage-rates"
+    }
   },
   {
     "route": "/api/users",
@@ -6389,8 +6455,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": ""
+    "status": "canonical-done",
+    "note": "M2 slice 39: canonical administration, reports, settings, and self-service admission."
   },
   {
     "route": "/api/users/[id]",
@@ -6403,8 +6469,8 @@
     ],
     "anyOf": [],
     "scope": null,
-    "status": "existing",
-    "note": "Role, credential and clinician-link changes are owner-only (staff.role.change, staff.credentials.reset, staff.clinician-link.change); deactivation needs staff.accounts.disable.",
+    "status": "canonical-done",
+    "note": "Role, credential and clinician-link changes are owner-only (staff.role.change, staff.credentials.reset, staff.clinician-link.change); deactivation needs staff.accounts.disable. M2 slice 39: canonical administration, reports, settings, and self-service admission.",
     "branches": {
       "discriminator": "action",
       "values": {

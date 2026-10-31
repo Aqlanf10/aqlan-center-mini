@@ -1,4 +1,4 @@
-import { ensureSchema, getPool } from "./db";
+import { ensureSchema, getPool, type DbClient } from "./db";
 import { isKnownUnifiedReport, type UnifiedReportId } from "./report-access";
 
 export const REPORT_SECTION_IDS = ["intelligence", "operational", "financial", "receivables", "clinical", "doctors"] as const;
@@ -111,9 +111,13 @@ function uniqueViolation(error: unknown): never {
  * تقارير المستخدم نفسه + القوالب المشتركة من غيره. تصفية الصلاحية على نوع التقرير
  * تتم في المسار (canAccessUnifiedReport) — القالب المشترك لا يمنح صلاحيةً لا يملكها المستخدم.
  */
-export async function listSavedReports(viewerUsername: string): Promise<SavedReport[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<SavedRow>(
+export type SavedReportQueryRunner = Pick<DbClient, "query">;
+
+export async function listSavedReportsWith(
+  runner: SavedReportQueryRunner,
+  viewerUsername: string,
+): Promise<SavedReport[]> {
+  const { rows } = await runner.query<SavedRow>(
     `SELECT ${SAVED_COLUMNS}
        FROM saved_reports
       WHERE owner_username = $1 OR is_shared
@@ -123,28 +127,43 @@ export async function listSavedReports(viewerUsername: string): Promise<SavedRep
   return rows.map((row) => mapRow(row, viewerUsername));
 }
 
-/** تقريرٌ محفوظ يراه المستخدم: ملكه أو قالبٌ مشترك. */
-export async function getVisibleSavedReport(viewerUsername: string, id: number): Promise<SavedReport | null> {
+export async function listSavedReports(viewerUsername: string): Promise<SavedReport[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<SavedRow>(
+  return listSavedReportsWith(getPool(), viewerUsername);
+}
+
+/** تقريرٌ محفوظ يراه المستخدم: ملكه أو قالبٌ مشترك. */
+export async function getVisibleSavedReportWith(
+  runner: SavedReportQueryRunner,
+  viewerUsername: string,
+  id: number,
+): Promise<SavedReport | null> {
+  const { rows } = await runner.query<SavedRow>(
     `SELECT ${SAVED_COLUMNS} FROM saved_reports WHERE id = $1 AND (owner_username = $2 OR is_shared)`,
     [id, viewerUsername],
   );
   return rows[0] ? mapRow(rows[0], viewerUsername) : null;
 }
 
-export async function createSavedReport(input: {
-  ownerUsername: string;
-  name: string;
-  reportId: UnifiedReportId;
-  sectionId: ReportSectionId;
-  queryString: string;
-  isFavorite?: boolean;
-  isShared?: boolean;
-}): Promise<SavedReport> {
+export async function getVisibleSavedReport(viewerUsername: string, id: number): Promise<SavedReport | null> {
   await ensureSchema();
+  return getVisibleSavedReportWith(getPool(), viewerUsername, id);
+}
+
+export async function createSavedReportWith(
+  runner: SavedReportQueryRunner,
+  input: {
+    ownerUsername: string;
+    name: string;
+    reportId: UnifiedReportId;
+    sectionId: ReportSectionId;
+    queryString: string;
+    isFavorite?: boolean;
+    isShared?: boolean;
+  },
+): Promise<SavedReport> {
   try {
-    const { rows } = await getPool().query<SavedRow>(
+    const { rows } = await runner.query<SavedRow>(
       `INSERT INTO saved_reports (owner_username, name, report_id, section_id, query_string, is_favorite, is_shared)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING ${SAVED_COLUMNS}`,
@@ -157,19 +176,34 @@ export async function createSavedReport(input: {
   }
 }
 
-/** تعديل المالك وحده: الاسم، المفضلة، المشاركة (المسار يقصرها على المدير)، أو حفظ العرض الحالي فوقه. */
-export async function updateSavedReport(input: {
+export async function createSavedReport(input: {
   ownerUsername: string;
-  id: number;
-  name?: string;
+  name: string;
+  reportId: UnifiedReportId;
+  sectionId: ReportSectionId;
+  queryString: string;
   isFavorite?: boolean;
   isShared?: boolean;
-  view?: { reportId: UnifiedReportId; sectionId: ReportSectionId; queryString: string };
-}): Promise<SavedReport | null> {
+}): Promise<SavedReport> {
   await ensureSchema();
+  return createSavedReportWith(getPool(), input);
+}
+
+/** تعديل المالك وحده: الاسم، المفضلة، المشاركة (المسار يقصرها على المدير)، أو حفظ العرض الحالي فوقه. */
+export async function updateSavedReportWith(
+  runner: SavedReportQueryRunner,
+  input: {
+    ownerUsername: string;
+    id: number;
+    name?: string;
+    isFavorite?: boolean;
+    isShared?: boolean;
+    view?: { reportId: UnifiedReportId; sectionId: ReportSectionId; queryString: string };
+  },
+): Promise<SavedReport | null> {
   const name = input.name === undefined ? null : normalizeSavedReportName(input.name);
   try {
-    const { rows } = await getPool().query<SavedRow>(
+    const { rows } = await runner.query<SavedRow>(
       `UPDATE saved_reports
           SET name = COALESCE($3::text, name),
               is_favorite = COALESCE($4::boolean, is_favorite),
@@ -189,9 +223,25 @@ export async function updateSavedReport(input: {
   }
 }
 
+export async function updateSavedReport(input: {
+  ownerUsername: string;
+  id: number;
+  name?: string;
+  isFavorite?: boolean;
+  isShared?: boolean;
+  view?: { reportId: UnifiedReportId; sectionId: ReportSectionId; queryString: string };
+}): Promise<SavedReport | null> {
+  await ensureSchema();
+  return updateSavedReportWith(getPool(), input);
+}
+
 /** اسمٌ متاح للنسخة: «نسخة من X»، ثم «نسخة من X (2)»… ضمن حد الثمانين حرفًا. */
-export async function availableCopyName(ownerUsername: string, sourceName: string): Promise<string> {
-  const { rows } = await getPool().query<{ name: string }>(
+export async function availableCopyNameWith(
+  runner: SavedReportQueryRunner,
+  ownerUsername: string,
+  sourceName: string,
+): Promise<string> {
+  const { rows } = await runner.query<{ name: string }>(
     `SELECT lower(name) AS name FROM saved_reports WHERE owner_username = $1`,
     [ownerUsername],
   );
@@ -205,11 +255,23 @@ export async function availableCopyName(ownerUsername: string, sourceName: strin
   throw new SavedReportInputError("تعذّر اختيار اسم للنسخة؛ سمّها يدويًّا.");
 }
 
-export async function deleteSavedReport(ownerUsername: string, id: number): Promise<boolean> {
-  await ensureSchema();
-  const result = await getPool().query(
+export async function availableCopyName(ownerUsername: string, sourceName: string): Promise<string> {
+  return availableCopyNameWith(getPool(), ownerUsername, sourceName);
+}
+
+export async function deleteSavedReportWith(
+  runner: SavedReportQueryRunner,
+  ownerUsername: string,
+  id: number,
+): Promise<boolean> {
+  const result = await runner.query(
     "DELETE FROM saved_reports WHERE id = $1 AND owner_username = $2",
     [id, ownerUsername],
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+export async function deleteSavedReport(ownerUsername: string, id: number): Promise<boolean> {
+  await ensureSchema();
+  return deleteSavedReportWith(getPool(), ownerUsername, id);
 }

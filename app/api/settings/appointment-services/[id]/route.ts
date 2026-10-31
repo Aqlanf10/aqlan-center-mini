@@ -4,6 +4,8 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getAppointmentService, updateAppointmentService } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalAppointmentServicesPatch } from "@/lib/canonical-admin-reports-settings";
 import { readServiceInput } from "@/lib/appointment-service-input";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +20,15 @@ export const dynamic = "force-dynamic";
  * لا شيء. التعطيل يمنع الحجز الجديد ويُبقي القديم مقروءًا.
  */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    return canonicalAppointmentServicesPatch(selected.handle, request, rawId);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

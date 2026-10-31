@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalSettingsReadinessGet } from "@/lib/canonical-admin-reports-settings";
 import { isAdmin } from "@/lib/roles";
 import { getPool, getSettingsSafe } from "@/lib/db";
 import { SETTING_DEFAULTS } from "@/lib/settings";
@@ -19,6 +21,14 @@ export interface ReadinessCheck {
 }
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalSettingsReadinessGet(selected.handle);
+  }
+
   const session = await requireSession();
   if (!session || !isAdmin(session.role)) {
     return NextResponse.json({ message: "غير مصرّح." }, { status: 403 });

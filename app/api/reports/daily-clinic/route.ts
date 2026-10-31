@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalDailyClinicReportGet } from "@/lib/canonical-admin-reports-settings";
 import { getDailyClinicReportToday, loadDailyClinicReport } from "@/lib/daily-clinic-report";
 import { DailyClinicReportIntegrityError, isDailyClinicReportDate } from "@/lib/daily-clinic-report-model";
 
@@ -39,6 +41,14 @@ const headers = {
  * do not grant access: authorize the current authenticated admin first. */
 export async function GET(request: Request) {
   try {
+    const selected = await selectRequestStaffEnvelope();
+    if (selected.kind === "denied") {
+      return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });
+    }
+    if (selected.kind === "canonical") {
+      return canonicalDailyClinicReportGet(selected.handle, request);
+    }
+
     const session = await requireSession();
     if (!session) {
       return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers });

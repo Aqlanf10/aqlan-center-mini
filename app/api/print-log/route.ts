@@ -6,6 +6,8 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { getPrescription, recordAudit, recordPrint } from "@/lib/db";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPrintLogPost } from "@/lib/canonical-users-self";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,14 @@ const DOC_TYPES = ["receipt", "invoice", "voucher", "statement", "prescription",
  * وعدّه طباعةً يجعل كل سند يُراجَع مرةً يظهر «معاد طبعه» زورًا — فتفقد العلامة معناها.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalPrintLogPost(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

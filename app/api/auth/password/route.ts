@@ -9,6 +9,8 @@ import {
 } from "@/lib/auth";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalAuthPasswordPost } from "@/lib/canonical-users-self";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,14 @@ const MAX_PASSWORD_LENGTH = 200;
  * جلسةً جديدة فلا يُطرد من يغيّر كلمته.
  */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalAuthPasswordPost(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

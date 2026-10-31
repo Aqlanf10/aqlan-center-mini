@@ -106,6 +106,8 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   "read:finance.expense-categories": Object.freeze({ record: null, need: Object.freeze([]), anyOf: Object.freeze(["finance.expenses.view", "clinical.lab.order"] as const) }),
   /** GET /api/parties: operational/financial party directory with field/row projection (M2 slice 37b). */
   "read:parties": Object.freeze({ record: null, need: Object.freeze([]), anyOf: Object.freeze(["finance.suppliers.view", "finance.payments.view", "inventory.references.view", "clinical.visits.document", "clinical.plans.view", "clinical.lab.view", "appointments.create"] as const) }),
+  /** GET /api/executive: executive dashboard snapshot (M2 slice 39; whole-clinic profit KPIs further require reports.financial.view or finance.profits.view). */
+  "read:executive": Object.freeze({ record: null, need: Object.freeze([]), anyOf: Object.freeze(["reports.financial.view", "finance.commissions.view-own"] as const) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

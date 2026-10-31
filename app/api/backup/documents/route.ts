@@ -7,6 +7,8 @@ import { readFileByKey, storageStatus } from "@/lib/files";
 import { isAdmin } from "@/lib/roles";
 import { safeEntryName, tarEnd, tarHeader, tarPadding } from "@/lib/tar";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalBackupDocumentsGet } from "@/lib/canonical-owner-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,14 @@ export const dynamic = "force-dynamic";
  */
 
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalBackupDocumentsGet(selected.handle);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

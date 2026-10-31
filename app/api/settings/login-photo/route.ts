@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { readStoredSettings, saveSettingsAudited } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalLoginPhotoGet,
+  canonicalLoginPhotoPatch,
+  canonicalLoginPhotoPost,
+} from "@/lib/canonical-admin-reports-settings";
 import { canManageCategory } from "@/lib/settings-permissions";
 import { bodyErrorResponse, readBoundedFormData, readJsonBody } from "@/lib/http-body";
 import { LOGIN_PHOTO_ASSET, LOGIN_PHOTO_BODY_BYTES, LOGIN_PHOTO_KEYS, LOGIN_PHOTO_MAX_BYTES,
@@ -34,6 +40,10 @@ async function save(values: Record<string, string>, expected: Record<string, str
   return snapshot();
 }
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return fail("انتهت الجلسة. سجّل الدخول من جديد.", 401);
+  if (selected.kind === "canonical") return canonicalLoginPhotoGet(selected.handle);
+
   const access = await actor(); if ("error" in access) return access.error;
   try {
     const stored = await readStoredSettings();
@@ -45,6 +55,10 @@ export async function GET() {
   } catch { return fail("تعذّر تحميل معاينة الصورة.", 500); }
 }
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return fail("انتهت الجلسة. سجّل الدخول من جديد.", 401);
+  if (selected.kind === "canonical") return canonicalLoginPhotoPost(selected.handle, request);
+
   const access = await actor(); if ("error" in access) return access.error;
   try {
     const form = await readBoundedFormData(request, LOGIN_PHOTO_BODY_BYTES);
@@ -66,6 +80,10 @@ export async function POST(request: Request) {
   }
 }
 export async function PATCH(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return fail("انتهت الجلسة. سجّل الدخول من جديد.", 401);
+  if (selected.kind === "canonical") return canonicalLoginPhotoPatch(selected.handle, request);
+
   const access = await actor(); if ("error" in access) return access.error;
   try {
     const body = await readJsonBody(request, 4096) as Record<string, unknown>;

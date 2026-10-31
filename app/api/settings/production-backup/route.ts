@@ -4,6 +4,8 @@ import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { isAdmin } from "@/lib/roles";
 import { requireBackupAdminReadOnly } from "@/lib/backupReadOnly";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { admitCanonicalBackupOwner } from "@/lib/canonical-backup-readonly";
 import { storageStatus } from "@/lib/files";
 import { assertDocumentsDirInsideVolume } from "@/lib/backupVolume";
 import {
@@ -36,17 +38,28 @@ const failClosed = () =>
 export async function POST(request: Request) {
   // المصادقة قراءة حصرًا: توقيع HMAC ثم SELECT مباشر لصف المستخدم — بلا
   // ensureSchema. جدول users غائب أو غير مقروء ⇒ فشل مغلق لا إصلاح ضمني.
-  const auth = await requireBackupAdminReadOnly();
-  if (!auth.ok) {
-    // الجلسة الغائبة أو الحساب المُبدَّل رفضٌ مصادقة عادي (401 كما كان) —
-    // أما جدول users غير المقروء ففشلٌ مغلق (503): لا جلسة ولا إصلاح ضمني.
-    return noStore(
-      { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن — يلزم تدخّل يدوي." : "سجّل الدخول من جديد." },
-      auth.reason === "users-unreadable" ? 503 : 401,
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") {
+    const admitted = await admitCanonicalBackupOwner(
+      selected.handle,
+      "تفعيل النسخة الإنتاجية للمدير وحده.",
+      "المصادقة غير متاحة الآن — يلزم تدخّل يدوي.",
     );
-  }
-  if (!isAdmin(auth.session.role)) {
-    return noStore({ message: "تفعيل النسخة الإنتاجية للمدير وحده." }, 403);
+    if ("response" in admitted) return admitted.response;
+  } else {
+    const auth = await requireBackupAdminReadOnly();
+    if (!auth.ok) {
+      // الجلسة الغائبة أو الحساب المُبدَّل رفضٌ مصادقة عادي (401 كما كان) —
+      // أما جدول users غير المقروء ففشلٌ مغلق (503): لا جلسة ولا إصلاح ضمني.
+      return noStore(
+        { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن — يلزم تدخّل يدوي." : "سجّل الدخول من جديد." },
+        auth.reason === "users-unreadable" ? 503 : 401,
+      );
+    }
+    if (!isAdmin(auth.session.role)) {
+      return noStore({ message: "تفعيل النسخة الإنتاجية للمدير وحده." }, 403);
+    }
   }
 
   let body: unknown;

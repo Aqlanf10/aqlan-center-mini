@@ -6,8 +6,8 @@ import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { inspectStaffRuntimeSchema } from "./staff-runtime-probe.mjs";
 import { revalidateVerifiedDurableSession, type DurableSessionClaims, type VerifiedDurableSession } from "./staff-durable-session";
 import { parseStaffCapabilityDocument } from "./staff-permission-envelope";
-import { hasStaffCapability, ownerContextFromTrustedBinding, resolveStaffCapabilities, staffAuthorizationFingerprint, type ResolvedStaffAccess } from "./staff-capabilities";
-import type { StaffCapability, StaffCapabilityDocument } from "./staff-capability-catalogue";
+import { canPerformOwnerOperation, hasStaffCapability, ownerContextFromTrustedBinding, resolveStaffCapabilities, staffAuthorizationFingerprint, type ResolvedStaffAccess } from "./staff-capabilities";
+import type { OwnerOnlyOperation, StaffCapability, StaffCapabilityDocument } from "./staff-capability-catalogue";
 import type { StaffRuntimeAction } from "./staff-operation-runtime";
 function refuse(reason: string): never { throw new Error(`STAFF_OPERATION_${reason}`); }
 type RowLock = " FOR SHARE" | "";
@@ -161,6 +161,34 @@ export async function loadLockedIssuanceAuthority(client: DbClient, userId: numb
  * minus the capability gate; the projection is display, never a grant. */
 export async function loadLockedSessionAuthority(client: DbClient, session: VerifiedDurableSession, schema: string): Promise<ProvedAccountAuthority> {
  const proof = await proveSession(client, session, schema, " FOR SHARE");
+ if(!revalidateVerifiedDurableSession(session))refuse("SESSION_EXPIRED");
+ return proof;
+}
+/** Owner-only operation admission under the shared lifecycle fence and READ COMMITTED XID.
+ * Refuses with `STAFF_OPERATION_CAPABILITY_DENIED` unless the live session belongs to the
+ * protected owner and `operation` is a registered `OwnerOnlyOperation`. */
+export async function loadLockedOwnerSessionAuthority(
+ client: DbClient,
+ session: VerifiedDurableSession,
+ schema: string,
+ operation: OwnerOnlyOperation,
+): Promise<ProvedAccountAuthority> {
+ const proof = await proveSession(client, session, schema, " FOR SHARE");
+ if(!canPerformOwnerOperation(proof.access,operation))refuse("CAPABILITY_DENIED");
+ if(!revalidateVerifiedDurableSession(session))refuse("SESSION_EXPIRED");
+ return proof;
+}
+/** Zero-write owner-only admission inside a `READ ONLY` transaction holding the shared
+ * lifecycle fence (no `FOR SHARE` row locks, since PostgreSQL forbids row-level locking
+ * on user tables in `READ ONLY` transactions). */
+export async function loadReadOnlyOwnerSessionAuthority(
+ client: Pick<DbClient, "query">,
+ session: VerifiedDurableSession,
+ schema: string,
+ operation: OwnerOnlyOperation,
+): Promise<ProvedAccountAuthority> {
+ const proof = await proveSession(client, session, schema, "");
+ if(!canPerformOwnerOperation(proof.access,operation))refuse("CAPABILITY_DENIED");
  if(!revalidateVerifiedDurableSession(session))refuse("SESSION_EXPIRED");
  return proof;
 }

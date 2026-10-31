@@ -4,6 +4,8 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { deleteVerifiedBackupArchive } from "@/lib/backupAdmin";
 import { requireBackupAdminReadOnly } from "@/lib/backupReadOnly";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { admitCanonicalBackupOwner } from "@/lib/canonical-backup-readonly";
 import { isValidBackupArchiveId, resolveBackupDirectory } from "@/lib/backupVolume";
 import { isAdmin } from "@/lib/roles";
 
@@ -16,15 +18,29 @@ export async function DELETE(
   request: Request,
   context: { params: Promise<{ backupId: string }> },
 ) {
-  const auth = await requireBackupAdminReadOnly();
-  if (!auth.ok) {
-    return noStore(
-      { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن." : "سجّل الدخول من جديد." },
-      auth.reason === "users-unreadable" ? 503 : 401,
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return noStore({ message: "سجّل الدخول من جديد." }, 401);
+  let actorUsername: string;
+  if (selected.kind === "canonical") {
+    const admitted = await admitCanonicalBackupOwner(
+      selected.handle,
+      "حذف النسخ الاحتياطية للمدير وحده.",
+      "المصادقة غير متاحة الآن.",
     );
-  }
-  if (!isAdmin(auth.session.role)) {
-    return noStore({ message: "حذف النسخ الاحتياطية للمدير وحده." }, 403);
+    if ("response" in admitted) return admitted.response;
+    actorUsername = admitted.username;
+  } else {
+    const auth = await requireBackupAdminReadOnly();
+    if (!auth.ok) {
+      return noStore(
+        { message: auth.reason === "users-unreadable" ? "المصادقة غير متاحة الآن." : "سجّل الدخول من جديد." },
+        auth.reason === "users-unreadable" ? 503 : 401,
+      );
+    }
+    if (!isAdmin(auth.session.role)) {
+      return noStore({ message: "حذف النسخ الاحتياطية للمدير وحده." }, 403);
+    }
+    actorUsername = auth.session.username;
   }
 
   const { backupId } = await context.params;
@@ -65,7 +81,7 @@ export async function DELETE(
   const result = await deleteVerifiedBackupArchive({
     backupDir,
     backupId,
-    actor: auth.session.username,
+    actor: actorUsername,
     reason,
   });
 

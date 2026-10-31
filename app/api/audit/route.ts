@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auditActors, listAudit } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalAuditGet } from "@/lib/canonical-admin-reports-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,14 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  * أداة عمل له.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalAuditGet(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

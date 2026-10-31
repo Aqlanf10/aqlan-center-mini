@@ -1,15 +1,16 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { DbClient, DbPool } from "./db";
-import { SESSION_DURATION_MS, signDurableSessionClaims, verifyPassword } from "./auth";
+import { SESSION_DURATION_MS, hashPassword, signDurableSessionClaims, verifyPassword } from "./auth";
 import { sessionCredentialVersion } from "./auth";
 import { getPool, insertAuditRow, usesSharedLocalDatabaseConnection } from "./db";
 import { withIsolation } from "./transactions";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { staffLifecycleLockKey } from "./legacy-staff-schema.mjs";
 import { inspectStaffRuntimeSchema } from "./staff-runtime-probe.mjs";
-import { readVerifiedDurableSession, revalidateVerifiedDurableSession, type DurableSessionClaims } from "./staff-durable-session";
-import { loadLockedIssuanceAuthority, type ProvedAccountAuthority } from "./staff-authority-proof-internal";
+import { readVerifiedDurableSession, revalidateVerifiedDurableSession, type DurableSessionClaims, type VerifiedDurableSession } from "./staff-durable-session";
+import { loadLockedIssuanceAuthority, loadLockedSessionAuthority, type ProvedAccountAuthority } from "./staff-authority-proof-internal";
 import { STAFF_AUTHORIZATION_POLICY_VERSION } from "./staff-capability-catalogue";
 import { accountLimitKey, legacyStaffAccountKey, loginLimitKeys, WINDOW_MINUTES } from "./loginLimit";
 import { clearAccountLoginLimits, consumeSharedLoginLimits, consumeStaffAccountLimit } from "./login-limit-storage";
@@ -207,4 +208,152 @@ export async function issueDurableStaffSessionIn(
 export async function issueDurableStaffSession(input: { readonly username: string; readonly password: string; readonly headers: Headers }): Promise<DurableLoginOutcome> {
  if (process.env.USE_LOCAL_DB === "true" || usesSharedLocalDatabaseConnection()) return Object.freeze({ kind: "unavailable" });
  return issueDurableStaffSessionIn(getPool(), "public", input);
+}
+
+export type DurablePasswordChangeOutcome =
+ | { readonly kind: "changed"; readonly token: string; readonly maxAgeSeconds: number }
+ | { readonly kind: "unauthenticated" }
+ | { readonly kind: "wrong_password" }
+ | { readonly kind: "rate_limited"; readonly retryAfterSeconds: number }
+ | { readonly kind: "invalid_input"; readonly error: string }
+ | { readonly kind: "unavailable" };
+
+/** Self-service password change for an active canonical session (`POST /api/auth/password`).
+ * Verifies the caller's live durable session, checks the current password outside the lock,
+ * updates `users.password_hash` under the exclusive lifecycle fence (bumping `authorization_epoch`
+ * and `credentialVersion` so all prior durable tokens are revoked), writes an atomic audit row,
+ * and mints a fresh durable session token for the caller. */
+export async function changeCanonicalStaffOwnPasswordIn(
+ pool: DbPool,
+ schema: string,
+ input: { readonly handle: VerifiedDurableSession; readonly currentPassword: string; readonly newPassword: string },
+): Promise<DurablePasswordChangeOutcome> {
+ const s = staffIdentitySchemaName(schema);
+ const initialClaims = revalidateVerifiedDurableSession(input.handle);
+ if (!initialClaims) return Object.freeze({ kind: "unauthenticated" });
+ const currentPassword = typeof input.currentPassword === "string" ? input.currentPassword : "";
+ const newPassword = typeof input.newPassword === "string" ? input.newPassword : "";
+ if (!currentPassword || currentPassword.length > MAX_PASSWORD) {
+  return Object.freeze({ kind: "invalid_input", error: "أدخل كلمة المرور الحالية وكلمة المرور الجديدة" });
+ }
+ if (newPassword.length < 8) {
+  return Object.freeze({ kind: "invalid_input", error: "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل" });
+ }
+ if (newPassword.length > MAX_PASSWORD) {
+  return Object.freeze({ kind: "invalid_input", error: "كلمة المرور طويلة جداً" });
+ }
+ if (!await issuanceReady(pool, s)) return Object.freeze({ kind: "unavailable" });
+
+ const rlKey = createHash("sha256").update(`password-change:${initialClaims.username.toLowerCase()}`).digest("hex");
+ const rlDecision = await consumeStaffAccountLimit(pool, rlKey, s);
+ if (!rlDecision.allowed) {
+  return Object.freeze({ kind: "rate_limited", retryAfterSeconds: rlDecision.retryAfterSeconds });
+ }
+
+ const captured = await candidate(pool, s, initialClaims.username);
+ if (!captured || captured.id !== initialClaims.userId) {
+  await verifyPassword(currentPassword, DUMMY_HASH);
+  return Object.freeze({ kind: "unauthenticated" });
+ }
+ const passwordOk = await verifyPassword(currentPassword, captured.passwordHash);
+ if (!passwordOk) {
+  // Confirm the session itself was still valid before reporting wrong_password vs 401.
+  try {
+   await withIsolation(pool, "READ COMMITTED", async client => {
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [staffLifecycleLockKey(s)]);
+    await loadLockedSessionAuthority(client, input.handle, s);
+   });
+   return Object.freeze({ kind: "wrong_password" });
+  } catch (error) {
+   if (error instanceof Error && /^STAFF_(OPERATION|RUNTIME)_[A-Z_]+$/.test(error.message)) {
+    return Object.freeze({ kind: "unauthenticated" });
+   }
+   throw error;
+  }
+ }
+
+ const nextPasswordHash = await hashPassword(newPassword);
+ let staged: { token: string; claims: DurableSessionClaims } | null = null;
+ try {
+  staged = await withIsolation(pool, "READ COMMITTED", async client => {
+   const xid = await transactionId(client);
+   await client.query("SET LOCAL lock_timeout = '5s'");
+   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [staffLifecycleLockKey(s)]);
+   const before = await loadLockedSessionAuthority(client, input.handle, s);
+   if (!matchesCandidate(before, captured)) refuse("CANDIDATE_CHANGED");
+   const { rows } = await client.query<{ id: number }>(
+    `UPDATE ${s}.users
+        SET password_hash = $2
+      WHERE id = $1
+        AND authorization_mode = 'canonical'
+        AND authorization_epoch::text = $3
+      RETURNING id`,
+    [before.user.id, nextPasswordHash, before.user.authorizationEpoch],
+   );
+   if (rows.length !== 1) refuse("CANDIDATE_CHANGED");
+   await insertAuditRow(client, {
+    action: "user.update",
+    entity: "user",
+    entityId: before.user.id,
+    actor: before.user.username,
+    actorRole: before.user.role,
+    entityLabel: before.user.username,
+    details: { selfPasswordChange: true, subjectId: before.subjectId, sessionsRevoked: true },
+   }, s);
+   const after = await loadLockedIssuanceAuthority(client, before.user.id, s);
+   if (
+    after.user.passwordHash !== nextPasswordHash ||
+    after.subjectId !== before.subjectId ||
+    after.realmId !== before.realmId ||
+    after.controlEpoch !== before.controlEpoch ||
+    after.generationId !== before.generationId
+   ) {
+    refuse("AUTHORITY_CHANGED");
+   }
+   const expiresAt = Date.now() + SESSION_DURATION_MS;
+   const claims = claimsFrom(after, expiresAt);
+   const token = signDurableSessionClaims(claims);
+   const nextHandle = readVerifiedDurableSession(token);
+   const parsed = nextHandle ? revalidateVerifiedDurableSession(nextHandle) : null;
+   if (!parsed || !isDeepStrictEqual(JSON.parse(JSON.stringify(parsed)), JSON.parse(JSON.stringify(claims)))) {
+    refuse("SHAPE_ROUNDTRIP");
+   }
+   if (await transactionId(client) !== xid) refuse("TRANSACTION_CHANGED");
+   if (expiresAt - Date.now() < MIN_REMAINING_MS || !revalidateVerifiedDurableSession(nextHandle!)) {
+    refuse("EXPIRED_BEFORE_COMMIT");
+   }
+   return { token, claims };
+  });
+ } catch (error) {
+  if (error instanceof Error && /^STAFF_OPERATION_[A-Z_]+$/.test(error.message)) {
+   return Object.freeze({ kind: "unauthenticated" });
+  }
+  if (error instanceof Error && /^STAFF_(ISSUER|RUNTIME)_[A-Z_]+$/.test(error.message)) {
+   return Object.freeze({ kind: "unavailable" });
+  }
+  throw error;
+ }
+
+ try {
+  await clearAccountLoginLimits(pool, rlKey, [], s);
+ } catch { /* best-effort counter reset */ }
+
+ const remaining = staged.claims.expiresAt - Date.now();
+ if (remaining < MIN_REMAINING_MS) return Object.freeze({ kind: "unavailable" });
+ return Object.freeze({
+  kind: "changed",
+  token: staged.token,
+  maxAgeSeconds: Math.floor(remaining / 1000),
+ });
+}
+
+export async function changeCanonicalStaffOwnPassword(input: {
+ readonly handle: VerifiedDurableSession;
+ readonly currentPassword: string;
+ readonly newPassword: string;
+}): Promise<DurablePasswordChangeOutcome> {
+ if (process.env.USE_LOCAL_DB === "true" || usesSharedLocalDatabaseConnection()) {
+  return Object.freeze({ kind: "unavailable" });
+ }
+ return changeCanonicalStaffOwnPasswordIn(getPool(), "public", input);
 }

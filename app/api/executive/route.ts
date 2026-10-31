@@ -6,6 +6,8 @@ import { exportFileName } from "@/lib/csv";
 import { isAdmin } from "@/lib/roles";
 import { canDoctorViewClinicProfits } from "@/lib/doctor-permissions";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalExecutiveGet } from "@/lib/canonical-admin-reports-settings";
 import { clinicDateString } from "@/lib/schedule";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +25,10 @@ const denied = () =>
  * الصريح، وللاستقبال تبقى مقفلة كما كانت.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return denied();
+  if (selected.kind === "canonical") return canonicalExecutiveGet(selected.handle, request);
+
   const session = await requireSession();
   if (!session) return denied();
   if (session.role === "doctor") {

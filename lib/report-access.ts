@@ -1,3 +1,5 @@
+import type { StaffCapability } from "./staff-capability-catalogue";
+
 /**
  * سياسة الوصول إلى مركز التقارير.
  *
@@ -147,4 +149,75 @@ export function reportVisibleToRole(
   access?: ReportFinanceAccessShape | null,
 ): boolean {
   return canAccessUnifiedReport(role, report, access);
+}
+
+const CLINICAL_ONLY_REPORTS = new Set<string>([
+  "treatment-plans",
+  "plan-intelligence",
+  "ortho-duplicate-adjustments",
+  "lab-intelligence",
+]);
+
+const MIXED_REVENUE_OPERATIONAL_REPORTS = new Set<string>([
+  "practice-overview",
+  "practice-trends",
+]);
+
+const OPERATIONAL_REPORTS = new Set<string>([
+  "patients",
+  "visits",
+  "appointments",
+  "recall",
+  "inventory",
+  "internal-referrals",
+  "chair-flow",
+  "provider-utilization",
+  "chair-utilization",
+  "appointment-performance",
+  "unscheduled-treatment",
+  "new-patient-intelligence",
+  "recall-intelligence",
+]);
+
+/** Canonical capability-based access to each unified report (never role-label based). */
+export function canCanonicalAccessUnifiedReport(
+  report: string,
+  granted: (capability: StaffCapability) => boolean,
+): boolean {
+  if (!isKnownUnifiedReport(report)) return false;
+  if (report === "options") {
+    return (
+      granted("reports.operational.view") ||
+      granted("reports.financial.view") ||
+      granted("reports.clinical.view")
+    );
+  }
+  if (COMMISSION_REPORTS.has(report)) {
+    return granted("reports.financial.view") && granted("finance.commissions.view-all");
+  }
+  if (SUPPLIER_REPORTS.has(report)) {
+    return granted("reports.financial.view") && granted("finance.suppliers.view");
+  }
+  if (report === "patient-statement") {
+    return (
+      (granted("reports.financial.view") || granted("reports.operational.view")) &&
+      granted("finance.patient-ledger.view")
+    );
+  }
+  if (PATIENT_LEDGER_REPORTS.has(report)) {
+    return granted("reports.financial.view") && granted("finance.patient-ledger.view");
+  }
+  if (GENERAL_FINANCIAL_REPORTS.has(report)) {
+    return granted("reports.financial.view");
+  }
+  if (CLINICAL_ONLY_REPORTS.has(report)) {
+    return granted("reports.clinical.view");
+  }
+  if (MIXED_REVENUE_OPERATIONAL_REPORTS.has(report)) {
+    return granted("reports.financial.view") && granted("reports.operational.view");
+  }
+  if (OPERATIONAL_REPORTS.has(report)) {
+    return granted("reports.operational.view");
+  }
+  return false;
 }

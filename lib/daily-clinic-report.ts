@@ -339,6 +339,15 @@ export async function loadDailyClinicReportSource(
     expenses };
 }
 
+export async function loadDailyClinicReportInSnapshot(
+  runner: DailyClinicExpenseQueryRunner,
+  date: string,
+): Promise<DailyClinicReport> {
+  if (!isDailyClinicReportDate(date)) throw new DailyClinicReportIntegrityError("Invalid report date");
+  const source = await loadDailyClinicReportSource(runner, date, CLINIC_TIME_ZONE);
+  return buildDailyClinicReport(source);
+}
+
 export async function loadDailyClinicReport(date: string): Promise<DailyClinicReport> {
   if (!isDailyClinicReportDate(date)) throw new DailyClinicReportIntegrityError("Invalid report date");
   const client = await getPool().connect();

@@ -5,6 +5,11 @@ import { createAppointmentService, getSettings, listAppointmentServices } from "
 import { chairCount } from "@/lib/settings";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalAppointmentServicesGet,
+  canonicalAppointmentServicesPost,
+} from "@/lib/canonical-admin-reports-settings";
 import { readServiceInput } from "@/lib/appointment-service-input";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +22,14 @@ export const dynamic = "force-dynamic";
  * يغيّر كم مريضًا يستقبل المركز في اليوم.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalAppointmentServicesGet(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
@@ -38,6 +51,14 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalAppointmentServicesPost(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

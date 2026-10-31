@@ -7,6 +7,8 @@ import { classifyImportRows, importSummary, looksLikeBrokenEncoding, parseCsv, t
 import { clinicDateString } from "@/lib/schedule";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientsImportPost } from "@/lib/canonical-owner-ops";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,14 @@ function publicRow(row: ImportRow) {
 }
 
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalPatientsImportPost(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

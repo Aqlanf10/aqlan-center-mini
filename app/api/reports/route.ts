@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { canAccessUnifiedReport, isKnownUnifiedReport } from "@/lib/report-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalUnifiedReportsGet } from "@/lib/canonical-admin-reports-settings";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions, validateAnnualReportRange } from "@/lib/reports";
 
@@ -14,6 +16,14 @@ export const dynamic = "force-dynamic";
  * وهو عين ما تنص عليه وثيقة المتطلبات (البند ١١): تقرير الطبيب المالي للإدارة.
  */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (selected.kind === "canonical") {
+    return canonicalUnifiedReportsGet(selected.handle, request);
+  }
+
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

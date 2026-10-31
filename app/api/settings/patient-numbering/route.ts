@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import {
+  canonicalPatientNumberingGet,
+  canonicalPatientNumberingPatch,
+} from "@/lib/canonical-admin-reports-settings";
 import { isAdmin } from "@/lib/roles";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -7,6 +12,9 @@ import { changeNumberingFloor, readNumberingPreview } from "@/lib/patient-number
 import { patientNumberingErrorResponse } from "@/lib/patient-numbering-response";
 export const dynamic = "force-dynamic";
 export async function GET() {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({message: "سجّل الدخول من جديد."}, {status: 401});
+  if (selected.kind === "canonical") return canonicalPatientNumberingGet(selected.handle);
   const session = await requireSession();
   if (!session) return NextResponse.json({message: "سجّل الدخول من جديد."}, {status: 401});
   if (!isAdmin(session.role)) return NextResponse.json({message: "لا توجد صلاحية لإعداد الترقيم."}, {status: 403});
@@ -14,6 +22,9 @@ export async function GET() {
   catch (error) { return patientNumberingErrorResponse(error); }
 }
 export async function PATCH(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({message: "سجّل الدخول من جديد."}, {status: 401});
+  if (selected.kind === "canonical") return canonicalPatientNumberingPatch(selected.handle, request);
   const session = await requireSession();
   if (!session) return NextResponse.json({message: "سجّل الدخول من جديد."}, {status: 401});
   if (!isAdmin(session.role)) return NextResponse.json({message: "لا توجد صلاحية لإعداد الترقيم."}, {status: 403});
