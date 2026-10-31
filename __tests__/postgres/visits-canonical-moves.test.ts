@@ -78,18 +78,91 @@ describe("scope and admission", () => {
     await expect(move("doctor", 999_999, { action: "call", chair: 3 })).rejects.toMatchObject({ code: "visit_not_found" });
     await move("doctor", own, { action: "return" });
   });
-  it("no visits.manage, a stale session after revocation, and the not-yet-canonical actions refuse", async () => {
+  it("no visits.manage, a stale session after revocation, and invalid inputs refuse", async () => {
     const id = await visit("SYN admission", null, null);
     await expect(move("viewer", id, { action: "finish" })).rejects.toThrow("STAFF_OPERATION_CAPABILITY_DENIED");
     const session = await fx.session("revoked");
     await fx.setGrants("revoked", {}, { patientScope: "all" });
     await expect(visits.commandCanonicalVisitMove(session, id, visits.parseCanonicalVisitMove({ action: "finish" }))).rejects.toThrow(/^STAFF_OPERATION_/);
-    for (const action of ["defer", "link", "open_file"]) {
-      expect(() => visits.parseCanonicalVisitMove({ action })).toThrow(expect.objectContaining({ code: "visit_action_not_canonical", status: 409 }));
-    }
+    expect(() => visits.parseCanonicalVisitMove({ action: "link" })).toThrow(expect.objectContaining({ code: "invalid_visit_input", status: 400 }));
     expect(() => visits.parseCanonicalVisitMove({ action: "call", chair: 0 })).toThrow(expect.objectContaining({ code: "invalid_visit_input" }));
     expect(() => visits.parseCanonicalVisitMove({ action: "teleport" })).toThrow(expect.objectContaining({ code: "invalid_visit_input" }));
     expect((await state(id)).status).toBe("waiting");
+  });
+
+  it("M2 slice 35: canonical link, open_file, defer, and deleteVisit enforce capability + scope + atomicity", async () => {
+    const otherPatient = (
+      await fx.pool.query<{ id: number }>(
+        "INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id) VALUES('SYN-M-OTHER-1','SYN Other Patient','0500000099',$1) RETURNING id",
+        [fx.parties.other!],
+      )
+    ).rows[0].id;
+    const walkIn = await visit("SYN Walk-In Link", null, fx.parties.doctor!);
+    // own-scope doctor cannot link a walk-in to another doctor's patient (404 indistinguishable from missing)
+    await expect(move("doctor", walkIn, { action: "link", patientId: otherPatient })).rejects.toMatchObject({
+      code: "patient_not_found",
+      status: 404,
+    });
+    // own-scope doctor links walk-in to own patient + atomic audit
+    expect(await move("doctor", walkIn, { action: "link", patientId: mine })).toEqual({
+      kind: "linked",
+      patientName: "SYN Moves 1",
+    });
+    expect(await audits(walkIn)).toContainEqual({ action: "visit.link_patient", actor: "SYN-M-DOCTOR" });
+
+    // open_file requires patients.create in addition to visits.manage
+    const fileVisit = (
+      await fx.pool.query<{ id: number }>(
+        "INSERT INTO visits(patient_name,patient_phone,doctor_id) VALUES('SYN New WalkIn','0501234567',$1) RETURNING id",
+        [fx.parties.doctor!],
+      )
+    ).rows[0].id;
+    await expect(move("reception", fileVisit, { action: "open_file" })).rejects.toMatchObject({
+      code: "visit_action_forbidden",
+      status: 403,
+    });
+    await fx.setGrants("reception", { "visits.manage": true, "patients.create": true }, { patientScope: "all" });
+    const opened = await move("reception", fileVisit, { action: "open_file" });
+    expect(opened).toMatchObject({ kind: "file_opened", created: true });
+
+    // defer requires finance.payments.collect and a signed visit
+    await expect(move("reception", fileVisit, { action: "defer" })).rejects.toMatchObject({
+      code: "visit_action_forbidden",
+      status: 403,
+    });
+    await fx.setGrants(
+      "reception",
+      { "visits.manage": true, "finance.payments.collect": true },
+      { patientScope: "all" },
+    );
+    await expect(move("reception", fileVisit, { action: "defer" })).rejects.toMatchObject({
+      code: "visit_move_conflict",
+      status: 409,
+    });
+    await fx.pool.query("UPDATE visits SET signed_at = NOW(), signed_by = 'SYN-M-DOCTOR' WHERE id = $1", [fileVisit]);
+    expect(await move("reception", fileVisit, { action: "defer", reason: "الدفع غدًا" })).toMatchObject({
+      kind: "deferred",
+      already: false,
+    });
+    expect(await move("reception", fileVisit, { action: "defer" })).toMatchObject({
+      kind: "deferred",
+      already: true,
+    });
+    await fx.setGrants("reception", MANAGE, { patientScope: "all" });
+
+    // deleteCanonicalVisit requires visits.delete, refuses signed visits, and deletes unsigned operational visits
+    await expect(visits.deleteCanonicalVisit(await fx.session("reception"), walkIn, "اختبار")).rejects.toThrow(
+      "STAFF_OPERATION_CAPABILITY_DENIED",
+    );
+    await expect(visits.deleteCanonicalVisit(await fx.session("owner"), fileVisit, "موقعة")).rejects.toMatchObject({
+      code: "visit_delete_conflict",
+      status: 409,
+    });
+    const deletable = await visit("SYN Deletable Visit", mine, fx.parties.doctor!);
+    const deleted = await visits.deleteCanonicalVisit(await fx.session("owner"), deletable, "إدخال خاطئ");
+    expect(deleted.message).toContain("حُذفت الزيارة");
+    expect((await fx.pool.query("SELECT 1 FROM visits WHERE id = $1", [deletable])).rows).toHaveLength(0);
+    expect(await audits(deletable)).toContainEqual({ action: "visit.delete", actor: "SYN-M-OWNER" });
   });
 });
 

@@ -80,6 +80,10 @@ export const CANONICAL_RECORD_READS = Object.freeze({
   /** GET /api/provider-blocks: one doctor's active blocks on one clinic day, inside the
    * appointment scope (`own` = the actor's own clinician party only) (M2 slice 25). */
   "read:provider-blocks": Object.freeze({ record: "appointment", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/appointments/availability: advisory booking slots inside appointment scope (`own` = own clinician only) (M2 slice 35). */
+  "read:appointments.availability": Object.freeze({ record: "appointment", need: Object.freeze([]), anyOf: Object.freeze([]) }),
+  /** GET /api/patients/[id]/number: patient number snapshot inside patient scope (M2 slice 35). */
+  "read:patients.number": Object.freeze({ record: "patient", need: Object.freeze(["patients.number.manage"] as const), anyOf: Object.freeze([]) }),
 } as const satisfies Readonly<Record<`read:${string}`, CanonicalRecordReadRule>>);
 
 export type CanonicalRecordRead = keyof typeof CANONICAL_RECORD_READS;

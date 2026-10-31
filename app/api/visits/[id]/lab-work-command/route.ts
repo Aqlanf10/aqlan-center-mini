@@ -2,9 +2,30 @@ import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { labWorkIntentSupported, readLabWorkCommandInTransaction, LabWorkIntentError } from "@/lib/lab-work-intent-db";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalEndoVisitFailure, readCanonicalVisitLabWorkCommand } from "@/lib/canonical-endo-visits";
 export const dynamic = "force-dynamic";
 /** Reconcile an exact actor-bound operation without persisting or recovering its clinical body. */
 export async function GET(request:Request,context:{params:Promise<{id:string}>}) {
+ const selected = await selectRequestStaffEnvelope();
+ if (selected.kind === "denied") {
+  return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401, headers: NO_STORE });
+ }
+ if (selected.kind === "canonical") {
+  const visitId = Number((await context.params).id);
+  const url = new URL(request.url);
+  const requestKey = url.searchParams.get("key") ?? "";
+  const requestHash = url.searchParams.get("hash") ?? "";
+  try {
+   return NextResponse.json(
+    await readCanonicalVisitLabWorkCommand(selected.handle, visitId, requestKey, requestHash),
+    { headers: { "Cache-Control": "no-store" } },
+   );
+  } catch (error) {
+   return canonicalEndoVisitFailure(error, "تعذّر إثبات نتيجة العملية؛ لا تنشئ طلبًا بديلًا.");
+  }
+ }
  const session=await requireSession();
  if(!session)return NextResponse.json({message:"انتهت الجلسة."},{status:401});
  if(!["admin","doctor"].includes(session.role))return NextResponse.json({message:"هذه العملية للطبيب أو المدير."},{status:403});

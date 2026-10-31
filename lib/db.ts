@@ -77,7 +77,10 @@ import { withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
-import { decideProcedurePrice, type PriceOverrideKind } from "./price-authority";
+import {
+  decideCanonicalProcedurePrice, decideProcedurePrice,
+  type CanonicalPriceCapabilities, type PriceOverrideKind,
+} from "./price-authority";
 import { SAVED_REPORTS_SQL } from "./saved-reports-schema";
 import { FINANCE_CONTROLS_SQL } from "./finance-controls-schema";
 import { STOCK_SUPPLIER_SQL } from "./stock-supplier-schema";
@@ -2795,6 +2798,24 @@ export async function getVisitOwner(
  * التوقيع (resolveVisitPatient): الهاتف المطابق لملفٍّ قائم يُربط به، وإلا يُنشأ ملفٌّ جديد —
  * داخل معاملة تحت قفل الزيارة، فلا ينشأ ملفّان لنقرتين متزامنتين.
  */
+export async function openVisitPatientFileInTransaction(client: DbClient, visitId: number): Promise<
+  { ok: true; patientId: number; created: boolean } | { ok: false; reason: "not_found" | "signed" }
+> {
+  const { rows } = await client.query<{
+    id: number; patient_name: string; patient_phone: string | null; patient_id: number | null; signed_at: Date | null;
+  }>(
+    `SELECT id, patient_name, patient_phone, patient_id, signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+  );
+  const visit = rows[0];
+  if (!visit) return { ok: false, reason: "not_found" };
+  if (visit.patient_id !== null) {
+    return { ok: true, patientId: visit.patient_id, created: false };
+  }
+  if (visit.signed_at) return { ok: false, reason: "signed" };
+  const { patientId, created } = await resolveVisitPatientDetailed(client, visit);
+  return { ok: true, patientId, created };
+}
+
 export async function openVisitPatientFile(visitId: number): Promise<
   { ok: true; patientId: number; created: boolean } | { ok: false; reason: "not_found" | "signed" }
 > {
@@ -2802,27 +2823,61 @@ export async function openVisitPatientFile(visitId: number): Promise<
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{
-      id: number; patient_name: string; patient_phone: string | null; patient_id: number | null; signed_at: Date | null;
-    }>(
-      `SELECT id, patient_name, patient_phone, patient_id, signed_at FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
-    );
-    const visit = rows[0];
-    if (!visit) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (visit.patient_id !== null) {
-      await client.query("COMMIT");
-      return { ok: true, patientId: visit.patient_id, created: false };
-    }
-    if (visit.signed_at) { await client.query("ROLLBACK"); return { ok: false, reason: "signed" }; }
-    const { patientId, created } = await resolveVisitPatientDetailed(client, visit);
-    await client.query("COMMIT");
-    return { ok: true, patientId, created };
+    const result = await openVisitPatientFileInTransaction(client, visitId);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+}
+
+export async function linkVisitToPatientInTransaction(client: DbClient, visitId: number, patientId: number): Promise<
+  { ok: true; patientName: string } | { ok: false; message: string }
+> {
+  const { rows: visits } = await client.query<{ signed_at: Date | null; patient_id: number | null }>(
+    `SELECT signed_at, patient_id FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
+  );
+  if (!visits[0]) return { ok: false, message: "الزيارة غير موجودة." };
+  if (visits[0].signed_at) {
+    return { ok: false, message: "الزيارة موقَّعة — وفاتورتها صدرت لملفٍّ بعينه فلا تُحوَّل." };
+  }
+
+  const { rows: patients } = await client.query<{ full_name: string; phone: string | null }>(
+    `SELECT full_name, phone FROM patients WHERE id = $1`, [patientId],
+  );
+  if (!patients[0]) return { ok: false, message: "الملف غير موجود." };
+
+  if (visits[0].patient_id !== patientId) {
+    const { rows: chartRecords } = await client.query(
+      `SELECT 1 FROM tooth_conditions WHERE visit_id = $1 LIMIT 1`, [visitId],
+    );
+    if (chartRecords[0]) {
+      return { ok: false, message: "الزيارة مرتبطة بسجل مخطط الأسنان — لا يمكن نقلها إلى ملف آخر." };
+    }
+  }
+
+  if (visits[0].patient_id !== patientId) {
+    const { labWorkIntentSupported } = await import("./lab-work-intent-db");
+    if (await labWorkIntentSupported(client)) {
+      const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
+        UNION ALL SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_member_id IS NOT NULL
+        UNION ALL SELECT 1 FROM lab_work_commands WHERE source_kind='visit' AND source_id=$1 LIMIT 1`, [visitId]);
+      if (linked.rows.length) {
+        return { ok: false, message: "الزيارة مرتبطة بهوية عمل مختبر — لا يمكن نقلها إلى ملف آخر." };
+      }
+    }
+  }
+
+  await client.query(
+    `UPDATE visits SET patient_id = $2, patient_name = $3,
+            patient_phone = COALESCE(NULLIF(patient_phone, ''), $4::text)
+      WHERE id = $1`,
+    [visitId, patientId, patients[0].full_name, patients[0].phone],
+  );
+  return { ok: true, patientName: patients[0].full_name };
 }
 
 export async function linkVisitToPatient(visitId: number, patientId: number): Promise<
@@ -2832,55 +2887,9 @@ export async function linkVisitToPatient(visitId: number, patientId: number): Pr
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: visits } = await client.query<{ signed_at: Date | null; patient_id: number | null }>(
-      `SELECT signed_at, patient_id FROM visits WHERE id = $1 FOR UPDATE`, [visitId],
-    );
-    if (!visits[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الزيارة غير موجودة." }; }
-    if (visits[0].signed_at) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "الزيارة موقَّعة — وفاتورتها صدرت لملفٍّ بعينه فلا تُحوَّل." };
-    }
-
-    const { rows: patients } = await client.query<{ full_name: string; phone: string | null }>(
-      `SELECT full_name, phone FROM patients WHERE id = $1`, [patientId],
-    );
-    if (!patients[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الملف غير موجود." }; }
-
-    // A chart event is patient-owned clinical history. Do not leave it attached
-    // to another patient's visit or silently transfer diagnoses during relinking.
-    // The visit lock serializes this check with the chart writer's FOR SHARE.
-    if (visits[0].patient_id !== patientId) {
-      const { rows: chartRecords } = await client.query(
-        `SELECT 1 FROM tooth_conditions WHERE visit_id = $1 LIMIT 1`, [visitId],
-      );
-      if (chartRecords[0]) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "الزيارة مرتبطة بسجل مخطط الأسنان — لا يمكن نقلها إلى ملف آخر." };
-      }
-    }
-
-    if (visits[0].patient_id !== patientId) {
-      const { labWorkIntentSupported } = await import("./lab-work-intent-db");
-      if (await labWorkIntentSupported(client)) {
-        const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
-          UNION ALL SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_member_id IS NOT NULL
-          UNION ALL SELECT 1 FROM lab_work_commands WHERE source_kind='visit' AND source_id=$1 LIMIT 1`, [visitId]);
-        if (linked.rows.length) {
-          await client.query("ROLLBACK");
-          return { ok: false, message: "الزيارة مرتبطة بهوية عمل مختبر — لا يمكن نقلها إلى ملف آخر." };
-        }
-      }
-    }
-
-    // الاسم والهاتف يتبعان الملف: ما يظهر على اللوحة يجب أن يوافق ما في السجل.
-    await client.query(
-      `UPDATE visits SET patient_id = $2, patient_name = $3,
-              patient_phone = COALESCE(NULLIF(patient_phone, ''), $4::text)
-        WHERE id = $1`,
-      [visitId, patientId, patients[0].full_name, patients[0].phone],
-    );
-    await client.query("COMMIT");
-    return { ok: true, patientName: patients[0].full_name };
+    const result = await linkVisitToPatientInTransaction(client, visitId, patientId);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -2999,75 +3008,78 @@ export async function finishVisitWith(client: DbClient, id: number, actor?: Visi
  * خطأً أو تكرارًا فحذفها نظيف: تُفرَّغ إشارات البنود والحالات والأدوار والمستندات
  * إليها، وتتالي إجراءاتها معها، ويبقى أثرها في سجل التدقيق.
  */
+export async function deleteVisitInTransaction(
+  client: DbClient,
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found" | "signed" | "invoiced" | "lab_linked" }> {
+  const { rows: rowsV } = await client.query<{
+    id: number; patient_id: number | null; patient_name: string; status: string;
+    arrived_at: Date; signed_at: Date | null; invoice_id: number | null; note: string | null;
+  }>(
+    `SELECT id, patient_id, patient_name, status, arrived_at, signed_at, invoice_id, note
+       FROM visits WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  if (!rowsV[0]) {
+    return { ok: false, reason: "not_found" };
+  }
+  const current = rowsV[0];
+  if (current.signed_at) {
+    return { ok: false, reason: "signed" };
+  }
+  if (current.invoice_id) {
+    return { ok: false, reason: "invoiced" };
+  }
+  const labApi: typeof import("./lab-work-intent-db") = await import("./lab-work-intent-db");
+  if (await labApi.labWorkIntentSupported(client)) {
+    const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
+      UNION ALL SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_intent_id IS NOT NULL
+      UNION ALL SELECT 1 FROM lab_work_commands WHERE source_kind='visit' AND source_id=$1 LIMIT 1`, [id]);
+    if (linked.rows.length) return { ok: false, reason: "lab_linked" };
+  }
+  const snapshot = {
+    id: current.id, patientId: current.patient_id, patientName: current.patient_name,
+    status: current.status, arrivedAt: current.arrived_at, note: current.note,
+    reason: context.reason ?? null,
+  };
+  await client.query(`UPDATE plan_items SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE treatment_sessions SET visit_id = NULL, planned_visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE ortho_adjustments SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE tooth_conditions SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE patient_documents SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`UPDATE lab_orders SET visit_id = NULL WHERE visit_id = $1`, [id]);
+  await client.query(`DELETE FROM visit_procedures WHERE visit_id = $1`, [id]);
+  await client.query(`DELETE FROM visits WHERE id = $1`, [id]);
+  await insertAuditRow(client, {
+    action: "visit.delete",
+    entity: "visit",
+    entityId: id,
+    entityLabel: current.patient_name || `#${id}`,
+    details: snapshot,
+    actor: context.actor,
+    actorRole: context.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
 export async function deleteVisit(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
 ): Promise<{ ok: boolean; reason?: "not_found" | "signed" | "invoiced" | "lab_linked" }> {
   await ensureSchema();
   const client = await getPool().connect();
-  let snapshot: Record<string, unknown> | null = null;
   try {
     await client.query("BEGIN");
-    const { rows: rowsV } = await client.query<{
-      id: number; patient_id: number | null; patient_name: string; status: string;
-      arrived_at: Date; signed_at: Date | null; invoice_id: number | null; note: string | null;
-    }>(
-      `SELECT id, patient_id, patient_name, status, arrived_at, signed_at, invoice_id, note
-         FROM visits WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    if (!rowsV[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
-    }
-    const current = rowsV[0];
-    snapshot = {
-      id: current.id, patientId: current.patient_id, patientName: current.patient_name,
-      status: current.status, arrivedAt: current.arrived_at, note: current.note,
-      reason: context.reason ?? null,
-    };
-    if (current.signed_at) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "signed" };
-    }
-    if (current.invoice_id) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "invoiced" };
-    }
-    const labApi: typeof import("./lab-work-intent-db") = await import("./lab-work-intent-db");
-    if (await labApi.labWorkIntentSupported(client)) {
-      const linked = await client.query(`SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1
-        UNION ALL SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_intent_id IS NOT NULL
-        UNION ALL SELECT 1 FROM lab_work_commands WHERE source_kind='visit' AND source_id=$1 LIMIT 1`, [id]);
-      if (linked.rows.length) { await client.query("ROLLBACK"); return {ok:false,reason:"lab_linked"}; }
-    }
-    /* الروابط اللينة تشير إلى الزيارة فتُفرَّغ قبل حذفها (المفاتيح بلا تتالٍ). */
-    await client.query(`UPDATE plan_items SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE treatment_sessions SET visit_id = NULL, planned_visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE ortho_adjustments SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE tooth_conditions SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE patient_documents SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    await client.query(`UPDATE lab_orders SET visit_id = NULL WHERE visit_id = $1`, [id]);
-    /* إجراءات الزيارة تتالي معها (visit_procedures ON DELETE CASCADE). */
-    await client.query(`DELETE FROM visit_procedures WHERE visit_id = $1`, [id]);
-    await client.query(`DELETE FROM visits WHERE id = $1`, [id]);
-    await client.query("COMMIT");
+    const result = await deleteVisitInTransaction(client, id, context);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
-  await recordAudit({
-    action: "visit.delete",
-    entity: "visit",
-    entityId: id,
-    entityLabel: snapshot ? String((snapshot as Record<string, unknown>).patientName ?? "") : `#${id}`,
-    details: snapshot,
-    actor: context.actor,
-    actorRole: context.actorRole ?? null,
-  });
-  return { ok: true };
 }
 
 /**
@@ -5710,40 +5722,36 @@ export async function patientInDoctorScopeWith(q: Pick<DbClient, "query">, docto
  * سجل ثانٍ بدلًا منه. الرقم يُوحَّد كما في كل مكان آخر يكتب سجل مريض.
  */
 /** (P2-7) ملفٌّ برقمه كما يكتبه المستخدم — «P-00012». */
-export async function findPatientIdByNumber(patientNumber: string): Promise<number | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
+export async function findPatientIdByNumberWith(q: Pick<DbClient, "query">, patientNumber: string): Promise<number | null> {
+  const { rows } = await q.query<{ id: number }>(
     `SELECT id FROM patients WHERE UPPER(patient_number) = UPPER($1) LIMIT 1`, [patientNumber.trim()],
   );
   return rows[0]?.id ?? null;
+}
+
+export async function findPatientIdByNumber(patientNumber: string): Promise<number | null> {
+  await ensureSchema();
+  return findPatientIdByNumberWith(getPool(), patientNumber);
 }
 
 export type PatientMergeResult =
   | { ok: true; moved: Record<string, number>; target: Patient }
   | { ok: false; reason: "same_patient" | "not_found" | "source_has_financial_history" | "conflict"; counts?: Record<string, number> };
 
-/**
- * (P2-7) دمج ملفٍّ مكرَّر (المصدر) في الملف الأصلي (الهدف) — معاملةٌ واحدة.
- *
- * التكرار يقسم تاريخ المريض نصفين: زياراتٌ في ملف وأشعةٌ في آخر، وتنبيهٌ طبيٌّ في
- * ملفٍّ لا يفتحه الطبيب. والدمج ينقل **كل** صفٍّ يشير إلى المصدر — بقراءة المفاتيح
- * الأجنبية من القاعدة نفسها لا من قائمةٍ في الكود تنسى جدولًا يُضاف غدًا — ثم يملأ
- * فراغات الهدف من المصدر (ويضمّ التنبيهين الطبيين لا يُسقط أحدهما)، ثم يحذف المصدر.
- *
- * المصدر ذو الأثر المالي (دفعات، حركات مخزون، رصيد افتتاحي، أرشيف مالي سابق) لا يُدمج: تلك سجلات
- * append-only لا يُعاد نسبها بصمت — تُصحَّح بقيودٍ معاكسة. وأي تعارضٍ فريد (مثل
- * خطةٍ واحدة لكل مريض) يتراجع بالدمج كله: لا دمج نصفيّ أبدًا.
- */
-export async function mergeDuplicatePatient(
+export async function mergeDuplicatePatientInTransaction(
+  client: DbClient,
   sourceId: number,
   targetId: number,
   ctx: { actor: string; actorRole?: string | null; reason?: string | null },
 ): Promise<PatientMergeResult> {
   if (sourceId === targetId) return { ok: false, reason: "same_patient" };
-  await ensureSchema();
-  const client = await getPool().connect();
+  await client.query("SAVEPOINT patient_merge_tx");
+  const abortMerge = async (result: PatientMergeResult) => {
+    await client.query("ROLLBACK TO SAVEPOINT patient_merge_tx");
+    await client.query("RELEASE SAVEPOINT patient_merge_tx");
+    return result;
+  };
   try {
-    await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('patient_import')), pg_advisory_xact_lock(hashtext('patient_numbering'))");
     await client.query("SET LOCAL aqlan.patient_merge_active = 'on'");
     const { rows: locked } = await client.query<PatientRow>(
@@ -5753,8 +5761,7 @@ export async function mergeDuplicatePatient(
     const source = locked.find((row) => row.id === sourceId);
     const target = locked.find((row) => row.id === targetId);
     if (!source || !target) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
+      return abortMerge({ ok: false, reason: "not_found" });
     }
 
     const { rows: [footprint] } = await client.query<{
@@ -5795,8 +5802,7 @@ export async function mergeDuplicatePatient(
     if (footprint.payments > 0 || footprint.invoices > 0 || footprint.movements > 0 || footprint.opening > 0
       || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0 || footprint.collection_attempts > 0
       || footprint.agreements > 0 || footprint.lab_financial > 0) {
-      await client.query("ROLLBACK");
-      return {
+      return abortMerge({
         ok: false, reason: "source_has_financial_history",
         counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
           legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments,
@@ -5804,10 +5810,9 @@ export async function mergeDuplicatePatient(
           ...(footprint.agreements > 0 ? { agreements: footprint.agreements } : {}),
           ...(footprint.lab_financial > 0 ? { labFinancial: footprint.lab_financial } : {}),
           ...(footprint.collection_attempts > 0 ? { collectionAttempts: footprint.collection_attempts } : {}) },
-      };
+      });
     }
 
-    /* كل عمودٍ يشير إلى patients(id) بمفتاحٍ أجنبي — من فهرس القاعدة نفسها. */
     const { rows: references } = await client.query<{ tbl: string; col: string }>(
       `SELECT c.conrelid::regclass::text AS tbl, a.attname AS col
          FROM pg_constraint c
@@ -5824,8 +5829,6 @@ export async function mergeDuplicatePatient(
       if (result.rowCount) moved[`${tbl}.${col}`] = result.rowCount;
     }
 
-    /* (PAT-4) عائلة المكرر: الضامن ينتقل أعلاه مع المفاتيح الأجنبية؛ والعضوية عمودٌ في صفّ المريض
-       نفسه — فتُورَّث للأصل إن لم تكن له عائلة (عائلته القائمة لا تُستبدل صامتةً). */
     const { rows: [sourceFamily] } = await client.query<{ family_id: number | null; family_role: string | null; target_family: number | null }>(
       `SELECT s.family_id, s.family_role, t.family_id AS target_family
          FROM patients s, patients t WHERE s.id = $1 AND t.id = $2`,
@@ -5833,8 +5836,6 @@ export async function mergeDuplicatePatient(
     );
     if (sourceFamily?.family_id != null && sourceFamily.target_family === null) moved["patients.family_id"] = 1;
 
-    /* فراغات الهدف تُملأ من المصدر، والتنبيهان الطبيّان يُضمّان — حساسيةٌ في الملف
-       المكرر لا تضيع بدمجه. */
     const alerts = [target.medical_alert, source.medical_alert]
       .map((value) => (value ?? "").trim()).filter(Boolean);
     const mergedAlert = [...new Set(alerts)].join("؛ ").slice(0, 800) || null;
@@ -5849,17 +5850,13 @@ export async function mergeDuplicatePatient(
          note          = CASE WHEN $8::text IS NULL THEN note
                               WHEN note IS NULL THEN $8
                               ELSE LEFT(note || E'\n' || $8, 2000) END,
-         /* (P2-8) تاريخ الميلاد ووليّ الأمر والهوية تُملأ من المكرر إن خلت — والتاريخ
-            لا يُنقل إن ناقض سنة ميلاد الأصل. */
          birth_date     = COALESCE(birth_date, CASE WHEN birth_year IS NULL
                                     OR birth_year = EXTRACT(YEAR FROM $9::date)::int THEN $9::date END),
          guardian_name  = COALESCE(guardian_name, $10),
          guardian_phone = COALESCE(guardian_phone, $11),
          national_id    = COALESCE(national_id, $12),
-         /* (P3-8ب) مصدر المريض ومن أحاله: الأصل أولى، والمكرر يملأ الفراغ فقط. */
          referral_source = COALESCE(referral_source, $13),
          referred_by     = COALESCE(referred_by, $14),
-         /* (PAT-3) البريد والقناة والصورة تملأ الفراغ، والأعلام تُضمّ — علَمٌ على المكرر لا يضيع. */
          email             = COALESCE(email, $15),
          preferred_channel = COALESCE(preferred_channel, $16),
          photo_document_id = COALESCE(photo_document_id, $17::int),
@@ -5871,7 +5868,6 @@ export async function mergeDuplicatePatient(
        RETURNING ${PATIENT_COLUMNS}`,
       [
         targetId, source.phone,
-        /* رقم المصدر المختلف يبقى رقمًا بديلًا للهدف إن خلا بديله — لا يضيع هاتف. */
         source.phone && target.phone && source.phone !== target.phone ? source.phone : source.alt_phone,
         source.birth_year, source.address, mergedAlert, source.gender, source.note,
         source.birth_date == null ? null : String(source.birth_date).slice(0, 10),
@@ -5883,11 +5879,7 @@ export async function mergeDuplicatePatient(
       ],
     );
     await client.query(`DELETE FROM patients WHERE id = $1`, [sourceId]);
-    await client.query("COMMIT");
-
-    /* مُنتظَر لا «أطلق وانسَ»: دمجٌ يحذف ملفًّا يجب أن يكون أثره مكتوبًا قبل الرد
-       (recordAudit لا يرمي أبدًا). */
-    await recordAudit({
+    await insertAuditRow(client, {
       action: "patient.merge", entity: "patient", entityId: targetId,
       entityLabel: target.full_name,
       details: {
@@ -5898,11 +5890,32 @@ export async function mergeDuplicatePatient(
       },
       actor: ctx.actor, actorRole: ctx.actorRole ?? null,
     });
+    await client.query("RELEASE SAVEPOINT patient_merge_tx");
     return { ok: true, moved, target: toPatient(updated[0]) };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK TO SAVEPOINT patient_merge_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT patient_merge_tx").catch(() => {});
     const code = (error as { code?: string } | null)?.code;
     if (code === "23505" || code === "23P01") return { ok: false, reason: "conflict" };
+    throw error;
+  }
+}
+
+export async function mergeDuplicatePatient(
+  sourceId: number,
+  targetId: number,
+  ctx: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<PatientMergeResult> {
+  if (sourceId === targetId) return { ok: false, reason: "same_patient" };
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await mergeDuplicatePatientInTransaction(client, sourceId, targetId, ctx);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
@@ -6122,287 +6135,246 @@ export async function contactConsentStatesWith(q: Pick<DbClient, "query">, patie
  * اللينة بين الوحدات (فاتورة الزيارة، موعد الزيارة المخططة، خطة الفاتورة)
  * تُفرَّغ قبل الحذف كي لا يدور الرصدُ في حلقة (زيارة→فاتورة→خطة→بند→زيارة).
  */
+export async function deletePatientCascadeInTransaction(
+  client: DbClient,
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{ ok: boolean; reason?: "not_found" | "has_financial_history" | "has_clinical_history"; counts?: Record<string, number> }> {
+  await client.query("SAVEPOINT patient_delete_tx");
+  const abortDelete = async (result: { ok: false; reason: "not_found" | "has_financial_history" | "has_clinical_history"; counts?: Record<string, number> }) => {
+    await client.query("ROLLBACK TO SAVEPOINT patient_delete_tx");
+    await client.query("RELEASE SAVEPOINT patient_delete_tx");
+    return result;
+  };
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('patient_import')), pg_advisory_xact_lock(hashtext('patient_numbering'))");
+
+  const { rows: patientRows } = await client.query<PatientRow>(
+    `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  if (!patientRows[0]) {
+    return abortDelete({ ok: false, reason: "not_found" });
+  }
+  const patient = toPatient(patientRows[0]);
+
+  const countOf = async (table: string, where: string, args: unknown[]): Promise<number> => {
+    const { rows } = await client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM ${table} WHERE ${where}`,
+      args,
+    );
+    return Number(rows[0]?.count ?? 0);
+  };
+  const [visitsN, appointmentsN, invoicesN, paymentsN, plansN, labOrdersN,
+    documentsN, cephN, orthoN, diagnosesN] = await Promise.all([
+    countOf("visits", "patient_id = $1", [id]),
+    countOf("appointments", "patient_id = $1", [id]),
+    countOf("invoices", "patient_id = $1", [id]),
+    countOf("payments", "patient_id = $1", [id]),
+    countOf("treatment_plans", "patient_id = $1", [id]),
+    countOf("lab_orders", "patient_id = $1", [id]),
+    countOf("patient_documents", "patient_id = $1", [id]),
+    countOf("ceph_analyses", "patient_id = $1", [id]),
+    countOf("ortho_cases", "patient_id = $1", [id]),
+    countOf("patient_diagnoses", "patient_id = $1", [id]),
+  ]);
+  const counts = {
+    visits: visitsN, appointments: appointmentsN, invoices: invoicesN,
+    payments: paymentsN, plans: plansN, labOrders: labOrdersN,
+    documents: documentsN, ceph: cephN, ortho: orthoN, diagnoses: diagnosesN,
+  };
+
+  const { rows: footprintRows } = await client.query<{
+    payments: string; invoices: string; opening_balances: string;
+    inventory_movements: string; lab_orders: string; payables: string;
+    financial_links: string;
+  }>(
+    `SELECT
+       (SELECT COUNT(*) FROM payments WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM collection_attempt_retirements WHERE patient_id = $1) AS payments,
+       (SELECT COUNT(*) FROM invoices WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM debt_repayment_arrangements WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM approved_agreement_principals WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM agreement_delta_amendments WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM agreement_reconciliations WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM invoice_archive_events WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM invoice_service_additions WHERE patient_id = $1) AS invoices,
+       (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM patient_opening_balance_history WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM legacy_balance_arrangements WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM legacy_treatments WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM legacy_payments WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM legacy_treatment_documents WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM legacy_treatment_agreements WHERE patient_id = $1) AS opening_balances,
+       (SELECT COUNT(*) FROM inventory_movements
+         WHERE patient_id = $1
+            OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS inventory_movements,
+       (SELECT COUNT(*) FROM lab_orders
+         WHERE patient_id = $1
+           AND (payable_id IS NOT NULL
+                OR cost_minor IS NOT NULL
+                OR EXISTS (SELECT 1 FROM payables pay WHERE pay.lab_order_id = lab_orders.id))) AS lab_orders,
+       (SELECT COUNT(*) FROM payables
+         WHERE id IN (SELECT payable_id FROM lab_orders
+                        WHERE patient_id = $1 AND payable_id IS NOT NULL)
+            OR lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1)) AS payables,
+       (SELECT COUNT(*) FROM expenses
+         WHERE payable_id IN (
+           SELECT payable_id FROM lab_orders
+            WHERE patient_id = $1 AND payable_id IS NOT NULL
+           UNION
+           SELECT pay.id FROM payables pay
+            WHERE pay.lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1))) AS financial_links`,
+    [id],
+  );
+  const footprint = footprintRows[0]
+    ? {
+      payments: Number(footprintRows[0].payments),
+      invoices: Number(footprintRows[0].invoices),
+      openingBalances: Number(footprintRows[0].opening_balances),
+      inventoryMovements: Number(footprintRows[0].inventory_movements),
+      labOrders: Number(footprintRows[0].lab_orders),
+      payables: Number(footprintRows[0].payables),
+      financialLinks: Number(footprintRows[0].financial_links),
+    }
+    : {
+      payments: 0, invoices: 0, openingBalances: 0, inventoryMovements: 0,
+      labOrders: 0, payables: 0, financialLinks: 0,
+    };
+  const hasFinancialHistory =
+    footprint.payments > 0 || footprint.invoices > 0 || footprint.openingBalances > 0
+    || footprint.inventoryMovements > 0 || footprint.labOrders > 0
+    || footprint.payables > 0 || footprint.financialLinks > 0;
+  if (hasFinancialHistory) {
+    return abortDelete({
+      ok: false,
+      reason: "has_financial_history",
+      counts: { ...counts, ...footprint },
+    });
+  }
+
+  const { rows: clinicalRows } = await client.query<{
+    signed_visits: string; documents: string; ceph: string; ortho: string;
+    diagnoses: string; prescriptions: string; referrals: string; medical_history: string;
+  }>(
+    `SELECT
+       (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL) AS signed_visits,
+       (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1) AS documents,
+       (SELECT COUNT(*) FROM ceph_analyses WHERE patient_id = $1) AS ceph,
+       (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1) AS ortho,
+       (SELECT COUNT(*) FROM patient_diagnoses WHERE patient_id = $1) AS diagnoses,
+       (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1) AS prescriptions,
+       (SELECT COUNT(*) FROM patient_referrals WHERE patient_id = $1) AS referrals,
+       (SELECT COUNT(*) FROM patient_medical_history WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM patient_vitals WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM endo_treatments WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM patient_problems WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM clinical_cases WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM lab_work_intents WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM ortho_strategy_revisions WHERE patient_id = $1)
+         + (SELECT COUNT(*) FROM ortho_assessment_revisions WHERE patient_id = $1) AS medical_history`,
+    [id],
+  );
+  const clinical = {
+    signedVisits: Number(clinicalRows[0]?.signed_visits ?? 0),
+    clinicalDocuments: Number(clinicalRows[0]?.documents ?? 0),
+    cephAnalyses: Number(clinicalRows[0]?.ceph ?? 0),
+    orthoCases: Number(clinicalRows[0]?.ortho ?? 0),
+    clinicalDiagnoses: Number(clinicalRows[0]?.diagnoses ?? 0),
+    prescriptions: Number(clinicalRows[0]?.prescriptions ?? 0),
+    referrals: Number(clinicalRows[0]?.referrals ?? 0),
+    medicalHistory: Number(clinicalRows[0]?.medical_history ?? 0),
+  };
+  if (Object.values(clinical).some((count) => count > 0)) {
+    return abortDelete({ ok: false, reason: "has_clinical_history", counts: { ...counts, ...clinical } });
+  }
+
+  const snapshot = {
+    patient: {
+      id: patient.id, patientNumber: patient.patientNumber,
+      fullName: patient.fullName, phone: patient.phone,
+    },
+    counts,
+    reason: context.reason ?? null,
+  };
+
+  await client.query(
+    `UPDATE visits SET invoice_id = NULL, planned_visit_id = NULL WHERE patient_id = $1`,
+    [id],
+  );
+  await client.query(
+    `UPDATE appointments SET planned_visit_id = NULL WHERE patient_id = $1`,
+    [id],
+  );
+  await client.query(`UPDATE invoices SET plan_id = NULL WHERE patient_id = $1`, [id]);
+  await client.query(`UPDATE ortho_cases SET plan_id = NULL WHERE patient_id = $1`, [id]);
+  await client.query(
+    `UPDATE tooth_conditions SET visit_id = NULL WHERE patient_id = $1`,
+    [id],
+  );
+  await client.query(`DELETE FROM ceph_analyses WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM patient_documents WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM ortho_cases WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM treatment_plans WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM tooth_conditions WHERE patient_id = $1`, [id]);
+  await client.query(
+    `DELETE FROM visit_procedures WHERE visit_id IN (SELECT id FROM visits WHERE patient_id = $1)`,
+    [id],
+  );
+  await client.query(`DELETE FROM visits WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM invoices WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM appointments WHERE patient_id = $1`, [id]);
+  await client.query(`DELETE FROM planned_visits WHERE patient_id = $1`, [id]);
+
+  const { rows: payRows } = await client.query<{ payable_id: number }>(
+    `SELECT DISTINCT payable_id FROM lab_orders WHERE patient_id = $1 AND payable_id IS NOT NULL`,
+    [id],
+  );
+  const payableIds = payRows.map((r) => r.payable_id);
+  if (payableIds.length > 0) {
+    await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = ANY($1::int[])`, [
+      payableIds,
+    ]);
+    await client.query(`DELETE FROM payables WHERE id = ANY($1::int[])`, [payableIds]);
+  }
+  await client.query(`DELETE FROM lab_orders WHERE patient_id = $1`, [id]);
+
+  const { rows: deleted } = await client.query<{ id: number }>(
+    `DELETE FROM patients WHERE id = $1 RETURNING id`,
+    [id],
+  );
+  if (!deleted[0]) {
+    return abortDelete({ ok: false, reason: "not_found" });
+  }
+  await insertAuditRow(client, {
+    action: "patient.delete",
+    entity: "patient",
+    entityId: id,
+    entityLabel: `${patient.fullName} (${patient.patientNumber})`,
+    details: snapshot,
+    actor: context.actor,
+    actorRole: context.actorRole ?? null,
+  });
+  await client.query("RELEASE SAVEPOINT patient_delete_tx");
+  return { ok: true };
+}
+
 export async function deletePatientCascade(
   id: number,
   context: { actor: string; actorRole?: string | null; reason?: string | null },
 ): Promise<{ ok: boolean; reason?: "not_found" | "has_financial_history" | "has_clinical_history"; counts?: Record<string, number> }> {
   await ensureSchema();
   const client = await getPool().connect();
-  let snapshot: Record<string, unknown> | null = null;
   try {
     await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('patient_import')), pg_advisory_xact_lock(hashtext('patient_numbering'))");
-
-    const { rows: patientRows } = await client.query<PatientRow>(
-      `SELECT ${PATIENT_COLUMNS} FROM patients WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    if (!patientRows[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
-    }
-    const patient = toPatient(patientRows[0]);
-
-    // عُدّ ما سيُمحى — صورة الحذف في سجل التدقيق وإحصاءاته في رسالة التأكيد.
-    const countOf = async (table: string, where: string, args: unknown[]): Promise<number> => {
-      const { rows } = await client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM ${table} WHERE ${where}`,
-        args,
-      );
-      return Number(rows[0]?.count ?? 0);
-    };
-    const [visitsN, appointmentsN, invoicesN, paymentsN, plansN, labOrdersN,
-      documentsN, cephN, orthoN, diagnosesN] = await Promise.all([
-      countOf("visits", "patient_id = $1", [id]),
-      countOf("appointments", "patient_id = $1", [id]),
-      countOf("invoices", "patient_id = $1", [id]),
-      countOf("payments", "patient_id = $1", [id]),
-      countOf("treatment_plans", "patient_id = $1", [id]),
-      countOf("lab_orders", "patient_id = $1", [id]),
-      countOf("patient_documents", "patient_id = $1", [id]),
-      countOf("ceph_analyses", "patient_id = $1", [id]),
-      countOf("ortho_cases", "patient_id = $1", [id]),
-      countOf("patient_diagnoses", "patient_id = $1", [id]),
-    ]);
-    const counts = {
-      visits: visitsN, appointments: appointmentsN, invoices: invoicesN,
-      payments: paymentsN, plans: plansN, labOrders: labOrdersN,
-      documents: documentsN, ceph: cephN, ortho: orthoN, diagnoses: diagnosesN,
-    };
-
-    /* (P1-FINAL-1) حارس الأثر المالي المركزي — قبل أي DELETE وبصمام واحد:
-       أي أثر مالي يعني أن الملف شاهدٌ على مالٍ دخل أو خرج أو استُحق، فلا يُمحى
-       السجل الذي يحمله. الفحص يشمل:
-        - payments: الدفعات والردود (كان محفوظًا من قبل).
-        - invoices: مدفوعةً أو غير مدفوعة — الفاتورة غير المدفوعة دَينٌ قائم
-          بذاته؛ محوها محوُ دَينٍ لم يُسدَّد.
-        - patient_opening_balances: رصيدٌ سابقٌ على النظام — مالٌ واجب التتبع.
-        - inventory_movements: حركات المخزون المرتبطة بالمريض أو زياراته.
-        - lab orders ذات أثر مالي: مربوطة بالتزام (payable) أو لها تكلفة مسجَّلة
-          أو يشير إليها التزام عبر payables.lab_order_id.
-        - payables المرتبطة بأعمال المريض/المعمل — بالاتجاهين (lab_orders.payable_id
-          وpayables.lab_order_id): ما كان سيُمحى أو يُفصل عن سياقه.
-        - financialLinks: صرفُ المصروفات المرتبط بتلك الالتزامات (expenses.payable_id)
-          — السجلات التي كان الحذف سيقطع صلتها بالتزام المريض.
-       الحساب كله داخل المعاملة نفسها، والرفض يتراجع بكل شيء: لا حذف جزئيًّا
-       أبدًا (اختبار E). */
-    const { rows: footprintRows } = await client.query<{
-      payments: string; invoices: string; opening_balances: string;
-      inventory_movements: string; lab_orders: string; payables: string;
-      financial_links: string;
-    }>(
-      `SELECT
-         /* (0068) Retired collection keys are permanent proof for this patient, like receipts. */
-         (SELECT COUNT(*) FROM payments WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM collection_attempt_retirements WHERE patient_id = $1) AS payments,
-         (SELECT COUNT(*) FROM invoices WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM debt_repayment_arrangements WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM approved_agreement_principals WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM agreement_delta_amendments WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM agreement_reconciliations WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM invoice_archive_events WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM invoice_service_additions WHERE patient_id = $1) AS invoices,
-         /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
-         (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM patient_opening_balance_history WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM legacy_balance_arrangements WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM legacy_treatments WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM legacy_payments WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM legacy_treatment_documents WHERE patient_id = $1)
-           /* (INV-LEGACY) الاتفاق التاريخي لعلاجٍ بدأ قبل النظام شاهدٌ ماليّ كذلك. */
-           + (SELECT COUNT(*) FROM legacy_treatment_agreements WHERE patient_id = $1) AS opening_balances,
-         (SELECT COUNT(*) FROM inventory_movements
-           WHERE patient_id = $1
-              OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS inventory_movements,
-         (SELECT COUNT(*) FROM lab_orders
-           WHERE patient_id = $1
-             AND (payable_id IS NOT NULL
-                  OR cost_minor IS NOT NULL
-                  OR EXISTS (SELECT 1 FROM payables pay WHERE pay.lab_order_id = lab_orders.id))) AS lab_orders,
-         (SELECT COUNT(*) FROM payables
-           WHERE id IN (SELECT payable_id FROM lab_orders
-                          WHERE patient_id = $1 AND payable_id IS NOT NULL)
-              OR lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1)) AS payables,
-         (SELECT COUNT(*) FROM expenses
-           WHERE payable_id IN (
-             SELECT payable_id FROM lab_orders
-              WHERE patient_id = $1 AND payable_id IS NOT NULL
-             UNION
-             SELECT pay.id FROM payables pay
-              WHERE pay.lab_order_id IN (SELECT id FROM lab_orders WHERE patient_id = $1))) AS financial_links`,
-      [id],
-    );
-    const footprint = footprintRows[0]
-      ? {
-        payments: Number(footprintRows[0].payments),
-        invoices: Number(footprintRows[0].invoices),
-        openingBalances: Number(footprintRows[0].opening_balances),
-        inventoryMovements: Number(footprintRows[0].inventory_movements),
-        labOrders: Number(footprintRows[0].lab_orders),
-        payables: Number(footprintRows[0].payables),
-        financialLinks: Number(footprintRows[0].financial_links),
-      }
-      : {
-        payments: 0, invoices: 0, openingBalances: 0, inventoryMovements: 0,
-        labOrders: 0, payables: 0, financialLinks: 0,
-      };
-    const hasFinancialHistory =
-      footprint.payments > 0 || footprint.invoices > 0 || footprint.openingBalances > 0
-      || footprint.inventoryMovements > 0 || footprint.labOrders > 0
-      || footprint.payables > 0 || footprint.financialLinks > 0;
-    if (hasFinancialHistory) {
-      await client.query("ROLLBACK");
-      return {
-        ok: false,
-        reason: "has_financial_history",
-        counts: { ...counts, ...footprint },
-      };
-    }
-
-    /* (P2-6) حارس السجل السريري — بعد المالي وبالصمام نفسه: زيارةٌ موقّعة أو صورة
-       أشعة أو تحليل سيفالو أو حالة تقويم أو تشخيص أو وصفة سجلٌّ طبيٌّ يجب حفظه،
-       والحذف كان يمحوه كله بلا أثر إلا سطر التدقيق. يبقى الحذف متاحًا لملفٍّ سُجّل
-       خطأً (مواعيد أو زيارات غير موقّعة فقط). */
-    const { rows: clinicalRows } = await client.query<{
-      signed_visits: string; documents: string; ceph: string; ortho: string;
-      diagnoses: string; prescriptions: string; referrals: string; medical_history: string;
-    }>(
-      `SELECT
-         (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL) AS signed_visits,
-         (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1) AS documents,
-         (SELECT COUNT(*) FROM ceph_analyses WHERE patient_id = $1) AS ceph,
-         (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1) AS ortho,
-         (SELECT COUNT(*) FROM patient_diagnoses WHERE patient_id = $1) AS diagnoses,
-         (SELECT COUNT(*) FROM prescriptions WHERE patient_id = $1) AS prescriptions,
-         (SELECT COUNT(*) FROM patient_referrals WHERE patient_id = $1) AS referrals,
-         /* (PAT-2) التاريخ الطبي المنظَّم والعلامات الحيوية سجلٌّ طبيٌّ كذلك. */
-         (SELECT COUNT(*) FROM patient_medical_history WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM patient_vitals WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM endo_treatments WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM patient_problems WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM clinical_cases WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM lab_work_intents WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM ortho_strategy_revisions WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM ortho_assessment_revisions WHERE patient_id = $1) AS medical_history`,
-      [id],
-    );
-    const clinical = {
-      signedVisits: Number(clinicalRows[0]?.signed_visits ?? 0),
-      clinicalDocuments: Number(clinicalRows[0]?.documents ?? 0),
-      cephAnalyses: Number(clinicalRows[0]?.ceph ?? 0),
-      orthoCases: Number(clinicalRows[0]?.ortho ?? 0),
-      clinicalDiagnoses: Number(clinicalRows[0]?.diagnoses ?? 0),
-      prescriptions: Number(clinicalRows[0]?.prescriptions ?? 0),
-      referrals: Number(clinicalRows[0]?.referrals ?? 0),
-      medicalHistory: Number(clinicalRows[0]?.medical_history ?? 0),
-    };
-    if (Object.values(clinical).some((count) => count > 0)) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "has_clinical_history", counts: { ...counts, ...clinical } };
-    }
-
-    snapshot = {
-      patient: {
-        id: patient.id, patientNumber: patient.patientNumber,
-        fullName: patient.fullName, phone: patient.phone,
-      },
-      counts,
-      reason: context.reason ?? null,
-    };
-
-    /* ١) فرَّغ روابط الإشارة اللينة بين الوحدات — الحذف بعدها يسير بلا حلقات. */
-    await client.query(
-      `UPDATE visits SET invoice_id = NULL, planned_visit_id = NULL WHERE patient_id = $1`,
-      [id],
-    );
-    await client.query(
-      `UPDATE appointments SET planned_visit_id = NULL WHERE patient_id = $1`,
-      [id],
-    );
-    await client.query(`UPDATE invoices SET plan_id = NULL WHERE patient_id = $1`, [id]);
-    await client.query(`UPDATE ortho_cases SET plan_id = NULL WHERE patient_id = $1`, [id]);
-    await client.query(
-      `UPDATE tooth_conditions SET visit_id = NULL WHERE patient_id = $1`,
-      [id],
-    );
-
-    /* (P1-FIX-3) الدفعات لم تعد تُحذف هنا أبدًا: مريض له دفعات مُنع أعلاه،
-          وحارس DELETE على مستوى القاعدة شبكة الأمان الدائمة. */
-
-    /* ٣) السيفالو قبل مستنداته (مفتاحه المقيِّد RESTRICT) وقبل حالات التقويم. */
-    await client.query(`DELETE FROM ceph_analyses WHERE patient_id = $1`, [id]);
-
-    /* ٤) المستندات قبل حالات التقويم (إشارتها إليها بلا تتالٍ). */
-    await client.query(`DELETE FROM patient_documents WHERE patient_id = $1`, [id]);
-
-    /* ٥) حالات التقويم (تعديلاتها تتالي) قبل الخطط (تشير إليها بلا تتالٍ). */
-    await client.query(`DELETE FROM ortho_cases WHERE patient_id = $1`, [id]);
-
-    /* ٦) خطط العلاج: بنودها وأقساطها وجلساتها تتالى معها. */
-    await client.query(`DELETE FROM treatment_plans WHERE patient_id = $1`, [id]);
-
-    /* ٧) حالات الأسنان ثم إجراءات الزيارات ثم الزيارات نفسها. */
-    await client.query(`DELETE FROM tooth_conditions WHERE patient_id = $1`, [id]);
-    await client.query(
-      `DELETE FROM visit_procedures WHERE visit_id IN (SELECT id FROM visits WHERE patient_id = $1)`,
-      [id],
-    );
-    await client.query(`DELETE FROM visits WHERE patient_id = $1`, [id]);
-
-    /* ٨) الفواتير (بنودها تتالي) والمواعيد والزيارات المخططة. */
-    await client.query(`DELETE FROM invoices WHERE patient_id = $1`, [id]);
-    await client.query(`DELETE FROM appointments WHERE patient_id = $1`, [id]);
-    await client.query(`DELETE FROM planned_visits WHERE patient_id = $1`, [id]);
-
-    /* ٩) أعمال المعمل: (P1-FINAL-1) الحارس أعلاه يمنع أي التزام مرتبط، فما بعد
-          هذا نقطة لا يبلغها الالتزامات أبدًا — التنظيف يبقى شبكة أمان دفاعية:
-          لو أفلت التزام من الفحص يومًا فالإحصاء أعلاه كشفه أولًا، وهنا لا يُحذف
-          التزام ثم يُفصل صرفه ثم تُعتبر العملية سليمة: الحذف نفسه مرفوض أصلًا.
-          سندات الصرف تشير للالتزام بلا مفتاح أجنبي (تاريخٌ يُقرأ لا يُدار). */
-    const { rows: payRows } = await client.query<{ payable_id: number }>(
-      `SELECT DISTINCT payable_id FROM lab_orders WHERE patient_id = $1 AND payable_id IS NOT NULL`,
-      [id],
-    );
-    const payableIds = payRows.map((r) => r.payable_id);
-    if (payableIds.length > 0) {
-      await client.query(`UPDATE expenses SET payable_id = NULL WHERE payable_id = ANY($1::int[])`, [
-        payableIds,
-      ]);
-      await client.query(`DELETE FROM payables WHERE id = ANY($1::int[])`, [payableIds]);
-    }
-    await client.query(`DELETE FROM lab_orders WHERE patient_id = $1`, [id]);
-
-    /* ١٠) صف المريض نفسه — الاستمارات والطلبات والتشخيصات والأرصدة الافتتاحية
-           والرسائل تتالى معه. */
-    const { rows: deleted } = await client.query<{ id: number }>(
-      `DELETE FROM patients WHERE id = $1 RETURNING id`,
-      [id],
-    );
-    if (!deleted[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "not_found" };
-    }
-    await client.query("COMMIT");
+    const result = await deletePatientCascadeInTransaction(client, id, context);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
   }
-  await recordAudit({
-    action: "patient.delete",
-    entity: "patient",
-    entityId: id,
-    entityLabel: snapshot
-      ? `${(snapshot.patient as { fullName?: string }).fullName ?? ""} (${
-          (snapshot.patient as { patientNumber?: string }).patientNumber ?? ""
-        })`
-      : `#${id}`,
-    details: snapshot,
-    actor: context.actor,
-    actorRole: context.actorRole ?? null,
-  });
-  return { ok: true };
 }
 
 // ─── أعمال المختبر ───────────────────────────────────────────────────────────
@@ -18475,13 +18447,12 @@ const toProcedureLine = (row: ProcedureRow): ProcedureLine => ({
   note: row.note,
 });
 
-export async function getClinicalVisit(
+export async function getClinicalVisitWith(
+  q: Pick<DbClient, "query">,
   visitId: number,
-  options: { actorPartyId?: number | null } = {},
+  options: { actorPartyId?: number | null; clinicianScopePartyId?: number | null } = {},
 ): Promise<ClinicalVisit | null> {
-  await ensureSchema();
-  const pool = getPool();
-  const { rows } = await pool.query<ClinicalRow>(
+  const { rows } = await q.query<ClinicalRow>(
     `SELECT id, patient_id, patient_name, patient_phone, chief_complaint, examination, diagnosis,
             treatment_done, next_plan, addendum, doctor_id, signed_at, signed_by,
             invoice_id, arrived_at, billing_currency,
@@ -18494,7 +18465,7 @@ export async function getClinicalVisit(
   );
   if (!rows[0]) return null;
 
-  const { rows: procedureRows } = await pool.query<ProcedureRow>(
+  const { rows: procedureRows } = await q.query<ProcedureRow>(
     `SELECT p.id, p.service_id, s.name AS service_name, s.category, p.doctor_id,
             p.tooth_code, p.surfaces, p.quantity, p.unit_price_minor, p.plan_item_id, p.note,
             t.base_currency AS plan_currency
@@ -18506,10 +18477,14 @@ export async function getClinicalVisit(
   );
   const procedures = procedureRows.map(toProcedureLine);
   const row = rows[0];
-  const patientId = await previewPatientId(pool, row);
-  /* (TD-05 owner review) عملة بنود الخطة المرتبطة بالزيارة — واحدةً فتُعاين
-     الأرقام بها، أو مختلطة/غائبة فتعاين بالأساس (والتوقيع المختلط مرفوض). */
-  const { rows: linkedCurrencyRows } = await pool.query<{ base_currency: string }>(
+  const rawPreviewPatientId = await previewPatientId(q, row);
+  const patientId = row.patient_id === null
+    && rawPreviewPatientId !== null
+    && options.clinicianScopePartyId != null
+    && !(await patientInDoctorScopeWith(q, options.clinicianScopePartyId, rawPreviewPatientId))
+    ? null
+    : rawPreviewPatientId;
+  const { rows: linkedCurrencyRows } = await q.query<{ base_currency: string }>(
     `SELECT DISTINCT t.base_currency
        FROM visit_procedures vp
        JOIN plan_items i ON i.id = vp.plan_item_id
@@ -18520,30 +18495,29 @@ export async function getClinicalVisit(
   const planCurrency = linkedCurrencyRows.length === 1
     ? (linkedCurrencyRows[0].base_currency as Currency)
     : null;
-  const plan = await visitPlanContext(pool, patientId, procedures);
-  const ortho = await visitOrthoContext(patientId, visitId);
-  const workflow = await visitWorkflowContext(pool, visitId, patientId, procedures);
-  // طلبات المختبر المرتبطة بالزيارة — ليعرف الزر السياقي ما هو موجود سلفًا (§١٩).
-  const { rows: visitLabRows } = await pool.query<{
+  const plan = await visitPlanContext(q, patientId, procedures);
+  const ortho = await visitOrthoContext(q, patientId, visitId);
+  const workflow = await visitWorkflowContext(q, visitId, patientId, procedures);
+  const { rows: visitLabRows } = await q.query<{
     id: number; work_type: string; tooth_code: number | null; status: string; lab_name: string;
   }>(
     `SELECT id, work_type, tooth_code, status, lab_name
        FROM lab_orders WHERE visit_id = $1 AND status <> 'cancelled' ORDER BY id`,
     [visitId],
   );
-  const suggestions = await visitSuggestionsFor(pool, visitId, patientId, options.actorPartyId ?? null, {
+  const suggestions = await visitSuggestionsFor(q, visitId, patientId, options.actorPartyId ?? null, {
     plannedTitle: workflow.plannedVisit?.remainingWork ?? workflow.plannedVisit?.title ?? null,
     plannedDoctorId: workflow.plannedVisit?.doctorId ?? null,
     inOrtho: ortho !== null,
   });
   const labWorkApi = await import("./lab-work-intent-db");
-  const labWorkIntentSupported = await labWorkApi.labWorkIntentSupported(pool);
+  const labWorkIntentSupported = await labWorkApi.labWorkIntentSupported(q);
   let labWorkIntentRequired = false;
   if (labWorkIntentSupported && patientId !== null) {
     const [procedureWork, plannedWork, required] = await Promise.all([
-      labWorkApi.readLabWorkForVisitProcedures(pool, patientId, visitId),
-      labWorkApi.readLabWorkForPlanItems(pool, patientId, workflow.outstanding.map(item => item.planItemId)),
-      pool.query(`SELECT EXISTS(SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1)
+      labWorkApi.readLabWorkForVisitProcedures(q, patientId, visitId),
+      labWorkApi.readLabWorkForPlanItems(q, patientId, workflow.outstanding.map(item => item.planItemId)),
+      q.query(`SELECT EXISTS(SELECT 1 FROM lab_work_intents WHERE origin_visit_id=$1)
         OR EXISTS(SELECT 1 FROM visit_procedures WHERE visit_id=$1 AND lab_work_intent_id IS NOT NULL) AS required`, [visitId]),
     ]);
     for (const procedure of procedures) Object.assign(procedure, procedureWork.get(procedure.id) ?? {});
@@ -18590,8 +18564,16 @@ export async function getClinicalVisit(
       toothCode: labRow.tooth_code ?? null, status: labRow.status, labName: labRow.lab_name,
     })),
     suggestions,
-    referral: patientId === null ? null : await visitReferralContext(pool, visitId, patientId),
+    referral: patientId === null ? null : await visitReferralContext(q, visitId, patientId),
   };
+}
+
+export async function getClinicalVisit(
+  visitId: number,
+  options: { actorPartyId?: number | null } = {},
+): Promise<ClinicalVisit | null> {
+  await ensureSchema();
+  return getClinicalVisitWith(getPool(), visitId, options);
 }
 
 /**
@@ -18599,7 +18581,7 @@ export async function getClinicalVisit(
  * الداخل إن كانت جهته طبيبًا، وطبيب المريض الأساسي، والجلسة المخطَّطة التالية (بفاصلها).
  */
 async function visitSuggestionsFor(
-  pool: DbPool,
+  pool: Pick<DbClient, "query">,
   visitId: number,
   patientId: number | null,
   actorPartyId: number | null,
@@ -18671,7 +18653,7 @@ export const ORTHO_CASE_FUNDED_SQL =
 
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
 async function baseOrthoAdjustmentBillingClass(
-  db: DbClient | DbPool, caseId: number, patientId: number,
+  db: Pick<DbClient, "query">, caseId: number, patientId: number,
 ): Promise<BillingClassification> {
   const { rows: [evidence] } = await db.query<{
     baseline_kind: string | null; legacy_financial_mode: string | null;
@@ -18710,7 +18692,7 @@ async function baseOrthoAdjustmentBillingClass(
 
 /** Explicit routine coverage is independent of an ordinary invoice's existence.
  * Signing freezes the exact revision; already signed snapshots are never rebased. */
-export async function orthoAdjustmentCoverage(db: DbClient | DbPool, caseId: number, patientId: number, lock = false): Promise<{ classification: BillingClassification; revisionId: string | null }> {
+export async function orthoAdjustmentCoverage(db: Pick<DbClient, "query">, caseId: number, patientId: number, lock = false): Promise<{ classification: BillingClassification; revisionId: string | null }> {
   const { resolveExplicitFollowupCoverage } = await import("./ortho-followup-coverage-db");
   const explicit = await resolveExplicitFollowupCoverage(db, caseId, patientId, lock);
   if (explicit.state === "review_required") return { classification: "REVIEW_REQUIRED", revisionId: null };
@@ -18720,17 +18702,21 @@ export async function orthoAdjustmentCoverage(db: DbClient | DbPool, caseId: num
   };
   return { classification: await baseOrthoAdjustmentBillingClass(db, caseId, patientId), revisionId: null };
 }
-export async function orthoAdjustmentBillingClass(db: DbClient | DbPool, caseId: number, patientId: number): Promise<BillingClassification> {
+export async function orthoAdjustmentBillingClass(db: Pick<DbClient, "query">, caseId: number, patientId: number): Promise<BillingClassification> {
   return (await orthoAdjustmentCoverage(db, caseId, patientId)).classification;
 }
 
-async function visitOrthoContext(patientId: number | null, visitId: number): Promise<VisitOrtho | null> {
+async function visitOrthoContext(
+  q: Pick<DbClient, "query">,
+  patientId: number | null,
+  visitId: number,
+): Promise<VisitOrtho | null> {
   if (!patientId) return null;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const open = await openOrthoCaseFor(patientId, today);
+  const open = await openOrthoCaseForWith(q, patientId, today);
   if (!open) return null;
   const last = open.adjustments[0] ?? null;
-  const visitAdjustmentId = await orthoAdjustmentForVisit(open.id, visitId);
+  const visitAdjustmentId = await orthoAdjustmentForVisitWith(q, open.id, visitId);
   return {
     caseId: open.id,
     appliance: open.appliance,
@@ -18752,14 +18738,14 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
        أو فكُّه لاحقًا كتابةَ تاريخها؛ وغير الموقّعة تُصنَّف بالاتفاق القائم ساعة التوقيع. */
     adjustmentBillingClass: await (async () => {
       if (visitAdjustmentId !== null) {
-        const { rows: [frozen] } = await getPool().query<{ billing_class: string | null; billing_decision: string | null }>(
+        const { rows: [frozen] } = await q.query<{ billing_class: string | null; billing_decision: string | null }>(
           `SELECT billing_class, billing_decision FROM ortho_adjustments WHERE id = $1`, [visitAdjustmentId]);
         if (frozen?.billing_class) {
           const decision = frozen.billing_decision === "billed" || frozen.billing_decision === "no_charge" ? frozen.billing_decision : null;
           return effectiveAdjustmentClass(frozen.billing_class as BillingClassification, decision);
         }
       }
-      return orthoAdjustmentBillingClass(getPool(), open.id, patientId);
+      return orthoAdjustmentBillingClass(q, open.id, patientId);
     })(),
     nextWeeks: last?.nextWeeks ?? 4,
   };
@@ -18774,7 +18760,7 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
  * يحتاجه: المريض الذي وصل من الباب لا من الموعد.
  */
 async function previewPatientId(
-  pool: DbPool,
+  pool: Pick<DbClient, "query">,
   visit: { patient_id: number | null; patient_phone?: string | null },
 ): Promise<number | null> {
   if (visit.patient_id) return visit.patient_id;
@@ -18792,7 +18778,7 @@ async function previewPatientId(
  * مصدرٌ واحد لتحذير الشاشة ولرفض التوقيع. القراءة بلا قفل: التوقيع يرفض قبل أن يكتب شيئًا.
  */
 async function unlinkedPlanSessionConflicts(
-  db: DbClient | DbPool,
+  db: Pick<DbClient, "query">,
   patientId: number | null,
   procedures: readonly ProcedureLine[],
 ): Promise<{ messages: string[]; amendedService: boolean }> {
@@ -18908,7 +18894,7 @@ async function unlinkedPlanSessionConflicts(
  *    المريض قبل المحاسب.
  */
 async function visitPlanContext(
-  pool: DbPool,
+  pool: Pick<DbClient, "query">,
   patientId: number | null,
   procedures: ProcedureLine[],
 ): Promise<{ matched: number; title: string | null; warning: string | null; amendedServiceConflict: boolean }> {
@@ -18967,7 +18953,7 @@ async function visitPlanContext(
  * من خطط المريض، و**سعر كل جلسة من الخطة** وفق قاعدة الفوترة — لا من ذاكرة أحد.
  */
 async function visitWorkflowContext(
-  pool: DbPool,
+  pool: Pick<DbClient, "query">,
   visitId: number,
   patientId: number | null,
   procedures: ProcedureLine[],
@@ -19055,7 +19041,10 @@ async function visitWorkflowContext(
   const latestDiagnosis = diagnosisRow
     ? { text: diagnosisRow.diagnosis, date: clinicDateString(diagnosisRow.arrived_at, CLINIC_TIME_ZONE) }
     : null;
-  const [cases, caseItems] = await Promise.all([listPatientCases(patientId), listCasePlanItems(patientId)]);
+  const [cases, caseItems] = await Promise.all([
+    listPatientCasesWith(pool, patientId),
+    listCasePlanItemsWith(pool, patientId),
+  ]);
   // Historical identity (including void) is not a next clinical step. Retain all saved open sessions.
   const { rows: historicalItems } = await pool.query<{ plan_item_id: number; open_session: boolean }>(
     `SELECT la.plan_item_id, EXISTS (SELECT 1 FROM treatment_sessions s
@@ -19200,7 +19189,11 @@ export async function saveClinicalNotes(input: {
 }
 
 /** (P1-6) رفض سعر إجراءٍ لا يملك صاحبه سلطته — رسالةٌ عربية جاهزة للمستخدم. */
-export class ProcedurePriceRejected extends Error {}
+export class ProcedurePriceRejected extends Error {
+  constructor(message?: string, readonly forbidden = false) {
+    super(message);
+  }
+}
 
 export interface ProcedurePriceOverride {
   serviceId: number;
@@ -19228,9 +19221,16 @@ async function lockVisitPatientFirst(client: DbClient, visitId: number): Promise
   return patientId;
 }
 
-export async function setVisitProcedures(input: {
+export type SetVisitProceduresInput = {
   visitId: number;
-  labCommand?: { expectedPatientId: number; requestKey: string; requestHash: string; retirements?: unknown; session: import("./auth").SessionPayload };
+  labCommand?: {
+    expectedPatientId: number;
+    requestKey: string;
+    requestHash: string;
+    retirements?: unknown;
+    session?: import("./auth").SessionPayload;
+    canonicalOperation?: import("./lab-work-intent-db").CanonicalLabOperation;
+  };
   procedures: VisitProcedureInput[];
   /** HTTP saves notes and procedures atomically; other callers retain procedure-only behavior. */
   clinicalNotes?: Omit<Parameters<typeof saveClinicalNotes>[0], "visitId">;
@@ -19239,6 +19239,7 @@ export async function setVisitProcedures(input: {
    * صلاحيته. المسارات الداخلية (رحلات التحقق) تمرّ بلا سلطة كما كانت.
    */
   authority?: { role: string; maxDiscountPercent: number };
+  canonicalPriceAuthority?: { capabilities: CanonicalPriceCapabilities; maxDiscountPercent: number };
   /** تُملأ بالانحرافات المقبولة عن الدليل — ليسجّلها المسار في التدقيق. */
   overrides?: ProcedurePriceOverride[];
   /**
@@ -19247,11 +19248,18 @@ export async function setVisitProcedures(input: {
    */
   billingCurrency?: Currency;
   rates?: ForeignRates;
-}): Promise<boolean> {
-  await ensureSchema();
-  const client = await getPool().connect();
+};
+
+export async function setVisitProceduresInTransaction(
+  client: DbClient,
+  input: SetVisitProceduresInput,
+): Promise<boolean> {
+  await client.query("SAVEPOINT visit_procedures_tx");
+  const abortSavepoint = async () => {
+    await client.query("ROLLBACK TO SAVEPOINT visit_procedures_tx");
+    await client.query("RELEASE SAVEPOINT visit_procedures_tx");
+  };
   try {
-    await client.query("BEGIN");
     const lockedPatientId = await lockVisitPatientFirst(client, input.visitId);
     const labApi: typeof import("./lab-work-intent-db") = await import("./lab-work-intent-db");
     if (input.labCommand && (!Number.isSafeInteger(input.labCommand.expectedPatientId) || input.labCommand.expectedPatientId <= 0
@@ -19261,7 +19269,9 @@ export async function setVisitProcedures(input: {
     const labSupported = await labApi.labWorkIntentSupported(client);
     const labContext = input.labCommand && lockedPatientId !== null ? {
       patientId: lockedPatientId, sourceKind: "visit" as const, sourceId: input.visitId,
-      visitId: input.visitId, session: input.labCommand.session,
+      visitId: input.visitId,
+      session: input.labCommand.session,
+      canonicalOperation: input.labCommand.canonicalOperation,
       requestKey: input.labCommand.requestKey, requestHash: input.labCommand.requestHash,
     } : null;
     if (input.labCommand && !labContext) throw new labApi.LabWorkIntentError("no_patient", "اربط الزيارة بمريض قبل حفظ مسوّدة المختبر.", 409);
@@ -19275,7 +19285,8 @@ export async function setVisitProcedures(input: {
       const priorLabCommand = await labApi.readLabWorkCommandInTransaction(client, labContext);
       if (priorLabCommand) {
         labApi.assertLabWorkCommandApplied(priorLabCommand);
-        await client.query("ROLLBACK"); return true;
+        await abortSavepoint();
+        return true;
       }
     }
     if (!input.labCommand) {
@@ -19293,11 +19304,11 @@ export async function setVisitProcedures(input: {
       `SELECT id, patient_id, billing_currency, planned_visit_id FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
-    if (!rows[0]) { await client.query("ROLLBACK"); return false; }
+    if (!rows[0]) { await abortSavepoint(); return false; }
     if (rows[0].patient_id !== null && rows[0].patient_id !== lockedPatientId) throw new ClinicalPlanConflict();
     await lockClinicalDoctors(client, input.procedures.map((line) => line.doctorId));
     if (input.clinicalNotes && !(await saveClinicalNotes({ ...input.clinicalNotes, visitId: input.visitId }, client))) {
-      await client.query("ROLLBACK");
+      await abortSavepoint();
       return false;
     }
     const visitCurrency: Currency = input.billingCurrency
@@ -19323,7 +19334,7 @@ export async function setVisitProcedures(input: {
       name: string; price_minor: string; price_configured: boolean;
       price_sar_minor: string | null; price_usd_minor: string | null;
     }>();
-    if (input.authority) {
+    if (input.authority || input.canonicalPriceAuthority) {
       const ids = [...new Set(input.procedures.filter((p) => !p.planItemId).map((p) => p.serviceId))];
       if (ids.length > 0) {
         const { rows: services } = await client.query<{
@@ -19357,7 +19368,7 @@ export async function setVisitProcedures(input: {
       let quantity = Math.max(1, Math.round(procedure.quantity));
       let unitPriceMinor = Math.max(0, Math.round(procedure.unitPriceMinor));
 
-      if (input.authority && !procedure.planItemId) {
+      if ((input.authority || input.canonicalPriceAuthority) && !procedure.planItemId) {
         const service = catalog.get(procedure.serviceId);
         if (!service) throw new ProcedurePriceRejected("خدمة غير موجودة في الدليل.");
         /* (DAY1) سعر الدليل بعملة الزيارة: سعرها الخاص، وإلا المحوَّل بسعر الصرف؛ وخدمةٌ
@@ -19371,19 +19382,36 @@ export async function setVisitProcedures(input: {
         const configured = priced.minor === null ? false
           : priced.source === "catalog" && visitCurrency !== CLINIC_BASE_CURRENCY ? true
             : service.price_configured;
-        const decision = decideProcedurePrice({
-          serviceName: service.name,
-          catalogMinor: priced.minor ?? 0,
-          priceConfigured: configured,
-          requestedMinor: unitPriceMinor,
-          role: input.authority.role,
-          reason: procedure.priceReason ?? null,
-          maxDiscountPercent: input.authority.maxDiscountPercent,
-        });
-        if (!decision.ok) throw new ProcedurePriceRejected(decision.message);
-        unitPriceMinor = decision.unitPriceMinor;
-        if (decision.override) {
-          input.overrides?.push({ serviceId: procedure.serviceId, serviceName: service.name, currency: visitCurrency, ...decision.override });
+        if (input.canonicalPriceAuthority) {
+          const decision = decideCanonicalProcedurePrice({
+            serviceName: service.name,
+            catalogMinor: priced.minor ?? 0,
+            priceConfigured: configured,
+            requestedMinor: unitPriceMinor,
+            capabilities: input.canonicalPriceAuthority.capabilities,
+            maxDiscountPercent: input.canonicalPriceAuthority.maxDiscountPercent,
+            reason: procedure.priceReason ?? null,
+          });
+          if (!decision.ok) throw new ProcedurePriceRejected(decision.message, decision.forbidden === true);
+          unitPriceMinor = decision.unitPriceMinor;
+          if (decision.override) {
+            input.overrides?.push({ serviceId: procedure.serviceId, serviceName: service.name, currency: visitCurrency, ...decision.override });
+          }
+        } else if (input.authority) {
+          const decision = decideProcedurePrice({
+            serviceName: service.name,
+            catalogMinor: priced.minor ?? 0,
+            priceConfigured: configured,
+            requestedMinor: unitPriceMinor,
+            role: input.authority.role,
+            reason: procedure.priceReason ?? null,
+            maxDiscountPercent: input.authority.maxDiscountPercent,
+          });
+          if (!decision.ok) throw new ProcedurePriceRejected(decision.message);
+          unitPriceMinor = decision.unitPriceMinor;
+          if (decision.override) {
+            input.overrides?.push({ serviceId: procedure.serviceId, serviceName: service.name, currency: visitCurrency, ...decision.override });
+          }
         }
       }
 
@@ -19438,8 +19466,24 @@ export async function setVisitProcedures(input: {
       );
     }
     if (labContext && labPreparation) await labApi.recordVisitLabWorkCommandInTransaction(client, labContext, labPreparation.revisions);
-    await client.query("COMMIT");
+    await client.query("RELEASE SAVEPOINT visit_procedures_tx");
     return true;
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT visit_procedures_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT visit_procedures_tx").catch(() => {});
+    throw error;
+  }
+}
+
+export async function setVisitProcedures(input: SetVisitProceduresInput): Promise<boolean> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const ok = await setVisitProceduresInTransaction(client, input);
+    if (ok) await client.query("COMMIT");
+    else await client.query("ROLLBACK");
+    return ok;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -19841,7 +19885,7 @@ async function assertLegacyCaseSignable(client: DbClient, patientId: number, cli
   }
 }
 
-export async function signClinicalVisit(input: {
+export type SignClinicalVisitInput = {
   visitId: number;
   baseCurrency: Currency;
   signedBy: string;
@@ -19853,10 +19897,13 @@ export async function signClinicalVisit(input: {
   orthoSession?: OrthoSessionDraft | null;
   signerRole?: string | null;
   session?: import("./auth").SessionPayload;
+  canonicalOperation?: import("./lab-work-intent-db").CanonicalLabOperation;
   labSignVersion?: string | null;
   /** (P1-C) قرار الشدّة خارج العقد عند التوقيع: «بلا رسوم» بسببٍ مكتوب. والفوترة تكون بسطر خدمة تقويم. */
   outsideContractDecision?: { decision: "no_charge"; reason: string } | null;
-}): Promise<{
+};
+
+export type SignClinicalVisitResult = {
   visit: ClinicalVisit | null;
   invoiceId: number | null;
   /* (TD-05 owner review — Finding 1) عملة الفاتورة التي وُلدت فعلًا — الشبّاك
@@ -19890,15 +19937,17 @@ export async function signClinicalVisit(input: {
     | "ortho_case_invalid" | "ortho_adjustments_ambiguous" | "plan_session_unlinked" | "amended_plan_session_unlinked" | "invalid_decision_reason" | null;
   /** (P1-D) إجراءاتٌ حرّة تطابق بنود خطةٍ متعددة الجلسات — مع جلستها المنتظرة. */
   sessionConflicts?: string[];
-}> {
-  const existing = await getClinicalVisit(input.visitId);
+};
+
+export async function signClinicalVisitInTransaction(
+  client: DbClient,
+  input: SignClinicalVisitInput,
+): Promise<SignClinicalVisitResult> {
+  const existing = await getClinicalVisitWith(client, input.visitId);
   const emptyResult = (
-    reason:
-      | "not_found" | "already_signed" | "empty" | "no_patient"
-      | "mixed_plan_currencies" | "no_treating_doctor" | "unmet_dependency" | "invalid_override_reason"
-      | "ortho_case_invalid" | "ortho_adjustments_ambiguous" | "plan_session_unlinked" | "amended_plan_session_unlinked" | "invalid_decision_reason" | null,
+    reason: SignClinicalVisitResult["reason"],
     extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[]; sessionConflicts?: string[] },
-  ) => ({
+  ): SignClinicalVisitResult => ({
     visit: extra?.visit ?? null, invoiceId: extra?.invoiceId ?? null,
     invoiceCurrency: input.baseCurrency,
     chartUpdates: 0, planItemsDone: 0, duesMinor: 0, sessionsCompleted: 0,
@@ -19917,7 +19966,7 @@ export async function signClinicalVisit(input: {
   const hasOrthoSession = Boolean(input.orthoSession) || existing.ortho?.visitAdjustmentId != null;
   /* (ENDO-3) سجلّ علاج الجذور المهيكل لهذه الزيارة عملٌ سريريٌّ يكفي للتوقيع كذلك. */
   const { hasMeaningfulEndoVisit } = await import("./endodontics-db");
-  const hasEndoRecord = await hasMeaningfulEndoVisit(getPool(), input.visitId);
+  const hasEndoRecord = await hasMeaningfulEndoVisit(client, input.visitId);
   const check = canSign({
     status: existing.status,
     procedures: existing.procedures,
@@ -19928,9 +19977,12 @@ export async function signClinicalVisit(input: {
   });
   if (!check.ok) return emptyResult("empty", { visit: existing });
 
-  const client = await getPool().connect();
+  await client.query("SAVEPOINT visit_sign_tx");
+  const abortSavepoint = async () => {
+    await client.query("ROLLBACK TO SAVEPOINT visit_sign_tx");
+    await client.query("RELEASE SAVEPOINT visit_sign_tx");
+  };
   try {
-    await client.query("BEGIN");
     const lockedPatientId = await lockVisitPatientFirst(client, input.visitId);
 
     const { rows: locked } = await client.query<{
@@ -19945,7 +19997,7 @@ export async function signClinicalVisit(input: {
       [input.visitId],
     );
     if (!locked[0]) {
-      await client.query("ROLLBACK");
+      await abortSavepoint();
       return emptyResult("already_signed", { visit: existing });
     }
 
@@ -20009,7 +20061,7 @@ export async function signClinicalVisit(input: {
       diagnosis: locked[0].diagnosis, treatmentDone: locked[0].treatment_done,
       hasOrthoSession: Boolean(input.orthoSession) || visitAdjustments.length > 0,
       hasEndoRecord: hasLockedEndoRecord }).ok) {
-      await client.query("ROLLBACK");
+      await abortSavepoint();
       return emptyResult("empty", { visit: existing });
     }
     // Validate every explicit performer under the visit lock before side effects.
@@ -20055,7 +20107,7 @@ export async function signClinicalVisit(input: {
         [line.id, defaultDoctorId]);
     }
     if (existing.procedures.some((line) => line.doctorId === null && !includedLineIds.has(line.id) && line.totalMinor > 0)) {
-      await client.query("ROLLBACK");
+      await abortSavepoint();
       return emptyResult("no_treating_doctor", { visit: existing });
     }
 
@@ -20075,7 +20127,7 @@ export async function signClinicalVisit(input: {
         source: "visit_sign",
       });
       if (!written.ok) {
-        await client.query("ROLLBACK");
+        await abortSavepoint();
         return emptyResult("ortho_case_invalid", { visit: existing });
       }
       orthoAdjustmentId = written.id;
@@ -20090,7 +20142,7 @@ export async function signClinicalVisit(input: {
       const { resolveExplicitFollowupCoverage } = await import("./ortho-followup-coverage-db");
       for (const adjustment of adjustmentRows) {
         if ((await resolveExplicitFollowupCoverage(client, adjustment.case_id, patientId, true)).state !== "absent") {
-          await client.query("ROLLBACK");
+          await abortSavepoint();
           return emptyResult("ortho_adjustments_ambiguous", { visit: existing });
         }
       }
@@ -20105,7 +20157,7 @@ export async function signClinicalVisit(input: {
     const noChargeReason = input.outsideContractDecision?.decision === "no_charge"
       ? input.outsideContractDecision.reason.trim() : null;
     if (noChargeReason !== null && (noChargeReason.length < 3 || noChargeReason.length > 300)) {
-      await client.query("ROLLBACK");
+      await abortSavepoint();
       return emptyResult("invalid_decision_reason", { visit: existing });
     }
 
@@ -20122,7 +20174,7 @@ export async function signClinicalVisit(input: {
     /* (P1-D) علاج العصب بندٌ واحد بثلاث جلسات — لا يُفوتَر ثلاث مرات بإجراءٍ حرّ في كل زيارة. */
     const sessionConflicts = await unlinkedPlanSessionConflicts(client, patientId, existing.procedures);
     if (sessionConflicts.messages.length > 0) {
-      await client.query("ROLLBACK");
+      await abortSavepoint();
       return emptyResult(sessionConflicts.amendedService ? "amended_plan_session_unlinked" : "plan_session_unlinked",
         { visit: existing, sessionConflicts: sessionConflicts.messages });
     }
@@ -20218,11 +20270,11 @@ export async function signClinicalVisit(input: {
       });
       const overrideReason = input.dependencyOverrideReason?.trim() ?? "";
       if (overrideReason.length < 3) {
-        await client.query("ROLLBACK");
+        await abortSavepoint();
         return emptyResult("unmet_dependency", { visit: existing, unmetRequirements: lines });
       }
       if (overrideReason.length > 300) {
-        await client.query("ROLLBACK");
+        await abortSavepoint();
         return emptyResult("invalid_override_reason", { visit: existing });
       }
       await insertAuditRow(client, {
@@ -20290,11 +20342,11 @@ export async function signClinicalVisit(input: {
         if (planCurrency === visitCurrency || linkedCount === billable.length) {
           invoiceCurrency = planCurrency;
         } else {
-          await client.query("ROLLBACK");
+          await abortSavepoint();
           return emptyResult("mixed_plan_currencies", { visit: existing });
         }
       } else if (distinct.length > 1) {
-        await client.query("ROLLBACK");
+        await abortSavepoint();
         return emptyResult("mixed_plan_currencies", { visit: existing });
       }
       const { rows: invoiceRows } = await client.query<{ id: number }>(
@@ -20371,10 +20423,13 @@ export async function signClinicalVisit(input: {
         UNION ALL SELECT 1 FROM lab_prescription_source_memberships WHERE plan_item_id=ANY($2::int[]) LIMIT 1`,
         [input.visitId,existing.procedures.map(line=>line.planItemId).filter(Boolean)]);
       if (known.rows.length) {
-        if (!input.session) throw new labApi.LabWorkIntentError("unauthorized","يتطلب توقيع عمل المختبر جلسة سريرية موثقة.",403);
+        if (!input.session && !input.canonicalOperation) {
+          throw new labApi.LabWorkIntentError("unauthorized","يتطلب توقيع عمل المختبر جلسة سريرية موثقة.",403);
+        }
         const currentLab = await labApi.readLabWorkForVisitProcedures(client,patientId,input.visitId);
         explicitLab = await labApi.materializeVisitLabWorkInTransaction(client,{
-          patientId,visitId:input.visitId,invoiceId,session:input.session,
+          patientId,visitId:input.visitId,invoiceId,
+          session:input.session,canonicalOperation:input.canonicalOperation,
           rows:existing.procedures.map(line=>({procedureId:line.id,planItemId:line.planItemId,
             serviceId:line.serviceId,toothCode:line.toothCode,quantity:line.quantity,doctorId:line.doctorId,
             category:line.category,labWork:currentLab.get(line.id)?.labWork})),
@@ -20450,14 +20505,31 @@ export async function signClinicalVisit(input: {
       followupProof ? [input.visitId, input.signedBy, linkedInvoiceId, JSON.stringify(followupProof)] : [input.visitId, input.signedBy, linkedInvoiceId],
     );
 
-    await client.query("COMMIT");
+    await client.query("RELEASE SAVEPOINT visit_sign_tx");
+    const signedVisit = await getClinicalVisitWith(client, input.visitId);
     return {
-      visit: await getClinicalVisit(input.visitId),
+      visit: signedVisit,
       invoiceId, invoiceCurrency, chartUpdates, planItemsDone,
       duesMinor, sessionsCompleted: sessionOutcome.sessionsCompleted,
       nextPlannedVisit, labOrdersCreated, materialsDeducted,
       orthoAdjustmentId, orthoBillingClass, orthoBillingDecision, reason: null,
     };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT visit_sign_tx").catch(() => {});
+    await client.query("RELEASE SAVEPOINT visit_sign_tx").catch(() => {});
+    throw error;
+  }
+}
+
+export async function signClinicalVisit(input: SignClinicalVisitInput): Promise<SignClinicalVisitResult> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await signClinicalVisitInTransaction(client, input);
+    if (result.reason === null) await client.query("COMMIT");
+    else await client.query("ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -20945,12 +21017,12 @@ async function deductServiceMaterials(input: {
 }
 
 /** ملحق على زيارة موقَّعة — يُضاف ولا يمحو ما قبله. */
-export async function addVisitAddendum(input: {
-  visitId: number; text: string; author: string;
-}): Promise<boolean> {
-  await ensureSchema();
+export async function addVisitAddendumInTransaction(
+  client: Pick<DbClient, "query">,
+  input: { visitId: number; text: string; author: string },
+): Promise<boolean> {
   const entry = formatAddendum({ text: input.text, author: input.author, at: new Date().toISOString() });
-  const { rowCount } = await getPool().query(
+  const { rowCount } = await client.query(
     `UPDATE visits
         SET addendum = CASE WHEN addendum IS NULL OR addendum = '' THEN $2::text
                             ELSE addendum || E'\n' || $2::text END
@@ -20958,6 +21030,13 @@ export async function addVisitAddendum(input: {
     [input.visitId, entry],
   );
   return (rowCount ?? 0) > 0;
+}
+
+export async function addVisitAddendum(input: {
+  visitId: number; text: string; author: string;
+}): Promise<boolean> {
+  await ensureSchema();
+  return addVisitAddendumInTransaction(getPool(), input);
 }
 
 // ─── مخطط الأسنان ────────────────────────────────────────────────────────────
@@ -27448,12 +27527,21 @@ export async function createInventoryMovementInTransaction(client: DbClient, inp
 export const AUTO_MATERIAL_REASON_PREFIX = "خصم تلقائي — ";
 
 /** (P4) مريض الزيارة — لربط حركة مادة بزيارةٍ تخص المريض نفسه لا غيره. */
+export async function visitPatientOfWith(
+  q: Pick<DbClient, "query">,
+  visitId: number,
+): Promise<{ patientId: number | null; doctorId: number | null } | null> {
+  const { rows } = await q.query<{ patient_id: number | null; doctor_id: number | null }>(
+    `SELECT patient_id, doctor_id FROM visits WHERE id = $1`,
+    [visitId],
+  );
+  return rows[0] ? { patientId: rows[0].patient_id, doctorId: rows[0].doctor_id } : null;
+}
+
 export async function visitPatientOf(visitId: number): Promise<{ patientId: number | null } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number | null }>(
-    `SELECT patient_id FROM visits WHERE id = $1`, [visitId],
-  );
-  return rows[0] ? { patientId: rows[0].patient_id } : null;
+  const row = await visitPatientOfWith(getPool(), visitId);
+  return row ? { patientId: row.patientId } : null;
 }
 
 export interface VisitMaterialLine {
@@ -27469,10 +27557,27 @@ export interface VisitMaterialLine {
   createdAt: string;
 }
 
+export interface PatientMaterialMovementLine {
+  id: number;
+  itemId: number;
+  itemName: string;
+  category: string;
+  unit: string;
+  kind: string;
+  qty: number;
+  expiryDate: string | null;
+  reason: string | null;
+  visitId: number | null;
+  createdBy: string;
+  createdAt: string;
+}
+
 /** (P4) المواد المصروفة على زيارةٍ بعينها — التلقائية واليدوية من سجل الحركات نفسه. */
-export async function visitMaterialMovements(visitId: number): Promise<VisitMaterialLine[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{
+export async function visitMaterialMovementsWith(
+  q: Pick<DbClient, "query">,
+  visitId: number,
+): Promise<VisitMaterialLine[]> {
+  const { rows } = await q.query<{
     id: number; item_id: number; item_name: string; unit: string; qty: string;
     reason: string | null; created_by: string; created_at: Date;
   }>(
@@ -27492,6 +27597,54 @@ export async function visitMaterialMovements(visitId: number): Promise<VisitMate
     reason: row.reason,
     createdBy: row.created_by,
     createdAt: row.created_at.toISOString(),
+  }));
+}
+
+export async function visitMaterialMovements(visitId: number): Promise<VisitMaterialLine[]> {
+  await ensureSchema();
+  return visitMaterialMovementsWith(getPool(), visitId);
+}
+
+export async function patientMaterialMovementsWith(
+  q: Pick<DbClient, "query">,
+  patientId: number,
+): Promise<PatientMaterialMovementLine[]> {
+  const { rows } = await q.query<{
+    id: number;
+    item_id: number;
+    kind: string;
+    qty: string;
+    expiry_date: Date | string | null;
+    reason: string | null;
+    visit_id: number | null;
+    created_by: string;
+    created_at: Date;
+    item_name: string;
+    unit: string;
+    category: string;
+  }>(
+    `SELECT m.id, m.item_id, m.kind, m.qty, m.expiry_date, m.reason, m.visit_id, m.created_by, m.created_at,
+            i.name AS item_name, i.unit, i.category
+       FROM inventory_movements m
+       JOIN inventory_items i ON i.id = m.item_id
+      WHERE m.patient_id = $1 OR m.visit_id IN (SELECT id FROM visits WHERE patient_id = $1)
+      ORDER BY m.id DESC
+      LIMIT 100`,
+    [patientId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    itemId: r.item_id,
+    itemName: r.item_name,
+    category: r.category,
+    unit: r.unit,
+    kind: r.kind,
+    qty: Number(r.qty),
+    expiryDate: r.expiry_date ? String(r.expiry_date).slice(0, 10) : null,
+    reason: r.reason,
+    visitId: r.visit_id,
+    createdBy: r.created_by,
+    createdAt: r.created_at.toISOString(),
   }));
 }
 
@@ -29089,16 +29242,23 @@ async function seedAppointmentServicesOnPool(): Promise<number> {
   return inserted;
 }
 
-export async function listAppointmentServices(
+export async function listAppointmentServicesWith(
+  q: Pick<DbClient, "query">,
   options: { includeInactive?: boolean } = {},
 ): Promise<AppointmentService[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<AppointmentServiceRow>(
+  const { rows } = await q.query<AppointmentServiceRow>(
     `${SERVICE_SELECT}
       ${options.includeInactive ? "" : "WHERE is_active = TRUE"}
       ORDER BY sort_order, id`,
   );
   return rows.map(toAppointmentService);
+}
+
+export async function listAppointmentServices(
+  options: { includeInactive?: boolean } = {},
+): Promise<AppointmentService[]> {
+  await ensureSchema();
+  return listAppointmentServicesWith(getPool(), options);
 }
 
 export async function getAppointmentService(id: number): Promise<AppointmentService | null> {
@@ -32134,12 +32294,20 @@ export async function recordOrthoBaseline(input: BaselineDraft & {
 }
 
 /** شدّة التقويم المرتبطة بزيارة (إن وُجدت) — لشاشة الزيارة: «سُجّلت شدّة هذه الزيارة». */
-async function orthoAdjustmentForVisit(caseId: number, visitId: number): Promise<number | null> {
-  const { rows } = await getPool().query<{ id: number }>(
+async function orthoAdjustmentForVisitWith(
+  q: Pick<DbClient, "query">,
+  caseId: number,
+  visitId: number,
+): Promise<number | null> {
+  const { rows } = await q.query<{ id: number }>(
     `SELECT id FROM ortho_adjustments WHERE case_id = $1 AND visit_id = $2 ORDER BY id LIMIT 1`,
     [caseId, visitId],
   );
   return rows[0]?.id ?? null;
+}
+
+async function orthoAdjustmentForVisit(caseId: number, visitId: number): Promise<number | null> {
+  return orthoAdjustmentForVisitWith(getPool(), caseId, visitId);
 }
 
 export interface OrthoDuplicateAdjustmentRow {
@@ -32758,29 +32926,36 @@ export type DeferPaymentResult =
  * لا سند ولا فاتورة ولا قيد: الرصيد يبقى كما هو على المريض، والزيارة (المُنهاة بالتوقيع) تبقى
  * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
  */
-export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
-  return inVisitTransaction(async (client) => {
-    const { rows } = await client.query<ReadinessFactsRow>(
-      `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
-      [CLINIC_TIME_ZONE, id],
-    );
-    const row = rows[0];
-    if (!row) return { ok: false, reason: "not_found" };
-    if (!row.signed_at) return { ok: false, reason: "not_signed" };
-    if (row.deferred) return { ok: true, already: true, invoiceId: row.invoice_id };
-    await insertAuditRow(client, {
-      action: "visit.payment_deferred", entity: "visit", entityId: id, entityLabel: row.patient_name,
-      details: {
-        الفاتورة: row.invoice_id,
-        "صافي الفاتورة": row.invoice_net === null ? null : toMinor(row.invoice_net),
-        العملة: row.invoice_currency,
-        /* (P0-G) سبب التأجيل كما كتبه الاستقبال — يظهر في التدقيق وتقرير جريان الكرسي. */
-        ...(reason ? { السبب: reason } : {}),
-      },
-      actor: actor.actor, actorRole: actor.actorRole ?? null,
-    });
-    return { ok: true, already: false, invoiceId: row.invoice_id };
+export async function deferVisitPaymentInTransaction(
+  client: DbClient,
+  id: number,
+  actor: VisitActor,
+  reason: string | null = null,
+): Promise<DeferPaymentResult> {
+  const { rows } = await client.query<ReadinessFactsRow>(
+    `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
+    [CLINIC_TIME_ZONE, id],
+  );
+  const row = rows[0];
+  if (!row) return { ok: false, reason: "not_found" };
+  if (!row.signed_at) return { ok: false, reason: "not_signed" };
+  if (row.deferred) return { ok: true, already: true, invoiceId: row.invoice_id };
+  await insertAuditRow(client, {
+    action: "visit.payment_deferred", entity: "visit", entityId: id, entityLabel: row.patient_name,
+    details: {
+      الفاتورة: row.invoice_id,
+      "صافي الفاتورة": row.invoice_net === null ? null : toMinor(row.invoice_net),
+      العملة: row.invoice_currency,
+      /* (P0-G) سبب التأجيل كما كتبه الاستقبال — يظهر في التدقيق وتقرير جريان الكرسي. */
+      ...(reason ? { السبب: reason } : {}),
+    },
+    actor: actor.actor, actorRole: actor.actorRole ?? null,
   });
+  return { ok: true, already: false, invoiceId: row.invoice_id };
+}
+
+export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
+  return inVisitTransaction((client) => deferVisitPaymentInTransaction(client, id, actor, reason));
 }
 
 /** سطر عملٍ في ملخّص المغادرة. */
@@ -33007,7 +33182,11 @@ async function visitWalkoutInSnapshot(pool: DbClient, visitId: number): Promise<
  * الإحالة التي جاءت بها الزيارة: موعدها المربوط بالإحالة أولًا (حجز الإحالة)، وإلا إحالةٌ داخلية
  * مفتوحة للمريض في حالة الزيارة نفسها (`visits.case_id`). قراءةٌ فقط — لا تغيّر حالةً ولا مالًا.
  */
-async function visitReferralContext(pool: DbPool, visitId: number, patientId: number): Promise<VisitReferral | null> {
+async function visitReferralContext(
+  pool: Pick<DbClient, "query">,
+  visitId: number,
+  patientId: number,
+): Promise<VisitReferral | null> {
   const { rows } = await pool.query<{
     id: number; doctor_name: string | null; reason: string; teeth: string | null; workflow_state: string;
     case_title: string | null; blocks_title: string | null;

@@ -5,6 +5,13 @@ import { visitMaterialMovements, visitPatientOf } from "@/lib/db";
 import { listVisitMaterialReturns, returnVisitMaterial } from "@/lib/inventory-visit-returns";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalEndoVisitFailure,
+  readCanonicalVisitMaterials,
+  recordCanonicalVisitMaterialReturn,
+} from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +22,18 @@ export const dynamic = "force-dynamic";
  * بحركة عكسية موثّقة (`kind='in', is_return=true`) — لا جدول موادٍ ثانٍ.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const visitId = Number((await context.params).id);
+    try {
+      return NextResponse.json(await readCanonicalVisitMaterials(selected.handle, visitId), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر تحميل مواد الزيارة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   const visitId = Number((await context.params).id);
@@ -41,6 +60,29 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const visitId = Number((await context.params).id);
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_body", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(
+        await recordCanonicalVisitMaterialReturn(selected.handle, visitId, canonicalBody),
+        { status: 201, headers: NO_STORE },
+      );
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر تسجيل ردّ المادة للمخزن.");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") {

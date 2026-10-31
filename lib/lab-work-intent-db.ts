@@ -1,13 +1,24 @@
 import { createHash } from "node:crypto";
-import type { DbClient } from "./db";
+import { doctorOwnsPatient, type DbClient } from "./db";
 import type { SessionPayload } from "./auth";
 import { revalidateSessionInTransaction } from "./session";
 import { canAccessPatient } from "./patient-access";
 import { PENDING_LAB_NAME } from "./lab";
 import { validateLabPrescription, type LabPrescriptionInput } from "./lab-prescription-input";
 import { normalizeLabWorkGroups, parseLabWorkDraft, type LabWorkCommand, type LabWorkDraft,  type LabWorkMember, type LabWorkSourceRow } from "./lab-work-intent-contract";
+import {
+  staffOperationCapabilities,
+  staffOperationIdentity,
+  staffOperationPatientScope,
+  type StaffOperationHandle,
+  type StaffRuntimeAction,
+} from "./staff-operation-runtime";
 
 type QueryDb = Pick<DbClient,"query">;
+export interface CanonicalLabOperation {
+  readonly handle: StaffOperationHandle;
+  readonly action: StaffRuntimeAction;
+}
 export class LabWorkIntentError extends Error {
   readonly status:number;
   constructor(readonly code:string,messageOrStatus:string|number=409,status=409){
@@ -25,7 +36,7 @@ export function assertLabWorkCommandApplied(result:LabWorkCommandResult):asserts
   if(result.outcome==="rejected")throw new LabWorkIntentError(result.code,"عملية المختبر مرفوضة نهائيًا؛ استخدم طلبًا جديدًا بعد التصحيح.",409);
 }
 export interface LabWorkCommandContext {
-  patientId:number;sourceKind:"visit"|"invoice";sourceId:number;session:SessionPayload;requestKey:string;requestHash:string;
+  patientId:number;sourceKind:"visit"|"invoice";sourceId:number;session?:SessionPayload;canonicalOperation?:CanonicalLabOperation;requestKey:string;requestHash:string;
 }
 interface IntentRow {id:string;patient_id:number;origin_kind:"visit"|"invoice";origin_visit_id:number|null;origin_invoice_id:number|null;group_kind:"single"|"bridge";revision:number;state:"draft"|"materialized"|"cancelled";prescription:LabPrescriptionInput;initial_order_id:number|null;}
 interface MemberRow {id:string;intent_id:string;patient_id:number;service_id:number;source_category:string;tooth_code:number;quantity:number;plan_item_id:number|null;doctor_id:number|null;created_revision:number;retired_revision:number|null;}
@@ -40,11 +51,21 @@ export async function labWorkIntentSupported(db:QueryDb):Promise<boolean>{
   const marker=await db.query<{version:number}>("SELECT version FROM lab_work_intent_schema WHERE singleton=TRUE");
   return marker.rows.length===1&&marker.rows[0].version===1;
 }
-async function authorize(client:DbClient,session:SessionPayload,patientId:number){
-  const active=await revalidateSessionInTransaction(session,client);
+async function authorize(client:DbClient,auth:{session?:SessionPayload;canonicalOperation?:CanonicalLabOperation},patientId:number):Promise<{userId:number;username:string;role:string}>{
+  if(auth.canonicalOperation){
+    const identity=await staffOperationIdentity(client,auth.canonicalOperation.handle,auth.canonicalOperation.action);
+    const capabilities=await staffOperationCapabilities(client,auth.canonicalOperation.handle,auth.canonicalOperation.action,["clinical.lab.order"] as const);
+    if(!positive(identity.userId)||!capabilities.has("clinical.lab.order"))return fail("unauthorized",403);
+    const scope=await staffOperationPatientScope(client,auth.canonicalOperation.handle,auth.canonicalOperation.action);
+    if(scope.kind==="none")return fail("unauthorized",403);
+    if(scope.kind==="own"&&!await doctorOwnsPatient(scope.clinicianPartyId,patientId,client,"nowait"))return fail("unauthorized",403);
+    return {userId:identity.userId,username:identity.username,role:identity.role};
+  }
+  if(!auth.session)return fail("unauthorized",403);
+  const active=await revalidateSessionInTransaction(auth.session,client);
   if(!active||!["admin","doctor"].includes(active.role)||!positive(active.userId)
     ||!await canAccessPatient(active,patientId,undefined,client,"nowait"))return fail("unauthorized",403);
-  return active;
+  return {userId:active.userId,username:active.username,role:active.role};
 }
 function checkContext(input:LabWorkCommandContext){
   if(!positive(input.patientId)||!positive(input.sourceId)||!/[\s\S]/.test(input.requestHash)
@@ -53,7 +74,7 @@ function checkContext(input:LabWorkCommandContext){
 const hash=(raw:string)=>createHash("sha256").update(raw).digest("hex");
 /** Caller owns patient/source lock. Same actor/key serialized before stale revision checks. */
 export async function readLabWorkCommandInTransaction(client:DbClient,input:LabWorkCommandContext):Promise<LabWorkCommandResult|null>{
-  checkContext(input);const active=await authorize(client,input.session,input.patientId);
+  checkContext(input);const active=await authorize(client,input,input.patientId);
   const lock=await client.query<{locked:boolean}>("SELECT pg_try_advisory_xact_lock(hashtext($1),hashtext($2)) AS locked",[`lab-work:${active.userId}`,input.requestKey]);
   if(lock.rows[0]?.locked!==true)fail("command_busy");
   const {rows}=await client.query<{patient_id:number;source_kind:string;source_id:number;request_hash:string;result:{outcome?:string;code?:string;labWork?:LabWorkReceipt[]}}>(
@@ -68,7 +89,7 @@ export async function readLabWorkCommandInTransaction(client:DbClient,input:LabW
   return {outcome:"applied",labWork:saved.result.labWork};
 }
 export async function recordVisitLabWorkCommandInTransaction(client:DbClient,input:LabWorkCommandContext,revisions:LabWorkReceipt[]):Promise<void>{
-  const active=await authorize(client,input.session,input.patientId);checkContext(input);
+  const active=await authorize(client,input,input.patientId);checkContext(input);
   await client.query(`INSERT INTO lab_work_commands(actor_user_id,request_key,patient_id,source_kind,source_id,request_hash,result)
     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,[active.userId,input.requestKey,input.patientId,input.sourceKind,input.sourceId,hash(input.requestHash),JSON.stringify({outcome:"applied",labWork:revisions})]);
 }
@@ -77,10 +98,11 @@ export async function recordRejectedLabWorkCommandInTransaction(client:DbClient,
   if(! /^[a-z][a-z0-9_]{0,95}$/.test(code))fail("invalid_rejection_code",400);
   await requireCapability(client);
   const prior=await readLabWorkCommandInTransaction(client,input);if(prior)return prior;
+  const active=await authorize(client,input,input.patientId);
   await validateOrigin(client,input.patientId,input.sourceKind,input.sourceId);
   const result:LabWorkCommandResult={outcome:"rejected",code};
   await client.query(`INSERT INTO lab_work_commands(actor_user_id,request_key,patient_id,source_kind,source_id,request_hash,result)
-    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,[input.session.userId,input.requestKey,input.patientId,input.sourceKind,input.sourceId,hash(input.requestHash),JSON.stringify(result)]);
+    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,[active.userId,input.requestKey,input.patientId,input.sourceKind,input.sourceId,hash(input.requestHash),JSON.stringify(result)]);
   return result;
 }
 async function requireCapability(client:DbClient){if(!await labWorkIntentSupported(client))fail("schema_unavailable",503);}
@@ -119,7 +141,7 @@ async function validateOrigin(client:QueryDb,patientId:number,kind:"visit"|"invo
 function receipt(intent:IntentRow,members:MemberRow[]):LabWorkReceipt{return {intentId:intent.id,orderId:intent.initial_order_id,revision:intent.revision,memberIds:members.filter(m=>m.retired_revision===null).map(m=>m.id).sort()};}
 
 async function prepareGroups(client:DbClient,input:LabWorkCommandContext,command:LabWorkCommand){
-  const active=await authorize(client,input.session,input.patientId);
+  const active=await authorize(client,input,input.patientId);
   await validateOrigin(client,input.patientId,input.sourceKind,input.sourceId);
   await lockIntents(client,[...command.groups.map(g=>g.intentId),...command.retirements.map(r=>r.intentId)]);
   const results:LabWorkReceipt[]=[];
@@ -204,7 +226,7 @@ async function linkSource(client:DbClient,input:{patientId:number;intentId:strin
   if(old){if(old.intent_id!==input.intentId||old.member_id!==input.memberId||old.patient_id!==input.patientId)fail("competing_prescription");return;}
   await client.query(`INSERT INTO lab_prescription_source_memberships(intent_id,member_id,patient_id,${column},linked_by_user_id) VALUES($1,$2,$3,$4,$5)`,[input.intentId,input.memberId,input.patientId,input.sourceId,input.actorId]);
 }
-async function ensureOrder(client:DbClient,intent:IntentRow,actor:SessionPayload,actualDoctors:(number|null)[]){
+async function ensureOrder(client:DbClient,intent:IntentRow,actor:{username:string;role:string},actualDoctors:(number|null)[]){
   if(intent.state==="cancelled")fail("cancelled_intent");
   try{await client.query("LOCK TABLE lab_orders IN ROW EXCLUSIVE MODE NOWAIT");}catch(error){if((error as {code?:string}).code==="55P03")fail("clinical_boundary_busy");throw error;}
   if(intent.initial_order_id!==null){
@@ -231,7 +253,7 @@ async function ensureOrder(client:DbClient,intent:IntentRow,actor:SessionPayload
   return {orderId:order.id,created:true,intent:updated};
 }
 
-export async function materializeInvoiceLabWorkInTransaction(client:DbClient,input:{patientId:number;invoiceId:number;visitId?:number|null;session:SessionPayload;requestKey:string;requestHash:string;rows:readonly InvoiceLabSourceRow[];retirements?:unknown}):Promise<MaterializedLabWorkReceipt[]>{
+export async function materializeInvoiceLabWorkInTransaction(client:DbClient,input:{patientId:number;invoiceId:number;visitId?:number|null;session?:SessionPayload;canonicalOperation?:CanonicalLabOperation;requestKey:string;requestHash:string;rows:readonly InvoiceLabSourceRow[];retirements?:unknown}):Promise<MaterializedLabWorkReceipt[]>{
   const hasPayload=input.rows.some(row=>row.labWork!==undefined&&row.labWork!==null)||(Array.isArray(input.retirements)&&input.retirements.length>0);
   const supported=await labWorkIntentSupported(client);
   if(!supported){if(hasPayload)fail("schema_unavailable",503);return [];}
@@ -249,7 +271,7 @@ export async function materializeInvoiceLabWorkInTransaction(client:DbClient,inp
     if(alias&&(!draft||draft.intentId!==alias.intent_id||draft.memberId!==alias.member_id))fail("stripped_plan_lab_identity");
   }
   const command=normalizeLabWorkGroups(input.rows,input.retirements);
-  await prepareGroups(client,context,command);const actor=await authorize(client,input.session,input.patientId);
+  await prepareGroups(client,context,command);const actor=await authorize(client,input,input.patientId);
   const results:MaterializedLabWorkReceipt[]=[];
   for(const group of command.groups){
     let intent=(await getIntent(client,group.intentId))!;
@@ -265,8 +287,8 @@ export async function materializeInvoiceLabWorkInTransaction(client:DbClient,inp
   await recordVisitLabWorkCommandInTransaction(client,context,results);return results;
 }
 
-export async function materializeVisitLabWorkInTransaction(client:DbClient,input:{patientId:number;visitId:number;invoiceId:number|null;session:SessionPayload;rows:readonly VisitLabSourceRow[]}){
-  await requireCapability(client);const actor=await authorize(client,input.session,input.patientId);
+export async function materializeVisitLabWorkInTransaction(client:DbClient,input:{patientId:number;visitId:number;invoiceId:number|null;session?:SessionPayload;canonicalOperation?:CanonicalLabOperation;rows:readonly VisitLabSourceRow[]}){
+  await requireCapability(client);const actor=await authorize(client,input,input.patientId);
   await validateOrigin(client,input.patientId,"visit",input.visitId);
   const command=normalizeLabWorkGroups(input.rows);await lockIntents(client,command.groups.map(g=>g.intentId));
   const stored=(await client.query<{id:number;lab_work_intent_id:string|null;lab_work_member_id:string|null;service_id:number;tooth_code:number|null;quantity:number;plan_item_id:number|null;doctor_id:number|null}>("SELECT id,lab_work_intent_id,lab_work_member_id,service_id,tooth_code,quantity,plan_item_id,doctor_id FROM visit_procedures WHERE visit_id=$1 ORDER BY id",[input.visitId])).rows;

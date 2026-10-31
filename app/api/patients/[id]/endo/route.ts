@@ -3,12 +3,31 @@ import { NextResponse } from "next/server";
 import { checkEndoTreatmentDraft } from "@/lib/endodontics";
 import { listPatientEndo, openEndoTreatment, OPEN_ENDO_MESSAGE } from "@/lib/endodontics-db";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalEndoVisitFailure,
+  createCanonicalEndoTreatment,
+  readCanonicalPatientEndo,
+} from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
 /** (ENDO-2) نوبات علاج الجذور للمريض — القراءة لمن يملك الوصول إلى ملفه (العزل المركزي نفسه). */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const patientId = idOf((await params).id);
+  const rawId = (await params).id;
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    try {
+      return NextResponse.json(await readCanonicalPatientEndo(selected.handle, Number(rawId)), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر تحميل علاج الجذور.");
+    }
+  }
+  const patientId = idOf(rawId);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, false);
   if (!guard.ok) return guard.response;
@@ -22,7 +41,24 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 /** فتح نوبة علاج جذور لسنٍّ داخل حالةٍ تخصصية — الطبيب والمدير. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const patientId = idOf((await params).id);
+  const rawId = (await params).id;
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      return NextResponse.json(
+        await createCanonicalEndoTreatment(selected.handle, Number(rawId), read.body),
+        { status: 201, headers: NO_STORE },
+      );
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر فتح علاج الجذور. أعد المحاولة.");
+    }
+  }
+  const patientId = idOf(rawId);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, true);
   if (!guard.ok) return guard.response;

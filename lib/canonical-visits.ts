@@ -1,7 +1,7 @@
 import "server-only";
 import {
   CLINIC_TIME_ZONE, PlannedVisitStartConflict, ActiveVisitExists, addVisitWith, callVisitAgainWith, chairReadinessSettingsWith, clearVisitWith, computeDebtRowsInSnapshot,
-  finishVisitWith, gatedVisitMoveWith, getPool, insertAuditRow, listTodayVisitReadinessFactsWith, listTodayVisitsWith, patientInDoctorScopeWith,
+  deferVisitPaymentInTransaction, deleteVisitInTransaction, finishVisitWith, gatedVisitMoveWith, getPool, insertAuditRow, linkVisitToPatientInTransaction, listTodayVisitReadinessFactsWith, listTodayVisitsWith, openVisitPatientFileInTransaction, patientInDoctorScopeWith,
   patientVisitReadinessFactsWith, returnVisitToWaitingWith, startVisitFromPlannedVisitWith, type DbClient, type VisitReadinessFacts,
 } from "./db";
 import { balanceLines, chairStepper, deriveReadiness, normalizeEmergencyReason, type BalanceLine, type ReadinessItem } from "./chair-readiness";
@@ -10,7 +10,7 @@ import { PATIENT_CARE_CAPABILITIES } from "./canonical-patient-reads";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
 import type { Visit } from "./flow";
 import type { VerifiedDurableSession } from "./staff-durable-session";
-import { staffOperationClinician, staffOperationIdentity, staffOperationPatientScope, withStaffOperation, type StaffOperationHandle } from "./staff-operation-runtime";
+import { staffOperationCapabilities, staffOperationClinician, staffOperationIdentity, staffOperationPatientScope, withStaffOperation, type StaffOperationHandle, type StaffRuntimeAction } from "./staff-operation-runtime";
 
 /**
  * Canonical Today queue (M2 slice 11): GET /api/visits and the arrival POST /api/visits.
@@ -43,7 +43,7 @@ export const VISIT_QUEUE_MAX_BYTES = 1024 * 1024;
 export class CanonicalVisitRefusal extends Error {
   constructor(
     readonly code: "invalid_visit_input" | "patient_not_found" | "visit_doctor_not_allowed" | "visit_already_active" | "planned_visit_not_found" | "planned_visit_conflict"
-      | "visit_not_found" | "visit_move_conflict" | "visit_action_not_canonical" | "clearance_required" | "emergency_reason_required",
+      | "visit_not_found" | "visit_move_conflict" | "visit_action_not_canonical" | "visit_action_forbidden" | "visit_delete_conflict" | "clearance_required" | "emergency_reason_required",
     readonly status: 400 | 403 | 404 | 409,
     message: string,
     readonly visitId?: number,
@@ -179,33 +179,50 @@ export async function commandCanonicalArrival(session: VerifiedDurableSession, i
  * Deferring payment (a money decision), linking a walk-in to a file and opening a
  * file are not canonical yet and refuse (409).
  * ------------------------------------------------------------------------- */
-const QUEUE_ACTIONS = ["call", "call_again", "seat", "return", "finish", "clear"] as const;
+const QUEUE_ACTIONS = ["call", "call_again", "seat", "return", "finish", "clear", "defer", "link", "open_file"] as const;
 type QueueAction = typeof QUEUE_ACTIONS[number];
 export interface CanonicalVisitMove {
   readonly action: QueueAction;
   readonly chair: number | null;
   readonly emergency: { readonly requested: boolean; readonly reason: string | null };
+  readonly reason: string | null;
+  readonly patientId: number | null;
 }
 
 export function parseCanonicalVisitMove(body: unknown): CanonicalVisitMove {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "طلب غير صالح.");
   const source = body as Record<string, unknown>;
   const action = source.action;
-  if (action === "defer" || action === "link" || action === "open_file") {
-    throw new CanonicalVisitRefusal("visit_action_not_canonical", 409, "هذا الإجراء لم يُنقل بعد إلى الهوية الموحّدة.");
-  }
   if (typeof action !== "string" || !(QUEUE_ACTIONS as readonly string[]).includes(action)) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "إجراء غير معروف.");
   let chair: number | null = null;
   if (action === "call" || action === "seat") {
     chair = Number(source.chair);
     if (!Number.isSafeInteger(chair) || chair <= 0 || chair > 100) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "رقم الكرسي غير صالح.");
   }
-  return { action: action as QueueAction, chair, emergency: { requested: source.emergency === true, reason: normalizeEmergencyReason(source.emergencyReason) } };
+  let patientId: number | null = null;
+  if (action === "link") {
+    const parsed = positiveId(source.patientId);
+    if (parsed === null || Number.isNaN(parsed)) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "رقم الملف غير صالح.");
+    patientId = parsed;
+  }
+  const reason = typeof source.reason === "string" && source.reason.trim() ? source.reason.trim().slice(0, 300) : null;
+  return {
+    action: action as QueueAction,
+    chair,
+    emergency: { requested: source.emergency === true, reason: normalizeEmergencyReason(source.emergencyReason) },
+    reason,
+    patientId,
+  };
 }
 
 const VISIT_NOT_FOUND = "لا توجد زيارة بهذا الرقم ضمن مرضاك.";
-async function requireVisitInScope(client: DbClient, handle: StaffOperationHandle, visitId: number): Promise<void> {
-  const scope = await staffOperationPatientScope(client, handle, "visits.manage");
+async function requireVisitInScope(
+  client: DbClient,
+  handle: StaffOperationHandle,
+  visitId: number,
+  action: StaffRuntimeAction = "visits.manage",
+): Promise<void> {
+  const scope = await staffOperationPatientScope(client, handle, action);
   if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
   const { rows: [visit] } = await client.query<{ patient_id: number | null; doctor_id: number | null }>(
     "SELECT patient_id, doctor_id FROM visits WHERE id = $1", [visitId]);
@@ -216,14 +233,17 @@ async function requireVisitInScope(client: DbClient, handle: StaffOperationHandl
 
 export type CanonicalVisitMoveResult =
   | { readonly kind: "visit"; readonly visit: Visit; readonly warning: string | null }
-  | { readonly kind: "cleared"; readonly clearedAt: string; readonly clearedBy: string; readonly already: boolean };
+  | { readonly kind: "cleared"; readonly clearedAt: string; readonly clearedBy: string; readonly already: boolean }
+  | { readonly kind: "deferred"; readonly already: boolean; readonly message: string }
+  | { readonly kind: "linked"; readonly patientName: string }
+  | { readonly kind: "file_opened"; readonly patientId: number; readonly created: boolean };
 
 export async function commandCanonicalVisitMove(session: VerifiedDurableSession, visitId: number, move: CanonicalVisitMove, pool = getPool()): Promise<CanonicalVisitMoveResult> {
   if (!Number.isSafeInteger(visitId) || visitId <= 0) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "رقم الزيارة غير صالح.");
   return withStaffOperation(pool, session, "visits.manage", async (client, handle) => {
     const identity = await staffOperationIdentity(client, handle, "visits.manage");
     const actor = { actor: identity.username, actorRole: identity.role };
-    const admit = (id: number) => requireVisitInScope(client, handle, id);
+    const admit = (id: number) => requireVisitInScope(client, handle, id, "visits.manage");
     const conflict = (message: string): never => { throw new CanonicalVisitRefusal("visit_move_conflict", 409, message); };
     switch (move.action) {
       case "call":
@@ -255,7 +275,82 @@ export async function commandCanonicalVisitMove(session: VerifiedDurableSession,
         }
         return { kind: "cleared", clearedAt: cleared.clearedAt, clearedBy: cleared.clearedBy, already: cleared.already };
       }
+      case "defer": {
+        const caps = await staffOperationCapabilities(client, handle, "visits.manage", ["finance.payments.collect"] as const);
+        if (!caps.has("finance.payments.collect")) {
+          throw new CanonicalVisitRefusal("visit_action_forbidden", 403, "تأجيل الدفع للاستقبال أو المدير.");
+        }
+        await admit(visitId);
+        const deferred = await deferVisitPaymentInTransaction(client, visitId, actor, move.reason);
+        if (!deferred.ok) {
+          if (deferred.reason === "not_found") throw new CanonicalVisitRefusal("visit_not_found", 404, VISIT_NOT_FOUND);
+          return conflict("وقّع الزيارة أولًا — التأجيل يكون عند الشبّاك بعد التوقيع.");
+        }
+        return { kind: "deferred", already: deferred.already, message: "أُجِّل الدفع — الرصيد باقٍ على المريض." };
+      }
+      case "link": {
+        await admit(visitId);
+        await requirePatientInScope(client, handle, move.patientId!, true);
+        const linked = await linkVisitToPatientInTransaction(client, visitId, move.patientId!);
+        if (!linked.ok) return conflict(linked.message);
+        await insertAuditRow(client, {
+          action: "visit.link_patient", entity: "visit", entityId: visitId, entityLabel: linked.patientName,
+          details: { المريض: move.patientId! }, actor: identity.username, actorRole: identity.role,
+        });
+        return { kind: "linked", patientName: linked.patientName };
+      }
+      case "open_file": {
+        const caps = await staffOperationCapabilities(client, handle, "visits.manage", ["patients.create"] as const);
+        if (!caps.has("patients.create")) {
+          throw new CanonicalVisitRefusal("visit_action_forbidden", 403, "فتح الملف للطبيب أو المدير أو الاستقبال.");
+        }
+        await admit(visitId);
+        const opened = await openVisitPatientFileInTransaction(client, visitId);
+        if (!opened.ok) {
+          if (opened.reason === "not_found") throw new CanonicalVisitRefusal("visit_not_found", 404, VISIT_NOT_FOUND);
+          return conflict("الزيارة موقَّعة — ملفّها فُتح عند توقيعها.");
+        }
+        if (opened.created) {
+          await insertAuditRow(client, {
+            action: "patient.create", entity: "patient", entityId: opened.patientId,
+            details: { المصدر: "زيارة سريرية", الزيارة: visitId },
+            actor: identity.username, actorRole: identity.role,
+          });
+        }
+        return { kind: "file_opened", patientId: opened.patientId, created: opened.created };
+      }
     }
+  });
+}
+
+export async function deleteCanonicalVisit(
+  session: VerifiedDurableSession,
+  visitId: number,
+  reason: string | null,
+  pool = getPool(),
+): Promise<{ readonly message: string }> {
+  if (!Number.isSafeInteger(visitId) || visitId <= 0) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "رقم الزيارة غير صالح.");
+  return withStaffOperation(pool, session, "visits.delete", async (client, handle) => {
+    const identity = await staffOperationIdentity(client, handle, "visits.delete");
+    await requireVisitInScope(client, handle, visitId, "visits.delete");
+    const result = await deleteVisitInTransaction(client, visitId, {
+      actor: identity.username,
+      actorRole: identity.role,
+      reason,
+    });
+    if (!result.ok) {
+      if (result.reason === "lab_linked") {
+        throw new CanonicalVisitRefusal("visit_delete_conflict", 409, "هذه الزيارة مرتبطة بهوية مختبر دائمة؛ لا تُحذف دون معالجة سريرية صريحة للروابط.");
+      }
+      if (result.reason === "signed") {
+        throw new CanonicalVisitRefusal("visit_delete_conflict", 409, "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى.");
+      }
+      if (result.reason === "invoiced") {
+        throw new CanonicalVisitRefusal("visit_delete_conflict", 409, "الزيارة مفوترة — دخلت الدفاتر ولا تُمحى. ألغِ الفاتورة أولًا إن كان ذلك الصحيح.");
+      }
+      throw new CanonicalVisitRefusal("visit_not_found", 404, VISIT_NOT_FOUND);
+    }
+    return { message: "حُذفت الزيارة وسُجِّل الحذف في التدقيق." };
   });
 }
 

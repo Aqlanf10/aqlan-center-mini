@@ -6,6 +6,8 @@ import { canReadReceptionHandoff } from "@/lib/reception-handoff";
 import { completeReceptionHandoff, isHandoffSignature } from "@/lib/reception-handoff-db";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalEndoVisitFailure, completeCanonicalReceptionHandoff } from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
@@ -13,6 +15,22 @@ const reply = (body: unknown, status = 200) => NextResponse.json(body, { status,
 
 /** An explicit, reasoned front-desk decision, never a payment or debt clearance. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return reply({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  if (selected.kind === "canonical") {
+    const rawId = (await context.params).id;
+    try {
+      const canonicalBody = await readJsonBody<unknown>(request, JSON_BODY_LIMIT_BYTES);
+      return reply(await completeCanonicalReceptionHandoff(selected.handle, rawId, canonicalBody));
+    } catch (error) {
+      const bodyError = bodyErrorResponse(error);
+      if (bodyError) {
+        bodyError.headers.set("Cache-Control", headers["Cache-Control"]);
+        return bodyError;
+      }
+      return canonicalEndoVisitFailure(error, "تعذّر حفظ إنهاء المتابعة. حدّث القائمة للتحقّق ثم أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return reply({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
   if (!canReadReceptionHandoff(session.role)) return reply({ message: "إنهاء متابعة الاستقبال للاستقبال والمدير فقط." }, 403);

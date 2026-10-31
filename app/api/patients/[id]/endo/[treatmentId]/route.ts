@@ -3,12 +3,31 @@ import { NextResponse } from "next/server";
 import { checkEndoStatusChange } from "@/lib/endodontics";
 import { changeEndoStatus, ENDO_STATUS_MESSAGE } from "@/lib/endodontics-db";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalEndoVisitFailure, updateCanonicalEndoStatus } from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
 /** (ENDO-2) إكمال علاج الجذور أو إيقافه (بسبب) — النوبة المنتهية لا تعود. */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string; treatmentId: string }> }) {
   const { id, treatmentId: rawTreatment } = await params;
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      return NextResponse.json(
+        await updateCanonicalEndoStatus(selected.handle, Number(id), Number(rawTreatment), read.body),
+        { headers: NO_STORE },
+      );
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر تغيير حالة علاج الجذور. أعد المحاولة.");
+    }
+  }
   const patientId = idOf(id);
   const treatmentId = idOf(rawTreatment);
   if (!patientId || !treatmentId) return json("رقم غير صالح.", 400);

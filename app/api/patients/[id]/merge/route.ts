@@ -4,6 +4,9 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { findPatientIdByNumber, getPatient, mergeDuplicatePatient } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalEndoVisitFailure, mergeCanonicalPatient } from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,26 @@ export const dynamic = "force-dynamic";
  * تعارض — لا دمج نصفيّ.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_body", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    try {
+      return NextResponse.json(await mergeCanonicalPatient(selected.handle, Number(rawId), canonicalBody), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر دمج الملفين. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });

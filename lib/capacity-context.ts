@@ -9,8 +9,8 @@
  * للمحرّك. ولا يبني أيُّ مسارٍ حكمَه بنفسه.
  */
 import {
-  CLINIC_TIME_ZONE, getSettings, getSettingsWith, listAppointmentServices, listProviderBlocks,
-  resolveServiceByLegacyType, type DbClient,
+  CLINIC_TIME_ZONE, getSettings, getSettingsWith, listAppointmentServices, listAppointmentServicesWith,
+  listProviderBlocks, resolveServiceByLegacyType, resolveServiceByLegacyTypeWith, type DbClient,
 } from "./db";
 import { clinicDayStart } from "./clinicZone";
 import { chairCount, type SettingsMap } from "./settings";
@@ -104,6 +104,19 @@ export async function resolveService(input: {
   return null;
 }
 
+/** Same lookup inside a caller-owned snapshot/transaction (no ensureSchema). */
+export async function resolveServiceWith(
+  q: Pick<DbClient, "query">,
+  input: { serviceId?: number | null; appointmentType?: string | null },
+): Promise<AppointmentService | null> {
+  if (input.serviceId) {
+    const all = await listAppointmentServicesWith(q, { includeInactive: true });
+    return all.find((service) => service.id === input.serviceId) ?? null;
+  }
+  if (input.appointmentType) return await resolveServiceByLegacyTypeWith(q, input.appointmentType);
+  return null;
+}
+
 /** الخدمة الافتراضية حين لا تُحدَّد — لا تُعطّل الحجز ولا تفرض متطلّباتٍ وهمية. */
 export const FALLBACK_SERVICE = {
   requiresProvider: false,
@@ -116,7 +129,7 @@ export const FALLBACK_SERVICE = {
 
 /** نوافذ حجب الطبيب بالدقائق من بداية يوم المركز؛ تُقرأ مرة واحدة عند عرض اليوم. */
 export async function loadProviderBlockWindows(
-  providerId: number, date: string, client?: DbClient,
+  providerId: number, date: string, client?: Pick<DbClient, "query">,
 ): Promise<ProviderBlockWindow[]> {
   const raw = await listProviderBlocks(providerId, date, client);
   const dayStart = clinicDayStart(date, CLINIC_TIME_ZONE);
@@ -156,7 +169,7 @@ export interface CapacityEvaluationInput {
   newPatientsBookedToday?: number;
   excludeId?: number;
   /** اتصال المعاملة حين يُقيَّم داخل قفل اليوم — فلا اتصالَ ثانٍ ولا لقطةٌ أقدم. */
-  client?: DbClient;
+  client?: Pick<DbClient, "query">;
 }
 
 /** Freeze verified block windows once for the decision and its alternatives. */

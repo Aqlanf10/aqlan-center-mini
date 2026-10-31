@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { checkEndoVisitDraft } from "@/lib/endodontics";
 import { saveEndoVisit, SAVE_ENDO_VISIT_MESSAGE, type SaveEndoVisitRefusal } from "@/lib/endodontics-db";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalEndoVisitFailure, saveCanonicalEndoVisit } from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +21,20 @@ const STATUS: Record<SaveEndoVisitRefusal, number> = {
  */
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string; treatmentId: string }> }) {
   const { id, treatmentId: rawTreatment } = await params;
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) return read.response;
+    try {
+      const result = await saveCanonicalEndoVisit(selected.handle, Number(id), Number(rawTreatment), read.body);
+      return NextResponse.json(result.treatment, { status: result.created ? 201 : 200, headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر حفظ سجل علاج الجذور. أعد المحاولة.");
+    }
+  }
   const patientId = idOf(id);
   const treatmentId = idOf(rawTreatment);
   if (!patientId || !treatmentId) return json("رقم غير صالح.", 400);

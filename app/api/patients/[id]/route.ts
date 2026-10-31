@@ -22,6 +22,7 @@ import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure, canonicalPatientWriteFailure } from "@/lib/canonical-patient-http";
 import { commandCanonicalPatientUpdate } from "@/lib/canonical-patient-writes";
 import { readCanonicalPatientFile } from "@/lib/canonical-patient-reads";
+import { canonicalEndoVisitFailure, deleteCanonicalPatient } from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -229,6 +230,26 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
  * والفواتير والدفعات والخطط والأشعة وأعمال المعمل في معاملة واحدة، ويترك
  * صورةً كاملة في سجل التدقيق. التأكيد بالإجابة برقم الملف نفسه من الواجهة. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    let canonicalBody: unknown = {};
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      /* الجسم فارغ — يُرفض التحذير أدناه */
+    }
+    try {
+      return NextResponse.json(await deleteCanonicalPatient(selected.handle, Number(rawId), canonicalBody), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر حذف الملف. أعد المحاولة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {

@@ -17,6 +17,13 @@ import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { assistantProcedureChange } from "@/lib/clinical-finalizer";
 import { withHttpIdempotency } from "@/lib/http-idempotency";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import {
+  canonicalEndoVisitFailure,
+  handleCanonicalClinicalVisitPost,
+  readCanonicalClinicalVisit,
+} from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +44,18 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const visitId = await idFrom(context);
+    try {
+      return NextResponse.json(await readCanonicalClinicalVisit(selected.handle, visitId ?? NaN), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر تحميل الزيارة.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const visitId = await idFrom(context);
@@ -69,6 +88,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
  * بالخطأ.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const visitId = await idFrom(context);
+    let canonicalBody: unknown;
+    try {
+      canonicalBody = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) return bounded;
+      return NextResponse.json({ code: "invalid_body", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE });
+    }
+    return handleCanonicalClinicalVisitPost(request, selected.handle, visitId, canonicalBody);
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (session.role !== "doctor" && session.role !== "admin" && session.role !== "assistant") return clinicalOnly();

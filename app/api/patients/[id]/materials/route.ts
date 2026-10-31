@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { getPool, ensureSchema } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalEndoVisitFailure, readCanonicalPatientMaterials } from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +15,18 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const { id: rawId } = await context.params;
+    try {
+      return NextResponse.json(await readCanonicalPatientMaterials(selected.handle, Number(rawId)), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر تحميل سجل المستهلكات.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const { id: rawId } = await context.params;

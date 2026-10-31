@@ -6,6 +6,9 @@ import { loadCapacityContext, loadProviderBlockWindows, resolveService } from "@
 import { CLINIC_TIME_ZONE, findUserByUsername, getParty, listAppointmentsByDate } from "@/lib/db";
 import { clinicDateString, toMinutes } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalEndoVisitFailure, readCanonicalAppointmentAvailability } from "@/lib/canonical-endo-visits";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +20,18 @@ const validDate = (date: string): boolean => {
 
 /** اقتراحات قراءة فقط؛ لا أسماء مرضى أو بيانات موارد بشرية أو ضمان حجز. */
 export async function GET(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") {
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  }
+  if (selected.kind === "canonical") {
+    const params = new URL(request.url).searchParams;
+    try {
+      return NextResponse.json(await readCanonicalAppointmentAvailability(selected.handle, params), { headers: NO_STORE });
+    } catch (error) {
+      return canonicalEndoVisitFailure(error, "تعذّر التحقق من أوقات الطبيب.", "appointment");
+    }
+  }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") {
