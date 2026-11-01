@@ -369,17 +369,7 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
 }
 async function isPrincipalOwnerAdmin(client: DbClient, userId: number): Promise<boolean> {
   const res = await client.query<{ is_principal: boolean }>(
-    `SELECT (
-       u.role = 'admin'
-       AND u.is_active = TRUE
-       AND (
-         u.is_owner = TRUE
-         OR (
-           NOT EXISTS (SELECT 1 FROM users WHERE is_owner = TRUE AND is_active = TRUE)
-           AND u.id = (SELECT MIN(id) FROM users WHERE role = 'admin' AND is_active = TRUE)
-         )
-       )
-     ) AS is_principal
+    `SELECT (u.role = 'admin' AND u.is_active = TRUE AND u.is_owner = TRUE) AS is_principal
      FROM users u
      WHERE u.id = $1`,
     [userId],
@@ -537,6 +527,23 @@ async function replay(client: QueryRunner, key: string, fingerprint: string) {
   if (rows[0].request_fingerprint !== fingerprint) fail("key_conflict", "مفتاح الطلب نفسه مرتبط بصرف مختلف؛ لا يمكن إعادة استخدامه.");
   const view = await disbursementView(rows[0],client); view.replayed = true; return view;
 }
+/**
+ * Peer-review #7: ambiguous-error recovery for a single-item disbursement. Resolves the
+ * same client request key ONLY when the stored request fingerprint (item, amount,
+ * components, method, reference, notes, actor) matches exactly; a different
+ * disbursement under the same key raises `key_conflict` (409) instead of being
+ * reported as this request's success.
+ */
+export async function replayDisbursementForActor(
+  query: QueryRunner,
+  itemId: number | string,
+  input: DisburseInput,
+  actorUserId: number,
+): Promise<HrPayrollDisbursementView | null> {
+  const normalized = normalizeDisbursementForActor(idOf(itemId), input, actorUserId);
+  if (!normalized.key) return null;
+  return replay(query, normalized.key, normalized.fingerprint);
+}
 async function refreshRunTotals(client: DbClient, runId: number) {
   await client.query(`UPDATE hr_payroll_runs r SET total_paid_minor=t.paid,total_remaining_minor=t.remaining
     FROM (SELECT COALESCE(SUM(paid_minor),0) AS paid,COALESCE(SUM(remaining_minor),0) AS remaining FROM hr_payroll_items WHERE run_id=$1) t WHERE r.id=$1`, [runId]);
@@ -621,7 +628,9 @@ export async function disbursePayrollItem(idOrInput: number | string | (Disburse
   catch (error) {
     // COMMIT may have reached PostgreSQL even when the response was lost. Resolve by the same key, never create another key.
     if (input.key && !(error instanceof HrPayrollError)) {
-      const existing = await withPayrollTransaction(session, authorize, client => replay(client,input.key!,input.fingerprint)).catch(() => null); if (existing) return existing;
+      const existing = await withPayrollTransaction(session, authorize, client => replay(client,input.key!,input.fingerprint))
+        .catch((recoveryError) => { if (recoveryError instanceof HrPayrollError) throw recoveryError; return null; });
+      if (existing) return existing;
     }
     throw error;
   }

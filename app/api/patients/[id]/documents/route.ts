@@ -7,10 +7,11 @@ import {
 } from "@/lib/canonical-clinical-records";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import {
-  DocumentAssociationError, getSettings, listPatientDocuments, recordAudit, recordDocument,
+  DocumentAssociationError, getPool, getSettings, listPatientDocuments, recordAudit, recordDocument,
   validateDocumentAssociations,
 } from "@/lib/db";
-import { putFile, storageStatus } from "@/lib/files";
+import { putFile, storageStatus, type StoredFile } from "@/lib/files";
+import { cleanupUncommittedStoredFile, plannedStorageKey, withStorageKeyGuard } from "@/lib/file-cleanup";
 import { imageSize } from "@/lib/imageSize";
 import { isAdmin } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "@/lib/storage";
@@ -197,23 +198,36 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
        التراكب والمقارنة يرسمان فوق الشععة فيحتاجان مقاسها، و`null` ليست عطلًا
        فالمستندُ PDF لا أبعاد صورة له. */
     const dimensions = imageSize(bytes);
-    const stored = await putFile(bytes, check.extension);
-    const document = await recordDocument({
-      patientId, visitId, kind, title,
-      mimeType: file.type,
-      sizeBytes: stored.sizeBytes,
-      sha256: stored.sha256,
-      storageKey: stored.key,
-      note,
-      takenOn,
-      uploadedBy: session.username,
-      orthoCaseId,
-      adjustmentId,
-      photoStage,
-      photoView,
-      width: dimensions?.width ?? null,
-      height: dimensions?.height ?? null,
-    });
+    // Peer-review #6/#8: hold the storage-object guard from before the write until the
+    // referencing row committed; reconcile a newly written object after any failure.
+    const plannedKey = plannedStorageKey(bytes, check.extension);
+    let stored: StoredFile | null = null;
+    let document: Awaited<ReturnType<typeof recordDocument>>;
+    try {
+      document = await withStorageKeyGuard(getPool(), plannedKey, async () => {
+        const written = await putFile(bytes, check.extension);
+        stored = written;
+        return recordDocument({
+          patientId, visitId, kind, title,
+          mimeType: file.type,
+          sizeBytes: written.sizeBytes,
+          sha256: written.sha256,
+          storageKey: written.key,
+          note,
+          takenOn,
+          uploadedBy: session.username,
+          orthoCaseId,
+          adjustmentId,
+          photoStage,
+          photoView,
+          width: dimensions?.width ?? null,
+          height: dimensions?.height ?? null,
+        });
+      });
+    } catch (writeError) {
+      await cleanupUncommittedStoredFile(stored);
+      throw writeError;
+    }
     void recordAudit({
       action: "document.upload",
       entity: "patient_documents",

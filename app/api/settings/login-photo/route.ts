@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readStoredSettings, saveSettingsAudited } from "@/lib/db";
+import { getPool, readStoredSettings, saveSettingsAudited } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import {
@@ -11,7 +11,9 @@ import { canManageCategory } from "@/lib/settings-permissions";
 import { bodyErrorResponse, readBoundedFormData, readJsonBody } from "@/lib/http-body";
 import { LOGIN_PHOTO_ASSET, LOGIN_PHOTO_BODY_BYTES, LOGIN_PHOTO_KEYS, LOGIN_PHOTO_MAX_BYTES,
   LOGIN_PHOTO_VISIBLE, loginPhotoVersions, parseLoginPhotoAsset } from "@/lib/login-photo";
-import { readVerifiedLoginPhoto, storeLoginPhoto, validateLoginPhotoBytes } from "@/lib/login-photo-server";
+import { readVerifiedLoginPhoto, storeLoginPhotoWithMeta, validateLoginPhotoBytes } from "@/lib/login-photo-server";
+import { cleanupUncommittedStoredFile, withStorageKeyGuard } from "@/lib/file-cleanup";
+import type { StoredFile } from "@/lib/files";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" };
@@ -70,9 +72,24 @@ export async function POST(request: Request) {
     if (!(file instanceof File) || file.size === 0 || file.size > LOGIN_PHOTO_MAX_BYTES) return fail("اختر صورة JPEG أو PNG لا تتجاوز ٢ ميغابايت.", 400);
     const bytes = Buffer.from(await file.arrayBuffer());
     if (!validateLoginPhotoBytes(bytes, file.type)) return fail("الصورة غير صالحة. استخدم JPEG أو PNG ثابتة ضمن حدود الحجم والأبعاد.", 400);
-    const asset = await storeLoginPhoto(bytes, file.type);
-    // Replacement is private until the owner explicitly publishes this exact version.
-    return await save({ [LOGIN_PHOTO_ASSET]: JSON.stringify(asset), [LOGIN_PHOTO_VISIBLE]: "false" }, expected, access.session);
+    let uploadedStored: StoredFile | null = null;
+    try {
+      const planned = validateLoginPhotoBytes(bytes, file.type);
+      // Peer-review #6/#8: guard the content-addressed object until the setting row commits.
+      const res = await withStorageKeyGuard(getPool(), planned?.key ?? "invalid", async () => {
+        const storedPhoto = await storeLoginPhotoWithMeta(bytes, file.type);
+        uploadedStored = storedPhoto.stored;
+        // Replacement is private until the owner explicitly publishes this exact version.
+        return save({ [LOGIN_PHOTO_ASSET]: JSON.stringify(storedPhoto.asset), [LOGIN_PHOTO_VISIBLE]: "false" }, expected, access.session);
+      });
+      if (res.status >= 400) {
+        await cleanupUncommittedStoredFile(uploadedStored);
+      }
+      return res;
+    } catch (saveErr) {
+      await cleanupUncommittedStoredFile(uploadedStored);
+      throw saveErr;
+    }
   } catch (error) {
     const bounded = bodyErrorResponse(error);
     if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); bounded.headers.set("X-Content-Type-Options", "nosniff"); return bounded; }

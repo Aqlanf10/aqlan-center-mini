@@ -24,7 +24,7 @@ import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence"
  * يختلط ببيانات طلبٍ آخر بلا أثر في السجلات.
  */
 
-import { payableAmountSql, payableSettledTotalSql, PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, listParties, listServices, commissionReport, listOpenPastAppointments, listMissedAppointments, listLapsedPatients, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, commissionDetailReport, computeDebtRows, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
+import { payableAmountSql, payableSettledTotalSql, PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, getSettingsWith, listParties, listPartiesWith, listServices, listServicesWith, commissionReport, listOpenPastAppointments, listOpenPastAppointmentsWith, listMissedAppointments, listMissedAppointmentsWith, listLapsedPatients, listLapsedPatientsWith, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, listOrthoDuplicateAdjustmentsWith, commissionDetailReport, commissionDetailReportWith, computeDebtRows, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CHAIR_EVENT_ROW_CAP, REFERRAL_HISTORY_ROW_CAP, loadChairFlow, loadInternalReferrals } from "./reports-ops";
 import { REFERRAL_SPECIALTY_LABEL, WORKFLOW_STATE_LABEL, type ReferralSpecialty, type WorkflowState } from "./referrals";
 import { CATEGORY_LABEL } from "./services-catalog";
@@ -39,7 +39,7 @@ import { attributeByKey, attributeCollections, collectedParts, type AttributionI
 
 /** خط نسب المواد الزمني لكل تخصص — كما يقرؤه محرّك العمولات. */
 type MaterialRateTimeline = Awaited<ReturnType<typeof materialRateTimeline>>;
-import { loadCapacityContext } from "./capacity-context";
+import { loadCapacityContext, loadCapacityContextWith } from "./capacity-context";
 import {
   activityBySpecialty, emptyRecord as emptySpecialtyRecord, labCostBySpecialty,
   parseSpecialtyDoctorKey, proceduresBySpecialtyDoctor, specialtyDoctorKey,
@@ -174,7 +174,11 @@ const num = (value: string | number | null | undefined): number => Number(value 
  */
 export async function dbTodayISO(): Promise<string> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ today: string }>(
+  return dbTodayISOWith(getPool());
+}
+
+export async function dbTodayISOWith(q: Pick<DbClient, "query">): Promise<string> {
+  const { rows } = await q.query<{ today: string }>(
     `SELECT (NOW() AT TIME ZONE $1)::date::text AS today`,
     [CLINIC_TIME_ZONE],
   );
@@ -284,8 +288,9 @@ async function loadMovements(opts: {
   asOf?:string;
   patientId?: number | null;
   patientStatus?: PatientStatusFilter;
+  skipEnsureSchema?: boolean;
 }): Promise<PatientMovement[]> {
-  await ensureSchema();
+  if (!opts.skipEnsureSchema) await ensureSchema();
   return withFinancialReadSnapshot(getPool(),runner=>loadMovementsInSnapshot(opts,runner),usesSharedLocalDatabaseConnection());
 }
 async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],pool:DbClient|DbPool):Promise<PatientMovement[]>{
@@ -806,11 +811,12 @@ export interface ExecutiveReceivableRow {
 export async function executiveFinancialReadModels(
   from: string,
   to: string,
+  options?: { skipEnsureSchema?: boolean },
 ): Promise<{
   billingByCurrency: ExecutiveBillingRow[];
   receivableByCurrency: ExecutiveReceivableRow[];
 }> {
-  const movements = await loadMovements({asOf:to});
+  const movements = await loadMovements({ asOf: to, skipEnsureSchema: options?.skipEnsureSchema });
   const gross = emptyCurrencyRecord();
   const discount = emptyCurrencyRecord();
   const net = emptyCurrencyRecord();
@@ -1063,13 +1069,17 @@ interface ReportContext {
   commissionRows?: CommissionRow[];
   /** (RPT-SPEC) الإجراءات وتكاليف المختبر ونسب المواد — للتقرير حسب التخصص وحده. */
   specialty?: { procedures: SpecialtyProcedure[]; labCosts: SpecialtyLabCost[]; materialTimeline: MaterialRateTimeline };
+  skipEnsureSchema?: boolean;
 }
 
 /**
  * (RPT-SPEC) إجراءات الزيارات **الموقّعة** وتكاليف المختبر **المُرسَل** في المدى، وخط نسب المواد الزمني.
  * مرشّح المريض يسري عليها كما يسري على المالية.
  */
-async function loadSpecialtyExtras(filters: ReportFilters): Promise<NonNullable<ReportContext["specialty"]>> {
+async function loadSpecialtyExtras(
+  filters: ReportFilters,
+  skipEnsureSchema = false,
+): Promise<NonNullable<ReportContext["specialty"]>> {
   const pool = getPool();
   const procedures = await pool.query<{
     date: string; visit_id: number; patient_id: number | null; doctor_id: number | null; category: string | null; quantity: number;
@@ -1105,7 +1115,7 @@ async function loadSpecialtyExtras(filters: ReportFilters): Promise<NonNullable<
         AND ($3::int IS NULL OR lo.patient_id = $3::int)`,
     [filters.from, filters.to, filters.patientId ?? null],
   );
-  const materialTimeline = await materialRateTimeline();
+  const materialTimeline = skipEnsureSchema ? await materialRateTimeline(pool) : await materialRateTimeline();
   return {
     procedures: procedures.rows.map((row) => ({
       date: row.date, visitId: row.visit_id, patientId: row.patient_id, doctorId: row.doctor_id,
@@ -1125,15 +1135,16 @@ async function loadContext(
   filters: ReportFilters,
   needMovements: boolean,
   expenseComparison: { from: string; to: string } | null = null,
+  skipEnsureSchema = false,
 ): Promise<ReportContext> {
-  const doctorParties = await listParties("doctor");
+  const pool = getPool();
+  const doctorParties = skipEnsureSchema ? await listPartiesWith(pool, "doctor") : await listParties("doctor");
   // (TD-05) الأساس دستوري من الكود — التقارير كلها تعرض مكافئاتها به.
   const base = CLINIC_BASE_CURRENCY;
   const doctors = new Map(doctorParties.map((party) => [party.id, party.name]));
   const commissions = new Map(doctorParties.map((party) => [party.id, party.commissionPercent]));
 
-  const pool = getPool();
-  await ensureSchema();
+  if (!skipEnsureSchema) await ensureSchema();
   const expensesRes = await pool.query<{ date: string; base: string; category: string; payee: string | null }>(
     `SELECT (created_at AT TIME ZONE $1)::date::text AS date,
             base_amount_minor::text AS base, category, payee_text AS payee
@@ -1147,11 +1158,16 @@ async function loadContext(
   }));
 
   const movements = needMovements
-    ? await loadMovements({ patientId: filters.patientId, patientStatus: filters.patientStatus,asOf:filters.to })
+    ? await loadMovements({
+        patientId: filters.patientId,
+        patientStatus: filters.patientStatus,
+        asOf: filters.to,
+        skipEnsureSchema,
+      })
     : [];
   const visits = needMovements ? await loadVisits(filters) : [];
 
-  return { filters, base, doctors, commissions, expenses, movements, visits };
+  return { filters, base, doctors, commissions, expenses, movements, visits, skipEnsureSchema };
 }
 
 /**
@@ -1211,7 +1227,12 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
 }
 
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
-export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
+export async function buildReport(
+  report: string,
+  filters: ReportFilters,
+  options?: { skipEnsureSchema?: boolean },
+): Promise<ReportResult> {
+  const skip = options?.skipEnsureSchema === true;
   // الطلب السنوي محدود الحجم قبل تحميل أي سياق مالي، من دون اقتطاع المدى.
   if (report === "annual") {
     const range = validateAnnualReportRange(filters.from, filters.to);
@@ -1230,14 +1251,20 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   const expenseComparison = report === "monthly"
     ? comparisonRange(filters.from, filters.to, filters.compare)
     : null;
-  const ctx = await loadContext(filters, needsMovements, expenseComparison);
+  const ctx = await loadContext(filters, needsMovements, expenseComparison, skip);
   /* (P0-1) «مستحق الطبيب» في تقرير الطبيب يأتي من محرّك العمولات الواحد (التحصيل
      الفعلي، خصم المختبر، النسبة السارية وقت التحصيل) — لا من صيغةٍ ثانية كانت تضرب
      قيمة الفاتورة كاملةً في نسبة اليوم فتناقض شاشة العمولات. */
   if (report === "doctor" || report === "doctor-commission") {
-    ctx.commissionRows = await commissionReport(filters.from, filters.to);
+    ctx.commissionRows = skip
+      ? await withFinancialReadSnapshot(
+          getPool(),
+          (runner) => commissionReport(filters.from, filters.to, undefined, runner),
+          usesSharedLocalDatabaseConnection(),
+        )
+      : await commissionReport(filters.from, filters.to);
   }
-  if (report === "specialty") ctx.specialty = await loadSpecialtyExtras(filters);
+  if (report === "specialty") ctx.specialty = await loadSpecialtyExtras(filters, skip);
 
   if (report === "visits") {
     // Only source evidence shares this snapshot; existing report context was loaded above.
@@ -3631,7 +3658,9 @@ async function preSystemReceiptsReport(ctx: ReportContext): Promise<ReportResult
   // Include zero/credit buckets: a settled legacy patient must remain visible in this audit.
   const affectedIds = [...new Set([...openingPatients, ...openingHistoryRows.map((row) => row.patient_id), ...patients])];
   const affectedPatientIds = new Set(affectedIds);
-  const balanceRows = affectedIds.length === 0 ? [] : await computeDebtRows(affectedIds, true);
+  const balanceRows = affectedIds.length === 0
+    ? []
+    : await computeDebtRows(affectedIds, true, ctx.skipEnsureSchema ? { skipEnsureSchema: true } : undefined);
   const balances = new Map(balanceRows.map((row) => [`${row.patientId}:${row.currency}`, row]));
   const flaggedIds = new Set(rows.map((row) => row.payment_id));
   const firstMigrationSignal = new Map<number, number>();
@@ -4040,7 +4069,9 @@ async function planDoubleBillingReport(ctx: ReportContext): Promise<ReportResult
  */
 async function orthoDuplicateAdjustmentsReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
-  const duplicates = await listOrthoDuplicateAdjustments(filters.patientId ?? null);
+  const duplicates = ctx.skipEnsureSchema
+    ? await listOrthoDuplicateAdjustmentsWith(getPool(), filters.patientId ?? null)
+    : await listOrthoDuplicateAdjustments(filters.patientId ?? null);
   const patients = new Set(duplicates.map((row) => row.patientId));
   const extra = duplicates.reduce((sum, row) => sum + row.count - 1, 0);
   return {
@@ -4775,11 +4806,18 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
 
 async function recallReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
-  const [openPast, missed, lapsed] = await Promise.all([
-    listOpenPastAppointments(),
-    listMissedAppointments(),
-    listLapsedPatients(6),
-  ]);
+  const pool = getPool();
+  const [openPast, missed, lapsed] = ctx.skipEnsureSchema
+    ? await Promise.all([
+        listOpenPastAppointmentsWith(pool, null),
+        listMissedAppointmentsWith(pool, null),
+        listLapsedPatientsWith(pool, 6, null),
+      ])
+    : await Promise.all([
+        listOpenPastAppointments(),
+        listMissedAppointments(),
+        listLapsedPatients(6),
+      ]);
 
   const patientAllowed = (patientId: number) => !filters.patientId || filters.patientId === patientId;
   const rows: ReportRow[] = [
@@ -5165,7 +5203,7 @@ function minutesOfShift(start: string, end: string): number {
 async function chairUtilizationReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
   const { from, to } = filters;
-  const capacity = await loadCapacityContext();
+  const capacity = ctx.skipEnsureSchema ? await loadCapacityContextWith(getPool()) : await loadCapacityContext();
   const dailyMinutes = capacity.shifts.reduce((sum, shift) => sum + minutesOfShift(shift.start, shift.end), 0);
 
   const pool = getPool();
@@ -5898,7 +5936,8 @@ async function practiceTrendsReport(ctx: ReportContext): Promise<ReportResult> {
     at("المركز", "المركز", monthOf(visit.date)).visits += 1;
     if (visit.doctorId !== null) at("الطبيب", doctors.get(visit.doctorId) ?? `#${visit.doctorId}`, monthOf(visit.date)).visits += 1;
   }
-  const serviceNames = new Map((await listServices()).map((service) => [service.id, service.name]));
+  const serviceList = ctx.skipEnsureSchema ? await listServicesWith(getPool()) : await listServices();
+  const serviceNames = new Map(serviceList.map((service) => [service.id, service.name]));
   for (const patient of ctx.movements) {
     if (patient.createdDate && patient.createdDate >= from && patient.createdDate <= to) at("المركز", "المركز", monthOf(patient.createdDate)).newPatients += 1;
     for (const invoice of patient.invoices) {
@@ -6029,15 +6068,19 @@ async function practiceTrendsReport(ctx: ReportContext): Promise<ReportResult> {
 // ─── خيارات الفلاتر ─────────────────────────────────────────────────────────
 
 export async function reportOptions(): Promise<ReportOptions> {
-  const [doctors, services, settings] = await Promise.all([
-    listParties("doctor"),
-    listServices(),
-    getSettings(),
-  ]);
   await ensureSchema();
-  const receiversRes = await getPool().query<{ receiver: string | null }>(
-    `SELECT DISTINCT created_by AS receiver FROM payments WHERE created_by IS NOT NULL ORDER BY created_by`,
-  );
+  return reportOptionsWith(getPool());
+}
+
+export async function reportOptionsWith(q: Pick<DbClient, "query">): Promise<ReportOptions> {
+  const [doctors, services, settings, receiversRes] = await Promise.all([
+    listPartiesWith(q, "doctor"),
+    listServicesWith(q),
+    getSettingsWith(q),
+    q.query<{ receiver: string | null }>(
+      `SELECT DISTINCT created_by AS receiver FROM payments WHERE created_by IS NOT NULL ORDER BY created_by`,
+    ),
+  ]);
   return {
     doctors: doctors.map((party) => ({ id: party.id, name: party.name })),
     specialties: Object.entries(CATEGORY_LABEL).map(([value, label]) => ({ value, label })),
@@ -6150,11 +6193,18 @@ export function parseFilters(params: URLSearchParams, today?: string): ReportFil
  */
 async function commissionDetailCenterReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
-  const detail = await commissionDetailReport(filters.from, filters.to, {
+  const filterArg = {
     doctorId: filters.doctorId,
     currency: filters.currency === "all" ? null : (filters.currency as Currency),
     category: filters.specialty,
-  });
+  };
+  const detail = ctx.skipEnsureSchema
+    ? await withFinancialReadSnapshot(
+        getPool(),
+        (runner) => commissionDetailReportWith(runner, filters.from, filters.to, filterArg),
+        usesSharedLocalDatabaseConnection(),
+      )
+    : await commissionDetailReport(filters.from, filters.to, filterArg);
   const accrued = Object.fromEntries(CURRENCIES.map((code) => [code, 0])) as Record<Currency, number>;
   const earned = Object.fromEntries(CURRENCIES.map((code) => [code, 0])) as Record<Currency, number>;
   for (const line of detail.lines) {
@@ -6244,7 +6294,10 @@ export function commissionStatementHref(filters: Pick<ReportFilters, "doctorId" 
 /** الإحالات الداخلية: إحالات الفترة وكل مفتوحةٍ منها أيًّا كان تاريخها — التراكم ظاهرٌ دائمًا. */
 async function internalReferralsReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
-  const { rows, totals, historyCapped } = await loadInternalReferrals(filters);
+  const { rows, totals, historyCapped } = await loadInternalReferrals(
+    filters,
+    ctx.skipEnsureSchema ? { skipEnsureSchema: true } : undefined,
+  );
   /* المجاميع من الاستعلام التجميعي بلا سقف — لا من صفوف التفصيل. */
   const count = (states: string[]) => states.reduce((sum, state) => sum + (totals.byState[state] ?? 0), 0);
   const averageDays = totals.averageDaysToComplete;
@@ -6303,7 +6356,10 @@ async function internalReferralsReport(ctx: ReportContext): Promise<ReportResult
 /** جريان الكرسي: جاهزية زيارات الفترة، وتجاوزات البوابة الطارئة بأسبابها، وتأجيلات الدفع — من سجل التدقيق. */
 async function chairFlowReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
-  const flow = await loadChairFlow(filters);
+  const flow = await loadChairFlow(
+    filters,
+    ctx.skipEnsureSchema ? { skipEnsureSchema: true } : undefined,
+  );
   const { bypasses, deferred } = flow;
   return {
     report: "chair-flow",

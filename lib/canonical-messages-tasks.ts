@@ -25,7 +25,7 @@ import {
   patientIdsForOutboundRecipientWith,
   patientMessagingConsentWith,
   patientThreadMessagesWith,
-  recordMessageDelivery,
+  recordMessageDeliveryWith,
   staffConversationListWith,
   unreadMessageCountWith,
   urgentUnreadMessageCountWith,
@@ -55,6 +55,11 @@ import {
 } from "./hr-shared";
 import { parseTaskDeadline } from "./hr-task-time";
 import { bodyErrorResponse, readJsonBody } from "./http-body";
+import {
+  claimOutboundIdempotencyInTx,
+  completeOutboundIdempotency,
+  releaseOutboundReservation,
+} from "./http-idempotency";
 import {
   parseMessageId,
   parseMessageTarget,
@@ -420,6 +425,12 @@ export async function messagesOutboundGetCanonicalResponse(
       session,
       "messages.use",
       async (query, scope) => {
+        if (scope.patientScope.kind === "none") {
+          return {
+            kind: "forbidden" as const,
+            message: "نطاق وصولك للمرضى مغلق.",
+          };
+        }
         if (patientId !== null) {
           if (!(await canAccessPatientInSnapshot(query, scope.patientScope, patientId))) {
             return {
@@ -435,12 +446,6 @@ export async function messagesOutboundGetCanonicalResponse(
         });
         if (scope.patientScope.kind === "all") {
           return { kind: "ok" as const, rows: allRows };
-        }
-        if (scope.patientScope.kind === "none") {
-          return {
-            kind: "ok" as const,
-            rows: allRows.filter((row) => row.patientId === null),
-          };
         }
         const candidateIds = [
           ...new Set(
@@ -543,8 +548,15 @@ export async function messagesOutboundPostCanonicalResponse(
           patient = await getPatientWith(client, matchingPatients[0]);
         }
 
+        const patientScope = await staffOperationPatientScope(client, handle, "messages.use");
+        if (patientScope.kind === "none") {
+          return {
+            kind: "early" as const,
+            status: 403,
+            body: { message: "نطاق وصولك للمرضى مغلق." },
+          };
+        }
         if (patient) {
-          const patientScope = await staffOperationPatientScope(client, handle, "messages.use");
           if (!(await canAccessPatientInTx(client, patientScope, patient.id))) {
             return {
               kind: "early" as const,
@@ -552,6 +564,12 @@ export async function messagesOutboundPostCanonicalResponse(
               body: { message: "غير مصرّح لك بمراسلة هذا المريض." },
             };
           }
+        } else if (patientScope.kind !== "all") {
+          return {
+            kind: "early" as const,
+            status: 403,
+            body: { message: "إرسال رسائل لرقم غير مرتبط بملف مريض متاح لمن يملك نطاق جميع المرضى فقط." },
+          };
         }
 
         const channelData = await messagingChannelWithSecretWith(client, channel);
@@ -575,14 +593,36 @@ export async function messagesOutboundPostCanonicalResponse(
               })
             : false;
 
+        const subject = typeof body.subject === "string" ? body.subject.slice(0, 200) : null;
+        const textBody = typeof body.body === "string" ? body.body : "";
+        const outboundActor = `canon:${identity.realmId}:${identity.subjectId}`;
+        // Peer-review #3/#5: claim a durable delivery reservation INSIDE the authorized
+        // transaction (after capability + patient scope), before any external I/O.
+        const reservation = await claimOutboundIdempotencyInTx(
+          client,
+          request,
+          OUTBOUND_IDEMPOTENCY_SCOPE,
+          outboundActor,
+          { channel, to, subject, body: textBody, patientId: patient?.id ?? null, purpose, replyToInboundId },
+          typeof body.clientRequestId === "string" ? body.clientRequestId : null,
+        );
+        if (reservation.kind === "conflict") {
+          return { kind: "early" as const, status: reservation.status, body: reservation.body };
+        }
+        if (reservation.kind === "replay") {
+          return { kind: "replay" as const, status: reservation.status, body: reservation.body };
+        }
+
         return {
           kind: "ready" as const,
           actor: identity.username,
           actorRole: identity.role,
+          outboundActor,
+          reservation: reservation.kind === "reserved" ? reservation : null,
           channel,
           to,
-          subject: typeof body.subject === "string" ? body.subject.slice(0, 200) : null,
-          textBody: typeof body.body === "string" ? body.body : "",
+          subject,
+          textBody,
           patientId: patient?.id ?? null,
           patientName: patient?.fullName ?? null,
           purpose,
@@ -597,29 +637,93 @@ export async function messagesOutboundPostCanonicalResponse(
     if (preflight.kind === "early") {
       return jsonNoStore(preflight.body, preflight.status);
     }
+    if (preflight.kind === "replay") {
+      return NextResponse.json(preflight.body, {
+        status: preflight.status,
+        headers: { ...NO_STORE, "X-Idempotent-Replay": "true" },
+      });
+    }
 
-    // Phase 2: Execute sendOutbound outside DB transaction, then record audit atomically.
+    const pool = getPool();
+    const reserved = preflight.reservation;
+    const release = async () => {
+      if (reserved) {
+        await releaseOutboundReservation(pool, OUTBOUND_IDEMPOTENCY_SCOPE, preflight.outboundActor, reserved.key, reserved.requestHash);
+      }
+    };
+
+    // Fresh authority + consent + channel proof immediately before transport: a grant,
+    // patient-scope or consent withdrawn after the first transaction stops the send.
+    let fresh: {
+      channelData: typeof preflight.channelData;
+      consentData: typeof preflight.consentData;
+      replyVerified: boolean;
+    };
+    try {
+      fresh = await withStaffOperation(getPool(), session, "messages.use", async (client, handle) => {
+        const patientScope = await staffOperationPatientScope(client, handle, "messages.use");
+        if (patientScope.kind === "none") {
+          throw new OutboundAuthorityWithdrawn();
+        }
+        if (preflight.patientId !== null) {
+          if (!(await canAccessPatientInTx(client, patientScope, preflight.patientId))) {
+            throw new OutboundAuthorityWithdrawn();
+          }
+        } else if (patientScope.kind !== "all") {
+          throw new OutboundAuthorityWithdrawn();
+        }
+        const channelData = await messagingChannelWithSecretWith(client, preflight.channel);
+        const consentData =
+          preflight.patientId !== null && preflight.purpose === "manual"
+            ? await patientMessagingConsentWith(client, preflight.patientId, preflight.channel)
+            : null;
+        const replyVerified =
+          preflight.purpose === "reply" &&
+          preflight.replyToInboundId !== null &&
+          Number.isInteger(preflight.replyToInboundId) &&
+          preflight.replyToInboundId > 0
+            ? await isVerifiedInboundReplyWith(client, {
+                inboundId: preflight.replyToInboundId,
+                channel: preflight.channel,
+                patientId: preflight.patientId,
+                to: preflight.to,
+              })
+            : false;
+        return { channelData, consentData, replyVerified };
+      });
+    } catch (error) {
+      await release();
+      if (error instanceof OutboundAuthorityWithdrawn) {
+        return jsonNoStore({ message: "غير مصرّح لك بمراسلة هذا المريض." }, 403);
+      }
+      throw error;
+    }
+
+    // Phase 2: external transport outside any DB transaction. Once transport may have
+    // started, the reservation is never deleted: an uncertain outcome fails closed on
+    // retry (409 outbound_delivery_uncertain) instead of sending twice.
+    // A thrown transport error propagates with the reservation left in_progress.
     const result = await sendOutbound(
-      {
-        channel: preflight.channel,
-        to: preflight.to,
-        subject: preflight.subject,
-        body: preflight.textBody,
-        patientId: preflight.patientId,
-        purpose: preflight.purpose,
-        actor: preflight.actor,
-        replyToInboundId: preflight.replyToInboundId,
-      },
-      {
-        channel: async () => ({
-          view: preflight.channelData.view,
-          secret: preflight.channelData.secret,
-        }),
-        record: recordMessageDelivery,
-        consent: preflight.consentData ? async () => preflight.consentData! : undefined,
-        verifyReply: async () => preflight.replyVerified,
-      },
-    );
+        {
+          channel: preflight.channel,
+          to: preflight.to,
+          subject: preflight.subject,
+          body: preflight.textBody,
+          patientId: preflight.patientId,
+          purpose: preflight.purpose,
+          actor: preflight.actor,
+          replyToInboundId: preflight.replyToInboundId,
+        },
+        {
+          channel: async () => ({
+            view: fresh.channelData.view,
+            secret: fresh.channelData.secret,
+          }),
+          record: (inp) => recordMessageDeliveryWith(pool, inp),
+          consent: fresh.consentData ? async () => fresh.consentData! : undefined,
+          verifyReply: async () => fresh.replyVerified,
+        },
+      );
 
     await insertAuditRow(getPool(), {
       action: "messaging.send",
@@ -631,25 +735,40 @@ export async function messagesOutboundPostCanonicalResponse(
       actorRole: preflight.actorRole,
     }).catch(() => undefined);
 
-    return result.ok
-      ? jsonNoStore(
-          {
-            ok: true,
-            deliveryId: result.deliveryId,
-            ...(result.logged
-              ? {}
-              : { message: "أُرسلت الرسالة، لكن تعذّر حفظها في السجل — لا تُعد إرسالها." }),
-          },
-          201,
-        )
-      : jsonNoStore(
-          { ok: false, message: result.message, deliveryId: result.deliveryId },
-          result.status,
-        );
+    const responseBody = result.ok
+      ? {
+          ok: true,
+          deliveryId: result.deliveryId,
+          ...(result.logged
+            ? {}
+            : { message: "أُرسلت الرسالة، لكن تعذّر حفظها في السجل — لا تُعد إرسالها." }),
+        }
+      : { ok: false, message: result.message, deliveryId: result.deliveryId };
+    const responseStatus = result.ok ? 201 : result.status;
+
+    if (reserved) {
+      if (!result.ok && (result.status === 400 || result.status === 409)) {
+        // sendOutbound refuses with 400/409 only before any transport call.
+        await release();
+      } else {
+        // Delivered (201) or provider-reported failure (502): record the definitive
+        // outcome. If this write fails the reservation stays in_progress (fail closed).
+        await completeOutboundIdempotency(pool, OUTBOUND_IDEMPOTENCY_SCOPE, preflight.outboundActor, reserved.key, responseStatus, responseBody);
+      }
+    }
+    return jsonNoStore(responseBody, responseStatus);
   } catch (error) {
     const bounded = bodyErrorResponse(error);
     if (bounded) return bounded;
     return canonicalPatientReadFailure(error, "تعذّر إرسال الرسالة.");
+  }
+}
+
+const OUTBOUND_IDEMPOTENCY_SCOPE = "messages.outbound";
+class OutboundAuthorityWithdrawn extends Error {
+  constructor() {
+    super("OUTBOUND_AUTHORITY_WITHDRAWN");
+    this.name = "OutboundAuthorityWithdrawn";
   }
 }
 

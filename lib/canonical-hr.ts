@@ -1,5 +1,4 @@
 import "server-only";
-import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { canonicalPatientReadFailure, NO_STORE } from "./canonical-patient-http";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
@@ -85,6 +84,7 @@ import {
   listPayrollItemsWith,
   listPayrollPeriodsWith,
   listPayrollRunsWith,
+  replayDisbursementForActor,
   reversePayrollDisbursementInTx,
   updateHrSettingsInTx,
   type DisburseInput,
@@ -103,7 +103,7 @@ import {
 } from "./hr-temporal-request";
 import { recordHrHistoryInTransaction } from "./hr-temporal-write";
 import { bodyErrorResponse, readJsonBody } from "./http-body";
-import { IDEMPOTENCY_KEY_PATTERN } from "./idempotency-key";
+import { withHttpIdempotencyInTx } from "./http-idempotency";
 import { clinicDateString } from "./schedule";
 import { JSON_BODY_LIMIT_BYTES } from "./security-limits";
 import { staffAdmissionRefusal } from "./staff-capability-editor";
@@ -165,21 +165,13 @@ class CanonicalHrRefusal extends Error {
   }
 }
 
-function hrCanonCanonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value ?? null);
-  if (Array.isArray(value)) return `[${value.map(hrCanonCanonicalJson).join(",")}]`;
-  const entries = Object.keys(value as Record<string, unknown>)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${hrCanonCanonicalJson((value as Record<string, unknown>)[key])}`);
-  return `{${entries.join(",")}}`;
-}
-
 type HrTxIdempotentOutcome = {
   status: number;
   body: unknown;
   replay?: boolean;
 };
 
+/** Delegates to the shared advisory-locked, same-transaction implementation (peer-review #1/#9). */
 async function withHrCanonicalIdempotencyInTx(
   client: DbClient,
   request: Request,
@@ -188,92 +180,7 @@ async function withHrCanonicalIdempotencyInTx(
   rawPayload: unknown,
   execute: () => Promise<HrTxIdempotentOutcome>,
 ): Promise<HrTxIdempotentOutcome> {
-  const rawHeader = request.headers.get("idempotency-key");
-  const key = rawHeader?.trim() ?? "";
-  if (!key) {
-    return execute();
-  }
-  if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
-    return {
-      status: 400,
-      body: {
-        reason: "invalid_idempotency_key",
-        message: "صيغة مفتاح منع التكرار (Idempotency-Key) غير صالحة.",
-      },
-    };
-  }
-
-  const requestHash = createHash("sha256").update(hrCanonCanonicalJson(rawPayload)).digest("hex");
-  const existing = await client.query<{
-    request_hash: string;
-    state: string;
-    status_code: number | null;
-    response_body: unknown;
-    age_ms: number;
-  }>(
-    `SELECT request_hash, state, status_code, response_body,
-            EXTRACT(EPOCH FROM (NOW() - created_at)) * 1000 AS age_ms
-       FROM http_idempotency_keys
-      WHERE scope = $1 AND actor = $2 AND idempotency_key = $3
-      FOR UPDATE`,
-    [scope, actor, key],
-  );
-  const row = existing.rows[0];
-  if (row) {
-    if (row.request_hash !== requestHash) {
-      return {
-        status: 409,
-        body: { reason: "idempotency_conflict", message: "مفتاح الإعادة مستعمل بعملية مختلفة." },
-      };
-    }
-    if (row.state === "completed") {
-      return {
-        status: row.status_code ?? 200,
-        body: row.response_body,
-        replay: true,
-      };
-    }
-    if (Number(row.age_ms ?? 0) < 60_000) {
-      return {
-        status: 409,
-        body: { reason: "idempotency_in_progress", message: "الطلب الأول لا يزال قيد المعالجة." },
-      };
-    }
-  }
-
-  await client.query("SAVEPOINT canonical_hr_http_idempotency_tx");
-  try {
-    const result = await execute();
-    if (result.status >= 200 && result.status < 300) {
-      await client.query(
-        `INSERT INTO http_idempotency_keys
-           (scope, actor, idempotency_key, request_hash, state, status_code, response_body, completed_at)
-         VALUES ($1, $2, $3, $4, 'completed', $5, $6::jsonb, NOW())
-         ON CONFLICT (scope, actor, idempotency_key) DO UPDATE
-            SET state = 'completed',
-                status_code = EXCLUDED.status_code,
-                response_body = EXCLUDED.response_body,
-                completed_at = NOW()`,
-        [scope, actor, key, requestHash, result.status, JSON.stringify(result.body ?? null)],
-      );
-      await client.query("RELEASE SAVEPOINT canonical_hr_http_idempotency_tx");
-      return result;
-    }
-    await client.query("ROLLBACK TO SAVEPOINT canonical_hr_http_idempotency_tx");
-    await client.query("RELEASE SAVEPOINT canonical_hr_http_idempotency_tx");
-    if (row && row.state === "in_progress") {
-      await client.query(
-        `DELETE FROM http_idempotency_keys
-          WHERE scope = $1 AND actor = $2 AND idempotency_key = $3 AND state = 'in_progress'`,
-        [scope, actor, key],
-      );
-    }
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK TO SAVEPOINT canonical_hr_http_idempotency_tx").catch(() => {});
-    await client.query("RELEASE SAVEPOINT canonical_hr_http_idempotency_tx").catch(() => {});
-    throw error;
-  }
+  return withHttpIdempotencyInTx(client, request, scope, actor, rawPayload, execute);
 }
 
 /** Audit-free error mapper safe for both read routes and `AUDIT_EXEMPT` routes. */
@@ -2266,6 +2173,7 @@ export async function hrPayrollDisbursePostCanonicalResponse(
       throw new HrPayrollError("invalid_id", 400, "حدّد بند المستحق.");
     }
     let disbursement;
+    let actorUserId: number | null = null;
     try {
       disbursement = await withStaffOperation(
         getPool(),
@@ -2273,6 +2181,7 @@ export async function hrPayrollDisbursePostCanonicalResponse(
         "hr.payroll.manage",
         async (client, handle) => {
           const identity = await staffOperationIdentity(client, handle, "hr.payroll.manage");
+          actorUserId = identity.userId;
           return disbursePayrollItemInTx(client, p.itemId as number | string, input, {
             userId: identity.userId,
             username: identity.username,
@@ -2281,13 +2190,21 @@ export async function hrPayrollDisbursePostCanonicalResponse(
         },
       );
     } catch (err) {
-      if (!(err instanceof HrPayrollError) && !staffAdmissionRefusal(err) && input.clientRequestId) {
-        const replayed = await runCanonicalReadSnapshot(
-          session,
-          "hr.payroll.manage",
-          (query) => findDisbursementByRequestId(input.clientRequestId!.trim(), query),
-          { errorPrefix: "STAFF_READ", maxBytes: HR_SNAPSHOT_MAX_BYTES },
-        ).catch(() => null);
+      const recoveryActorId: number | null = actorUserId;
+      if (!(err instanceof HrPayrollError) && !staffAdmissionRefusal(err) && input.clientRequestId && recoveryActorId !== null) {
+        // Peer-review #7: compare the FULL request fingerprint, never the key alone.
+        let replayed: Awaited<ReturnType<typeof replayDisbursementForActor>> = null;
+        try {
+          replayed = await runCanonicalReadSnapshot(
+            session,
+            "hr.payroll.manage",
+            (query) => replayDisbursementForActor(query, p.itemId as number | string, input, recoveryActorId),
+            { errorPrefix: "STAFF_READ", maxBytes: HR_SNAPSHOT_MAX_BYTES },
+          );
+        } catch (recoveryError) {
+          if (recoveryError instanceof HrPayrollError) throw recoveryError;
+          replayed = null;
+        }
         if (replayed) {
           replayed.replayed = true;
           return NextResponse.json(

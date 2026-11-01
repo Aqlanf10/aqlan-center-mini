@@ -18,18 +18,19 @@ import {
 } from "./clinic-reset";
 import { csvFile, exportFileName } from "./csv";
 import {
-  allPatientCandidates,
+  allPatientCandidatesWith,
   applyLegacyAssignments,
   backupSqlLines,
   CLINIC_TIME_ZONE,
-  clinicResetPreview,
+  clinicResetPreviewWith,
   commitLegacyImport,
   commitPatientImport,
-  documentsForArchive,
+  documentsForArchiveWith,
   existingOpeningKeys,
-  expenseAttachmentsForArchive,
-  findLegacyImport,
-  findPatientImport,
+  expenseAttachmentsForArchiveWith,
+  findLegacyImportWith,
+  findPatientImportWith,
+  getPool,
   insertAuditRow,
   journalEntries,
   legacyPatientRefs,
@@ -110,7 +111,14 @@ export async function canonicalBackupSqlGet(
   }
 
   const encoder = new TextEncoder();
-  const iterator = backupSqlLines();
+  const backupClient = await getPool().connect();
+  const iterator = (async function* () {
+    try {
+      yield* backupSqlLines(backupClient);
+    } finally {
+      backupClient.release();
+    }
+  })();
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
@@ -147,8 +155,8 @@ export async function canonicalBackupDocumentsGet(
       if (!storage.ready) {
         return { kind: "storage_unready" as const, message: storage.message };
       }
-      const rows = await documentsForArchive();
-      const expenseRows = await expenseAttachmentsForArchive();
+      const rows = await documentsForArchiveWith(client);
+      const expenseRows = await expenseAttachmentsForArchiveWith(client);
       const totalCount = rows.length + expenseRows.length;
       if (totalCount === 0) {
         return { kind: "empty" as const };
@@ -254,7 +262,16 @@ export async function canonicalBackupFullGet(
     return ownerAdmissionFailure(admitted.reason, "النسخة الكاملة للمدير وحده.", "سجّل الدخول من جديد.");
   }
 
-  const source = Readable.from(fullBackupBlocks());
+  const backupClient = await getPool().connect();
+  const source = Readable.from(
+    (async function* () {
+      try {
+        yield* fullBackupBlocks({ source: backupClient });
+      } finally {
+        backupClient.release();
+      }
+    })(),
+  );
   const gzip = createGzip();
   source.on("error", (error) => gzip.destroy(error));
   const abort = () => {
@@ -531,7 +548,7 @@ export async function canonicalPatientsImportPost(
     const admitted = await withCanonicalOwnerOperation(
       session,
       "clinic.data.import",
-      async (_client, view) => {
+      async (client, view) => {
         const csv = typeof body.csv === "string" ? body.csv : "";
         const fileName =
           typeof body.fileName === "string" && body.fileName.trim()
@@ -554,8 +571,8 @@ export async function canonicalPatientsImportPost(
         const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
         if (mode === "preview") {
-          const existing = await allPatientCandidates();
-          const previous = await findPatientImport(fileSha256);
+          const existing = await allPatientCandidatesWith(client);
+          const previous = await findPatientImportWith(client, fileSha256);
           const classified = classifyImportRows(rows, existing, today);
           if (classified.rows.length === 0) {
             return ownerNoStore(
@@ -575,15 +592,18 @@ export async function canonicalPatientsImportPost(
         if (body.fileSha256 !== fileSha256) {
           return ownerNoStore({ message: "تغيّر الملف بعد المعاينة. عاينه من جديد قبل الاستيراد." }, 409);
         }
-        const result = await commitPatientImport({
-          rows,
-          fileSha256,
-          fileName,
-          today,
-          includePossibleDuplicates: body.includePossibleDuplicates === true,
-          actor: view.username,
-          actorRole: view.roleLabel,
-        });
+        const result = await commitPatientImport(
+          {
+            rows,
+            fileSha256,
+            fileName,
+            today,
+            includePossibleDuplicates: body.includePossibleDuplicates === true,
+            actor: view.username,
+            actorRole: view.roleLabel,
+          },
+          { skipEnsureSchema: true },
+        );
         if (!result.ok && result.reason === "already_imported") {
           return ownerNoStore(
             {
@@ -648,7 +668,7 @@ export async function canonicalPatientsLegacyImportPost(
     const admitted = await withCanonicalOwnerOperation(
       session,
       "clinic.data.import",
-      async (_client, view) => {
+      async (client, view) => {
         const mode = body.mode === "commit" ? "commit" : body.mode === "preview" ? "preview" : null;
         if (!mode) return ownerNoStore({ message: "حدّد المعاينة أو الحفظ." }, 400);
         const treatmentsCsv = typeof body.treatmentsCsv === "string" ? body.treatmentsCsv : "";
@@ -690,9 +710,9 @@ export async function canonicalPatientsLegacyImportPost(
         const assignments = canonicalLegacyAssignmentsOf(body.assignments);
 
         if (mode === "preview") {
-          const patients = await legacyPatientRefs();
-          const previous = await findLegacyImport(fileSha256);
-          const existing = await existingOpeningKeys();
+          const patients = await legacyPatientRefs(client);
+          const previous = await findLegacyImportWith(client, fileSha256);
+          const existing = await existingOpeningKeys(client);
           const plan = applyLegacyAssignments(
             planLegacyImport(treatments.records, sessions.records, patients),
             assignments,
@@ -735,16 +755,19 @@ export async function canonicalPatientsLegacyImportPost(
         if (body.fileSha256 !== fileSha256) {
           return ownerNoStore({ message: "تغيّر الملفان بعد المعاينة. عاينهما من جديد قبل الاستيراد." }, 409);
         }
-        const result = await commitLegacyImport({
-          treatments: treatments.records,
-          sessions: sessions.records,
-          assignments,
-          fileSha256,
-          fileNames,
-          asOfDate: clinicDateString(new Date(), CLINIC_TIME_ZONE),
-          actor: view.username,
-          actorRole: view.roleLabel,
-        });
+        const result = await commitLegacyImport(
+          {
+            treatments: treatments.records,
+            sessions: sessions.records,
+            assignments,
+            fileSha256,
+            fileNames,
+            asOfDate: clinicDateString(new Date(), CLINIC_TIME_ZONE),
+            actor: view.username,
+            actorRole: view.roleLabel,
+          },
+          { skipEnsureSchema: true },
+        );
         if (!result.ok) {
           return ownerNoStore(
             {
@@ -773,7 +796,7 @@ export async function canonicalClinicResetGet(
     const admitted = await withCanonicalOwnerOperation(
       session,
       "clinic.reset",
-      async () => clinicResetPreview(),
+      async (client) => clinicResetPreviewWith(client),
     );
     if (!admitted.ok) {
       return ownerAdmissionFailure(admitted.reason, "إعادة الضبط للمدير وحده.");
@@ -848,6 +871,7 @@ export async function canonicalClinicResetPost(
           ? { ok: true, backupId: backup.backup.backupId }
           : { ok: false, failure: backup.body };
       },
+      { skipEnsureSchema: true },
     );
   } catch (error) {
     if (error instanceof ProtectedLabHistoryError) return ownerNoStore({ message: error.message, code: "protected-lab-history" }, 409);

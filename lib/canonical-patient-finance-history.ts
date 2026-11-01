@@ -18,6 +18,7 @@ import {
   createPartyOpeningAdvanceInTx,
   createPartyOpeningPayableInTx,
   createPatientFamilyInTx,
+  doctorOwnedPatientIdsWith,
   familyIdOfPatientWith,
   familyMemberBalancesInSnapshot,
   findFamiliesByPhoneWith,
@@ -723,6 +724,9 @@ export async function familiesSearchCanonicalResponse(
       session,
       "read:patients.record",
       async (query, scope) => {
+        if (scope.patientScope.kind === "none") {
+          throw new CanonicalPatientFinanceRefusal(403, "نطاق وصولك للمرضى مغلق.");
+        }
         const clinicianPartyId =
           scope.patientScope.kind === "own" ? scope.patientScope.clinicianPartyId : null;
         if (phone) {
@@ -2256,8 +2260,15 @@ export async function listOpeningBalancesCanonicalResponse(
       const preview = await runCanonicalReadSnapshot(
         session,
         "finance.reconciliation.view",
-        async (query) =>
-          openingCorrectionPreviewInSnapshot(query, patientId, currency, clear ? null : amountMinor),
+        async (query, scope) => {
+          if (scope.patientScope.kind === "none") {
+            throw new CanonicalPatientFinanceRefusal(403, "نطاق وصولك للمرضى مغلق.");
+          }
+          if (!(await patientVisibleInSnapshot(query, scope, patientId))) {
+            throw new CanonicalPatientFinanceRefusal(403, "غير مصرح بالوصول إلى المريض.");
+          }
+          return openingCorrectionPreviewInSnapshot(query, patientId, currency, clear ? null : amountMinor);
+        },
         { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
       );
       return NextResponse.json({ preview }, { headers: NO_STORE });
@@ -2272,7 +2283,15 @@ export async function listOpeningBalancesCanonicalResponse(
       const history = await runCanonicalReadSnapshot(
         session,
         "finance.reconciliation.view",
-        async (query) => listOpeningBalanceHistoryWith(query, historyFor),
+        async (query, scope) => {
+          if (scope.patientScope.kind === "none") {
+            throw new CanonicalPatientFinanceRefusal(403, "نطاق وصولك للمرضى مغلق.");
+          }
+          if (!(await patientVisibleInSnapshot(query, scope, historyFor))) {
+            throw new CanonicalPatientFinanceRefusal(403, "غير مصرح بالوصول إلى المريض.");
+          }
+          return listOpeningBalanceHistoryWith(query, historyFor);
+        },
         { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
       );
       return NextResponse.json({ history }, { headers: NO_STORE });
@@ -2285,8 +2304,20 @@ export async function listOpeningBalancesCanonicalResponse(
     const payload = await runCanonicalReadSnapshot(
       session,
       "finance.reconciliation.view",
-      async (query) => {
-        const balances = await listOpeningBalancesWith(query);
+      async (query, scope) => {
+        if (scope.patientScope.kind === "none") {
+          throw new CanonicalPatientFinanceRefusal(403, "نطاق وصولك للمرضى مغلق.");
+        }
+        const rawBalances = await listOpeningBalancesWith(query);
+        let balances = rawBalances;
+        if (scope.patientScope.kind === "own") {
+          const owned = await doctorOwnedPatientIdsWith(
+            query,
+            scope.patientScope.clinicianPartyId,
+            rawBalances.map((r) => r.patientId),
+          );
+          balances = rawBalances.filter((r) => owned.has(r.patientId));
+        }
         const totalsByCurrency: Record<string, number> = {};
         for (const row of balances) {
           totalsByCurrency[row.currency] = (totalsByCurrency[row.currency] ?? 0) + row.amountMinor;
@@ -2359,6 +2390,20 @@ export async function setOpeningBalanceCanonicalResponse(
       session,
       "finance.opening-balances.manage",
       async (client, handle) => {
+        const patientScope = await staffOperationPatientScope(
+          client,
+          handle,
+          "finance.opening-balances.manage",
+        );
+        if (patientScope.kind === "none") {
+          throw new CanonicalPatientFinanceRefusal(403, "نطاق وصولك للمرضى مغلق.");
+        }
+        if (
+          patientScope.kind === "own" &&
+          !(await patientInDoctorScopeWith(client, patientScope.clinicianPartyId, patientId))
+        ) {
+          throw new CanonicalPatientFinanceRefusal(403, "غير مصرح بالوصول إلى المريض.");
+        }
         const identity = await staffOperationIdentity(
           client,
           handle,
@@ -2472,6 +2517,20 @@ export async function clearOpeningBalanceCanonicalResponse(
       session,
       "finance.opening-balances.manage",
       async (client, handle) => {
+        const patientScope = await staffOperationPatientScope(
+          client,
+          handle,
+          "finance.opening-balances.manage",
+        );
+        if (patientScope.kind === "none") {
+          throw new CanonicalPatientFinanceRefusal(403, "نطاق وصولك للمرضى مغلق.");
+        }
+        if (
+          patientScope.kind === "own" &&
+          !(await patientInDoctorScopeWith(client, patientScope.clinicianPartyId, patientId))
+        ) {
+          throw new CanonicalPatientFinanceRefusal(403, "غير مصرح بالوصول إلى المريض.");
+        }
         const identity = await staffOperationIdentity(
           client,
           handle,

@@ -4,7 +4,6 @@ import { JSON_BODY_LIMIT_BYTES } from "./security-limits";
 import { bodyErrorResponse, readJsonBody } from "./http-body";
 import {
   MAX_PASSWORD_LENGTH,
-  SESSION_COOKIE,
   hashPassword,
 } from "./auth";
 import {
@@ -22,7 +21,6 @@ import {
   type DoctorCommissionConfig,
 } from "./doctor-permissions";
 import { isRole } from "./roles";
-import { staffSessionCookieSecure } from "./sessionCookie";
 import { withIsolation } from "./transactions";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
@@ -37,7 +35,8 @@ import {
   type StaffAccountOperation,
 } from "./staff-capabilities";
 import { StaffCapabilityEditError, staffAdmissionRefusal } from "./staff-capability-editor";
-import { changeCanonicalStaffOwnPassword } from "./staff-durable-issuer";
+import { POST as loginRoutePost } from "@/app/api/auth/login/route";
+import { rotateCanonicalStaffOwnPassword } from "./staff-session-revocation";
 import {
   revalidateVerifiedDurableSession,
   type VerifiedDurableSession,
@@ -612,7 +611,7 @@ export async function canonicalAuthPasswordPost(
   }
 
   try {
-    const outcome = await changeCanonicalStaffOwnPassword({
+    const outcome = await rotateCanonicalStaffOwnPassword({
       handle: session,
       currentPassword,
       newPassword,
@@ -636,14 +635,32 @@ export async function canonicalAuthPasswordPost(
       return usersJson({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
     }
 
-    const response = NextResponse.json({ ok: true, message: "تغيّرت كلمة المرور. سُجّل خروج الأجهزة الأخرى." });
-    response.cookies.set(SESSION_COOKIE, outcome.token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: staffSessionCookieSecure(request.headers.get("host")),
-      path: "/",
-      maxAge: outcome.maxAgeSeconds,
-    });
+    const loginHeaders = new Headers({ "content-type": "application/json" });
+    for (const headerName of ["host", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"]) {
+      const value = request.headers.get(headerName);
+      if (value) loginHeaders.set(headerName, value);
+    }
+    const loginRes = await loginRoutePost(
+      new Request(new URL("/api/auth/login", request.url), {
+        method: "POST",
+        headers: loginHeaders,
+        body: JSON.stringify({ username: outcome.username, password: newPassword }),
+      }),
+    );
+
+    const response = NextResponse.json(
+      { ok: true, message: "تغيّرت كلمة المرور. سُجّل خروج الأجهزة الأخرى." },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+    if (loginRes.status === 200) {
+      const setCookies = loginRes.headers.getSetCookie?.() ?? [];
+      if (setCookies.length > 0) {
+        for (const cookie of setCookies) response.headers.append("set-cookie", cookie);
+      } else {
+        const single = loginRes.headers.get("set-cookie");
+        if (single) response.headers.set("set-cookie", single);
+      }
+    }
     return response;
   } catch {
     return usersJson({ message: "تعذّر تغيير كلمة المرور. أعد المحاولة." }, 500);

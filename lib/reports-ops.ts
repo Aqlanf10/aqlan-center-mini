@@ -53,8 +53,8 @@ export const REFERRAL_HISTORY_ROW_CAP = 2000;
  */
 export async function loadInternalReferrals(filters: {
   from: string; to: string; doctorId: number | null; patientId: number | null;
-}): Promise<{ rows: InternalReferralReportRow[]; totals: InternalReferralTotals; historyCapped: boolean }> {
-  await ensureSchema();
+}, options?: { skipEnsureSchema?: boolean }): Promise<{ rows: InternalReferralReportRow[]; totals: InternalReferralTotals; historyCapped: boolean }> {
+  if (!options?.skipEnsureSchema) await ensureSchema();
   const pool = getPool();
   const params = [CLINIC_TIME_ZONE, filters.from, filters.to, filters.doctorId, filters.patientId];
   const select = `
@@ -148,8 +148,8 @@ export const CHAIR_EVENT_ROW_CAP = 2000;
  */
 export async function loadChairFlow(filters: {
   from: string; to: string; patientId: number | null;
-}): Promise<ChairFlowData> {
-  await ensureSchema();
+}, options?: { skipEnsureSchema?: boolean }): Promise<ChairFlowData> {
+  if (!options?.skipEnsureSchema) await ensureSchema();
   const pool = getPool();
   const { rows: [counts] } = await pool.query<{ arrived: string; cleared: string }>(
     `SELECT COUNT(*)::text AS arrived, COUNT(cleared_at)::text AS cleared

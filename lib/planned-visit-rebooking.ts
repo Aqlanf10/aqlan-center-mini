@@ -9,7 +9,7 @@ import { revalidateSessionInTransaction } from "./session";
 import { canAccessPatient } from "./patient-access";
 import { canActOnReferral } from "./referrals";
 import { lockBookableAppointmentDoctor } from "./appointment-doctor";
-import { loadCapacityContext } from "./capacity-context";
+import { loadCapacityContext, loadCapacityContextWith } from "./capacity-context";
 import { judgeBookingInDay } from "./book-appointment";
 import { PURCHASE_RESET_FENCE } from "./clinic-reset";
 import type { BookingConflict } from "./book-appointment";
@@ -102,7 +102,9 @@ export async function rebookPlannedVisitWith(input: PlannedRebookIntent, authori
   if (!parsed) return { ok: false, status: 400, message: "أدخل موعدًا صحيحًا وسبب إعادة الحجز ورقم محاولة صالحًا." };
   input = parsed;
   if (authority.admitsRole && !authority.admitsRole()) return { ok: false, status: 403, message: "غير مصرّح لك بإعادة الحجز." };
-  const capacityContext = await loadCapacityContext();
+  const capacityContext = authority.client
+    ? await loadCapacityContextWith(authority.client)
+    : await loadCapacityContext();
   // Never trust this unlocked preview for writing. It only identifies all referral
   // appointment locks that must precede the planned row; a changed set is rejected.
   const { rows: previewRows } = await (authority.client ?? getPool()).query<{ referral_id: number | null }>(

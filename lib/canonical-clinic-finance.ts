@@ -1,5 +1,4 @@
 import "server-only";
-import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   getAccountName,
@@ -32,6 +31,7 @@ import {
   createPartyInTx,
   createPayableInTransaction,
   deleteExpenseCategoryInTx,
+  doctorOwnedPatientIdsWith,
   ExpenseCategoryConflictError,
   financeSummaryWith,
   fxReportWith,
@@ -63,6 +63,7 @@ import {
   partyBalancesWith,
   partyStatementWith,
   patientDebtReportWith,
+  patientInDoctorScopeWith,
   quoteExpenseWith,
   ratesFromSettings,
   recordExpenseAttachmentWith,
@@ -80,10 +81,11 @@ import {
 import { projectExpenseCategories } from "./expense-catalogue-visibility";
 import { parseExpenseRequest, refusalStatus } from "./expense-request";
 import { isPartyKind } from "./expenses";
-import { putFile, readFileByKey, storageStatus } from "./files";
+import { putFile, readFileByKey, storageStatus, type StoredFile } from "./files";
+import { cleanupUncommittedStoredFile, holdStorageKeyShared, plannedStorageKey } from "./file-cleanup";
 import { projectFinanceSummary } from "./finance-report-visibility";
 import { bodyErrorResponse, readBoundedFormData, readJsonBody } from "./http-body";
-import { IDEMPOTENCY_KEY_PATTERN } from "./idempotency-key";
+import { withHttpIdempotencyInTx } from "./http-idempotency";
 import { JOURNAL_REVIEW_RESPONSE, JournalReadIntegrityError } from "./journal-read-integrity";
 import { LAB_BALANCE_VIEW, projectLabBalanceOverview } from "./lab-balance-overview";
 import {
@@ -108,6 +110,7 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
 import {
   staffOperationCapabilities,
   staffOperationIdentity,
+  staffOperationPatientScope,
   withStaffOperation,
 } from "./staff-operation-runtime";
 import { DEFAULT_MAX_BYTES, validateUpload } from "./storage";
@@ -147,24 +150,17 @@ class CanonicalSlice37bRefusal extends Error {
   }
 }
 
-function canonicalJson(value: unknown): string {
-  if (value === null || value === undefined || typeof value !== "object") {
-    return JSON.stringify(value ?? null);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
-}
-
 type TxResponseOutcome = {
   status: number;
   body: unknown;
   replay?: boolean;
 };
 
+/**
+ * Finding #9 (peer review): delegates to the shared advisory-locked, same-transaction
+ * implementation in `lib/http-idempotency.ts` so two concurrent requests with a new
+ * key can never both execute (`SELECT ? FOR UPDATE` on an absent row locks nothing).
+ */
 async function withCanonicalHttpIdempotencyInTx(
   client: DbClient,
   request: Request,
@@ -173,92 +169,7 @@ async function withCanonicalHttpIdempotencyInTx(
   rawPayload: unknown,
   execute: () => Promise<TxResponseOutcome>,
 ): Promise<TxResponseOutcome> {
-  const rawHeader = request.headers.get("idempotency-key");
-  const key = rawHeader?.trim() ?? "";
-  if (!key) {
-    return execute();
-  }
-  if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
-    return {
-      status: 400,
-      body: {
-        reason: "invalid_idempotency_key",
-        message: "صيغة مفتاح منع التكرار (Idempotency-Key) غير صالحة.",
-      },
-    };
-  }
-
-  const requestHash = createHash("sha256").update(canonicalJson(rawPayload)).digest("hex");
-  const existing = await client.query<{
-    request_hash: string;
-    state: string;
-    status_code: number | null;
-    response_body: unknown;
-    age_ms: number;
-  }>(
-    `SELECT request_hash, state, status_code, response_body,
-            EXTRACT(EPOCH FROM (NOW() - created_at)) * 1000 AS age_ms
-       FROM http_idempotency_keys
-      WHERE scope = $1 AND actor = $2 AND idempotency_key = $3
-      FOR UPDATE`,
-    [scope, actor, key],
-  );
-  const row = existing.rows[0];
-  if (row) {
-    if (row.request_hash !== requestHash) {
-      return {
-        status: 409,
-        body: { reason: "idempotency_conflict", message: "مفتاح الإعادة مستعمل بعملية مختلفة." },
-      };
-    }
-    if (row.state === "completed") {
-      return {
-        status: row.status_code ?? 200,
-        body: row.response_body,
-        replay: true,
-      };
-    }
-    if (Number(row.age_ms ?? 0) < 60_000) {
-      return {
-        status: 409,
-        body: { reason: "idempotency_in_progress", message: "الطلب الأول لا يزال قيد المعالجة." },
-      };
-    }
-  }
-
-  await client.query("SAVEPOINT canonical_http_idempotency_tx");
-  try {
-    const result = await execute();
-    if (result.status >= 200 && result.status < 300) {
-      await client.query(
-        `INSERT INTO http_idempotency_keys
-           (scope, actor, idempotency_key, request_hash, state, status_code, response_body, completed_at)
-         VALUES ($1, $2, $3, $4, 'completed', $5, $6::jsonb, NOW())
-         ON CONFLICT (scope, actor, idempotency_key) DO UPDATE
-            SET state = 'completed',
-                status_code = EXCLUDED.status_code,
-                response_body = EXCLUDED.response_body,
-                completed_at = NOW()`,
-        [scope, actor, key, requestHash, result.status, JSON.stringify(result.body ?? null)],
-      );
-      await client.query("RELEASE SAVEPOINT canonical_http_idempotency_tx");
-      return result;
-    }
-    await client.query("ROLLBACK TO SAVEPOINT canonical_http_idempotency_tx");
-    await client.query("RELEASE SAVEPOINT canonical_http_idempotency_tx");
-    if (row && row.state === "in_progress") {
-      await client.query(
-        `DELETE FROM http_idempotency_keys
-          WHERE scope = $1 AND actor = $2 AND idempotency_key = $3 AND state = 'in_progress'`,
-        [scope, actor, key],
-      );
-    }
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK TO SAVEPOINT canonical_http_idempotency_tx").catch(() => {});
-    await client.query("RELEASE SAVEPOINT canonical_http_idempotency_tx").catch(() => {});
-    throw error;
-  }
+  return withHttpIdempotencyInTx(client, request, scope, actor, rawPayload, execute);
 }
 
 function toTxJsonResponse(outcome: TxResponseOutcome): NextResponse {
@@ -762,6 +673,7 @@ export async function expenseAttachmentsCreateCanonicalResponse(
   rawId: string,
   session: VerifiedDurableSession,
 ): Promise<NextResponse> {
+  let uploadedStored: StoredFile | null = null;
   try {
     const outcome = await withStaffOperation(
       getPool(),
@@ -815,7 +727,9 @@ export async function expenseAttachmentsCreateCanonicalResponse(
         if (!contentMatchesMimeType(bytes, file.type)) {
           return { status: 400, body: { message: SIGNATURE_MISMATCH_MESSAGE } };
         }
+        await holdStorageKeyShared(client, plannedStorageKey(bytes, check.extension));
         const stored = await putFile(bytes, check.extension);
+        uploadedStored = stored;
         const attachment = await recordExpenseAttachmentWith(client, {
           expenseId,
           title,
@@ -840,8 +754,13 @@ export async function expenseAttachmentsCreateCanonicalResponse(
         return { status: 201, body: attachment };
       },
     );
+    if (outcome.status >= 400) {
+      // The transaction committed without a referencing row (e.g. 404): reconcile.
+      await cleanupUncommittedStoredFile(uploadedStored);
+    }
     return toTxJsonResponse(outcome);
   } catch (error) {
+    await cleanupUncommittedStoredFile(uploadedStored);
     return handleSlice37bError(error, "تعذّر حفظ الملف. أعد المحاولة.");
   }
 }
@@ -932,11 +851,28 @@ export async function commissionOverridesGetCanonicalResponse(
     const payload = await runCanonicalReadSnapshot(
       session,
       "finance.commissions.manage-rates",
-      async (query) => {
-        const [overrides, targets] = await Promise.all([
-          listCaseOverridesWith(query, { patientId }),
-          patientId ? caseOverrideTargetsWith(query, patientId) : Promise.resolve(null),
-        ]);
+      async (query, scope) => {
+        if (scope.patientScope.kind === "none") {
+          throw new CanonicalSlice37bRefusal(403, "نطاق وصولك للمرضى مغلق.");
+        }
+        if (
+          scope.patientScope.kind === "own" &&
+          patientId !== null &&
+          !(await patientInDoctorScopeWith(query, scope.patientScope.clinicianPartyId, patientId))
+        ) {
+          throw new CanonicalSlice37bRefusal(403, "غير مصرح بالوصول إلى المريض.");
+        }
+        const rawOverrides = await listCaseOverridesWith(query, { patientId });
+        let overrides = rawOverrides;
+        if (scope.patientScope.kind === "own" && patientId === null) {
+          const owned = await doctorOwnedPatientIdsWith(
+            query,
+            scope.patientScope.clinicianPartyId,
+            rawOverrides.flatMap((o) => (o.patientId !== null ? [o.patientId] : [])),
+          );
+          overrides = rawOverrides.filter((o) => o.patientId !== null && owned.has(o.patientId));
+        }
+        const targets = patientId ? await caseOverrideTargetsWith(query, patientId) : null;
         return { overrides, targets };
       },
       { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
@@ -957,6 +893,14 @@ export async function commissionOverridesPostCanonicalResponse(
       session,
       "finance.commissions.manage-rates",
       async (client, handle) => {
+        const patientScope = await staffOperationPatientScope(
+          client,
+          handle,
+          "finance.commissions.manage-rates",
+        );
+        if (patientScope.kind === "none") {
+          return { status: 403, body: { message: "نطاق وصولك للمرضى مغلق." } };
+        }
         const identity = await staffOperationIdentity(client, handle, "finance.commissions.manage-rates");
         let body: unknown = null;
         try {
@@ -968,6 +912,28 @@ export async function commissionOverridesPostCanonicalResponse(
         const parsed = parseCaseOverrideRequest(body);
         if (!parsed.ok) {
           return { status: 400, body: { message: parsed.message } };
+        }
+        if (patientScope.kind === "own") {
+          const { rows: targetRows } =
+            parsed.value.caseId !== null
+              ? await client.query<{ patient_id: number }>(
+                  `SELECT patient_id FROM clinical_cases WHERE id = $1`,
+                  [parsed.value.caseId],
+                )
+              : await client.query<{ patient_id: number }>(
+                  `SELECT patient_id FROM treatment_plans WHERE id = $1`,
+                  [parsed.value.planId],
+                );
+          if (
+            targetRows[0] &&
+            !(await patientInDoctorScopeWith(
+              client,
+              patientScope.clinicianPartyId,
+              targetRows[0].patient_id,
+            ))
+          ) {
+            return { status: 403, body: { message: "غير مصرح بالوصول إلى المريض." } };
+          }
         }
         const result = await createCaseOverrideInTx(client, {
           ...parsed.value,
@@ -1111,10 +1077,25 @@ export async function debtsGetCanonicalResponse(
     const payload = await runCanonicalReadSnapshot(
       session,
       "finance.patient-ledger.view",
-      async (query) => ({
-        rows: await patientDebtReportWith(query),
-        baseCurrency: CLINIC_BASE_CURRENCY,
-      }),
+      async (query, scope) => {
+        if (scope.patientScope.kind === "none") {
+          throw new CanonicalSlice37bRefusal(403, "نطاق وصولك للمرضى مغلق.");
+        }
+        const allRows = await patientDebtReportWith(query);
+        let rows = allRows;
+        if (scope.patientScope.kind === "own") {
+          const owned = await doctorOwnedPatientIdsWith(
+            query,
+            scope.patientScope.clinicianPartyId,
+            allRows.map((r) => r.patientId),
+          );
+          rows = allRows.filter((r) => owned.has(r.patientId));
+        }
+        return {
+          rows,
+          baseCurrency: CLINIC_BASE_CURRENCY,
+        };
+      },
       { errorPrefix: "STAFF_READ", maxBytes: SNAPSHOT_MAX_BYTES },
     );
     return NextResponse.json(payload, { headers: NO_STORE });
@@ -1708,8 +1689,16 @@ export async function labReconciliationGetCanonicalResponse(
         const tomorrowStr = addDays(todayStr, 1);
         const afterTomorrowStr = addDays(todayStr, 2);
 
+        if (scope.patientScope.kind === "none") {
+          return {
+            status: 403,
+            body: { message: "نطاق وصولك للمرضى مغلق." },
+          };
+        }
+
         const scopedDoctorPartyId =
           scope.patientScope.kind === "own" ? scope.patientScope.clinicianPartyId : undefined;
+        const canReadAppointments = scope.appointmentScope.kind !== "none";
         const apptDoctorId =
           scope.appointmentScope.kind === "own" ? scope.appointmentScope.clinicianPartyId : null;
 
@@ -1719,9 +1708,9 @@ export async function labReconciliationGetCanonicalResponse(
             limit: 300,
             ...(scopedDoctorPartyId !== undefined ? { scopedDoctorPartyId } : {}),
           }),
-          listAppointmentsByDateWith(query, todayStr, apptDoctorId),
-          listAppointmentsByDateWith(query, tomorrowStr, apptDoctorId),
-          listAppointmentsByDateWith(query, afterTomorrowStr, apptDoctorId),
+          canReadAppointments ? listAppointmentsByDateWith(query, todayStr, apptDoctorId) : Promise.resolve([]),
+          canReadAppointments ? listAppointmentsByDateWith(query, tomorrowStr, apptDoctorId) : Promise.resolve([]),
+          canReadAppointments ? listAppointmentsByDateWith(query, afterTomorrowStr, apptDoctorId) : Promise.resolve([]),
         ]);
 
         const upcomingAppts = [...todayAppts, ...tomorrowAppts, ...afterAppts];

@@ -62,7 +62,7 @@ import {
   type SaveEndoVisitRefusal,
 } from "./endodontics-db";
 import { visibleEndoTreatment } from "./endodontics-response";
-import { withHttpIdempotency } from "./http-idempotency";
+import { withHttpIdempotencyInTx } from "./http-idempotency";
 import { IDEMPOTENCY_KEY_PATTERN } from "./idempotency-key";
 import { InventoryBusy, InventoryTrackingRequired } from "./inventory-domain/legacy-write-guard";
 import { listVisitMaterialReturnsWith, returnVisitMaterialInTransaction, type VisitMaterialReturnLine } from "./inventory-visit-returns";
@@ -643,6 +643,8 @@ export async function handleCanonicalClinicalVisitPost(
             throw new CanonicalEndoVisitRefusal("ortho_edit_required", 403, "تسجيل شدّة التقويم أو قرار فوترتها يتطلب صلاحية تعديل التقويم.");
           }
           await assertVisitInOperationScope(client, handle, "clinical.visits.sign", visitId);
+          // Peer-review #2: replay is answered only after live capability + visit scope were re-proved.
+          return withHttpIdempotencyInTx(client, request, `visits.clinical.sign:${visitId}`, actorKey, source, async () => {
           const identity = await staffOperationIdentity(client, handle, "clinical.visits.sign");
           const signerDoctorPartyId = await staffOperationClinician(client, handle, "clinical.visits.sign");
           const result = await signClinicalVisitInTransaction(client, {
@@ -704,7 +706,7 @@ export async function handleCanonicalClinicalVisitPost(
                 canViewOrtho: caps.has("clinical.ortho.view"),
               })
             : null;
-          return {
+          return { status: 200, body: {
             ...projectedVisit,
             invoiceId: projectedVisit?.invoiceId ?? result.invoiceId,
             createdInvoiceId: result.invoiceId,
@@ -716,9 +718,13 @@ export async function handleCanonicalClinicalVisitPost(
             materialsDeducted: result.materialsDeducted,
             orthoAdjustmentId: result.orthoAdjustmentId,
             orthoBillingClass: result.orthoBillingClass,
-          };
+          } };
+          });
         });
-        return NextResponse.json(payload, { headers: NO_STORE });
+        return NextResponse.json(payload.body, {
+          status: payload.status,
+          headers: payload.replay ? { ...NO_STORE, "X-Idempotent-Replay": "true" } : NO_STORE,
+        });
       }
 
       if (action === "addendum") {
@@ -726,6 +732,7 @@ export async function handleCanonicalClinicalVisitPost(
         if (!note) throw new CanonicalEndoVisitRefusal("invalid_addendum", 400, "اكتب نصّ الملحق.");
         const updated = await withStaffOperation(pool, session, "clinical.visits.document", async (client, handle) => {
           await assertVisitInOperationScope(client, handle, "clinical.visits.document", visitId);
+          return withHttpIdempotencyInTx(client, request, `visits.clinical.addendum:${visitId}`, actorKey, source, async () => {
           const identity = await staffOperationIdentity(client, handle, "clinical.visits.document");
           const clinicianPartyId = await staffOperationClinician(client, handle, "clinical.visits.document");
           const scope = await staffOperationPatientScope(client, handle, "clinical.visits.document");
@@ -756,13 +763,17 @@ export async function handleCanonicalClinicalVisitPost(
             clinicianScopePartyId: scope.kind === "own" ? scope.clinicianPartyId : null,
           });
           if (!visit) throw new CanonicalEndoVisitRefusal("visit_not_found", 404, VISIT_NOT_FOUND_MESSAGE);
-          return projectClinicalVisit(visit, {
+          return { status: 200, body: projectClinicalVisit(visit, {
             hasCare: true,
             canViewPlans: caps.has("clinical.plans.view"),
             canViewOrtho: caps.has("clinical.ortho.view"),
+          }) };
           });
         });
-        return NextResponse.json(updated, { headers: NO_STORE });
+        return NextResponse.json(updated.body, {
+          status: updated.status,
+          headers: updated.replay ? { ...NO_STORE, "X-Idempotent-Replay": "true" } : NO_STORE,
+        });
       }
 
       const savedPayload = await withStaffOperation(pool, session, "clinical.visits.document", async (client, handle) => {
@@ -977,9 +988,7 @@ export async function handleCanonicalClinicalVisitPost(
     }
   };
 
-  return action === "sign" || action === "addendum"
-    ? withHttpIdempotency(request, `visits.clinical.${action}:${visitId}`, actorKey, source, runAction)
-    : runAction();
+  return runAction();
 }
 
 export async function readCanonicalVisitLabWorkCommand(
@@ -1364,10 +1373,18 @@ export async function mergeCanonicalPatient(
   return withStaffOperation(pool, session, "patients.merge", async (client, handle) => {
     const scope = await staffOperationPatientScope(client, handle, "patients.merge");
     if (scope.kind === "none") throw new Error("STAFF_OPERATION_RECORD_SCOPE_DENIED");
-    const [sourceId, targetRes] = await Promise.all([
-      findPatientIdByNumberWith(client, duplicateNumber),
-      client.query<{ id: number; full_name: string }>("SELECT id, full_name FROM patients WHERE id = $1", [targetId]),
-    ]);
+    const candidateSourceId = await findPatientIdByNumberWith(client, duplicateNumber);
+    // Independent finding 12: lock BOTH files (id order) before any scope decision, then
+    // re-read under the locks — a decision made before waiting could be stale.
+    await client.query(
+      "SELECT id FROM patients WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE",
+      [[targetId, ...(candidateSourceId !== null ? [candidateSourceId] : [])]],
+    );
+    const sourceId = await findPatientIdByNumberWith(client, duplicateNumber);
+    if (sourceId !== candidateSourceId) {
+      throw new CanonicalEndoVisitRefusal("conflict", 409, "تغيّر رقم الملف المكرر أثناء الدمج. حدّث الصفحة وأعد المحاولة.");
+    }
+    const targetRes = await client.query<{ id: number; full_name: string }>("SELECT id, full_name FROM patients WHERE id = $1", [targetId]);
     const target = targetRes.rows[0];
     const targetInside = target !== undefined && (
       scope.kind === "all" || await patientInDoctorScopeWith(client, scope.clinicianPartyId, targetId)

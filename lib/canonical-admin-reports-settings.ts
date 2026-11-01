@@ -16,11 +16,11 @@ import {
 } from "./daily-clinic-report-model";
 import {
   CLINIC_TIME_ZONE,
-  createAppointmentService,
-  createDisplayAnnouncement,
-  deleteDisplayAnnouncement,
+  createAppointmentServiceWith,
+  createDisplayAnnouncementInTransaction,
+  deleteDisplayAnnouncementWith,
   executiveKpis,
-  getAppointmentService,
+  getAppointmentServiceWith,
   getPool,
   getSettingsInTransaction,
   getSettingsWith,
@@ -28,17 +28,17 @@ import {
   invalidateSettingsCache,
   labCountsWith,
   listAppointmentServicesWith,
-  listAppointmentsByDate,
-  listDisplayAnnouncements,
-  listMessagingChannels,
-  listVisitsByDate,
+  listAppointmentsByDateWith,
+  listDisplayAnnouncementsWith,
+  listMessagingChannelsWith,
+  listVisitsByDateWith,
   readStoredSettingsWith,
-  reorderDisplayAnnouncements,
-  saveMessagingChannel,
-  setMaterialRate,
-  todayPlannedVisits,
-  updateAppointmentService,
-  updateDisplayAnnouncement,
+  reorderDisplayAnnouncementsInTransaction,
+  saveMessagingChannelInTransaction,
+  setMaterialRateInTransaction,
+  todayPlannedVisitsWith,
+  updateAppointmentServiceWith,
+  updateDisplayAnnouncementWith,
   usesSharedLocalDatabaseConnection,
   writeSettingsInTransaction,
 } from "./db";
@@ -68,9 +68,11 @@ import {
 } from "./login-photo";
 import {
   readVerifiedLoginPhoto,
-  storeLoginPhoto,
+  storeLoginPhotoWithMeta,
   validateLoginPhotoBytes,
 } from "./login-photo-server";
+import { cleanupUncommittedStoredFile, holdStorageKeyShared } from "./file-cleanup";
+import type { StoredFile } from "./files";
 import { parseRateBp } from "./materialRate";
 import {
   isChannel,
@@ -91,10 +93,10 @@ import {
 } from "./report-access";
 import {
   buildReport,
-  dbTodayISO,
+  dbTodayISOWith,
   parseFilters,
   ReportInputError,
-  reportOptions,
+  reportOptionsWith,
   validateAnnualReportRange,
 } from "./reports";
 import { addDays, clinicDateString } from "./schedule";
@@ -273,7 +275,7 @@ export async function canonicalExecutiveGet(
 
     const runtimeAction = gate.hasFinancialView ? "reports.financial.view" : "finance.profits.view";
     const kpis = await withStaffOperation(getPool(), session, runtimeAction, async () =>
-      executiveKpis(from, to),
+      executiveKpis(from, to, { skipEnsureSchema: true }),
     );
     if (wantsCsv) {
       return new NextResponse("\uFEFF" + executiveCsv(kpis), {
@@ -405,33 +407,42 @@ export async function canonicalOperationalReportGet(
 
         const visits =
           patientScope.kind === "all"
-            ? await listVisitsByDate(date)
+            ? await listVisitsByDateWith(client, date)
             : patientScope.kind === "own"
-              ? await listVisitsByDate(date, patientScope.clinicianPartyId)
+              ? await listVisitsByDateWith(client, date, patientScope.clinicianPartyId)
               : [];
 
         const appointments =
           appointmentScope.kind === "all"
-            ? await listAppointmentsByDate(date)
+            ? await listAppointmentsByDateWith(client, date, null)
             : appointmentScope.kind === "own"
-              ? await listAppointmentsByDate(date, appointmentScope.clinicianPartyId)
+              ? await listAppointmentsByDateWith(client, date, appointmentScope.clinicianPartyId)
               : [];
 
         const nextDay =
           appointmentScope.kind === "all"
-            ? await listAppointmentsByDate(next)
+            ? await listAppointmentsByDateWith(client, next, null)
             : appointmentScope.kind === "own"
-              ? await listAppointmentsByDate(next, appointmentScope.clinicianPartyId)
+              ? await listAppointmentsByDateWith(client, next, appointmentScope.clinicianPartyId)
               : [];
 
-        const lab = await labCountsWith(client, { mode: "workflow", today });
+        const lab =
+          patientScope.kind === "all"
+            ? await labCountsWith(client, { mode: "workflow", today })
+            : patientScope.kind === "own"
+              ? await labCountsWith(client, {
+                  mode: "workflow",
+                  today,
+                  scopedDoctorPartyId: patientScope.clinicianPartyId,
+                })
+              : { outstanding: 0, late: 0, dueToday: 0, waitingFitting: 0 };
 
         const plannedToday =
           patientScope.kind === "all"
-            ? await todayPlannedVisits(date, null)
+            ? await todayPlannedVisitsWith(client, date, null)
             : patientScope.kind === "own"
-              ? await todayPlannedVisits(date, patientScope.clinicianPartyId)
-              : { scheduledVisits: [], unscheduledToday: [] };
+              ? await todayPlannedVisitsWith(client, date, patientScope.clinicianPartyId)
+              : [];
 
         return {
           date,
@@ -483,7 +494,7 @@ export async function canonicalUnifiedReportsGet(
 
         if (report === "options") {
           try {
-            return adminNoStore(await reportOptions(), 200);
+            return adminNoStore(await reportOptionsWith(client), 200);
           } catch {
             return adminNoStore({ message: "تعذّر تحميل خيارات الفلاتر." }, 500);
           }
@@ -493,8 +504,8 @@ export async function canonicalUnifiedReportsGet(
           if (report === "annual" && params.get("preset") === "custom") {
             validateAnnualReportRange(params.get("from"), params.get("to"));
           }
-          const filters = parseFilters(params, await dbTodayISO());
-          const result = await buildReport(report, filters);
+          const filters = parseFilters(params, await dbTodayISOWith(client));
+          const result = await buildReport(report, filters, { skipEnsureSchema: true });
           return adminNoStore(
             {
               result,
@@ -631,10 +642,15 @@ export async function canonicalAppointmentServicesPost(
         const identity = await staffOperationIdentity(client, opHandle, "settings.operational.edit");
         const parsed = readServiceInput(body);
         if (!parsed.ok) return adminNoStore({ message: parsed.message }, 400);
-        const result = await createAppointmentService(parsed.input, {
-          actor: identity.username,
-          actorRole: identity.role,
-        });
+        const result = await createAppointmentServiceWith(
+          client,
+          parsed.input,
+          {
+            actor: identity.username,
+            actorRole: identity.role,
+          },
+          (row) => insertAuditRow(client, row),
+        );
         return result.ok
           ? adminNoStore(result.service, 201)
           : adminNoStore({ message: result.message }, 400);
@@ -675,14 +691,20 @@ export async function canonicalAppointmentServicesPatch(
         if (!Number.isInteger(id) || id <= 0 || !body) {
           return adminNoStore({ message: "رقم الخدمة غير صالح." }, 400);
         }
-        const current = await getAppointmentService(id);
+        const current = await getAppointmentServiceWith(client, id);
         if (!current) return adminNoStore({ message: "الخدمة غير موجودة." }, 404);
         const parsed = readServiceInput(body, current);
         if (!parsed.ok) return adminNoStore({ message: parsed.message }, 400);
-        const result = await updateAppointmentService(id, parsed.input, {
-          actor: identity.username,
-          actorRole: identity.role,
-        });
+        const result = await updateAppointmentServiceWith(
+          client,
+          id,
+          parsed.input,
+          {
+            actor: identity.username,
+            actorRole: identity.role,
+          },
+          (row) => insertAuditRow(client, row),
+        );
         return result.ok
           ? adminNoStore(result.service, 200)
           : adminNoStore({ message: result.message }, 400);
@@ -770,7 +792,7 @@ export async function canonicalDisplayAnnouncementsPost(
         const isActive = source.isActive === undefined ? true : source.isActive === true;
 
         try {
-          const announcement = await createDisplayAnnouncement({
+          const announcement = await createDisplayAnnouncementInTransaction(client, {
             title: verdict.value.title,
             body: verdict.value.body,
             isActive,
@@ -836,7 +858,8 @@ export async function canonicalDisplayAnnouncementsPatch(
         const verdict = validateAnnouncementPatch(source);
         if (!verdict.ok) return adminNoStore({ message: verdict.message }, 400);
 
-        const announcement = await updateDisplayAnnouncement(
+        const announcement = await updateDisplayAnnouncementWith(
+          client,
           announcementId,
           verdict.value,
           identity.username,
@@ -879,7 +902,7 @@ export async function canonicalDisplayAnnouncementsDelete(
         if (announcementId === null) {
           return adminNoStore({ message: "إعلان غير صالح." }, 400);
         }
-        const removed = await deleteDisplayAnnouncement(announcementId);
+        const removed = await deleteDisplayAnnouncementWith(client, announcementId);
         if (!removed) {
           return adminNoStore({ message: "الإعلان غير موجود — ربما حُذف من نافذة أخرى." }, 404);
         }
@@ -930,8 +953,8 @@ export async function canonicalDisplayAnnouncementsReorderPatch(
           );
         }
         try {
-          await reorderDisplayAnnouncements(ids);
-          const announcements = await listDisplayAnnouncements();
+          await reorderDisplayAnnouncementsInTransaction(client, ids);
+          const announcements = await listDisplayAnnouncementsWith(client);
           await insertAuditRow(client, {
             action: "display.announcement.reorder",
             entity: "display_announcement",
@@ -1117,48 +1140,57 @@ export async function canonicalLoginPhotoPost(
         { status: 400, headers: loginPhotoHeaders },
       );
     }
-    const asset = await storeLoginPhoto(bytes, file.type);
-
-    const outcome = await withStaffOperation(
-      getPool(),
-      session,
-      "settings.operational.edit",
-      async (client, opHandle) => {
-        const identity = await staffOperationIdentity(client, opHandle, "settings.operational.edit");
-        const writeRes = await writeSettingsInTransaction(client, {
-          values: { [LOGIN_PHOTO_ASSET]: JSON.stringify(asset), [LOGIN_PHOTO_VISIBLE]: "false" },
-          expected,
-        });
-        if (!writeRes.ok) return { ok: false as const };
-        for (const entry of writeRes.audits) {
-          await insertAuditRow(client, {
-            action: SETTINGS_AUDIT_UPDATE,
-            entity: SETTINGS_AUDIT_ENTITY,
-            entityId: entry.key,
-            details: entry.details,
-            actor: identity.username,
-            actorRole: identity.role,
+    let uploadedStored: StoredFile | null = null;
+    try {
+      const outcome = await withStaffOperation(
+        getPool(),
+        session,
+        "settings.operational.edit",
+        async (client, opHandle) => {
+          const identity = await staffOperationIdentity(client, opHandle, "settings.operational.edit");
+          const planned = validateLoginPhotoBytes(bytes, file.type);
+          if (planned) await holdStorageKeyShared(client, planned.key);
+          const storedPhoto = await storeLoginPhotoWithMeta(bytes, file.type);
+          uploadedStored = storedPhoto.stored;
+          const writeRes = await writeSettingsInTransaction(client, {
+            values: { [LOGIN_PHOTO_ASSET]: JSON.stringify(storedPhoto.asset), [LOGIN_PHOTO_VISIBLE]: "false" },
+            expected,
           });
-        }
-        const stored = await readStoredSettingsWith(client);
-        return {
-          ok: true as const,
-          payload: {
-            [LOGIN_PHOTO_ASSET]: stored.get(LOGIN_PHOTO_ASSET)?.value ?? "",
-            [LOGIN_PHOTO_VISIBLE]: stored.get(LOGIN_PHOTO_VISIBLE)?.value ?? "false",
-            __versions: Object.fromEntries(LOGIN_PHOTO_KEYS.map((k) => [k, stored.get(k)?.updatedAt ?? null])),
-          },
-        };
-      },
-    );
-    if (!outcome.ok) {
-      return NextResponse.json(
-        { message: "تغيرت الصورة أو حالة إظهارها. حدّث الإعدادات قبل إعادة المحاولة." },
-        { status: 409, headers: loginPhotoHeaders },
+          if (!writeRes.ok) return { ok: false as const };
+          for (const entry of writeRes.audits) {
+            await insertAuditRow(client, {
+              action: SETTINGS_AUDIT_UPDATE,
+              entity: SETTINGS_AUDIT_ENTITY,
+              entityId: entry.key,
+              details: entry.details,
+              actor: identity.username,
+              actorRole: identity.role,
+            });
+          }
+          const stored = await readStoredSettingsWith(client);
+          return {
+            ok: true as const,
+            payload: {
+              [LOGIN_PHOTO_ASSET]: stored.get(LOGIN_PHOTO_ASSET)?.value ?? "",
+              [LOGIN_PHOTO_VISIBLE]: stored.get(LOGIN_PHOTO_VISIBLE)?.value ?? "false",
+              __versions: Object.fromEntries(LOGIN_PHOTO_KEYS.map((k) => [k, stored.get(k)?.updatedAt ?? null])),
+            },
+          };
+        },
       );
+      if (!outcome.ok) {
+        await cleanupUncommittedStoredFile(uploadedStored);
+        return NextResponse.json(
+          { message: "تغيرت الصورة أو حالة إظهارها. حدّث الإعدادات قبل إعادة المحاولة." },
+          { status: 409, headers: loginPhotoHeaders },
+        );
+      }
+      invalidateSettingsCache();
+      return NextResponse.json(outcome.payload, { headers: loginPhotoHeaders });
+    } catch (innerError) {
+      await cleanupUncommittedStoredFile(uploadedStored);
+      throw innerError;
     }
-    invalidateSettingsCache();
-    return NextResponse.json(outcome.payload, { headers: loginPhotoHeaders });
   } catch (error) {
     const bounded = bodyErrorResponse(error);
     if (bounded) {
@@ -1330,7 +1362,11 @@ export async function canonicalMaterialRatesPost(
             400,
           );
         }
-        const result = await setMaterialRate({ category, rateBp, actor: identity.username });
+        const result = await setMaterialRateInTransaction(
+          client,
+          { category, rateBp, actor: identity.username, actorRole: identity.role },
+          (row) => insertAuditRow(client, row),
+        );
         if (!result.ok) return adminNoStore({ message: result.message }, 400);
         return adminNoStore({ ok: true }, 200);
       },
@@ -1727,7 +1763,7 @@ export async function canonicalMessagingSettingsGet(
   const admitted = await withCanonicalOwnerOperation(
     session,
     "settings.integrations.change",
-    async () => listMessagingChannels(),
+    async (client) => listMessagingChannelsWith(client),
   );
   if (!admitted.ok) {
     if (admitted.reason === "forbidden") {
@@ -1759,7 +1795,7 @@ export async function canonicalMessagingSettingsPut(
     const admitted = await withCanonicalOwnerOperation(
       session,
       "settings.integrations.change",
-      async (_client, view) => {
+      async (client, view) => {
         if (!isChannel(body.channel)) {
           return NextResponse.json({ message: "قناة غير معروفة." }, { status: 400, headers: { "Cache-Control": "no-store" } });
         }
@@ -1775,7 +1811,7 @@ export async function canonicalMessagingSettingsPut(
           if (value === null) secrets[key] = null;
           else if (typeof value === "string" && value.trim()) secrets[key] = value.trim().slice(0, 2000);
         }
-        const current = (await listMessagingChannels()).find((row) => row.channel === body.channel);
+        const current = (await listMessagingChannelsWith(client)).find((row) => row.channel === body.channel);
         const present = new Set(current?.secretKeys ?? []);
         for (const [key, value] of Object.entries(secrets)) {
           if (value === null) present.delete(key);
@@ -1785,14 +1821,18 @@ export async function canonicalMessagingSettingsPut(
         if (missing) {
           return NextResponse.json({ message: missing }, { status: 400, headers: { "Cache-Control": "no-store" } });
         }
-        const saved = await saveMessagingChannel({
-          channel: body.channel,
-          enabled,
-          config: normalized.config,
-          secrets,
-          actor: view.username,
-          actorRole: view.roleLabel,
-        });
+        const saved = await saveMessagingChannelInTransaction(
+          client,
+          {
+            channel: body.channel,
+            enabled,
+            config: normalized.config,
+            secrets,
+            actor: view.username,
+            actorRole: view.roleLabel,
+          },
+          (row) => insertAuditRow(client, row),
+        );
         return NextResponse.json({ channel: saved }, { status: 200, headers: { "Cache-Control": "no-store" } });
       },
     );

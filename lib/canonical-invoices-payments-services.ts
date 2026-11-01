@@ -1,4 +1,5 @@
 import "server-only";
+import type { StaffRecordConstraint } from "./staff-capabilities";
 import { NextResponse } from "next/server";
 import {
   collectCanonicalApprovedAgreementInTransaction,
@@ -226,6 +227,41 @@ async function patientVisibleInSnapshot(
   return patientInDoctorScopeWith(query, scope.patientScope.clinicianPartyId, patientId);
 }
 
+const FINANCE_PATIENT_SCOPE_DENIED = "غير مصرّح لك بالوصول لملفات المرضى المالية.";
+
+/** Patient-linked finance reads/writes never run with patient scope "none". */
+function assertFinancePatientScopeNotNone(patientScope: StaffRecordConstraint): void {
+  if (patientScope.kind === "none") {
+    throw new CanonicalSlice37aRefusal(403, FINANCE_PATIENT_SCOPE_DENIED, "patient_scope_denied");
+  }
+}
+
+async function requireFinancePatientScope(
+  client: DbClient,
+  handle: Parameters<typeof staffOperationPatientScope>[1],
+  action: Parameters<typeof staffOperationPatientScope>[2],
+): Promise<StaffRecordConstraint> {
+  const patientScope = await staffOperationPatientScope(client, handle, action);
+  assertFinancePatientScopeNotNone(patientScope);
+  return patientScope;
+}
+
+async function assertFinancePatientInScope(
+  q: Pick<DbClient, "query">,
+  patientScope: StaffRecordConstraint,
+  patientId: number,
+): Promise<void> {
+  assertFinancePatientScopeNotNone(patientScope);
+  if (
+    patientScope.kind === "own" &&
+    Number.isSafeInteger(patientId) &&
+    patientId > 0 &&
+    !(await patientInDoctorScopeWith(q, patientScope.clinicianPartyId, patientId))
+  ) {
+    throw new CanonicalSlice37aRefusal(403, "غير مصرّح لك بالوصول لهذا الملف.");
+  }
+}
+
 /* ============================================================================
  * 1. INVOICES (/api/invoices/**)
  * ============================================================================ */
@@ -243,6 +279,7 @@ export async function invoicesListCanonicalResponse(
       session,
       "finance.invoices.view",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         if (
           scope.patientScope.kind === "own" &&
           !(await patientInDoctorScopeWith(query, scope.patientScope.clinicianPartyId, patientId))
@@ -289,6 +326,7 @@ export async function invoicesCreateCanonicalResponse(
       session,
       "finance.invoices.create",
       async (client, handle) => {
+        await requireFinancePatientScope(client, handle, "finance.invoices.create");
         const identity = await staffOperationIdentity(client, handle, "finance.invoices.create");
         const caps = await staffOperationCapabilities(
           client,
@@ -326,6 +364,11 @@ export async function invoicesCreateCanonicalResponse(
           Number.isInteger(Number(source.patientId)) &&
           Number(source.patientId) > 0
         ) {
+          await assertFinancePatientInScope(
+            client,
+            await staffOperationPatientScope(client, handle, "finance.invoices.create"),
+            Number(source.patientId),
+          );
           const recovered = await recoverLinkedInvoiceInTransaction(client, {
             patientId: Number(source.patientId),
             idempotencyKey: source.idempotencyKey.trim(),
@@ -544,6 +587,7 @@ export async function invoiceGetCanonicalResponse(
       session,
       "finance.invoices.view",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         const found = await getInvoice(id, query as DbClient);
         if (!found) throw new CanonicalSlice37aRefusal(404, "الفاتورة غير موجودة.");
         if (
@@ -594,6 +638,7 @@ export async function invoicePatchCanonicalResponse(
 
   try {
     const outcome = await withStaffOperation(getPool(), session, action, async (client, handle) => {
+      await requireFinancePatientScope(client, handle, action);
       const identity = await staffOperationIdentity(client, handle, action);
       const existing = await getInvoice(id, client);
       if (existing) {
@@ -705,6 +750,7 @@ export async function invoiceAddServiceGetCanonicalResponse(
       session,
       "finance.invoices.create",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         const data = await readCanonicalInvoiceAddServiceWith(query, id);
         if (
           scope.patientScope.kind === "own" &&
@@ -739,6 +785,7 @@ export async function invoiceAddServicePreviewCanonicalResponse(
       session,
       "finance.invoices.create",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         const result = await previewCanonicalInvoiceAddServiceWith(query, id, body, {
           userId: scope.userId,
           username: scope.username,
@@ -783,6 +830,7 @@ export async function invoiceAddServicePostCanonicalResponse(
       session,
       "finance.invoices.create",
       async (client, handle) => {
+        await requireFinancePatientScope(client, handle, "finance.invoices.create");
         const identity = await staffOperationIdentity(client, handle, "finance.invoices.create");
         const caps = await staffOperationCapabilities(
           client,
@@ -870,6 +918,7 @@ export async function invoiceArchiveGetCanonicalResponse(
       session,
       "finance.invoices.view",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         const result = await readCanonicalInvoiceArchiveWith(query, id);
         if (
           scope.patientScope.kind === "own" &&
@@ -906,6 +955,7 @@ export async function invoiceArchivePostCanonicalResponse(
       session,
       "finance.invoices.cancel",
       async (client, handle) => {
+        await requireFinancePatientScope(client, handle, "finance.invoices.cancel");
         const identity = await staffOperationIdentity(client, handle, "finance.invoices.cancel");
         const ownerRow = (
           await client.query<{ patient_id: number }>("SELECT patient_id FROM invoices WHERE id = $1", [id])
@@ -956,6 +1006,7 @@ export async function invoiceArchiveListCanonicalResponse(
       session,
       "finance.invoices.view",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         if (
           scope.patientScope.kind === "own" &&
           !(await patientInDoctorScopeWith(query, scope.patientScope.clinicianPartyId, patientId))
@@ -1005,6 +1056,7 @@ export async function invoiceCorrectGetCanonicalResponse(
       session,
       "finance.invoices.correct",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         const result = await readCanonicalInvoiceRevisionWith(query, id);
         if (
           scope.patientScope.kind === "own" &&
@@ -1043,6 +1095,7 @@ export async function invoiceCorrectPostCanonicalResponse(
       session,
       "finance.invoices.correct",
       async (client, handle) => {
+        await requireFinancePatientScope(client, handle, "finance.invoices.correct");
         const identity = await staffOperationIdentity(client, handle, "finance.invoices.correct");
         const ownerRow = (
           await client.query<{ patient_id: number }>("SELECT patient_id FROM invoices WHERE id = $1", [id])
@@ -1087,6 +1140,7 @@ export async function invoiceClinicalPreviewCanonicalResponse(
       session,
       "read:invoices.clinical-preview",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         if (hasInvoiceLabWork(body) && !scope.granted("clinical.visits.document")) {
           throw new CanonicalSlice37aRefusal(403, "وصفة المختبر السريرية للطبيب والإدارة فقط.");
         }
@@ -1194,7 +1248,9 @@ export async function paymentsListCanonicalResponse(
       session,
       "finance.payments.view",
       async (query, scope) => {
+        assertFinancePatientScopeNotNone(scope.patientScope);
         const list = await listPaymentsByDateWith(query, date);
+        // "none" was refused above (assertFinancePatientScopeNotNone); only "all" passes unfiltered.
         if (scope.patientScope.kind !== "own") return list;
         const filtered = [];
         const allowedCache = new Map<number, boolean>();
@@ -1260,6 +1316,7 @@ export async function paymentsCreateCanonicalResponse(
         session,
         "finance.payments.collect",
         async (client, handle) => {
+          await requireFinancePatientScope(client, handle, "finance.payments.collect");
           const identity = await staffOperationIdentity(client, handle, "finance.payments.collect");
           const pScope = await staffOperationPatientScope(client, handle, "finance.payments.collect");
           if (
@@ -1332,6 +1389,7 @@ export async function paymentsCreateCanonicalResponse(
 
   try {
     const outcome = await withStaffOperation(getPool(), session, action, async (client, handle) => {
+      await requireFinancePatientScope(client, handle, action);
       const identity = await staffOperationIdentity(client, handle, action);
 
       const patientId = Number(source.patientId);
@@ -1825,7 +1883,13 @@ export async function paymentCorrectCanonicalResponse(
       session,
       "finance.payments.void",
       async (client, handle) => {
+        await requireFinancePatientScope(client, handle, "finance.payments.void");
         const identity = await staffOperationIdentity(client, handle, "finance.payments.void");
+        const correctionScope = await staffOperationPatientScope(client, handle, "finance.payments.void");
+        if (correctionScope.kind === "own") {
+          const target = await getPaymentWith(client, paymentId);
+          if (target) await assertFinancePatientInScope(client, correctionScope, target.patientId);
+        }
         if (mode === "correct") {
           const caps = await staffOperationCapabilities(
             client,
@@ -1954,7 +2018,13 @@ export async function paymentAttemptRetireCanonicalResponse(
       session,
       "finance.payments.collect",
       async (client, handle) => {
+        await requireFinancePatientScope(client, handle, "finance.payments.collect");
         const identity = await staffOperationIdentity(client, handle, "finance.payments.collect");
+        const retireScope = await staffOperationPatientScope(client, handle, "finance.payments.collect");
+        const retirePatientId = Number(fields.patientId);
+        if (Number.isSafeInteger(retirePatientId) && retirePatientId > 0) {
+          await assertFinancePatientInScope(client, retireScope, retirePatientId);
+        }
         return retireCanonicalCollectionAttemptInTx(
           client,
           {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { contentMatchesMimeType } from "./magic-bytes";
 import { imageSize } from "./imageSize";
-import { putFile, readFileByKey } from "./files";
+import { putFile, readFileByKey, type StoredFile } from "./files";
 import { LOGIN_PHOTO_EXTENSIONS, LOGIN_PHOTO_MAX_BYTES, parseLoginPhotoAsset, validLoginPhotoDimensions, type LoginPhotoAsset } from "./login-photo";
 
 // PNG uses CRC-32 over each chunk's type and payload (not its length).
@@ -92,11 +92,23 @@ export async function readVerifiedLoginPhoto(asset: LoginPhotoAsset): Promise<Bu
   return actual && actual.key === asset.key && actual.sha256 === asset.sha256
     && actual.sizeBytes === asset.sizeBytes && actual.width === asset.width && actual.height === asset.height ? bytes : null;
 }
-export async function storeLoginPhoto(bytes: Buffer, mimeType: string): Promise<LoginPhotoAsset> {
+export async function storeLoginPhotoWithMeta(
+  bytes: Buffer,
+  mimeType: string,
+): Promise<{ asset: LoginPhotoAsset; stored: StoredFile }> {
   const asset = validateLoginPhotoBytes(bytes, mimeType);
   if (!asset) throw new Error("INVALID_LOGIN_PHOTO");
   const file = await putFile(bytes, LOGIN_PHOTO_EXTENSIONS[asset.mimeType]);
   // Existing driver deduplicates by key; do not trust pre-existing content blindly.
-  if (file.key !== asset.key || !(await readVerifiedLoginPhoto(asset))) throw new Error("LOGIN_PHOTO_STORAGE_INTEGRITY");
+  // No unlink here: the object may be shared by a concurrent uploader; reconciliation
+  // happens only under the exclusive storage-object lock (lib/file-cleanup.ts).
+  if (file.key !== asset.key || !(await readVerifiedLoginPhoto(asset))) {
+    throw new Error("LOGIN_PHOTO_STORAGE_INTEGRITY");
+  }
+  return { asset, stored: file };
+}
+
+export async function storeLoginPhoto(bytes: Buffer, mimeType: string): Promise<LoginPhotoAsset> {
+  const { asset } = await storeLoginPhotoWithMeta(bytes, mimeType);
   return asset;
 }

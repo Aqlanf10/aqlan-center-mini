@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CHANNEL_LABEL, type Channel } from "@/lib/messaging-channels";
 
 /**
@@ -41,6 +41,7 @@ export function ExternalMessages() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [log, setLog] = useState<Delivery[]>([]);
+  const sendKeyRef = useRef<{ signature: string; key: string } | null>(null);
 
   const loadLog = useCallback(async () => {
     const params = new URLSearchParams();
@@ -75,21 +76,30 @@ export function ExternalMessages() {
   async function send() {
     setBusy(true); setNote(null);
     try {
+      const payload = {
+        channel, patientId: patient?.id ?? null, to, subject, body,
+        purpose: replyToInboundId !== null ? "reply" : "manual", replyToInboundId,
+      };
+      // One stable key per exact message: a retry after a lost reply reuses it and the
+      // server never sends twice; editing the message starts a new key.
+      const signature = JSON.stringify(payload);
+      if (!sendKeyRef.current || sendKeyRef.current.signature !== signature) {
+        sendKeyRef.current = { signature, key: `msg-${crypto.randomUUID()}` };
+      }
       const response = await fetch("/api/messages/outbound", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          channel, patientId: patient?.id ?? null, to, subject, body,
-          purpose: replyToInboundId !== null ? "reply" : "manual", replyToInboundId,
-        }),
+        headers: { "content-type": "application/json", "idempotency-key": sendKeyRef.current.key },
+        body: signature,
       });
-      const payload = (await response.json().catch(() => ({}))) as { message?: string };
+      const result = (await response.json().catch(() => ({}))) as { message?: string };
       if (response.ok) {
-        setNote({ ok: true, text: payload.message ?? "أُرسلت الرسالة." });
+        sendKeyRef.current = null;
+        setNote({ ok: true, text: result.message ?? "أُرسلت الرسالة." });
         setBody("");
         setReplyToInboundId(null);
       } else {
-        setNote({ ok: false, text: payload.message ?? "تعذّر الإرسال." });
+        if (response.status === 502) sendKeyRef.current = null;
+        setNote({ ok: false, text: result.message ?? "تعذّر الإرسال." });
       }
       await loadLog();
     } finally {

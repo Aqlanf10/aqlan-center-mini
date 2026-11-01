@@ -451,17 +451,7 @@ function assertContractPayComplete(current:Record<string,any>):void{
 
 async function isPrincipalOwnerAdmin(client: DbClient, userId: number): Promise<boolean> {
   const res = await client.query<{ is_principal: boolean }>(
-    `SELECT (
-       u.role = 'admin'
-       AND u.is_active = TRUE
-       AND (
-         u.is_owner = TRUE
-         OR (
-           NOT EXISTS (SELECT 1 FROM users WHERE is_owner = TRUE AND is_active = TRUE)
-           AND u.id = (SELECT MIN(id) FROM users WHERE role = 'admin' AND is_active = TRUE)
-         )
-       )
-     ) AS is_principal
+    `SELECT (u.role = 'admin' AND u.is_active = TRUE AND u.is_owner = TRUE) AS is_principal
      FROM users u
      WHERE u.id = $1`,
     [userId],

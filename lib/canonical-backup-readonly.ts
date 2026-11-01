@@ -2,11 +2,29 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { SETTINGS_BODY_LIMIT_BYTES } from "./security-limits";
 import { bodyErrorResponse, readJsonBody } from "./http-body";
-import { messagingChannelWithSecret, recordChannelTest, recordMessageDelivery } from "./db";
+import {
+  getPool,
+  messagingChannelWithSecretWith,
+  recordChannelTestWith,
+  recordMessageDeliveryWith,
+} from "./db";
+import {
+  claimOutboundIdempotencyInTx,
+  completeOutboundIdempotency,
+  releaseOutboundReservation,
+} from "./http-idempotency";
 import { isChannel } from "./messaging-channels";
 import { sendOutbound } from "./messaging-send";
-import type { VerifiedDurableSession } from "./staff-durable-session";
-import { admitCanonicalOwnerReadOnly, withCanonicalOwnerOperation } from "./staff-session-admission";
+import {
+  revalidateVerifiedDurableSession,
+  type VerifiedDurableSession,
+} from "./staff-durable-session";
+import {
+  admitCanonicalOwnerReadOnly,
+  withCanonicalOwnerOperation,
+} from "./staff-session-admission";
+
+const MESSAGING_TEST_IDEMPOTENCY_SCOPE = "settings.messaging.test";
 
 const canonicalBackupNoStore = (body: unknown, status: number): NextResponse =>
   NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -36,6 +54,8 @@ export async function admitCanonicalBackupOwner(
 
 /**
  * Canonical owner-only `POST /api/settings/messaging/test` (AUDIT_EXEMPT: result stored on channel).
+ * Reserves a durable outbound idempotency claim before network I/O and never deletes an
+ * `in_progress` claim or returns a retry-inducing 500 after external delivery.
  */
 export async function canonicalMessagingTestPost(
   session: VerifiedDurableSession,
@@ -61,10 +81,43 @@ export async function canonicalMessagingTestPost(
       : NextResponse.json({ message: "أدخل رقمًا أو بريدًا لرسالة الاختبار." }, { status: 400 });
   }
 
+  const clientRequestId =
+    typeof body.clientRequestId === "string" ? body.clientRequestId : null;
+
   const admitted = await withCanonicalOwnerOperation(
     session,
     "settings.integrations.change",
-    async (_client, view) => view,
+    async (client, view) => {
+      if (precheck instanceof NextResponse) {
+        return { kind: "invalid" as const, response: precheck };
+      }
+      const claims = revalidateVerifiedDurableSession(session);
+      const outboundActor = claims
+        ? `canon:${claims.durableIdentity.realmId}:${claims.durableIdentity.subjectId}`
+        : `canon:user:${view.userId}`;
+      const reservation = await claimOutboundIdempotencyInTx(
+        client,
+        request,
+        MESSAGING_TEST_IDEMPOTENCY_SCOPE,
+        outboundActor,
+        { channel: precheck.channel, to: precheck.to },
+        clientRequestId,
+      );
+      if (reservation.kind === "conflict") {
+        return { kind: "conflict" as const, status: reservation.status, body: reservation.body };
+      }
+      if (reservation.kind === "replay") {
+        return { kind: "replay" as const, status: reservation.status, body: reservation.body };
+      }
+      return {
+        kind: "ready" as const,
+        username: view.username,
+        outboundActor,
+        channel: precheck.channel,
+        to: precheck.to,
+        reservation: reservation.kind === "reserved" ? reservation : null,
+      };
+    },
   );
   if (!admitted.ok) {
     if (admitted.reason === "forbidden") {
@@ -75,25 +128,106 @@ export async function canonicalMessagingTestPost(
     }
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (precheck instanceof NextResponse) return precheck;
+  if (admitted.value.kind === "invalid") return admitted.value.response;
+  if (admitted.value.kind === "conflict") {
+    return NextResponse.json(admitted.value.body, { status: admitted.value.status });
+  }
+  if (admitted.value.kind === "replay") {
+    return NextResponse.json(admitted.value.body, {
+      status: admitted.value.status,
+      headers: { "Cache-Control": "no-store", "X-Idempotent-Replay": "true" },
+    });
+  }
+
+  const ready = admitted.value;
+  const pool = getPool();
+  const reserved = ready.reservation;
+  const release = async () => {
+    if (reserved) {
+      await releaseOutboundReservation(
+        pool,
+        MESSAGING_TEST_IDEMPOTENCY_SCOPE,
+        ready.outboundActor,
+        reserved.key,
+        reserved.requestHash,
+      );
+    }
+  };
+
+  // Fresh owner authority + channel configuration proof immediately before external transport.
+  const fresh = await withCanonicalOwnerOperation(
+    session,
+    "settings.integrations.change",
+    async (client) => messagingChannelWithSecretWith(client, ready.channel),
+  );
+  if (!fresh.ok) {
+    await release();
+    if (fresh.reason === "forbidden") {
+      return NextResponse.json({ message: "اختبار القنوات للمدير وحده." }, { status: 403 });
+    }
+    if (fresh.reason === "unavailable") {
+      return NextResponse.json({ message: "الهوية الموحّدة غير متاحة الآن." }, { status: 503 });
+    }
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
 
   try {
     const result = await sendOutbound(
       {
-        channel: precheck.channel,
-        to: precheck.to,
+        channel: ready.channel,
+        to: ready.to,
         subject: "رسالة اختبار",
         body: "رسالة اختبار من نظام المركز — القناة تعمل.",
         patientId: null,
         purpose: "test",
-        actor: admitted.value.username,
+        actor: ready.username,
       },
-      { channel: messagingChannelWithSecret, record: recordMessageDelivery },
+      {
+        channel: async () => ({ view: fresh.value.view, secret: fresh.value.secret }),
+        record: (inp) => recordMessageDeliveryWith(pool, inp),
+      },
     );
-    await recordChannelTest(precheck.channel, result.ok, result.ok ? "نجح الاختبار" : result.message);
-    return result.ok
-      ? NextResponse.json({ ok: true })
-      : NextResponse.json({ ok: false, message: result.message }, { status: result.status });
+    let channelRecorded = true;
+    try {
+      await recordChannelTestWith(
+        pool,
+        ready.channel,
+        result.ok,
+        result.ok ? "نجح الاختبار" : result.message,
+      );
+    } catch {
+      channelRecorded = false;
+    }
+
+    const responseStatus = result.ok ? 200 : result.status;
+    const responseBody = result.ok
+      ? {
+          ok: true,
+          ...(result.logged && channelRecorded
+            ? {}
+            : { message: "أُرسلت رسالة الاختبار، لكن تعذّر تحديث سجل القناة — لا تُعد الإرسال." }),
+        }
+      : { ok: false, message: result.message };
+
+    if (reserved) {
+      if (!result.ok && (result.status === 400 || result.status === 409)) {
+        await release();
+      } else {
+        await completeOutboundIdempotency(
+          pool,
+          MESSAGING_TEST_IDEMPOTENCY_SCOPE,
+          ready.outboundActor,
+          reserved.key,
+          responseStatus,
+          responseBody,
+        );
+      }
+    }
+
+    return NextResponse.json(responseBody, {
+      status: responseStatus,
+      headers: { "Cache-Control": "no-store" },
+    });
   } catch {
     return NextResponse.json({ message: "تعذّر اختبار القناة." }, { status: 500 });
   }

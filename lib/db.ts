@@ -167,7 +167,7 @@ import {
 import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
 import { assertBaseUnitEdit, quantityAtoms, QUANTITY_SCALE } from "./inventory-domain/quantities";
 import { proportionalCostMinor } from "./inventory-domain/treatment-cost";
-import { hashPassword } from "./auth";
+import { hashPassword, sessionCredentialVersion, sessionPermissionVersion, type SessionPayload } from "./auth";
 import { seedDefaultServices } from "./services-seed";
 import { seedDefaultLabServices } from "./lab-services-seed";
 import {
@@ -2639,9 +2639,17 @@ export const CLINIC_TIME_ZONE = resolveClinicZone(process.env.CLINIC_TIME_ZONE);
  */
 export async function listVisitsByDate(date: string, doctorPartyId?: number | null): Promise<Visit[]> {
   await ensureSchema();
+  return listVisitsByDateWith(getPool(), date, doctorPartyId);
+}
+
+export async function listVisitsByDateWith(
+  q: Pick<DbClient, "query">,
+  date: string,
+  doctorPartyId?: number | null,
+): Promise<Visit[]> {
   if (doctorPartyId !== undefined && (doctorPartyId === null || doctorPartyId <= 0)) return [];
   if (typeof doctorPartyId === "number" && doctorPartyId > 0) {
-    const { rows } = await getPool().query<VisitRow>(
+    const { rows } = await q.query<VisitRow>(
       `SELECT v.* FROM visits v
         WHERE ${onClinicDaySql("v.arrived_at", "$1", "$2::date")}
           AND (v.doctor_id = $3 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = v.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$3")}))
@@ -2650,7 +2658,7 @@ export async function listVisitsByDate(date: string, doctorPartyId?: number | nu
     );
     return rows.map(toVisit);
   }
-  const { rows } = await getPool().query<VisitRow>(
+  const { rows } = await q.query<VisitRow>(
     `SELECT * FROM visits
       WHERE ${onClinicDaySql("arrived_at", "$1", "$2::date")}
       ORDER BY arrived_at ASC`,
@@ -2667,7 +2675,15 @@ export async function listVisitsByDate(date: string, doctorPartyId?: number | nu
  */
 export async function listVisitsBetween(from: string, to: string): Promise<Visit[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<VisitRow>(
+  return listVisitsBetweenWith(getPool(), from, to);
+}
+
+export async function listVisitsBetweenWith(
+  q: Pick<DbClient, "query">,
+  from: string,
+  to: string,
+): Promise<Visit[]> {
+  const { rows } = await q.query<VisitRow>(
     `SELECT * FROM visits
       WHERE ${onClinicDaysSql("arrived_at", "$1", "$2::date", "$3::date")}
       ORDER BY arrived_at ASC`,
@@ -3316,6 +3332,49 @@ export async function revokeUserSessions(userId: number): Promise<void> {
     `UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE id = $1`,
     [userId],
   );
+}
+
+/**
+ * يبطل جلسات المستخدم القديمة فقط إذا كان الرمز المقدَّم لا يزال حاليًّا غير مُبطل
+ * (يمنع رمزًا قديمًا سبق إبطاله من رفع `session_version` وإسقاط جلسات أحدث).
+ */
+export async function revokeLegacySessionIfCurrent(payload: SessionPayload | null | undefined): Promise<boolean> {
+  if (!payload || !Number.isInteger(payload.userId) || payload.userId <= 0 || !payload.credentialVersion) {
+    return false;
+  }
+  if (payload.expiresAt <= Date.now()) {
+    return false;
+  }
+  if (await readLegacyStaffSchema(getPool()) !== "base") {
+    return false;
+  }
+  await ensureSchema();
+  return withTransaction(getPool(), async (client) => {
+    await lockLegacyStaffBoundary(client);
+    const { rows } = await client.query<UserRow>(
+      "SELECT * FROM users WHERE id = $1 FOR UPDATE",
+      [payload.userId],
+    );
+    const row = rows[0];
+    if (!row || !row.is_active) return false;
+    assertLegacyPermissionEnvelope(row.permissions);
+    const user = toUser(row);
+    if (user.username !== payload.username || user.role !== payload.role) return false;
+    if (payload.credentialVersion !== sessionCredentialVersion(user.passwordHash, user.sessionVersion)) {
+      return false;
+    }
+    if (
+      (user.role === "cashier" || user.role === "accountant") &&
+      payload.permissionVersion !== sessionPermissionVersion(user.role, user.permissions?.financeAccess)
+    ) {
+      return false;
+    }
+    await client.query(
+      "UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE id = $1",
+      [user.id],
+    );
+    return true;
+  });
 }
 
 /**
@@ -3978,12 +4037,12 @@ export async function commitPatientImport(input: {
   includePossibleDuplicates: boolean;
   actor: string;
   actorRole: string | null;
-}): Promise<
+}, options?: { skipEnsureSchema?: boolean }): Promise<
   | { ok: true; created: { line: number; id: number; patientNumber: string; fullName: string }[]; rows: ImportRow[] }
   | { ok: false; reason: "already_imported"; at: string; actor: string }
   | { ok: false; reason: "invalid_file"; problems: string[] }
 > {
-  await ensureSchema();
+  if (!options?.skipEnsureSchema) await ensureSchema();
   const source = await currentAuditSource();
   return withTransaction(getPool(), async (client) => {
     await client.query(PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL);
@@ -4078,8 +4137,8 @@ export async function commitPatientImport(input: {
 }
 
 /** (P1-5ج) مرضى القاعدة بصيغة ربط سجلات النظام القديم. */
-export async function legacyPatientRefs(client?: DbClient): Promise<LegacyPatientRef[]> {
-  await ensureSchema();
+export async function legacyPatientRefs(client?: Pick<DbClient, "query">): Promise<LegacyPatientRef[]> {
+  if (!client) await ensureSchema();
   const { rows } = await (client ?? getPool()).query<{
     id: number; patient_number: string; full_name: string; phone: string | null; alt_phone: string | null;
   }>(`SELECT id, patient_number, full_name, phone, alt_phone FROM patients`);
@@ -4089,8 +4148,8 @@ export async function legacyPatientRefs(client?: DbClient): Promise<LegacyPatien
 }
 
 /** (P1-5ج) أرصدةٌ افتتاحية قائمة بعملاتها — لكشف التعارض قبل الاستيراد. */
-export async function existingOpeningKeys(client?: DbClient): Promise<Set<string>> {
-  await ensureSchema();
+export async function existingOpeningKeys(client?: Pick<DbClient, "query">): Promise<Set<string>> {
+  if (!client) await ensureSchema();
   const { rows } = await (client ?? getPool()).query<{ patient_id: number; currency: string }>(
     `SELECT patient_id, currency FROM patient_opening_balances`);
   return new Set(rows.map((row) => `${row.patient_id}:${row.currency}`));
@@ -4098,7 +4157,14 @@ export async function existingOpeningKeys(client?: DbClient): Promise<Set<string
 
 export async function findLegacyImport(fileSha256: string): Promise<{ at: string; actor: string } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ created_at: Date; actor: string }>(
+  return findLegacyImportWith(getPool(), fileSha256);
+}
+
+export async function findLegacyImportWith(
+  q: Pick<DbClient, "query">,
+  fileSha256: string,
+): Promise<{ at: string; actor: string } | null> {
+  const { rows } = await q.query<{ created_at: Date; actor: string }>(
     `SELECT created_at, actor FROM audit_log
       WHERE action = 'legacy.import' AND details->>'fileSha256' = $1 ORDER BY id LIMIT 1`,
     [fileSha256],
@@ -4143,7 +4209,7 @@ export async function commitLegacyImport(input: {
   asOfDate: string;
   actor: string;
   actorRole: string | null;
-}): Promise<
+}, options?: { skipEnsureSchema?: boolean }): Promise<
   | {
     ok: true;
     treatments: number; sessions: number;
@@ -4153,7 +4219,7 @@ export async function commitLegacyImport(input: {
   }
   | { ok: false; reason: "already_imported"; at: string; actor: string }
 > {
-  await ensureSchema();
+  if (!options?.skipEnsureSchema) await ensureSchema();
   const source = await currentAuditSource();
   return withTransaction(getPool(), async (client) => {
     await client.query(PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL);
@@ -4337,7 +4403,11 @@ export async function patientLegacyHistoryWith(
 /** (P1-5) مرضى القاعدة كلها بصيغة مرشّحي التكرار — لمعاينة الاستيراد. */
 export async function allPatientCandidates(): Promise<CandidatePatient[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return allPatientCandidatesWith(getPool());
+}
+
+export async function allPatientCandidatesWith(q: Pick<DbClient, "query">): Promise<CandidatePatient[]> {
+  const { rows } = await q.query<{
     id: number; patient_number: string; full_name: string;
     phone: string | null; alt_phone: string | null; birth_year: number | null;
   }>(`SELECT id, patient_number, full_name, phone, alt_phone, birth_year FROM patients`);
@@ -4350,7 +4420,14 @@ export async function allPatientCandidates(): Promise<CandidatePatient[]> {
 /** (P1-5) هل استُورد هذا الملف من قبل؟ — للمعاينة؛ والحفظ يعيد الفحص تحت القفل. */
 export async function findPatientImport(fileSha256: string): Promise<{ at: string; actor: string } | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ created_at: Date; actor: string }>(
+  return findPatientImportWith(getPool(), fileSha256);
+}
+
+export async function findPatientImportWith(
+  q: Pick<DbClient, "query">,
+  fileSha256: string,
+): Promise<{ at: string; actor: string } | null> {
+  const { rows } = await q.query<{ created_at: Date; actor: string }>(
     `SELECT created_at, actor FROM audit_log
       WHERE action = 'patient.import' AND details->>'fileSha256' = $1 ORDER BY id LIMIT 1`,
     [fileSha256],
@@ -8016,6 +8093,22 @@ export async function setLabOrderStatusInTransaction(
         [id],
       );
     } else {
+      // Independent finding 12: the existence of a payment is not full settlement. Only a
+      // payable settled in full (net of reversals) is marked paid; a partial or reversed
+      // settlement refuses the cancellation for financial review (whole transaction rolls back).
+      const { rows: [settlement] } = await client.query<{ settled: string; amount: string }>(
+        `SELECT ${payableSettledTotalSql("p")}::text AS settled, ${payableAmountSql("p")}::text AS amount
+           FROM payables p WHERE p.id = $1`,
+        [current.payable_id],
+      );
+      const settledMinor = Number(settlement?.settled ?? 0);
+      const amountMinor = Number(settlement?.amount ?? 0);
+      if (!settlement || !(amountMinor > 0) || settledMinor < amountMinor) {
+        throw new LabFinancialBoundaryError(
+          "lab_cancel_partial_payment_review",
+          "على هذه الإرسالية سداد جزئي أو سند معكوس؛ لا تُلغى ولا تُعلَّم مسدّدة قبل مراجعة الالتزام المالي وتسويته.",
+        );
+      }
       await client.query(
         `UPDATE lab_orders SET financial_status = 'paid' WHERE id = $1 AND financial_status <> 'paid'`,
         [id],
@@ -8472,24 +8565,39 @@ export async function deleteLabOrder(
  */
 export async function labCountsWith(
   q: Pick<DbClient, "query">,
-  options?: { mode: "workflow"; today: string },
+  options?: ({ mode: "workflow"; today: string } | { mode?: undefined }) & { scopedDoctorPartyId?: number | null },
 ): Promise<{
   outstanding: number; late: number; dueToday: number; waitingFitting: number;
 }> {
+  if (
+    options
+    && "scopedDoctorPartyId" in options
+    && options.scopedDoctorPartyId !== undefined
+    && (options.scopedDoctorPartyId === null || options.scopedDoctorPartyId <= 0)
+  ) {
+    return { outstanding: 0, late: 0, dueToday: 0, waitingFitting: 0 };
+  }
   // Reports use the full workflow and one captured clinic day; badges keep their sent-only SQL clock.
   const workflow = options?.mode === "workflow";
-  const outstanding = workflow ? "status IN ('sent', 'in_progress', 'remake')" : "status = 'sent'";
+  const outstanding = workflow ? "l.status IN ('sent', 'in_progress', 'remake')" : "l.status = 'sent'";
   const today = workflow ? "$1::date" : "(NOW() AT TIME ZONE $1)::date";
+  const scoped = typeof options?.scopedDoctorPartyId === "number" && options.scopedDoctorPartyId > 0;
+  const scopeWhere = scoped
+    ? `WHERE (l.doctor_id = $2 OR EXISTS (SELECT 1 FROM patients WHERE patients.id = l.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")}))`
+    : "";
   const { rows } = await q.query<{
     outstanding: string; late: string; due_today: string; waiting_fitting: string;
   }>(
     `SELECT
        count(*) FILTER (WHERE ${outstanding})::int AS outstanding,
-       count(*) FILTER (WHERE ${outstanding} AND due_date < ${today})::int AS late,
-       count(*) FILTER (WHERE ${outstanding} AND due_date = ${today})::int AS due_today,
-       count(*) FILTER (WHERE status = 'received')::int AS waiting_fitting
-     FROM lab_orders`,
-    [workflow ? options.today : CLINIC_TIME_ZONE],
+       count(*) FILTER (WHERE ${outstanding} AND l.due_date < ${today})::int AS late,
+       count(*) FILTER (WHERE ${outstanding} AND l.due_date = ${today})::int AS due_today,
+       count(*) FILTER (WHERE l.status = 'received')::int AS waiting_fitting
+     FROM lab_orders l
+     ${scopeWhere}`,
+    scoped
+      ? [workflow ? options.today : CLINIC_TIME_ZONE, options.scopedDoctorPartyId]
+      : [workflow ? options.today : CLINIC_TIME_ZONE],
   );
   return {
     outstanding: Number(rows[0].outstanding),
@@ -9275,7 +9383,11 @@ const ANNOUNCEMENT_COLUMNS =
 /** القائمة كاملة للإدارة — المفعَّل والمعطَّل معًا، بترتيب العرض. */
 export async function listDisplayAnnouncements(): Promise<DisplayAnnouncement[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<DisplayAnnouncementRow>(
+  return listDisplayAnnouncementsWith(getPool());
+}
+
+export async function listDisplayAnnouncementsWith(q: Pick<DbClient, "query">): Promise<DisplayAnnouncement[]> {
+  const { rows } = await q.query<DisplayAnnouncementRow>(
     `SELECT ${ANNOUNCEMENT_COLUMNS} FROM display_announcements ORDER BY sort_order, id`,
   );
   return rows.map(toDisplayAnnouncement);
@@ -9428,6 +9540,34 @@ export async function activeAnnouncementsForScreenWith(q: Pick<DbClient, "query"
  * تجاوزه يُرمى بعلامة ANNOUNCEMENTS_LIMIT يعرفها مسار الـ API فيقولها
  * للمدير بالعربية لا بخطأ خادمٍ عام.
  */
+export async function createDisplayAnnouncementInTransaction(
+  client: Pick<DbClient, "query">,
+  input: {
+    title: string;
+    body: string;
+    isActive: boolean;
+    actor: string;
+  },
+): Promise<DisplayAnnouncement> {
+  await client.query("SELECT pg_advisory_xact_lock(7463)");
+  const counted = await client.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM display_announcements`,
+  );
+  if (Number(counted.rows[0]?.count ?? "0") >= MAX_ANNOUNCEMENTS_COUNT) {
+    throw new Error("ANNOUNCEMENTS_LIMIT");
+  }
+  const next = await client.query<{ next: number }>(
+    `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM display_announcements`,
+  );
+  const inserted = await client.query<DisplayAnnouncementRow>(
+    `INSERT INTO display_announcements (title, body, sort_order, is_active, created_by, updated_by)
+     VALUES ($1, $2, $3, $4, $5, $5)
+     RETURNING ${ANNOUNCEMENT_COLUMNS}`,
+    [input.title, input.body, next.rows[0]?.next ?? 1, input.isActive, input.actor],
+  );
+  return toDisplayAnnouncement(inserted.rows[0]!);
+}
+
 export async function createDisplayAnnouncement(input: {
   title: string;
   body: string;
@@ -9438,24 +9578,9 @@ export async function createDisplayAnnouncement(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(7463)");
-    const counted = await client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM display_announcements`,
-    );
-    if (Number(counted.rows[0]?.count ?? "0") >= MAX_ANNOUNCEMENTS_COUNT) {
-      throw new Error("ANNOUNCEMENTS_LIMIT");
-    }
-    const next = await client.query<{ next: number }>(
-      `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM display_announcements`,
-    );
-    const inserted = await client.query<DisplayAnnouncementRow>(
-      `INSERT INTO display_announcements (title, body, sort_order, is_active, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $5)
-       RETURNING ${ANNOUNCEMENT_COLUMNS}`,
-      [input.title, input.body, next.rows[0]?.next ?? 1, input.isActive, input.actor],
-    );
+    const created = await createDisplayAnnouncementInTransaction(client, input);
     await client.query("COMMIT");
-    return toDisplayAnnouncement(inserted.rows[0]!);
+    return created;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -9477,6 +9602,15 @@ export async function updateDisplayAnnouncement(
   actor: string,
 ): Promise<DisplayAnnouncement | null> {
   await ensureSchema();
+  return updateDisplayAnnouncementWith(getPool(), id, patch, actor);
+}
+
+export async function updateDisplayAnnouncementWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+  patch: { title?: string; body?: string; isActive?: boolean },
+  actor: string,
+): Promise<DisplayAnnouncement | null> {
   const sets: string[] = [];
   const values: unknown[] = [id];
   if (patch.title !== undefined) {
@@ -9493,7 +9627,7 @@ export async function updateDisplayAnnouncement(
   }
   if (sets.length === 0) return null;
   values.push(actor);
-  const { rows } = await getPool().query<DisplayAnnouncementRow>(
+  const { rows } = await q.query<DisplayAnnouncementRow>(
     `UPDATE display_announcements
         SET ${sets.join(", ")}, updated_by = $${values.length}, updated_at = NOW()
       WHERE id = $1
@@ -9506,7 +9640,11 @@ export async function updateDisplayAnnouncement(
 /** حذف إعلان — نهائي بلا قبر: الإعلان إعلانٌ يُستبدل لا سجلٌّ مالي يُحاسَب. */
 export async function deleteDisplayAnnouncement(id: number): Promise<boolean> {
   await ensureSchema();
-  const { rowCount } = await getPool().query(
+  return deleteDisplayAnnouncementWith(getPool(), id);
+}
+
+export async function deleteDisplayAnnouncementWith(q: Pick<DbClient, "query">, id: number): Promise<boolean> {
+  const { rowCount } = await q.query(
     `DELETE FROM display_announcements WHERE id = $1`,
     [id],
   );
@@ -9524,28 +9662,36 @@ export async function deleteDisplayAnnouncement(id: number): Promise<boolean> {
  *
  * والترتيبُ تحرُّك قائمة لا تحرير محتوى: updated_by وupdated_at لا يمسّهما.
  */
+export async function reorderDisplayAnnouncementsInTransaction(
+  client: Pick<DbClient, "query">,
+  ids: number[],
+): Promise<boolean> {
+  await client.query("SELECT pg_advisory_xact_lock(7463)");
+  const table = await client.query<{ id: number; total: string }>(
+    `SELECT id, COUNT(*) OVER ()::text AS total FROM display_announcements`,
+  );
+  const total = Number(table.rows[0]?.total ?? "0");
+  const inTable = table.rows.map((row) => row.id).sort((a, b) => a - b).join(",");
+  const wanted = [...ids].sort((a, b) => a - b).join(",");
+  if (total !== ids.length || inTable !== wanted) {
+    throw new Error("ANNOUNCEMENTS_REORDER_INCOMPLETE");
+  }
+  await client.query(
+    `UPDATE display_announcements AS a
+        SET sort_order = x.ord
+       FROM unnest($1::int[], $2::int[]) AS x(id, ord)
+      WHERE a.id = x.id`,
+    [ids, ids.map((_, index) => index + 1)],
+  );
+  return true;
+}
+
 export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolean> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(7463)");
-    const table = await client.query<{ id: number; total: string }>(
-      `SELECT id, COUNT(*) OVER ()::text AS total FROM display_announcements`,
-    );
-    const total = Number(table.rows[0]?.total ?? "0");
-    const inTable = table.rows.map((row) => row.id).sort((a, b) => a - b).join(",");
-    const wanted = [...ids].sort((a, b) => a - b).join(",");
-    if (total !== ids.length || inTable !== wanted) {
-      throw new Error("ANNOUNCEMENTS_REORDER_INCOMPLETE");
-    }
-    await client.query(
-      `UPDATE display_announcements AS a
-          SET sort_order = x.ord
-         FROM unnest($1::int[], $2::int[]) AS x(id, ord)
-        WHERE a.id = x.id`,
-      [ids, ids.map((_, index) => index + 1)],
-    );
+    await reorderDisplayAnnouncementsInTransaction(client, ids);
     await client.query("COMMIT");
     return true;
   } catch (error) {
@@ -9987,22 +10133,21 @@ export async function materialRatesMapAsOf(asOf: string): Promise<Map<string, nu
  * صفّان، والأحدث هو الساري. الحذف يُسجَّل نسبة صفر سارية من اللحظة — «لا خصم
  * من الآن» — لا محوًا للماضي.
  */
-export async function setMaterialRate(input: {
-  category: string; rateBp: number | null; actor: string;
-}): Promise<{ ok: true } | { ok: false; message: string }> {
-  await ensureSchema();
+export async function setMaterialRateInTransaction(
+  client: DbClient,
+  input: { category: string; rateBp: number | null; actor: string; actorRole?: string | null },
+  audit?: (input: AuditInput) => Promise<void>,
+): Promise<{ ok: true; category: string } | { ok: false; message: string }> {
   const category = input.category.trim().toLowerCase();
   if (!category) return { ok: false, message: "اكتب فئة التخصص." };
-  await withTransaction(getPool(), async (client) => {
-    if (input.rateBp === null) {
-      await client.query(`DELETE FROM material_rates WHERE category = $1`, [category]);
-      await client.query(
-        `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
-         VALUES ($1, 0, NOW(), $2)`,
-        [category, input.actor],
-      );
-      return;
-    }
+  if (input.rateBp === null) {
+    await client.query(`DELETE FROM material_rates WHERE category = $1`, [category]);
+    await client.query(
+      `INSERT INTO material_rate_history (category, rate_bp, effective_from, recorded_by)
+       VALUES ($1, 0, NOW(), $2)`,
+      [category, input.actor],
+    );
+  } else {
     await client.query(
       `INSERT INTO material_rates (category, rate_bp, updated_by)
        VALUES ($1, $2, $3)
@@ -10015,6 +10160,34 @@ export async function setMaterialRate(input: {
        VALUES ($1, $2, NOW(), $3)`,
       [category, input.rateBp, input.actor],
     );
+  }
+  if (audit) {
+    await audit(
+      input.rateBp === null
+        ? {
+            action: "material_rate.clear", entity: "material_rates", entityId: 0,
+            entityLabel: category, details: { الفئة: category },
+            actor: input.actor, actorRole: input.actorRole ?? null,
+          }
+        : {
+            action: "material_rate.set", entity: "material_rates", entityId: 0,
+            entityLabel: category,
+            details: { الفئة: category, النسبة: `${input.rateBp / 100}%` },
+            actor: input.actor, actorRole: input.actorRole ?? null,
+          },
+    );
+  }
+  return { ok: true, category };
+}
+
+export async function setMaterialRate(input: {
+  category: string; rateBp: number | null; actor: string;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  await ensureSchema();
+  const category = input.category.trim().toLowerCase();
+  if (!category) return { ok: false, message: "اكتب فئة التخصص." };
+  await withTransaction(getPool(), async (client) => {
+    await setMaterialRateInTransaction(client, input);
   });
   void recordAudit(
     input.rateBp === null
@@ -16561,8 +16734,12 @@ export async function patientDebtReportWith(q: Pick<DbClient, "query">): Promise
  * (PAT-1 review) أرصدة المرضى بالمحرّك الكانوني — **بلا قصّ** — لكل المرضى (`null`) أو لمجموعةٍ
  * منهم فقط (صفحة القائمة): فلا يُقرأ كل المال لعرض ٢٥ مريضًا، ولا يُسقط مدينٌ بعد الخمسمئة.
  */
-export async function computeDebtRows(patientIds: readonly number[] | null, includeNonPositive = false): Promise<DebtRow[]> {
-  await ensureSchema();
+export async function computeDebtRows(
+  patientIds: readonly number[] | null,
+  includeNonPositive = false,
+  options?: { skipEnsureSchema?: boolean },
+): Promise<DebtRow[]> {
+  if (!options?.skipEnsureSchema) await ensureSchema();
   const scope = patientIds === null ? null : [...patientIds];
   if (scope !== null && scope.length === 0) return [];
   const debtPool=getPool();
@@ -18716,25 +18893,33 @@ async function countStats(from: string, to: string) {
  * والاستدعاءات التشغيلية (الزيارات، المرضى، التقويم، تنبيهات المخزون، أرصدة
  * الجهات) هي نفس الدوال التي تخدم شاشاتها — فلا يمكنها المخالفة أيضًا.
  */
-export async function executiveKpis(from: string, to: string): Promise<ExecutiveKpis> {
-  await ensureSchema();
+export async function executiveKpis(
+  from: string,
+  to: string,
+  options?: { skipEnsureSchema?: boolean },
+): Promise<ExecutiveKpis> {
+  const skip = options?.skipEnsureSchema === true;
+  if (!skip) await ensureSchema();
 
   // (P-01 owner review — تصحيح ١) استيرادٌ كسول: محرك التقارير يستورد هذا
   // الملف (getPool/ensureSchema) فالاستيراد الساكن هنا يُنشئ حلقة؛ والكسول
   // يمرّ نظيفًا والاستعمال نفسه — داخل الدالة لا عند التهيئة.
   const { executiveFinancialReadModels } = await import("./reports");
+  const pool = getPool();
 
   const [allEntries, financialReadModels, visits, stats, alerts, partyRows, settingsMap] = await Promise.all([
-    journalEntries("0001-01-01", to),
+    skip ? journalEntries("0001-01-01", to, pool) : journalEntries("0001-01-01", to),
     // (P-01 owner review — تصحيح ١) الفواتير والذمم من المراجع القانونية لكل عملة — وهي تطابق
     // الدفتر الأصلي رقمًا بالبناء (TD-REG-028).
-    executiveFinancialReadModels(from, to),
-    listVisitsBetween(from, to),
+    executiveFinancialReadModels(from, to, skip ? { skipEnsureSchema: true } : undefined),
+    skip ? listVisitsBetweenWith(pool, from, to) : listVisitsBetween(from, to),
     countStats(from, to),
-    inventoryAlerts(clinicDateString(new Date(), CLINIC_TIME_ZONE)),
+    skip
+      ? inventoryAlertsWith(pool, clinicDateString(new Date(), CLINIC_TIME_ZONE))
+      : inventoryAlerts(clinicDateString(new Date(), CLINIC_TIME_ZONE)),
     // (TD-REG-028) مستحق كل جهة لكل عملة — لا مكافئٌ أساسي ممزوج.
-    partyDueByCurrency(),
-    getSettings(),
+    skip ? loadPartyDueByCurrency(pool) : partyDueByCurrency(),
+    skip ? getSettingsWith(pool) : getSettings(),
   ]);
   const payableTotals = new Map<Currency, number>();
   for (const row of partyRows) payableTotals.set(row.currency, (payableTotals.get(row.currency) ?? 0) + row.dueMinor);
@@ -19359,7 +19544,11 @@ function messagingChannelView(channel: Channel, row: MessagingChannelRow | undef
 /** القنوات الثلاث دائمًا — الغائبة بإعدادها الافتراضي معطَّلة. */
 export async function listMessagingChannels(): Promise<MessagingChannelView[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<MessagingChannelRow>(`SELECT * FROM messaging_channels`);
+  return listMessagingChannelsWith(getPool());
+}
+
+export async function listMessagingChannelsWith(q: Pick<DbClient, "query">): Promise<MessagingChannelView[]> {
+  const { rows } = await q.query<MessagingChannelRow>(`SELECT * FROM messaging_channels`);
   return CHANNELS.map((channel) => messagingChannelView(channel, rows.find((row) => row.channel === channel)));
 }
 
@@ -19385,16 +19574,19 @@ function generatedInboundToken(): string {
  * يحفظ إعداد قناة. `secrets`: لكل سرٍّ بالاسم نصٌّ ⇒ يُستبدل، `null` ⇒ يُحذف، غائب ⇒ يبقى.
  * ورموز الاستقبال (verifyToken / inboundKey) تُولَّد إن غابت. والتدقيق يحمل الحالة لا القيم.
  */
-export async function saveMessagingChannel(input: {
-  channel: Channel;
-  enabled: boolean;
-  config: ChannelConfigMap[Channel];
-  secrets?: Record<string, string | null | undefined>;
-  actor: string;
-  actorRole: string | null;
-}): Promise<MessagingChannelView> {
-  await ensureSchema();
-  const before = await messagingChannelWithSecret(input.channel);
+export async function saveMessagingChannelInTransaction(
+  client: Pick<DbClient, "query">,
+  input: {
+    channel: Channel;
+    enabled: boolean;
+    config: ChannelConfigMap[Channel];
+    secrets?: Record<string, string | null | undefined>;
+    actor: string;
+    actorRole: string | null;
+  },
+  audit?: (row: AuditInput) => Promise<void>,
+): Promise<MessagingChannelView> {
+  const before = await messagingChannelWithSecretWith(client, input.channel);
   const nextSecrets = mergeSecrets(input.channel, before.secrets, input.secrets ?? {});
   const config = { ...input.config } as Record<string, unknown>;
   const previous = before.view.config as unknown as Record<string, unknown>;
@@ -19404,7 +19596,7 @@ export async function saveMessagingChannel(input: {
   }
   if (input.channel === "sms") config.inboundKey = String(config.inboundKey || previous.inboundKey || generatedInboundToken());
   const secretEnc = Object.keys(nextSecrets).length > 0 ? encryptSecret(JSON.stringify(nextSecrets)) : null;
-  const { rows } = await getPool().query<MessagingChannelRow>(
+  const { rows } = await client.query<MessagingChannelRow>(
     `INSERT INTO messaging_channels (channel, enabled, config, secret_enc, updated_by, updated_at)
      VALUES ($1, $2, $3::jsonb, $4, $5, NOW())
      ON CONFLICT (channel) DO UPDATE SET
@@ -19421,7 +19613,7 @@ export async function saveMessagingChannel(input: {
     keyStates[key] = input.secrets?.[key] === undefined ? (has ? "UNCHANGED" : "NOT_CONFIGURED")
       : has ? (had ? "REPLACED" : "CONFIGURED") : (had ? "REMOVED" : "NOT_CONFIGURED");
   }
-  await recordAudit({
+  const auditRow: AuditInput = {
     action: "messaging.channel.update",
     entity: "messaging_channel",
     entityId: input.channel,
@@ -19429,13 +19621,36 @@ export async function saveMessagingChannel(input: {
     details: { enabled: input.enabled, wasEnabled: before.view.enabled, keyStates },
     actor: input.actor,
     actorRole: input.actorRole,
-  });
+  };
+  if (audit) await audit(auditRow);
+  else await recordAudit(auditRow);
   return messagingChannelView(input.channel, rows[0], nextSecrets);
+}
+
+export async function saveMessagingChannel(input: {
+  channel: Channel;
+  enabled: boolean;
+  config: ChannelConfigMap[Channel];
+  secrets?: Record<string, string | null | undefined>;
+  actor: string;
+  actorRole: string | null;
+}): Promise<MessagingChannelView> {
+  await ensureSchema();
+  return saveMessagingChannelInTransaction(getPool(), input);
 }
 
 export async function recordChannelTest(channel: Channel, ok: boolean, message: string): Promise<void> {
   await ensureSchema();
-  await getPool().query(
+  await recordChannelTestWith(getPool(), channel, ok, message);
+}
+
+export async function recordChannelTestWith(
+  q: Pick<DbClient, "query">,
+  channel: Channel,
+  ok: boolean,
+  message: string,
+): Promise<void> {
+  await q.query(
     `INSERT INTO messaging_channels (channel, last_test_at, last_test_ok, last_test_message)
      VALUES ($1, NOW(), $2, $3)
      ON CONFLICT (channel) DO UPDATE SET last_test_at = NOW(), last_test_ok = $2, last_test_message = $3`,
@@ -25048,8 +25263,20 @@ export async function todayPlannedVisits(date: string, doctorPartyId?: number | 
   durationMinutes: number; status: string; appointmentId: number | null;
 }[]> {
   await ensureSchema();
+  return todayPlannedVisitsWith(getPool(), date, doctorPartyId);
+}
+
+export async function todayPlannedVisitsWith(
+  q: Pick<DbClient, "query">,
+  date: string,
+  doctorPartyId?: number | null,
+): Promise<{
+  id: number; patientId: number; patientName: string; patientNumber: string;
+  title: string; doctorName: string | null; time: string | null;
+  durationMinutes: number; status: string; appointmentId: number | null;
+}[]> {
   const scoped = typeof doctorPartyId === "number" && doctorPartyId > 0;
-  const { rows } = await getPool().query<{
+  const { rows } = await q.query<{
     id: number; patient_id: number; patient_name: string; patient_number: string;
     title: string; doctor_name: string | null; time: string | null;
     duration_minutes: number; status: string; appointment_id: number | null;
@@ -26252,7 +26479,14 @@ export async function documentsForArchive(): Promise<{
   title: string; takenOn: string | null; uploadedAt: Date; storageKey: string;
 }[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return documentsForArchiveWith(getPool());
+}
+
+export async function documentsForArchiveWith(q: Pick<DbClient, "query">): Promise<{
+  id: number; patientNumber: string; patientName: string; kind: string;
+  title: string; takenOn: string | null; uploadedAt: Date; storageKey: string;
+}[]> {
+  const { rows } = await q.query<{
     id: number; patient_number: string; full_name: string; kind: string;
     title: string; taken_on: Date | null; uploaded_at: Date; storage_key: string;
   }>(
@@ -26284,7 +26518,18 @@ export async function expenseAttachmentsForArchive(): Promise<{
   storageKey: string;
 }[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return expenseAttachmentsForArchiveWith(getPool());
+}
+
+export async function expenseAttachmentsForArchiveWith(q: Pick<DbClient, "query">): Promise<{
+  id: number;
+  expenseId: number;
+  voucherNumber: string;
+  title: string;
+  uploadedAt: Date;
+  storageKey: string;
+}[]> {
+  const { rows } = await q.query<{
     id: number;
     expense_id: number;
     voucher_number: string | null;
@@ -26849,7 +27094,8 @@ async function openVisitTodayForOrthoCase(client: DbClient, caseId: number, done
 
 /** (P1-C) خدمات «الشدّة» التي يعني تفوترها فوترة الشدّة نفسها — من الإعدادات، وإلا اسم خدمة الدليل. */
 async function orthoAdjustmentServiceIds(client: DbClient): Promise<Set<number>> {
-  const configured = String((await getSettingsSafe())["ortho.adjustment_service_ids"] ?? "")
+  const settings = await getSettingsWith(client).catch(() => withDefaults({}));
+  const configured = String(settings["ortho.adjustment_service_ids"] ?? "")
     .split(",").map((part) => Number(part.trim())).filter((id) => Number.isInteger(id) && id > 0);
   const { rows } = await client.query<{ id: number }>(
     configured.length > 0
@@ -31085,7 +31331,14 @@ export async function listAppointmentServices(
 
 export async function getAppointmentService(id: number): Promise<AppointmentService | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<AppointmentServiceRow>(`${SERVICE_SELECT} WHERE id = $1`, [id]);
+  return getAppointmentServiceWith(getPool(), id);
+}
+
+export async function getAppointmentServiceWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+): Promise<AppointmentService | null> {
+  const { rows } = await q.query<AppointmentServiceRow>(`${SERVICE_SELECT} WHERE id = $1`, [id]);
   return rows[0] ? toAppointmentService(rows[0]) : null;
 }
 
@@ -31125,16 +31378,17 @@ export type ServiceWriteResult =
   | { ok: true; service: AppointmentService }
   | { ok: false; message: string };
 
-/** إنشاء خدمة — الرمز فريدٌ، والتصادم يُردّ برسالةٍ تقول أيّ رمزٍ تكرّر. */
-export async function createAppointmentService(
-  input: AppointmentServiceInput, actor: { actor: string; actorRole?: string | null },
+export async function createAppointmentServiceWith(
+  q: Pick<DbClient, "query">,
+  input: AppointmentServiceInput,
+  actor: { actor: string; actorRole?: string | null },
+  audit?: (row: AuditInput) => Promise<void>,
 ): Promise<ServiceWriteResult> {
-  await ensureSchema();
   const problem = validateService(input);
   if (problem) return { ok: false, message: problem };
   const code = normalizeCode(input.code);
   try {
-    const { rows } = await getPool().query<AppointmentServiceRow>(
+    const { rows } = await q.query<AppointmentServiceRow>(
       `INSERT INTO appointment_services
          (code, name_ar, name_en, specialty, default_duration_minutes, buffer_before_minutes,
           buffer_after_minutes, requires_provider, requires_chair,
@@ -31155,11 +31409,13 @@ export async function createAppointmentService(
       ],
     );
     const service = toAppointmentService(rows[0]);
-    await recordAudit({
+    const auditRow: AuditInput = {
       action: "appointment_service.create", entity: "appointment_service",
       entityId: String(service.id), actor: actor.actor, actorRole: actor.actorRole ?? null,
       details: { الرمز: service.code, الاسم: service.nameAr, المدة: `${service.defaultDurationMinutes} دقيقة` },
-    }).catch(() => {});
+    };
+    if (audit) await audit(auditRow);
+    else await recordAudit(auditRow).catch(() => {});
     return { ok: true, service };
   } catch (error) {
     if ((error as { code?: string }).code === "23505") {
@@ -31169,22 +31425,33 @@ export async function createAppointmentService(
   }
 }
 
+/** إنشاء خدمة — الرمز فريدٌ، والتصادم يُردّ برسالةٍ تقول أيّ رمزٍ تكرّر. */
+export async function createAppointmentService(
+  input: AppointmentServiceInput, actor: { actor: string; actorRole?: string | null },
+): Promise<ServiceWriteResult> {
+  await ensureSchema();
+  return createAppointmentServiceWith(getPool(), input, actor);
+}
+
 /**
  * تعديل خدمة — والرمز لا يُغيَّر.
  *
  * الرمز هوية: قواعدُ وتكاملاتٌ ومواعيدُ تاريخية تشير إليه. وتغييرُه صامتًا يكسر
  * ما بُني عليه. فالمالك يُعطّل خدمةً وينشئ غيرها إن أراد رمزًا آخر.
  */
-export async function updateAppointmentService(
-  id: number, input: AppointmentServiceInput, actor: { actor: string; actorRole?: string | null },
+export async function updateAppointmentServiceWith(
+  q: Pick<DbClient, "query">,
+  id: number,
+  input: AppointmentServiceInput,
+  actor: { actor: string; actorRole?: string | null },
+  audit?: (row: AuditInput) => Promise<void>,
 ): Promise<ServiceWriteResult> {
-  await ensureSchema();
-  const before = await getAppointmentService(id);
+  const before = await getAppointmentServiceWith(q, id);
   if (!before) return { ok: false, message: "الخدمة غير موجودة." };
   const problem = validateService({ ...input, code: before.code });
   if (problem) return { ok: false, message: problem };
 
-  const { rows } = await getPool().query<AppointmentServiceRow>(
+  const { rows } = await q.query<AppointmentServiceRow>(
     `UPDATE appointment_services
         SET name_ar = $2, name_en = $3, specialty = $4, default_duration_minutes = $5,
             buffer_before_minutes = $6, buffer_after_minutes = $7, requires_provider = $8,
@@ -31228,16 +31495,25 @@ export async function updateAppointmentService(
   compare("sortOrder", "الترتيب");
 
   if (Object.keys(changes).length > 0) {
-    await recordAudit({
+    const auditRow: AuditInput = {
       action: before.isActive !== service.isActive
         ? (service.isActive ? "appointment_service.activate" : "appointment_service.deactivate")
         : "appointment_service.update",
       entity: "appointment_service", entityId: String(id),
       actor: actor.actor, actorRole: actor.actorRole ?? null,
       details: { الرمز: service.code, ...changes },
-    }).catch(() => {});
+    };
+    if (audit) await audit(auditRow);
+    else await recordAudit(auditRow).catch(() => {});
   }
   return { ok: true, service };
+}
+
+export async function updateAppointmentService(
+  id: number, input: AppointmentServiceInput, actor: { actor: string; actorRole?: string | null },
+): Promise<ServiceWriteResult> {
+  await ensureSchema();
+  return updateAppointmentServiceWith(getPool(), id, input, actor);
 }
 
 /* ═══ حجب الأطباء ═══════════════════════════════════════════════════════════ */
@@ -32197,9 +32473,13 @@ export async function closeReferral(input: {
 /** كم في كل جدول مما سيُمسح — لشاشة التأكيد. */
 export async function clinicResetPreview(): Promise<Record<string, number>> {
   await ensureSchema();
+  return clinicResetPreviewWith(getPool());
+}
+
+export async function clinicResetPreviewWith(q: Pick<DbClient, "query">): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
   for (const table of RESET_WIPE_TABLES) {
-    const { rows } = await getPool().query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ${table}`);
+    const { rows } = await q.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ${table}`);
     counts[table] = Number(rows[0].n);
   }
   return counts;
@@ -32240,11 +32520,12 @@ class ResetBackupFailed<F> extends Error {
 export async function resetClinicData<F>(
   input: { actor: string; actorRole: string | null },
   backup: ResetBackupStep<F>,
+  options?: { skipEnsureSchema?: boolean },
 ): Promise<
   | { ok: true; counts: Record<string, number>; storageKeys: string[]; backupId: string | null }
   | { ok: false; failure: F }
 > {
-  await ensureSchema();
+  if (!options?.skipEnsureSchema) await ensureSchema();
   const source = await currentAuditSource();
   const backupClient = await getPool().connect();
   try {
@@ -34199,7 +34480,14 @@ export interface OrthoDuplicateAdjustmentRow {
  */
 export async function listOrthoDuplicateAdjustments(patientId?: number | null): Promise<OrthoDuplicateAdjustmentRow[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<{
+  return listOrthoDuplicateAdjustmentsWith(getPool(), patientId);
+}
+
+export async function listOrthoDuplicateAdjustmentsWith(
+  q: Pick<DbClient, "query">,
+  patientId?: number | null,
+): Promise<OrthoDuplicateAdjustmentRow[]> {
+  const { rows } = await q.query<{
     case_id: number; visit_id: number; patient_id: number; full_name: string; patient_number: string;
     n: number; ids: number[]; first_done_on: string; recorded_by: string;
   }>(

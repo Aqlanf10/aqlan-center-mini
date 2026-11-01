@@ -44,7 +44,8 @@ import {
 } from "./db";
 import { readClinicalNavigationContextWith } from "./clinical-navigation-db";
 import { readClinicalContext } from "./patient-navigation";
-import { putFile, readFileByKey, storageStatus } from "./files";
+import { putFile, readFileByKey, storageStatus, type StoredFile } from "./files";
+import { cleanupUncommittedStoredFile, holdStorageKeyShared, plannedStorageKey } from "./file-cleanup";
 import { imageSize } from "./imageSize";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "./storage";
 import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "./magic-bytes";
@@ -52,7 +53,7 @@ import { CONSENT_RECORD_NOTE_LIMIT, DOCUMENT_NOTE_LIMIT, parseStoredConsent } fr
 import { buildSuggestions, checkPrescriptionDraft, checkVoidReason } from "./prescription";
 import { evaluatePrescriptionSafety } from "./medication-safety";
 import { isIssuingClinician } from "./clinical-identity";
-import { withHttpIdempotency } from "./http-idempotency";
+import { withHttpIdempotencyInTx } from "./http-idempotency";
 import {
   buildSafetyAcknowledgementToken,
   verifySafetyAcknowledgementToken,
@@ -187,7 +188,11 @@ export async function commandCanonicalDocumentUpload(
   form: FormData,
   pool: DbPool = getPool(),
 ): Promise<{ kind: "uploaded"; document: Awaited<ReturnType<typeof recordDocumentInTransaction>> } | { kind: "rejected_signature"; message: string }> {
-  return withStaffOperation(pool, session, "clinical.xrays.upload", async (client, handle) => {
+  // Peer-review #6/#8: a file written by this attempt is reconciled after the
+  // transaction ends (rollback/refusal), under the storage-object ownership protocol.
+  let stored: StoredFile | null = null;
+  try {
+    return await withStaffOperation(pool, session, "clinical.xrays.upload", async (client, handle) => {
     const patientId = parsePositiveId(rawPatientId, "رقم الملف غير صالح.");
     await assertPatientInScope(client, handle, "clinical.xrays.upload", patientId, "FOR KEY SHARE");
 
@@ -266,16 +271,18 @@ export async function commandCanonicalDocumentUpload(
     }
 
     const dimensions = imageSize(bytes);
-    const stored = await putFile(bytes, check.extension);
+    await holdStorageKeyShared(client, plannedStorageKey(bytes, check.extension));
+    const written = await putFile(bytes, check.extension);
+    stored = written;
     const document = await recordDocumentInTransaction(client, {
       patientId,
       visitId,
       kind,
       title,
       mimeType: file.type,
-      sizeBytes: stored.sizeBytes,
-      sha256: stored.sha256,
-      storageKey: stored.key,
+      sizeBytes: written.sizeBytes,
+      sha256: written.sha256,
+      storageKey: written.key,
       note,
       takenOn,
       uploadedBy: actor.username,
@@ -296,7 +303,11 @@ export async function commandCanonicalDocumentUpload(
       actorRole: actor.role,
     });
     return { kind: "uploaded", document };
-  });
+    });
+  } catch (error) {
+    await cleanupUncommittedStoredFile(stored, pool);
+    throw error;
+  }
 }
 
 export async function readCanonicalDocumentDownload(
@@ -536,7 +547,7 @@ export async function commandCanonicalPrescriptionCreate(
   const actorKey = claims ? `canon:${claims.durableIdentity.realmId}:${claims.durableIdentity.subjectId}` : "canon:expired";
   const execute = async (): Promise<NextResponse> => {
     try {
-      const outcome = await withStaffOperation<CanonicalRxOutcome>(
+      const outcome = await withStaffOperation<{ status: number; payload: unknown; replay: boolean }>(
         pool,
         session,
         "clinical.prescriptions.write",
@@ -596,6 +607,9 @@ export async function commandCanonicalPrescriptionCreate(
             throw new CanonicalClinicalRecordsRefusal("prescribing_doctor_inactive", 400, "الطبيب المحدد غير موجود أو غير نشط.");
           }
 
+          // Peer-review #2: the idempotent replay runs only here, AFTER live capability,
+          // active clinician link, patient scope and selected-doctor authority were re-proved.
+          const decide = async (): Promise<CanonicalRxOutcome> => {
           const draft = checkPrescriptionDraft({
             ownerAuthority,
             prescribingDoctorName: selectedDoctor.name,
@@ -731,16 +745,33 @@ export async function commandCanonicalPrescriptionCreate(
               ? { id: record.id, createdAt: record.createdAt, safetyWarnings: finalWarnings, acknowledged: true }
               : { id: record.id, createdAt: record.createdAt },
           };
+          };
+          const replayable = await withHttpIdempotencyInTx(
+            client,
+            request,
+            "prescriptions.create",
+            actorKey,
+            body,
+            async () => {
+              const decided = await decide();
+              return { status: decided.status, body: decided.payload };
+            },
+            // Only the final 201 creation freezes the key; previews and blocks stay retryable.
+            { shouldCache: (result) => result.status === 201 },
+          );
+          return { status: replayable.status, payload: replayable.body, replay: replayable.replay === true };
         },
       );
-      return NextResponse.json(outcome.payload, { status: outcome.status, headers: NO_STORE });
+      return NextResponse.json(outcome.payload, {
+        status: outcome.status,
+        headers: outcome.replay ? { ...NO_STORE, "X-Idempotent-Replay": "true" } : NO_STORE,
+      });
     } catch (error) {
       return canonicalClinicalRecordsFailure(error, "تعذّر حفظ الوصفة.");
     }
   };
 
-  if (!claims) return execute();
-  return withHttpIdempotency(request, "prescriptions.create", actorKey, body, execute);
+  return execute();
 }
 
 export async function commandCanonicalPrescriptionVoid(

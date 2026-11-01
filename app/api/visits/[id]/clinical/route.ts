@@ -398,7 +398,22 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "تعذّر حفظ الزيارة." }, { status: 500 });
   }
   };
+  const preflightVisit = await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null });
+  if (!preflightVisit) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
+  if (preflightVisit.patientId !== null && !(await canAccessPatient(session, preflightVisit.patientId))) {
+    return NextResponse.json({ message: "هذه زيارة مريضٍ ليس من مرضاك." }, { status: 403 });
+  }
+  if (assistant && assistantOutsideToday(preflightVisit)) {
+    return NextResponse.json({ message: "المساعد السريري يعمل على زيارات اليوم وحدها." }, { status: 403 });
+  }
+
   return action === "sign" || action === "addendum"
-    ? withHttpIdempotency(request, `visits.clinical.${action}:${visitId}`, session.username, source, runClinicalAction)
+    ? withHttpIdempotency(
+        request,
+        `visits.clinical.${action}:${visitId}`,
+        session.username,
+        source,
+        runClinicalAction,
+      )
     : runClinicalAction();
 }

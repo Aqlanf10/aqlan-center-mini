@@ -21,7 +21,7 @@ import {
   writeAppointmentAcrossDays, writeAppointmentInDay, type AuditInput, type DbClient,
 } from "./db";
 import {
-  prepareCapacityEvaluator, loadCapacityContext, resolveService, type CapacityContext,
+  prepareCapacityEvaluator, loadCapacityContext, loadCapacityContextWith, resolveService, resolveServiceWith, type CapacityContext,
 } from "./capacity-context";
 import { usableShifts, type CapacityVerdict } from "./capacity";
 import type { Appointment } from "./schedule";
@@ -394,11 +394,16 @@ export async function bookAppointment(
     return { ok: false, status: 400, message: "وقت غير صالح." };
   }
 
-  const context = await loadCapacityContext();
-  let service = await resolveService({
-    serviceId: input.serviceId ?? null,
-    appointmentType: input.appointmentType ?? null,
-  });
+  const context = options.client ? await loadCapacityContextWith(options.client) : await loadCapacityContext();
+  let service = options.client
+    ? await resolveServiceWith(options.client, {
+        serviceId: input.serviceId ?? null,
+        appointmentType: input.appointmentType ?? null,
+      })
+    : await resolveService({
+        serviceId: input.serviceId ?? null,
+        appointmentType: input.appointmentType ?? null,
+      });
   // Fast rejection only. The transaction below must re-read and lock the row
   // before trusting identity or metadata; this preflight object may become stale.
   if (input.bookingIntent === "ortho_follow_up"
@@ -647,14 +652,17 @@ export async function rescheduleAppointment(
     };
   }
 
-  const context = await loadCapacityContext();
+  const context = options.client ? await loadCapacityContextWith(options.client) : await loadCapacityContext();
   /* الخدمة: الجديدة إن طُلبت صراحةً، وإلّا خدمةُ الموعد كما حُجز. */
   const changingService = input.serviceId !== undefined && input.serviceId !== null
     && input.serviceId !== current.serviceId;
-  const service = await resolveService({
+  const serviceLookup = {
     serviceId: changingService ? input.serviceId! : (current.serviceId ?? null),
     appointmentType: changingService ? null : (current.appointmentType ?? null),
-  });
+  };
+  const service = options.client
+    ? await resolveServiceWith(options.client, serviceLookup)
+    : await resolveService(serviceLookup);
 
   const requested = Number(input.durationMinutes);
   const durationMinutes = Number.isFinite(requested) && requested > 0

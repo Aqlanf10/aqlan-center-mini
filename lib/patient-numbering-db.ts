@@ -144,14 +144,9 @@ export async function changePatientNumber(session: SessionPayload, patientId: nu
         throw new PatientNumberingError("invalid", "تجاوز الأرقام المتقاعدة مسموح لأرقام الأرشيف الورقي الأقل من 7000 فقط.");
       }
       const { rows: [ownerRow] } = await client.query<{ is_principal: boolean }>(
-        `SELECT (
-           u.role = 'admin' AND u.is_active = TRUE AND (
-             u.is_owner = TRUE OR (
-               NOT EXISTS (SELECT 1 FROM users WHERE is_owner = TRUE AND is_active = TRUE)
-               AND u.id = (SELECT MIN(id) FROM users WHERE role = 'admin' AND is_active = TRUE)
-             )
-           )
-         ) AS is_principal FROM users u WHERE u.id = $1`,
+        `SELECT (u.role = 'admin' AND u.is_active = TRUE AND u.is_owner = TRUE) AS is_principal
+           FROM users u
+          WHERE u.id = $1`,
         [session.userId],
       );
       if (!ownerRow?.is_principal) {

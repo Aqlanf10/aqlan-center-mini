@@ -269,7 +269,17 @@ export async function readCanonicalLabResponse(
       const counts = await runCanonicalReadSnapshot(
         session,
         "clinical.lab.view",
-        async (query) => labCountsWith(query),
+        async (query, scope) => {
+          if (scope.patientScope.kind === "none") {
+            throw new CanonicalLabRefusal("patient_scope_denied", 403, "نطاق وصولك للمرضى مغلق.");
+          }
+          return labCountsWith(
+            query,
+            scope.patientScope.kind === "own"
+              ? { scopedDoctorPartyId: scope.patientScope.clinicianPartyId }
+              : undefined,
+          );
+        },
         { errorPrefix: "STAFF_READ", maxBytes: LAB_SNAPSHOT_MAX_BYTES },
       );
       return NextResponse.json(counts, { headers: NO_STORE });
@@ -279,6 +289,9 @@ export async function readCanonicalLabResponse(
       session,
       "read:lab.orders",
       async (query, scope) => {
+        if (scope.patientScope.kind === "none") {
+          throw new CanonicalLabRefusal("patient_scope_denied", 403, "نطاق وصولك للمرضى مغلق.");
+        }
         if (
           scope.patientScope.kind === "own"
           && patientFilter !== null
@@ -927,6 +940,9 @@ export async function patchCanonicalLabOrderResponse(
         session,
         "read:lab.orders",
         async (query, scope) => {
+          if (scope.patientScope.kind === "none") {
+            throw new CanonicalLabRefusal("patient_scope_denied", 403, "نطاق وصولك للمرضى مغلق.");
+          }
           if (scope.patientScope.kind === "own") {
             const existing = await getLabOrderByIdWith(query, id);
             if (!existing) {
