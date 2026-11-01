@@ -3200,11 +3200,13 @@
    "reception",
    "doctor"
   ],
-  "need": [],
+  "need": [
+   "clinical.xrays.view"
+  ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 33: read:ceph.list requires independent clinical.xrays.view and current patient scope in one RR READ ONLY snapshot. Corrects the incomplete map need[] to match the existing legacy canViewXrays guard. Explicit ceph-summary allowlist with draft/completed status, phase/calendar date/timestamps and saved ANB/FMA/WITS only. Draft first, then newest with id tie-breaker; 300-row bound plus honest hasMore. Proves backing document and optional orthodontic case ownership; owned removed/non-image reference reports unavailable without exposing its identity/content. No image URLs/bytes/storage, notes, device, diagnosis, calibration, financial data or editors. Non-finite saved measurements fail; no recalculation. Legacy GET/POST bodies unchanged."
  },
  {
   "route": "/api/patients/[id]/ceph",

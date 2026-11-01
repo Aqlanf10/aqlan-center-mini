@@ -30,16 +30,16 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 mapped route/method entries, after slice 32 on WORK)
+### Counts (383 mapped route/method entries, after slice 33 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 293 |
+| existing | 292 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 51 |
+| canonical-done | 52 |
 
 | Record scope | Routes |
 |---|---|
@@ -497,6 +497,14 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - Native saved problems, objectives, strategy, rationale and revision reasons are clinical documentation. Saved plan-item links require the independent `clinical.plans.view` grant; otherwise each row exposes only `planLinks:{state:"restricted"}`, with no names, IDs, counts or choices. Current foreign links contribute no content; historical text is never replaced by current names. No prices, agreements, finance, images or editor choices are queried or returned.
 - `clinicalWritable=false`, `planLinksWritable=false`, `canRevise=false`. The existing strategy reference renderer mounts on demand without an editor lifetime; 30-second/visibility/focus refresh, unmount/transport/decoder ownership, and existing 15-second timeout retire old documents. The legacy GET/POST and store reader/writer bodies remain unchanged.
 - Evidence: `ortho-canonical-strategy`, `canonical-ortho-strategy-journey` (portOffset 45), legacy strategy/union regression; `docs/review/work-ortho-strategy-slice32-20261101.md`. Source-map migration status is not activation or independent acceptance.
+
+### Slice 33 — saved cephalometric study list
+
+- `GET /api/patients/[id]/ceph`, registered `read:ceph.list`: `clinical.xrays.view` and current patient scope. The old map's empty `need` was incomplete; the existing legacy handler already requires `canViewXrays`. No role-derived or orthodontic-view-derived imaging grant.
+- One owning RR READ ONLY snapshot covers authority, central patient membership, study metadata, backing document / optional ortho-case ownership and saved ANB/FMA/WITS. Outside/missing patient = 404. A broken/foreign backing relationship rejects without details; owned removed or non-image references retain saved study values with `imageState=unavailable` and no image identity or content.
+- `ceph-summary` allows id/patientId/status/phase/calendar xrayDate/createdAt/completedAt/imageState/findings only. Excludes discarded studies. Draft first, then createdAt DESC and id DESC; bound 300 plus `hasMore`. No summary counts claiming completeness. Drafts never expose sealed findings; completed values are saved data, not recalculated or rounded replacements. Non-finite stored values reject the whole read.
+- No document IDs, image bytes/URLs/storage paths, notes, device, diagnosis, calibration, finance, current reference names or editor data. On-demand canonical patient panel clears on focus/hide/refresh/denial, retires late replies and times out after eight seconds. The legacy readers and all writes remain unchanged.
+- Evidence: `ceph-canonical-list`, calendar-date regression, `canonical-ceph-list-journey` (portOffset 46), projection/parser and existing ceph UI tests. Source migration is not activation or independent acceptance.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
