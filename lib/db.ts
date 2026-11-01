@@ -7749,16 +7749,6 @@ export async function updateLabOrderAccountingInTransaction(
   const hasMoneyUpdate = input.costMinor !== undefined
     || input.costCurrency != null || input.exchangeRate != null;
   const hasPositiveMoneyUpdate = hasMoneyUpdate && resolvedCost != null && resolvedCost > 0;
-  const wouldCreatePayable = !order.payable_id && order.party_id !== null && resolvedCost != null && resolvedCost > 0;
-  if (order.lab_work_intent_id && order.status === "cancelled" && (hasMoneyUpdate || input.isPosted === true || wouldCreatePayable)) {
-    throw new LabFinancialBoundaryError("lab_cancelled_money_review", "العمل ملغى؛ لا تُعاد تكلفته أو يُنشأ التزام له من محرر الربط. راجع القرار المالي أولًا.");
-  }
-  if (!hasMoneyUpdate && !order.payable_id && resolvedCost != null && resolvedCost > 0) {
-    savedLabPayableSnapshot(order);
-  }
-  if (hasMoneyUpdate && !hasPositiveMoneyUpdate) {
-    throw new Error("lab_order_accounting_price_invalid");
-  }
   if (hasPositiveMoneyUpdate) {
     if (!Number.isSafeInteger(resolvedCost) || !isCurrency(resolvedCurrency)) {
       throw new Error("lab_order_accounting_price_invalid");
@@ -7778,8 +7768,20 @@ export async function updateLabOrderAccountingInTransaction(
     throw new Error("lab_order_accounting_price_invalid");
   }
 
+  const wouldCreatePayable = !order.payable_id && order.party_id !== null && resolvedCost != null && resolvedCost > 0;
+  if (order.lab_work_intent_id && order.status === "cancelled" && (hasMoneyUpdate || input.isPosted === true || wouldCreatePayable)) {
+    throw new LabFinancialBoundaryError("lab_cancelled_money_review", "العمل ملغى؛ لا تُعاد تكلفته أو يُنشأ التزام له من محرر الربط. راجع القرار المالي أولًا.");
+  }
+
+  const nonPositiveMoneyIntent = hasMoneyUpdate && !hasPositiveMoneyUpdate;
+  const currencyWithoutExplicitCost = hasMoneyUpdate
+    && input.costCurrency != null
+    && input.costCurrency !== order.cost_currency
+    && !(input.costMinor != null && input.costMinor > 0);
   const moneyChanged = hasMoneyUpdate && (
-    resolvedCost !== (order.cost_minor == null ? null : Number(order.cost_minor))
+    nonPositiveMoneyIntent
+    || currencyWithoutExplicitCost
+    || resolvedCost !== (order.cost_minor == null ? null : Number(order.cost_minor))
     || resolvedCurrency !== (order.cost_currency || "YER")
     || resolvedRate !== Number(order.exchange_rate ?? 1)
     || baseAmount !== (order.base_amount_minor == null ? null : Number(order.base_amount_minor)));
@@ -7806,10 +7808,12 @@ export async function updateLabOrderAccountingInTransaction(
     }
     throw error;
   }
-  if (linked.length > 1 || linked.some(row => row.party_id !== order.party_id
-    || row.lab_order_id !== orderId || row.source_type !== "operational")
-    || (order.payable_id != null && linked[0]?.id !== order.payable_id)) {
-    throw new Error("lab_order_accounting_link_invalid");
+  if ((!order.payable_id && linked.length > 0)
+    || linked.length > 1
+    || (order.payable_id != null && (!linked[0] || linked[0].id !== order.payable_id))
+    || linked.some(row => row.party_id !== order.party_id
+      || row.lab_order_id !== orderId || row.source_type !== "operational")) {
+    throw new LabFinancialBoundaryError("lab_payable_link_review", "ربط الالتزام المالي للإرسالية غير متسق؛ راجعه قبل التعديل.");
   }
   const { rows: settlementRows } = await client.query<{ has_settlement: boolean }>(
     `SELECT (EXISTS (SELECT 1 FROM expenses WHERE payable_id = ANY($1::int[]))
@@ -7819,7 +7823,17 @@ export async function updateLabOrderAccountingInTransaction(
     [linked.map(row => row.id), orderId],
   );
   if (order.financial_status === "paid" || settlementRows[0]?.has_settlement) {
-    throw new Error("lab_order_accounting_settled");
+    throw new LabFinancialBoundaryError("lab_settled_money_review", "lab_order_accounting_settled");
+  }
+  const hasSavedObligation = order.payable_id !== null || (order.cost_minor !== null && Number(order.cost_minor) > 0);
+  if (hasMoneyUpdate && hasSavedObligation && (nonPositiveMoneyIntent || currencyWithoutExplicitCost)) {
+    throw new LabFinancialBoundaryError("lab_accounting_money_review", "lab_order_accounting_price_invalid");
+  }
+  if (nonPositiveMoneyIntent) {
+    throw new Error("lab_order_accounting_price_invalid");
+  }
+  if (!hasMoneyUpdate && !order.payable_id && resolvedCost != null && resolvedCost > 0) {
+    savedLabPayableSnapshot(order);
   }
   const { rows: cutoffRows } = await client.query<{ value: string }>(
     "SELECT value FROM settings WHERE key = 'finance.locked_before'",

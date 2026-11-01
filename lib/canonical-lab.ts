@@ -173,7 +173,19 @@ export function canonicalLabFailure(error: unknown, fallback: string): NextRespo
   }
   if (error instanceof LabFinancialBoundaryError) {
     const status = error.code.endsWith("_forbidden") ? 403 : error.status;
-    return NextResponse.json({ code: error.code, message: error.message }, { status, headers: NO_STORE });
+    const boundaryMessages: Record<string, string> = {
+      lab_settled_money_review:
+        "للإرسالية أثر سداد؛ لا يمكن تغيير بياناتها المالية. راجع التسوية المحاسبية دون تعديل المدفوعات السابقة.",
+      lab_accounting_money_review:
+        "لا يمكن تصفير أو مسح التزام قائم أو تبديل عملته دون مبلغ كامل معتمد؛ راجع التصحيح المالي. لم يتغير شيء.",
+      lab_payable_link_review:
+        "ربط الالتزام المالي للإرسالية غير متسق؛ راجعه قبل التعديل.",
+    };
+    const message =
+      error.message.startsWith("lab_order_") && boundaryMessages[error.code]
+        ? boundaryMessages[error.code]
+        : error.message;
+    return NextResponse.json({ code: error.code, message }, { status, headers: NO_STORE });
   }
   if (error instanceof LabPrescriptionError) {
     return NextResponse.json({ message: error.message }, { status: error.status, headers: NO_STORE });

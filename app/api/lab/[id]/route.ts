@@ -360,7 +360,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json(await maskLabCostsIfNeeded(updated));
   } catch (error) {
     if ((error as { code?: string }).code === "55P03") return NextResponse.json({ code: "lab_status_busy", message: "يوجد تحديث جارٍ؛ حدّث الإرسالية وأعد المحاولة." }, { status: 409 });
-    if (error instanceof LabFinancialBoundaryError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status });
+    if (error instanceof LabFinancialBoundaryError) {
+      const boundaryMessages: Record<string, string> = {
+        lab_settled_money_review: "للإرسالية أثر سداد؛ لا يمكن تغيير بياناتها المالية. راجع التسوية المحاسبية دون تعديل المدفوعات السابقة.",
+        lab_accounting_money_review: "لا يمكن تصفير أو مسح التزام قائم أو تبديل عملته دون مبلغ كامل معتمد؛ راجع التصحيح المالي. لم يتغير شيء.",
+        lab_payable_link_review: "ربط الالتزام المالي للإرسالية غير متسق؛ راجعه قبل التعديل.",
+      };
+      const message = error.message.startsWith("lab_order_") && boundaryMessages[error.code]
+        ? boundaryMessages[error.code]
+        : error.message;
+      return NextResponse.json({ message, code: error.code }, { status: error.status });
+    }
     if (error instanceof LabPrescriptionError) return NextResponse.json({ message: error.message }, { status: error.status });
     const code = error instanceof Error ? error.message : "";
     if (code === "lab_order_accounting_price_invalid") return NextResponse.json({ code, message: "التكلفة المعدّلة يجب أن تكون مبلغًا موجبًا؛ لا يمكن مسح الالتزام المالي من هذا الإجراء." }, { status: 400 });
