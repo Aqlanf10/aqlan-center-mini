@@ -28,13 +28,13 @@ beforeAll(async () => {
 afterAll(async () => { await side?.end(); await fx?.close(); });
 it("own patient summary exposes only saved pending-review identity and date, without independent visit/financial facts", async () => {
   const feed = await read("own"); expect(feed.pending.map(r => r.adjustmentId)).toEqual([ids.review, ids.outsideContract]); expect(feed).toMatchObject({ projection: "ortho-pending-decisions", limit: 300, hasMore: false });
-  expect(Object.keys(feed.pending[0]).sort()).toEqual(["adjustmentId", "doctorName", "doneOn", "legacy", "patientId", "patientName"]); expect(feed.pending[0].legacy).toBe(false);
+  expect(Object.keys(feed.pending[0]).sort()).toEqual(["adjustmentId", "decisionContext", "doctorName", "doneOn", "legacy", "patientId", "patientName"]); expect(feed.pending[0].legacy).toBe(false);
   expect(JSON.stringify(feed)).not.toMatch(/private|visitId|invoice|currency|Minor|planId|billing_class|source|recorded_by|wire|note/);
 });
 it.each(["none", "unlinked", "adjacent"] as const)("%s cannot infer access from a role or appointment scope", async key => { await expect(read(key)).rejects.toThrow(/CAPABILITY|SCOPE|PROVIDER/); });
 it("all/owner retain the admitted list and legacy source selection remains unchanged", async () => {
   for (const key of ["all", "owner"] as const) expect((await read(key)).pending.map(r => r.adjustmentId)).toEqual([ids.review, ids.outsideContract, ids.foreign]);
-  const old = await db.listPendingOrthoDecisions(), feed = await read("owner"); expect(feed.pending).toEqual(old.map(({ visitId: _visitId, ...row }) => row));
+  const old = await db.listPendingOrthoDecisions(), feed = await read("owner"); expect(feed.pending.map(({ decisionContext: _decisionContext, ...row }) => row)).toEqual(old.map(({ visitId: _visitId, ...row }) => row));
 });
 it("hidden care and financial facts cannot expand the response; closed cases retain their recorded pending review", async () => {
   const before = await read("own"); await fx.pool.query("UPDATE ortho_adjustments SET note='SYN changed private note' WHERE id=$1", [ids.review]); await fx.pool.query("UPDATE ortho_cases SET note='SYN changed private care',status='completed' WHERE id=$1", [ids.caseId]);

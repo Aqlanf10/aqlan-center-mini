@@ -1,8 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { isCanonicalOrthoDecisions, type CanonicalOrthoDecisions } from "@/lib/canonical-ortho-decisions-projection";
-/** Read-only review queue; the independent financial/clinical commands remain separate. */
+import { CanonicalOrthoDecisionEditor } from "./CanonicalOrthoDecisionEditor";
+import { useSession } from "./SessionProvider";
+/** Minimal review queue with independently authorized decision commands. */
 export function CanonicalOrthoPendingDecisions() {
+  const session = useSession();
   const [feed, setFeed] = useState<CanonicalOrthoDecisions | null>(null), [error, setError] = useState<string | null>(null), [refresh, setRefresh] = useState(0);
   useEffect(() => {
     let alive = true, sequence = 0, controller: AbortController | undefined;
@@ -29,5 +32,6 @@ export function CanonicalOrthoPendingDecisions() {
       {feed.pending.length ? <ul className="space-y-2">{feed.pending.map(row => <li key={row.adjustmentId} className="rounded-xl border border-slate-200 bg-white p-3"><a href={`/patients/${row.patientId}`} className="font-bold text-navy-900 underline underline-offset-4">{row.patientName}</a><p className="mt-1 text-xs text-slate-600"><bdi>{row.doneOn}</bdi>{row.doctorName ? ` — ${row.doctorName}` : ""}{row.legacy ? " · حالة سابقة" : ""}</p></li>)}</ul> : <p>لا شدّات بانتظار المراجعة ضمن نطاقك.</p>}
       {feed.hasMore ? <p role="status" className="font-bold text-amber-900">تظهر أقدم 300 شدّة ضمن نطاقك فقط؛ القائمة غير كاملة.</p> : null}
     </div>}
+    {session?.username ? <CanonicalOrthoDecisionEditor key={session.username} ownerKey={session.username} feed={feed} refresh={() => { setFeed(null); setError(null); setRefresh(n => n + 1); }} /> : null}
   </section>;
 }

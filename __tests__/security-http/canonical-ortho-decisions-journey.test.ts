@@ -28,7 +28,7 @@ it("HTTP: anonymous, none and adjacent grants refuse; all and owner keep the sam
   for (const key of ["none", "adjacent"] as const) { const session = await journey.login(key); expect((await journey.api("/api/ortho/billing-decisions", session.cookie)).status).toBe(403); }
   for (const key of ["all", "owner"] as const) {
     const session = await journey.login(key), response = await journey.api("/api/ortho/billing-decisions", session.cookie), body = await response.json(); expect(response.status).toBe(200); expect(body.pending).toHaveLength(2); expect(response.headers.get("cache-control")).toContain("no-store");
-    for (const row of body.pending) expect(Object.keys(row).sort()).toEqual(["adjustmentId", "doctorName", "doneOn", "legacy", "patientId", "patientName"]);
+    for (const row of body.pending) expect(Object.keys(row).sort()).toEqual(["adjustmentId", "decisionContext", "doctorName", "doneOn", "legacy", "patientId", "patientName"]);
     expect(JSON.stringify(body)).not.toMatch(/SYN private|visitId|invoice|currency|Minor|note|patientPhone/);
   }
 });

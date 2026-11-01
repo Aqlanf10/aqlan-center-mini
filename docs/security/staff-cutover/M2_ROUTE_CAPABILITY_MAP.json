@@ -2899,8 +2899,8 @@
   "need": [],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "",
+  "status": "canonical-done",
+  "note": "M2 slice 52, implemented locally with acceptance pending: independent mapped no_charge clinical.ortho.edit plus native responsible clinician or protected owner; billed finance.invoices.create plus patient scope. Patient/adjustment/case/visit/invoice witnesses, fresh post-wait authority, opaque observed version, original atomic writer/audit. No new invoice, amount, currency, coverage policy or permanent request receipt. Unknown results require fresh review and explicit new intent.",
   "branches": {
    "discriminator": "decision",
    "values": {
@@ -2948,12 +2948,13 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 51: mapped clinical.ortho.view and current patient scope in one owning fenced RR read-only snapshot. Reads saved pending classification without computing coverage or granting a decision. Own scope filters before oldest 300/hasMore; 1 MiB whole-response bound and same-patient visit/doctor witnesses fail closed. Explicit summary omits visit links, finance, care notes and decision controls. Current UI clears hidden/late/failed/revoked content. Legacy reader and all decision writers remain unchanged.",
+  "note": "M2 slice 51: mapped clinical.ortho.view and current patient scope in one owning fenced RR read-only snapshot. Reads saved pending classification without computing coverage or granting a decision. Own scope filters before oldest 300/hasMore; 1 MiB whole-response bound and same-patient visit/doctor witnesses fail closed. Explicit summary omits visit links, finance, care notes and decision controls. Current UI clears hidden/late/failed/revoked content. Legacy reader and all decision writers remain unchanged. Slice 52 adds a same-snapshot minimal decisionContext preview (opaque version and independently allowed choices); never invoice/care data or reusable authority.",
   "projection": {
    "legacy": "Admin/reception read all; doctor sees their visit or responsible case. No amount payload.",
    "groups": {
     "summary": "clinical.ortho.view and central patient scope: adjustment ID, patient ID/name, saved date, doctor name and historical-case flag",
-    "excluded": "No visit ID or visit access, monetary amount/currency, invoice/reference, hidden notes, classification details, source snapshots or command grant"
+    "excluded": "No visit ID or visit access, monetary amount/currency, invoice/reference, hidden notes, classification details, source snapshots or command grant",
+    "decisionPreview": "Independent branch capabilities and native responsibility/protected ownership: opaque observed version and allowed choices only. No invoice numbers or monetary data; the POST rechecks all authority and record witnesses."
    },
    "rows": "Central patient own/all scope before oldest 300 plus hasMore; no booking-based assignment or new authority"
   }

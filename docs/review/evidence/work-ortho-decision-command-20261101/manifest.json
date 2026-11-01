@@ -1,0 +1,68 @@
+{
+  "format": "work-ortho-decision-command-v1",
+  "baseRevision": "ddc6a2124eacfabcd9fecaee5f3945a72149cbea",
+  "sourceRevision": null,
+  "buildId": "WX0_Tl-PFBBeQ1-urhmI-",
+  "acceptance": {
+    "focusedPostgres": {
+      "passed": 47,
+      "files": 4,
+      "newCommandCases": 23
+    },
+    "focusedUnit": {
+      "passed": 41,
+      "files": 2
+    },
+    "mapGuards": {
+      "passed": 10,
+      "files": 2
+    },
+    "typecheck": "passed; final check will include late HTTP test additions",
+    "build": "passed",
+    "sourcePreservationChecks": 4,
+    "HTTPBrowser": "pending",
+    "fullGates": "pending",
+    "exactHeadCI": "not yet published",
+    "independentReview": "pending",
+    "actualDocker": "blocked: previously enforced Alpine destination refusal, not retried"
+  },
+  "sourceSha256": {
+    "__tests__/canonical-ortho-decision-command.test.ts": "f333400bd85da17717b4f7727446617502b8725a2bf3512b006de8a71640f6d0",
+    "__tests__/canonical-ortho-decisions-projection.test.ts": "d36e1aa6e09d4d493116def3a0d78fc29bbb1e0a9b9ee16bd9768f063767ed13",
+    "__tests__/postgres/ortho-canonical-decisions.test.ts": "7c4db2011c95f4ac35c03c6d709a2be69186ad5ce2973f0576a68b411cead39f",
+    "__tests__/postgres/ortho-decision-canonical-command.test.ts": "816b3d499e8796790aadc124769ba817d4094fd1f8f3ce71c71953e793b1bc41",
+    "__tests__/security-http/canonical-ortho-decision-write-journey.test.ts": "dfbe95b499696782180ac66e3445f37722f0039f0198ee7edf1c2cd88d41713a",
+    "__tests__/security-http/canonical-ortho-decisions-journey.test.ts": "c6b81432bb373bf4becf4ffe535c76b90e2b1003f43f72c71a17de1dcf2bd9bf",
+    "app/api/ortho/adjustments/[id]/billing-decision/route.ts": "d39898e13da902407d815499f11b974809280b891521d4a6339028f87a064ebc",
+    "components/CanonicalOrthoDecisionEditor.tsx": "cf169ed98c0ff3933fa35a2750da032a9ca8f3745b3e7907639ea264c4d15801",
+    "components/CanonicalOrthoPendingDecisions.tsx": "fb900a6d6ec50fb1ce2bf89b381a6c52b2aeeb549cbfbeec2275cce214187d33",
+    "docs/review/work-ortho-decision-command-slice52-20261101.md": "4f029ec41ce9e407d842bd44bc4047399051830903b94c3de899debc6feef34e",
+    "docs/security/staff-cutover/HANDOFF.md": "5070b68c79aa7c63df7c26628ad741e8872c84dd045195508142bf235ee582d1",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "eab0afed848b1be084e37601b3590c36726f8bfc13f4a2f0be94c79fa76b8847",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "4c02037641ac73584414dc16ba4ffed9dc66785740ab3a7007d824d822d2fd3c",
+    "docs/security/staff-cutover/inventory.json": "e3052d68d05941d9445d0e3ae28d6964808ebdb1925d9ac84ccbc6141f982f88",
+    "lib/canonical-ortho-decision-command.ts": "dc7168edf46cb3577df74f894ddb564533df4720fa3b607a437a51e6f60c8081",
+    "lib/canonical-ortho-decision-version.ts": "d9500c32a11e3718dcfe9b9858c5c6eeb762096f5e12d132258d57deab46d688",
+    "lib/canonical-ortho-decisions-projection.ts": "3b8af394065f0026a06fc3cb0a37cbe4c5bd53c6a869e51c2f4fa11a8bcec02e",
+    "lib/canonical-ortho-decisions.ts": "9063534afdaee0eafa0dd1b6fb628cf2ca48129bf22a27bb7b2c39396ffe793e",
+    "lib/canonical-read-snapshot.ts": "663fea91421dfd32627ee9208a12d4046dfee76acc3f5fe14d76875b849a4d5b",
+    "lib/db.ts": "34f044ddfbb2ac7866c49f029bbf87571a0372f7135874a78be5bb4e13866ace",
+    "lib/staff-operation-runtime.ts": "f63825c63d527429dccd91bbddf49655b968c2588b974a2dc3e4412241d64184",
+    "scripts/audits/staff-cutover-readiness.test.mjs": "9fa097bb68868884ab66595fafbaaa9a7497edfeaf6c3867d5f457f958633891"
+  },
+  "artifacts": {
+    "slice52-before-source.json": "e3b5cd40d7ce5ac650925c26e55daea1d1067288252a84f80c36d39e594afebb",
+    "slice52-build-first.log": "452446a66d06fae829720eef96ac86868a5fbd86c791f3ad71d38e0a9bd9b200",
+    "slice52-build-first.log.gz": "22e1403e3c1a8c8f64272d536c709ea96cec8273734263e5b32a1b8e8badeffb",
+    "slice52-guards.log": "7e42440661a92de19ab2e00a113c3bac92d88682de444fcddabcb037a7bde0b5",
+    "slice52-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice52-original-writer.txt": "40b17c3faf9286c03663aa641fff1a3766876133fec1a7d2baabe086b10b453c",
+    "slice52-pg-final-focused.log": "b71125f46d78f8f842ac13de4f0f81ef5b8339160b7f469f5a20ca9c7978a5f8",
+    "slice52-pg-first.log": "c43f8712f9535512d4464a9b5867887b33f69c917b177488f849b83234a1b089",
+    "slice52-pg-second.log": "4da4001376c04ead37ca8a6cd79c19f5a1fb28b5530d46ede5de7e3a660638d6",
+    "slice52-source-freeze.json": "e6290b05321d92953e4eece62e4c763278b2d16280129275c82a53e28a44087b",
+    "slice52-tsc-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice52-unit-first.log": "c32981cd15cb363f672f8f892e370e6e271a5f7ffa420ddc8f0af4a31edd5bd5",
+    "slice52-writer-source-proof.json": "944239e13fc738daaa0e1992eb1c23b697f4a370e1b1effcb5f984df901d315c"
+  }
+}

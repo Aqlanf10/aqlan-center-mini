@@ -64,6 +64,8 @@ export interface CanonicalSnapshotScope {
  /** Same-snapshot answer: is the actor the protected owner, for this owner-only
   * operation? Display of what the owner may change; never a mutation grant. */
  ownerMay(operation: OwnerOnlyOperation): boolean;
+ /** Same-snapshot protected ownership for native responsibility previews only. */
+ isProtectedOwner(): boolean;
 }
 export interface CanonicalSnapshotOptions {
  /** Bounded error-code prefix, e.g. `STAFF_DIRECTORY` → `STAFF_DIRECTORY_DEADLINE`. */
@@ -203,6 +205,7 @@ export async function runCanonicalReadSnapshot<T>(
    patientScope, appointmentScope,
    granted: (capability: StaffCapability) => open && hasStaffCapability(access, capability),
    ownerMay: (operation: OwnerOnlyOperation) => open && canPerformOwnerOperation(access, operation),
+   isProtectedOwner: () => open && access.isOwner,
   });
   let value: T;
   try { value = await read(facade, scope); }

@@ -24127,10 +24127,11 @@ export interface PendingOrthoDecision {
 /** Already admitted, bounded pending-review summary. This reads recorded status;
  * it never recomputes coverage or grants the separate decision command. */
 export async function listPendingOrthoDecisionSummariesWith(q: Pick<DbClient, "query">, doctorPartyId: number | null) {
-  type Row = { adjustmentId: number; patientId: number; patientName: string; doneOn: string; doctorName: string | null; legacy: boolean; invalid: boolean };
+  type Row = { adjustmentId: number; patientId: number; patientName: string; doneOn: string; doctorName: string | null; legacy: boolean; invalid: boolean; caseId: number; responsibleDoctorId: number | null; adjustmentXmin: string; adjustmentTid: string; caseXmin: string; caseTid: string };
   const { rows: [envelope] } = await q.query<{ oversized: boolean; invalid: boolean; rows: Row[] | null }>(`WITH candidates AS MATERIALIZED (
     SELECT a.id AS "adjustmentId",c.patient_id AS "patientId",patients.full_name AS "patientName",a.done_on::text AS "doneOn",
       d.name AS "doctorName",COALESCE(c.baseline_kind='legacy',FALSE) AS legacy,
+      c.id AS "caseId",c.responsible_doctor_id AS "responsibleDoctorId",a.xmin::text AS "adjustmentXmin",a.ctid::text AS "adjustmentTid",c.xmin::text AS "caseXmin",c.ctid::text AS "caseTid",
       ((a.visit_id IS NOT NULL AND (v.id IS NULL OR v.patient_id IS DISTINCT FROM c.patient_id))
         OR (COALESCE(v.doctor_id,c.responsible_doctor_id) IS NOT NULL AND (d.id IS NULL OR d.kind<>'doctor'))) AS invalid
     FROM ortho_adjustments a JOIN ortho_cases c ON c.id=a.case_id JOIN patients ON patients.id=c.patient_id
@@ -24190,42 +24191,55 @@ export async function decideOrthoAdjustmentBilling(input: {
   if (input.decision === "billed" && !input.invoiceNumber?.trim()) {
     return { ok: false, status: 400, message: "اكتب رقم الفاتورة التي فوترت الشدّة." };
   }
-  return withTransaction(getPool(), async (client): Promise<OrthoDecisionResult> => {
-    const { rows: [row] } = await client.query<{
-      id: number; patient_id: number; billing_class: string | null; billing_decision: string | null; full_name: string;
-    }>(
-      `SELECT a.id, c.patient_id, a.billing_class, a.billing_decision, p.full_name
-         FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id JOIN patients p ON p.id = c.patient_id
-        WHERE a.id = $1 FOR UPDATE OF a`, [input.adjustmentId]);
-    if (!row) return { ok: false, status: 404, message: "الشدّة غير موجودة." };
-    if (!["OUTSIDE_CONTRACT", "REVIEW_REQUIRED"].includes(row.billing_class ?? "") || row.billing_decision !== null) {
-      return { ok: false, status: 409, message: "هذه الشدّة ليست بانتظار قرار فوترة — مشمولة أو حُسم قرارها." };
-    }
-    let invoiceId: number | null = null;
-    if (input.decision === "billed") {
-      const { rows: [invoice] } = await client.query<{ id: number }>(
-        `SELECT id FROM invoices WHERE invoice_number = $1 AND patient_id = $2 AND status <> 'cancelled'`,
-        [input.invoiceNumber!.trim(), row.patient_id]);
-      if (!invoice) return { ok: false, status: 409, message: "لا فاتورة سارية بهذا الرقم لهذا المريض." };
-      invoiceId = invoice.id;
-    }
-    await client.query(
-      `UPDATE ortho_adjustments
-          SET billing_decision = $2, billing_decision_reason = $3::text, billing_decided_by = $4,
-              billing_decided_at = NOW(), billing_invoice_id = $5::int
-        WHERE id = $1`,
-      [row.id, input.decision, input.decision === "no_charge" ? reason : null, input.actor, invoiceId]);
-    await insertAuditRow(client, {
-      action: "ortho.billing_decision", entity: "ortho_adjustments", entityId: row.id, entityLabel: row.full_name,
-      details: {
-        القرار: input.decision === "billed" ? "فوتِرت" : "بلا رسوم",
-        ...(reason && input.decision === "no_charge" ? { السبب: reason } : {}),
-        ...(invoiceId ? { الفاتورة: input.invoiceNumber!.trim() } : {}),
-      },
-      actor: input.actor, actorRole: input.actorRole,
-    });
-    return { ok: true, decision: input.decision };
+  return withTransaction(getPool(), client => decideOrthoAdjustmentBillingInTransaction(client, input));
+}
+
+/** Existing decision writer on the admitted owning transaction; no schema initialization. */
+export async function decideOrthoAdjustmentBillingInTransaction(client: DbClient, input: {
+  adjustmentId: number; decision: OutsideContractDecision; reason: string | null;
+  invoiceNumber: string | null; actor: string; actorRole: string | null;
+}): Promise<OrthoDecisionResult> {
+  const reason = input.reason?.trim() || null;
+  if (input.decision === "no_charge" && (!reason || reason.length < 3 || reason.length > 300)) {
+    return { ok: false, status: 400, message: "اكتب سبب «بلا رسوم» (من ٣ أحرف إلى ٣٠٠)." };
+  }
+  if (input.decision === "billed" && !input.invoiceNumber?.trim()) {
+    return { ok: false, status: 400, message: "اكتب رقم الفاتورة التي فوترت الشدّة." };
+  }
+  const { rows: [row] } = await client.query<{
+    id: number; patient_id: number; billing_class: string | null; billing_decision: string | null; full_name: string;
+  }>(
+    `SELECT a.id, c.patient_id, a.billing_class, a.billing_decision, p.full_name
+       FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id JOIN patients p ON p.id = c.patient_id
+      WHERE a.id = $1 FOR UPDATE OF a`, [input.adjustmentId]);
+  if (!row) return { ok: false, status: 404, message: "الشدّة غير موجودة." };
+  if (!["OUTSIDE_CONTRACT", "REVIEW_REQUIRED"].includes(row.billing_class ?? "") || row.billing_decision !== null) {
+    return { ok: false, status: 409, message: "هذه الشدّة ليست بانتظار قرار فوترة — مشمولة أو حُسم قرارها." };
+  }
+  let invoiceId: number | null = null;
+  if (input.decision === "billed") {
+    const { rows: [invoice] } = await client.query<{ id: number }>(
+      `SELECT id FROM invoices WHERE invoice_number = $1 AND patient_id = $2 AND status <> 'cancelled'`,
+      [input.invoiceNumber!.trim(), row.patient_id]);
+    if (!invoice) return { ok: false, status: 409, message: "لا فاتورة سارية بهذا الرقم لهذا المريض." };
+    invoiceId = invoice.id;
+  }
+  await client.query(
+    `UPDATE ortho_adjustments
+        SET billing_decision = $2, billing_decision_reason = $3::text, billing_decided_by = $4,
+            billing_decided_at = NOW(), billing_invoice_id = $5::int
+      WHERE id = $1`,
+    [row.id, input.decision, input.decision === "no_charge" ? reason : null, input.actor, invoiceId]);
+  await insertAuditRow(client, {
+    action: "ortho.billing_decision", entity: "ortho_adjustments", entityId: row.id, entityLabel: row.full_name,
+    details: {
+      القرار: input.decision === "billed" ? "فوتِرت" : "بلا رسوم",
+      ...(reason && input.decision === "no_charge" ? { السبب: reason } : {}),
+      ...(invoiceId ? { الفاتورة: input.invoiceNumber!.trim() } : {}),
+    },
+    actor: input.actor, actorRole: input.actorRole,
   });
+  return { ok: true, decision: input.decision };
 }
 
 /**
