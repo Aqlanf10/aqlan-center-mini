@@ -168,7 +168,11 @@ describe("doctor report versus payroll settlement", () => {
       // Payroll belongs to October, but its cash settlement occurs on the
       // persisted expense day. Do not backdate the actual payout or widen the
       // ledger query to hide a missing journal entry.
+      expect(settlement.cash_day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       const entries = await db.journalEntries(settlement.cash_day, settlement.cash_day);
+      if (settlement.cash_day < FROM || settlement.cash_day > TO) {
+        expect((await db.journalEntries(FROM, TO)).some(entry => entry.reference === settlement.voucher_number)).toBe(false);
+      }
       const cashEntry = entries.find(entry => entry.reference === settlement.voucher_number)!;
       expect(cashEntry).toBeDefined();
       expect(isBalanced(cashEntry)).toBe(true);
@@ -313,10 +317,10 @@ describe("explicit reservation and currency-boundary ordering", () => {
     // it must still show the original YER settlement, even after the correction.
     const beforeReclassification = await db.commissionDetailReport(FROM, "2026-10-11");
     expect(beforeReclassification.lines.filter(line => line.patientId === p).map(line => ({ invoice: line.invoiceId,
-      doctor: line.doctorId, covered: line.invoiceCoveredMinor, earned: line.earnedMinor })).sort((left, right) => left.invoice - right.invoice))
-      .toEqual([{ invoice: yerOrigin, doctor: b.id, covered: 8000, earned: 3200 },
-        { invoice: earlierSar, doctor: a.id, covered: 2000, earned: 600 },
-        { invoice: targetSar, doctor: b.id, covered: 0, earned: 0 }]);
+      doctor: line.doctorId, currency: line.currency, covered: line.invoiceCoveredMinor, earned: line.earnedMinor })).sort((left, right) => left.invoice - right.invoice))
+      .toEqual([{ invoice: yerOrigin, doctor: b.id, currency: "YER", covered: 8000, earned: 3200 },
+        { invoice: earlierSar, doctor: a.id, currency: "SAR", covered: 2000, earned: 600 },
+        { invoice: targetSar, doctor: b.id, currency: "SAR", covered: 0, earned: 0 }]);
     const check = async (target: number) => {
       const detail = await db.commissionDetailReport(FROM, TO);
       expect(detail.lines.filter(line => line.patientId === p).map(line => ({ invoice: line.invoiceId,

@@ -382,16 +382,16 @@ node scripts/audits/m2-route-scan.mjs --write
 
 | المنطقة | العدد |
 |---|---|
-| patients | 52 (بعضها بفروع قانونية جزئية) |
+| patients | 51 (بعضها بفروع قانونية جزئية) |
 | hr | 41 |
 | settings | 14 |
 | plans | 18 |
 | finance | 16 |
-| ortho | 13 |
+| ortho | 12 |
 | lab | 15 |
 | invoices | 13 |
 | visits | 10 |
-| ceph | 7 |
+| ceph | 6 |
 | tasks | 8 |
 | families | 7 |
 | inventory | 7 |

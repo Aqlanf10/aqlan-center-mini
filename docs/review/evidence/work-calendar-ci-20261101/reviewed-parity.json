@@ -1,0 +1,28 @@
+{
+  "base": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+  "reviewedSource": "1b5f3c61df702be1d5283d295a3e1b420196c94b",
+  "scope": "only additional assertions from the reviewed test correction; no Rx product code, migrations or branch writes",
+  "results": {
+    "postgres": {
+      "passed": 18,
+      "files": 2
+    },
+    "focusedLint": "passed; zero errors and warnings"
+  },
+  "sourceSha256": {
+    "__tests__/postgres/performer-commission-reconciliation.test.ts": "7108dc31a9ba6632ea52213753bfbeb55b0f92e74d02a7e5443a85df4318705a"
+  },
+  "evidence": {
+    "ci-calendar-reviewed-parity.log": {
+      "rawSha256": "c727ac7d993304d1412f677f17c57b4e1670426d40dfab9b534e31d4a25938c8",
+      "publishedSha256": "c727ac7d993304d1412f677f17c57b4e1670426d40dfab9b534e31d4a25938c8",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ci-calendar-reviewed-parity-lint.log": {
+      "rawSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "publishedSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "normalization": "trailing whitespace/CR only"
+    }
+  },
+  "finalCi": "not yet run for this local follow-up; a7af0bde CI does not cover these extra assertions"
+}
