@@ -30,23 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 42 on WORK)
+### Counts (386 mapped route/method entries, after local slice 44 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 281 |
+| existing | 279 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 63 |
+| canonical-done | 65 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Local slices 40–42 have not yet passed published-head CI; the published base has 59 canonical-done / 285 existing ordinary entries.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 40–42 are published at e09263fa with exact-head CI running; slices 43–44 remain local. Published map: 63 canonical-done / 281 existing; local map: 65 / 279. Neither state is whole-system acceptance.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -600,3 +600,11 @@ Still open, not inferred: the owner decisions (four owner-only operations; empty
 ### Slice 42 — plan dependency add/remove
 
 `POST` and `DELETE /api/plan-items/[id]/dependencies` use existing plan-edit/view authority and current patient scope. Both endpoints are locked to the same patient; graph mutations share the legacy patient lock, preserve cycle semantics and audit atomically. Add is bounded; removal requires the opaque stored-edge version emitted by the clinical reader, preventing a stale request from deleting a recreated edge. The UI stores only a minimal pending marker and never replays automatically. No permanent request receipt or financial/execution policy is added. See [the acceptance matrix](../../review/work-plan-dependency-slice42-20261101.md). Focused local validation does not replace full exact-head CI or independent review.
+
+### Slice 43 — general clinical case status
+
+`PATCH /api/cases/[id]` uses current plan-edit/view authority and patient scope with a locked opaque version comparison, post-wait checks and atomic original transition/audit logic. Terminal cases cannot reopen; bridged orthodontic cases remain native-managed. No creation, assignment, money or permanent request receipt. See [the acceptance matrix](../../review/work-case-status-slice43-20261101.md). Local focused gates do not replace exact-head CI or independent review.
+
+### Slice 44 — clinical problem status
+
+`PATCH /api/problems/[id]` requires current `clinical.visits.document`, independently of plan edit. Original problem transitions, resolution provenance and atomic audit run on the admitted connection after patient and problem locks with a row-version comparison. It does not modify the case or financial state. The client requires explicit new intent after uncertainty. See [the acceptance matrix](../../review/work-problem-status-slice44-20261101.md); full new-head gates and review remain separate.

@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "430bfde42d05e5023b0a3bcd7d43abf924a35dd7bd11a6cf3c3d7022f13de333",
+  "sourceDigest": "f1b18da4630bf2e89ef998a79eb9db2172a0d4a61d9540fd6a1283b22de7fa1d",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -45,7 +45,8 @@
     "finance.shifts.operate",
     "clinical.xrays.view",
     "clinical.plans.view",
-    "clinical.plans.edit"
+    "clinical.plans.edit",
+    "clinical.visits.document"
   ],
   "summary": {
     "routeMethods": 420,
