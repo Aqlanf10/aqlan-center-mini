@@ -47,8 +47,8 @@ it("HTTP/browser: a legacy visit without patient ownership fails closed and clea
     const visit = (await journey.db.query("INSERT INTO visits(patient_name,doctor_id) VALUES('SYN unlinked visit',$1) RETURNING id", [doctor])).rows[0].id;
     await journey.db.query("UPDATE ortho_adjustments SET visit_id=$1 WHERE id=$2", [visit, ids.adjustmentId]);
     const response = await journey.api("/api/ortho/billing-decisions", session.cookie);
-    expect(response.status).toBe(500); expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(await response.json()).toEqual({ message: "تعذّر التحقق من قائمة المراجعة؛ لم تُعتبر فارغة." });
+    expect(response.status).toBe(503); expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({ code: "STAFF_READ_READ_FAILED", message: "الهوية الموحّدة غير جاهزة الآن. أعد المحاولة لاحقًا." });
     await panel.getByRole("button", { name: "تحديث قائمة المراجعة" }).click(); await panel.getByRole("alert").waitFor();
     expect(await panel.getByTestId("ortho-decision-summary").count()).toBe(0);
     expect(await panel.textContent()).not.toMatch(/مريض مراجعة اصطناعي|SYN private|SYN unlinked/);
