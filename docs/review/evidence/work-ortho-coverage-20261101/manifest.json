@@ -35,8 +35,21 @@
       "totalFiles": 856,
       "status": "failed: eager SQL expansion plus missing synthetic session secret"
     },
-    "fullPostgres": "running",
-    "runtimeProvenance": "running",
+    "fullPostgres": {
+      "passed": 5193,
+      "files": 400,
+      "skipped": 0,
+      "sourceRevision": "b93bf77154d83cdfee8afb50e10e8bfa15008723",
+      "note": "Historical before the f864 lazy-import correction; not the final later batch gate"
+    },
+    "runtimeProvenance": {
+      "buildId": "krjMdegCPffqpvKRweu6l",
+      "bracesFiles": 10187,
+      "bracesTraces": 372,
+      "lintTraces": 741,
+      "lintManifests": 86,
+      "status": "passed; available maps only, no opaque-code claim"
+    },
     "exactHeadCI": "not published",
     "independentReview": "pending",
     "actualDocker": "blocked by prior enforced Alpine destination refusal",
@@ -83,7 +96,15 @@
     "slice48-unit-first.log": "6b7431813336bc4efe1c85a870adf44c13e447906a8143ce916cecc74bc54e20",
     "slice48-unit-guards-first.log": "10f8f460b5db87b1b9b4193260fc8b517a326e73384f270aec6f40ab93a896df",
     "verify-slice48.py": "96a6c9c03068dcb22c615ee916deee69c4f9fa2c9ede42ebae52f99a449277b7",
-    "slice48-build-first.log.gz": "c6092c58d88c6e5913d380dc982c6030691b72d270957a62bfd42cca88efc32d"
+    "slice48-build-first.log.gz": "c6092c58d88c6e5913d380dc982c6030691b72d270957a62bfd42cca88efc32d",
+    "slice48-pg-full.log": "418d0413f3899e3ceac15193307c2bbbc6f97df1beb022762c3985ff82128606",
+    "slice48-braces-runtime.log": "6cf4acddde4a68b45e480907862812221ada3d68ed3d81f7a5aece271520db49",
+    "slice48-lint-runtime.log": "87c7dcbdcdf6e3081e81c50b7aaf91b9e4a7aa04a532f27a626be1cca3b6701a",
+    "slice48-preflight.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice48-environment.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice48-money.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice48-runtime-proof.json": "7117d9a9146881faf8f1877d7ff0be756e3f13bc9de046be7ab919b30981f9eb",
+    "slice48-lint-tooling-runtime-proof.json": "6eaefcc72caba8b7754b719494a30a490f5d2aca85e2de855395654e91661038"
   },
   "artifactNormalization": {
     "slice48-build-first.log": "Trailing terminal progress whitespace normalized for git; byte-exact original retained as slice48-build-first.log.gz",

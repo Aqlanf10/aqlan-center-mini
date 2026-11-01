@@ -43,10 +43,10 @@ it("HTTP: money and scope are independent and no source notes or dispatch grant 
   for (const query of ["?scope=all", "?money=1", `?patientId=${ids.outside}`]) expect((await journey.api(`/api/plans/proposals${query}`, own.cookie)).status).toBe(400);
   expect(await journey.ddlLog()).toEqual([]);
 });
-it("HTTP: read and still-held legacy POST preserve plans, money and audit", async () => {
+it("HTTP: read and invalid canonical POST preserve plans, money and audit", async () => {
   const session = await journey.login("owner"), sql = "SELECT (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM treatment_plans t) plans,(SELECT count(*) FROM audit_log)::int audits", before = (await journey.db.query(sql)).rows;
   expect((await journey.api("/api/plans/proposals", session.cookie)).status).toBe(200);
-  expect((await journey.api("/api/plans/proposals", session.cookie, { method: "POST", body: JSON.stringify({ planId: ids.plan, note: "SYN held" }) })).status).toBe(401);
+  expect((await journey.api("/api/plans/proposals", session.cookie, { method: "POST", body: JSON.stringify({ planId: ids.plan, note: "SYN held" }) })).status).toBe(400);
   expect((await journey.db.query(sql)).rows).toEqual(before);
 });
 async function openProposals(page: import("playwright").Page, key: keyof typeof ACCOUNTS = "own") {

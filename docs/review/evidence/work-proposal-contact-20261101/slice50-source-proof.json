@@ -1,0 +1,26 @@
+{
+  "baseRevision": "b49e073b5b1e9d8a92f207c44f37d7512697b84a",
+  "checks": {
+    "legacy_audit_writer_body": true,
+    "db_prefix_before_contact": true,
+    "remaining_db_after_contact": true,
+    "get_branch_unchanged": true,
+    "legacy_post_body_unchanged": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/staff-capability-catalogue.ts": true,
+    "lib/canonical-read-snapshot.ts": true,
+    "lib/canonical-proposals.ts": true,
+    "lib/canonical-proposal-projection.ts": true,
+    "lib/canonical-proposal-version.ts": true,
+    "lib/ortho-followup-coverage-db.ts": true,
+    "lib/consultation-followup.ts": true,
+    "lib/commission.ts": true,
+    "lib/fullBackup.ts": true,
+    "lib/restore/staging.ts": true,
+    "__tests__/postgres/consultation-followup.test.ts": true,
+    "__tests__/security-http/consultation-followup-http.test.ts": true,
+    "immutable_migrations": true
+  },
+  "passed": 19,
+  "historicalSourceHashes": 628
+}

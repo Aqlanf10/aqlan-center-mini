@@ -21203,21 +21203,26 @@ export async function recordProposalContact(input: {
   planId: number; note: string | null; actor: string; actorRole: string | null;
 }): Promise<{ ok: true; lastContactAt: string } | { ok: false; status: 404 | 409; message: string }> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client) => {
-    const { rows: [plan] } = await client.query<{ title: string; status: string; consent_at: Date | null; patient_id: number }>(
-      `SELECT title, status, consent_at, patient_id FROM treatment_plans WHERE id = $1 FOR UPDATE`, [input.planId]);
-    if (!plan) return { ok: false as const, status: 404 as const, message: "الخطة غير موجودة." };
-    if (plan.status !== "active" || plan.consent_at !== null) {
-      return { ok: false as const, status: 409 as const, message: "هذه الخطة ليست عرضًا معلّقًا — وافق عليها المريض أو أُغلقت." };
-    }
-    /* لا يمسّ last_reminder_at (طابع تذكير الأقساط): التواصل يُسجَّل في التدقيق وحده. */
-    await insertAuditRow(client, {
-      action: "plan.proposal_contact", entity: "treatment_plans", entityId: input.planId, entityLabel: plan.title,
-      details: { المريض: plan.patient_id, ...(input.note ? { الملاحظة: input.note } : {}) },
-      actor: input.actor, actorRole: input.actorRole,
-    });
-    return { ok: true as const, lastContactAt: new Date().toISOString() };
+  return withTransaction(getPool(), client => recordProposalContactInTransaction(client, input));
+}
+
+/** Retained proposal-only audit writer on the owning admitted transaction. */
+export async function recordProposalContactInTransaction(client: DbClient, input: {
+  planId: number; note: string | null; actor: string; actorRole: string | null;
+}): Promise<{ ok: true; lastContactAt: string } | { ok: false; status: 404 | 409; message: string }> {
+  const { rows: [plan] } = await client.query<{ title: string; status: string; consent_at: Date | null; patient_id: number }>(
+    `SELECT title, status, consent_at, patient_id FROM treatment_plans WHERE id = $1 FOR UPDATE`, [input.planId]);
+  if (!plan) return { ok: false as const, status: 404 as const, message: "الخطة غير موجودة." };
+  if (plan.status !== "active" || plan.consent_at !== null) {
+    return { ok: false as const, status: 409 as const, message: "هذه الخطة ليست عرضًا معلّقًا — وافق عليها المريض أو أُغلقت." };
+  }
+  /* لا يمسّ last_reminder_at (طابع تذكير الأقساط): التواصل يُسجَّل في التدقيق وحده. */
+  await insertAuditRow(client, {
+    action: "plan.proposal_contact", entity: "treatment_plans", entityId: input.planId, entityLabel: plan.title,
+    details: { المريض: plan.patient_id, ...(input.note ? { الملاحظة: input.note } : {}) },
+    actor: input.actor, actorRole: input.actorRole,
   });
+  return { ok: true as const, lastContactAt: new Date().toISOString() };
 }
 
 /**

@@ -1,3 +1,4 @@
+import { CanonicalProposalContactRefusal, commandCanonicalProposalContact } from "@/lib/canonical-proposal-contact-command";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { canonicalProposalQuery, readCanonicalProposals } from "@/lib/canonical-proposals";
@@ -44,6 +45,20 @@ export async function GET(request: Request) {
 
 /** (P1-E) تسجيل تواصلٍ مع المريض بشأن عرضه — بملاحظة اختيارية تُدقَّق. */
 export async function POST(request: Request) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    let body: unknown;
+    try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); }
+    catch (error) { const bounded = bodyErrorResponse(error); if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; } return NextResponse.json({ code: "invalid_proposal_contact", message: "طلب غير صالح." }, { status: 400, headers: NO_STORE }); }
+    try {
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalProposalContactRefusal("invalid_proposal_contact", 400, "تسجيل التواصل لا يقبل مرشحات إضافية.");
+      return NextResponse.json(await commandCanonicalProposalContact(selected.handle, body), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalProposalContactRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد تسجيل التواصل. تحقّق من الحالة الحالية قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   if (!ALLOWED.has(session.role)) {

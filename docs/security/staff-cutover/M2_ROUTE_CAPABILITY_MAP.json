@@ -4789,8 +4789,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 50: existing clinical.plans.edit and current patient scope. Explicit manual completed-contact audit only, not outbound dispatch. Patient then shared legacy plan lock, authority after waits, opaque plan/contact observation comparison and original audit-only writer on the owning transaction. Retained consent/status/300-character note meaning; no money/installment or responsibility changes. Same observation cannot record twice. Not durable idempotency: list-level unknown-result recovery never auto-resends, checks fresh state and requires explicit new intent; disappearance is not a receipt and blocked sessionStorage cannot guarantee reload recovery."
  },
  {
   "route": "/api/plans/reminders",

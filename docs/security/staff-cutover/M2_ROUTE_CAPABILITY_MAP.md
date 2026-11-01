@@ -34,19 +34,19 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 274 |
+| existing | 273 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 70 |
+| canonical-done | 71 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 43–47 are published at `327b12fb` with completed local gates; exact-head CI and independent review are pending. Slices 48–49 are local and their full gates remain pending. Published map: 68 canonical-done / 276 existing; local map: 70 / 274. Neither state is whole-system acceptance.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 43–47 are published at `327b12fb` with completed local gates; exact-head CI and independent review are pending. Slices 48–50 are local and their full gates remain pending. Published map: 68 canonical-done / 276 existing; local map: 71 / 273. Neither state is whole-system acceptance.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -628,3 +628,7 @@ GET `/api/ortho/[id]/followup-coverage` requires independent `finance.agreements
 ### Slice 49 — pending treatment proposal summaries
 
 GET `/api/plans/proposals` uses its mapped plan-edit authority and patient scope without legacy role fallback. Scope precedes the oldest 300-row limit; hasMore describes only the admitted scope. Current settings, proposal state, contact timing and authority use one RR snapshot. Money uses the existing independent patient-ledger projection. No care notes, item names, invoice details, dispatch choices or audit note text are returned. The canonical recall panel is read-only, clears stale data and retains the established RTL identity. No manual contact or outbound command is activated in this slice. [Acceptance and bounds](../../review/work-plan-proposals-slice49-20261101.md).
+
+### Slice 50 — record an already completed proposal contact
+
+POST `/api/plans/proposals` is an audit-only manual record under current plan-edit authority and patient scope. It never dispatches a message. The canonical writer locks the patient and same legacy plan, rechecks authority after waits, compares an opaque plan/contact observation and invokes the retained writer on the same transaction. Effect/audit rollback together; consent, amounts and installment reminder stamps remain unchanged. List-level pending recovery survives proposal disappearance and never automatically resends. No permanent receipt is claimed; fresh state and a new explicit intention are required after uncertainty. [Acceptance and limitations](../../review/work-proposal-contact-slice50-20261101.md).

@@ -1,0 +1,74 @@
+{
+  "format": "work-proposal-contact-v1",
+  "baseRevision": "b49e073b5b1e9d8a92f207c44f37d7512697b84a",
+  "sourceRevision": null,
+  "buildId": "eYpsA9XH-V-fyyzHFLUBy",
+  "acceptance": {
+    "focusedPostgres": {
+      "passed": 41,
+      "files": 4,
+      "newCommandCases": 17
+    },
+    "focusedHttpBrowser": {
+      "passed": 31,
+      "files": 5,
+      "newCommandJourneys": 8
+    },
+    "focusedUnit": {
+      "passed": 36,
+      "files": 3
+    },
+    "mapInventoryGuards": {
+      "passed": 10,
+      "files": 2
+    },
+    "sourcePreservation": 19,
+    "historicalSourceHashes": 628,
+    "build": "passed",
+    "fullBatchGates": "pending",
+    "exactHeadCI": "not published",
+    "independentReview": "pending",
+    "actualDocker": "blocked by prior enforced Alpine destination refusal"
+  },
+  "sourceSha256": {
+    "__tests__/canonical-proposal-contact-command.test.ts": "d262107a03c0d16000c4c5fad2708cb724029c5a121599e4799a830aed4c26ea",
+    "__tests__/postgres/proposal-contact-canonical-command.test.ts": "70d73ed3ef197d8b242da90e7bf04fb4c2356441b30aacc766effcfb2d733955",
+    "__tests__/security-http/canonical-proposal-contact-journey.test.ts": "22446383141732e8ef6e62f172a0b32f954513b5a951a06ad296c2477ba0686f",
+    "__tests__/security-http/canonical-proposals-journey.test.ts": "4a136bbff323d964f7129d00a59798973e67b00bc1d24a7b93a469396592d2e1",
+    "app/api/plans/proposals/route.ts": "431668aaa99e7e1e0193287ccf0ce4781faff7c8b0939ea3fc7eec71dfe94ef5",
+    "app/recall/page.tsx": "217e1199078322645fd743760cb62f1a3d7a795aea36b9655050ba1349618c22",
+    "components/CanonicalProposalContactEditor.tsx": "bc3c7278398d8d66e58866d41cf07d8af0f199149b4ad8df1913ec027f60a5cd",
+    "components/CanonicalProposalFollowUp.tsx": "dd76cb8070437f839a902824c3846cf3d057adf43a3761b984fb9d39c91d4d05",
+    "docs/review/work-ortho-coverage-slice48-20261101.md": "dfaf5e9426183dae9cf8562edc2fff2d75f4987e12468c5cb57706272d79d0fe",
+    "docs/review/work-proposal-contact-slice50-20261101.md": "a75a3dd8384c3412592a04780b029d48b8bd921888570801e4f3028520607c30",
+    "docs/review/work-remaining-plan-20261101.md": "ab9674b6875196af8ce87289f4d6227d4c141e79b3dbc367ffbf9eebcf15bff8",
+    "docs/security/staff-cutover/HANDOFF.md": "7670191c3e904a6a1ed1d098ac8a536a7e8f429a49f578b245db081c44666b29",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "82a9f6e19bf375993431ef244da1a9bfc82b70eea4d562660abf8c8d53a9dea3",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "d8b7d9fa9c009915f9e9695412ea4b145c648ad710619afa29054ae7e5d9802c",
+    "docs/security/staff-cutover/inventory.json": "6c415f492528fdabc3a405cd50de47039fc3f5b0e8df79d12a4d6e3bb091843f",
+    "lib/canonical-proposal-contact-command.ts": "06d0fdfd2dcb8f1f68b8f857502982c22d61a4f0c08634c01f99678dacf50a57",
+    "lib/db.ts": "c847b3cbf4dde9af173d4167302005210f5586974e83ad7d4173390b590624c4"
+  },
+  "artifacts": {
+    "proposal-contact-390.png": "b8f3eb3aae4fab8a643e54690a9fdda57944a338c62cd4fe10c28d84a255011b",
+    "slice50-build-first.log": "9aa8df465bcc6c184b39087f9e4f1bce39082bb7f592b57b1800e47583b35a4e",
+    "slice50-build-first.log.gz": "b95b9f1f5f2f60b3dbb246ee79550eb65a20888168e298fa08be6da8443be8c6",
+    "slice50-guards.log": "7a020659e48e389b4d94a87ca911dac79095fc5dd3b307f0d34715e442faa849",
+    "slice50-http-before.log": "fb541b5ae0a2d83789a572771ddf21c25ff6927c311cb85b2052fa43ffac8745",
+    "slice50-http-first.log": "b1888275a8c5398132cc31eae038427ba8e471bded532a0a4fba3637e01c37ca",
+    "slice50-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice50-pg-final.log": "f788b3359de956b685f3a8b8e75616e3027d7a5e2d53e1625b4e303744f28da5",
+    "slice50-pg-first.log": "6f3dac5834fa727ea4bc142003e2fa1b20ad115e40876e03cdbdadce1009b613",
+    "slice50-source-proof.json": "3d7ff4554b6f8a697b12ec33d273221587bfa3e578c1c4129c63a1f21265aba6",
+    "slice50-types-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice50-unit-first.log": "9d90a77d876ec68ce8d2ed51dbf7dee4e662c436ec80869af9614c24f2bfd441",
+    "verify-slice50.py": "96f1ea9b474fd97c7daa513bf9cbd97d918fa5e3d65a5fa0b136fc932dcf3983"
+  },
+  "normalization": {
+    "slice50-build-first.log": {
+      "rawSha256": "ad38c2891c2e20a8aaab09ab28cb07417cb280ac0e03d43ce8add7dc141fa497",
+      "rawGzip": "slice50-build-first.log.gz",
+      "displayLog": "trailing whitespace/newlines normalized only; byte-exact original compressed"
+    }
+  }
+}

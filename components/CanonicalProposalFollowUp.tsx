@@ -2,10 +2,11 @@
 import { useEffect, useState } from "react";
 import { isCanonicalProposalFeed, type CanonicalProposalFeed } from "@/lib/canonical-proposal-projection";
 import { PROPOSAL_STAGE_LABEL } from "@/lib/consultation-followup";
+import { CanonicalProposalContactEditor } from "./CanonicalProposalContactEditor";
 import { formatMoney } from "@/lib/money";
 
-/** Scoped summary only. No legacy editor, automatic dispatch or consent change. */
-export function CanonicalProposalFollowUp() {
+/** Scoped summaries and an explicit manual-contact audit. No automatic dispatch or consent change. */
+export function CanonicalProposalFollowUp({ ownerKey }: { ownerKey: string }) {
   const [feed, setFeed] = useState<CanonicalProposalFeed | null>(null), [error, setError] = useState<string | null>(null), [refresh, setRefresh] = useState(0);
   useEffect(() => {
     let alive = true, sequence = 0, controller: AbortController | undefined;
@@ -41,5 +42,6 @@ export function CanonicalProposalFollowUp() {
       </li>)}</ul>}
       {feed.hasMore ? <p role="status" className="text-amber-800">تظهر أقدم 300 عرض ضمن نطاقك فقط؛ هذه ليست القائمة الكاملة. التصنيف والأولوية داخل العروض المعروضة.</p> : null}
     </div>}
+    <CanonicalProposalContactEditor ownerKey={ownerKey} feed={feed} refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} />
   </section>;
 }
