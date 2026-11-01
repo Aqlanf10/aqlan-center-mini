@@ -1,6 +1,6 @@
 {
   "format": "work-ceph-create-ui-v1",
-  "preparedAt": "2026-11-01T17:01:33.368822+00:00",
+  "preparedAt": "2026-11-01T17:39:10.974662+00:00",
   "baseRevision": "a9a75d866dccfb520c246747198e282314574130",
   "buildId": "eqWf8RRpV3s3dsfu9bI_O",
   "acceptance": {
@@ -21,11 +21,27 @@
       "firstAttempt": "Accidentally collected copied .next/standalone test files:18pass2fail due copied-source inventory digest. Actual root guards10/2 pass with standard .next exclusion; no guard change."
     },
     "typeBuildLint": "final build typecheck and targeted lint passed,0errors0warnings",
-    "fullUnit": "running, not claimed pass",
-    "fullPostgreSQL": "running, not claimed pass",
-    "runtime": "not yet run for final60build",
+    "fullUnit": {
+      "passed": 14776,
+      "files": 871,
+      "skipped": 0
+    },
+    "fullPostgreSQL": {
+      "passed": 5455,
+      "files": 414,
+      "skipped": 0,
+      "seconds": 2538.11
+    },
+    "runtime": {
+      "buildId": "eqWf8RRpV3s3dsfu9bI_O",
+      "bracesTraces": 372,
+      "toolingTraces": 741,
+      "manifests": 86,
+      "status": "both passed"
+    },
     "exactHeadCI": "not published",
-    "independentReview": "pending"
+    "independentReview": "pending",
+    "fullQuality": "lint0errors345existingwarnings; body, environment, money and preflight passed"
   },
   "before": {
     "read": "actual56build400vs200 for create context; GET unchanged at59",
@@ -86,6 +102,17 @@
     "slice60-tsc-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "slice60-type-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "slice60-unit-context-first.log": "a9ea864eeee532b808a9caedc892f3d303223a318cfa434c5cfdeacd32f0344c",
-    "slice60-unit-expanded.log": "2b218cbfcb62af9c08213febfee8756f907e4c2e862aecb0be233dbd2a099b88"
+    "slice60-unit-expanded.log": "2b218cbfcb62af9c08213febfee8756f907e4c2e862aecb0be233dbd2a099b88",
+    "slice60-body-full.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice60-runtime-tooling-full.log": "f3609014bb648d65bb90b022cbd9ef11581e7fc15a91c24cad4910fe25164465",
+    "slice60-unit-full.log": "83993ce10e5f09d2c3d2a5128f90effedac317a0602057b19317b17d4a07e220",
+    "slice60-lint-full.log": "f97bbe15bef51e444b2feb3ab41bfcef010d605635db86d30c326f09306945d3",
+    "slice60-money-full.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice60-runtime-braces-full.log": "a802429ada187d924badbc3ba8468a1f8f2cca158ff1f31ec2b7a530f0e36f62",
+    "slice60-pg-full.log": "3dcdc9d089bd92d5a97c5ade3ea4db3e6637f381df7c5e5f7bdfe07bf8a254fc",
+    "slice60-environment-full.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice60-preflight-full.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice60-runtime-proof.json": "6b4d8a9d242bc348577b6f98ebec36cbfd0e12634814af335e2452f2d7312ab4",
+    "slice60-lint-tooling-runtime-proof.json": "f47d76bd407f3de18125bd5d6fcd8b1ac43aad0cc7c7e7935aac8b0cf731cb2f"
   }
 }
