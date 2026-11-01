@@ -1,4 +1,4 @@
-const rxFixture = vi.hoisted(() => ({ long: false }));
+const rxFixture = vi.hoisted(() => ({ long: false, longIdentity: false }));
 vi.mock("@/lib/prescription-prescriber", () => ({ prescriptionPrescriberOptions: async () => ({ issuerId: 5, canChooseAnyDoctor: false, doctors: [{ id: 5, name: "SYN-DRAFT-CLINICIAN" }] }) }));
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -20,8 +20,8 @@ vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null, ReprintMar
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", printCount: async () => 0,
   getSettingsSafe: async () => SETTING_DEFAULTS, getPrescriptionPrintSettings: async () => SETTING_DEFAULTS,
   patientAppointmentsFrom: async () => [{ id: 1, patientId: 2, scheduledDate: "2031-01-04", scheduledTime: "09:30", status: "booked" }],
-  getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
-  getPrescription: async () => ({ id: 11, patientId: 1, prescribingDoctorName: "SYN-SAVED-CLINICIAN", createdBy: "SYN-ACTOR", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: Array.from({ length: rxFixture.long ? 20 : 1 }, (_, index) => ({ selection: { id: "manual", amount: rxFixture.long ? `SYN-AMOUNT-${String(index + 1).padStart(2, "0")}` : "SYN-AMOUNT", confirmed: true }, name: rxFixture.long ? `SYN-MED-${String(index + 1).padStart(2, "0")}` : "SYNTHETIC-RX-MEDICATION", dose: rxFixture.long ? `SYN-DOSE-${String(index + 1).padStart(2, "0")}` : "SYN-DOSE", form: "Tablets", frequency: rxFixture.long ? `SYN-FREQUENCY-${String(index + 1).padStart(2, "0")}` : "SYN-FREQUENCY", duration: rxFixture.long ? `SYN-DURATION-${String(index + 1).padStart(2, "0")}` : "SYN-DURATION", instructions: `تعليمات اصطناعية للاختبار ${index + 1}`, instructionsEn: rxFixture.long ? `SYN-INSTRUCTIONS-${String(index + 1).padStart(2, "0")}` : "SYN-INSTRUCTIONS" })) }),
+  getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: rxFixture.longIdentity ? "SYN-RX-PATIENT SYNTHETIC EXTENDED PATIENT IDENTITY FOR WRAPPING SYN-PATIENT-LAST" : "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
+  getPrescription: async () => ({ id: 11, patientId: 1, prescribingDoctorName: rxFixture.longIdentity ? "SYN-SAVED-CLINICIAN SYNTHETIC EXTENDED DOCTOR IDENTITY FOR WRAPPING SYN-DOCTOR-LAST" : "SYN-SAVED-CLINICIAN", createdBy: "SYN-ACTOR", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: Array.from({ length: rxFixture.long ? 20 : 1 }, (_, index) => ({ selection: { id: "manual", amount: rxFixture.long ? `SYN-AMOUNT-${String(index + 1).padStart(2, "0")}` : "SYN-AMOUNT", confirmed: true }, name: rxFixture.long ? `SYN-MED-${String(index + 1).padStart(2, "0")}` : "SYNTHETIC-RX-MEDICATION", dose: rxFixture.long ? `SYN-DOSE-${String(index + 1).padStart(2, "0")}` : "SYN-DOSE", form: "Tablets", frequency: rxFixture.long ? `SYN-FREQUENCY-${String(index + 1).padStart(2, "0")}` : "SYN-FREQUENCY", duration: rxFixture.long ? `SYN-DURATION-${String(index + 1).padStart(2, "0")}` : "SYN-DURATION", instructions: `تعليمات اصطناعية للاختبار ${index + 1}`, instructionsEn: rxFixture.long ? `SYN-INSTRUCTIONS-${String(index + 1).padStart(2, "0")}` : "SYN-INSTRUCTIONS" })) }),
   getLabOrderById: async () => dispatchOrder({ labName: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456", serviceName: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", workType: "SYNTHETIC-DISPATCH-SERVICE-1234567890123" }),
   getPayment: async () => ({ id: 1, receiptNumber: "SYN-PROV-ORIGINAL-BHGFBCDEFABCD", patientName: "SYNTHETIC-RECEIPT-PROVENANCE", invoiceId: 1, kind: "payment", amountMinor: 50000, currency: "YER", method: "cash", createdBy: "SYNTHETIC-SIGNER", createdAt: "2000-03-02T22:00:00.000Z" }),
 }));
@@ -53,9 +53,10 @@ function labCss() {
   return css.toString();
 }
 describe("native compact print regression witnesses", () => {
-  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "prescription-long", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
+  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "prescription-long", "prescription-long-identity", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
     const prescription = kind.startsWith("prescription-");
-    rxFixture.long = kind === "prescription-long";
+    rxFixture.long = kind.startsWith("prescription-long");
+    rxFixture.longIdentity = kind === "prescription-long-identity";
     const node = kind === "patient-card" ? await PatientCardPage({ params: Promise.resolve({ id: "2" }) }) : prescription
       ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(kind !== "prescription-draft"
         ? { rx: "11", diagnosis: "SYN-URL-TAMPER" }
@@ -96,7 +97,7 @@ describe("native compact print regression witnesses", () => {
         expect(pages.length).toBeGreaterThan(0);
         assertLabDispatchPdfFields(pages, { service: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", lab: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456" });
       } else {
-        if (kind === "prescription-long") expect(pages.length).toBeGreaterThan(1);
+        if (rxFixture.long) expect(pages.length).toBeGreaterThan(1);
         else expect(pages).toHaveLength(1);
         for (const paper of pages) {
         expect(Math.abs(paper.width - 105 * 72 / 25.4)).toBeLessThan(1);
@@ -106,9 +107,9 @@ describe("native compact print regression witnesses", () => {
           expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.yMin).toBeGreaterThanOrEqual(0);
           expect(word.xMax).toBeLessThanOrEqual(paper.width); expect(word.yMax).toBeLessThanOrEqual(paper.height);
         }
-        if (kind === "prescription-long") {
+        if (rxFixture.long) {
           const pageText = paper.words.map(word => word.text).join(" ");
-          for (const identity of ["SYN-RX-PATIENT", "SYN-RX-001", "SYN-SAVED-CLINICIAN", "Rx", "#11"]) expect(pageText).toContain(identity);
+          for (const identity of ["SYN-RX-PATIENT", "SYN-RX-001", "SYN-SAVED-CLINICIAN", "Rx", "#11", ...(rxFixture.longIdentity ? ["SYN-PATIENT-LAST", "SYN-DOCTOR-LAST"] : [])]) expect(pageText).toContain(identity);
         }
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });

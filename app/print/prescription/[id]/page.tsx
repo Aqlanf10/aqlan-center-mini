@@ -2,7 +2,6 @@ import "./prescription.css";
 import { manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
 import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
 import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
-import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getPatient, getPrescription, getPrescriptionPrintSettings } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -141,36 +140,22 @@ export default async function PrescriptionPrintPage({
       <div className="sheet sheet-a6 prescription-a6-sheet">
         <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact strictIdentity />
 
-        <table className="prescription-pages"><thead><tr><td>
-        {/* Repeated by the print engine on continuation pages. */}
-        {/* معلومات المريض */}
-        <PrintMetadata>
-          <div className="line">
-            <span style={{ color: "#475569" }}>المريض:</span>
-            <span style={{ fontWeight: 800 }}>{patient.fullName}</span>
-          </div>
-          <div className="line">
-            <span style={{ color: "#475569" }}>رقم الملف:</span>
-            <span className="num" dir="ltr" style={{ fontWeight: 700 }}>{patient.patientNumber}</span>
-          </div>
-          <div className="line">
-            <span style={{ color: "#475569" }}>العمر / الجنس:</span>
-            <span>{ageText(age)} · {GENDER_LABEL[patient.gender]}</span>
-          </div>
-          <div className="line">
-            <span style={{ color: "#475569" }}>التاريخ:</span>
-            <span>{friendlyDateLong(dateStr)}</span>
-          </div>
-        </PrintMetadata>
-        <div className="prescription-page-identity" dir="auto">
-          الطبيب: <bdi>{prescribingDoctorName}</bdi> · {stored ? `Rx #${stored.id}` : "مسودة غير معتمدة"}
-          <span> · بيانات الوصفة لجميع صفحاتها</span>
+        <div className="prescription-context" dir="rtl">
+          <span>العمر / الجنس: {ageText(age)} · {GENDER_LABEL[patient.gender]}</span>
+          <span>التاريخ: {friendlyDateLong(dateStr)}</span>
         </div>
-        </td></tr></thead><tbody><tr><td>
+        <table className="prescription-pages"><thead><tr><td>
+          {/* Compact identity repeats; the full metadata block exceeded the
+              browser's repeating-header height budget on A6. */}
+          <div className="prescription-page-identity">
+            <div>المريض: <bdi style={{ fontWeight: 800 }}>{patient.fullName}</bdi> · رقم الملف: <bdi>{patient.patientNumber}</bdi></div>
+            <div>الطبيب: <bdi>{prescribingDoctorName}</bdi> · <bdi>{stored ? `Rx #${stored.id}` : "مسودة غير معتمدة"}</bdi></div>
+          </div>
+        </td></tr></thead><tbody dir="ltr" data-prescription-body="ltr" style={{ textAlign: "left" }}><tr><td>
 
         {/* تنبيه الحساسية والأمراض المزمنة */}
         {patient.medicalAlert ? (
-          <div style={{
+          <div dir="rtl" style={{
             border: "1px solid #b91c1c",
             backgroundColor: "#fef2f2",
             color: "#991b1b",
@@ -216,9 +201,9 @@ export default async function PrescriptionPrintPage({
           </div>
         ) : null}
 
-        <section dir="ltr" data-prescription-body="ltr" style={{ textAlign: "left" }}>
+
         {diagnosisText ? (
-          <div className="line" style={{ marginTop: "2.5mm", fontSize: "9pt" }}>
+          <div className="line" style={{ marginTop: "1mm", fontSize: "9pt" }}>
             <span style={{ color: "#475569" }}>التشخيص الطبي:</span>
             <span dir="auto" style={{ fontWeight: 700 }}>{diagnosisText}</span>
           </div>
@@ -226,33 +211,17 @@ export default async function PrescriptionPrintPage({
 
         <div className="rule" />
 
-        {/* Entire medication section starts LTR; Arabic instructions remain isolated RTL. */}
-        <div style={{ display: "flex", alignItems: "center", gap: "2mm", margin: "2mm 0" }}>
-          <span style={{
-            fontSize: "18pt",
-            fontFamily: "serif",
-            fontWeight: 900,
-            fontStyle: "italic",
-            color: "#0d2137"
-          }}>
-            ℞
-          </span>
-          <span style={{ fontSize: "8.5pt", color: "#64748b", fontWeight: 600 }}>
-            <span dir="ltr">Prescription &amp; Dosage</span> · <span dir="rtl">الوصفة العلاجية والجرعات</span>
-          </span>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "3mm" }} dir="ltr">
+        {/* The document title already identifies the prescription; omit the
+            redundant decorative Rx banner rather than shrinking clinical text. */}
+        </td></tr>
           {rxItems.map((item, idx) => {
             const ar = (item.instructions ?? "").trim();
             const en = (item.instructionsEn ?? "").trim();
             const showAr = lang !== "en" && ar;
             const showEn = lang !== "ar" && en;
             return (
-              <div
-                key={idx}
-                className="prescription-medication"
-                style={{
+              <tr key={idx} className="prescription-medication"><td>
+              <div style={{
                   borderBottom: "1px dashed #cbd5e1",
                   paddingBottom: "2.5mm",
                   fontSize: "9pt",
@@ -305,10 +274,10 @@ export default async function PrescriptionPrintPage({
                   </div>
                 )}
               </div>
+              </td></tr>
             );
           })}
-        </div>
-
+        <tr className="prescription-ending"><td>
         {notesText && (
           <div dir="auto" style={{ marginTop: "3mm", fontSize: "8pt", color: "#475569", lineHeight: "1.5" }}>
             <span style={{ fontWeight: 700 }}>إرشادات إضافية: </span>
@@ -330,7 +299,6 @@ export default async function PrescriptionPrintPage({
           </div>
         </div>
 
-        </section>
         <PrintFooter settings={settings} strictIdentity />
         </td></tr></tbody></table>
       </div>
