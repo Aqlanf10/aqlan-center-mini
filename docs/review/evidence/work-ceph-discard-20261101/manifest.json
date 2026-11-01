@@ -1,7 +1,7 @@
 {
   "format": "work-ceph-discard-evidence-v1",
   "baseRevision": "01a75969c19cdc3b935c6237ce80570077ab2c9d",
-  "sourceRevision": null,
+  "sourceRevision": "930bec71b938d5ecb9470fbd6048011cb0ced4f1",
   "buildId": "7VhnR7xAAIIUis6j-UgVq",
   "results": {
     "postgres": {
@@ -27,16 +27,26 @@
       "warnings": 345
     },
     "sourcePreservation": 24,
-    "historicalSourceHashes": 572,
+    "historicalSourceHashes": 591,
     "fullUnit": {
       "passed": 14432,
       "files": 855
     },
-    "fullPostgres": "running",
+    "fullPostgres": {
+      "passed": 5168,
+      "files": 399,
+      "skipped": 0
+    },
     "exactHeadCI": "unpublished",
     "independentReview": "pending",
     "actualDocker": "blocked by previously enforced Alpine destination refusal",
-    "moneyGuard": "passed"
+    "moneyGuard": "passed using scan:money; final pipeline ci:scan:money typo failed and is retained",
+    "runtimeProvenance": {
+      "braces": "10146 files, 372 traces",
+      "lintTooling": "741 traces, 86 manifests; available maps only"
+    },
+    "preflight": "passed; 71 immutable migration assets",
+    "environment": "passed"
   },
   "sourceSha256": {
     "lib/canonical-ceph-discard-command.ts": "de47a834042028dac0dcd44241cccec23afcae34262357c48994436c95bd998b",
@@ -84,6 +94,15 @@
     "slice47-unit-full.log": "cfd01c8389b482093ee8316bb80c2bcd00c11843b9c489368a42da3add5694af",
     "slice47-unit-guards-final.log": "48bc5028967a8769ed8308b99cc8f744eb6e6ae164b9b7a1046704f75ad25ee3",
     "slice47-unit-guards.log": "24374b0ce4f7e402c7fa540bc61756aefad54ac16869b18abb1b2c4be625f7e6",
-    "verify-slice47.py": "14ef1db35040db00a294dd05f16a24bfeecd75116bf9d0533e6d7fae56940994"
+    "verify-slice47.py": "14ef1db35040db00a294dd05f16a24bfeecd75116bf9d0533e6d7fae56940994",
+    "slice47-pg-full.log": "9fd5923e43b3e1e5d287b9ea28cb32fe95558116e3f127b3971a126c76333e73",
+    "slice47-braces-runtime.log": "84d152365361c6925e473f472383430ca059b24fb3924bf8fa78236fcfccf9c5",
+    "slice47-lint-runtime.log": "e19d0610d8131d351d09083b2de172ccc6e22f2381a850a940cc9f50da3d4c32",
+    "slice47-preflight.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice47-environment.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice47-money.log": "9b5d906ced38eb1ce4bbfcfc2f192d69aea65e1a88e1647d0a682999a53f7c2d",
+    "runtime-proof.json": "f2474d5b4ffb925669e7be6b5b01e6623d9c98997b0d8694291e092513b24778",
+    "lint-tooling-runtime-proof.json": "9ecb36615379618817dcbbf7cdd6fca07dacdf46f4dc85f3225aefd3c2adaecc",
+    "slice47-history-pinned.json": "b44c2afff84afcc48a43fde16b2a8e92db58756fae43b423ffb5ad162f62a97c"
   }
 }
