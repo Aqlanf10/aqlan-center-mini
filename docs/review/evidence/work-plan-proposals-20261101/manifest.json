@@ -23,7 +23,13 @@
     "fullBatchGates": "pending",
     "exactHeadCI": "not published",
     "independentReview": "pending",
-    "actualDocker": "blocked by prior enforced Alpine destination refusal"
+    "actualDocker": "blocked by prior enforced Alpine destination refusal",
+    "fullUnit": {
+      "sourceRevision": "b49e073b5b1e9d8a92f207c44f37d7512697b84a",
+      "passed": 14470,
+      "files": 857,
+      "note": "Explicit synthetic SESSION_SECRET; original reports/signer/session tests unchanged. Separate later slice 50 full gate is pending."
+    }
   },
   "sourceSha256": {
     "__tests__/canonical-proposals-projection.test.ts": "3f3aa1c0613727735efe141a1bdddc5979c86b568704c64e81ef493f56fef8b6",
@@ -64,7 +70,8 @@
     "slice49-unit-first.log": "9c2240cfbb091f37ed22ae37182ee88e9cd993d68bba1bd292072c8567dd0a58",
     "slice49-unit-guards-final.log": "f278eb86e3ebae990efc503df1e4a7e40952580db00679489e797dd9ce1ff4fb",
     "slice49-unit-guards-fixed.log": "bf75473d4105601b117b32a3203b0714162fee84cbdfeda256a8b8ad92cf165c",
-    "verify-slice49.py": "b2e0121251468d6375f5f897affed6d2df724fe81c8eb1d0e5a2c484122304b3"
+    "verify-slice49.py": "b2e0121251468d6375f5f897affed6d2df724fe81c8eb1d0e5a2c484122304b3",
+    "slice49-unit-full.log": "11ba7c0ac9f0d24cec8166022071e8ccb811efcb579f6cb127b4255571413a11"
   },
   "normalization": {
     "slice49-build-first.log": {

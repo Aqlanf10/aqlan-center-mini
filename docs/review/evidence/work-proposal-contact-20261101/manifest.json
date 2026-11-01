@@ -1,7 +1,7 @@
 {
   "format": "work-proposal-contact-v1",
   "baseRevision": "b49e073b5b1e9d8a92f207c44f37d7512697b84a",
-  "sourceRevision": null,
+  "sourceRevision": "985352177f0d3a552bd1c6df4ec478cd8ea5c015",
   "buildId": "eYpsA9XH-V-fyyzHFLUBy",
   "acceptance": {
     "focusedPostgres": {
@@ -28,7 +28,12 @@
     "fullBatchGates": "pending",
     "exactHeadCI": "not published",
     "independentReview": "pending",
-    "actualDocker": "blocked by prior enforced Alpine destination refusal"
+    "actualDocker": "blocked by prior enforced Alpine destination refusal",
+    "fullUnit": {
+      "passed": 14487,
+      "files": 858,
+      "sourceRevision": "985352177f0d3a552bd1c6df4ec478cd8ea5c015"
+    }
   },
   "sourceSha256": {
     "__tests__/canonical-proposal-contact-command.test.ts": "d262107a03c0d16000c4c5fad2708cb724029c5a121599e4799a830aed4c26ea",
@@ -62,7 +67,8 @@
     "slice50-source-proof.json": "3d7ff4554b6f8a697b12ec33d273221587bfa3e578c1c4129c63a1f21265aba6",
     "slice50-types-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "slice50-unit-first.log": "9d90a77d876ec68ce8d2ed51dbf7dee4e662c436ec80869af9614c24f2bfd441",
-    "verify-slice50.py": "96f1ea9b474fd97c7daa513bf9cbd97d918fa5e3d65a5fa0b136fc932dcf3983"
+    "verify-slice50.py": "96f1ea9b474fd97c7daa513bf9cbd97d918fa5e3d65a5fa0b136fc932dcf3983",
+    "slice50-unit-full.log": "bd67828cde9b716c28e1e8b9c0b45eff7363223e5ab15d009e4aea76c1dfb271"
   },
   "normalization": {
     "slice50-build-first.log": {

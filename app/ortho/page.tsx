@@ -15,6 +15,7 @@ import { OrthoPendingDecisions } from "@/components/OrthoPendingDecisions";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useSession } from "@/components/SessionProvider";
+import { CanonicalOrthoPendingDecisions } from "@/components/CanonicalOrthoPendingDecisions";
 import { CanonicalOrthoFollowups } from "@/components/CanonicalOrthoFollowups";
 
 /**
@@ -48,7 +49,8 @@ const TONE_CLASS: Record<string, string> = {
 export default function OrthoFollowupPage() {
   const session = useSession();
   if (!session) return null;
-  return session.canonical ? <CanonicalOrthoFollowups /> : <LegacyOrthoFollowupPage />;
+  const canReadDecisions = session.isOwner === true || session.capabilities?.includes("clinical.ortho.view") && (session.patientScope === "own" || session.patientScope === "all");
+  return session.canonical ? <>{canReadDecisions ? <CanonicalOrthoPendingDecisions key={`${session.username}:${session.patientScope}:${session.capabilities?.join(",")}`} /> : null}<CanonicalOrthoFollowups /></> : <LegacyOrthoFollowupPage />;
 }
 
 function LegacyOrthoFollowupPage() {

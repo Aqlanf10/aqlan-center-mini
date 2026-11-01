@@ -73,7 +73,8 @@ it("browser: the clinical board fits 390px without legacy money, contact or book
     expect(await panel.textContent()).not.toMatch(/SYN private|SYN outside|بلا موعد متابعة دورية مؤكّد|غياب مسجّل سابقًا/);
     expect(await panel.getByText("صلاحية التقويم لا تمنح تفاصيل المواعيد.", { exact: false }).count()).toBe(1);
     expect(await panel.locator('a[href*="wa.me"],input,textarea,select').count()).toBe(0);
-    expect(calls).toEqual(["GET /api/ortho/followups"]); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    // The independent read-only review queue is now mounted beside the board.
+    expect(calls.toSorted()).toEqual(["GET /api/ortho/billing-decisions", "GET /api/ortho/followups"]); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     if (process.env.HR_EVIDENCE_DIR) { mkdirSync(process.env.HR_EVIDENCE_DIR, { recursive: true }); await page.screenshot({ path: join(process.env.HR_EVIDENCE_DIR, "ortho-followups-390.png"), fullPage: true }); }
   } finally { await context.close(); }
 });

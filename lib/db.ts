@@ -24124,6 +24124,28 @@ export interface PendingOrthoDecision {
   legacy: boolean;
 }
 
+/** Already admitted, bounded pending-review summary. This reads recorded status;
+ * it never recomputes coverage or grants the separate decision command. */
+export async function listPendingOrthoDecisionSummariesWith(q: Pick<DbClient, "query">, doctorPartyId: number | null) {
+  type Row = { adjustmentId: number; patientId: number; patientName: string; doneOn: string; doctorName: string | null; legacy: boolean; invalid: boolean };
+  const { rows: [envelope] } = await q.query<{ oversized: boolean; invalid: boolean; rows: Row[] | null }>(`WITH candidates AS MATERIALIZED (
+    SELECT a.id AS "adjustmentId",c.patient_id AS "patientId",patients.full_name AS "patientName",a.done_on::text AS "doneOn",
+      d.name AS "doctorName",COALESCE(c.baseline_kind='legacy',FALSE) AS legacy,
+      ((a.visit_id IS NOT NULL AND (v.id IS NULL OR v.patient_id<>c.patient_id))
+        OR (COALESCE(v.doctor_id,c.responsible_doctor_id) IS NOT NULL AND (d.id IS NULL OR d.kind<>'doctor'))) AS invalid
+    FROM ortho_adjustments a JOIN ortho_cases c ON c.id=a.case_id JOIN patients ON patients.id=c.patient_id
+    LEFT JOIN visits v ON v.id=a.visit_id LEFT JOIN parties d ON d.id=COALESCE(v.doctor_id,c.responsible_doctor_id)
+    WHERE a.billing_class IN ('OUTSIDE_CONTRACT','REVIEW_REQUIRED') AND a.billing_decision IS NULL
+      ${doctorPartyId===null?'':`AND ${DOCTOR_PATIENT_CONDITION.replaceAll(':doc','$1')}`}
+    ORDER BY a.done_on,a.id LIMIT 301
+  ), sized AS (SELECT *,octet_length(to_jsonb(candidates)::text) bytes FROM candidates)
+  SELECT COALESCE(sum(bytes),0)>1048576 oversized,COALESCE(bool_or(invalid),FALSE) invalid,
+    CASE WHEN COALESCE(sum(bytes),0)<=1048576 THEN COALESCE(jsonb_agg(to_jsonb(sized)-'bytes'-'invalid' ORDER BY "doneOn","adjustmentId"),'[]'::jsonb) ELSE NULL END rows FROM sized`,
+    doctorPartyId===null?[]:[doctorPartyId]);
+  if (!envelope || envelope.oversized || envelope.invalid || !Array.isArray(envelope.rows)) throw new Error("STAFF_READ_READ_FAILED");
+  return { rows: envelope.rows.slice(0,300), hasMore: envelope.rows.length>300 };
+}
+
 export async function listPendingOrthoDecisions(options: { doctorPartyId: number | null } = { doctorPartyId: null }): Promise<PendingOrthoDecision[]> {
   await ensureSchema();
   const { rows } = await getPool().query<{

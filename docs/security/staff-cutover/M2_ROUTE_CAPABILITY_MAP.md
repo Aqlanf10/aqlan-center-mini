@@ -34,19 +34,19 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 273 |
+| existing | 272 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 71 |
+| canonical-done | 72 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 43–47 are published at `327b12fb` with completed local gates; exact-head CI and independent review are pending. Slices 48–50 are local and their full gates remain pending. Published map: 68 canonical-done / 276 existing; local map: 71 / 273. Neither state is whole-system acceptance.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 43–47 are published at `327b12fb` with completed local gates; exact-head CI and independent review are pending. Slices 48–51 are local and their full gates remain pending. Published map: 68 canonical-done / 276 existing; local map: 72 / 272. Neither state is whole-system acceptance.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -632,3 +632,7 @@ GET `/api/plans/proposals` uses its mapped plan-edit authority and patient scope
 ### Slice 50 — record an already completed proposal contact
 
 POST `/api/plans/proposals` is an audit-only manual record under current plan-edit authority and patient scope. It never dispatches a message. The canonical writer locks the patient and same legacy plan, rechecks authority after waits, compares an opaque plan/contact observation and invokes the retained writer on the same transaction. Effect/audit rollback together; consent, amounts and installment reminder stamps remain unchanged. List-level pending recovery survives proposal disappearance and never automatically resends. No permanent receipt is claimed; fresh state and a new explicit intention are required after uncertainty. [Acceptance and limitations](../../review/work-proposal-contact-slice50-20261101.md).
+
+### Slice 51 — saved pending orthodontic review queue
+
+GET `/api/ortho/billing-decisions` uses its approved ortho-view capability and central patient scope in one owning RR snapshot. The bounded summary reads existing saved pending states; it does not infer absent coverage, dispatch work or grant a clinical/financial decision. Own scope precedes the oldest-300 plus hasMore limit; foreign visit or invalid clinician references and oversized context refuse the whole read. The read-only UI omits visits, amounts, invoice references, notes and decision controls, and clears stale/failed/hidden responses. All legacy reads and decision writers are unchanged. [Acceptance and boundaries](../../review/work-ortho-decisions-slice51-20261101.md).
