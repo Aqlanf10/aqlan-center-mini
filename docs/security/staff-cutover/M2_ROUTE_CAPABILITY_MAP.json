@@ -3215,10 +3215,23 @@
    "doctor"
   ],
   "need": [],
-  "anyOf": [],
+  "anyOf": [
+   "clinical.plans.view",
+   "clinical.visits.document",
+   "clinical.xrays.view"
+  ],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Slice 40: bounded clinical cases, problems, items and complete dependencies in one fenced RR READ ONLY snapshot. Independent plan/ortho projection; legacy GET/POST retained. No finance or writer activation.",
+  "projection": {
+   "legacy": "Cases and native ortho bridge, problem list and optional plan items, including billing metadata.",
+   "groups": {
+    "care": "Existing clinical care group: cases and problems; no invoice, agreement or financial markers.",
+    "plan": "clinical.plans.view independently admits clinical plan items and dependency graph; cancelled-plan endpoints remain explicitly labelled.",
+    "ortho": "clinical.ortho.view independently admits native/bridged orthodontic cases; hidden case links omitted. No images or assessment payload."
+   },
+   "rows": "Same-snapshot patient scope and same-patient references. Complete graph only: limits 1000 cases, 1000 problems, 2000 items, 4000 edges, 2 MiB; excess or malformed references refuse the whole read."
+  }
  },
  {
   "route": "/api/patients/[id]/cases",

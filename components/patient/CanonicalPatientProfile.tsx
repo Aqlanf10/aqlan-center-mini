@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { CanonicalNextSession } from "./CanonicalNextSession";
 import { CanonicalCephStudies } from "./CanonicalCephStudies";
 import { CanonicalClinicalPlans } from "./CanonicalClinicalPlans";
+import { CanonicalPatientCases } from "./CanonicalPatientCases";
 import { CanonicalOrthoCases } from "./CanonicalOrthoCases";
 import { useSession } from "@/components/SessionProvider";
 import { GENDER_LABEL, ageFromBirthDate, ageFromBirthYear, ageText, type Gender } from "@/lib/patient";
@@ -177,6 +178,8 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.plans.view") && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalClinicalPlans key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
       {projection.care ? <ClinicalPanels patientId={patientId} /> : null}
+      {session?.isOwner === true || (session?.capabilities?.some(c => ["clinical.plans.view", "clinical.visits.document", "clinical.xrays.view"].includes(c)) && (session.patientScope === "own" || session.patientScope === "all"))
+        ? <CanonicalPatientCases key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId} /> : null}
       {projection.care ? <PlannedVisitsPanel patientId={patientId}
         canBook={session?.isOwner === true || (session?.capabilities ?? []).includes("appointments.create")} /> : null}
       <TimelinePanel patientId={patientId} />

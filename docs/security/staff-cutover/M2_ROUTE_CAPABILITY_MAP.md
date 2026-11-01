@@ -588,3 +588,7 @@ Every canonical patient reader, run as the owner (every source read), must take 
 
 Still open, not inferred: the owner decisions (four owner-only operations; empty manual grants versus per-account confirmed templates; reception's clinical-summary scope), the restore hold, owner-only recovery, and the issuer lost-COMMIT acknowledgement review (6479317375).
 
+
+### Slice 40 — patient clinical cases and plan dependencies
+
+`GET /api/patients/[id]/cases` uses the existing care record rule and current patient scope in one fenced RR READ ONLY snapshot. Plan items and edges require `clinical.plans.view`; native/bridged orthodontic cases require `clinical.ortho.view`. The exact clinical allowlist excludes financial markers and image/assessment data. All joined references belong to the same patient; missing and outside are identical. The complete graph includes explicitly labelled cancelled-plan endpoints; 1000 cases, 1000 problems, 2000 items, 4000 edges and 2 MiB are hard read bounds, not silent truncation. Cycles, malformed states or foreign references refuse the whole read. No existing writer is activated. See [the acceptance matrix](../../review/work-patient-cases-slice40-20261101.md); local implementation is distinct from final-head CI and independent acceptance.

@@ -2,12 +2,28 @@ import { NextResponse } from "next/server";
 import { createClinicalCase, listCasePlanItems, listPatientCases, listPatientProblems } from "@/lib/db";
 import { checkCaseDraft } from "@/lib/cases";
 import { canViewPlanItems, guardPatient, idOf, json, readBody } from "@/lib/case-route";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalPlanPatientId } from "@/lib/canonical-plan-reads";
+import { CanonicalCaseReadRefusal, readCanonicalPatientCases } from "@/lib/canonical-case-reads";
 
 export const dynamic = "force-dynamic";
 
 /** (CASE-MODEL-1) الحالات التخصصية للمريض وقائمة مشاكله وبنود خطته مرتّبةً باعتمادياتها — قراءة واحدة. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const patientId = idOf((await params).id);
+  const rawId = (await params).id;
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const id = canonicalPlanPatientId(rawId, new URL(_request.url).searchParams);
+      return NextResponse.json(await readCanonicalPatientCases(selected.handle, id), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof CanonicalCaseReadRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: 409, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تحميل الحالات التخصصية.");
+    }
+  }
+  const patientId = idOf(rawId);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, false);
   if (!guard.ok) return guard.response;

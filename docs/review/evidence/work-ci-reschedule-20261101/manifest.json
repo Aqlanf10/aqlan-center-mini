@@ -2,7 +2,7 @@
   "format": "work-ci-reschedule-race-evidence-v1",
   "productRevision": "ed830332558afab1c2209616f390d5391b1960a4",
   "publishedFailureRevision": "93b54b12069e927afa2e9969adc717b0d9c8ff00",
-  "sourceRevision": null,
+  "sourceRevision": "8e12f9591ebd0aafc578587b4d6c3e5e657eee6f",
   "results": {
     "publishedProductFocusedPG": {
       "tests": 9,
