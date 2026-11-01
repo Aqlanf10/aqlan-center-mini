@@ -1,6 +1,7 @@
 /** Native PostgreSQL only. Synthetic isolated DBs; no application/live data. */
 import { beforeAll, afterAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { Client } from 'pg';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,14 +44,17 @@ it.each(['patients','visits'] as const)('writer-first %s row lock rolls back iss
 });
 async function blocked(pattern:string){const deadline=Date.now()+5000;while(Date.now()<deadline){const {rows:[row]}=await query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND cardinality(pg_blocking_pids(pid))>0 AND query LIKE $1) AS blocked",[pattern]);if(row.blocked)return;await new Promise(resolve=>setTimeout(resolve,20));}throw new Error('Expected native lock wait not observed');}
 it.each(['delete','merge','relink','reset'] as const)('issuance-first holds locks until audit commits; actual %s writer then refuses',async kind=>{
- const f=await setup(),blocker=await db.getPool().connect();
+ // Reset reserves backup + transaction connections; the default app pool has three.
+ // Keep the synthetic audit blocker outside that pool so the writer reaches its SQL fence.
+ const f=await setup(),blocker=new Client({connectionString:fixture.source.options.connectionString,ssl:false});
  const {rows:[target]}=await query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic race target') RETURNING id",[`RAD-RACE-${randomUUID()}`]);
  const backup=vi.fn(async()=>({ok:true as const,backupId:null}));
  let issued:ReturnType<typeof issueRadiologyRequest>|undefined,writer:Promise<unknown>|undefined;
+ await blocker.connect();
  try{await blocker.query('BEGIN');await blocker.query('LOCK TABLE audit_log IN SHARE MODE');issued=issueRadiologyRequest(f.session,f.key,f.draft);await blocked('%INSERT INTO audit_log%');
   writer=kind==='delete'?db.deleteVisit(f.draft.visitId,{actor:f.session.username}):kind==='merge'?db.mergeDuplicatePatient(f.draft.patientId,target.id,{actor:f.session.username}):kind==='relink'?db.linkVisitToPatient(f.draft.visitId,target.id):db.resetClinicData({actor:'synthetic-reset-race',actorRole:'admin'},backup).catch(error=>({protectedError:error.name}));
   await blocked(kind==='reset'?'%LOCK TABLE radiology_requests IN EXCLUSIVE MODE%':kind==='merge'?'%FROM patients%FOR UPDATE%':'%FROM visits%FOR UPDATE%');
- }finally{await blocker.query('ROLLBACK');blocker.release();}
+ }finally{await blocker.query('ROLLBACK');await blocker.end();}
  expect(await issued).toMatchObject({id:f.key});expect(await writer).toMatchObject(kind==='reset'?{protectedError:'ProtectedRadiologyHistoryError'}:{ok:false});expect(backup).not.toHaveBeenCalled();
  expect((await query('SELECT patient_id,visit_id FROM radiology_requests WHERE command_key=$1',[f.key])).rows[0]).toEqual({patient_id:f.draft.patientId,visit_id:f.draft.visitId});
 });

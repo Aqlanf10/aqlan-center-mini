@@ -27,3 +27,31 @@ Pending hosted gates:
 3. `__tests__/print-visual/radiology-request-a6.test.tsx`: actual page dimensions, short and long Arabic text, continuation identity and PDF text bounds. Do not claim A6 overflow acceptance until this passes.
 4. Built-app authenticated HTTP/role and settings/patient workflows against synthetic data, including revoked grant, patient/visit mismatch and direct print URL.
 5. Independent final source review, sole-publisher Draft PR/CI. No live settings/grants, deployment or data mutation as part of implementation.
+
+## First hosted review evidence (2026-11-01; not release acceptance)
+PR 509 head `2ca7b2e91af0f9fc7e994120df8e0acda19988e2`, checked-out CI merge
+`6c477d6050f61ecfe1960ac8a2074229c4fc7919`, exact source tree
+`ca1c6d8885fd24a8ad8b7828e52cafa3311279f4`, run `41316009782`, native job
+`124876092331`, PostgreSQL version number `180006`:
+- 15/16 radiology native cases passed, including official SQL/full-archive restore and replay.
+  The reset-race observer failed because its test-only audit blocker exhausted the default
+  three-connection application pool together with issuance and reset's backup connection.
+  The fixture now uses a separate connection to the verified isolated database; the exact
+  reset SQL-lock observation, refusal, no-backup and unchanged receipt assertions remain.
+- Source-generated framed candidates were recovered with all chunk/whole-payload, ordered
+  migration and generator-source hashes verified against the exact reviewed source tree.
+  Current-schema contract SHA-256:
+  `26c3247a9ca3193a1840514b2f1c17542e118bf15ca2ef7a0cdaaec7db9956e4`.
+  Preflight disclosure SHA-256:
+  `05a42c9f2a645e42eb0fe23563c94f8ece169754f7173a5b86316019120a5dcc`.
+  The contract adds only `radiology_requests`; existing tables are byte-equivalent as JSON
+  objects. Disclosure additions have exact readable source-DDL witnesses for all 19 new
+  text hashes; none of the previous allowed hashes is removed. PGlite was used only to
+  derive matching text witnesses, not as authority for native candidate bytes or semantics.
+- The original short A6 fixture overflowed to two pages; long continuation tests passed.
+  The compact/shared-identity correction still requires fresh actual PDF verification.
+- Stale migration-tail/count expectations were updated only for 0094. No comparison,
+  native lock, PDF bounds, identity or one-page assertion was waived.
+
+A subsequent exact-head full CI run, native reset race, shared-brand A6 PDFs and built-app
+HTTP journeys remain mandatory. These first-run findings do not authorize merging or release.
