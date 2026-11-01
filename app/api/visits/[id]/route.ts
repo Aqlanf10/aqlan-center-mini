@@ -220,6 +220,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const result = await deleteVisit(id, { actor: session.username, actorRole: session.role, reason });
     if (!result.ok) {
+      if (result.reason === "has_prescription_history") {
+        return NextResponse.json({ code: "has_prescription_history", message: "الزيارة مرتبطة بوصفات صادرة بمفاتيح محفوظة؛ لا تُحذف ولا يُمحى ارتباطها الأصلي. لم يُغيَّر شيء." }, { status: 409 });
+      }
       if (result.reason === "signed") {
         return NextResponse.json(
           { message: "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى." },

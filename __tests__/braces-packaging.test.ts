@@ -15,7 +15,15 @@ describe("development-only braces artifact packaging", () => {
     expect(manifest.devDependencies.braces).toBe("file:" + artifact);
     expect(manifest.overrides).toEqual(REVIEWED_OVERRIDES);
     expect(manifest.devDependencies.tailwindcss).toBe("3.4.19");
-    expect(JSON.parse(read("scripts/dependency-review/consumer-fixture/package.json").toString()).overrides).toEqual(REVIEWED_OVERRIDES);
+    // This isolated historical braces-consumer fixture is not the modern root
+    // toolchain. Preserve its reviewed ESLint 9 inputs and exact parser overrides.
+    const fixture = JSON.parse(read("scripts/dependency-review/consumer-fixture/package.json").toString());
+    expect(fixture.name).toBe("aqlan-braces-consumer-review");
+    expect(fixture.devDependencies.eslint).toBe("9.39.5");
+    expect(fixture.overrides).toEqual({
+      "tailwindcss@3.4.19": { "postcss-selector-parser": "7.1.6" },
+      "postcss-nested@6.2.0": { "postcss-selector-parser": "7.1.6" },
+    });
     expect(lock.packages[""].devDependencies.braces).toBe(manifest.devDependencies.braces);
     const copies = Object.entries(lock.packages).filter(([name]) => name === "node_modules/braces" || name.endsWith("/node_modules/braces"));
     expect(copies.length).toBeGreaterThan(0);
