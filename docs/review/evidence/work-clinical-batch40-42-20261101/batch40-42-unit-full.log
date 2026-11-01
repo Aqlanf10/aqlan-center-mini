@@ -1,0 +1,119 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ __tests__/development-runtime-tracing.test.ts (5 tests | 1 failed) 5119ms
+     × does not let runtime app, component or library imports depend on excluded development tooling 5052ms
+ ❯ __tests__/durable-signer-boundary.test.ts (9 tests | 1 failed) 1171ms
+     × signs exactly the strict durable shape, which only the durable parser accepts 4ms
+Synthetic TypeScript journey passed
+Synthetic TypeScript journey failed intentionally
+Synthetic TypeScript journey passed
+ ❯ __tests__/staff-session-selection.test.ts (10 tests | 4 failed) 17ms
+     × a valid canonical cookie is selected and never falls through to a legacy Bearer 5ms
+     × a signed but malformed canonical cookie is denied, not translated or downgraded 1ms
+     × legacy cookie stays legacy; absent/invalid cookie uses the signed Bearer 1ms
+     × nothing usable selects none 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/development-runtime-tracing.test.ts > temporary development-only runtime tracing boundary > does not let runtime app, component or library imports depend on excluded development tooling
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/development-runtime-tracing.test.ts:135:3
+    133|   });
+    134|
+    135|   it("does not let runtime app, component or library imports depend on…
+       |   ^
+    136|     expect(runtimeSources.length).toBeGreaterThan(600);
+    137|     const violations: string[] = [];
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  __tests__/durable-signer-boundary.test.ts > private durable signer shape > signs exactly the strict durable shape, which only the durable parser accepts
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ signDurableSessionClaims lib/auth.ts:114:21
+ ❯ __tests__/durable-signer-boundary.test.ts:63:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > a valid canonical cookie is selected and never falls through to a legacy Bearer
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ signDurableSessionClaims lib/auth.ts:114:21
+ ❯ durable __tests__/staff-session-selection.test.ts:9:23
+ ❯ __tests__/staff-session-selection.test.ts:23:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > a signed but malformed canonical cookie is denied, not translated or downgraded
+TypeError: The "key" argument must be of type string or an instance of ArrayBuffer, Buffer, TypedArray, DataView, KeyObject, or CryptoKey. Received undefined
+ ❯ forgedMarker __tests__/staff-session-selection.test.ts:18:20
+     16| const forgedMarker = () => {
+     17|  const body = Buffer.from(JSON.stringify({ userId: 2, username: "x", e…
+     18|  return `${body}.${createHmac("sha256", process.env.SESSION_SECRET!).u…
+       |                    ^
+     19| };
+     20|
+ ❯ __tests__/staff-session-selection.test.ts:26:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > legacy cookie stays legacy; absent/invalid cookie uses the signed Bearer
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ createSessionToken lib/auth.ts:95:21
+ ❯ legacy __tests__/staff-session-selection.test.ts:15:22
+ ❯ __tests__/staff-session-selection.test.ts:29:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  __tests__/staff-session-selection.test.ts > one staff envelope selection rule > nothing usable selects none
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:66:11
+     64|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     65|   if (!value || value.length < 32) {
+     66|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     67|   }
+     68|   return value;
+ ❯ sign lib/auth.ts:72:31
+ ❯ readSignedSessionEnvelope lib/auth.ts:126:28
+ ❯ classify lib/staff-session-admission.ts:34:19
+ ❯ selectStaffEnvelope lib/staff-session-admission.ts:42:21
+ ❯ __tests__/staff-session-selection.test.ts:35:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  3 failed | 847 passed (850)
+      Tests  6 failed | 14323 passed (14329)
+   Start at  06:20:59
+   Duration  479.82s (transform 22.04s, setup 0ms, import 100.37s, tests 278.00s, environment 81ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
