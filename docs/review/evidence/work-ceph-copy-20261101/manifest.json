@@ -1,7 +1,7 @@
 {
   "format": "work-ceph-copy-evidence-v1",
   "baseRevision": "f3ce7bbb7b22ea0a4800154b6a1d7dbe037bf2a0",
-  "sourceRevision": null,
+  "sourceRevision": "01a75969c19cdc3b935c6237ce80570077ab2c9d",
   "buildId": "2YmZnQbtnQzGuREAMNekw",
   "results": {
     "postgres": {
@@ -31,8 +31,14 @@
     "rawBodyGuard": "passed without exception",
     "preservationChecks": 22,
     "historicalSourceHashes": 554,
-    "fullUnit": "current-source rerun running; prior 14413 before copied-source guard is historical",
-    "fullPostgres": "running on isolated frozen source",
+    "fullUnit": {
+      "passed": 14413,
+      "files": 854
+    },
+    "fullPostgres": {
+      "passed": 5137,
+      "files": 397
+    },
     "exactHeadCI": "not published",
     "independentReview": "pending",
     "actualDocker": "blocked: existing enforced Alpine destination refusal",
@@ -40,7 +46,14 @@
       "failed": 4,
       "passed": 1,
       "filteredOut": 19
-    }
+    },
+    "runtimeProvenance": {
+      "braces": "10116 files, 372 traces",
+      "lintTooling": "741 traces, 86 manifests; available maps only"
+    },
+    "preflight": "passed; 71 immutable migration assets",
+    "environment": "passed",
+    "moneyGuard": "passed via existing scan:money script; earlier nonexistent ci:scan:money invocation retained as failed command"
   },
   "sourceSha256": {
     "lib/canonical-ceph-copy-command.ts": "ed4f3767975a36b927dddac43aee6e6134245519fff1998c10d2e05bb765c4f9",
@@ -64,12 +77,17 @@
   },
   "artifacts": {
     "ceph-copy-390.png": "ca1298a5fe6008b6e632f583da9787559d202dcf668435c6bd2513111837bb49",
+    "e092-final-ci.json": "254308414f969fff8d7d6e7b0aab1863e7984f4fd872c156ba34a78bd7acecb8",
+    "lint-tooling-runtime-proof.json": "aac1beb7c48d801b391db8cc1ce9c9a0f7fc2c5328cc1217b0798eb301dd5fba",
+    "runtime-proof.json": "91018719721d27824ba499caa6531afeb7596cc8db3156b6f6772abe1d326397",
     "slice46-before-http.log": "65ceec4331b609980f1b1c032802bd85617e3f09697a77931ce3f42bb1c7f3cb",
     "slice46-body-validated.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
     "slice46-body.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice46-braces-runtime.log": "83a49c5c2561dadb7b0f61c1db9ef9edfe341468b284285e7b967ebd87d03cc5",
     "slice46-build-final.log": "88ea16453af197ad88197842458e8ff78fd90a07dcc10112cc719e32459f8c08",
     "slice46-build-first.log": "e8337913530e6ef79ae587d5f92250ecc3b60e372127bd29510030b6821cffb2",
     "slice46-build-validated.log": "50e397bad570bc68c3206d0ba83428be43cc5f40b9af87fb89280425fcf0f35b",
+    "slice46-environment.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
     "slice46-http-final.log": "558b74b359f3e95d5e5d3c41358b54a10704511f6df0ec9a1204978acdd7a26c",
     "slice46-http-first.log": "0f80377c610adc88d59bb9a8e6256ba4889d87a29656f687237fc26d0634811a",
     "slice46-http-read-regressions.log": "1c7e54016bdf91b5527fa949f837732817af41af40a9d428f8a4c4f529276388",
@@ -77,12 +95,17 @@
     "slice46-inventory-validated.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
     "slice46-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
     "slice46-lint-full.log": "231f738bd10e3cf6a1b867cc5a2d5f4c4221a3d0fc9ea48443e1a3f4e3101469",
+    "slice46-lint-runtime.log": "f467f381a1bd74a9ab24918c6c5d4f8fc93c34638a69f3338d48a97b0081b74a",
     "slice46-lint-validated.log": "231f738bd10e3cf6a1b867cc5a2d5f4c4221a3d0fc9ea48443e1a3f4e3101469",
+    "slice46-money-final.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice46-money.log": "9b5d906ced38eb1ce4bbfcfc2f192d69aea65e1a88e1647d0a682999a53f7c2d",
     "slice46-pg-calendar-validated.log": "e26b8bc8765e26817df2ac0b8a523ab4484cbe67d9f4dc9aec7ba909742ace20",
     "slice46-pg-correct-phase.log": "9b256db1caadb4a7bdb073e9ef0485b904c6325e49bec1f244a40f45c8dfaf3d",
     "slice46-pg-expanded.log": "340bcf842afab72073bc0e5938cdc86bf10732ca71f53790759e1627123c7010",
     "slice46-pg-first.log": "d8eb23d4518a4a88ac7b40bd8ddca1f3bb11a2f9a088494eca8bdad2dfb14707",
+    "slice46-pg-full.log": "215f3c5e776fa896054ec064aad84c036ac404bc82cb5d8ffb24f9946a7e14f3",
     "slice46-pg-validated.log": "cbd00563b367d8c652fba6a64f5f8ca9610b57e7e0679748ab5d97007383eab3",
+    "slice46-preflight.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
     "slice46-source-proof-validated.json": "311677728cc2896c4664e5b1dde1f60daca9e091e4eb449519a1d9f10d84adb6",
     "slice46-source-proof.json": "311677728cc2896c4664e5b1dde1f60daca9e091e4eb449519a1d9f10d84adb6",
     "slice46-source-validity-before.log": "309b2e4be5d010f523785346f68c99e8c47b34ef4d1e66d496bd250c36cce8e6",
@@ -92,6 +115,7 @@
     "slice46-unit-first.log": "3ced69f83630139d75d968c44793c2b7f1f0555e9ef962d94cac9a4d7f29960b",
     "slice46-unit-full.log": "48ad9499a0304556eb29e0d080a8ebb3f08c3dd7c32fca03b692224bfc135ff8",
     "slice46-unit-guards.log": "3547c65ba7d3caca733eef8c7dceec29bf2a7b45d3ad503e052a619fd3678d7e",
+    "slice46-unit-validated.log": "ef6dc6d8a3dfb67cfcc877080bdaad66544e51d2a519df6bf28b75f658afa7a0",
     "verify-slice46.py": "3cb5fd2e05b666db690094aea5b2e2bd7b80f4196d48a680159ce26fb25d1f84"
   }
 }
