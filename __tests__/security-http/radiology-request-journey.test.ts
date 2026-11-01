@@ -119,11 +119,15 @@ it("keeps the real account page inert and restores a pending radiology key only 
     },{storageKey,pendingKey});
     const page=await context.newPage(),writes:string[]=[];
     page.on('request',request=>{if(request.url().includes('/api/radiology-requests')&&request.method()==='POST')writes.push(request.method());});
-    const response=await page.goto(`${baseUrl}/patients/${h.seeded.patientAId}?tab=account`,{waitUntil:'networkidle'});
+    const response=await page.goto(`${baseUrl}/patients/${h.seeded.patientAId}?tab=account`,{waitUntil:'domcontentloaded'});
     expect(response?.status()).toBe(200);
+    const entry=page.getByRole('button',{name:'فتح طلبات الأشعة',exact:true});
+    await entry.waitFor({state:'visible'});
+    await expect.poll(()=>entry.isEnabled()).toBe(true);
     const reads=()=>page.evaluate(()=>((window as unknown as {__radiologyStorageReads:string[]}).__radiologyStorageReads));
     expect(await reads()).toEqual([]);
-    await page.getByRole('button',{name:'فتح طلبات الأشعة',exact:true}).click();
+    expect(writes).toEqual([]);
+    await entry.click();
     await expect.poll(reads).toEqual([storageKey]);
     await expect.poll(()=>page.getByRole('status').allTextContents()).toContain('يوجد طلب سابق؛ تحقق من نتيجته قبل إصدار طلب آخر.');
     expect(await page.getByRole('button',{name:'إعادة نفس الطلب بأمان',exact:true}).isDisabled()).toBe(true);
