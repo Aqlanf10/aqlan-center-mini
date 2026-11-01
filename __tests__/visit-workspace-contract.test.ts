@@ -40,6 +40,24 @@ const baseline = [
     "sha": "4e4e248dcb8594590ae26312591e7ecfa9e43d19439440df250c4e509d59741a"
   }
 ];
+// Literal reviewed deltas only; do not generalize to whitespace, callback or
+// arbitrary setter removal. Every approved insertion must occur exactly once.
+const reviewedMirrorChanges = {
+  load: [
+    ['lastAutoTreatment.current = ""; setDisplayedAutoTreatment("");', 'lastAutoTreatment.current = "";'],
+    ["lastAppliedOwner.current = owner; setAppliedOwner(owner);", "lastAppliedOwner.current = owner;"],
+    ['if (loaded.status === "signed") { confirmedSignOwner.current = owner; setDisplayedSignOwner(owner); }', 'if (loaded.status === "signed") confirmedSignOwner.current = owner;'],
+    ["[visitId, expectedPatientId, currentOwner, owner, setRxOpen, setPostOpOpen]", "[visitId, expectedPatientId, currentOwner, owner]"],
+  ],
+  sign: [["confirmedSignOwner.current = owner; setDisplayedSignOwner(owner);", "confirmedSignOwner.current = owner;"]],
+} as const;
+function restoreReviewedHistoricalSlice(slice: string, boundary: keyof typeof reviewedMirrorChanges) {
+  for (const [current, previous] of reviewedMirrorChanges[boundary]) {
+    expect(slice.split(current)).toHaveLength(2);
+    slice = slice.replace(current, previous);
+  }
+  return slice;
+}
 const source = readFileSync("components/ClinicalVisit.tsx", "utf8");
 const fingerprint = (text: string) => createHash("sha256").update(text).digest("hex");
 function section(text: string, start: string, end: string) {
@@ -57,10 +75,11 @@ function inOrder(text: string, fragments: string[]) {
 }
 
 describe("actual visit workspace retains its authoritative contracts", () => {
-  it.each(baseline)("keeps $label byte-identical to its reviewed authority boundary", ({ start, end, sha }) => {
+  it.each(baseline)("keeps $label byte-identical to its reviewed authority boundary", ({ label, start, end, sha }) => {
     const from = source.indexOf(start); expect(from).toBeGreaterThan(-1);
     const to = source.indexOf(end, from); expect(to).toBeGreaterThan(from);
-    expect(createHash("sha256").update(source.slice(from, to)).digest("hex")).toBe(sha);
+    const slice = source.slice(from, to);
+    expect(fingerprint(label === "load" || label === "sign" ? restoreReviewedHistoricalSlice(slice, label) : slice)).toBe(sha);
   });
   it("changes only the owner-guarded save failure presentation from the prior reviewed send boundary", () => {
     const send = section(source, "  const send = useCallback(", "  /** التوقيع");
@@ -74,7 +93,7 @@ describe("actual visit workspace retains its authoritative contracts", () => {
       .toBe("c2e47037edac7e0e9b4fdf374b05a76830803bfb85fc7e1774b7e6e9c8cbb019");
   });
   it("retains the original validated sign acceptance and documentary reset byte-for-byte", () => {
-    const sign = section(source, "  const sign = useCallback(", "  /** (VISIT-2) فتح ملف");
+    const sign = restoreReviewedHistoricalSlice(section(source, "  const sign = useCallback(", "  /** (VISIT-2) فتح ملف"), "sign");
     const from = sign.indexOf("      const payload = await response.json();");
     const callback = sign.indexOf("      onSigned?.({", from);
     const to = sign.indexOf("      });", callback);
@@ -122,6 +141,25 @@ describe("actual visit workspace retains its authoritative contracts", () => {
       "validateClinicalLabOriginBody(body,categories);", "await labCommand.prepare(body)",
       "if (!currentOwner()) return false;", "const response = await fetch(",
       "if (!currentOwner() || command.current !== attempt) return false;"]);
+  });
+  it("binds presentation mirrors and stable dependencies to direct React state setters", () => {
+    for (const declaration of [
+      "const [appliedOwner, setAppliedOwner] = useState<typeof owner | null>(null);",
+      "const [displayedSignOwner, setDisplayedSignOwner] = useState<typeof owner | null>(null);",
+      'const [displayedAutoTreatment, setDisplayedAutoTreatment] = useState("");',
+      "const [rxOpen, setRxOpen] = useState(false);",
+      "const [postOpOpen, setPostOpOpen] = useState(false);",
+    ]) expect(source.split(declaration)).toHaveLength(2);
+  });
+  it("does not hide missing, duplicate or unreviewed authority edits in the historical reconstruction", () => {
+    const boundary = baseline.find(item => item.label === "load")!;
+    const from = source.indexOf(boundary.start), to = source.indexOf(boundary.end, from);
+    const load = source.slice(from, to), insertion = reviewedMirrorChanges.load[0][0];
+    expect(() => restoreReviewedHistoricalSlice(load.replace(insertion, ""), "load")).toThrow();
+    expect(() => restoreReviewedHistoricalSlice(load + insertion, "load")).toThrow();
+    expect(load).toContain("currentOwner()");
+    const changedAuthority = load.replace("currentOwner()", "true");
+    expect(fingerprint(restoreReviewedHistoricalSlice(changedAuthority, "load"))).not.toBe(baseline.find(item => item.label === "load")!.sha);
   });
   it("uses one catalog action and one worklist, preserving tooth and plan callbacks", () => {
     expect(source.match(/<ServiceSelect/g)).toHaveLength(1);

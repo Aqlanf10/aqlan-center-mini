@@ -37,6 +37,14 @@ vi.mock("react", () => ({
       mock.slots[n] = { deps, cleanup: effect() };
     }
   },
+  useLayoutEffect: (effect: () => void | (() => void), deps: unknown[]) => {
+    const n = mock.cursor++,
+      old = mock.slots[n];
+    if (!old || deps.some((d, i) => !Object.is(d, old.deps[i]))) {
+      old?.cleanup?.();
+      mock.slots[n] = { deps, cleanup: effect() };
+    }
+  },
 }));
 vi.mock("../lib/inventory-reference-journal", async (original) => ({
   ...(await original<typeof import("../lib/inventory-reference-journal")>()),

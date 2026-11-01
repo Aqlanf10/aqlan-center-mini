@@ -518,6 +518,12 @@ function PlannedVisitsPanel({ patientId, canBook }: { patientId: string; canBook
     finally { setBusy(false); }
   }
 
+  const nearbyTarget = nearby ? visits.find(visit => visit.id === nearby.visitId) : null;
+  const confirmNearby = () => {
+    if (!nearby || !nearbyTarget) return;
+    if (nearby.mode === "book") void book(nearbyTarget, nearby.token);
+    else void rebook(nearbyTarget, nearby.token);
+  };
   const field = "mt-1 block min-h-11 w-full rounded-xl border border-slate-300 px-2 text-sm";
   return (
     <section aria-labelledby={`${uid}-title`} className="rounded-2xl border border-slate-200 bg-white p-4" data-testid="planned-visits">
@@ -573,13 +579,10 @@ function PlannedVisitsPanel({ patientId, canBook }: { patientId: string; canBook
         ))}
       </ul>
       {message ? <p role={message.ok ? "status" : "alert"} className={`mt-2 text-sm ${message.ok ? "text-emerald-700" : "text-red-700"}`}>{message.text}</p> : null}
-      {nearby ? (() => {
-        const target = visits.find(visit => visit.id === nearby.visitId);
-        return target ? (
-          <button type="button" disabled={busy} onClick={() => void (nearby.mode === "book" ? book(target, nearby.token) : rebook(target, nearby.token))}
-            className="mt-2 min-h-11 rounded-xl border border-amber-400 bg-amber-50 px-3 text-xs font-bold text-amber-900">تأكيد الحجز رغم ذلك</button>
-        ) : null;
-      })() : null}
+      {nearbyTarget ? (
+        <button type="button" disabled={busy} onClick={confirmNearby}
+          className="mt-2 min-h-11 rounded-xl border border-amber-400 bg-amber-50 px-3 text-xs font-bold text-amber-900">تأكيد الحجز رغم ذلك</button>
+      ) : null}
     </section>
   );
 }

@@ -4,9 +4,10 @@ import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-reception", role: "reception" }) }));
 
 // Exercise the real component's rendered handlers and state across renders.
-// This repository has no DOM unit-test dependency. Effects are intentionally
-// excluded here; the built-app browser journey covers actual clicks and dialogs.
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
+// This repository has no DOM unit-test dependency. Passive effects are intentionally
+// excluded here; layout ownership is committed before handlers; the built-app browser journey covers actual clicks and dialogs.
+const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
+  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(), pending: [] as (() => void)[] }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   function slot(initial: unknown) {
@@ -14,10 +15,17 @@ vi.mock("react", async (original) => {
     if (!(index in hooks.values)) hooks.values[index] = initial;
     return index;
   }
+  const same = (a?: readonly unknown[], b?: readonly unknown[]) => !!a && !!b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+  const memo = (fn: () => unknown, deps?: readonly unknown[]) => { const i = slot(undefined), old = hooks.memos.get(i);
+    if (old && same(old.deps, deps)) return old.value;
+    const value = fn(); hooks.memos.set(i, { deps, value }); return value; };
+  const layout = (fn: () => void | (() => void), deps?: readonly unknown[]) => { const i = slot(undefined), old = hooks.effects.get(i);
+    if (old && same(old.deps, deps)) return;
+    hooks.pending.push(() => { old?.cleanup?.(); hooks.effects.set(i, { deps, cleanup: fn() || undefined }); }); };
   return {
     ...react,
     useId: () => "quick-appointment",
-    useEffect: () => {},
+    useEffect: () => {}, useLayoutEffect: layout, useMemo: memo, useCallback: (fn: unknown, deps?: readonly unknown[]) => memo(() => fn, deps),
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
       return [hooks.values[index], (value: unknown) => {
@@ -49,6 +57,7 @@ const fetchMock = vi.fn();
 function render(patientId?: number) {
   hooks.cursor = 0;
   const tree = QuickAppointmentModal({ patientId, isOpen: true, onClose, onSuccess });
+  hooks.pending.splice(0).forEach(effect => effect());
   const all = elements(tree);
   return {
     tree,
@@ -89,12 +98,12 @@ function changeField(id: string, value: string) {
 const writes = (url: string) => fetchMock.mock.calls.filter(([target]) => target === url);
 
 beforeEach(() => {
-  hooks.values = [];
+  hooks.values = []; hooks.memos.clear(); hooks.effects.clear(); hooks.pending = [];
   hooks.cursor = 0;
   vi.clearAllMocks();
   vi.stubGlobal("fetch", fetchMock);
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { hooks.effects.forEach(effect => effect.cleanup?.()); vi.unstubAllGlobals(); });
 
 describe("quick booking owns the complete patient-create and appointment request", () => {
   it("locks before a slow patient create and ignores same-tick or later repeated submission", async () => {

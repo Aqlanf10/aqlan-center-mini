@@ -75,7 +75,7 @@ export function useInventoryCommand(workspace: InventoryWorkspace) {
         publish({ ...old, status: old.pending ? "uncertain" : "blocked", message: INVENTORY_RECOVERY_STORAGE });
       }
     }
-  }, [actor, workspace, enabled, token, adopt, publish, session?.role]);
+  }, [actor, workspace, enabled, token, adopt, publish, session]);
   useEffect(() => {
     if (!enabled) return;
     void refresh();

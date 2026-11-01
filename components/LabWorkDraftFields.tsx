@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LAB_IMPRESSION_LABEL, LAB_PRIORITY_LABEL, STUMP_SHADES_ND } from "@/lib/lab";
 import { LAB_PRESCRIPTION_SHADES } from "@/lib/lab-prescription-input";
 import type { LabWorkDraft, LabWorkRetirement } from "@/lib/lab-work-intent-contract";
@@ -83,17 +83,17 @@ export function LabWorkDraftFields({value,workLabel,sourceTooth,disabled,onChang
 export function LabWorkOrderLink({orderId,patientId,disabled,onChanged}:{orderId:number;patientId:number;disabled:boolean;onChanged:()=>void}) {
  const [order,setOrder]=useState<import("@/lib/lab").LabOrder|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState("");
- const [lifetime]=useState(()=>({active:true}));
- useEffect(()=>{lifetime.active=true;return()=>{lifetime.active=false;};},[lifetime]);
+ const lifetime=useRef(false);
+ useLayoutEffect(()=>{lifetime.current=true;return()=>{lifetime.current=false;};},[]);
  async function open(){
   if(busy||disabled)return;setBusy(true);setError("");
   try{const response=await fetch(`/api/lab?patientId=${patientId}`,{cache:"no-store"});const body=await response.json();
    if(!response.ok||!Array.isArray(body.orders))throw Error("تعذّر التحقق من الإرسالية المرتبطة.");
    const found=body.orders.find((row:import("@/lib/lab").LabOrder)=>row.id===orderId&&row.patientId===patientId);
    if(!found)throw Error("لم تُثبت الإرسالية لهذا المريض؛ حدّث بيانات العمل.");
-   if(lifetime.active)setOrder(found);
-  }catch(reason){if(lifetime.active)setError(reason instanceof Error?reason.message:"تعذّر التحميل.");}
-  finally{if(lifetime.active)setBusy(false);}
+   if(lifetime.current)setOrder(found);
+  }catch(reason){if(lifetime.current)setError(reason instanceof Error?reason.message:"تعذّر التحميل.");}
+  finally{if(lifetime.current)setBusy(false);}
  }
  return <div className="mt-3 rounded-lg border border-sky-200 p-3 text-xs">
   <p>هذا العمل مرتبط بالإرسالية RX-{orderId}. تُراجع المواصفات الحالية في نفس الطلب دون إنشاء طلب آخر.</p>

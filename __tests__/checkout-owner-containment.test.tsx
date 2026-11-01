@@ -31,7 +31,13 @@ vi.mock("react", async (original) => {
       if (!(index in frame.values)) frame.values[index] = { current: initial };
       return frame.values[index];
     },
+    useMemo: (compute: () => unknown) => {
+      const frame = runtime.frame!; const index = frame.cursor++;
+      if (!(index in frame.values)) frame.values[index] = compute();
+      return frame.values[index];
+    },
     useCallback: (callback: unknown) => callback,
+    useLayoutEffect: (effect: () => void | (() => void)) => { runtime.frame!.effects.push(effect); },
     useEffect: (effect: () => void | (() => void)) => { runtime.frame!.effects.push(effect); },
   };
 });

@@ -31,3 +31,14 @@ describe("atomic cross-tab clinical admission",()=>{
  it("holds sign admission across network operation; A cannot reserve until B releases",async()=>{const a=await ready(),b=await secondInstance();let release!:()=>void,entered!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{entered=resolve;});const sign=b.withMutationLock("ordinary",async()=>{entered();await gate;return true;});await started;const pending=prepare(a,{procedures:[]});for(let i=0;i<10;i++)await Promise.resolve();expect(harness.writes).toHaveLength(0);release();await sign;await pending;expect(harness.writes).toHaveLength(1);});
  it("refuses capable clinical mutation if Web Locks unavailable",async()=>{const hook=await ready();vi.stubGlobal("navigator",{});const send=vi.fn(async()=>true);await expect(hook.withMutationLock("ordinary",send)).rejects.toThrow();expect(send).not.toHaveBeenCalled();});
 });
+
+it("retry presentation mirrors only the sealed current owner and clears after acknowledgement",async()=>{
+ let hook=await ready();expect(hook.canRetry).toBe(false);
+ const command=await prepare(hook,{diagnosis:"Synthetic unchanged body",procedures:[]});
+ hook=renderHarness();expect(hook.canRetry).toBe(true);
+ await hook.acknowledge({...command.reference,...scope},command.reference);
+ expect(renderHarness().canRetry).toBe(false);
+ const next=await prepare(renderHarness(),{procedures:[]});expect(next.reference.requestKey).not.toBe(command.reference.requestKey);
+ expect(renderHarness().canRetry).toBe(true);
+ owner={};await ready();expect(renderHarness().canRetry).toBe(false);
+});

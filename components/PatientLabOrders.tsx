@@ -30,7 +30,8 @@ const STATUS_MAP: Record<string, { label: string; bg: string; text: string }> = 
   cancelled: { label: "ملغى", bg: "bg-slate-50 border-slate-200", text: "text-slate-500" },
 };
 
-type LabReadOwner = { active: boolean; sequence: number; controller: AbortController | null };
+type LabReadOwner = { scope: string };
+type LabReadRuntime = { owner: LabReadOwner; active: boolean; sequence: number; controller: AbortController | null };
 type LabName = { labName: string; labPhone: string | null };
 type LabReadState =
   | { owner: LabReadOwner; status: "loading" }
@@ -91,7 +92,10 @@ export function PatientLabOrders({
   const scope = JSON.stringify([patientId, session?.username, session?.role, session?.permissions ?? null]);
   const hasPrincipal = !!session?.username && !!session?.role;
   const hasContext = hasPrincipal && Number.isSafeInteger(patientId) && patientId > 0;
-  const owner = useMemo<LabReadOwner>(() => ({ active: false, sequence: 0, controller: null }), [scope]);
+  const owner = useMemo<LabReadOwner>(() => ({ scope }), [scope]);
+  // Lifetime latches are imperative; render-visible results retain immutable owner identity.
+  const runtimeRef = useRef<LabReadRuntime | null>(null);
+  const isOwnerActive = useCallback(() => runtimeRef.current?.owner === owner && runtimeRef.current.active, [owner]);
   const [readState, setReadState] = useState<LabReadState | null>(null);
   const currentRead = readState?.owner === owner ? readState : null;
   const loading = !currentRead || currentRead.status === "loading";
@@ -127,14 +131,15 @@ export function PatientLabOrders({
   const prescriptionOrder = prescriptionSelection?.owner === owner ? prescriptionSelection.order : null;
   const deliveryAppointmentOrder = deliverySelection?.owner === owner ? deliverySelection.order : null;
   const setPrescriptionOrder = (order: LabOrder | null) => {
-    if (owner.active) setPrescriptionSelection(order ? { owner, order } : null);
+    if (isOwnerActive()) setPrescriptionSelection(order ? { owner, order } : null);
   };
   const setDeliveryAppointmentOrder = (order: LabOrder | null) => {
-    if (owner.active) setDeliverySelection(order ? { owner, order } : null);
+    if (isOwnerActive()) setDeliverySelection(order ? { owner, order } : null);
   };
 
   useLayoutEffect(() => {
-    owner.active = hasContext;
+    const runtime: LabReadRuntime = { owner, active: hasContext, sequence: 0, controller: null };
+    runtimeRef.current = runtime;
     if (!hasContext) setReadState({ owner, status: "error", message: hasPrincipal
       ? "تعذّر التحقق من سياق المريض."
       : "انتهت الجلسة. سجّل الدخول من جديد." });
@@ -161,20 +166,22 @@ export function PatientLabOrders({
     setCost("");
     setNote("");
     return () => {
-      owner.active = false;
-      ++owner.sequence;
-      owner.controller?.abort();
-      owner.controller = null;
+      runtime.active = false;
+      ++runtime.sequence;
+      runtime.controller?.abort();
+      runtime.controller = null;
+      if (runtimeRef.current === runtime) runtimeRef.current = null;
     };
   }, [owner, hasContext, hasPrincipal]);
 
   const load = useCallback(async () => {
-    if (!owner.active) return;
-    const sequence = ++owner.sequence;
-    owner.controller?.abort();
+    const runtime = runtimeRef.current;
+    if (!runtime || runtime.owner !== owner || !runtime.active) return;
+    const sequence = ++runtime.sequence;
+    runtime.controller?.abort();
     const controller = new AbortController();
-    owner.controller = controller;
-    const current = () => owner.active && owner.sequence === sequence && !controller.signal.aborted;
+    runtime.controller = controller;
+    const current = () => runtime.active && runtime.sequence === sequence && !controller.signal.aborted;
     setReadState({ owner, status: "loading" });
     try {
       const res = await fetch(`/api/lab?patientId=${patientId}`, { cache: "no-store", signal: controller.signal });
@@ -194,7 +201,7 @@ export function PatientLabOrders({
     } catch {
       if (current()) setReadState({ owner, status: "error", message: READ_ERROR });
     } finally {
-      if (current()) owner.controller = null;
+      if (current()) runtime.controller = null;
     }
   }, [owner, patientId]);
 
@@ -204,9 +211,9 @@ export function PatientLabOrders({
 
   // تحميل المختبرات المسجلة لربط التكلفة بجهتها
   useEffect(() => {
-    if (!owner.active) return;
+    if (!isOwnerActive()) return;
     const controller = new AbortController();
-    const current = () => owner.active && !controller.signal.aborted;
+    const current = () => isOwnerActive() && !controller.signal.aborted;
     void (async () => {
       try {
         const res = await fetch("/api/laboratories", { cache: "no-store", signal: controller.signal });
@@ -222,11 +229,11 @@ export function PatientLabOrders({
       }
     })();
     return () => controller.abort();
-  }, [owner]);
+  }, [owner, isOwnerActive]);
 
   const submitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!owner.active || !labName.trim() || busy || mutationPending.current) return;
+    if (!isOwnerActive() || !labName.trim() || busy || mutationPending.current) return;
     setStatusError(null);
 
     /* التكلفة التزام على جهة مسجلة: نطابق اسم المختبر المكتوب مع المختبرات
@@ -266,9 +273,9 @@ export function PatientLabOrders({
           note: note.trim() || null,
         }),
       });
-      if (!owner.active) return;
+      if (!isOwnerActive()) return;
       const data = await res.json().catch(() => null);
-      if (!owner.active) return;
+      if (!isOwnerActive()) return;
       if (!res.ok) {
         setError(data?.message ?? "تعذّر حفظ طلب المعمل.");
         return;
@@ -281,9 +288,9 @@ export function PatientLabOrders({
       setNote("");
       await load();
     } catch {
-      if (owner.active) setError("تعذّر الاتصال بالخادم.");
+      if (isOwnerActive()) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      if (owner.active) {
+      if (isOwnerActive()) {
         mutationPending.current = false;
         setBusy(false);
       }
@@ -291,7 +298,7 @@ export function PatientLabOrders({
   };
 
   const updateStatus = async (orderId: number, nextStatus: "received" | "delivered") => {
-    if (!owner.active || busy || mutationPending.current) return;
+    if (!isOwnerActive() || busy || mutationPending.current) return;
     const target = orders.find((order) => order.id === orderId && order.patientId === patientId);
     if (!target) return;
     mutationPending.current = true;
@@ -303,10 +310,10 @@ export function PatientLabOrders({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      if (!owner.active) return;
+      if (!isOwnerActive()) return;
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        if (!owner.active) return;
+        if (!isOwnerActive()) return;
         const message = typeof data?.message === "string" && data.message.trim()
           ? data.message
           : "تعذّر تحديث حالة طلب المعمل.";
@@ -317,14 +324,14 @@ export function PatientLabOrders({
         return;
       }
       await load();
-      if (owner.active && nextStatus === "received") {
+      if (isOwnerActive() && nextStatus === "received") {
         setDeliveryAppointmentOrder({ ...target, status: "received" });
       }
     } catch {
       // A lost response does not establish whether the server committed.
-      if (owner.active) setStatusError("تعذّر تأكيد تحديث حالة طلب المعمل. تحقّق من حالته قبل إعادة المحاولة.");
+      if (isOwnerActive()) setStatusError("تعذّر تأكيد تحديث حالة طلب المعمل. تحقّق من حالته قبل إعادة المحاولة.");
     } finally {
-      if (owner.active) {
+      if (isOwnerActive()) {
         mutationPending.current = false;
         setBusy(false);
       }
@@ -334,7 +341,7 @@ export function PatientLabOrders({
   /* إلغاء إرسالية قائمة عند المختبر — من ملف المريض، والمدير وحده: الخادم يحرس
    * البوابة نفسها (رسالة واضحة لغيره)، والزر لا يظهر له أصلًا. */
   const cancelSubmission = async (order: LabOrder) => {
-    if (!owner.active || busy || mutationPending.current) return;
+    if (!isOwnerActive() || busy || mutationPending.current) return;
     const hasCost = Number(order.costMinor) > 0;
     const message = hasCost
       ? `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟\nالتزامها غير المسدَّد يُمحى معها. إن كان مسدَّدًا بسند صرف يبقى أثره المالي للتدقيق.`
@@ -350,18 +357,18 @@ export function PatientLabOrders({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "cancelled", note: "إلغاء من ملف المريض" }),
       });
-      if (!owner.active) return;
+      if (!isOwnerActive()) return;
       const data = await res.json().catch(() => null);
-      if (!owner.active) return;
+      if (!isOwnerActive()) return;
       if (!res.ok) {
         setError(data?.message ?? "تعذّر إلغاء الإرسالية.");
         return;
       }
       await load();
     } catch {
-      if (owner.active) setError("تعذّر الاتصال بالخادم.");
+      if (isOwnerActive()) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      if (owner.active) {
+      if (isOwnerActive()) {
         mutationPending.current = false;
         setBusy(false);
       }
@@ -732,7 +739,7 @@ export function PatientLabOrders({
         </div>
       )}
 
-      {editorOrder && <LabPrescriptionEditor key={`${scope}:${editorOrder.id}`} order={editorOrder} onClose={() => { setEditorSelection(null); void load(); }} onSaved={() => { if (owner.active) { setEditorSelection(null); void load(); } }} />}
+      {editorOrder && <LabPrescriptionEditor key={`${scope}:${editorOrder.id}`} order={editorOrder} onClose={() => { setEditorSelection(null); void load(); }} onSaved={() => { if (isOwnerActive()) { setEditorSelection(null); void load(); } }} />}
       {/* نافذة استمارة طلب المعمل */}
       {prescriptionOrder && (
         <LabPrescriptionModal

@@ -403,7 +403,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
     setMaintenanceRecoveries(current=>{const next=new Map(current);if(maintenance)next.set(recoveryKey,maintenance);else next.delete(recoveryKey);return next;});
     setOrthoRecoveries(current => { const next = new Map(current); if (ortho) next.set(recoveryKey, ortho); else next.delete(recoveryKey); return next; });
     setRestoredCommandKey(invoice ? command!.key : "");
-  }, [patientId, principal, recoveryKey, recoveryOwner, session?.username, setRecoveries, setDebtRecoveries,setRevisionRecoveries,setHistoricalRecoveries,setMoneyRecoveries]);
+  }, [patientId, principal, recoveryKey, recoveryOwner, session?.username, setRecoveries, setDebtRecoveries,setRevisionRecoveries,setHistoricalRecoveries,setMoneyRecoveries,setReconciliationRecoveries,setMaintenanceRecoveries,setOrthoRecoveries]);
   useEffect(() => {
     if (!session?.username) return;
     let active = true,generation=0;
@@ -587,6 +587,18 @@ function PatientLedgerContent({ orthoRecovery, reconciliationRecovery, patientId
       if (current()) setLoading(false);
     }
   }, [patientId]);
+
+  const maintenanceSelection = maintenanceRecovery ?? maintenanceOpen;
+  const handleMaintenanceChanged = () => {
+    if (!maintenanceSelection) return;
+    setMaintenanceOpen({ operation: maintenanceSelection.operation, invoiceId: maintenanceSelection.invoiceId });
+    void load(); onClinicalChange?.();
+  };
+  const maintenanceProps = {
+    patientId, invoiceId: maintenanceSelection?.invoiceId ?? 0, recovery: maintenanceRecovery,
+    onRecoveryChange: onMaintenanceRecoveryChange, financialRecovery,
+    onCancel: () => setMaintenanceOpen(null), onChanged: handleMaintenanceChanged,
+  };
 
   const notifyFinancialChange = useCallback(() => {
     if (readRef.current.active) onClinicalChange?.();
@@ -1050,12 +1062,11 @@ function PatientLedgerContent({ orthoRecovery, reconciliationRecovery, patientId
 
       <InvoiceArchiveList patientId={patientId} refreshKey={ledger} canManage={admin&&!financialBlocked&&mode==="none"&&!busy&&!loading&&!error&&!collectOpen&&correctingReceipt===null}
         onOpen={invoiceId=>{if(!financialBlocked)setMaintenanceOpen({operation:"archive",invoiceId});}}/>
-      {admin&&maintenanceActive?(()=>{
-        const selected=maintenanceRecovery??maintenanceOpen!;
-        const props={patientId,invoiceId:selected.invoiceId,recovery:maintenanceRecovery,onRecoveryChange:onMaintenanceRecoveryChange,
-          financialRecovery,onCancel:()=>setMaintenanceOpen(null),onChanged:()=>{setMaintenanceOpen({operation:selected.operation,invoiceId:selected.invoiceId});void load();onClinicalChange?.();}};
-        return selected.operation==="archive"?<InvoiceArchive key={`archive:${selected.invoiceId}`} {...props}/>:<InvoiceAddService key={`add-service:${selected.invoiceId}`} {...props}/>;
-      })():null}
+      {admin && maintenanceActive && maintenanceSelection ? (
+        maintenanceSelection.operation === "archive"
+          ? <InvoiceArchive key={`archive:${maintenanceSelection.invoiceId}`} {...maintenanceProps}/>
+          : <InvoiceAddService key={`add-service:${maintenanceSelection.invoiceId}`} {...maintenanceProps}/>
+      ) : null}
 
       {admin&&(revisionRecovery||correcting!==null)?<InvoiceCorrection key={revisionRecovery?.invoiceId??correcting!}
         patientId={patientId} invoiceId={revisionRecovery?.invoiceId??correcting!} recovery={revisionRecovery}

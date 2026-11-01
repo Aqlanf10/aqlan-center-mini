@@ -3,12 +3,11 @@
 import { clinicDateString } from "@/lib/schedule";
 import { buildConsentNotePayload } from "@/lib/consent-record";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   FileText,
   PenTool,
   AlertTriangle,
-  CheckCircle2,
   X,
   RotateCcw,
   Save,
@@ -18,7 +17,6 @@ import {
 import {
   CONSENT_TEMPLATES,
   getConsentTemplate,
-  type ConsentTemplate,
 } from "@/lib/consent-templates";
 
 interface ConsentModalProps {
@@ -52,6 +50,15 @@ export function ConsentModal({
 
   const template = getConsentTemplate(selectedTemplateId) ?? CONSENT_TEMPLATES[0];
 
+  const clearSignature = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasSignature(false);
+  }, []);
+
   useEffect(() => {
     if (isOpen) {
       setSignatoryName(patientName);
@@ -62,11 +69,10 @@ export function ConsentModal({
       setError(null);
 
       // إعادة تهيئة الكانفاس بعد الرندرة
-      setTimeout(clearSignature, 100);
+      const timer = setTimeout(clearSignature, 100);
+      return () => clearTimeout(timer);
     }
-  }, [isOpen, patientName, selectedTemplateId]);
-
-  if (!isOpen) return null;
+  }, [isOpen, patientName, selectedTemplateId, clearSignature]);
 
   // دوال الرسم على الكانفاس
   const getCoordinates = (e: MouseEvent | TouchEvent, canvas: HTMLCanvasElement) => {
@@ -118,16 +124,7 @@ export function ConsentModal({
     isDrawing.current = false;
   };
 
-  const clearSignature = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    setHasSignature(false);
-  };
-
-  const handleSaveConsent = async (e: React.FormEvent) => {
+  const handleSaveConsent = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (saving) return;
 
@@ -186,7 +183,9 @@ export function ConsentModal({
     } finally {
       setSaving(false);
     }
-  };
+  }, [saving, agreedToTerms, hasSignature, signatoryName, patientName, template, signatoryRelation, guardianRelation, patientId, openPrintAfterSave, onSigned, onClose]);
+
+  if (!isOpen) return null;
 
   return (
     <div

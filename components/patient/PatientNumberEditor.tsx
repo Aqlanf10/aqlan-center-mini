@@ -13,7 +13,8 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
   const [number, setNumber] = useState(""), [reason, setReason] = useState(""), [confirm, setConfirm] = useState("");
   const [error, setError] = useState(""), [success, setSuccess] = useState("");
   const generation = useRef(0), saving = useRef(false);
-  useEffect(() => { generation.current++; setOpen(false); setSnapshot(null); setError(""); setSuccess(""); saving.current=false; setBusy(false); }, [patientId]);
+  const [savePending, setSavePending] = useState(false);
+  useEffect(() => { generation.current++; setOpen(false); setSnapshot(null); setError(""); setSuccess(""); saving.current=false; setSavePending(false); setBusy(false); }, [patientId]);
   useEffect(() => () => { generation.current++; }, []);
   async function load() {
     if (saving.current) return;
@@ -36,7 +37,7 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
     const newNumber = parsePatientNumber(number);
     if (!newNumber || !numberingReason(reason) || confirm !== snapshot.patientNumber) { setError("أدخل رقمًا صحيحًا وسببًا، واكتب رقم الملف الحالي للتأكيد."); return; }
     const token = generation.current;
-    saving.current=true; setBusy(true); setError("");
+    saving.current=true; setSavePending(true); setBusy(true); setError("");
     try {
       const response = await fetch(`/api/patients/${patientId}/number`, {method: "PATCH", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({patientNumber: newNumber, expectedVersion: snapshot.version, expectedPatientNumber: snapshot.patientNumber, reason})});
@@ -47,7 +48,7 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
       if (!accepted || accepted.patientNumber !== newNumber || BigInt(accepted.version) !== BigInt(snapshot.version) + 1n) { setSnapshot(null); throw new Error("لم يتأكد الحفظ لهذا الملف؛ حدّث الرقم قبل إعادة المحاولة."); }
       setOpen(false); setSnapshot(null); setSuccess(`حُفظ رقم الملف ${accepted.patientNumber} وسُجّل التغيير. أبلغ المريض برقم الدخول الجديد.`); onChanged();
     } catch (cause) { if (token === generation.current) { setError(cause instanceof Error ? cause.message : "لم يتأكد الحفظ؛ حدّث الرقم قبل إعادة المحاولة."); } }
-    finally { if (token === generation.current) {saving.current=false; setBusy(false);} }
+    finally { if (token === generation.current) {saving.current=false; setSavePending(false); setBusy(false);} }
   }
   if (!session || !isAdmin(session.role)) return null;
   return <section className="space-y-3" aria-label="تعديل رقم ملف المريض">
@@ -67,7 +68,7 @@ export function PatientNumberEditor({patientId, onChanged}: {patientId: number; 
       </>}
       {error && <p role="alert" className="text-red-700">{error}</p>}
       <div className="flex gap-3"><button type="button" className="btn btn-secondary min-h-11" disabled={busy} onClick={load}>تحديث الرقم الحالي</button>
-        <button type="button" className="btn btn-secondary min-h-11" disabled={saving.current} onClick={()=>{if(saving.current)return;generation.current++;setOpen(false);setBusy(false);setSnapshot(null);setError("");}}>إلغاء</button></div>
+        <button type="button" className="btn btn-secondary min-h-11" disabled={savePending} onClick={()=>{if(saving.current)return;generation.current++;setOpen(false);setBusy(false);setSnapshot(null);setError("");}}>إلغاء</button></div>
     </form>}
   </section>;
 }

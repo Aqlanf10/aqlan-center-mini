@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "./Modal";
 import { requestBookingWithConfirmation, type NearbyBookingWarning } from "@/lib/nearby-booking-request";
 import { friendlyDate, friendlyTime } from "@/lib/reminders";
 
-type Pending = { warning: NearbyBookingWarning; finish: (accepted: boolean) => void };
+type Pending = { owner: object; token: object; warning: NearbyBookingWarning; finish: (accepted: boolean) => void };
 
 export function NearbyBookingDialog({ warning, onDecision }: {
   warning: NearbyBookingWarning; onDecision: (accepted: boolean) => void;
@@ -34,36 +34,40 @@ export function NearbyBookingDialog({ warning, onDecision }: {
 export function useNearbyBooking(scope?: unknown) {
   const [pending, setPending] = useState<Pending | null>(null);
   const pendingRef = useRef<Pending | null>(null);
-  const owner = useRef({ scope, live: true, busy: false });
-  if (owner.current.scope !== scope) {
-    owner.current.live = false;
-    pendingRef.current?.finish(false);
-    pendingRef.current = null;
-    owner.current = { scope, live: true, busy: false };
-  }
-  useEffect(() => {
-    const current = owner.current;
-    current.live = true;
-    return () => { current.live = false; pendingRef.current?.finish(false); pendingRef.current = null; };
-  }, [scope]);
-  const decide = useRef((value: Pending, accepted: boolean) => {
-    if (pendingRef.current !== value) return;
+  const token = useMemo(() => ({ scope }), [scope]);
+  const owner = useRef<{ token: typeof token; live: boolean; busy: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const current = { token, live: true, busy: false };
+    owner.current = current;
+    setPending(null);
+    return () => {
+      current.live = false;
+      if (pendingRef.current?.owner === current) {
+        pendingRef.current.finish(false);
+        pendingRef.current = null;
+      }
+      if (owner.current === current) owner.current = null;
+    };
+  }, [token]);
+  const decide = useCallback((value: Pending, accepted: boolean) => {
+    if (pendingRef.current !== value || owner.current !== value.owner || !owner.current.live) return;
     pendingRef.current = null;
     setPending(null);
     value.finish(accepted);
-  }).current;
-  const bookingFetch = useRef(async (url: string, init: RequestInit, stillCurrent: () => boolean = () => true) => {
+  }, []);
+  const bookingFetch = useCallback(async (url: string, init: RequestInit, stillCurrent: () => boolean = () => true) => {
     const current = owner.current;
-    if (!current.live || current.busy) return new Response(JSON.stringify({ message: "طلب الحجز قيد المراجعة. لم يُرسل طلب إضافي." }), { status: 409 });
+    if (!current || current.token !== token || !current.live || current.busy) return new Response(JSON.stringify({ message: "طلب الحجز قيد المراجعة. لم يُرسل طلب إضافي." }), { status: 409 });
     current.busy = true;
     try {
       return await requestBookingWithConfirmation(url, init, warning => new Promise<boolean>(finish => {
-        const value = { warning, finish };
+        const value = { owner: current, token, warning, finish };
         pendingRef.current = value;
         setPending(value);
       }), () => current.live && owner.current === current && stillCurrent());
     } finally { current.busy = false; }
-  }).current;
-  return { bookingFetch, nearbyBookingDialog: pending && pendingRef.current === pending
+  }, [token]);
+  // Only the committed generation can publish a prompt; render never retires a request.
+  return { bookingFetch, nearbyBookingDialog: pending && pending.token === token
     ? <NearbyBookingDialog warning={pending.warning} onDecision={accepted => decide(pending, accepted)} /> : null };
 }

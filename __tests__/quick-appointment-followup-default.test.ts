@@ -15,6 +15,7 @@ vi.mock("../components/useReturnBookingContext", () => ({ useReturnBookingContex
 // database, bootstrap, or live fetch is imported/executed.
 const hooks = vi.hoisted(() => ({
   values: [] as unknown[], cursor: 0, effectCursor: 0, dirty: false,
+  memos: new Map<number, { deps?: DependencyList; value: unknown }>(),
   effects: [] as { deps?: DependencyList; cleanup?: ReturnType<EffectCallback> }[],
   pending: [] as { index: number; deps?: DependencyList; run: EffectCallback }[],
 }));
@@ -25,6 +26,19 @@ vi.mock("react", async (original) => {
     if (!(index in hooks.values)) hooks.values[index] = initial;
     return index;
   }
+  const effect = (run: EffectCallback, deps?: DependencyList) => {
+      const index = hooks.effectCursor++;
+      const previous = hooks.effects[index];
+      if (!previous || !deps || !previous.deps || deps.length !== previous.deps.length ||
+        deps.some((value, position) => !Object.is(value, previous.deps![position]))) {
+        hooks.pending.push({ index, deps, run });
+      }
+    };
+  const memo = (fn: () => unknown, deps?: DependencyList) => {
+    const index = slot(undefined), old = hooks.memos.get(index);
+    if (old && deps && old.deps && deps.length === old.deps.length && deps.every((v, n) => Object.is(v, old.deps![n]))) return old.value;
+    const value = fn(); hooks.memos.set(index, { deps, value }); return value;
+  };
   return {
     ...react,
     useId: () => "booking-default-audit",
@@ -37,14 +51,8 @@ vi.mock("react", async (original) => {
       }];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
-    useEffect: (run: EffectCallback, deps?: DependencyList) => {
-      const index = hooks.effectCursor++;
-      const previous = hooks.effects[index];
-      if (!previous || !deps || !previous.deps || deps.length !== previous.deps.length ||
-        deps.some((value, position) => !Object.is(value, previous.deps![position]))) {
-        hooks.pending.push({ index, deps, run });
-      }
-    },
+    useEffect: effect, useLayoutEffect: effect,
+    useMemo: memo, useCallback: (fn: unknown, deps?: DependencyList) => memo(() => fn, deps),
   };
 });
 // Modal's native dialog/window effects are outside this isolated hook audit.
@@ -121,7 +129,7 @@ async function settle() { for (let i = 0; i < 20; i++) await Promise.resolve(); 
 async function services(rows: ReturnType<typeof catalog>[], status = 200) { serviceRequest.resolve(response(status, { services: rows, chairs: 2 })); await settle(); }
 function selected() { return render().all.filter((node) => node.type === "button" && node.props["aria-pressed"] === true).map(text); }
 function cleanup() { for (const effect of hooks.effects) if (typeof effect.cleanup === "function") effect.cleanup(); }
-function resetHooks() { hooks.values = []; hooks.cursor = 0; hooks.effectCursor = 0; hooks.effects = []; hooks.pending = []; hooks.dirty = false; }
+function resetHooks() { hooks.values = []; hooks.memos.clear(); hooks.cursor = 0; hooks.effectCursor = 0; hooks.effects = []; hooks.pending = []; hooks.dirty = false; }
 beforeEach(() => {
   resetHooks(); open = true; patientProp = 91001; intent = "ortho_follow_up"; vi.clearAllMocks();
   serviceRequest = deferred(); vi.stubGlobal("fetch", fetchMock);

@@ -1,19 +1,26 @@
 import { type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const hooks = vi.hoisted(() => ({ username: "synthetic-a", values: [] as unknown[], cursor: 0, effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(), pending: [] as (() => void)[] }));
+const hooks = vi.hoisted(() => ({ username: "synthetic-a", values: [] as unknown[], cursor: 0, memos: new Map<number, { deps: readonly unknown[]; value: unknown }>(), effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(), pending: [] as (() => void)[] }));
 vi.mock("react", async original => {
   const react = await original<typeof import("react")>();
   const slot = (initial: unknown) => { const i = hooks.cursor++; if (!(i in hooks.values)) hooks.values[i] = initial; return i; };
-  return { ...react,
-    useState: (initial: unknown) => { const i = slot(initial); return [hooks.values[i], (value: unknown) => { hooks.values[i] = typeof value === "function" ? value(hooks.values[i]) : value; }]; },
-    useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
-    useEffect: (effect: () => void | (() => void), deps: readonly unknown[]) => {
+
+  const effect = (effect: () => void | (() => void), deps: readonly unknown[]) => {
       const i = hooks.cursor++; const old = hooks.effects.get(i);
       if (old?.deps && old.deps.length === deps.length && old.deps.every((value, index) => Object.is(value, deps[index]))) return;
       const next = { deps, cleanup: undefined as (() => void) | undefined }; hooks.effects.set(i, next);
       hooks.pending.push(() => { old?.cleanup?.(); next.cleanup = effect() || undefined; });
-    },
+    };
+  const memo = (compute: () => unknown, deps: readonly unknown[]) => {
+    const i = slot(undefined), old = hooks.memos.get(i);
+    if (old && old.deps.length === deps.length && old.deps.every((v, n) => Object.is(v, deps[n]))) return old.value;
+    const value = Object.freeze(compute()); hooks.memos.set(i, { deps, value }); return value;
+  };
+  return { ...react,
+    useState: (initial: unknown) => { const i = slot(initial); return [hooks.values[i], (value: unknown) => { hooks.values[i] = typeof value === "function" ? value(hooks.values[i]) : value; }]; },
+    useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
+    useMemo: memo, useLayoutEffect: effect, useEffect: effect,
   };
 });
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: hooks.username, role: "reception" }) }));
@@ -40,7 +47,7 @@ const success = { ok: true, patientId: 19, source, doctorId: 71, doctorName: "Cu
 type Element = ReactElement<Record<string, unknown>>;
 function elements(node: ReactNode): Element[] { if (Array.isArray(node)) return node.flatMap(elements); if (!node || typeof node !== "object" || !("props" in node)) return []; return [node as Element, ...elements((node as Element).props.children as ReactNode)]; }
 function choose(view: ReactNode, value: string) { const select = elements(view).find(node => node.type === "select")!; (select.props.onChange as (event: unknown) => void)({ target: { value } }); }
-beforeEach(() => { hooks.username = "synthetic-a"; hooks.values = []; hooks.cursor = 0; hooks.effects.clear(); hooks.pending = []; args = { patientId: 19, enabled: true }; });
+beforeEach(() => { hooks.username = "synthetic-a"; hooks.values = []; hooks.cursor = 0; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = []; args = { patientId: 19, enabled: true }; });
 afterEach(() => { hooks.effects.forEach(effect => effect.cleanup?.()); vi.unstubAllGlobals(); });
 describe("shared current-responsibility return booking UI", () => {
   it("requires an exact clinical context choice, not an arbitrary doctor", async () => {
@@ -97,4 +104,12 @@ describe("shared current-responsibility return booking UI", () => {
     expect(renderToStaticMarkup(denied.view)).not.toContain("Current source clinician");
   });
 
+});
+
+it("a committed principal A to B to A never revives old listed cases before a fresh response", async () => {
+ const fetcher = vi.fn().mockResolvedValueOnce(reply({contexts:[option]})).mockImplementation(() => new Promise(() => {})); vi.stubGlobal("fetch",fetcher);
+ render();const listed=await flush();expect(renderToStaticMarkup(listed.view)).toContain(option.label);
+ hooks.username="synthetic-b";expect(renderToStaticMarkup(render().view)).not.toContain(option.label);
+ hooks.username="synthetic-a";const again=render();expect(again.ready).toBe(false);expect(renderToStaticMarkup(again.view)).not.toContain(option.label);
+ expect(fetcher).toHaveBeenCalledTimes(3);
 });

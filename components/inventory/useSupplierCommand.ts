@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   SUPPLIER_PROTOCOL,
   type SupplierIntent,
@@ -48,7 +48,10 @@ export function useSupplierCommand(
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const live = useRef(authority);
-  live.current = authority;
+  useLayoutEffect(() => {
+    live.current = authority;
+    return () => { if (live.current === authority) live.current = null; };
+  }, [authority]);
   const inFlight = useRef(false);
   const realm = authority?.realmId,
     subject = authority?.subjectId,

@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./SessionProvider";
 
 import { parseReturnBookingSource, type ReturnBookingSource } from "@/lib/return-booking-source";
 type SettingsTarget = { kind: "clinical" | "ortho"; id: number };
 type ContextOption = { source: ReturnBookingSource; label: string; doctorId: number | null; doctorName: string | null; settingsTarget: SettingsTarget; available: boolean };
 type Verified = { ok: true; patientId: number; source: ReturnBookingSource; doctorId: number; doctorName: string; fingerprint: string; settingsTarget?: SettingsTarget; label?: string };
-type Read = { scope: string; verified: Verified | null; contexts: ContextOption[]; message: string | null; settingsTarget?: SettingsTarget };
+type Read = { token: object; scope: string; verified: Verified | null; contexts: ContextOption[]; message: string | null; settingsTarget?: SettingsTarget };
 const sourceKey = (source?: ReturnBookingSource | null) => source ? `${source.kind}:${source.id}` : "";
 const isSource = (source: unknown): source is ReturnBookingSource => parseReturnBookingSource(source) !== null;
 const isSettings = (value: unknown): value is SettingsTarget => !!value && typeof value === "object"
@@ -19,23 +19,30 @@ export function useReturnBookingContext({ patientId, source, enabled, locked = f
 }) {
   const session = useSession();
   const baseScope = JSON.stringify([session?.username, session?.role, session?.permissions, enabled, patientId, sourceKey(source)]);
-  const [choice, setChoice] = useState<{ scope: string; source: ReturnBookingSource } | null>(null);
-  const selected = choice?.scope === baseScope ? choice.source : source ?? null;
-  const [optionsRead, setOptionsRead] = useState<{ scope: string; contexts: ContextOption[] } | null>(null);
+  const baseToken = useMemo(() => ({ baseScope }), [baseScope]);
+  const [choice, setChoice] = useState<{ token: object; source: ReturnBookingSource } | null>(null);
+  const selected = choice?.token === baseToken ? choice.source : source ?? null;
+  const [optionsRead, setOptionsRead] = useState<{ token: object; contexts: ContextOption[] } | null>(null);
   const selectedKey = sourceKey(selected);
   const originQuery = source && sourceKey(source) !== selectedKey ? `&originKind=${source.kind}&originId=${source.id}` : "";
   const query = selected ? `?kind=${selected.kind}&sourceId=${selected.id}${originQuery}` : "";
   const [revision, setRevision] = useState(0);
   const scope = JSON.stringify([baseScope, sourceKey(selected), revision]);
   const [read, setRead] = useState<Read | null>(null);
-  const lifetime = useRef({ scope, live: true });
-  if (lifetime.current.scope !== scope) { lifetime.current.live = false; lifetime.current = { scope, live: true }; }
-  const current = read?.scope === scope ? read : null;
+  const token = useMemo(() => ({ scope }), [scope]);
+  const lifetime = useRef<{ token: typeof token; live: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const owner = { token, live: true };
+    lifetime.current = owner;
+    return () => { owner.live = false; if (lifetime.current === owner) lifetime.current = null; };
+  }, [token]);
+  const current = read?.token === token ? read : null;
   const verified = current?.verified ?? null;
   useEffect(() => {
-    const owner = lifetime.current; owner.live = true;
+    const owner = lifetime.current;
+    if (!owner || owner.token !== token) return;
     const controller = new AbortController();
-    const fail = (message: string) => { if (owner.live && lifetime.current === owner) setRead({ scope, verified: null, contexts: [], message }); };
+    const fail = (message: string) => { if (owner.live && lifetime.current === owner) setRead({ token, scope, verified: null, contexts: [], message }); };
     const timeout = setTimeout(() => { controller.abort(); fail("تعذّر التحقق من الطبيب المسؤول في الوقت المحدد. أعد المحاولة."); }, 15_000);
     if (enabled && Number.isSafeInteger(patientId) && Number(patientId) > 0) void (async () => {
       try {
@@ -43,8 +50,8 @@ export function useReturnBookingContext({ patientId, source, enabled, locked = f
         const data = await response.json().catch(() => null);
         if (!owner.live || lifetime.current !== owner || controller.signal.aborted) return;
         if (response.status === 401 || response.status === 403) {
-          setOptionsRead({ scope: baseScope, contexts: [] });
-          setRead({ scope, verified: null, contexts: [], message: "انتهت الجلسة أو تغيّرت صلاحية هذا الملف. أعد التحقق من الوصول قبل الحجز." });
+          setOptionsRead({ token: baseToken, contexts: [] });
+          setRead({ token, scope, verified: null, contexts: [], message: "انتهت الجلسة أو تغيّرت صلاحية هذا الملف. أعد التحقق من الوصول قبل الحجز." });
           return;
         }
         const valid = response.ok && data?.ok === true && data.patientId === patientId && isSource(data.source)
@@ -52,30 +59,30 @@ export function useReturnBookingContext({ patientId, source, enabled, locked = f
           && typeof data.doctorName === "string" && data.doctorName.trim() && typeof data.fingerprint === "string" && /^[a-f0-9]{64}$/.test(data.fingerprint);
         const contexts: ContextOption[] = Array.isArray(data?.contexts) ? data.contexts.filter((item: ContextOption) => item && isSource(item.source)
           && ["clinical_case", "ortho_case"].includes(item.source.kind) && typeof item.label === "string" && isSettings(item.settingsTarget)) : [];
-        if (contexts.length || !selectedKey) setOptionsRead({ scope: baseScope, contexts });
+        if (contexts.length || !selectedKey) setOptionsRead({ token: baseToken, contexts });
         const target = isSettings(data?.settingsTarget) ? data.settingsTarget : contexts.find(item => sourceKey(item.source) === selectedKey)?.settingsTarget ?? (contexts.length === 1 ? contexts[0].settingsTarget : undefined);
-        setRead({ scope, verified: valid ? data : null, contexts,
+        setRead({ token, scope, verified: valid ? data : null, contexts,
           message: valid || (!selectedKey && response.ok) ? null : typeof data?.message === "string" ? data.message : "تعذّر التحقق من سياق الحالة والطبيب المسؤول.", settingsTarget: target });
       } catch { if (!controller.signal.aborted) fail("تعذّر تحميل الطبيب المسؤول. أعد المحاولة."); }
       finally { clearTimeout(timeout); }
     })();
     else clearTimeout(timeout);
     return () => { owner.live = false; controller.abort(); clearTimeout(timeout); };
-  }, [scope, baseScope, enabled, patientId, query, selectedKey]);
-  const refresh = () => setRevision(value => value + 1);
+  }, [token, scope, baseToken, enabled, patientId, query, selectedKey]);
+  const refresh = () => { if (lifetime.current?.token === token) setRevision(value => value + 1); };
   const handleRejection = (payload: unknown) => {
     const code = payload && typeof payload === "object" ? (payload as { code?: unknown }).code : null;
     if (typeof code === "string" && (code.startsWith("return_source_") || code.startsWith("responsibility_") || code === "ortho_booking_source_changed" || code === "return_booking_source_changed")) {
-      lifetime.current.live = false; refresh();
+      if (lifetime.current?.token === token) { lifetime.current.live = false; refresh(); }
     }
   };
   const target = verified?.settingsTarget ?? current?.settingsTarget;
   const settingsHref = target && patientId ? `/patients/${patientId}?tab=treatment&sub=${target.kind === "ortho" ? "ortho" : "cases"}&patientId=${patientId}&${target.kind === "ortho" ? "orthoCaseId" : "clinicalCaseId"}=${target.id}` : null;
-  const options = optionsRead?.scope === baseScope ? optionsRead.contexts : current?.contexts ?? [];
+  const options = optionsRead?.token === baseToken ? optionsRead.contexts : current?.contexts ?? [];
   const view = !enabled ? null : <section aria-label="الطبيب المسؤول عن موعد المراجعة" className="my-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-navy-950" dir="rtl">
     {!source || options.length > 1 || sourceKey(selected) !== sourceKey(source) ? <label className="block text-xs font-bold">الحالة التي تخصها المراجعة
       <select disabled={locked} aria-label="سياق موعد المراجعة" value={sourceKey(selected)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2"
-        onChange={event => { const option = options.find(item => sourceKey(item.source) === event.target.value); setChoice(option ? { scope: baseScope, source: option.source } : null); }}>
+        onChange={event => { const option = options.find(item => sourceKey(item.source) === event.target.value); setChoice(option ? { token: baseToken, source: option.source } : null); }}>
         <option value="">اختر الحالة المقصودة</option>
         {options.map(item => <option key={sourceKey(item.source)} value={sourceKey(item.source)}>{item.label}</option>)}
         {selected && !options.some(item => sourceKey(item.source) === sourceKey(selected)) ? <option value={sourceKey(selected)}>{verified?.label ?? "الحالة المحددة"}</option> : null}
@@ -95,6 +102,6 @@ export function useReturnBookingContext({ patientId, source, enabled, locked = f
     intrinsicPayload: verified ? { returnBookingSource: verified.source, returnBookingFingerprint: verified.fingerprint } : {},
     payload: verified ? { returnBookingSource: verified.source, returnBookingFingerprint: verified.fingerprint,
       ...(source && sourceKey(source) !== sourceKey(verified.source) ? { returnBookingOrigin: source } : {}) } : {},
-    isCurrent: () => !enabled || !!verified && lifetime.current.live && lifetime.current.scope === scope,
+    isCurrent: () => !enabled || !!verified && lifetime.current?.live === true && lifetime.current.token === token,
   };
 }

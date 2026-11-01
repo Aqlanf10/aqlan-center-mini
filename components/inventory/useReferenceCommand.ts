@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   REFERENCE_PROTOCOL,
   type ReferenceAuthority,
@@ -21,8 +21,7 @@ export function useReferenceCommand(
   const token = JSON.stringify(authority),
     current = useRef(token),
     flight = useRef(false);
-  current.current = token;
-  useEffect(() => {
+  useLayoutEffect(() => {
     current.current = token;
     return () => {
       current.current = "";

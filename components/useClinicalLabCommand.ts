@@ -12,6 +12,7 @@ export function useClinicalLabCommand(parent:object,scope:ClinicalLabScope|null,
  const live=useRef<object|null>(owner),liveScope=useRef(key);
  useLayoutEffect(()=>{live.current=owner;liveScope.current=key;return()=>{if(live.current===owner&&liveScope.current===key)live.current=null;};},[owner,key]);
  const admission=useRef<{owner:object;journal:ClinicalLabJournal|null}|null>(null);
+ const [sealedOwner,setSealedOwner]=useState<object|null>(null);
  const sealed=useRef<{owner:object;body:string;reference:ClinicalLabReference}|null>(null);
  useEffect(()=>{let active=true;if(!enabled||!scope)return;
   void readClinicalLabReference(scope).then(journal=>{if(active&&live.current===owner&&liveScope.current===key)setState({owner,key,journal,error:""});})
@@ -26,7 +27,7 @@ export function useClinicalLabCommand(parent:object,scope:ClinicalLabScope|null,
  const receiptMatches=(raw:unknown,reference:ClinicalLabReference)=>{if(!raw||typeof raw!=="object"||!scope)return false;const row=raw as Record<string,unknown>;return row.requestKey===reference.requestKey&&row.requestHash===reference.requestHash&&row.actor===scope.actor&&row.patientId===scope.patientId&&row.visitId===scope.visitId;};
  function verifyReceipt(raw:unknown,reference:ClinicalLabReference){guard();if(!receiptMatches(raw,reference))throw Error("تعذّر إثبات نتيجة حفظ المختبر؛ تحقق من الطلب قبل أي تعديل.");}
  async function acknowledge(raw:unknown,reference:ClinicalLabReference){verifyReceipt(raw,reference);
-  const next=await acknowledgeClinicalLabReference(scope!,reference);guard();setState({owner,key,journal:next,error:""});sealed.current=null;
+  const next=await acknowledgeClinicalLabReference(scope!,reference);guard();setState({owner,key,journal:next,error:""});sealed.current=null;setSealedOwner(null);
  }
  async function prepare(body:Record<string,unknown>){guard();const fresh=admission.current;const journal=fresh?.owner===owner?fresh.journal:null;if(!journal)throw Error("لم يكتمل التحقق الحصري من مرجع الحفظ.");
   const pending=journal.pending;
@@ -36,7 +37,7 @@ export function useClinicalLabCommand(parent:object,scope:ClinicalLabScope|null,
   const reference=await clinicalLabBodyReference(requestKey,encoded);guard();
   const next=await reserveClinicalLabReference(scope!,journal.revision,reference);guard();setState({owner,key,journal:next,error:""});
   if(next.pending?.requestKey!==reference.requestKey||next.pending.requestHash!==reference.requestHash)throw Error("توجد عملية أخرى لهذه الزيارة؛ تحقق منها قبل الحفظ.");
-  const value={owner,body:encoded,reference};sealed.current=value;return value;
+  const value={owner,body:encoded,reference};sealed.current=value;setSealedOwner(owner);return value;
  }
  async function withMutationLock<T>(kind:"ordinary"|"lab"|"reconcile",run:()=>Promise<T>):Promise<T>{
   const identity=lockScope??scope;if(!identity)throw Error("تعذّر إثبات نطاق قفل الزيارة.");
@@ -57,5 +58,5 @@ export function useClinicalLabCommand(parent:object,scope:ClinicalLabScope|null,
   if(body.result?.outcome!==undefined&&body.result.outcome!=="applied"&&body.result.outcome!=="rejected")throw Error("نتيجة الطلب غير معروفة؛ بقي مرجع الحفظ محفوظًا.");
   return {reference:pending,receipt:body.receipt,outcome:body.result?.outcome==="rejected"?"rejected" as const:"applied" as const};
  }
- return {prepare,withMutationLock,verifyReceipt,acknowledge,reconcile,retryReference:()=>{guard();setReadAttempt(value=>value+1);},pending,blocked:enabled&&(!journal||!!pending),error:state.owner===owner&&state.key===key?state.error:"",canRetry:!!pending&&sealed.current?.owner===owner};
+ return {prepare,withMutationLock,verifyReceipt,acknowledge,reconcile,retryReference:()=>{guard();setReadAttempt(value=>value+1);},pending,blocked:enabled&&(!journal||!!pending),error:state.owner===owner&&state.key===key?state.error:"",canRetry:!!pending&&sealedOwner===owner};
 }
