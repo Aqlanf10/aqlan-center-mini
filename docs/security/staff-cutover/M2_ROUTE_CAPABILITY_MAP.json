@@ -499,8 +499,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice54: explicit saved-draft completion with clinical.ceph.analyze and patient scope; patient/study/reference/child locks, fresh authority and opaque saved observation; existing computation and atomic measurements/status/audit. Refuse a retained known measurement unavailable in the current geometry without deleting history or changing clinical engine. Minimal acknowledgment and no automatic retry after lost reply; legacy adapter retained."
  },
  {
   "route": "/api/ceph/[id]/duplicate",

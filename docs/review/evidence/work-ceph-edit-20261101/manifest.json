@@ -1,7 +1,7 @@
 {
   "format": "work-ceph-edit-v1",
   "baseRevision": "1990b9666961e23a4e15dccd5919d868f6be2dc2",
-  "sourceRevision": "recorded by next evidence commit; hashes pin this source",
+  "sourceRevision": "62bd83aea3d4831060152aec25c4caf4cd954c7b",
   "buildId": "8dLEKtaabiYlOEioDU6d0",
   "acceptance": {
     "focusedPostgres": {

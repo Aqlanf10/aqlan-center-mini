@@ -30,16 +30,16 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 46 on WORK)
+### Counts (386 mapped route/method entries, after local slice 54 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 270 |
+| existing | 269 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 74 |
+| canonical-done | 75 |
 
 | Record scope | Routes |
 |---|---|

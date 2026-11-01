@@ -25523,74 +25523,77 @@ export async function getCephReferenceSet(key: string): Promise<CephReferenceSet
  * وبلا معالم كاملة. والختم يجري في معاملة القفل نفسها: لا فجوةٌ تُقرأ فيها
  * مسودةٌ معتمدة بلا أرقام، ولا أرقامٌ لتحليلٍ ما زال مسودة.
  */
-export async function completeCephAnalysis(
-  id: number, by: string,
-): Promise<CephCompleteResult> {
+/** Same saved-data computation and status transition on the caller-owned transaction. */
+export async function completeCephAnalysisInTransaction(
+  client: DbClient, id: number, by: string,
+): Promise<{ result: CephCompleteResult; auditLabel?: string }> {
+  const { rows } = await client.query<CephAnalysisDbRow>(
+    `SELECT * FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  const analysis = rows[0];
+  if (!analysis) { return { result: { ok: false, message: "التحليل غير موجود." } }; }
+  if (analysis.status === "completed") {
+    return { result: { ok: false, message: "التحليل معتمد سلفًا." } };
+  }
+  if (analysis.status !== "draft") {
+    return { result: { ok: false, message: "التحليل مرفوض — لا يُعتمد." } };
+  }
+  if (analysis.mm_per_pixel == null) {
+    return { result: { ok: false, message: "اعتمد بلا معايرة ممنوع: عاير الشععة أولًا حتى تكون الأطوال بالمليمتر." } };
+  }
+
+  const { rows: lm } = await client.query<{ code: string; x: number; y: number }>(
+    `SELECT code, x, y FROM ceph_landmarks WHERE analysis_id = $1`, [id],
+  );
+  const map: LandmarkMap = {};
+  for (const r of lm) if (isCephLandmarkCode(r.code)) map[r.code as LandmarkCode] = { x: r.x, y: r.y };
+  const missing = REQUIRED_LANDMARKS.filter((c) => map[c] == null);
+  if (missing.length > 0) {
+    return { result: { ok: false, message: `المعالم ناقصة: ${missing.join("، ")}` } };
+  }
+
+  const results = computeAll(map, analysis.mm_per_pixel);
+  const stamped = results.filter((r) => r.value != null) as { code: string; value: number }[];
+  // Never approve a retained known measurement which the current geometry cannot produce.
+  // Do not delete historical values or introduce new clinical thresholds.
+  const existing = await client.query<{ code: string }>("SELECT code FROM ceph_measurements WHERE analysis_id=$1 FOR SHARE", [id]);
+  const unavailable = new Set(results.filter(r => r.value == null).map(r => r.code));
+  if (existing.rows.some(r => unavailable.has(r.code))) {
+    return { result: { ok: false, message: "توجد قياسات محفوظة لا تنتجها المعالم الحالية. راجع المعايرة والمعالم قبل الاعتماد؛ لم تُحذف القياسات ولم تُعتمد الدراسة." } };
+  }
+  for (const r of stamped) {
+    await client.query(
+      `INSERT INTO ceph_measurements (analysis_id, code, value) VALUES ($1, $2, $3)
+       ON CONFLICT (analysis_id, code) DO UPDATE SET value = EXCLUDED.value`,
+      [id, r.code, r.value],
+    );
+  }
+  await client.query(
+    `UPDATE ceph_analyses SET status='completed', completed_by=$2, completed_at=NOW() WHERE id=$1`,
+    [id, by],
+  );
+  const summary = summarize(results);
+  return {
+    result: { ok: true, measurements: stamped.map(r => ({ code: r.code, value: r.value })), summary: `${summary.skeletal} · ${summary.vertical}` },
+    auditLabel: `ANB=${stamped.find(r => r.code === "ANB")?.value ?? "—"} · FMA=${stamped.find(r => r.code === "FMA")?.value ?? "—"} · ${summary.skeletal}`,
+  };
+}
+
+export async function completeCephAnalysis(id: number, by: string): Promise<CephCompleteResult> {
   await ensureSchema();
   const client = await getPool().connect();
+  let discardLease = false;
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<CephAnalysisDbRow>(
-      `SELECT * FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    const analysis = rows[0];
-    if (!analysis) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (analysis.status === "completed") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل معتمد سلفًا." };
-    }
-    if (analysis.status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل مرفوض — لا يُعتمد." };
-    }
-    if (analysis.mm_per_pixel == null) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "اعتمد بلا معايرة ممنوع: عاير الشععة أولًا حتى تكون الأطوال بالمليمتر." };
-    }
-
-    const { rows: lm } = await client.query<{ code: string; x: number; y: number }>(
-      `SELECT code, x, y FROM ceph_landmarks WHERE analysis_id = $1`, [id],
-    );
-    const map: LandmarkMap = {};
-    for (const r of lm) if (isCephLandmarkCode(r.code)) map[r.code as LandmarkCode] = { x: r.x, y: r.y };
-    const missing = REQUIRED_LANDMARKS.filter((c) => map[c] == null);
-    if (missing.length > 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: `المعالم ناقصة: ${missing.join("، ")}` };
-    }
-
-    const results = computeAll(map, analysis.mm_per_pixel);
-    const stamped = results.filter((r) => r.value != null) as { code: string; value: number }[];
-    for (const r of stamped) {
-      await client.query(
-        `INSERT INTO ceph_measurements (analysis_id, code, value) VALUES ($1, $2, $3)
-         ON CONFLICT (analysis_id, code) DO UPDATE SET value = EXCLUDED.value`,
-        [id, r.code, r.value],
-      );
-    }
-    await client.query(
-      `UPDATE ceph_analyses SET status='completed', completed_by=$2, completed_at=NOW() WHERE id=$1`,
-      [id, by],
-    );
+    const done = await completeCephAnalysisInTransaction(client, id, by);
+    if (!done.result.ok) { await client.query("ROLLBACK"); return done.result; }
     await client.query("COMMIT");
-
-    const summary = summarize(results);
-    await recordAudit({
-      action: "ceph.complete", entity: "ceph_analysis", entityId: String(id),
-      entityLabel: `ANB=${stamped.find((r) => r.code === "ANB")?.value ?? "—"} · FMA=${stamped.find((r) => r.code === "FMA")?.value ?? "—"} · ${summary.skeletal}`,
-      actor: by,
-    });
-    return {
-      ok: true,
-      measurements: stamped.map((r) => ({ code: r.code, value: r.value })),
-      summary: `${summary.skeletal} · ${summary.vertical}`,
-    };
+    await recordAudit({ action: "ceph.complete", entity: "ceph_analysis", entityId: String(id), entityLabel: done.auditLabel, actor: by });
+    return done.result;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    try { await client.query("ROLLBACK"); } catch { discardLease = true; }
     throw error;
-  } finally {
-    client.release();
-  }
+  } finally { client.release(discardLease); }
 }
 
 /** رفض مسودة — بدل حذفٍ صامت: الرفض يُوثَّق باسم رافضه. */
