@@ -1,0 +1,11 @@
+{
+  "base": "a9a75d866dccfb520c246747198e282314574130",
+  "checks": {
+    "legacy route body 1": true,
+    "legacy route body 2": true,
+    "lib/db.ts preserved": true,
+    "lib/canonical-ceph-reads.ts preserved": true,
+    "lib/staff-operation-runtime.ts preserved": true
+  },
+  "qualification": "Default clinical list reader, legacy route bodies and shared native writer unchanged; optional canonical ortho link now needs current ortho.view. No files, migrations, finance or responsibility effects introduced."
+}

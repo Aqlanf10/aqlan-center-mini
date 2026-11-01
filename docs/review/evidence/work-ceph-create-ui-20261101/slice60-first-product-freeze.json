@@ -1,0 +1,12 @@
+{
+  "base": "a9a75d866dccfb520c246747198e282314574130",
+  "buildId": "yQhPO28euut2NWw5veVUq",
+  "files": {
+    "app/api/patients/[id]/ceph/route.ts": "d5ad82f49685b91a2e50f60e672007d2c2871d9df3f23e2ffe0aa29c494b1aa3",
+    "components/patient/CanonicalCephStudies.tsx": "1db1870c6a3e72d32e17ff5a0927a99e7f73d326fa99c5be28b2c33889e9ae19",
+    "components/patient/CanonicalPatientProfile.tsx": "5670835450fc77b8eec326619c5b78f1af3380f4d184ef748eedc60677c91758",
+    "components/patient/CanonicalCephCreate.tsx": "97ee266ef1c427b3128845a24647e55032b8f11db3b7e4a10ed06599e1451c8b",
+    "lib/canonical-ceph-create-context.ts": "74ea4fd5b981c0590be682a23459bfee64b884eaae508bcb67186664e52bcddc",
+    "lib/canonical-ceph-create-projection.ts": "dd4f7411d06ba5590169591e19ed1e565cb5d2be00930c71e61c9a7364ed947e"
+  }
+}

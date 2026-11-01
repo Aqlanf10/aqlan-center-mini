@@ -1,3 +1,4 @@
+import { canonicalCephCreateQuery, readCanonicalCephCreateContext } from "@/lib/canonical-ceph-create-context";
 import { CanonicalCephCreateRefusal, commandCanonicalCephCreate } from "@/lib/canonical-ceph-create-command";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE,canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
@@ -36,6 +37,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});
   if(selected.kind==="canonical") {
     try {
+      const params = new URL(_request.url).searchParams;
+      if (params.has("create")) {
+        const input = canonicalCephCreateQuery((await context.params).id, params);
+        return NextResponse.json(await readCanonicalCephCreateContext(selected.handle, input.patientId, input.imagesBefore), { headers: NO_STORE });
+      }
       const patientId=canonicalCephReadId((await context.params).id,new URL(_request.url).searchParams,true);
       return NextResponse.json(await readCanonicalCephList(selected.handle,patientId),{headers:NO_STORE});
     } catch(error) {

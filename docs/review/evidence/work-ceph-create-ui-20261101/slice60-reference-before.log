@@ -1,0 +1,35 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+[security-http] الخادم جاهز على http://127.0.0.1:11917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ceph-create-ui-journey.test.ts (13 tests | 1 failed | 12 skipped) 8303ms
+   × browser: an inactive default is not silently offered over the current active reference catalogue 2333ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ceph-create-ui-journey.test.ts > browser: an inactive default is not silently offered over the current active reference catalogue
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ __tests__/security-http/canonical-ceph-create-ui-journey.test.ts:79:425
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 skipped (13)
+   Start at  16:46:15
+   Duration  12.83s (transform 196ms, setup 0ms, import 665ms, tests 8.30s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

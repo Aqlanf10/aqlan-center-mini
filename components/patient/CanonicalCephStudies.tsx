@@ -3,6 +3,7 @@ import { formatClinicDate } from "@/lib/clinic-clock";
 import { CanonicalCephComparison } from "./CanonicalCephComparison";
 import { CanonicalCephStudy } from "./CanonicalCephStudy";
 import { CanonicalCephReferences } from "./CanonicalCephReferences";
+import { CanonicalCephCreate } from "./CanonicalCephCreate";
 import { CanonicalCephDiscard } from "./CanonicalCephDiscard";
 
 import { useEffect, useId, useState } from "react";
@@ -10,7 +11,7 @@ import { CEPH_READ_PHASES,isCanonicalCephList,type CanonicalCephList } from "@/l
 
 /** Read-only summary. Opening this section never mounts legacy editors or requests
  * their plan, image, assessment or financial endpoints. */
-export function CanonicalCephStudies({ patientId,ownerKey,canAnalyze }: { patientId: string;ownerKey:string;canAnalyze:boolean }) {
+export function CanonicalCephStudies({ patientId,ownerKey,canAnalyze,canCreate = false }: { patientId: string;ownerKey:string;canAnalyze:boolean;canCreate?:boolean }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -82,5 +83,8 @@ export function CanonicalCephStudies({ patientId,ownerKey,canAnalyze }: { patien
       {feed && !error && canAnalyze ? <CanonicalCephDiscard patientId={patientId} ownerKey={ownerKey} draftId={feed.analyses.find(row => row.status === "draft")?.id ?? null}
         refresh={() => { setFeed(null); setRefresh(value => value + 1); }} onDiscarded={() => { setNotice("رُفضت المسودة وسُجّل أثرها؛ بقيت بياناتها محفوظة."); setFeed(null); setRefresh(value => value + 1); }} /> : null}
     </div>:null}
+    {canCreate ? <CanonicalCephCreate patientId={patientId} ownerKey={ownerKey} visible={open && !!feed && !error} list={feed}
+      refreshStudies={() => { setFeed(null); setRefresh(value => value + 1); }}
+      onCreated={() => { setNotice("فُتحت مسودة جديدة وسُجّل أثرها. لا تحتوي نتائج معتمدة."); setFeed(null); setRefresh(value => value + 1); }} /> : null}
   </section>;
 }
