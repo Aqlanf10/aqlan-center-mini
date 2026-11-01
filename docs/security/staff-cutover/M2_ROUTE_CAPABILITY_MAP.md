@@ -30,23 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 57 on WORK)
+### Counts (386 mapped route/method entries, after local slice 61 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 267 |
+| existing | 265 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 77 |
+| canonical-done | 79 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts are source conversion states, not an acceptance percentage. The broader inventory has 420 methods / 97 pages and remains NOT_READY. Published batch 53–55 at `7f586db2` has 75 canonical-done / 269 existing ordinary methods; exact-head CI and review are separate. Local slices 56–57 add immutable assessment and strategy append contracts, giving 77 / 267. Full gates and review remain pending; the strategy editor has not been enabled. Partial lifecycle PATCH, source pickers, bridge creation and image tracing are not implied by these counts.
+Counts are source conversion states, not an acceptance percentage. The broader inventory has 420 methods / 97 pages and remains NOT_READY. Published batch56–58 at `aa2388b0` has 77 canonical-done / 267 existing ordinary methods. Local59 and61 add two methods, giving 79 / 265; UI60 adds no method. Source implementation, full gates, exact-head CI and independent review remain separate. The subsequent local coverage writer/editor are not included in this table.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
