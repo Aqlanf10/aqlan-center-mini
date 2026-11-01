@@ -22,6 +22,20 @@ function scalar(lines, label) {
   const value = Number(token);
   return Number.isFinite(value) && Math.abs(value) <= 1_000_000_000 ? value : undefined;
 }
+function inlineScalars(lines) {
+  const atom='(?:true|false|-?(?:0|[1-9][0-9]{0,9})(?:\\.[0-9]{1,6})?)';
+  const pattern=new RegExp(`^AssertionError: expected (${atom}) to be (${atom})(?: // Object\\.is equality)?$`);
+  const matches=lines.map(line=>pattern.exec(line.trim())).filter(Boolean);
+  if(matches.length!==1)return {};
+  const actual=scalar([`Received: ${matches[0][1]}`],'Received');
+  const expected=scalar([`Expected: ${matches[0][2]}`],'Expected');
+  return actual===undefined||expected===undefined?{}:{actual,expected};
+}
+function navigationCategory(messages) {
+  const categories={ERR_CONNECTION_REFUSED:'NavigationConnectionRefused',ERR_ABORTED:'NavigationAborted',ERR_CONNECTION_CLOSED:'NavigationConnectionClosed',ERR_HTTP_RESPONSE_CODE_FAILURE:'NavigationHttpResponseFailure'};
+  const matches=messages.map(message=>/^page\.goto: net::(ERR_CONNECTION_REFUSED|ERR_ABORTED|ERR_CONNECTION_CLOSED|ERR_HTTP_RESPONSE_CODE_FAILURE) at https?:\/\/[^\s\u0000-\u001f]+$/.exec(message.split('\n')[0])).filter(Boolean);
+  return matches.length===1?categories[matches[0][1]]:undefined;
+}
 export function sanitizeDiagnostic(report, root) {
   const target = checkedTarget(root);
   if (!report || !Array.isArray(report.testResults) || report.testResults.length !== 1) throw new Error('invalid');
@@ -34,8 +48,8 @@ export function sanitizeDiagnostic(report, root) {
     const messages = result.failureMessages.map(message => message.replace(/\u001b\[[0-9;]*m/g, ''));
     const lines = messages.flatMap(message => message.split('\n'));
     const category = messages.some(message => /^AssertionError:/.test(message)) ? 'AssertionError'
-      : messages.some(message => /^TimeoutError:/.test(message)) ? 'TimeoutError'
-        : messages.some(message => /^Error:/.test(message)) ? 'Error' : 'Unknown';
+      : messages.some(message => /^TimeoutError:/.test(message) || /^page\.goto: Timeout [1-9][0-9]{0,8}ms exceeded\.(?:\n|$)/.test(message)) ? 'TimeoutError'
+        : messages.some(message => /^Error:/.test(message)) ? 'Error' : navigationCategory(messages) ?? 'Unknown';
     const locations = [];
     for (const line of lines) {
       // Parse a complete location token, then compare exact canonical path;
@@ -47,7 +61,8 @@ export function sanitizeDiagnostic(report, root) {
         if (!locations.some(location => location.line === lineNumber && location.column === column) && locations.length < 5) locations.push({ file: TARGET, line: lineNumber, column });
       }
     }
-    const expected = scalar(lines, 'Expected'), actual = scalar(lines, 'Received');
+    const inline=inlineScalars(lines);
+    const expected = scalar(lines, 'Expected') ?? inline.expected, actual = scalar(lines, 'Received') ?? inline.actual;
     return { category, locations, ...(expected === undefined ? {} : { expected }), ...(actual === undefined ? {} : { actual }) };
   });
   if (suite.status === 'failed' && failed.length === 0) failures.push({ category: 'SuiteError', locations: [] });

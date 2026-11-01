@@ -65,3 +65,22 @@ it.each([[42, 0, 42], [124, 0, 124], [0, 1, 1], [0, 0, 0]])('preserves test/time
   const result = spawnSync('bash', ['-c', functions + shell], { env: { NODE_ENV: "test", PATH: process.env.PATH, RUNNER_TEMP: directory }, encoding: 'utf8' });
   expect(result.status).toBe(expectedCode); expect(result.stdout + result.stderr).not.toContain('SECRET'); expect(existsSync(join(directory, 'pr509-legacy-http-raw.log'))).toBe(false);
 });
+
+it.each([['404','200',404,200],['true','false',true,false],['1.5','2.25',1.5,2.25]])('maps inline actual then expected scalars only (%s,%s)',(actual,expected,a,e)=>{
+  expect(sanitizeDiagnostic(report(`AssertionError: expected ${actual} to be ${expected} // Object.is equality`),root).failures[0]).toMatchObject({actual:a,expected:e});
+});
+it.each(['AssertionError: expected "404" to be 200','AssertionError: expected 404 to be 200 SECRET','PREFIX AssertionError: expected 404 to be 200','AssertionError: expected 1e3 to be 200','AssertionError: expected 1000000001 to be 200','AssertionError: expected 404 to be\n200','AssertionError: expected 404 to be 200\u001b]SECRET'])('omits unsupported inline scalar forms',message=>{
+ const failure=sanitizeDiagnostic(report(message),root).failures[0];expect(failure).not.toHaveProperty('actual');expect(failure).not.toHaveProperty('expected');
+});
+it('classifies exact page goto timeout without retaining timeout or call log',()=>{
+ expect(sanitizeDiagnostic(report('page.goto: Timeout 30000ms exceeded.\nCall log:\n https://secret.invalid/?token=SECRET'),root).failures[0]).toEqual({category:'TimeoutError',locations:[]});
+ for(const message of ['PREFIX page.goto: Timeout 30000ms exceeded.','page.goto: Timeout 30000ms exceeded. SECRET','page.goto: Timeout 9999999999ms exceeded.'])expect(sanitizeDiagnostic(report(message),root).failures[0].category).toBe('Unknown');
+});
+it.each([['ERR_CONNECTION_REFUSED','NavigationConnectionRefused'],['ERR_ABORTED','NavigationAborted'],['ERR_CONNECTION_CLOSED','NavigationConnectionClosed'],['ERR_HTTP_RESPONSE_CODE_FAILURE','NavigationHttpResponseFailure']])('maps exact navigation code%s to closed enum only',(code,category)=>{
+ const result=sanitizeDiagnostic(report(`page.goto: net::${code} at https://SECRET:PRIVATE@secret.invalid/path?token=TOKEN\nCall log:\n Cookie: COOKIE`),root);
+ expect(result.failures[0]).toEqual({category,locations:[]});
+ for(const secret of ['SECRET','PRIVATE','secret.invalid','TOKEN','COOKIE','https','Call log'])expect(JSON.stringify(result)).not.toContain(secret);
+});
+it.each(['page.goto: net::ERR_UNKNOWN at https://private.invalid','PREFIX page.goto: net::ERR_ABORTED at https://private.invalid','page.goto: net::ERR_ABORTED at https://private.invalid SECRET','page.goto: net::ERR_ABORTED_EXTRA at https://private.invalid','page.goto: net::ERR_ABORTED at not-a-url'])('omits unsupported navigation forms',message=>{
+ expect(sanitizeDiagnostic(report(message),root).failures[0]).toEqual({category:'Unknown',locations:[]});
+});

@@ -7,7 +7,8 @@ export interface DiagnosticLocation {
   column: number;
 }
 export interface DiagnosticAssertionFailure {
-  category: 'AssertionError' | 'TimeoutError' | 'Error' | 'Unknown';
+  category: 'AssertionError' | 'TimeoutError' | 'Error' | 'Unknown'
+    | 'NavigationConnectionRefused' | 'NavigationAborted' | 'NavigationConnectionClosed' | 'NavigationHttpResponseFailure';
   locations: DiagnosticLocation[];
   expected?: number | boolean;
   actual?: number | boolean;
