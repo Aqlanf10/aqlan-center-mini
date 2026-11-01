@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "61bd4d4a974ca242c960c475e8429cece78af695b5ca7c3a622217bbf578c76e",
+  "sourceDigest": "4a3f6875dd587374a0f6a35475b36a1068f208701cf12f4cd70707302b649bc1",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -43,7 +43,8 @@
     "appointments.schedule.manage",
     "finance.shifts.view",
     "finance.shifts.operate",
-    "clinical.xrays.view"
+    "clinical.xrays.view",
+    "clinical.plans.view"
   ],
   "summary": {
     "routeMethods": 416,
@@ -2920,7 +2921,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 34
         },
         {
           "symbol": "findUserByUsername",
@@ -2928,7 +2929,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 26
+          "line": 41
         }
       ]
     },
@@ -11721,7 +11722,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 19
+          "line": 34
         },
         {
           "symbol": "findUserByUsername",
@@ -11729,7 +11730,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 26
+          "line": 41
         }
       ]
     },

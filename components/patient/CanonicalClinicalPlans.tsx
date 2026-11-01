@@ -3,6 +3,7 @@
 import { useEffect, useId, useState } from "react";
 import { isCanonicalClinicalPlans, type CanonicalClinicalPlans as PlanFeed } from "@/lib/canonical-plan-projection";
 import { PLAN_ITEM_STATUS_LABEL, PLAN_STATUS_LABEL } from "@/lib/plans";
+import { CanonicalPlanTemplateCatalog } from "./CanonicalPlanTemplateCatalog";
 
 export function CanonicalClinicalPlans({ patientId }: { patientId: string }) {
   const regionId = useId();
@@ -44,6 +45,7 @@ export function CanonicalClinicalPlans({ patientId }: { patientId: string }) {
         className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">{open ? "إغلاق الخطط السريرية" : "عرض الخطط السريرية"}</button>
     </div>
     {open ? <div id={regionId} data-testid="canonical-clinical-plans" className="mt-3 space-y-3 [overflow-wrap:anywhere]">
+      <CanonicalPlanTemplateCatalog />
       <p className="text-xs text-slate-600">الخطة وبنود العلاج كما سُجلت. هذا العرض السريري لا يتضمن الأسعار أو الأقساط أو التحصيل.</p>
       <button type="button" onClick={() => { setFeed(null); setError(null); setRefresh(value => value + 1); }}
         className="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-bold text-navy-800">تحديث الخطط السريرية</button>

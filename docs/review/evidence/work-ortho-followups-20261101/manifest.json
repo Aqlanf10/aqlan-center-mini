@@ -170,10 +170,6 @@
       "sha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
       "bytes": 209
     },
-    "slice37-legacy-proof.cjs": {
-      "sha256": "2d7f1880745c3ad0b5651dc3a9349a2d57ca74cb1d761095db0bfa5bc775b901",
-      "bytes": 3052
-    },
     "slice37-legacy-proof.json": {
       "sha256": "96809c424fb418feeb334aaaa1aa9dcfcf8df2e4411cd8a8bec06d9ca85ed265",
       "bytes": 4678
@@ -221,6 +217,10 @@
     "slice37-units-focused.log": {
       "sha256": "e2f7055f07cb5431da8d607a01dad3c2cc36638af10afdb360b71b54b89905d1",
       "bytes": 428
+    },
+    "slice37-legacy-proof.mjs": {
+      "sha256": "1c671e78b25e5741f41879b21c7381e9703f668264f039b2e60c7b76448c9105",
+      "bytes": 3057
     }
   },
   "publishedEvidenceNormalization": "CRLF converted to LF and line-ending whitespace trimmed only; raw originals remain in the local review directory. No test result, assertion, failure or error line was removed.",
@@ -228,5 +228,7 @@
     "slice37-build.log": "d17be69b67b2c6b38c22c576e715a7b32ce978a33e51d3e0b1971957f180ad3f",
     "slice37-full-unit.log": "b0fd55e9dab67e0ff9dcb07d784957a2785c4dafa27c6720d286eb40286fd8e8",
     "alpine-index-diagnostic-head.txt": "6e1c8134301d19f9d0adb1b9e5b476a90f8d9a2557855cb53573d08635d70bba"
-  }
+  },
+  "sourceRevision": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+  "packagingCorrection": "The later slice38 complete-tree lint found three require-style import errors in the added source-witness artifact. Converted that evidence script to equivalent ESM; no lint rule or assertion removed. Original slice37 checks preceded artifact packaging; final packaged-tree lint is reported with slice38."
 }

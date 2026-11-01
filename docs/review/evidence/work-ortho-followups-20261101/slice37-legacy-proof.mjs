@@ -1,4 +1,6 @@
-const fs=require('node:fs'),cp=require('node:child_process'),crypto=require('node:crypto');
+import fs from 'node:fs';
+import cp from 'node:child_process';
+import crypto from 'node:crypto';
 const base='e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a';
 const old=p=>cp.execFileSync('git',['show',base+':'+p],{encoding:'utf8',maxBuffer:8*1024*1024});
 const hash=s=>crypto.createHash('sha256').update(s).digest('hex'); const checks=[];

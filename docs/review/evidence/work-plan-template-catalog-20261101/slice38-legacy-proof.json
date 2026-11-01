@@ -1,0 +1,123 @@
+{
+  "base": "97f929c14b6eda80a1505cb715eb0602fb4d4e25",
+  "checks": [
+    {
+      "file": "app/api/plan-templates/route.ts",
+      "part": "legacy GET suffix",
+      "unchanged": true,
+      "sha256": "0240712adaceacab81f4a78f5572d337b73e25245f34c4d1ed308338da90e3cc"
+    },
+    {
+      "file": "lib/staff-operation-runtime.ts",
+      "allowedDifference": "only two exact clinical.plans.view catalogue/runtime literals",
+      "beforeSha256": "2a1b2770ab7806498c7a99b0ec71d672c50b58fd776e8a6f3a0019ff461b10c5",
+      "afterSha256": "3061a0632468afc6b5495ca7581f4c4e351e5d21b47bf7f516632436f108144d"
+    },
+    {
+      "file": "components/patient/CanonicalClinicalPlans.tsx",
+      "allowedDifference": "only import and readonly catalogue mount",
+      "beforeSha256": "315ffedcd92507f6b063226fd1131e4a36ed57517c48b55edf6c297d688d1319",
+      "afterSha256": "7d3b295cd4e3bc100806cef1815782ab7d6d581c2e936247666f7afd01572e7d"
+    },
+    {
+      "file": "lib/db.ts",
+      "unchanged": true,
+      "sha256": "09616942c1f36833b0ead1fde832e463d77b2a847f1ff81c92e162cc888fcb06"
+    },
+    {
+      "file": "lib/specialty-templates.ts",
+      "unchanged": true,
+      "sha256": "7aa9d76cc719be50ef4ee4d46bc90b33ca7928710901e683985618c27d8475b9"
+    },
+    {
+      "file": "lib/service-pricing.ts",
+      "unchanged": true,
+      "sha256": "6cb895f16afeadfcafa0f94b71bfff947d0c9b66b5729bc4a607a73c1e689a83"
+    },
+    {
+      "file": "lib/plans.ts",
+      "unchanged": true,
+      "sha256": "0ceb498cc667227dae56d655c88e758c0dea1cc679d79e4d4a1f52d66b73fbcc"
+    },
+    {
+      "file": "lib/canonical-read-snapshot.ts",
+      "unchanged": true,
+      "sha256": "7321dbd8af7a2412003bc315c384195277c7f8fe0c4ebdb63837c81c3ae0bb93"
+    },
+    {
+      "file": "lib/staff-authority-proof-internal.ts",
+      "unchanged": true,
+      "sha256": "c259bbdbefc02d01b0e004e053c1bb487bb637947be32d82eb6f25473b40c96a"
+    },
+    {
+      "file": "lib/staff-capability-catalogue.ts",
+      "unchanged": true,
+      "sha256": "2e6b83691df24db4ef63d941fe48bbb047523285eeeef1bdb986cb100624100d"
+    },
+    {
+      "file": "lib/canonical-plan-reads.ts",
+      "unchanged": true,
+      "sha256": "70e6e07575180eb55a785ef19b021f7cfc6b73d597da0ff4faa96ad04f22f0b9"
+    },
+    {
+      "file": "lib/canonical-plan-projection.ts",
+      "unchanged": true,
+      "sha256": "ff4eb0ca0b71c2ed6f7136bf60a274530bc6a4d29cb8a038837dca56fae0af10"
+    },
+    {
+      "file": "lib/canonical-ortho-followups.ts",
+      "unchanged": true,
+      "sha256": "30db2812c7136e3cd5233d43594608cf4c93242aa987b28c42a60289d3f9a78e"
+    },
+    {
+      "file": "lib/canonical-ortho-assessment.ts",
+      "unchanged": true,
+      "sha256": "a8717164ecd01ce833ef25db0f2d78c3ae61aad2f33d4ea1519b748cf10e7b35"
+    },
+    {
+      "file": "lib/ortho-assessment-store.ts",
+      "unchanged": true,
+      "sha256": "dc13e538d0e3618df6713a5feb7643b4ed1483c1b7d3c2de8264943c6738b3fa"
+    },
+    {
+      "file": "lib/ortho-assessment-versioned-sources.ts",
+      "unchanged": true,
+      "sha256": "f5f9dd9e5523e7a65aec0aa3f6f210054829802a9cae0329c2783e1a1a361ed8"
+    },
+    {
+      "file": "lib/canonical-appointments.ts",
+      "unchanged": true,
+      "sha256": "b60ed530479f43b25d61b8e796b689ac62b7690dbb6d40487ee57ec21972c7d8"
+    },
+    {
+      "file": "lib/canonical-patient-reads.ts",
+      "unchanged": true,
+      "sha256": "3fcf671f04e9223ea5879315e3d81113c4d79336ae929d34ccb5bc229f73b35f"
+    },
+    {
+      "file": "lib/plan-payment-projection.ts",
+      "unchanged": true,
+      "sha256": "1bb0ed9a1c5dbe252858357931f4e09a057f4756efbf744029c83344feaf9955"
+    },
+    {
+      "file": "lib/approved-agreements.ts",
+      "unchanged": true,
+      "sha256": "9004da5eac12a71fb701241578d0e7a6c64f1406a6d472ef6311a14b5c221143"
+    },
+    {
+      "file": "lib/hr-payroll.ts",
+      "unchanged": true,
+      "sha256": "df5db4921d350ccf7c71e64acc07b124fbe6d8689739cf3dace2b7aa93584a4d"
+    },
+    {
+      "file": "app/api/settings/route.ts",
+      "unchanged": true,
+      "sha256": "fb2cd254ff6e8abdf945d7665766cab0d9937858d0cf065c1494f25026c17730"
+    },
+    {
+      "file": "app/api/patients/[id]/plans/route.ts",
+      "unchanged": true,
+      "sha256": "0639c95464d8c24bdd5c14b85a8832c9529fb7c3f05e95cb90020b3ac5f6a786"
+    }
+  ]
+}

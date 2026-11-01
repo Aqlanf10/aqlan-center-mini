@@ -4430,8 +4430,18 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 38: non-patient clinical template/service catalogue under clinical.plans.view; prices only with independent finance.service-prices.view. Fresh fenced RR READ ONLY, existing template parser/defaults with explicit source, 2000 active services/2MiB bounds. No creation/settings writers, patient grant, FX or clinical/financial mutation; legacy GET preserved.",
+  "projection": {
+   "legacy": "Templates and active services with role-dependent base prices, plus canEdit; legacy implementation preserved unchanged.",
+   "groups": {
+    "clinical": "clinical.plans.view: current template steps, session metadata and active service names/categories; template billingRule is existing workflow metadata, not patient financial state.",
+    "prices": "finance.service-prices.view additionally admits the exact YER catalogue minor amount and configured/provisional markers. Hidden prices are not selected, parsed, budgeted or serialized. No foreign rates, foreign-currency prices or costs.",
+    "source": "saved, default or default-invalid-setting explicitly follows the existing parser/effective template behavior; no raw setting or unrelated settings.",
+    "excluded": "No patient records, plan creation, setting edit, canEdit, inactive service or financial mutation authority."
+   },
+   "rows": "Non-patient catalogue; no patient scope expansion. Active services ordered sort_order,name,id with 2000-row and 2MiB selected-source bounds in one fenced RR READ ONLY snapshot. Read-only catalogue UI clears stale/failed/retired responses."
+  }
  },
  {
   "route": "/api/planned-visits/[id]/rebook",
