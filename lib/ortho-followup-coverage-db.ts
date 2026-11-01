@@ -43,7 +43,9 @@ export async function followupCoverageAvailable(db:Runner):Promise<boolean>{
 }
 /** Stable commercial/source identity; payment progress and treatment progress do
  * not change inclusion. Foreign, cancelled, conflicting and unverified lineage do. */
-const FOLLOWUP_SOURCE_SQL = `SELECT c.patient_id AS "patientId",c.id AS "orthoCaseId",cc.id AS "clinicalCaseId",
+// Preserve call-time expansion: importing report readers must not eagerly touch
+// coverage-specific DB exports. The original helper evaluated these at invocation.
+function followupSourceSql(){return `SELECT c.patient_id AS "patientId",c.id AS "orthoCaseId",cc.id AS "clinicalCaseId",
     t.id AS "planId",i.id AS "planItemId",inv.id AS "invoiceId",inv.invoice_number AS "invoiceNumber",i.service_name AS "serviceName",c.arches,cc.site AS "clinicalSite",i.tooth_code AS "toothCode",
     (t.status <> 'cancelled' AND i.status <> 'cancelled' AND inv.status <> 'cancelled'
       AND ${PLAN_ITEM_PREBILLED_SQL} AND NOT ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AND NOT ${PLAN_ITEM_LEGACY_LINEAGE_SQL}
@@ -63,9 +65,9 @@ const FOLLOWUP_SOURCE_SQL = `SELECT c.patient_id AS "patientId",c.id AS "orthoCa
     JOIN plan_items i ON i.case_id=cc.id AND i.category='ortho'
     JOIN treatment_plans t ON t.id=i.plan_id AND t.patient_id=c.patient_id
     JOIN invoices inv ON inv.id=i.billed_invoice_id AND inv.patient_id=c.patient_id
-    WHERE c.id=$1 AND c.patient_id=$2 ORDER BY i.id,inv.id`;
+    WHERE c.id=$1 AND c.patient_id=$2 ORDER BY i.id,inv.id`;}
 async function sourceRows(db:Runner,patientId:number,caseId:number):Promise<SourceRow[]>{
-  const {rows}=await db.query<SourceRow>(FOLLOWUP_SOURCE_SQL,[caseId,patientId]);
+  const {rows}=await db.query<SourceRow>(followupSourceSql(),[caseId,patientId]);
   return validateSources(rows);
 }
 function validateSources(rows:SourceRow[]):SourceRow[]{
@@ -142,7 +144,7 @@ export async function readFollowupCoverageSnapshotWith(db:Runner,patientId:numbe
   // SQL refuses the whole result before sending a large JSON value to Node. It
   // never truncates candidates and falsely concludes a saved decision is stale.
   const {rows:[bounded]}=await db.query<{oversized:boolean;sources:SourceRow[]|null}>(`WITH candidates AS MATERIALIZED (
-    ${FOLLOWUP_SOURCE_SQL} LIMIT 257
+    ${followupSourceSql()} LIMIT 257
   ), sized AS (SELECT *,octet_length(to_jsonb(candidates)::text) AS bytes FROM candidates)
   SELECT count(*)>256 OR COALESCE(sum(bytes),0)>2097152 AS oversized,
     CASE WHEN count(*)<=256 AND COALESCE(sum(bytes),0)<=2097152

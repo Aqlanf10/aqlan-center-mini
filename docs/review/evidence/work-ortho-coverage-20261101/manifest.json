@@ -1,7 +1,7 @@
 {
   "format": "work-ortho-coverage-evidence-v1",
   "baseRevision": "327b12fba84049e2b0f5e4e65fbd48445da42386",
-  "sourceRevision": null,
+  "sourceRevision": "b93bf77154d83cdfee8afb50e10e8bfa15008723",
   "buildId": "krjMdegCPffqpvKRweu6l",
   "results": {
     "focusedPostgres": {
@@ -28,12 +28,19 @@
     "rawBodyGuard": "passed",
     "sourcePreservation": 21,
     "historicalSourceHashes": 591,
-    "fullUnit": "running",
+    "fullUnit": {
+      "passed": 14438,
+      "failed": 5,
+      "failedFiles": 3,
+      "totalFiles": 856,
+      "status": "failed: eager SQL expansion plus missing synthetic session secret"
+    },
     "fullPostgres": "running",
     "runtimeProvenance": "running",
     "exactHeadCI": "not published",
     "independentReview": "pending",
-    "actualDocker": "blocked by prior enforced Alpine destination refusal"
+    "actualDocker": "blocked by prior enforced Alpine destination refusal",
+    "followupFix": "../work-ortho-coverage-import-fix-20261101/manifest.json"
   },
   "sourceSha256": {
     "__tests__/canonical-ortho-coverage-projection.test.ts": "eacc609048e6d73e7f359254a880975d0525e832d5f7ed9df3ca5a124500ccf3",

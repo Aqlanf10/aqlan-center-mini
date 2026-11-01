@@ -1,0 +1,15 @@
+{
+  "format": "work-coverage-lazy-import-fix-v1",
+  "baseRevision": "b93bf77154d83cdfee8afb50e10e8bfa15008723",
+  "sourceRevision": null,
+  "sourceSha256": {
+    "lib/ortho-followup-coverage-db.ts": "1b0d419ed7c6d71d663576e484d19ead1ef081f49eee4bc0cb613b3dabf36239"
+  },
+  "artifacts": {
+    "proof.json": "f1107312c4f46f637e6f669d6ed67afe8c6a81dad4322f3be4ab469f62058ceb",
+    "slice48-import-fix-pg.log": "61aba1ac9eb690460ef2d7554dd3b2ba7ad0588dfa30fc9675d8baac42693af0",
+    "slice48-import-fix-unit.log": "83c8f8d0a0b4f7e493b9f5e03c8347dd91000696da87f23b16dfdb7d5742c7b7",
+    "slice48-unit-full.log": "307c2f3094061e1395a170d56349a6904a7b07b156a4780c427d90933c5cec9f"
+  },
+  "fullFinalAcceptance": "pending subsequent complete batch gates; prior b93 full unit failed and is not accepted"
+}
