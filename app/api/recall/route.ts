@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
+  getSettingsSafe,
   listLapsedPatients,
   listMissedAppointments,
   listOpenPastAppointments,
@@ -9,12 +10,12 @@ import {
   markPatientRecalled,
   recordAudit,
 } from "@/lib/db";
-import { LAPSE_OPTIONS } from "@/lib/recall";
+import { resolveRecallWeeks } from "@/lib/recall";
 import { canDoctorAccessAllPatients } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure, canonicalPatientWriteFailure } from "@/lib/canonical-patient-http";
-import { CanonicalRecallRefusal, commandCanonicalRecallContact, readCanonicalRecall, recallWeeks } from "@/lib/canonical-recall";
+import { CanonicalRecallRefusal, commandCanonicalRecallContact, readCanonicalRecall } from "@/lib/canonical-recall";
 
 export const dynamic = "force-dynamic";
 
@@ -28,18 +29,28 @@ export async function GET(request: Request) {
   if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
   if (selected.kind === "canonical") {
     try {
-      return NextResponse.json(await readCanonicalRecall(selected.handle, recallWeeks(new URL(request.url).searchParams.get("weeks"))), { headers: NO_STORE });
+      return NextResponse.json(
+        await readCanonicalRecall(selected.handle, {
+          weeksParam: new URL(request.url).searchParams.get("weeks"),
+        }),
+        { headers: NO_STORE },
+      );
     } catch (error) {
       return canonicalPatientReadFailure(error, "تعذّر تحميل قائمة المتابعة.");
     }
   }
   const session = await requireSession();
   if (!session) return denied();
-  const requested = Number(new URL(request.url).searchParams.get("weeks") ?? 6);
-  // المدة من قائمة مغلقة لا من الطلب مباشرة: رقمٌ ضخم يجعل الاستعلام يمسح الجدول كله.
-  const weeks = (LAPSE_OPTIONS as readonly number[]).includes(requested) ? requested : 6;
+  if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") {
+    return NextResponse.json({ message: "قائمة المتابعة للإدارة والاستقبال والأطباء." }, { status: 403 });
+  }
 
   try {
+    const settings = await getSettingsSafe();
+    const weeks = resolveRecallWeeks(
+      new URL(request.url).searchParams.get("weeks"),
+      settings["recall.lapse_weeks"],
+    );
     const restrictedDoctor = session.role === "doctor" && !(await canDoctorAccessAllPatients(session));
     const docScope = restrictedDoctor
       ? (typeof session.partyId === "number" && session.partyId > 0 ? session.partyId : null)

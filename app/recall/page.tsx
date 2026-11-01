@@ -5,12 +5,12 @@ import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { friendlyDateLong, toWhatsAppNumber } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import {
-  LAPSE_LABEL,
   LAPSE_OPTIONS,
+  lapseLabelForWeeks,
   openPastText,
+  parseConfiguredLapseWeeks,
   recallText,
   sinceText,
-  type LapseWeeks,
   type OpenPastAppointment,
   type RecallRow,
 } from "@/lib/recall";
@@ -49,8 +49,19 @@ export default function RecallPage() {
   const canSeeProposals = !canonical && (session?.role === "admin" || session?.role === "reception");
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
-  const [feed, setFeed] = useState<RecallFeed>({ openPast: [], missed: [], lapsed: [], weeks: 6 });
-  const [weeks, setWeeks] = useState<LapseWeeks>(6);
+  const configuredLapseWeeks = parseConfiguredLapseWeeks(useSetting("recall.lapse_weeks"));
+  const [feed, setFeed] = useState<RecallFeed>({ openPast: [], missed: [], lapsed: [], weeks: configuredLapseWeeks });
+  const [weeksOverride, setWeeksOverride] = useState<number | null>(null);
+  const weeks = weeksOverride ?? configuredLapseWeeks;
+  const setWeeks = useCallback((nextWeeks: number) => setWeeksOverride(nextWeeks), []);
+  const lapseOptions = useMemo(
+    () => (
+      (LAPSE_OPTIONS as readonly number[]).includes(configuredLapseWeeks)
+        ? [...LAPSE_OPTIONS]
+        : [...new Set([configuredLapseWeeks, ...LAPSE_OPTIONS])].sort((a, b) => a - b)
+    ),
+    [configuredLapseWeeks],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -200,7 +211,7 @@ export default function RecallPage() {
           <span className="text-[10px] text-amber-700">يحتاجون إعادة جدولة</span>
         </div>
         <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-3.5 shadow-2xs">
-          <span className="text-[11px] font-bold text-blue-800">انقطعوا عن العلاج ({LAPSE_LABEL[weeks]})</span>
+          <span className="text-[11px] font-bold text-blue-800">انقطعوا عن العلاج ({lapseLabelForWeeks(weeks)})</span>
           <p className="mt-1 text-xl font-black text-blue-900">{feed.lapsed.length}</p>
           <span className="text-[10px] text-blue-700">يحتاجون تذكير بالمتابعة</span>
         </div>
@@ -260,7 +271,7 @@ export default function RecallPage() {
         {/* فترات الانقطاع */}
         <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
           <span className="text-[11px] font-bold text-slate-500">مدة الانقطاع:</span>
-          {LAPSE_OPTIONS.map((option) => (
+          {lapseOptions.map((option) => (
             <button
               key={option}
               onClick={() => setWeeks(option)}
@@ -270,7 +281,7 @@ export default function RecallPage() {
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              {LAPSE_LABEL[option]}
+              {lapseLabelForWeeks(option)}
             </button>
           ))}
           <button

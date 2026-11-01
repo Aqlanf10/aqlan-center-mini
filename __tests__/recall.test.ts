@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { recallText, sinceText, weeksSince } from "../lib/recall";
+import { lapseLabelForWeeks, parseConfiguredLapseWeeks, recallText, resolveRecallWeeks, sinceText, weeksSince } from "../lib/recall";
 
 const TODAY = "2026-08-27";
 
@@ -40,5 +40,26 @@ describe("رسالة الاستدعاء", () => {
     // اللوم يفقدك المريض نهائيًا، وهو يعرف أنه تأخّر.
     expect(text).not.toContain("لماذا");
     expect(text).not.toContain("تأخرتم");
+  });
+});
+
+describe("استهلاك إعداد العيادة recall.lapse_weeks (S23 / R35)", () => {
+  it("يستهلك الإعداد المحفوظ عند غياب معامل الطلب ويرفض الأرقام المتطرفة", () => {
+    expect(parseConfiguredLapseWeeks("8")).toBe(8);
+    expect(parseConfiguredLapseWeeks(16)).toBe(16);
+    expect(parseConfiguredLapseWeeks("0")).toBe(6);
+    expect(parseConfiguredLapseWeeks("999")).toBe(6);
+    expect(parseConfiguredLapseWeeks("invalid")).toBe(6);
+
+    expect(resolveRecallWeeks(null, "8")).toBe(8);
+    expect(resolveRecallWeeks("", "8")).toBe(8);
+    expect(resolveRecallWeeks("8", "8")).toBe(8);
+    expect(resolveRecallWeeks("12", "8")).toBe(12);
+    expect(resolveRecallWeeks("100000", "8")).toBe(8);
+    expect(resolveRecallWeeks("100000")).toBe(6);
+
+    expect(lapseLabelForWeeks(6)).toBe("أكثر من ٦ أسابيع");
+    expect(lapseLabelForWeeks(8)).toBe("أكثر من 8 أسابيع");
+    expect(lapseLabelForWeeks(16)).toBe("أكثر من 16 أسبوعًا");
   });
 });

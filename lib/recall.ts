@@ -46,6 +46,49 @@ export const LAPSE_LABEL: Record<LapseWeeks, string> = {
 };
 
 /**
+ * قراءة مدة الانقطاع الافتراضية من الإعدادات المركزية (`recall.lapse_weeks`)
+ * ضمن الحدود المعتمدة في سجل الإعدادات (1..104 أسابيع) مع الرجوع الآمن إلى 6.
+ */
+export function parseConfiguredLapseWeeks(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= 104 ? n : 6;
+}
+
+/**
+ * تحديد عدد أسابيع الانقطاع الفعلي للطلب:
+ * - عند غياب معامل الطلب (`?weeks=`) يُستهلك إعداد العيادة `recall.lapse_weeks`.
+ * - عند إرسال معامل صريح يُقبل فقط إن كان من الخيارات المغلقة أو مطابقًا لإعداد العيادة،
+ *   منعًا لأرقام ضخمة تمسح الجدول كله.
+ */
+export function resolveRecallWeeks(
+  requestedRaw: string | number | null | undefined,
+  configuredRaw?: unknown,
+): number {
+  const configured = parseConfiguredLapseWeeks(configuredRaw);
+  if (requestedRaw === null || requestedRaw === undefined || String(requestedRaw).trim() === "") {
+    return configured;
+  }
+  const requested = Number(requestedRaw);
+  if (
+    Number.isInteger(requested)
+    && ((LAPSE_OPTIONS as readonly number[]).includes(requested) || requested === configured)
+  ) {
+    return requested;
+  }
+  return configured;
+}
+
+export function lapseLabelForWeeks(weeks: number): string {
+  if ((LAPSE_OPTIONS as readonly number[]).includes(weeks)) {
+    return LAPSE_LABEL[weeks as LapseWeeks];
+  }
+  if (weeks === 1) return "أكثر من أسبوع";
+  if (weeks === 2) return "أكثر من أسبوعين";
+  if (weeks >= 3 && weeks <= 10) return `أكثر من ${weeks} أسابيع`;
+  return `أكثر من ${weeks} أسبوعًا`;
+}
+
+/**
  * الأسابيع منذ تاريخ، وأدناها صفر.
  *
  * التقريب لأسفل لا للأقرب: «مضى ٥ أسابيع» عن أربعة أسابيع وستة أيام أدقّ في القراءة

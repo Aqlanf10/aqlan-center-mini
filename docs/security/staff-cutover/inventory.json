@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "637188f7da95c70f5114af056ed3d50b1e84989a998833622ab722cc4d4e6eb1",
+  "sourceDigest": "24b86d162fe5063786f15cb99ee926fcc326f043d1f7c11dcf4c3c436ce40875",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -144,7 +144,7 @@
       "canonical-ready": 0,
       "unknown": 25
     },
-    "legacyReferenceFiles": 253,
+    "legacyReferenceFiles": 252,
     "canonicalDirectReferences": 0
   },
   "sourceEntries": [
@@ -709,19 +709,6 @@
       ]
     },
     {
-      "file": "app/api/auth/logout/route.ts",
-      "evidence": [
-        {
-          "symbol": "readSessionPayload",
-          "line": 4
-        },
-        {
-          "symbol": "readSessionPayload",
-          "line": 10
-        }
-      ]
-    },
-    {
       "file": "app/api/auth/me/route.ts",
       "evidence": [
         {
@@ -1042,15 +1029,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 7
         },
         {
           "symbol": "requireSession",
-          "line": 45
+          "line": 46
         },
         {
           "symbol": "requireSession",
-          "line": 64
+          "line": 65
         }
       ]
     },
@@ -2071,15 +2058,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 13
+          "line": 15
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 35
         },
         {
           "symbol": "requireSession",
-          "line": 58
+          "line": 60
         }
       ]
     },
@@ -2467,15 +2454,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 17
+          "line": 18
         },
         {
           "symbol": "requireSession",
-          "line": 54
+          "line": 55
         },
         {
           "symbol": "requireSession",
-          "line": 100
+          "line": 101
         }
       ]
     },
@@ -3361,15 +3348,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 14
+          "line": 15
         },
         {
           "symbol": "requireSession",
-          "line": 36
+          "line": 42
         },
         {
           "symbol": "requireSession",
-          "line": 78
+          "line": 89
         }
       ]
     },
@@ -3766,7 +3753,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 22
         }
       ]
     },
@@ -3805,11 +3792,23 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 20
         },
         {
           "symbol": "requireSession",
+          "line": 34
+        },
+        {
+          "symbol": "revalidateSessionInTransaction",
           "line": 20
+        },
+        {
+          "symbol": "revalidateSessionInTransaction",
+          "line": 57
+        },
+        {
+          "symbol": "revalidateSessionInTransaction",
+          "line": 104
         }
       ]
     },
@@ -3839,7 +3838,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 32
+          "line": 33
         }
       ]
     },
@@ -5110,16 +5109,7 @@
       "workflow": "entry",
       "boundary": "transaction-or-external-effect-boundary-required-if-staff",
       "reason": "Public transport exemption is staff entry, not canonical admission",
-      "directHelperEvidence": [
-        {
-          "symbol": "readSessionPayload",
-          "line": 4
-        },
-        {
-          "symbol": "readSessionPayload",
-          "line": 10
-        }
-      ]
+      "directHelperEvidence": []
     },
     {
       "route": "/api/auth/me",
@@ -5978,15 +5968,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 7
         },
         {
           "symbol": "requireSession",
-          "line": 45
+          "line": 46
         },
         {
           "symbol": "requireSession",
-          "line": 64
+          "line": 65
         }
       ]
     },
@@ -6006,15 +5996,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 6
+          "line": 7
         },
         {
           "symbol": "requireSession",
-          "line": 45
+          "line": 46
         },
         {
           "symbol": "requireSession",
-          "line": 64
+          "line": 65
         }
       ]
     },
@@ -9144,15 +9134,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 13
+          "line": 15
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 35
         },
         {
           "symbol": "requireSession",
-          "line": 58
+          "line": 60
         }
       ]
     },
@@ -9171,15 +9161,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 13
+          "line": 15
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 35
         },
         {
           "symbol": "requireSession",
-          "line": 58
+          "line": 60
         }
       ]
     },
@@ -10536,15 +10526,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 17
+          "line": 18
         },
         {
           "symbol": "requireSession",
-          "line": 54
+          "line": 55
         },
         {
           "symbol": "requireSession",
-          "line": 100
+          "line": 101
         }
       ]
     },
@@ -10564,15 +10554,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 17
+          "line": 18
         },
         {
           "symbol": "requireSession",
-          "line": 54
+          "line": 55
         },
         {
           "symbol": "requireSession",
-          "line": 100
+          "line": 101
         }
       ]
     },
@@ -12937,15 +12927,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 14
+          "line": 15
         },
         {
           "symbol": "requireSession",
-          "line": 36
+          "line": 42
         },
         {
           "symbol": "requireSession",
-          "line": 78
+          "line": 89
         }
       ]
     },
@@ -12964,15 +12954,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 14
+          "line": 15
         },
         {
           "symbol": "requireSession",
-          "line": 36
+          "line": 42
         },
         {
           "symbol": "requireSession",
-          "line": 78
+          "line": 89
         }
       ]
     },
@@ -14180,7 +14170,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 22
         }
       ]
     },
@@ -14202,7 +14192,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 22
         }
       ]
     },
@@ -14224,7 +14214,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 22
         }
       ]
     },
@@ -14340,11 +14330,23 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 20
         },
         {
           "symbol": "requireSession",
+          "line": 34
+        },
+        {
+          "symbol": "revalidateSessionInTransaction",
           "line": 20
+        },
+        {
+          "symbol": "revalidateSessionInTransaction",
+          "line": 57
+        },
+        {
+          "symbol": "revalidateSessionInTransaction",
+          "line": 104
         }
       ]
     },
@@ -14431,7 +14433,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 32
+          "line": 33
         }
       ]
     },

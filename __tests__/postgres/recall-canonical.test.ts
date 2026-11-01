@@ -59,6 +59,29 @@ describe("the lists", () => {
     expect(all.lapsed).toEqual(await db.listLapsedPatients(6));
     await expect(recall.readCanonicalRecall(await fx.session("appointmentsOnly"), 6)).rejects.toThrow(/SCOPE/);
     expect(recall.recallWeeks("100000")).toBe(6);
+
+    // S23 / R35: omitting ?weeks= consumes settings["recall.lapse_weeks"] inside the canonical snapshot
+    const fiveWeekPatient = (
+      await q(
+        "INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id,created_at) VALUES ('SYN-RC-5W','SYN Recall 5W','0500000499',$1,NOW() - INTERVAL '35 days') RETURNING id",
+        [fx.parties.doctor!],
+      )
+    )[0].id as number;
+    try {
+      await q(
+        "INSERT INTO settings(key, value) VALUES ('recall.lapse_weeks', '4') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+      );
+      const defaultConfigured = await recall.readCanonicalRecall(await fx.session("doctor"), { weeksParam: null });
+      expect(defaultConfigured.weeks).toBe(4);
+      expect(defaultConfigured.lapsed.map(row => row.id)).toContain(fiveWeekPatient);
+
+      const explicitSix = await recall.readCanonicalRecall(await fx.session("doctor"), { weeksParam: "6" });
+      expect(explicitSix.weeks).toBe(6);
+      expect(explicitSix.lapsed.map(row => row.id)).not.toContain(fiveWeekPatient);
+    } finally {
+      await q("DELETE FROM settings WHERE key = 'recall.lapse_weeks'");
+      await q("DELETE FROM patients WHERE id = $1", [fiveWeekPatient]);
+    }
   });
 });
 

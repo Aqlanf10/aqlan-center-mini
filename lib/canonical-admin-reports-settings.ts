@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES, SETTINGS_BODY_LIMIT_BYTES } from "./security-limits";
 import { bodyErrorResponse, readBoundedFormData, readJsonBody } from "./http-body";
 import { readServiceInput } from "./appointment-service-input";
+import { evaluateBackupReadinessCheck, queryBackupAuditEvidenceWith } from "./backup-readiness-check";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
 import { exportFileName } from "./csv";
 import {
@@ -1487,6 +1488,7 @@ export async function canonicalSettingsReadinessGet(
         const users = await query.query<{ c: string }>(
           `SELECT count(*)::int AS c FROM users WHERE is_active = true`,
         );
+        const backupAuditEvidence = await queryBackupAuditEvidenceWith(query);
         return {
           dbLatency,
           settings,
@@ -1496,6 +1498,7 @@ export async function canonicalSettingsReadinessGet(
           unpricedCount: Number(pricing.rows[0]?.unpriced ?? 0),
           provisionalCount: Number(pricing.rows[0]?.provisional ?? 0),
           userCount: Number(users.rows[0]?.c ?? 0),
+          backupAuditEvidence,
         };
       },
       { errorPrefix: "STAFF_READ", maxBytes: 262_144 },
@@ -1638,7 +1641,7 @@ export async function canonicalSettingsReadinessGet(
         title: "دليل الخدمات والأسعار",
         description: "دليل الخدمات يحتوي على عدد قليل من الخدمات. يُنصح بإضافة تسعيرة خدمات العيادة كاملة.",
         status: "warn",
-        actionHref: "/settings",
+        actionHref: "/finance/services",
         actionLabel: "تحديث دليل الخدمات",
       });
     }
@@ -1694,15 +1697,12 @@ export async function canonicalSettingsReadinessGet(
       actionLabel: "فتح شاشة الصالة",
     });
 
-    checks.push({
-      id: "backup_system",
-      category: "security",
-      title: "النسخ الاحتياطي وتصدير البيانات",
-      description: "نظام تصدير النسخ الاحتياطية الكاملة والمشفرة بتنسيق SQL و JSON جاهز ويعمل بكفاءة.",
-      status: "pass",
-      actionHref: "/settings/export",
-      actionLabel: "تصدير نسخة الآن",
-    });
+    checks.push(
+      await evaluateBackupReadinessCheck({
+        settings: dbChecks.settings,
+        auditEvidence: dbChecks.backupAuditEvidence,
+      }),
+    );
 
     const releaseSha = (process.env.RAILWAY_GIT_COMMIT_SHA ?? "").slice(0, 7);
     checks.push({

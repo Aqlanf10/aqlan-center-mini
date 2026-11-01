@@ -681,6 +681,8 @@ it("manages canonical operational settings and strictly restricts messaging, bac
   expect(readinessGet.status).toBe(200);
   const readinessBody = await readinessGet.json();
   expect(Array.isArray(readinessBody.checks)).toBe(true);
+  const backupCheck = readinessBody.checks.find((c: { id: string }) => c.id === "backup_system");
+  expect(backupCheck).toMatchObject({ id: "backup_system", status: "warn", actionHref: "/settings/backup" });
 
   // 4. Owner-only messaging settings: 403 for superDelegate (even with all 113 delegable caps!), 200 for owner
   const msgDelegateDenied = await adminReports.canonicalMessagingSettingsGet(

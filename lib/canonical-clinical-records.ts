@@ -648,16 +648,19 @@ export async function commandCanonicalPrescriptionCreate(
               : null;
 
           const patient = await getPatientWith(client, draft.value.patientId);
+          if (!patient) {
+            throw new CanonicalClinicalRecordsRefusal("patient_not_found", 404, "المريض غير موجود.");
+          }
           const historyRows = await listMedicalHistoryWith(client, draft.value.patientId, 1);
           const latestMedicalHistory = historyRows[0] ?? null;
 
           let finalWarnings: ReturnType<typeof evaluatePrescriptionSafety> = [];
           let acknowledged = false;
 
-          if (patient || latestMedicalHistory) {
+          {
             const alerts = evaluatePrescriptionSafety(
               draft.value.items.map(item => ({ name: item.name, dose: item.dose })),
-              patient?.medicalAlert ?? null,
+              patient.medicalAlert ?? null,
               latestMedicalHistory,
             );
             const critical = alerts.filter(alert => alert.severity === "critical");

@@ -1,9 +1,9 @@
 import "server-only";
 import {
-  getPool, insertAuditRow, listLapsedPatientsWith, listMissedAppointmentsWith, listOpenPastAppointmentsWith,
+  getPool, getSettingsWith, insertAuditRow, listLapsedPatientsWith, listMissedAppointmentsWith, listOpenPastAppointmentsWith,
   markAppointmentFollowedUpWith, markPatientRecalledWith, patientInDoctorScopeWith,
 } from "./db";
-import { LAPSE_OPTIONS } from "./recall";
+import { resolveRecallWeeks } from "./recall";
 import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
 import type { VerifiedDurableSession } from "./staff-durable-session";
 import { staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
@@ -30,14 +30,31 @@ export class CanonicalRecallRefusal extends Error {
   }
 }
 
-export function recallWeeks(raw: string | null): number {
-  const requested = Number(raw ?? 6);
-  // A closed list, never the raw request: a huge number scans the whole table.
-  return (LAPSE_OPTIONS as readonly number[]).includes(requested) ? requested : 6;
+export function recallWeeks(raw: string | null, configuredRaw?: unknown): number {
+  // A closed list + bounded clinic setting (1..104), never the raw request.
+  return resolveRecallWeeks(raw, configuredRaw);
 }
 
-export async function readCanonicalRecall(session: VerifiedDurableSession, weeks: number) {
+export async function readCanonicalRecall(
+  session: VerifiedDurableSession,
+  weeksOrQuery?: number | { weeksParam: string | null },
+) {
   return runCanonicalReadSnapshot(session, "read:recall", async (query, scope) => {
+    if (scope.patientScope.kind === "none") {
+      throw new Error("STAFF_READ_RECORD_SCOPE_DENIED");
+    }
+    const weeks = typeof weeksOrQuery === "number"
+      ? resolveRecallWeeks(weeksOrQuery, weeksOrQuery)
+      : resolveRecallWeeks(
+          weeksOrQuery?.weeksParam ?? null,
+          (await getSettingsWith(query))["recall.lapse_weeks"],
+        );
+    if (
+      scope.patientScope.kind === "own"
+      && (!Number.isInteger(scope.patientScope.clinicianPartyId) || scope.patientScope.clinicianPartyId <= 0)
+    ) {
+      return { openPast: [], missed: [], lapsed: [], weeks, canRecord: scope.granted("appointments.create") };
+    }
     const clinician = scope.patientScope.kind === "own" ? scope.patientScope.clinicianPartyId : null;
     // One snapshot, read in order (a client runs one statement at a time).
     const openPast = await listOpenPastAppointmentsWith(query, clinician);

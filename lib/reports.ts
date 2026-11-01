@@ -26,6 +26,7 @@ import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence"
 
 import { payableAmountSql, payableSettledTotalSql, PLAN_FUNDED_BY_AGREEMENT_SQL, getPool, ensureSchema, getSettings, getSettingsWith, listParties, listPartiesWith, listServices, listServicesWith, commissionReport, listOpenPastAppointments, listOpenPastAppointmentsWith, listMissedAppointments, listMissedAppointmentsWith, listLapsedPatients, listLapsedPatientsWith, materialRateAsOf, materialRateTimeline, listOrthoDuplicateAdjustments, listOrthoDuplicateAdjustmentsWith, commissionDetailReport, commissionDetailReportWith, computeDebtRows, CLINIC_TIME_ZONE, type CommissionRow } from "./db";
 import { CHAIR_EVENT_ROW_CAP, REFERRAL_HISTORY_ROW_CAP, loadChairFlow, loadInternalReferrals } from "./reports-ops";
+import { lapseLabelForWeeks, parseConfiguredLapseWeeks } from "./recall";
 import { REFERRAL_SPECIALTY_LABEL, WORKFLOW_STATE_LABEL, type ReferralSpecialty, type WorkflowState } from "./referrals";
 import { CATEGORY_LABEL } from "./services-catalog";
 import { CURRENCIES, formatMoney, isCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, FinancialCurrencyIntegrityError, type Currency, type DocumentCurrencyRef, CLINIC_BASE_CURRENCY } from "./money";
@@ -4807,16 +4808,19 @@ async function suppliersReport(ctx: ReportContext): Promise<ReportResult> {
 async function recallReport(ctx: ReportContext): Promise<ReportResult> {
   const { filters, base, doctors } = ctx;
   const pool = getPool();
+  const settings = ctx.skipEnsureSchema ? await getSettingsWith(pool) : await getSettings();
+  const lapseWeeks = parseConfiguredLapseWeeks(settings["recall.lapse_weeks"]);
+  const lapseStatusLabel = lapseLabelForWeeks(lapseWeeks);
   const [openPast, missed, lapsed] = ctx.skipEnsureSchema
     ? await Promise.all([
         listOpenPastAppointmentsWith(pool, null),
         listMissedAppointmentsWith(pool, null),
-        listLapsedPatientsWith(pool, 6, null),
+        listLapsedPatientsWith(pool, lapseWeeks, null),
       ])
     : await Promise.all([
         listOpenPastAppointments(),
         listMissedAppointments(),
-        listLapsedPatients(6),
+        listLapsedPatients(lapseWeeks),
       ]);
 
   const patientAllowed = (patientId: number) => !filters.patientId || filters.patientId === patientId;
@@ -4846,7 +4850,7 @@ async function recallReport(ctx: ReportContext): Promise<ReportResult> {
       referenceDate: row.referenceDate,
       phone: row.patientPhone ?? "—",
       doctorName: "—",
-      statusLabel: "أكثر من ٦ أسابيع",
+      statusLabel: lapseStatusLabel,
     })),
   ];
 

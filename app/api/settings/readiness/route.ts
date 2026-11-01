@@ -6,6 +6,7 @@ import { isAdmin } from "@/lib/roles";
 import { getPool, getSettingsSafe } from "@/lib/db";
 import { SETTING_DEFAULTS } from "@/lib/settings";
 import { probeStorageReadiness } from "@/lib/storage-readiness";
+import { evaluateBackupReadinessCheck, queryBackupAuditEvidenceWith } from "@/lib/backup-readiness-check";
 
 export const dynamic = "force-dynamic";
 
@@ -219,7 +220,7 @@ export async function GET() {
         title: "دليل الخدمات والأسعار",
         description: "دليل الخدمات يحتوي على عدد قليل من الخدمات. يُنصح بإضافة تسعيرة خدمات العيادة كاملة.",
         status: "warn",
-        actionHref: "/settings",
+        actionHref: "/finance/services",
         actionLabel: "تحديث دليل الخدمات",
       });
     }
@@ -282,16 +283,9 @@ export async function GET() {
       actionLabel: "فتح شاشة الصالة",
     });
 
-    // 8. النسخ الاحتياطي والأمان
-    checks.push({
-      id: "backup_system",
-      category: "security",
-      title: "النسخ الاحتياطي وتصدير البيانات",
-      description: "نظام تصدير النسخ الاحتياطية الكاملة والمشفرة بتنسيق SQL و JSON جاهز ويعمل بكفاءة.",
-      status: "pass",
-      actionHref: "/settings/export",
-      actionLabel: "تصدير نسخة الآن",
-    });
+    // 8. النسخ الاحتياطي والأمان (S22 / R53: مبني على الأدلة الفعلية لا النجاح الافتراضي)
+    const backupAuditEvidence = await queryBackupAuditEvidenceWith(pool);
+    checks.push(await evaluateBackupReadinessCheck({ settings, auditEvidence: backupAuditEvidence }));
 
     /* (P2/S11) ما كان يوماً يخرج من /api/health للعابرين انتقل إلى هنا —
        للمدير وحده: نسخة الإصدار العاملة، تشخيص التخزين الدائم التفصيلي،
