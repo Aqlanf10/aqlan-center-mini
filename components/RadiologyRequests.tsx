@@ -7,7 +7,13 @@ type HistoryRow={id:string;doctorName:string;centerName:string;createdAtLabel:st
 type Pending={commandKey:string;patientId:number;visitId:number|null;centerId:string;examination:string;region:string;notes:string};
 export function RadiologyRequests(props:{patientId:number;visitId?:number}) {
  const session=useSession();
- return <RadiologyPanel key={JSON.stringify([props.patientId,props.visitId,session?.username,session?.role,session?.permissions])} storageScope={JSON.stringify([session?.username,props.patientId,props.visitId??null])} {...props}/>;
+ return <RadiologyEntry key={JSON.stringify([props.patientId,props.visitId,session?.username,session?.role,session?.permissions])} storageScope={JSON.stringify([session?.username,props.patientId,props.visitId??null])} {...props}/>;
+}
+/** Keep unrelated patient tabs inert: durable recovery storage is inspected only
+ * after explicitly entering radiology. This keyed entry resets with patient/principal. */
+function RadiologyEntry(props:{patientId:number;visitId?:number;storageScope:string}) {
+ const [active,setActive]=useState(false);
+ return active?<RadiologyPanel {...props}/>:<section className="my-4 rounded-xl border p-4" aria-label="طلبات الأشعة"><h2 className="font-bold">طلبات الأشعة</h2><p>افتح السجل لإصدار طلب أو مراجعة طلب سابق وطباعته.</p><button type="button" onClick={()=>setActive(true)} className="mt-3 rounded border p-3">فتح طلبات الأشعة</button></section>;
 }
 function RadiologyPanel({patientId,visitId,storageScope}:{patientId:number;visitId?:number;storageScope:string}) {
  const alive=useRef(true), latch=useRef(false), pending=useRef<Pending|null>(null);

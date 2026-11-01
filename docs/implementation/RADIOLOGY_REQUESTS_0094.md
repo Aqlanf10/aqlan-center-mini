@@ -2,13 +2,15 @@
 
 ## Scope and operation
 - Central settings → مراكز الأشعة: UUID-addressed name/address/active catalog; empty by default, structured editor and existing clinical-settings CAS/permissions.
-- Patient file → طلبات الأشعة: current self-linked active doctor authors an examination, anatomical region and optional recipient instructions. Optional visit must belong to the patient. No diagnosis generation, results entry, billing or external transmission.
+- Patient file → طلبات الأشعة → فتح طلبات الأشعة: current self-linked active doctor authors an examination, anatomical region and optional recipient instructions. Optional visit must belong to the patient. No diagnosis generation, results entry, billing or external transmission.
 - Issue creates one immutable document/command receipt and awaited audit in one transaction. Key advisory lock precedes fresh credential/role/patient authorization; downstream scope locks use NOWAIT. Same actor/key/scope/payload replays the same document, not a new issuance.
 - Current-account admin status is not clinical/owner delegation. The separate protected owner-authority work is not activated here.
 - Reception has **no default grant**. An authorized administrator may explicitly enable `canPrintRadiologyRequests` under users. It permits only minimal scoped history and saved printing, never clinical authorship/options/edit.
 - A6 (105 × 148 mm) print is scoped to this document. Stored clinic/patient/doctor/recipient fields, clinic-zone issue time, no live rename substitution. Ordinary A4 reports are unchanged. Overflow must be verified on real PDFs; no fixed content clipping or shrink-to-fit.
 
 ## Recovery / operator instructions
+The entry remains inert on unrelated patient tabs: no radiology storage or network access occurs until the user explicitly opens it. Opening restores any retained command reference before issuance becomes possible; changing patient, visit or principal retires the entry scope.
+
 The browser stores only an opaque command key under the actor/patient/visit scope (no request text, names, medical notes, credentials or tokens). In-memory retries retain the exact original payload. Storage failure blocks submission. Reload with a retained key blocks new issuance and offers authoritative recovery/history. A missing receipt is **unknown**, not evidence of rollback. Recovery/replay never auto-prints. The app-controlled print button performs a fresh narrow POST authorization and awaited audit before window.print; errors or retired page scope never print. Browser-native Ctrl+P on content already disclosed cannot be revoked remotely.
 
 A clinician may explicitly choose “بدء طلب مستقل بعد مراجعة السجل” and confirm the warning that the prior request may already exist. This removes only the local reference and clears the draft; it neither deletes a server receipt nor automatically creates/submits a replacement. This is a documented **new-intent reconciliation**, not exactly-once recovery of lost draft contents. There is no server cancellation/terminal-rejection command in this tranche.

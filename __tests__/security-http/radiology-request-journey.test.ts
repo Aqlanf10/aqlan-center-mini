@@ -2,8 +2,9 @@
  * no browser mock, no receipt deletion: global harness teardown owns the test DB. */
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
+import { chromium } from "playwright";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { authedGet, authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, baseUrl, harness } from "./_server";
 const KEY = "clinical.radiology_centers";
 let h: Awaited<ReturnType<typeof harness>>, db: Client;
 beforeAll(async () => { h = await harness(); db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect(); }, 240_000);
@@ -101,3 +102,31 @@ it("rejects disallowed reception before malformed clinical fields while retainin
   expect((await post('/api/radiology-requests/invalid/print', {}, 'doctorA')).status).toBe(400);
   expect((await read('/api/patients/invalid/radiology-requests', 'doctorA')).status).toBe(400);
 });
+
+
+it("keeps the real account page inert and restores a pending radiology key only after explicit entry", async () => {
+  const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined});
+  const context=await browser.newContext({viewport:{width:1280,height:900}});
+  try {
+    const [name,...value]=h.sessions.doctorA.cookie.split('=');
+    await context.addCookies([{name,value:value.join('='),url:baseUrl}]);
+    const pendingKey=randomUUID(),storageKey=`radiology-request:v1:${JSON.stringify(['secdoctora',h.seeded.patientAId,null])}`;
+    await context.addInitScript(({storageKey,pendingKey})=>{
+      sessionStorage.setItem(storageKey,pendingKey);
+      const reads:string[]=[];Object.assign(window,{__radiologyStorageReads:reads});
+      const get=Storage.prototype.getItem;
+      Storage.prototype.getItem=function(key:string){if(this===sessionStorage&&key.startsWith('radiology-request:'))reads.push(key);return get.call(this,key);};
+    },{storageKey,pendingKey});
+    const page=await context.newPage(),writes:string[]=[];
+    page.on('request',request=>{if(request.url().includes('/api/radiology-requests')&&request.method()==='POST')writes.push(request.method());});
+    const response=await page.goto(`${baseUrl}/patients/${h.seeded.patientAId}?tab=account`,{waitUntil:'networkidle'});
+    expect(response?.status()).toBe(200);
+    const reads=()=>page.evaluate(()=>((window as unknown as {__radiologyStorageReads:string[]}).__radiologyStorageReads));
+    expect(await reads()).toEqual([]);
+    await page.getByRole('button',{name:'فتح طلبات الأشعة',exact:true}).click();
+    await expect.poll(reads).toEqual([storageKey]);
+    await expect.poll(()=>page.getByRole('status').allTextContents()).toContain('يوجد طلب سابق؛ تحقق من نتيجته قبل إصدار طلب آخر.');
+    expect(await page.getByRole('button',{name:'إعادة نفس الطلب بأمان',exact:true}).isDisabled()).toBe(true);
+    expect(writes).toEqual([]);
+  } finally {await context.close();await browser.close();}
+},60_000);

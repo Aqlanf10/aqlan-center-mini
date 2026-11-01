@@ -17,7 +17,8 @@ let storage: Map<string, string>;
 function render() {
   state.cursor = 0;
   const panel = RadiologyRequests({ patientId: 7, visitId: 9 });
-  const rendered = (panel.type as (props: unknown) => ReactNode)(panel.props);
+  let rendered: ReactNode = panel;
+  while (rendered && typeof rendered === "object" && "type" in rendered && typeof rendered.type === "function") rendered=(rendered.type as (props: unknown) => ReactNode)(rendered.props);
   state.effects.splice(0).forEach(effect => effect());
   return rendered;
 }
@@ -36,7 +37,9 @@ function click(label: string) { (button(label).props.onClick as () => void)(); }
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 const response = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body });
 function change(node: Element, value: string) { (node.props.onChange as (event: unknown) => void)({ target: { value } }); }
+function enter() { click("فتح طلبات الأشعة"); render(); }
 async function ready() {
+  enter();
   fetchMock.mockResolvedValueOnce(response({ requests: [], nextCursor: null, canIssue: true }));
   click("عرض / تحديث السجل"); await flush();
   fetchMock.mockResolvedValueOnce(response({ centers: [{ id: CENTER, name: "مركز", address: "عنوان", active: true }] }));
@@ -86,12 +89,15 @@ it("ignores an issuance response after unmount and scopes remounts to patient an
   finish(response({ id: KEY })); await flush(); expect(state.lateUpdates).toBe(0);
   const before = RadiologyRequests({ patientId: 7, visitId: 9 }).key;
   expect(RadiologyRequests({ patientId: 8, visitId: 9 }).key).not.toBe(before);
+  expect(RadiologyRequests({ patientId: 7, visitId: 10 }).key).not.toBe(before);
+  Object.assign(state.session,{permissions:{canPrintRadiologyRequests:false}});
+  expect(RadiologyRequests({ patientId: 7, visitId: 9 }).key).not.toBe(before);
   state.session = { username: "other", role: "doctor" };
   expect(RadiologyRequests({ patientId: 7, visitId: 9 }).key).not.toBe(before);
   expect(window.open).not.toHaveBeenCalled();
 });
 it("allows reception history links but exposes no issuance before a positive server capability", async () => {
-  state.session = { username: "reception", role: "reception" };
+  state.session = { username: "reception", role: "reception" }; enter();
   expect(text(render())).not.toContain("طلب أشعة جديد");
   fetchMock.mockResolvedValueOnce(response({ requests: [{ id: KEY, doctorName: "طبيب", centerName: "مركز", createdAtLabel: "اليوم" }], nextCursor: null, canIssue: false }));
   click("عرض / تحديث السجل"); await flush();
@@ -99,6 +105,7 @@ it("allows reception history links but exposes no issuance before a positive ser
   expect(fetchMock.mock.calls.some(call => call[1]?.method === "POST")).toBe(false);
 });
 it("ignores stale history results after unmount", async () => {
+  enter();
   let finish!: (value: unknown) => void;
   fetchMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })); click("عرض / تحديث السجل");
   state.cleanup.forEach(cleanup => cleanup()); state.mounted = false;
@@ -109,8 +116,9 @@ it("persists only an opaque key and blocks fresh issuance after reload while rec
   await ready(); fetchMock.mockRejectedValueOnce(new Error("lost response")); click("إصدار وحفظ الطلب"); await flush();
   expect([...storage.values()]).toEqual([KEY]);
   expect([...storage.keys()]).toEqual(['radiology-request:v1:["synthetic",7,9]']);
+  const readsBeforeReload=vi.mocked(window.sessionStorage.getItem).mock.calls.length;
   state.cleanup.forEach(cleanup => cleanup()); state.slots = []; state.cursor = 0; state.effects = []; state.cleanup = [];
-  render(); render();
+  render(); expect(window.sessionStorage.getItem).toHaveBeenCalledTimes(readsBeforeReload); enter(); render();
   expect(button("إعادة نفس الطلب بأمان").props.disabled).toBe(true);
   fetchMock.mockResolvedValueOnce(response({ state: "unknown" })); click("التحقق من نتيجة الإصدار"); await flush();
   expect(button("إعادة نفس الطلب بأمان").props.disabled).toBe(true);
@@ -142,4 +150,13 @@ it("clears an uncertain opaque reference only after explicit confirmation, with 
   expect(fetchMock.mock.calls.filter(call => call[1]?.method === "POST")).toHaveLength(posts);
   expect(text(render())).toContain("لم يصدر طلب جديد تلقائيًا");
   expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining("قد يكون قد حُفظ"));
+});
+
+it("keeps initial patient/account rendering inert until explicit radiology entry", () => {
+ storage.set('radiology-request:v1:["synthetic",7,9]',KEY);
+ expect(text(render())).toContain("فتح طلبات الأشعة");render();
+ expect(window.sessionStorage.getItem).not.toHaveBeenCalled();expect(window.sessionStorage.setItem).not.toHaveBeenCalled();expect(fetchMock).not.toHaveBeenCalled();expect(crypto.randomUUID).not.toHaveBeenCalled();
+ enter();render();
+ expect(window.sessionStorage.getItem).toHaveBeenCalledExactlyOnceWith('radiology-request:v1:["synthetic",7,9]');
+ expect(text(render())).toContain("يوجد طلب سابق");expect(button("إعادة نفس الطلب بأمان").props.disabled).toBe(true);expect(fetchMock).not.toHaveBeenCalled();expect(crypto.randomUUID).not.toHaveBeenCalled();expect([...storage.values()]).toEqual([KEY]);
 });
