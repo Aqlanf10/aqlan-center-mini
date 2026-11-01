@@ -4021,11 +4021,11 @@
   ],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 3: read:patients.clinical.",
+  "note": "M2 slice 3 read:patients.clinical; slice 45 proven dependency correction: same-snapshot same-patient case references, and hidden ortho associations masked at SQL projection without altering allowed problem facts or legacy reader.",
   "projection": {
    "legacy": "canAccessPatient (doctor own patients unless canViewAllPatients; reception and admin all).",
    "groups": {
-    "clinical": "the whole response — one of clinical.plans.view, clinical.visits.document, clinical.xrays.view (read:patients.clinical)"
+    "clinical": "Problem facts retain read:patients.clinical admission. Orthodontic caseId/caseTitle additionally require clinical.ortho.view; otherwise both are null. Foreign case references fail without returning linked content."
    },
    "rows": "patient outside the scope reads like a missing one (404)"
   }
@@ -4042,8 +4042,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Slice 45: independent clinical.visits.document and current patient scope after patient lock, locked responsibility, optional same-patient visible case/native link locked NOWAIT. Hidden/foreign case is indistinguishable from missing even under contention. Original problem insertion and atomic audit on one connection; minimal acknowledgment, no assignment/status/finance change or rich postcommit reader. No silent clinical truncation, automatic replay, permanent request receipt or fabricated duplicate suppression."
  },
  {
   "route": "/api/patients/[id]/referrals",

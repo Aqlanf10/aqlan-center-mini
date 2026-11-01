@@ -29082,31 +29082,39 @@ export async function listPatientProblemsWith(q: Pick<DbClient, "query">, patien
   return rows.map(toProblem);
 }
 
-export async function createPatientProblem(input: ProblemDraft & {
+export interface CreatePatientProblemInput extends ProblemDraft {
   patientId: number; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "no_patient" | "bad_case" }> {
+}
+/** Original problem insertion and audit on a caller-owned transaction. */
+export async function createPatientProblemInTransaction(client: DbClient, input: CreatePatientProblemInput): Promise<{ ok: true; problemId: number } | { ok: false; reason: "no_patient" | "bad_case" }> {
+  const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+  if (!patient[0]) { return { ok: false, reason: "no_patient" }; }
+  if (input.caseId !== null) {
+    const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, input.patientId]);
+    if (!rows[0]) { return { ok: false, reason: "bad_case" }; }
+  }
+  const { rows: [created] } = await client.query<{ id: number }>(
+    `INSERT INTO patient_problems (patient_id, label, site, specialty, case_id, noted_by)
+     VALUES ($1, $2, $3::text, $4::text, $5::int, $6) RETURNING id`,
+    [input.patientId, input.label, input.site, input.specialty, input.caseId, input.actor],
+  );
+  await insertAuditRow(client, {
+    action: "problem.create", entity: "patient", entityId: input.patientId, entityLabel: input.label,
+    details: { المشكلة: created.id, الموضع: input.site ?? "—", التخصص: input.specialty ?? "—", الحالة: input.caseId ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true, problemId: created.id };
+}
+
+export async function createPatientProblem(input: CreatePatientProblemInput): Promise<{ ok: true; problem: PatientProblem } | { ok: false; reason: "no_patient" | "bad_case" }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
-    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
-    if (input.caseId !== null) {
-      const { rows } = await client.query(`SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, input.patientId]);
-      if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
-    }
-    const { rows: [created] } = await client.query<{ id: number }>(
-      `INSERT INTO patient_problems (patient_id, label, site, specialty, case_id, noted_by)
-       VALUES ($1, $2, $3::text, $4::text, $5::int, $6) RETURNING id`,
-      [input.patientId, input.label, input.site, input.specialty, input.caseId, input.actor],
-    );
-    await insertAuditRow(client, {
-      action: "problem.create", entity: "patient", entityId: input.patientId, entityLabel: input.label,
-      details: { المشكلة: created.id, الموضع: input.site ?? "—", التخصص: input.specialty ?? "—", الحالة: input.caseId ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await createPatientProblemInTransaction(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
-    const { rows } = await getPool().query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [created.id]);
+    const { rows } = await getPool().query<ProblemRow>(`${PROBLEM_SELECT} WHERE p.id = $1`, [result.problemId]);
     return { ok: true, problem: toProblem(rows[0]) };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);

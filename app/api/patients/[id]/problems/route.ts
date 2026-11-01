@@ -5,6 +5,10 @@ import { createPatientProblem, listPatientProblems } from "@/lib/db";
 import { checkProblemDraft } from "@/lib/cases";
 import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
 
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { CanonicalProblemCreateRefusal, commandCanonicalProblemCreate } from "@/lib/canonical-problem-create-command";
+
 export const dynamic = "force-dynamic";
 
 /** (CASE-MODEL-1) قائمة مشاكل المريض. */
@@ -24,7 +28,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const patientId = idOf((await params).id);
+  const rawId = (await params).id, selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});
+  if (selected.kind === "canonical") {
+    const read = await readBody(request);
+    if (!read.ok) { read.response.headers.set("Cache-Control","private, no-store"); return read.response; }
+    try {
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalProblemCreateRefusal("invalid_problem_create",400,"طلب إنشاء المشكلة لا يقبل مرشحات إضافية.");
+      return NextResponse.json(await commandCanonicalProblemCreate(selected.handle,rawId,read.body),{status:201,headers:NO_STORE});
+    } catch (error) {
+      if (error instanceof CanonicalProblemCreateRefusal) return NextResponse.json({code:error.code,message:error.message},{status:error.status,headers:NO_STORE});
+      return canonicalPatientReadFailure(error,"تعذّر تأكيد حفظ المشكلة. راجع القائمة الحالية قبل أي طلب جديد.");
+    }
+  }
+  const patientId = idOf(rawId);
   if (!patientId) return json("رقم مريض غير صالح.", 400);
   const guard = await guardPatient(patientId, true);
   if (!guard.ok) return guard.response;

@@ -1,7 +1,7 @@
 {
   "format": "strict-plan-dependency-requirement-v1",
   "baseRevision": "e09263fa79bd627cf88b47ae0dbf59ea7b335499",
-  "sourceRevision": null,
+  "sourceRevision": "db16763d61a58289f62ffce54f44b35300afdbf1",
   "sourceSha256": {
     "lib/canonical-plan-dependency-command.ts": "f56f474a959cdc59fb0047509b7d4951971fb81ddffc2b521e87e72b35354dde",
     "__tests__/canonical-plan-dependency-command.test.ts": "3ba07697e87e558e96bd20fb3d359a8c520f2daaf4809629490d4baf8859d7d2",

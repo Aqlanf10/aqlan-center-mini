@@ -1,9 +1,9 @@
 import "server-only";
 import {
   browsePatientsWith, computeDebtRowsInSnapshot, getPatientWith, getSettingsWith, listMedicalHistoryWith, listPatientAppointmentsWith,
-  listPatientProblemsWith, listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
+  listPatientVisitsWith, listVitalsWith, patientInDoctorScopeWith, patientTimelineWith, searchPatientsWith,
   listPatientDiagnosesWith, listIntakeFormsWith, listPatientReferralsWith, listContactConsentsWith, contactConsentStatesWith,
-  CLINIC_TIME_ZONE, listPatientCasesWith, listPatientPlansWith, openOrthoCaseForWith, type DbClient, type PatientListRow,
+  CLINIC_TIME_ZONE, listPatientCasesWith, listPatientPlansWith, openOrthoCaseForWith, type DbClient, type PatientListRow, type PatientProblem,
   listPatientCaseRowsWith, listPatientPlannedVisitsWith, patientLedgerInSnapshot, patientWorkflowWith, patientHasMedicalAlertWith, patientsWithMedicalAlertWith,
 } from "./db";
 import { deriveAlerts, reviewDue } from "./medical-history";
@@ -245,7 +245,26 @@ export async function readCanonicalVitals(session: VerifiedDurableSession, patie
   return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => ({ vitals: await listVitalsWith(query, patientId, 30) }));
 }
 export async function readCanonicalProblems(session: VerifiedDurableSession, patientId: number) {
-  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async query => listPatientProblemsWith(query, patientId));
+  return readCanonicalPatientRecord(session, "read:patients.clinical", patientId, async (query, scope): Promise<PatientProblem[]> => {
+    // Problem facts belong to the existing care projection. Their linked case
+    // must not restore an ortho identity hidden by the independent case reader.
+    const {rows:[references]} = await query.query<{invalid:boolean}>(`SELECT EXISTS(
+      SELECT 1 FROM patient_problems p LEFT JOIN clinical_cases c ON c.id=p.case_id
+      WHERE p.patient_id=$1 AND p.case_id IS NOT NULL AND c.patient_id IS DISTINCT FROM p.patient_id
+    ) AS invalid`,[patientId]);
+    if (!references || references.invalid) throw new Error("CLINICAL_PROBLEM_REFERENCE_INVALID");
+    const visible = "($2::boolean OR (c.ortho_case_id IS NULL AND c.specialty <> 'orthodontics'))";
+    const {rows} = await query.query<Omit<PatientProblem,"notedAt"|"resolvedAt"> & {notedAt:Date;resolvedAt:Date|null}>(`
+      SELECT p.id,p.patient_id AS "patientId",p.label,p.site,p.specialty,p.status,
+        CASE WHEN ${visible} THEN p.case_id ELSE NULL END AS "caseId",
+        CASE WHEN ${visible} THEN c.title ELSE NULL END AS "caseTitle",
+        p.noted_by AS "notedBy",p.noted_at AS "notedAt",p.resolved_by AS "resolvedBy",p.resolved_at AS "resolvedAt"
+      FROM patient_problems p LEFT JOIN clinical_cases c ON c.id=p.case_id AND c.patient_id=p.patient_id
+      WHERE p.patient_id=$1
+      ORDER BY CASE p.status WHEN 'active' THEN 0 WHEN 'inactive' THEN 1 ELSE 2 END,p.noted_at DESC,p.id DESC`,
+      [patientId,scope.granted("clinical.ortho.view")]);
+    return rows.map(row=>({...row,notedAt:row.notedAt.toISOString(),resolvedAt:row.resolvedAt?.toISOString()??null}));
+  });
 }
 
 /** Timeline event groups (Dot 6480538845 item 3): a hidden group's events are omitted

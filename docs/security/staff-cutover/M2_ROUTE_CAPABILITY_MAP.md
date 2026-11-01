@@ -30,23 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 44 on WORK)
+### Counts (386 mapped route/method entries, after local slice 45 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 279 |
+| existing | 278 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 65 |
+| canonical-done | 66 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 40–42 are published at e09263fa with exact-head CI running; slices 43–44 remain local. Published map: 63 canonical-done / 281 existing; local map: 65 / 279. Neither state is whole-system acceptance.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 40–42 are published at e09263fa with exact-head CI running; slices 43–45 remain local. Published map: 63 canonical-done / 281 existing; local map: 66 / 278. Neither state is whole-system acceptance.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -608,3 +608,7 @@ Still open, not inferred: the owner decisions (four owner-only operations; empty
 ### Slice 44 — clinical problem status
 
 `PATCH /api/problems/[id]` requires current `clinical.visits.document`, independently of plan edit. Original problem transitions, resolution provenance and atomic audit run on the admitted connection after patient and problem locks with a row-version comparison. It does not modify the case or financial state. The client requires explicit new intent after uncertainty. See [the acceptance matrix](../../review/work-problem-status-slice44-20261101.md); full new-head gates and review remain separate.
+
+### Slice 45 — create a clinical problem, preserve independent case privacy
+
+POST `/api/patients/[id]/problems` requires the existing documentation capability and current patient scope. Optional clinical-case links are checked and locked inside that patient, with independent ortho visibility. The original writer and audit are atomic on the admitted connection. Existing GET now masks a linked orthodontic case ID/title without that independent read grant and refuses invalid foreign references in its owning snapshot. Original problem facts and legacy routes remain preserved. No assignment, money or migration; no automatic resend or durable receipt. See [the acceptance matrix](../../review/work-problem-create-slice45-20261101.md). Final combined gates and independent review remain pending.

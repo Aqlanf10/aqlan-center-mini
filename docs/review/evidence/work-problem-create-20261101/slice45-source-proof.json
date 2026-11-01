@@ -1,0 +1,29 @@
+{
+  "baseRevision": "db16763d61a58289f62ffce54f44b35300afdbf1",
+  "checks": {
+    "db_prefix_case_status_and_responsibility_unchanged": true,
+    "db_suffix_problem_status_finance_dependency_writers_unchanged": true,
+    "exact_original_create_and_audit_body": true,
+    "legacy_post_tail_identical": true,
+    "existing_get_identical": true,
+    "lib/cases.ts": true,
+    "lib/commission.ts": true,
+    "lib/initial-responsibility-authority.ts": true,
+    "lib/patient-responsibility-settings.ts": true,
+    "lib/staff-operation-runtime.ts": true,
+    "lib/canonical-case-reads.ts": true,
+    "lib/canonical-case-projection.ts": true,
+    "lib/canonical-problem-status-command.ts": true,
+    "lib/canonical-problem-status-version.ts": true,
+    "lib/canonical-case-status-command.ts": true,
+    "lib/canonical-case-status-version.ts": true,
+    "lib/canonical-plan-case-command.ts": true,
+    "lib/canonical-plan-dependency-command.ts": true,
+    "lib/canonical-plan-dependency-version.ts": true,
+    "components/PatientCases.tsx": true,
+    "patient_reads_only_import_and_problem_projection_changed": true,
+    "no_migration_changes": true
+  },
+  "passed": 22,
+  "historicalSourceHashes": 539
+}

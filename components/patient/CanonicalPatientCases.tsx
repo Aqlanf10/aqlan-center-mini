@@ -6,6 +6,7 @@ import { CASE_STATUS_LABEL, DEPENDENCY_REQUIREMENT_LABEL, PROBLEM_STATUS_LABEL, 
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { CanonicalPlanCaseEditor } from "./CanonicalPlanCaseEditor";
 import { CanonicalPlanDependencyEditor } from "./CanonicalPlanDependencyEditor";
+import { CanonicalProblemCreateEditor } from "./CanonicalProblemCreateEditor";
 import { CanonicalProblemStatusEditor } from "./CanonicalProblemStatusEditor";
 import { CanonicalCaseStatusEditor } from "./CanonicalCaseStatusEditor";
 
@@ -55,6 +56,7 @@ export function CanonicalPatientCases({ patientId, canEdit, canDocument, ownerKe
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
       {canEdit ? <CanonicalPlanDependencyEditor key={`dependency:${ownerKey}:${patientId}`} patientId={patientId} ownerKey={ownerKey} feed={feed}
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
+      {canDocument ? <CanonicalProblemCreateEditor patientId={patientId} ownerKey={ownerKey} feed={feed} refresh={() => setRefresh(v => v + 1)} /> : null}
       {canDocument ? <CanonicalProblemStatusEditor patientId={patientId} ownerKey={ownerKey} feed={feed} refresh={() => setRefresh(v => v + 1)} /> : null}
       {canEdit ? <CanonicalCaseStatusEditor key={`case-status:${ownerKey}:${patientId}`} patientId={patientId} ownerKey={ownerKey} feed={feed}
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
