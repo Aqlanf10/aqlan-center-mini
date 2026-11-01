@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
+// Keep this financial legacy-route parity fixture on its original session branch.
+vi.mock("@/lib/staff-session-admission", () => ({ selectRequestStaffEnvelope: async () => ({ kind: "legacy" }) }));
 import { renderToStaticMarkup } from "react-dom/server";
 import { assertRealPostgresUrl, createIsolatedDatabase, stubPostgresEnv } from "./_setup";
 import type { SessionPayload } from "../../lib/auth";

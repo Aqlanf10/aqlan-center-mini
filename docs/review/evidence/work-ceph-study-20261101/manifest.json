@@ -175,5 +175,7 @@
       "publishedSha256": "887c1abd4fc53d03b88a9db4d3865808cbc89b1b80139f95aaf00ed9c9f9323c",
       "normalization": "trailing whitespace/CR only"
     }
-  }
+  },
+  "sourceRevision": "a7af0bde20443e7e3d3ddf355beab0968b278c4e",
+  "sourceWitnessScope": "Historical delivery at sourceRevision; later slices can change these files and have their own evidence."
 }

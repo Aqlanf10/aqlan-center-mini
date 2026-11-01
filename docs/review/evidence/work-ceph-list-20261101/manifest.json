@@ -133,5 +133,7 @@
       "synthetic": true,
       "visuallyInspected": true
     }
-  }
+  },
+  "sourceRevision": "340e3429027bfef93b9f516272f3cf171e9599fa",
+  "sourceWitnessScope": "Historical delivery at sourceRevision; later slices can change these files and have their own evidence."
 }

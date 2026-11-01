@@ -224,5 +224,7 @@
     "work-checkout.log": "da6cb5f1ffe17ef70585ca8b83deb5725427e50dec5249ba41c8650086aebbf3",
     "tooling-build-final.log": "8590f1675a4b993c21c3264737997235f1bedfad839c4c2945e9f196748e972b",
     "work-context-final.log": "114d6a6740533cb7286ce402ce95aab9871b8e8f0a5fa2fa55507e890c6d2299"
-  }
+  },
+  "sourceRevision": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+  "sourceWitnessScope": "Historical delivery at sourceRevision; later slices can change these files and have their own evidence."
 }

@@ -3923,8 +3923,16 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 36: bounded clinical plan/item read under clinical.plans.view and patient scope; no finance projection, writers or clinical recalculation. Latest 100 plans with hasMore; legacy GET unchanged. Financial details remain a separate contract.",
+  "projection": {
+   "legacy": "Full plans, item prices and totals; collections conditional on canHandleMoney or doctor financial setting plus patient-payment permission; planned-visit rebooking projection.",
+   "groups": {
+    "clinical": "clinical.plans.view: native plan metadata, recorded consent facts, clinical items and actual completed clinical-session counts; no consent action or authority to perform treatment",
+    "independent": "Prices, currencies, billing state, receipts, installments, agreement/invoice metadata and appointment actions omitted including for owner; independent readers are outside this clinical slice"
+   },
+   "rows": "Patient scope proven in owning RR READ ONLY snapshot; item case/visit and session visit references must belong to the same patient; latest 100 plans with hasMore"
+  }
  },
  {
   "route": "/api/patients/[id]/prescriptions",

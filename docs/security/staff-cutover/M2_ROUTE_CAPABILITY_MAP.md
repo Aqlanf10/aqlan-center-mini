@@ -30,16 +30,16 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 mapped route/method entries, after slice 35 on WORK)
+### Counts (383 mapped route/method entries, after slice 36 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 290 |
+| existing | 289 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 54 |
+| canonical-done | 55 |
 
 | Record scope | Routes |
 |---|---|
@@ -514,6 +514,12 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - Whole-study limits are checked before materializing content: 256 landmarks, 256 measurements and 2 MiB stored bytes. Excess/invalid finite numeric data or partial calibration rejects; no history repair or silent truncation. Saved draft measurements remain explicitly `saved-unapproved`; approved values derive only from the recorded completed status. No new clinical decision is made.
 - Read-only on-demand panel inside the study list; no editor/tracer, PATCH/DELETE, image fetch or legacy page link. Scope/identity parser, eight-second timeout, clear-on-refresh/hide/denial and delayed-response retirement. Existing legacy GET/PATCH/DELETE and database writers retain their bodies.
 - Tests: `ceph-canonical-study`, full saved-list/calendar regression, `canonical-ceph-study-journey` (portOffset 47), older ortho/assessment and legacy ceph UI journeys. This is one read contract, not the whole ceph workflow.
+
+### Slice 36 — patient plans, clinical projection
+
+`GET /api/patients/[id]/plans` now has an independent `clinical.plans.view` plus patient-scope read. One RR READ ONLY snapshot covers authority, plan metadata, item facts, reference ownership and actual completed clinical sessions. Latest 100 plans have an explicit `hasMore`; at most 256 items per plan, 2000 per result, and 2 MiB are accepted before content materialization. Missing targets and native recorded values remain explicit. No financial query or data, plan/consent writer, image, appointment authority or historical recomputation is introduced. The legacy route body is preserved; canonical financial detail remains outside this clinical contract.
+
+The read-only patient panel clears stale or failed responses and has no action or legacy navigation. Local and exact-head CI evidence is tracked in the slice report; source conversion status is not release acceptance.
 
 ### Slice 35 — current cephalometric reference catalogue
 
