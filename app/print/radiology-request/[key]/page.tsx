@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { readSessionPayload } from '@/lib/session';
+import { requireSession } from '@/lib/session';
 import { readRadiologyRequest } from '@/lib/radiology-request-service';
 import { RADIOLOGY_UUID } from '@/lib/radiology-request';
 import { RadiologyPrintButton } from '@/components/RadiologyPrintButton';
@@ -8,7 +8,10 @@ import { withDefaults } from '@/lib/settings';
 import './radiology.css';
 export const dynamic='force-dynamic';
 export default async function RadiologyPrint({params,searchParams}:{params:Promise<{key:string}>;searchParams:Promise<{patientId?:string}>}) {
- const session=await readSessionPayload(); if(!session?.credentialVersion)notFound();
+ // HTML already boots the root layout's schema/session path. Join that same
+ // established bootstrap before acquiring clinical read locks (as Rx HTML does).
+ // API recovery/read/print authorization remains signature-only and no-DDL.
+ const session=await requireSession(); if(!session?.credentialVersion)notFound();
  const {key}=await params,query=await searchParams,patientId=Number(query.patientId);
  if(!RADIOLOGY_UUID.test(key)||!Number.isSafeInteger(patientId)||patientId<=0||patientId>2147483647)notFound();
  const record=await readRadiologyRequest(session,key,patientId).catch(()=>null);if(!record)notFound();

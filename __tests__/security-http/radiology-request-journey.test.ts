@@ -66,9 +66,12 @@ it("retains issued radiology snapshots and rechecks settings, clinical scope and
     expect((await read(`/api/patients/${patient.id}/radiology-requests?visitId=${wrongVisit.id}`)).status).toBe(404);
     const immutable = (await db.query("SELECT to_jsonb(r)::text AS row FROM radiology_requests r WHERE command_key=$1", [commandKey])).rows[0].row;
     expect((await saveSettings({ [KEY]: JSON.stringify([{ ...center, name: "CHANGED-CENTER", address: "CHANGED-ADDRESS", active: false }]) })).status).toBe(200);
+    // In the focused workflow this is the first HTML request: do not prewarm or retry.
     const html = await read(printPath); expect(html.status).toBe(200); const source = await html.text();
     for (const marker of ["radiology-a6", patientName, center.name, center.address, body.examination, body.notes, commandKey]) expect(source).toContain(marker);
     expect(source).not.toContain("CHANGED-CENTER");
+    expect((await db.query("SELECT to_jsonb(r)::text AS row FROM radiology_requests r WHERE command_key=$1", [commandKey])).rows).toEqual([{ row: immutable }]);
+    expect((await read(`/print/radiology-request/${randomUUID()}?patientId=${patient.id}`)).status).toBe(404);
     expect((await read(`/print/radiology-request/${commandKey}?patientId=${other.id}`)).status).toBe(404);
     expect((await post("/api/radiology-requests", { ...body, commandKey: randomUUID() })).status).toBe(409);
     await grant(true);

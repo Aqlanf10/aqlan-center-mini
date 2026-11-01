@@ -21,6 +21,22 @@ A clinician may explicitly choose “بدء طلب مستقل بعد مراجع�
 Runtime and CLI migrate both validate exact source/registry provenance and existing catalog before skipping/adopting anything. Unregistered residue is refused. Migration 0090–0093 bytes are untouched. Schema contract and ownership snapshots must be generated from hosted native PostgreSQL; **no hand-edited generated evidence**.
 
 ## Evidence / acceptance gates
+HTML print bootstrapping is distinct from the read-only API contract. The existing
+root layout already initializes schema through its settings/current-session path.
+The radiology HTML page awaits that established `requireSession()` bootstrap before
+starting clinical read locks, matching the prescription HTML page. Recovery,
+history/options and print-authorization APIs and the read service remain no-DDL;
+fresh transactional credential/grant/patient checks are not replaced by bootstrap.
+
+Native run `41356763010`, job `124998375904`, head
+`a8d40f1e38778fef034708128ae42f978b81fe0a` passed the two cold-render
+characterization cases: actual initializer/read SQL produced the exact lock witness
+and native `40P01` under the forced inverted order; initialization completed before
+read succeeded with the immutable receipt unchanged. This demonstrates the lock
+mechanism, not the deployed Next.js module-cache behavior. The HTML correction must
+still turn the isolated first-HTML-request 404 into 200 on its exact new head,
+without prewarming/retrying or weakening missing/revoked/scope refusals.
+
 Local focused unit/actual-handler tests cover central CAS/permissions, parser/decoder, fresh authorization, exact replay/collisions, atomic wrapper rollback, lost-response/reload recovery and minimal reception access. Bounded PGlite tests demonstrate SQL-shape compatibility/catalog validation only, not native locking or official restore.
 
 Pending hosted gates:

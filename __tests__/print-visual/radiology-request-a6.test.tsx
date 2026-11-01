@@ -13,7 +13,7 @@ import tailwindConfig from "../../tailwind.config";
 const fixture = vi.hoisted(() => ({ long: false }));
 const key = "11111111-1111-4111-8111-111111111111";
 const markers = Array.from({ length: 24 }, (_, index) => `RADNOTE${String(index + 1).padStart(2, "0")}`);
-vi.mock("@/lib/session", () => ({ readSessionPayload: async () => ({ username: "synthetic-doctor", role: "doctor", credentialVersion: "synthetic-version" }) }));
+vi.mock("@/lib/session", () => ({ requireSession: async () => ({ username: "synthetic-doctor", role: "doctor", credentialVersion: "synthetic-version" }) }));
 vi.mock("@/components/RadiologyPrintButton", () => ({ RadiologyPrintButton: () => null }));
 vi.mock("@/lib/radiology-request-service", () => ({ readRadiologyRequest: async () => ({
   id: "11111111-1111-4111-8111-111111111111", patientId: 7, visitId: 9, createdAt: "2026-11-01T08:30:00Z",
