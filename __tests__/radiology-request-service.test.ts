@@ -10,6 +10,7 @@ vi.mock("../lib/patient-access", () => ({ canAccessPatient: fx.access }));
 import { authorizeRadiologyPrint, issueRadiologyRequest, listRadiologyRequests, readRadiologyRequest, recoverRadiologyRequest, radiologyRequestOptions } from "../lib/radiology-request-service";
 import { GET as recoverGET } from "../app/api/radiology-requests/commands/[key]/route";
 import { GET as historyGET } from "../app/api/patients/[id]/radiology-requests/route";
+import { POST as issuePOST } from "../app/api/radiology-requests/route";
 import { POST as printPOST } from "../app/api/radiology-requests/[key]/print/route";
 const key = "11111111-1111-4111-8111-111111111111", centerId = "22222222-2222-4222-8222-222222222222";
 const draft = { patientId: 7, visitId: 9, centerId, examination: "بانوراما", region: "الفكين", notes: "" };
@@ -159,4 +160,28 @@ it("print POST denies freshly revoked reception grant without auditing", async (
   previous = record(); fx.user.mockResolvedValue({ role: "reception", permissions: { canPrintRadiologyRequests: false } });
   const response = await printPOST(new Request(`http://test.invalid/print`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ patientId: 7 }) }), { params: Promise.resolve({ key }) });
   expect(response.status).toBe(403); expect(fx.audit).not.toHaveBeenCalled();
+});
+
+
+const transportRoutes = ["issue", "recover", "print", "history"] as const;
+function transportRequest(route: typeof transportRoutes[number], valid: boolean) {
+ const url = `http://test.invalid/request${valid ? '?patientId=7&visitId=9' : ''}`;
+ const body = valid ? JSON.stringify(route === 'issue' ? {commandKey:key,...draft} : {patientId:7}) : '{}';
+ const request = new Request(url, route === 'issue' || route === 'print' ? {method:'POST',headers:{'content-type':'application/json'},body} : undefined);
+ const result = route === 'issue' ? issuePOST(request) : route === 'recover' ? recoverGET(request,{params:Promise.resolve({key:valid?key:'invalid'})}) : route === 'print' ? printPOST(request,{params:Promise.resolve({key:valid?key:'invalid'})}) : historyGET(request,{params:Promise.resolve({id:valid?'7':'invalid'})});
+ return {request,result};
+}
+it.each(transportRoutes.flatMap(route => (route === 'issue' || route === 'recover' ? ['reception','assistant','cashier','accountant'] : ['assistant','cashier','accountant']).map(role => ({route,role}))))('denies signed forbidden $role before malformed $route parsing or storage', async ({route,role}) => {
+ session.role=role as SessionPayload['role'];
+ const {request,result}=transportRequest(route,false);const response=await result;
+ expect(response.status).toBe(403);expect((await response.json()).message).toMatch(/[؀-ۿ]/);expect(response.headers.get('cache-control')).toBe('no-store');
+ expect(request.bodyUsed).toBe(false);expect(fx.requireSession).not.toHaveBeenCalled();expect(fx.ensure).not.toHaveBeenCalled();expect(fx.query).not.toHaveBeenCalled();expect(fx.revalidate).not.toHaveBeenCalled();expect(fx.audit).not.toHaveBeenCalled();
+});
+it.each(transportRoutes.flatMap(route => (route === 'issue' || route === 'recover' ? ['doctor','admin'] : ['doctor','admin','reception']).map(role => ({route,role}))))('retains400 for admitted $role with malformed $route fields',async({route,role})=>{
+ session.role=role as SessionPayload['role'];const response=await transportRequest(route,false).result;
+ expect(response.status).toBe(400);expect(fx.ensure).not.toHaveBeenCalled();expect(fx.query).not.toHaveBeenCalled();expect(fx.revalidate).not.toHaveBeenCalled();expect(fx.audit).not.toHaveBeenCalled();
+});
+it.each(transportRoutes)('signed admitted role never bypasses fresh revocation on %s',async route=>{
+ fx.revalidate.mockResolvedValue(null);const response=await transportRequest(route,true).result;
+ expect(response.status).toBe(403);expect(fx.revalidate).toHaveBeenCalledOnce();expect(fx.audit).not.toHaveBeenCalled();expect(inserts()).toHaveLength(0);expect(sqls().at(-1)).toBe('ROLLBACK');
 });

@@ -92,3 +92,12 @@ it("retains issued radiology snapshots and rechecks settings, clinical scope and
     finally { await db.query("UPDATE users SET permissions=$1 WHERE id=$2", [reception.permissions, reception.id]); }
   }
 }, 120_000);
+
+it("rejects disallowed reception before malformed clinical fields while retaining admitted validation", async () => {
+  expect((await post('/api/radiology-requests', {}, 'reception')).status).toBe(403);
+  expect((await read('/api/radiology-requests/commands/invalid', 'reception')).status).toBe(403);
+  expect((await post('/api/radiology-requests', {}, 'doctorA')).status).toBe(400);
+  expect((await read('/api/radiology-requests/commands/invalid', 'doctorA')).status).toBe(400);
+  expect((await post('/api/radiology-requests/invalid/print', {}, 'doctorA')).status).toBe(400);
+  expect((await read('/api/patients/invalid/radiology-requests', 'doctorA')).status).toBe(400);
+});
