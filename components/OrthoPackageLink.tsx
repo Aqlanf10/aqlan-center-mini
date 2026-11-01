@@ -13,6 +13,12 @@ interface PlanOption {
   /** Money-free: the full principal was explicitly approved (invoice-backed agreement). */
   approved: boolean;
 }
+// Use the same eligibility for presentation and the confirmed-read mutation guard.
+// An approved principal is the agreement; installments are its optional schedule.
+function fundsCase(plan: PlanOption): boolean {
+  return plan.status !== "cancelled" && (plan.approved || plan.installmentCount > 0);
+}
+
 type ReadState = { phase: "ready"; plans: PlanOption[] } | { phase: "loading" | "error" | "denied" };
 interface Props {
   caseId: number; patientId: number; planId: number | null; canLink: boolean; onChanged: () => void;
@@ -121,7 +127,7 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
     if (!mounted.current || writing.current || !canLink || current.phase !== "ready") return;
     // An old selection or a stale button cannot act outside the confirmed read.
     if (next === null ? planId === null || !current.plans.some((plan) => plan.id === planId)
-      : !current.plans.some((plan) => plan.id === next && plan.status !== "cancelled" && plan.installmentCount > 0)) return;
+      : !current.plans.some((plan) => plan.id === next && fundsCase(plan))) return;
     writing.current = true;
     setBusy(true);
     setMessage(null);
@@ -143,8 +149,6 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
   }
 
   const linked = read.phase === "ready" ? read.plans.find((plan) => plan.id === planId) ?? null : null;
-  // An approved principal is the agreement itself; installments are only its optional schedule.
-  const fundsCase = (plan: PlanOption) => plan.status !== "cancelled" && (plan.approved || plan.installmentCount > 0);
   const agreements = read.phase === "ready" ? read.plans.filter(fundsCase) : [];
   const missingLinked = read.phase === "ready" && planId !== null && linked === null;
   const funded = linked !== null && fundsCase(linked);

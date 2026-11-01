@@ -17,7 +17,8 @@ import {
   ORTHO_RECORDS_READ_FAILURE, recordStudyId, type OrthoRecordDocument, type OrthoRecordStudy,
 } from "@/lib/ortho-records";
 
-type Owner = { scope: readonly unknown[]; active: boolean; ready: boolean; busy: boolean; sequence: number;
+type Owner = { scope: readonly unknown[] };
+type OwnerRuntime = { owner: Owner; active: boolean; ready: boolean; busy: boolean; sequence: number;
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null; picker: PhotoView | null };
 type Snapshot = { owner: Owner; status: "loading" | "ready" | "error";
   documents: OrthoRecordDocument[]; studies: OrthoRecordStudy[] };
@@ -42,10 +43,13 @@ export function WebCephRecordsGrid({
     || (session?.role === "doctor" && session.permissions?.canViewXrays === true));
   const canUpload = canRead && (session?.role !== "doctor" || session.permissions?.canUploadXrays === true);
   const permissionScope = JSON.stringify(session?.permissions ?? null);
-  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope],
-    active: false, ready: false, busy: false, sequence: 0,
-    controller: null, timer: null, picker: null }),
+  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope] }),
     [patientId, orthoCaseId, session?.username, session?.role, permissionScope]);
+  const current = useRef<OwnerRuntime | null>(null);
+  const currentRuntime = useCallback(() => {
+    const runtime = current.current;
+    return runtime?.owner === owner && runtime.active ? runtime : null;
+  }, [owner]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [operation, setOperation] = useState<{ owner: Owner; slot?: PhotoView; documentId?: number } | null>(null);
   const [failure, setFailure] = useState<{ owner: Owner; message: string } | null>(null);
@@ -60,16 +64,18 @@ export function WebCephRecordsGrid({
   const error = failure?.owner === owner ? failure.message : null;
   const activeStage = selection?.owner === owner ? selection.stage : "all";
   const setActiveStage = (stage: PhotoStage | "all") => {
-    if (owner.active) setSelection({ owner, stage });
+    if (currentRuntime()) setSelection({ owner, stage });
   };
   const setError = (message: string | null) => {
-    if (owner.active) setFailure(message ? { owner, message } : null);
+    if (currentRuntime()) setFailure(message ? { owner, message } : null);
   };
   useLayoutEffect(() => {
-    owner.active = true;
+    const runtime: OwnerRuntime = { owner, active: true, ready: false, busy: false, sequence: 0, controller: null, timer: null, picker: null };
+    current.current = runtime;
     return () => {
-      owner.active = false; owner.ready = false; owner.picker = null; owner.controller?.abort();
-      if (owner.timer !== null) clearTimeout(owner.timer);
+      runtime.active = false; runtime.ready = false; runtime.picker = null; runtime.controller?.abort();
+      if (runtime.timer !== null) clearTimeout(runtime.timer);
+      if (current.current === runtime) current.current = null;
     };
   }, [owner]);
 
@@ -86,12 +92,13 @@ export function WebCephRecordsGrid({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
-    if (!owner.active || !canRead) return false;
-    owner.ready = false; owner.picker = null; owner.controller?.abort();
-    if (owner.timer !== null) clearTimeout(owner.timer);
-    const sequence = ++owner.sequence;
-    const controller = new AbortController(); owner.controller = controller;
-    const current = () => owner.active && owner.sequence === sequence;
+    const runtime = currentRuntime();
+    if (!runtime || !canRead) return false;
+    runtime.ready = false; runtime.picker = null; runtime.controller?.abort();
+    if (runtime.timer !== null) clearTimeout(runtime.timer);
+    const sequence = ++runtime.sequence;
+    const controller = new AbortController(); runtime.controller = controller;
+    const current = () => runtime.active && runtime.sequence === sequence;
     setSnapshot({ owner, status: "loading", documents: [], studies: [] });
     setFailure(null);
     try {
@@ -105,19 +112,19 @@ export function WebCephRecordsGrid({
         return { documents: decodeOrthoRecordDocuments(docs, patientId), studies: decodeOrthoRecordStudies(studies, patientId) };
       };
       const payload = await Promise.race([read(), new Promise<never>((_, reject) => {
-        owner.timer = setTimeout(() => { controller.abort(); reject(new Error(ORTHO_RECORDS_READ_FAILURE)); }, READ_TIMEOUT_MS);
+        runtime.timer = setTimeout(() => { controller.abort(); reject(new Error(ORTHO_RECORDS_READ_FAILURE)); }, READ_TIMEOUT_MS);
       })]);
       if (!current() || controller.signal.aborted) return false;
-      owner.ready = true;
+      runtime.ready = true;
       setSnapshot({ owner, status: "ready", ...payload });
       return true;
     } catch {
       if (current()) setSnapshot({ owner, status: "error", documents: [], studies: [] });
       return false;
     } finally {
-      if (current() && owner.timer !== null) { clearTimeout(owner.timer); owner.timer = null; }
+      if (current() && runtime.timer !== null) { clearTimeout(runtime.timer); runtime.timer = null; }
     }
-  }, [patientId, owner, canRead]);
+  }, [patientId, owner, canRead, currentRuntime]);
 
   useEffect(() => {
     void loadData();
@@ -130,7 +137,8 @@ export function WebCephRecordsGrid({
 
   // فتح أو إنشاء دراسة السيفالومتري فوراً
   const handleLaunchCeph = async (docId: number) => {
-    if (!owner.active || !owner.ready || owner.busy || !canRead
+    const runtime = currentRuntime();
+    if (!runtime || !runtime.ready || runtime.busy || !canRead
       || !documents.some(doc => doc.id === docId && doc.orthoCaseId === orthoCaseId)) return;
     const existing = caseRecordStudy(cephStudies, patientId, orthoCaseId, docId);
     // A patient-wide study is an explicit reference, never this case's analysis.
@@ -139,13 +147,13 @@ export function WebCephRecordsGrid({
       return;
     }
     if (!existing && !canUpload) return;
-    owner.busy = true;
+    runtime.busy = true;
     setOperation({ owner, documentId: docId });
     setError(null);
     try {
       // 1. فحص هل توجد دراسة سابقة لهذه الشععة
       if (existing) {
-        window.location.href = `/ceph/${existing.id}`;
+        window.location.assign(`/ceph/${existing.id}`);
         return;
       }
 
@@ -162,25 +170,26 @@ export function WebCephRecordsGrid({
         }),
       });
       const data = await res.json();
-      if (!owner.active) return;
+      if (!runtime.active) return;
       const analysisId = recordStudyId(data?.id);
       if (res.ok && analysisId !== null) {
-        window.location.href = `/ceph/${analysisId}`;
+        window.location.assign(`/ceph/${analysisId}`);
       } else {
         setError(data.message ?? "تعذّر فتح جلسة الرسم والتحليل السيفالومتري.");
       }
     } catch {
-      setError("تعذّر الاتصال بخادم السيفالومتري.");
+      if (runtime.active) setError("تعذّر الاتصال بخادم السيفالومتري.");
     } finally {
-      owner.busy = false;
-      if (owner.active) setOperation(null);
+      runtime.busy = false;
+      if (runtime.active) setOperation(null);
     }
   };
 
   // تشغيل منتقي الملفات للسلوت المحدد
   const triggerUpload = (slotKey: PhotoView) => {
-    if (!owner.active || !owner.ready || owner.busy || !canUpload) return;
-    owner.picker = slotKey;
+    const runtime = currentRuntime();
+    if (!runtime || !runtime.ready || runtime.busy || !canUpload) return;
+    runtime.picker = slotKey;
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
       fileInputRef.current.click();
@@ -189,10 +198,11 @@ export function WebCephRecordsGrid({
 
   // رفع الصورة المحددة إلى الخادم وربطها بالسلوت والحالة
   const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const runtime = currentRuntime();
     const file = e.target.files?.[0];
-    const slotKey = owner.picker;
-    if (!owner.active || !owner.ready || owner.busy || !canUpload || !file || !slotKey) return;
-    owner.picker = null; owner.busy = true;
+    const slotKey = runtime?.picker;
+    if (!runtime || !runtime.ready || runtime.busy || !canUpload || !file || !slotKey) return;
+    runtime.picker = null; runtime.busy = true;
 
     setOperation({ owner, slot: slotKey });
     setError(null);
@@ -215,7 +225,7 @@ export function WebCephRecordsGrid({
         body: formData,
       });
       const doc = await res.json();
-      if (!owner.active) return;
+      if (!runtime.active) return;
       if (!res.ok) {
         setError(doc.message ?? "تعذّر رفع الصورة.");
         return;
@@ -225,10 +235,10 @@ export function WebCephRecordsGrid({
       // never upload again or create a study from an unverified/stale document.
       void loadData();
     } catch {
-      setError("تعذّر الاتصال أثناء الرفع.");
+      if (runtime.active) setError("تعذّر الاتصال أثناء الرفع.");
     } finally {
-      owner.busy = false;
-      if (owner.active) setOperation(null);
+      runtime.busy = false;
+      if (runtime.active) setOperation(null);
     }
   };
 
@@ -301,7 +311,7 @@ export function WebCephRecordsGrid({
       ) : failed ? (
         <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <p>{ORTHO_RECORDS_READ_FAILURE}</p>
-          <button type="button" onClick={() => { if (owner.active && !owner.busy) void loadData(); }}
+          <button type="button" onClick={() => { const runtime = currentRuntime(); if (runtime && !runtime.busy) void loadData(); }}
             className="mt-2 font-bold underline">إعادة تحميل سجلات الحالة</button>
         </div>
       ) : null}
