@@ -16,3 +16,5 @@ The existing clinic formatter now renders orthodontic closure, specialty complet
 | Build and quality | Build z9dm33uOCMXzi0KHgP5Ay, typecheck, lint with 0 errors / 345 existing warnings, body/environment/money/preflight passed. The first typecheck caught four old typed fixture envelopes missing the new zone; the corrected typecheck passed. Final build typechecks the expanded tests. |
 
 The build product source stayed unchanged during the HTTP fixture corrections; before/after source hashes are recorded. Full combined suites, runtime provenance, exact-head CI and independent review remain separate gates. Inventory was regenerated and remains NOT_READY; no conversion count changes. No main merge, deployment or live mutation.
+
+Integration update: the final combined source and separately pinned full-suite/runtime gates are recorded in [batch 53–55 evidence](work-clinical-batch53-55-20261101.md). This preserves the original per-slice chronology above; final-head CI and independent review remain separate.

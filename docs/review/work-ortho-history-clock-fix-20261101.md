@@ -14,3 +14,5 @@ No server reader, authority rule, writer, SQL, persisted result, formula, immuta
 | Remaining gates | Final-build runtime provenance, final full unit, combined full PG, exact-head CI and independent review are tracked separately. No unrun gate is a pass. |
 
 Synthetic fixtures insert their explicit timestamps at creation; no immutable stored revision is updated to obtain the witness. Evidence and SHA256s are in `evidence/work-ortho-history-clock-20261101/manifest.json`. The separate coverage fix `0937e9aa` remains in the preserved history. No main merge, deployment or live change. This follow-up does not count another converted route.
+
+Integration update: the final combined source and separately pinned full-suite/runtime gates are recorded in [batch 53–55 evidence](work-clinical-batch53-55-20261101.md). This preserves the original per-slice chronology above; final-head CI and independent review remain separate.
