@@ -1,4 +1,5 @@
 "use client";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { CanonicalCephComparison } from "./CanonicalCephComparison";
 import { CanonicalCephStudy } from "./CanonicalCephStudy";
 import { CanonicalCephReferences } from "./CanonicalCephReferences";
@@ -60,7 +61,7 @@ export function CanonicalCephStudies({ patientId,ownerKey,canAnalyze }: { patien
       <p className="text-xs text-slate-600">نتائج محفوظة كما سُجلت؛ لم يُعَد حسابها، ولا تُعرض صور هنا.</p>
       {notice ? <p role="status">{notice}</p> : null}
       {feed && !error ? <CanonicalCephReferences /> : null}
-      {feed && !error && feed.analyses.length > 1 ? <CanonicalCephComparison patientId={patientId} studies={feed.analyses} /> : null}
+      {feed && !error && feed.analyses.length > 1 ? <CanonicalCephComparison patientId={patientId} studies={feed.analyses} clinicTimeZone={feed.clinicTimeZone} /> : null}
       <button type="button" onClick={()=>{setFeed(null);setError(null);setRefresh(value=>value+1);}}
         className="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-bold text-navy-800">تحديث الدراسات</button>
       {error?<p role="alert" className="text-sm text-red-700">{error}</p>:!feed?<p role="status">جارٍ تحميل الدراسات…</p>:feed.analyses.length===0?<p>لا توجد دراسات مسجلة لهذا المريض.</p>:
@@ -68,8 +69,8 @@ export function CanonicalCephStudies({ patientId,ownerKey,canAnalyze }: { patien
           <h3 className="font-bold text-navy-900">{row.status==="completed"?"دراسة معتمدة":"مسودة غير معتمدة"} — {CEPH_READ_PHASES[row.phase]}</h3>
           <dl className="mt-2 grid gap-2 sm:grid-cols-2">
             <div><dt className="text-xs text-slate-500">تاريخ الشععة</dt><dd dir="ltr">{row.xrayDate??"غير مسجل"}</dd></div>
-            <div><dt className="text-xs text-slate-500">تاريخ التسجيل</dt><dd dir="ltr">{row.createdAt.slice(0,10)}</dd></div>
-            {row.completedAt?<div><dt className="text-xs text-slate-500">تاريخ الاعتماد</dt><dd dir="ltr">{row.completedAt.slice(0,10)}</dd></div>:null}
+            <div><dt className="text-xs text-slate-500">تاريخ التسجيل</dt><dd dir="ltr">{formatClinicDate(row.createdAt, feed.clinicTimeZone)}</dd></div>
+            {row.completedAt?<div><dt className="text-xs text-slate-500">تاريخ الاعتماد</dt><dd dir="ltr">{formatClinicDate(row.completedAt, feed.clinicTimeZone)}</dd></div>:null}
           </dl>
           {row.status==="draft"?<p className="mt-2 text-xs text-amber-800">المسودة ليست نتيجة معتمدة.</p>:row.findings?<dl className="mt-2 grid grid-cols-3 gap-2" dir="ltr">
             <div><dt>ANB (°)</dt><dd>{row.findings.anb??"—"}</dd></div><div><dt>FMA (°)</dt><dd>{row.findings.fma??"—"}</dd></div><div><dt>WITS (mm)</dt><dd>{row.findings.wits??"—"}</dd></div>

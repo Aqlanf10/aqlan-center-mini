@@ -1,4 +1,5 @@
 "use client";
+import { formatClinicDate } from "@/lib/clinic-clock";
 
 import { useEffect, useId, useState } from "react";
 import { isCanonicalCephStudy,type CanonicalCephStudy as SavedCephStudy } from "@/lib/canonical-ceph-projection";
@@ -83,7 +84,7 @@ export function CanonicalCephStudy({ patientId,studyId,ownerKey,canAnalyze,onCop
           <div><dt className="text-slate-500">الأنسجة الرخوة</dt><dd className="whitespace-pre-wrap">{feed.diagnosis.softTissue??"غير مسجل"}</dd></div>
           <div><dt className="text-slate-500">ملاحظة التشخيص</dt><dd className="whitespace-pre-wrap">{feed.diagnosis.note??"لا توجد ملاحظة"}</dd></div>
           <div><dt className="text-slate-500">الاستنتاج المحفوظ</dt><dd className="whitespace-pre-wrap font-bold">{feed.diagnosis.finalDx}</dd></div>
-          <div><dt className="text-slate-500">سجله</dt><dd>{feed.diagnosis.createdBy} — {feed.diagnosis.updatedAt.slice(0,10)}</dd></div>
+          <div><dt className="text-slate-500">سجله</dt><dd>{feed.diagnosis.createdBy} — {formatClinicDate(feed.diagnosis.updatedAt, feed.clinicTimeZone)}</dd></div>
         </dl>:<p className="text-xs">لا يوجد تشخيص محفوظ؛ لم يُولّد تشخيص بديل.</p>}
       </div>}
       {canAnalyze ? <CanonicalCephComplete key={`complete:${ownerKey}:${patientId}:${studyId}`} patientId={patientId} studyId={studyId} ownerKey={ownerKey} feed={feed} onCompleted={onCompleted}

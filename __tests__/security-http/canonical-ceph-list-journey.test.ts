@@ -27,7 +27,7 @@ it("HTTP: canonical imaging viewer reads its saved study summaries without a leg
  const session=await journey.login("own");expect(session.status).toBe(200);
  expect((await journey.api(`/api/patients/${ids.own}`,session.cookie)).status).toBe(200);
  const response=await journey.api(`/api/patients/${ids.own}/ceph`,session.cookie);expect(response.status).toBe(200);
- expect(await response.json()).toMatchObject({projection:"ceph-summary",patientId:ids.own,hasMore:false});
+ expect(await response.json()).toMatchObject({projection:"ceph-summary", clinicTimeZone: "Asia/Aden",patientId:ids.own,hasMore:false});
  expect(await journey.ddlLog()).toEqual([]);
 });
 it("HTTP: independent grant, scope, empty file and strict query; no image identity or hidden clinical content",async()=>{
@@ -86,4 +86,18 @@ it("browser: a delayed reply cannot restore the closed list",async()=>{
  await panel.getByRole("button",{name:"تحديث الدراسات"}).click();await ready;await page.getByRole("button",{name:"إغلاق الدراسات"}).click();release();await done;expect(await page.getByTestId("canonical-ceph-studies").count()).toBe(0);
  await page.getByRole("button",{name:"عرض دراسات السيفالومتري"}).click();await panel.getByText("3.125",{exact:true}).waitFor();
  }finally{release();await context.close();}
+});
+
+it("browser: stored clinical instants use the clinic day on an American device, including refresh", async () => {
+  const instant = "2026-10-31T22:30:00.000Z", label = "الأحد 01/11/2026";
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar", timezoneId: "America/Los_Angeles" });
+  const old = (await journey.db.query("SELECT created_at,completed_at FROM ceph_analyses WHERE id=$1", [ids.completed])).rows[0];
+  try {
+    await journey.db.query("UPDATE ceph_analyses SET created_at=$1,completed_at=$1 WHERE id=$2", [instant, ids.completed]);
+    const page = await context.newPage(), panel = await openStudies(page);
+    const item = panel.getByRole("listitem").filter({ has: page.getByRole("heading", { name: "دراسة معتمدة — قبل العلاج", exact: true }) });
+    expect(await item.getByText(label, { exact: true }).count()).toBe(2);
+    await panel.getByRole("button", { name: "تحديث الدراسات", exact: true }).click(); await panel.getByText("3.125", { exact: true }).waitFor();
+    expect(await item.getByText(label, { exact: true }).count()).toBe(2);
+  } finally { await context.close(); await journey.db.query("UPDATE ceph_analyses SET created_at=$1,completed_at=$2 WHERE id=$3", [old.created_at, old.completed_at, ids.completed]); }
 });

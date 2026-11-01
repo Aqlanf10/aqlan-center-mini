@@ -1,0 +1,82 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-patient-cases-journey.test.ts (12 tests | 2 failed) 15735ms
+   × HTTP: exact projection, scope, independent plan and ortho grants, and no query expansion 395ms
+   × browser: stored clinical instants use the clinic day on an American device, including refresh 56ms
+ ❯ __tests__/security-http/canonical-plan-clinical-journey.test.ts (9 tests | 1 failed) 15245ms
+   × HTTP: independent permission, patient scope, exact projection and no query expansion 417ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-patient-cases-journey.test.ts > HTTP: exact projection, scope, independent plan and ortho grants, and no query expansion
+AssertionError: expected [ 'cases', 'clinicTimeZone', …(7) ] to deeply equal [ 'cases', 'dependencies', …(6) ]
+
+- Expected
++ Received
+
+@@ -1,7 +1,8 @@
+  [
+    "cases",
++   "clinicTimeZone",
+    "dependencies",
+    "items",
+    "orthoVisible",
+    "patientId",
+    "planVisible",
+
+ ❯ __tests__/security-http/canonical-patient-cases-journey.test.ts:42:38
+     40|     const session = await journey.login(key), response = await journey…
+     41|     expect(response.status).toBe(200); expect(response.headers.get("ca…
+     42|     expect(Object.keys(body).sort()).toEqual(["cases", "dependencies",…
+       |                                      ^
+     43|     expect(body.planVisible).toBe(key !== "care"); expect(body.items).…
+     44|     expect(body.cases).toHaveLength(key === "owner" ? 2 : 1); expect(b…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/security-http/canonical-patient-cases-journey.test.ts > browser: stored clinical instants use the clinic day on an American device, including refresh
+error: new row for relation "clinical_cases" violates check constraint "clinical_cases_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ __tests__/security-http/canonical-patient-cases-journey.test.ts:142:5
+    140|   const problem = (await journey.db.query("SELECT noted_at FROM patien…
+    141|   try {
+    142|     await journey.db.query("UPDATE clinical_cases SET completed_at=$1 …
+       |     ^
+    143|     await journey.db.query("UPDATE patient_problems SET noted_at=$1 WH…
+    144|     const page = await context.newPage(), panel = await openCases(page…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  __tests__/security-http/canonical-plan-clinical-journey.test.ts > HTTP: independent permission, patient scope, exact projection and no query expansion
+AssertionError: expected [ 'clinicTimeZone', 'hasMore', …(3) ] to deeply equal [ 'hasMore', 'patientId', …(2) ]
+
+- Expected
++ Received
+
+  [
++   "clinicTimeZone",
+    "hasMore",
+    "patientId",
+    "plans",
+    "projection",
+  ]
+
+ ❯ __tests__/security-http/canonical-plan-clinical-journey.test.ts:43:38
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 7 passed (9)
+      Tests  3 failed | 95 passed (98)
+   Start at  13:17:20
+   Duration  156.27s (transform 1.80s, setup 0ms, import 2.55s, tests 149.75s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isCanonicalClinicalPlans, type CanonicalClinicalPlans } from "../lib/canonical-plan-projection";
 import { canonicalPlanPatientId } from "../lib/canonical-plan-reads";
 
-const sample = (): CanonicalClinicalPlans => ({ projection: "patient-plan-clinical", patientId: 9, hasMore: false, plans: [{
+const sample = (): CanonicalClinicalPlans => ({ projection: "patient-plan-clinical", clinicTimeZone: "Asia/Aden", patientId: 9, hasMore: false, plans: [{
   id: 1, title: "SYN plan", status: "active", startDate: "2024-02-29", createdAt: "2024-03-01T10:00:00Z", note: null,
   consentAt: null, consentBy: null, consentNote: null,
   items: [{ id: 2, serviceName: "SYN saved service", category: null, toothCode: 26, surfaces: "MO", quantity: 2,
@@ -38,3 +38,5 @@ describe("clinical plan DTO and query boundary", () => {
     const value = sample(); value.plans[0].status = "unknown" as never; expect(isCanonicalClinicalPlans(value, 9)).toBe(false);
   });
 });
+
+it.each([undefined, null, 3, "SYN/Unknown"]) ("rejects a missing or invalid clinic zone: %s", clinicTimeZone => { expect(isCanonicalClinicalPlans({ ...sample(), clinicTimeZone }, 9)).toBe(false); });

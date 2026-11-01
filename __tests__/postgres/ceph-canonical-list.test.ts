@@ -33,7 +33,7 @@ beforeAll(async()=>{
 afterAll(async()=>{await side?.end();await fx?.close();});
 it("registers independent imaging capability and patient scope",()=>expect(CANONICAL_RECORD_READS["read:ceph.list"]).toEqual({record:"patient",need:["clinical.xrays.view"],anyOf:[]}));
 it.each(["owner","own","all"] as const)("%s reads saved values and explicit draft state with an allowlist",async key=>{
- const result=await read(key);expect(Object.keys(result).sort()).toEqual(["analyses","hasMore","patientId","projection"]);
+ const result=await read(key);expect(Object.keys(result).sort()).toEqual(["analyses","clinicTimeZone","hasMore","patientId","projection"]);
  expect(result.analyses.map(a=>a.id)).toEqual([ids.draft,ids.completed]);expect(result.analyses[0].findings).toBeNull();
  const a=result.analyses[1];expect(Object.keys(a).sort()).toEqual(["completedAt","createdAt","findings","id","imageState","patientId","phase","status","xrayDate"]);
  expect(a).toMatchObject({xrayDate:"2024-02-29",findings:{anb:3.125,fma:26.75,wits:-1.125}});

@@ -1,3 +1,4 @@
+import { isKnownZone } from "./clinicZone";
 import { CASE_STATUSES, PROBLEM_STATUSES, isDependencyMet, type CaseStatus, type ProblemStatus, type DependencyRequirement } from "./cases";
 
 export const CASE_READ_LIMITS = { cases: 1000, problems: 1000, items: 2000, dependencies: 4000 } as const;
@@ -19,7 +20,7 @@ export interface CanonicalCaseDependency {
   itemId: number; requiresItemId: number; requirement: DependencyRequirement; note: string | null; met: boolean; createdBy: string; version: string;
 }
 export interface CanonicalPatientCases {
-  projection: "patient-cases-clinical"; patientId: number; planVisible: boolean; orthoVisible: boolean;
+  projection: "patient-cases-clinical"; clinicTimeZone: string; patientId: number; planVisible: boolean; orthoVisible: boolean;
   cases: CanonicalCaseRow[]; problems: CanonicalProblemRow[]; items: CanonicalCaseItem[]; dependencies: CanonicalCaseDependency[];
 }
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -33,9 +34,9 @@ const date = (v: unknown) => text(v) && /^\d{4}-\d{2}-\d{2}$/.test(v) && Number.
 
 /** Exact clinical allowlist; a partial or malformed graph is never presented as complete. */
 export function isCanonicalPatientCases(value: unknown, patientId: number): value is CanonicalPatientCases {
-  if (!keys(value, "projection patientId planVisible orthoVisible cases problems items dependencies")) return false;
+  if (!keys(value, "projection clinicTimeZone patientId planVisible orthoVisible cases problems items dependencies")) return false;
   const b = value as CanonicalPatientCases;
-  if (b.projection !== "patient-cases-clinical" || b.patientId !== patientId || !id(patientId) || typeof b.planVisible !== "boolean" || typeof b.orthoVisible !== "boolean") return false;
+  if (typeof b.clinicTimeZone !== "string" || !isKnownZone(b.clinicTimeZone) || b.projection !== "patient-cases-clinical" || b.patientId !== patientId || !id(patientId) || typeof b.planVisible !== "boolean" || typeof b.orthoVisible !== "boolean") return false;
   for (const group of ["cases", "problems", "items", "dependencies"] as const) if (!Array.isArray(b[group]) || b[group].length > CASE_READ_LIMITS[group]) return false;
   const cases = new Set<number>(), native = new Set<number>(), problems = new Set<number>(), items = new Set<number>(), edges = new Set<string>();
   for (const c of b.cases) {

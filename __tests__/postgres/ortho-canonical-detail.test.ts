@@ -49,7 +49,7 @@ it.each(["all", "owner"] as const)("%s sees active and closed native clinical hi
   const result = await read(key);
   expect(result).toMatchObject({ projection: "case-clinical", hasMore: false, progress: { adjustments: 1 }, adjustments: [expect.objectContaining({ note: "SYN-private-adjustment" })] });
   expect((await read(key, ids.closed)).case.note).toBe("SYN-private-note");
-  expect(Object.keys(result).sort()).toEqual(["projection", "case", "adjustments", "editVersion", "hasMore", "progress", "today"].sort());
+  expect(Object.keys(result).sort()).toEqual(["projection", "case", "clinicTimeZone", "adjustments", "editVersion", "hasMore", "progress", "today"].sort());
   expect(result.editVersion).toMatch(/^[a-f0-9]{64}$/);
   expect((await read(key, ids.closed)).editVersion).toBeNull();
   expect(Object.keys(result.case).sort()).toEqual(["id", "patientId", "patientName", "appliance", "arches", "slot", "bracketSystem", "status", "phase", "startDate", "plannedMonths", "upperWire", "lowerWire", "retainer", "retainerOn", "note", "closedAt", "closedNote", "baselineKind", "baselineRecordedAt", "elastics", "remainingObjectives", "responsibleDoctorId", "responsibleDoctorName"].sort());

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isCanonicalPatientCases, type CanonicalPatientCases } from "../lib/canonical-case-projection";
 
-const fixture = (): CanonicalPatientCases => ({ projection: "patient-cases-clinical", patientId: 1, planVisible: true, orthoVisible: false,
+const fixture = (): CanonicalPatientCases => ({ projection: "patient-cases-clinical", clinicTimeZone: "Asia/Aden", patientId: 1, planVisible: true, orthoVisible: false,
   cases: [{ id: 2, kind: "specialty", orthoCaseId: null, specialty: "endodontics", title: "SYN case", site: "26", problem: null, responsibleName: null, status: "active", startedOn: "2024-01-01", completedAt: null, outcome: null, version: "b".repeat(64) }],
   problems: [{ id: 3, label: "SYN problem", site: null, specialty: null, status: "active", caseId: 2, version: "a".repeat(64), notedBy: "SYN", notedAt: "2024-01-01T00:00:00Z", resolvedBy: null, resolvedAt: null }],
   items: [4, 5].map(id => ({ id, planId: 6, planTitle: "SYN plan", planStatus: "active", serviceName: `SYN ${id}`, category: null, toothCode: null, surfaces: null, status: id === 5 ? "done" : "planned", doctorName: null, caseId: 2, priority: null, sortOrder: 0 })),
@@ -31,3 +31,5 @@ describe("clinical case allowlist and graph", () => {
 });
 
 it.each(["", "a".repeat(63), "X".repeat(64)])("refuses malformed problem comparison version %s", version => { const body = fixture(); body.problems[0].version = version; expect(isCanonicalPatientCases(body, 1)).toBe(false); });
+
+it.each([undefined, null, 3, "SYN/Unknown"]) ("rejects a missing or invalid clinic zone: %s", clinicTimeZone => { expect(isCanonicalPatientCases({ ...fixture(), clinicTimeZone }, 1)).toBe(false); });

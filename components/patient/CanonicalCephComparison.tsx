@@ -1,11 +1,12 @@
 "use client";
+import { formatClinicDate } from "@/lib/clinic-clock";
 
 import { useEffect, useId, useState } from "react";
 import { CEPH_READ_PHASES, type CanonicalCephSummary } from "@/lib/canonical-ceph-projection";
 import { isCanonicalCephComparison, isCanonicalCephSuperimposition, type CanonicalCephComparison as Comparison, type CanonicalCephSuperimposition as Geometry, type CephPairStudy } from "@/lib/canonical-ceph-pair-projection";
 
 type RequestPair = { first: number; second: number; mode: "compare" | "superimpose"; revision: number };
-export function CanonicalCephComparison({ patientId, studies }: { patientId: string; studies: CanonicalCephSummary[] }) {
+export function CanonicalCephComparison({ patientId, studies, clinicTimeZone }: { patientId: string; studies: CanonicalCephSummary[]; clinicTimeZone: string }) {
   const regionId = useId();
   const [open, setOpen] = useState(false), [first, setFirst] = useState(""), [second, setSecond] = useState("");
   const [request, setRequest] = useState<RequestPair | null>(null), [feed, setFeed] = useState<Comparison | Geometry | null>(null), [error, setError] = useState<string | null>(null);
@@ -38,7 +39,7 @@ export function CanonicalCephComparison({ patientId, studies }: { patientId: str
   const clear = () => { setFeed(null); setError(null); setRequest(null); };
   const choose = (mode: RequestPair["mode"]) => { setFeed(null); setError(null); setRequest(prior => ({ first: Number(first), second: Number(second), mode, revision: (prior?.revision ?? 0) + 1 })); };
   const allowed = !!first && !!second && first !== second;
-  const describe = (study: CephPairStudy) => `${CEPH_READ_PHASES[study.phase]} · ${study.xrayDate ?? study.createdAt.slice(0, 10)} · ${study.status === "completed" ? "معتمدة" : "مسودة"}`;
+  const describe = (study: CephPairStudy) => `${CEPH_READ_PHASES[study.phase]} · ${study.xrayDate ?? formatClinicDate(study.createdAt, clinicTimeZone)} · ${study.status === "completed" ? "معتمدة" : "مسودة"}`;
 
   return <section className="rounded-xl border border-slate-200 p-3 [overflow-wrap:anywhere]">
     <button type="button" aria-expanded={open} aria-controls={regionId} className="min-h-11 rounded-xl border border-slate-300 px-3 text-sm font-bold text-navy-800" onClick={() => { clear(); setOpen(value => !value); }}>

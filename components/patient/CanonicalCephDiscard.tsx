@@ -1,4 +1,5 @@
 "use client";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { useEffect, useId, useRef, useState } from "react";
 import { isCanonicalCephStudy, type CanonicalCephStudy } from "@/lib/canonical-ceph-projection";
 
@@ -78,7 +79,7 @@ export function CanonicalCephDiscard({ patientId, ownerKey, draftId, refresh, on
       {checked ? <button type="button" className={button} disabled={busy} onClick={() => { if (sending.current || !active.current) return; erase(); pendingRef.current = false; setPending(false); setPendingId(null); setChecked(false); setMessage(null); }}>راجعت الحالة، إغلاق المتابعة</button> : null}
     </div> : observed && observed.analysis.id === draftId ? <form className="space-y-3" onSubmit={event => { event.preventDefault(); void discard(); }}>
       <p>سيُسجّل رفض المسودة باسمك وتبقى بياناتها محفوظة. الدراسة المعتمدة لا تتغيّر. راجع تفاصيل الدراسة قبل التأكيد.</p>
-      <p className="text-xs text-slate-600">تاريخ المسودة: <span dir="ltr">{observed.analysis.createdAt.slice(0, 10)}</span> — سجّلها: {observed.analysis.createdBy}</p>
+      <p className="text-xs text-slate-600">تاريخ المسودة: <span dir="ltr">{formatClinicDate(observed.analysis.createdAt, observed.clinicTimeZone)}</span> — سجّلها: {observed.analysis.createdBy}</p>
       <label htmlFor={noteId} className="block text-xs font-bold">ملاحظة الرفض (اختيارية)</label>
       <textarea id={noteId} maxLength={4000} value={note} disabled={busy} onChange={event => setNote(event.target.value)} className="block min-h-24 w-full rounded-lg border border-slate-300 p-2" />
       <div className="flex flex-wrap gap-2"><button type="submit" className={button} disabled={busy}>{busy ? "جارٍ تسجيل الرفض…" : "تأكيد رفض المسودة"}</button><button type="button" className={button} disabled={busy} onClick={() => { setObserved(null); setNote(""); }}>إلغاء</button></div>

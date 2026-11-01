@@ -1,3 +1,4 @@
+import { isKnownZone } from "./clinicZone";
 /** Saved cephalometric projection. No tracing engine, financial or image payload. */
 export const CEPH_SUMMARY_LIMIT = 300;
 export const CEPH_READ_PHASES = {pretreatment:"قبل العلاج",during:"أثناء العلاج",posttreatment:"بعد العلاج",followup:"متابعة"} as const;
@@ -9,12 +10,12 @@ export interface CanonicalCephSummary {
   findings:{anb:number|null;fma:number|null;wits:number|null}|null;
 }
 export interface CanonicalCephList {
-  projection:"ceph-summary"; patientId:number; analyses:CanonicalCephSummary[]; hasMore:boolean;
+  projection:"ceph-summary"; clinicTimeZone:string; patientId:number; analyses:CanonicalCephSummary[]; hasMore:boolean;
 }
 export function isCanonicalCephList(value:unknown,patientId:number):value is CanonicalCephList {
   if(!value||typeof value!=="object")return false;
   const v=value as CanonicalCephList;
-  return v.projection==="ceph-summary"&&v.patientId===patientId&&typeof v.hasMore==="boolean"&&Array.isArray(v.analyses)&&v.analyses.length<=CEPH_SUMMARY_LIMIT
+  return typeof v.clinicTimeZone==="string"&&isKnownZone(v.clinicTimeZone)&&v.projection==="ceph-summary"&&v.patientId===patientId&&typeof v.hasMore==="boolean"&&Array.isArray(v.analyses)&&v.analyses.length<=CEPH_SUMMARY_LIMIT
     &&v.analyses.every(a=>a&&Number.isSafeInteger(a.id)&&a.id>0&&a.patientId===patientId&&(a.status==="draft"||a.status==="completed")
       &&Object.hasOwn(CEPH_READ_PHASES,a.phase)&&(a.xrayDate===null||typeof a.xrayDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(a.xrayDate))
       &&typeof a.createdAt==="string"&&Number.isFinite(Date.parse(a.createdAt))&&(a.completedAt===null||typeof a.completedAt==="string"&&Number.isFinite(Date.parse(a.completedAt)))
@@ -23,6 +24,7 @@ export function isCanonicalCephList(value:unknown,patientId:number):value is Can
 
 export interface CanonicalCephStudy {
   projection:"ceph-saved-study";
+  clinicTimeZone:string;
   /** Absent in older read-only payloads; commands require a fresh observed draft token. */
   discardVersion?:string|null;
   analysis:CanonicalCephSummary & {
@@ -38,7 +40,7 @@ const textOrNull=(v:unknown)=>v===null||typeof v==="string";
 export function isCanonicalCephStudy(value:unknown,patientId:number,studyId:number):value is CanonicalCephStudy {
   if(!value||typeof value!=="object")return false;
   const v=value as CanonicalCephStudy,a=v.analysis;
-  if(v.projection!=="ceph-saved-study"||!a||a.id!==studyId||!isCanonicalCephList({projection:"ceph-summary",patientId,hasMore:false,analyses:[a]},patientId))return false;
+  if(v.projection!=="ceph-saved-study"||!a||a.id!==studyId||!isCanonicalCephList({projection:"ceph-summary",clinicTimeZone:v.clinicTimeZone,patientId,hasMore:false,analyses:[a]},patientId))return false;
   if(!textOrNull(a.device)||!textOrNull(a.note)||!textOrNull(a.completedBy)||typeof a.refSet!=="string"||typeof a.createdBy!=="string")return false;
   if(a.mmPerPixel!==null&&(!Number.isFinite(a.mmPerPixel)||a.mmPerPixel<=0))return false;
   if(a.calibration!==null&&(!a.calibration||![a.calibration.x1,a.calibration.y1,a.calibration.x2,a.calibration.y2,a.calibration.mm].every(n=>typeof n==="number"&&Number.isFinite(n))||a.calibration.mm<=0))return false;

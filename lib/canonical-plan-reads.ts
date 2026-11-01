@@ -1,4 +1,5 @@
 import "server-only";
+import { CLINIC_TIME_ZONE } from "./db";
 import { CanonicalPatientReadRefusal, readCanonicalPatientRecord } from "./canonical-patient-reads";
 import type { CanonicalSnapshotQuery } from "./canonical-read-snapshot";
 import type { VerifiedDurableSession } from "./staff-durable-session";
@@ -36,7 +37,7 @@ interface ItemRow {
 export async function readClinicalPlansWith(q: CanonicalSnapshotQuery, patientId: number): Promise<CanonicalClinicalPlans> {
   const identifiers = (await q.query<{ id: number }>("SELECT id FROM treatment_plans WHERE patient_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2", [patientId, CLINICAL_PLAN_LIMIT + 1])).rows;
   const ids = identifiers.slice(0, CLINICAL_PLAN_LIMIT).map(row => row.id);
-  if (!ids.length) return { projection: "patient-plan-clinical", patientId, plans: [], hasMore: false };
+  if (!ids.length) return { projection: "patient-plan-clinical", clinicTimeZone: CLINIC_TIME_ZONE, patientId, plans: [], hasMore: false };
   const count = (await q.query<{ total: string; maximum: string }>(`SELECT COALESCE(sum(n),0)::text AS total,COALESCE(max(n),0)::text AS maximum
     FROM (SELECT count(*) n FROM plan_items WHERE plan_id=ANY($1::int[]) GROUP BY plan_id) counts`, [ids])).rows[0];
   if (!count || Number(count.total) > CLINICAL_PLAN_TOTAL_ITEM_LIMIT || Number(count.maximum) > CLINICAL_PLAN_ITEM_LIMIT) {
@@ -60,7 +61,7 @@ export async function readClinicalPlansWith(q: CanonicalSnapshotQuery, patientId
   const items = (await q.query<ItemRow>(`SELECT ${ITEM_COLUMNS},
     (SELECT count(*)::int FROM treatment_sessions s WHERE s.plan_item_id=i.id AND s.status='done') AS sessions_completed
     ${ITEM_JOINS} WHERE i.plan_id=ANY($1::int[]) ORDER BY i.plan_id,i.sort_order,i.id`, [ids])).rows;
-  const body: CanonicalClinicalPlans = { projection: "patient-plan-clinical", patientId, hasMore: identifiers.length > CLINICAL_PLAN_LIMIT,
+  const body: CanonicalClinicalPlans = { projection: "patient-plan-clinical", clinicTimeZone: CLINIC_TIME_ZONE, patientId, hasMore: identifiers.length > CLINICAL_PLAN_LIMIT,
     plans: plans.map(p => ({ id: p.id, title: p.title, status: p.status, startDate: p.start_date, createdAt: p.created_at.toISOString(), note: p.note,
       consentAt: p.consent_at?.toISOString() ?? null, consentBy: p.consent_by, consentNote: p.consent_note,
       items: items.filter(i => i.plan_id === p.id).map(i => ({ id: i.id, serviceName: i.service_name, category: i.category, toothCode: i.tooth_code,

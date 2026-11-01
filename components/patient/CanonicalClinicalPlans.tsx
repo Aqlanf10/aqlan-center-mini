@@ -1,4 +1,5 @@
 "use client";
+import { formatClinicDate } from "@/lib/clinic-clock";
 
 import { useEffect, useId, useState } from "react";
 import { isCanonicalClinicalPlans, type CanonicalClinicalPlans as PlanFeed } from "@/lib/canonical-plan-projection";
@@ -55,10 +56,10 @@ export function CanonicalClinicalPlans({ patientId }: { patientId: string }) {
             <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-navy-900">{plan.title}</h3><span>{PLAN_STATUS_LABEL[plan.status]}</span></div>
             <dl className="mt-2 grid gap-2 sm:grid-cols-2">
               <div><dt className="text-xs text-slate-500">تاريخ البداية</dt><dd dir="ltr">{plan.startDate}</dd></div>
-              <div><dt className="text-xs text-slate-500">تاريخ التسجيل</dt><dd dir="ltr">{plan.createdAt.slice(0, 10)}</dd></div>
+              <div><dt className="text-xs text-slate-500">تاريخ التسجيل</dt><dd dir="ltr">{formatClinicDate(plan.createdAt, feed.clinicTimeZone)}</dd></div>
             </dl>
             {plan.note ? <p className="mt-2 whitespace-pre-wrap">{plan.note}</p> : null}
-            {plan.consentAt ? <div className="mt-2 rounded-lg bg-slate-50 p-2 text-xs"><p>موافقة مسجلة بتاريخ <bdi>{plan.consentAt.slice(0, 10)}</bdi>{plan.consentBy ? ` — ${plan.consentBy}` : ""}</p>
+            {plan.consentAt ? <div className="mt-2 rounded-lg bg-slate-50 p-2 text-xs"><p>موافقة مسجلة بتاريخ <bdi>{formatClinicDate(plan.consentAt, feed.clinicTimeZone)}</bdi>{plan.consentBy ? ` — ${plan.consentBy}` : ""}</p>
               {plan.consentNote ? <p className="mt-1 whitespace-pre-wrap">{plan.consentNote}</p> : null}</div> : <p className="mt-2 text-xs text-amber-800">لم تُسجّل موافقة على الخطة.</p>}
             {plan.items.length === 0 ? <p className="mt-3 text-xs">لا توجد بنود علاج مسجلة في هذه الخطة.</p>
               : <ul className="mt-3 space-y-2">{plan.items.map(item => <li key={item.id} data-testid="canonical-clinical-plan-item" className="rounded-lg bg-slate-50 p-3">
@@ -72,7 +73,7 @@ export function CanonicalClinicalPlans({ patientId }: { patientId: string }) {
                   {item.doctorName ? <div><dt className="text-slate-500">طبيب البند</dt><dd>{item.doctorName}</dd></div> : null}
                   {item.category ? <div><dt className="text-slate-500">التصنيف المسجل</dt><dd>{item.category}</dd></div> : null}
                   {item.caseSite ? <div><dt className="text-slate-500">موضع الحالة</dt><dd>{item.caseSite}</dd></div> : null}
-                  {item.doneAt ? <div><dt className="text-slate-500">تاريخ الإنجاز المسجل</dt><dd dir="ltr">{item.doneAt.slice(0, 10)}</dd></div> : null}
+                  {item.doneAt ? <div><dt className="text-slate-500">تاريخ الإنجاز المسجل</dt><dd dir="ltr">{formatClinicDate(item.doneAt, feed.clinicTimeZone)}</dd></div> : null}
                 </dl>
                 {item.note ? <p className="mt-2 whitespace-pre-wrap text-xs">{item.note}</p> : null}
               </li>)}</ul>}

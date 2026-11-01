@@ -43,6 +43,6 @@ export async function readCanonicalOrthoCase(session: VerifiedDurableSession, ca
       scope.patientScope.kind === "own" ? scope.patientScope.clinicianPartyId : null,
       clinicDateString(new Date(), CLINIC_TIME_ZONE));
     if (!result) throw new CanonicalPatientReadRefusal("patient_not_found", "الحالة غير موجودة ضمن مرضاك.");
-    return { ...result, editVersion: await orthoLifecycleVersionWith(query, caseId) };
+    return { ...result, clinicTimeZone: CLINIC_TIME_ZONE, editVersion: await orthoLifecycleVersionWith(query, caseId) };
   }, { errorPrefix: "STAFF_READ", maxBytes: 1024 * 1024 });
 }

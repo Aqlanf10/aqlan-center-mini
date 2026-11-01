@@ -51,7 +51,7 @@ it("HTTP: anonymous, adjacent grants and scope none deny; all and owner retain t
     expect(response.status).toBe(200);
     const body = await response.json(); expect(body.case.note).toBe("SYN-hidden-clinical-note");
     expect(JSON.stringify(body)).not.toMatch(/planId|legacyFinancialMode|photos|visitId|visitSigned|invoice|balance/);
-    expect(Object.keys(body).sort()).toEqual(["projection", "case", "adjustments", "editVersion", "hasMore", "progress", "today"].sort());
+    expect(Object.keys(body).sort()).toEqual(["projection", "case", "clinicTimeZone", "adjustments", "editVersion", "hasMore", "progress", "today"].sort());
   }
 });
 it("HTTP: missing equals outside scope and URL expansions cannot fetch independent data", async () => {
@@ -176,4 +176,21 @@ it("browser: a late clinical response cannot overwrite newer data or reopen a cl
     expect(await page.getByTestId("canonical-ortho-detail").count()).toBe(0);
   } finally { release(); await context.close(); await journey.db.query("UPDATE ortho_cases SET note='SYN-hidden-clinical-note' WHERE id=$1", [ids.closed]); }
   expect(await journey.ddlLog()).toEqual([]);
+});
+
+it("browser: stored clinical instants use the clinic day on an American device, including refresh", async () => {
+  const instant = "2026-10-31T22:30:00.000Z", label = "الأحد 01/11/2026";
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar", timezoneId: "America/Los_Angeles" });
+  const old = (await journey.db.query("SELECT closed_at FROM ortho_cases WHERE id=$1", [ids.closed])).rows[0];
+  try {
+    await journey.db.query("UPDATE ortho_cases SET closed_at=$1 WHERE id=$2", [instant, ids.closed]);
+    const page = await context.newPage(); await journey.browserLogin(page, "doctor"); await page.goto(`${journey.baseUrl}/patients/${ids.own}`);
+    await page.getByRole("button", { name: "عرض حالات التقويم", exact: true }).click();
+    const item = page.getByTestId("canonical-ortho-cases").getByRole("listitem").filter({ has: page.getByText("مكتملة", { exact: true }) });
+    await item.getByRole("button", { name: "عرض تفاصيل الحالة", exact: true }).click(); const panel = item.getByTestId("canonical-ortho-detail");
+    await panel.getByText("السجل السريري للتقويم", { exact: true }).waitFor(); await panel.getByText(label, { exact: true }).waitFor();
+    await panel.getByRole("button", { name: "تحديث التفاصيل", exact: true }).click(); await panel.getByText(label, { exact: true }).waitFor();
+    await page.route(`**/api/ortho/${ids.closed}`, async route => { const response = await route.fetch(), body = await response.json(); body.clinicTimeZone = "SYN/Unknown"; await route.fulfill({ response, json: body }); });
+    await panel.getByRole("button", { name: "تحديث التفاصيل", exact: true }).click(); await panel.getByRole("alert").waitFor(); expect(await panel.getByText(label, { exact: true }).count()).toBe(0);
+  } finally { await context.close(); await journey.db.query("UPDATE ortho_cases SET closed_at=$1 WHERE id=$2", [old.closed_at, ids.closed]); }
 });

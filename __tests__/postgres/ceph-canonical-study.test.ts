@@ -38,7 +38,7 @@ beforeAll(async()=>{
 afterAll(async()=>{await side?.end();await fx?.close();});
 it("registers the independent imaging capability and patient scope",()=>expect(CANONICAL_RECORD_READS["read:ceph.study"]).toEqual({record:"patient",need:["clinical.xrays.view"],anyOf:[]}));
 it.each(["owner","own","all"] as const)("%s reads exact saved clinical values without a replacement engine or image access",async key=>{
- const result=await read(key);expect(Object.keys(result).sort()).toEqual(["analysis","diagnosis","landmarks","measurements","measurementsState","projection"]);
+ const result=await read(key);expect(Object.keys(result).sort()).toEqual(["analysis","clinicTimeZone","diagnosis","landmarks","measurements","measurementsState","projection"]);
  expect(Object.keys(result.analysis).sort()).toEqual(["calibration","completedAt","completedBy","createdAt","createdBy","device","findings","id","imageState","mmPerPixel","note","patientId","phase","refSet","status","xrayDate"]);
  expect(result.analysis).toMatchObject({id:ids.completed,xrayDate:"2024-02-29",note:"SYN saved clinical note",refSet:"SYN historical reference",calibration:{x1:0,y1:0,x2:100,y2:0,mm:10},mmPerPixel:0.1});
  expect(result.measurements).toContainEqual({code:"SYN_OLD_MEASURE",value:123.123456});expect(result.landmarks).toContainEqual({code:"SYN_OLD_CODE",x:2,y:3,source:"manual",confirmedBy:"SYN old recorder"});

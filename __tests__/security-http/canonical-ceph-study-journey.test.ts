@@ -27,7 +27,7 @@ it("HTTP: canonical imaging viewer reads its saved study without a legacy sessio
  const session=await journey.login("own");expect(session.status).toBe(200);
  expect((await journey.api(`/api/patients/${ids.own}/ceph`,session.cookie)).status).toBe(200);
  const response=await journey.api(`/api/ceph/${ids.completed}`,session.cookie);expect(response.status).toBe(200);
- expect(await response.json()).toMatchObject({projection:"ceph-saved-study",analysis:{id:ids.completed,patientId:ids.own,status:"completed"}});
+ expect(await response.json()).toMatchObject({projection:"ceph-saved-study", clinicTimeZone: "Asia/Aden",analysis:{id:ids.completed,patientId:ids.own,status:"completed"}});
 });
 it("HTTP: owner/all/own read the exact clinical snapshot; independent grant and scope deny everyone else",async()=>{
  const path=`/api/ceph/${ids.completed}`;expect((await journey.api(path,"")).status).toBe(401);
@@ -84,4 +84,15 @@ it("browser: delayed response cannot restore a closed study",async()=>{
  await page.route(`**/api/ceph/${ids.completed}`,async route=>{if(!first){await route.continue();return;}first=false;try{const r=await route.fetch();reached();await held;await route.fulfill({response:r}).catch(()=>undefined);}finally{finished();}});
  await panel.getByRole("button",{name:"تحديث الدراسة"}).click();await ready;await page.getByRole("button",{name:"إغلاق الدراسة المحفوظة"}).click();release();await done;expect(await page.getByTestId("canonical-ceph-study").count()).toBe(0);
  }finally{release();await context.close();}
+});
+
+it("browser: stored clinical instants use the clinic day on an American device, including refresh", async () => {
+  const instant = "2026-10-31T22:30:00.000Z", label = "الأحد 01/11/2026";
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar", timezoneId: "America/Los_Angeles" });
+  const old = (await journey.db.query("SELECT updated_at FROM ceph_diagnoses WHERE analysis_id=$1", [ids.completed])).rows[0];
+  try {
+    await journey.db.query("UPDATE ceph_diagnoses SET updated_at=$1 WHERE analysis_id=$2", [instant, ids.completed]);
+    const page = await context.newPage(), panel = await openStudy(page); expect(await panel.textContent()).toContain(label);
+    await panel.getByRole("button", { name: "تحديث الدراسة", exact: true }).click(); await panel.getByText("SYN استنتاج محفوظ", { exact: true }).waitFor(); expect(await panel.textContent()).toContain(label);
+  } finally { await context.close(); await journey.db.query("UPDATE ceph_diagnoses SET updated_at=$1 WHERE analysis_id=$2", [old.updated_at, ids.completed]); }
 });

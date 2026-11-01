@@ -1,4 +1,5 @@
 import "server-only";
+import { CLINIC_TIME_ZONE } from "./db";
 import { readCanonicalPatientRecord } from "./canonical-patient-reads";
 import type { CanonicalSnapshotQuery, CanonicalSnapshotScope } from "./canonical-read-snapshot";
 import type { VerifiedDurableSession } from "./staff-durable-session";
@@ -84,7 +85,7 @@ export async function readPatientCasesWith(q: CanonicalSnapshotQuery, scope: Can
   problems.sort((a, b) => b.notedAt.localeCompare(a.notedAt) || b.id - a.id);
   items.sort((a, b) => (a.priority ?? 1000) - (b.priority ?? 1000) || a.planId - b.planId || a.sortOrder - b.sortOrder || a.id - b.id);
   dependencies.sort((a, b) => a.itemId - b.itemId || a.requiresItemId - b.requiresItemId);
-  const body: CanonicalPatientCases = { projection: "patient-cases-clinical", patientId, planVisible, orthoVisible, cases, problems, items, dependencies };
+  const body: CanonicalPatientCases = { projection: "patient-cases-clinical", clinicTimeZone: CLINIC_TIME_ZONE, patientId, planVisible, orthoVisible, cases, problems, items, dependencies };
   if (!isCanonicalPatientCases(body, patientId)) throw new CanonicalCaseReadRefusal("case_stored_data_invalid", "تعذّر التحقق من البيانات السريرية المحفوظة؛ لم تُستبدل بقيم افتراضية.");
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > MAX_BYTES) throw new CanonicalCaseReadRefusal("case_read_limit", "السجل يتجاوز حد القراءة الآمنة؛ لم تُعرض نتيجة جزئية.");
   return body;

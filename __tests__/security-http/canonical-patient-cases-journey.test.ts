@@ -29,7 +29,7 @@ it("HTTP: an authorized canonical reader receives the patient's scoped cases and
   const session = await journey.login("own"); expect(session.status).toBe(200);
   const response = await journey.api(`/api/patients/${ids.patient}/cases`, session.cookie);
   expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ projection: "patient-cases-clinical", patientId: ids.patient, cases: [{ id: ids.caseId, title: "SYN root case" }], items: expect.arrayContaining([expect.objectContaining({ id: ids.item })]) });
+  expect(await response.json()).toMatchObject({ projection: "patient-cases-clinical", clinicTimeZone: "Asia/Aden", patientId: ids.patient, cases: [{ id: ids.caseId, title: "SYN root case" }], items: expect.arrayContaining([expect.objectContaining({ id: ids.item })]) });
   expect(await journey.ddlLog()).toEqual([]);
 });
 it("HTTP: exact projection, scope, independent plan and ortho grants, and no query expansion", async () => {
@@ -39,7 +39,7 @@ it("HTTP: exact projection, scope, independent plan and ortho grants, and no que
   for (const key of ["own", "all", "care", "owner"] as const) {
     const session = await journey.login(key), response = await journey.api(path, session.cookie), body = await response.json();
     expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(Object.keys(body).sort()).toEqual(["cases", "dependencies", "items", "orthoVisible", "patientId", "planVisible", "problems", "projection"]);
+    expect(body.clinicTimeZone).toBe("Asia/Aden"); expect(Object.keys(body).sort()).toEqual(["cases", "clinicTimeZone", "dependencies", "items", "orthoVisible", "patientId", "planVisible", "problems", "projection"]);
     expect(body.planVisible).toBe(key !== "care"); expect(body.items).toHaveLength(key === "care" ? 0 : 2);
     expect(body.cases).toHaveLength(key === "owner" ? 2 : 1); expect(body.orthoVisible).toBe(key === "owner");
     expect(JSON.stringify(body)).not.toMatch(/9900123|Minor|price|currency|billing|invoice|payment|patientName|patientPhone|financial|legacy/i);
@@ -131,4 +131,20 @@ it("browser: a delayed response cannot restore a closed case workspace", async (
     await panel.getByRole("button", { name: "تحديث الحالات وترتيب الخطة" }).click(); await ready; await page.getByRole("button", { name: "إغلاق الحالات وترتيب الخطة", exact: true }).click(); release(); await done;
     expect(await page.getByTestId("canonical-patient-cases").count()).toBe(0); await page.getByRole("button", { name: "عرض الحالات وترتيب الخطة", exact: true }).click(); await panel.getByText("SYN root case", { exact: true }).first().waitFor();
   } finally { release(); await context.close(); }
+});
+
+it("browser: stored clinical instants use the clinic day on an American device, including refresh", async () => {
+  const instant = "2026-10-31T22:30:00.000Z", label = "الأحد 01/11/2026";
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar", timezoneId: "America/Los_Angeles" });
+  const old = (await journey.db.query("SELECT status,completed_at FROM clinical_cases WHERE id=$1", [ids.caseId])).rows[0];
+  const problem = (await journey.db.query("SELECT noted_at FROM patient_problems WHERE id=$1", [ids.problemId])).rows[0];
+  try {
+    await journey.db.query("UPDATE clinical_cases SET status='completed',completed_at=$1 WHERE id=$2", [instant, ids.caseId]);
+    await journey.db.query("UPDATE patient_problems SET noted_at=$1 WHERE id=$2", [instant, ids.problemId]);
+    const page = await context.newPage(), panel = await openCases(page); expect(await panel.getByText(label, { exact: true }).count()).toBe(2);
+    await panel.getByRole("button", { name: "تحديث الحالات وترتيب الخطة", exact: true }).click(); await panel.getByText("SYN root case", { exact: true }).first().waitFor(); expect(await panel.getByText(label, { exact: true }).count()).toBe(2);
+  } finally {
+    await context.close(); await journey.db.query("UPDATE clinical_cases SET completed_at=$1,status=$2 WHERE id=$3", [old.completed_at, old.status, ids.caseId]);
+    await journey.db.query("UPDATE patient_problems SET noted_at=$1 WHERE id=$2", [problem.noted_at, ids.problemId]);
+  }
 });

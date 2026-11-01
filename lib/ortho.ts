@@ -386,6 +386,8 @@ export interface OrthoClinicalAdjustment {
   recordedBy: string;
 }
 export interface OrthoClinicalDetail {
+  /** Server-resolved zone supplied by the canonical detail read. */
+  clinicTimeZone?: string;
   /** Present on the canonical saved-detail projection; not mutation authority. */
   editVersion?: string | null;
   projection: "case-clinical";

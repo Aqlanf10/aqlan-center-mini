@@ -34,7 +34,7 @@ beforeAll(async () => {
 afterAll(async () => { await side?.end(); await fx?.close(); });
 it.each(["owner", "own", "all"] as const)("%s receives clinical case facts and a complete dependency graph", async key => {
   const body = await read(key);
-  expect(Object.keys(body).sort()).toEqual(["cases", "dependencies", "items", "orthoVisible", "patientId", "planVisible", "problems", "projection"]);
+  expect(Object.keys(body).sort()).toEqual(["cases", "clinicTimeZone", "dependencies", "items", "orthoVisible", "patientId", "planVisible", "problems", "projection"]);
   expect(body.cases).toEqual([expect.objectContaining({ id: ids.caseId, title: "SYN root case", problem: "SYN recorded problem", status: "active" })]);
   expect(body.items).toHaveLength(2); expect(body.items.find(i => i.id === ids.item)).toMatchObject({ priority: 3, caseId: ids.caseId });
   expect(body.dependencies).toEqual([{ itemId: ids.item, requiresItemId: ids.prerequisite, requirement: "completed", note: "SYN dependency note", met: true, createdBy: "SYN clinician", version: expect.stringMatching(/^[a-f0-9]{64}$/) }]);

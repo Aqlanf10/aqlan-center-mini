@@ -1,3 +1,4 @@
+import { isKnownZone } from "./clinicZone";
 import type { PlanItemStatus, PlanStatus } from "./plans";
 
 export const CLINICAL_PLAN_LIMIT = 100;
@@ -14,7 +15,7 @@ export interface CanonicalClinicalPlan {
   consentAt: string | null; consentBy: string | null; consentNote: string | null; items: CanonicalClinicalPlanItem[];
 }
 export interface CanonicalClinicalPlans {
-  projection: "patient-plan-clinical"; patientId: number; plans: CanonicalClinicalPlan[]; hasMore: boolean;
+  projection: "patient-plan-clinical"; clinicTimeZone: string; patientId: number; plans: CanonicalClinicalPlan[]; hasMore: boolean;
 }
 const integer = (value: unknown, min = 0): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= min;
 const text = (value: unknown): value is string => typeof value === "string";
@@ -27,7 +28,7 @@ const timestamp = (value: unknown): value is string => text(value) && /^\d{4}-\d
 export function isCanonicalClinicalPlans(value: unknown, patientId: number): value is CanonicalClinicalPlans {
   if (!value || typeof value !== "object") return false;
   const body = value as CanonicalClinicalPlans;
-  if (body.projection !== "patient-plan-clinical" || body.patientId !== patientId || !integer(patientId, 1)
+  if (typeof body.clinicTimeZone !== "string" || !isKnownZone(body.clinicTimeZone) || body.projection !== "patient-plan-clinical" || body.patientId !== patientId || !integer(patientId, 1)
     || typeof body.hasMore !== "boolean" || !Array.isArray(body.plans) || body.plans.length > CLINICAL_PLAN_LIMIT) return false;
   const plans = new Set<number>(), items = new Set<number>();
   return body.plans.every(plan => {

@@ -29,7 +29,7 @@ it("HTTP: a scoped canonical clinical-plan reader can read the saved plan withou
   expect(session.status).toBe(200);
   const response = await journey.api(`/api/patients/${ids.patient}/plans`, session.cookie);
   expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ projection: "patient-plan-clinical", patientId: ids.patient, plans: [{ id: ids.plan, title: "SYN clinical treatment plan" }] });
+  expect(await response.json()).toMatchObject({ projection: "patient-plan-clinical", clinicTimeZone: "Asia/Aden", patientId: ids.patient, plans: [{ id: ids.plan, title: "SYN clinical treatment plan" }] });
   expect(await journey.ddlLog()).toEqual([]);
 });
 
@@ -40,7 +40,7 @@ it("HTTP: independent permission, patient scope, exact projection and no query e
   for (const key of ["own", "all", "owner"] as const) {
     const session = await journey.login(key), response = await journey.api(path, session.cookie), body = await response.json();
     expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(Object.keys(body).sort()).toEqual(["hasMore", "patientId", "plans", "projection"]);
+    expect(body.clinicTimeZone).toBe("Asia/Aden"); expect(Object.keys(body).sort()).toEqual(["clinicTimeZone", "hasMore", "patientId", "plans", "projection"]);
     expect(Object.keys(body.plans[0].items[0]).sort()).toEqual(["caseSite", "category", "doctorName", "doneAt", "id", "note", "plannedVisitNumber", "quantity", "serviceName", "sessionCount", "sessionsCompleted", "status", "surfaces", "toothCode"]);
     expect(JSON.stringify(body)).not.toMatch(/9900123|Minor|price|currency|billing|installment|invoice|payment|patientName|patientPhone/i);
     for (const query of ["includeMoney=1", "scope=all", `patientId=${ids.outside}`]) expect((await journey.api(`${path}?${query}`, session.cookie)).status).toBe(400);
@@ -117,4 +117,20 @@ it("browser: a delayed response cannot restore the closed panel", async () => {
     expect(await page.getByTestId("canonical-clinical-plans").count()).toBe(0);
     await page.getByRole("button", { name: "عرض الخطط السريرية", exact: true }).click(); await panel.getByText("SYN recorded service", { exact: true }).waitFor();
   } finally { release(); await context.close(); }
+});
+
+it("browser: stored clinical instants use the clinic day on an American device, including refresh", async () => {
+  const instant = "2026-10-31T22:30:00.000Z", label = "الأحد 01/11/2026";
+  const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar", timezoneId: "America/Los_Angeles" });
+  const old = (await journey.db.query("SELECT created_at,consent_at FROM treatment_plans WHERE id=$1", [ids.plan])).rows[0];
+  const item = (await journey.db.query("SELECT done_at FROM plan_items WHERE id=$1", [ids.item])).rows[0];
+  try {
+    await journey.db.query("UPDATE treatment_plans SET created_at=$1,consent_at=$1 WHERE id=$2", [instant, ids.plan]);
+    await journey.db.query("UPDATE plan_items SET done_at=$1 WHERE id=$2", [instant, ids.item]);
+    const page = await context.newPage(), panel = await openPlans(page); expect(await panel.getByText(label, { exact: true }).count()).toBe(3);
+    await panel.getByRole("button", { name: "تحديث الخطط السريرية", exact: true }).click(); await panel.getByText("SYN recorded service", { exact: true }).waitFor(); expect(await panel.getByText(label, { exact: true }).count()).toBe(3);
+  } finally {
+    await context.close(); await journey.db.query("UPDATE treatment_plans SET created_at=$1,consent_at=$2 WHERE id=$3", [old.created_at, old.consent_at, ids.plan]);
+    await journey.db.query("UPDATE plan_items SET done_at=$1 WHERE id=$2", [item.done_at, ids.item]);
+  }
 });

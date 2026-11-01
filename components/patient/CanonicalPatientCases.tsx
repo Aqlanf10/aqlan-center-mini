@@ -1,4 +1,5 @@
 "use client";
+import { formatClinicDate } from "@/lib/clinic-clock";
 
 import { useEffect, useId, useState } from "react";
 import { isCanonicalPatientCases, type CanonicalPatientCases as CaseFeed } from "@/lib/canonical-case-projection";
@@ -73,12 +74,12 @@ export function CanonicalPatientCases({ patientId, canEdit, canDocument, ownerKe
           </dl>
           {c.problem ? <p className="mt-2 whitespace-pre-wrap">{c.problem}</p> : null}
           {c.outcome ? <p className="mt-2 whitespace-pre-wrap">النتيجة المسجلة: {c.outcome}</p> : null}
-          {c.completedAt ? <p className="mt-2 text-xs">تاريخ الإنهاء المسجل: <bdi>{c.completedAt.slice(0, 10)}</bdi></p> : null}
+          {c.completedAt ? <p className="mt-2 text-xs">تاريخ الإنهاء المسجل: <bdi>{formatClinicDate(c.completedAt, feed.clinicTimeZone)}</bdi></p> : null}
         </article>)}
         <h3 className="text-sm font-bold">المشاكل المسجلة</h3>
         {feed.problems.length === 0 ? <p className="text-sm">لا توجد مشاكل مسجلة.</p> : <ul className="space-y-2">{feed.problems.map(p => <li key={p.id} className="rounded-lg bg-slate-50 p-3 text-sm">
           <span className="font-bold">{p.label}</span> — {PROBLEM_STATUS_LABEL[p.status]}{p.site ? ` · ${p.site}` : ""}
-          <p className="mt-1 text-xs text-slate-600">سجّلها {p.notedBy} · <bdi>{p.notedAt.slice(0, 10)}</bdi></p>
+          <p className="mt-1 text-xs text-slate-600">سجّلها {p.notedBy} · <bdi>{formatClinicDate(p.notedAt, feed.clinicTimeZone)}</bdi></p>
         </li>)}</ul>}
         <h3 className="text-sm font-bold">ترتيب بنود الخطط واعتمادياتها</h3>
         {!feed.planVisible ? <p className="text-sm">عرض بنود الخطط يحتاج صلاحية عرض الخطط المستقلة.</p> : feed.items.length === 0 ? <p className="text-sm">لا توجد بنود خطط مسجلة.</p> : <ul className="space-y-2">{feed.items.map(item => <li key={item.id} data-testid="canonical-case-item" className="rounded-lg bg-slate-50 p-3 text-sm">

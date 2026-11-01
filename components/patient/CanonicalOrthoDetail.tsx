@@ -1,4 +1,6 @@
 "use client";
+import { isKnownZone } from "@/lib/clinicZone";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { CanonicalOrthoLifecycleEditor } from "./CanonicalOrthoLifecycleEditor";
 import { CanonicalOrthoCoverage } from "./CanonicalOrthoCoverage";
 import { CanonicalOrthoStrategy } from "./CanonicalOrthoStrategy";
@@ -30,7 +32,7 @@ export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = fa
         const payload = await response.json().catch(() => null);
         if (!alive || request !== sequence) return;
         if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل تفاصيل التقويم.");
-        if (payload?.projection !== "case-clinical" || payload.case?.id !== caseId
+        if (typeof payload?.clinicTimeZone !== "string" || !isKnownZone(payload.clinicTimeZone) || payload?.projection !== "case-clinical" || payload.case?.id !== caseId
           || payload.case?.patientId !== Number(patientId) || !Array.isArray(payload.adjustments)) {
           throw new Error("تعذّر التحقق من تفاصيل الحالة. أعد تحميلها.");
         }
@@ -66,7 +68,7 @@ export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = fa
           <div><dt className="text-xs text-slate-500">عدد الشدّات المسجلة</dt><dd>{feed.progress.adjustments}</dd></div>
           <div className="sm:col-span-2"><dt className="text-xs text-slate-500">الأهداف المتبقية</dt><dd className="whitespace-pre-wrap">{feed.case.remainingObjectives ?? "غير مسجلة"}</dd></div>
           <div className="sm:col-span-2"><dt className="text-xs text-slate-500">ملاحظة الحالة</dt><dd className="whitespace-pre-wrap">{feed.case.note ?? "لا توجد ملاحظة"}</dd></div>
-          {feed.case.closedAt ? <div className="sm:col-span-2"><dt className="text-xs text-slate-500">إقفال الحالة</dt><dd>{feed.case.closedAt.slice(0, 10)}</dd><dd className="whitespace-pre-wrap">{feed.case.closedNote}</dd></div> : null}
+          {feed.case.closedAt ? <div className="sm:col-span-2"><dt className="text-xs text-slate-500">إقفال الحالة</dt><dd>{formatClinicDate(feed.case.closedAt, feed.clinicTimeZone!)}</dd><dd className="whitespace-pre-wrap">{feed.case.closedNote}</dd></div> : null}
         </dl>
         <h5 className="font-bold text-navy-900">الشدّات المسجلة</h5>
         {!feed.adjustments.length ? <p>لا توجد شدّات مسجلة لهذه الحالة.</p> : <ol className="space-y-3">{feed.adjustments.map(a => <li key={a.id} className="rounded-xl bg-slate-50 p-3 [overflow-wrap:anywhere]">

@@ -40,7 +40,7 @@ it("registers exactly the plan grant plus patient scope", () => {
 });
 it.each(["owner", "own", "all"] as const)("%s reads recorded clinical facts, actual completed sessions and no money", async key => {
   const result = await read(key);
-  expect(Object.keys(result).sort()).toEqual(["hasMore", "patientId", "plans", "projection"]);
+  expect(Object.keys(result).sort()).toEqual(["clinicTimeZone", "hasMore", "patientId", "plans", "projection"]);
   expect(Object.keys(result.plans[0]).sort()).toEqual(["consentAt", "consentBy", "consentNote", "createdAt", "id", "items", "note", "startDate", "status", "title"]);
   expect(result.plans[0]).toMatchObject({ id: ids.plan, title: "SYN clinical treatment plan", note: "SYN saved clinical note", consentBy: "SYN recorder", startDate: "2024-03-01" });
   expect(result.plans[0].items[0]).toMatchObject({ id: ids.item, serviceName: "SYN recorded service", quantity: 2, toothCode: 26, sessionCount: 3, sessionsCompleted: 1, plannedVisitNumber: 2 });
