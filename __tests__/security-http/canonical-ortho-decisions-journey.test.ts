@@ -33,9 +33,9 @@ it("HTTP: anonymous, none and adjacent grants refuse; all and owner keep the sam
   }
 });
 it("HTTP: no caller query can expand scope, and read grants never authorize a decision", async () => {
-  const session = await journey.login("owner"), snapshot = async () => (await journey.db.query("SELECT (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM ortho_adjustments a) adjustments,(SELECT count(*) FROM audit_log)::int audits")).rows, before = await snapshot();
+  const session = await journey.login("owner"), readOnly = await journey.login("own"), snapshot = async () => (await journey.db.query("SELECT (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM ortho_adjustments a) adjustments,(SELECT count(*) FROM audit_log)::int audits")).rows, before = await snapshot();
   for (const query of ["?scope=all", "?money=1", `?patientId=${ids.outside}`, "?visitId=1"]) expect((await journey.api(`/api/ortho/billing-decisions${query}`, session.cookie)).status).toBe(400);
-  expect((await journey.api(`/api/ortho/adjustments/${ids.adjustmentId}/billing-decision`, session.cookie, { method: "POST", body: JSON.stringify({ decision: "no_charge", reason: "SYN held decision" }) })).status).toBe(401);
+  expect((await journey.api(`/api/ortho/adjustments/${ids.adjustmentId}/billing-decision`, readOnly.cookie, { method: "POST", body: JSON.stringify({ patientId: ids.patient, expectedVersion: "a".repeat(64), decision: "no_charge", reason: "SYN denied reader decision", invoiceNumber: null }) })).status).toBe(403);
   expect((await journey.api("/api/ortho/billing-decisions", session.cookie)).status).toBe(200); expect(await snapshot()).toEqual(before); expect(await journey.ddlLog()).toEqual([]);
 });
 async function openQueue(page: import("playwright").Page, key: keyof typeof ACCOUNTS = "own") { await journey.browserLogin(page, key); await page.goto(`${journey.baseUrl}/ortho`); const panel = page.getByTestId("canonical-ortho-decisions"); await panel.getByTestId("ortho-decision-summary").waitFor(); return panel; }
