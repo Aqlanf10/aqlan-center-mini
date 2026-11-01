@@ -1,3 +1,4 @@
+import { parseMedicationDoseProvenance } from "./medication-dose-provenance";
 import { manualMedicationSelectionError, type ManualMedicationSelection } from "./prescription-medication-selection";
 /**
  * الوصفة الطبية — الروشتة التي يخرج بها المريض إلى الصيدلية.
@@ -96,6 +97,7 @@ export function sanitizeRxItem(input: unknown): RxItem | null {
       amount: text((source.selection as ManualMedicationSelection).amount, MAX_FIELD),
       confirmed: (source.selection as ManualMedicationSelection).confirmed === true,
       ...((source.selection as ManualMedicationSelection).catalog ? { catalog: { ...(source.selection as ManualMedicationSelection).catalog! } } : {}),
+      ...((source.selection as ManualMedicationSelection).doseReview ? { doseReview: parseMedicationDoseProvenance((source.selection as ManualMedicationSelection).doseReview) ?? (source.selection as ManualMedicationSelection).doseReview! } : {}),
     } } : {}),
     dose: text(source.dose, MAX_FIELD),
     form: text(source.form, MAX_FIELD),
@@ -257,4 +259,10 @@ export function buildSuggestions(
       timesPrescribed: entry.count,
       lastPrescribedAt: entry.lastAt,
     }));
+}
+
+/** Draft print URLs retain only prescribed display fields, never calculation
+ * inputs (age/weight/product label) or its proof. Official print loads saved Rx. */
+export function prescriptionDraftPrintItems(items: readonly RxItem[]): RxItem[] {
+ return items.map(item=>{if(!item.selection?.doseReview)return item;const selection={...item.selection};delete selection.doseReview;return {...item,selection};});
 }

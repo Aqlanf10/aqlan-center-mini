@@ -1,3 +1,4 @@
+import { asManualDoseReference, parseMedicationDoseProvenance, type MedicationDoseProvenance } from "./medication-dose-provenance";
 import { validCatalogId } from "./medication-catalog";
 import type { RxItem } from "./prescription";
 
@@ -21,7 +22,7 @@ export const MEDICATION_NAME_CHOICES = [
   {"id": "sodium-fluoride", "name": "Sodium fluoride"},
 ] as const;
 export type MedicationNameChoiceId = typeof MEDICATION_NAME_CHOICES[number]["id"];
-export interface ManualMedicationSelection { id: MedicationNameChoiceId | "manual"; amount: string; confirmed: boolean; catalog?: { id: string; revision: number } }
+export interface ManualMedicationSelection { id: MedicationNameChoiceId | "manual"; amount: string; confirmed: boolean; catalog?: { id: string; revision: number }; doseReview?: MedicationDoseProvenance }
 export function createManualMedicationSelection(id: string): RxItem | null {
   const choice = MEDICATION_NAME_CHOICES.find(value => value.id === id);
   return choice ? { name: choice.name, dose: "", form: "", frequency: "", duration: "", instructions: "", instructionsEn: "",
@@ -39,7 +40,15 @@ export function manualMedicationSelectionError(items: unknown): string | null {
       || !/[A-Za-z]/.test(item.name))
       return `أكمل اسم الدواء والشكل والتركيز ومقدار الجرعة والتكرار والمدة في السطر ${index + 1} قبل الإصدار أو المعاينة.`;
     if (selection.catalog !== undefined && (!selection.catalog || typeof selection.catalog !== "object" || !validCatalogId(selection.catalog.id) || !Number.isSafeInteger(selection.catalog.revision) || selection.catalog.revision < 1 || Object.keys(selection.catalog).sort().join() !== "id,revision")) return "مرجع الدواء في الدليل غير صالح.";
+    // Before receipt lookup only immutable v1 shape is checked. Current clinical
+    // semantics belong to NEW issuance after authorized replay, not this parser.
+    if (selection.doseReview !== undefined && !parseMedicationDoseProvenance(selection.doseReview)) return "لقطة مراجعة الجرعة غير صالحة.";
     if (selection.confirmed !== true) return `راجع وأكّد تفاصيل الدواء في السطر ${index + 1} قبل الإصدار أو المعاينة.`;
   }
   return null;
+}
+
+/** Manual changes retire computed proof, but retain source provenance. */
+export function changedMedicationSelection(selection:ManualMedicationSelection):ManualMedicationSelection {
+ return {...selection,confirmed:false,...(selection.doseReview?{doseReview:asManualDoseReference(selection.doseReview)}:{})};
 }

@@ -1,3 +1,4 @@
+import { medicationDoseProvenanceProblem } from "./medication-dose-provenance";
 import { MEDICATION_CATALOG_KEY, EMPTY_MEDICATION_CATALOG, parseMedicationCatalog, catalogSelectionProblem } from "./medication-catalog";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
@@ -80,11 +81,23 @@ export async function issuePrescriptionTransaction(input: { session: SessionPayl
         const problem = catalogSelectionProblem(draft.items, catalog.value);
         if (problem) refuse(409, problem, "medication_catalog_changed");
       }
+      for (const item of draft.items) {
+        if (item.selection?.doseReview) {
+          const problem = medicationDoseProvenanceProblem(item.selection.doseReview, item as unknown as Record<string, unknown>);
+          if (problem) refuse(409, problem, "dose_review_changed");
+        }
+      }
       const currentDraft = { ...draft, prescribingDoctorName: authority.doctorName, ownerAuthority: authority.ownerAuthority };
       let completed = false;
       const response = await issue({ draft: currentDraft, patient: authority.patient, persist: async (warnings = []) => {
         if (completed) throw new Error("PRESCRIPTION_COMMAND_ALREADY_COMPLETED");
         if (authority.session.expiresAt < Date.now()) refuse(403, "انتهت الجلسة؛ أعد تسجيل الدخول.");
+        for (const item of currentDraft.items) {
+          if (item.selection?.doseReview) {
+            const problem = medicationDoseProvenanceProblem(item.selection.doseReview, item as unknown as Record<string, unknown>);
+            if (problem) refuse(409, problem, "dose_review_changed");
+          }
+        }
         const record = await savePrescription(currentDraft, authority.session.username, authority.issuerId, client);
         await client.query("UPDATE prescription_issuance_commands SET prescription_id=$2, warning_fingerprint=$3 WHERE command_key=$1::uuid", [key, record.id, warningFingerprint(warnings)]);
         completed = true;

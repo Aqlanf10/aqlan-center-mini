@@ -11,9 +11,10 @@ import { promisify } from 'node:util';
 import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { sessionCredentialVersion } from '../../lib/auth';
-const transport = vi.hoisted(() => ({ pool: null as unknown as Pool, commitLost: false, auditFails: false }));
-// Only transport/schema bootstrap are replaced. Real SQL save/audit/session,
-// clinician and patient-authority logic run against the owned PostgreSQL18 DB.
+const transport = vi.hoisted(() => ({ pool: null as unknown as Pool, commitLost: false, auditFails: false, retiredDoseVersion: null as string|null }));
+// Transport/schema bootstrap are replaced; one explicit semantic hook simulates
+// reference retirement. Real SQL save/audit/session, clinician and patient
+// authority logic run against the owned PostgreSQL18 DB.
 vi.mock('../../lib/db', async original => ({ ...await original<typeof import('../../lib/db')>(), ensureSchema: async () => {}, getPool: () => ({
  query: (sql: string, values?: unknown[]) => transport.pool.query(sql, values),
  connect: async () => {
@@ -26,6 +27,7 @@ vi.mock('../../lib/db', async original => ({ ...await original<typeof import('..
   } };
  },
 }) }));
+vi.mock('../../lib/medication-dose-provenance', async original => { const actual=await original<typeof import('../../lib/medication-dose-provenance')>(); return {...actual,medicationDoseProvenanceProblem:(...args:Parameters<typeof actual.medicationDoseProvenanceProblem>)=>transport.retiredDoseVersion && (args[0] as {referenceVersion?:string})?.referenceVersion===transport.retiredDoseVersion?'Synthetic reference version retired':actual.medicationDoseProvenanceProblem(...args)}; });
 vi.mock('next/headers', () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 import { issuePrescriptionTransaction, recoverPrescriptionCommand, type IssuanceContext } from '../../lib/prescription-issuance';
 import { backupSqlLines } from '../../lib/db';
@@ -64,7 +66,7 @@ beforeAll(async () => {
 });
 afterAll(async () => { for (const pool of ownedPools) await pool.end(); await fixture?.close(); if (directory) await rm(directory,{recursive:true,force:true}); vi.unstubAllEnvs(); });
 beforeEach(async () => {
- transport.pool = concurrent; transport.commitLost = false; transport.auditFails = false;
+ transport.pool = concurrent; transport.commitLost = false; transport.auditFails = false; transport.retiredDoseVersion = null;
  // Retain immutable receipt history even in fixtures; each test owns a new key.
  key = randomUUID(); baselineCounts = await rawCounts();
  await fixture.source.query(`UPDATE users SET password_hash='synthetic-password-hash',role='doctor',is_active=true,party_id=5 WHERE id=3;
@@ -168,4 +170,27 @@ it('catalogue disable blocks new issuance, not replay/recovery of immutable save
  const refused=await issuePrescriptionTransaction({session:session(),key:randomUUID(),draft:selected},issue);expect(refused.status).toBe(409);expect(await refused.json()).toMatchObject({code:'medication_catalog_changed'});
  expect(await counts()).toEqual({rx:1,commands:1,audits:1});
  const recovery=await recoverPrescriptionCommand(session(),key,{patientId:7,visitId:9,prescribingDoctorPartyId:5});expect(recovery.status).toBe(200);
+});
+
+
+it('stores verified dose snapshot, rejects tampering atomically, and replays an authorized historical reference without new clinical validation', async () => {
+ const {DOSE_REFERENCE_VERSION}=await import('../../lib/medication-dose-profiles');
+ const {createCalculatedDoseProvenance,calculatedDoseFields}=await import('../../lib/medication-dose-provenance');
+ const {checkPrescriptionDraft}=await import('../../lib/prescription');
+ const input={profileId:'amoxicillin-child-aapd-q8',referenceVersion:DOSE_REFERENCE_VERSION,indication:'Synthetic reviewed indication',ageMonths:60,ageVerified:true,weightKg:20,currentWeightVerified:true,selectedDose:30,administrationsPer24h:3,scheduleKind:'fixed-interval' as const,intervalHours:8,durationDays:5,reviewPlan:'Review synthetic patient',product:{name:'Synthetic suspension',ingredientId:'amoxicillin' as const,formulation:'single-ingredient' as const,labelUrl:'https://synthetic.invalid/label',kind:'oral-liquid' as const,strengthMg:250,perMl:5,measurementIncrementMl:0.1,minimumAgeMonths:4,labelVerified:true},otherSameIngredientMg24h:0,specialPopulationOrInteraction:false,antibioticIndicationReviewed:true};
+ const doseReview=createCalculatedDoseProvenance(input)!;const {amount,...fields}=calculatedDoseFields(doseReview)!;
+ const selected={...draft,items:[{...fields,selection:{id:'amoxicillin' as const,amount,confirmed:true,doseReview}}]};
+ const tampered=structuredClone(selected);if(tampered.items[0].selection.doseReview.mode!=='calculated')throw Error();tampered.items[0].selection.doseReview.result.mgPerDose=999;
+ const bad=await issuePrescriptionTransaction({session:session(),key:randomUUID(),draft:tampered},issue);expect(bad.status).toBe(409);expect(await counts()).toEqual({rx:0,commands:0,audits:0});
+ const first=await issuePrescriptionTransaction({session:session(),key,draft:selected},issue);expect(first.status).toBe(201);const saved=await first.json();
+ const stored=(await transport.pool.query('SELECT items FROM prescriptions WHERE id=$1',[saved.id])).rows[0].items;
+ expect(typeof stored==='string'?JSON.parse(stored):stored).toEqual(selected.items);
+ // Simulate retiring the immutable version from NEW prescribing admission only.
+ transport.retiredDoseVersion=DOSE_REFERENCE_VERSION;
+ expect(checkPrescriptionDraft(selected).ok).toBe(true);
+ const replay=await issuePrescriptionTransaction({session:session(),key,draft:selected},()=>{throw Error('Must replay before current reference admission');});expect(replay.status).toBe(201);expect(await replay.json()).toMatchObject({id:saved.id,replayed:true});
+ const fresh=await issuePrescriptionTransaction({session:session(),key:randomUUID(),draft:selected},issue);expect(fresh.status).toBe(409);
+ const changed=structuredClone(selected);changed.items[0].duration='6 days';expect((await issuePrescriptionTransaction({session:session(),key,draft:changed},issue)).status).toBe(409);
+ expect(await counts()).toEqual({rx:1,commands:1,audits:1});
+ await fixture.source.query("UPDATE users SET is_active=false WHERE id=3");expect((await issuePrescriptionTransaction({session:session(),key,draft:selected},issue)).status).toBe(403);
 });

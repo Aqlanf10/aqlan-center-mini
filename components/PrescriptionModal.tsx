@@ -1,9 +1,11 @@
 "use client";
+import { prescriptionDraftPrintItems } from "@/lib/prescription";
+import { PrescriptionDoseProfiles } from "./PrescriptionDoseProfiles";
 import { prescriberUnavailableMessage } from "@/lib/prescription-prescriber-feedback";
 import { canonicalPrescriptionCommand } from "@/lib/prescription-command";
 import { getOrCreatePrescriptionCommand, readPrescriptionCommand, prescriptionCommandStorageKey, createPrescriptionOperationFence, type PrescriptionOperation, type PendingPrescriptionCommand } from "@/lib/prescription-command-client";
 
-import { createManualMedicationSelection, manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
+import { changedMedicationSelection, createManualMedicationSelection, manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./SessionProvider";
@@ -230,7 +232,7 @@ export function PrescriptionModal({
   const updateItem = (index: number, field: Exclude<keyof RxItem, "selection">, value: string) => {
     setItems((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], [field]: value, ...(next[index].selection ? { selection: { ...next[index].selection!, confirmed: false } } : {}) };
+      next[index] = { ...next[index], [field]: value, ...(next[index].selection ? { selection: changedMedicationSelection(next[index].selection!) } : {}) };
       return next;
     });
   };
@@ -269,7 +271,7 @@ export function PrescriptionModal({
     if (notes) params.set("notes", notes);
     params.set("lang", lang);
     if (items.length > 0) {
-      params.set("items", JSON.stringify(items));
+      params.set("items", JSON.stringify(prescriptionDraftPrintItems(items)));
     }
     return `/print/prescription/${patientId}?${params.toString()}`;
   };
@@ -594,6 +596,7 @@ export function PrescriptionModal({
             </div>
           )}
 
+          <PrescriptionDoseProfiles key={`dose:${patientId}:${visitId ?? "none"}:${selectedDoctorId ?? "none"}:${prescriberStatus}`} disabled={items.length >= MAX_ITEMS || prescriberStatus !== "ready"} onSelect={item => setItems(previous => previous.length < MAX_ITEMS ? [...previous, item] : previous)} />
           <PrescriptionClinicCatalog key={`${patientId}:${visitId ?? "none"}:${selectedDoctorId ?? "none"}:${prescriberStatus}`} disabled={items.length >= MAX_ITEMS || prescriberStatus !== "ready"} onSelect={item => setItems(previous => previous.length < MAX_ITEMS ? [...previous, item] : previous)} />
           <PrescriptionMedicationLibrary disabled={items.length >= MAX_ITEMS || prescriberStatus !== "ready"} onSelectName={id => {
             const item = createManualMedicationSelection(id);
@@ -956,10 +959,10 @@ export function PrescriptionModal({
                   </div>
 
                   {item.selection && <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs">
-                    <p>أكمل الشكل والتركيز ومقدار الجرعة والتكرار والمدة بنفسك؛ الجرعات المرجعية غير معتمدة للتعبئة.</p>
+                    <p>{item.selection.doseReview?.mode === "calculated" ? "نُقلت النتيجة من حساب مرجعي متحقق رياضيًا؛ راجعها سريريًا قبل الإصدار. أي تعديل يدوي يزيل وصف الحساب." : item.selection.doseReview ? "تعديل يدوي مرتبط بمصدر مرجعي فقط — ليس نتيجة حساب معتمدة؛ أعد مراجعة السطر." : "أكمل الشكل والتركيز ومقدار الجرعة والتكرار والمدة بنفسك؛ لا اعتماد تلقائي."}</p>
                     <label className="my-2 block">مقدار الجرعة لكل مرة
                       <input aria-label={`مقدار الجرعة للسطر ${idx + 1}`} dir="ltr" value={item.selection.amount} placeholder="Clinician-entered amount per dose"
-                        onChange={event => setItems(previous => previous.map((row, i) => i === idx && row.selection ? { ...row, selection: { ...row.selection, amount: event.target.value, confirmed: false } } : row))}
+                        onChange={event => setItems(previous => previous.map((row, i) => i === idx && row.selection ? { ...row, selection: { ...changedMedicationSelection(row.selection), amount: event.target.value } } : row))}
                         className="mx-2 rounded border bg-white p-2" />
                     </label>
                     <label className="flex gap-2"><input type="checkbox" checked={item.selection.confirmed}

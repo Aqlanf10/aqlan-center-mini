@@ -1,3 +1,4 @@
+import { canonicalMedicationDoseProvenance } from "./medication-dose-provenance";
 /**
  * ربط إقرار قراءة تحذيرات السلامة الدوائية بالوصفة **وبالتحذيرات نفسها**
  * (Safety Acknowledgement Binding) — مراجعة P0 المستقلة، الجولة الثالثة،
@@ -74,6 +75,7 @@ export function canonicalPrescriptionForAck(draft: PrescriptionDraft): string {
       item.instructionsEn,
       ...(item.selection ? [item.selection.id, item.selection.amount, item.selection.confirmed] : []),
       ...(item.selection?.catalog ? [item.selection.catalog.id, item.selection.catalog.revision] : []),
+      ...(item.selection?.doseReview ? ["dose-review-v1", canonicalMedicationDoseProvenance(item.selection.doseReview)] : []),
     ]),
   });
 }
