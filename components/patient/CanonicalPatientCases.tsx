@@ -5,6 +5,7 @@ import { isCanonicalPatientCases, type CanonicalPatientCases as CaseFeed } from 
 import { CASE_STATUS_LABEL, DEPENDENCY_REQUIREMENT_LABEL, PROBLEM_STATUS_LABEL, SPECIALTY_LABEL } from "@/lib/cases";
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { CanonicalPlanCaseEditor } from "./CanonicalPlanCaseEditor";
+import { CanonicalPlanDependencyEditor } from "./CanonicalPlanDependencyEditor";
 
 const itemStatus: Record<string, string> = { planned: "مخطط", in_progress: "بدأ علاجه", done: "منفذ", cancelled: "ملغى" };
 const specialty = (key: string) => SPECIALTY_LABEL[key as keyof typeof SPECIALTY_LABEL] ?? key;
@@ -49,6 +50,8 @@ export function CanonicalPatientCases({ patientId, canEdit, ownerKey }: { patien
       <p className="text-xs text-slate-600">الحالات والمشاكل والروابط السريرية المسجلة. حالة العلاج لا تثبت التغطية المالية أو استحقاق عمولة.</p>
       <button type="button" onClick={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} className="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-bold text-navy-800">تحديث الحالات وترتيب الخطة</button>
       {canEdit ? <CanonicalPlanCaseEditor key={`${ownerKey}:${patientId}`} patientId={patientId} ownerKey={ownerKey} feed={feed}
+        refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
+      {canEdit ? <CanonicalPlanDependencyEditor key={`dependency:${ownerKey}:${patientId}`} patientId={patientId} ownerKey={ownerKey} feed={feed}
         refresh={() => { setFeed(null); setError(null); setRefresh(v => v + 1); }} /> : null}
       {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : !feed ? <p role="status">جارٍ تحميل الحالات…</p> : <>
         {!feed.orthoVisible ? <p className="text-xs text-slate-600">حالات التقويم غير معروضة دون صلاحية التقويم المستقلة.</p> : null}

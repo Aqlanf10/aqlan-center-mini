@@ -37,7 +37,7 @@ it.each(["owner", "own", "all"] as const)("%s receives clinical case facts and a
   expect(Object.keys(body).sort()).toEqual(["cases", "dependencies", "items", "orthoVisible", "patientId", "planVisible", "problems", "projection"]);
   expect(body.cases).toEqual([expect.objectContaining({ id: ids.caseId, title: "SYN root case", problem: "SYN recorded problem", status: "active" })]);
   expect(body.items).toHaveLength(2); expect(body.items.find(i => i.id === ids.item)).toMatchObject({ priority: 3, caseId: ids.caseId });
-  expect(body.dependencies).toEqual([{ itemId: ids.item, requiresItemId: ids.prerequisite, requirement: "completed", note: "SYN dependency note", met: true, createdBy: "SYN clinician" }]);
+  expect(body.dependencies).toEqual([{ itemId: ids.item, requiresItemId: ids.prerequisite, requirement: "completed", note: "SYN dependency note", met: true, createdBy: "SYN clinician", version: expect.stringMatching(/^[a-f0-9]{64}$/) }]);
   expect(JSON.stringify(body)).not.toMatch(/9900123|Minor|price|currency|billing|invoice|payment|patientName|patientPhone|financial|legacy/i);
 });
 it.each(["none", "unlinked", "adjacent", "orthoOnly"] as const)("denies %s without treating the role or another module as a clinical grant", async key => {

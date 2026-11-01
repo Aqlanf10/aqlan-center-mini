@@ -16,7 +16,7 @@ export interface CanonicalCaseItem {
   caseId: number | null; priority: number | null; sortOrder: number;
 }
 export interface CanonicalCaseDependency {
-  itemId: number; requiresItemId: number; requirement: DependencyRequirement; note: string | null; met: boolean; createdBy: string;
+  itemId: number; requiresItemId: number; requirement: DependencyRequirement; note: string | null; met: boolean; createdBy: string; version: string;
 }
 export interface CanonicalPatientCases {
   projection: "patient-cases-clinical"; patientId: number; planVisible: boolean; orthoVisible: boolean;
@@ -69,9 +69,9 @@ export function isCanonicalPatientCases(value: unknown, patientId: number): valu
   const children = new Map<number, number[]>(), incoming = new Map(b.items.map(i => [i.id, 0]));
   for (const d of b.dependencies) {
     const key = `${d.itemId}:${d.requiresItemId}`;
-    if (!keys(d, "itemId requiresItemId requirement note met createdBy") || !items.has(d.itemId) || !items.has(d.requiresItemId)
+    if (!keys(d, "itemId requiresItemId requirement note met createdBy version") || !items.has(d.itemId) || !items.has(d.requiresItemId)
       || d.itemId === d.requiresItemId || edges.has(key) || !["completed", "clearance"].includes(d.requirement)
-      || !nullableText(d.note) || typeof d.met !== "boolean" || !text(d.createdBy)
+      || !nullableText(d.note) || typeof d.met !== "boolean" || !text(d.createdBy) || typeof d.version !== "string" || !/^[a-f0-9]{64}$/.test(d.version)
       || d.met !== isDependencyMet(d.requirement, statusByItem.get(d.requiresItemId)!)) return false;
     edges.add(key);
     incoming.set(d.itemId, incoming.get(d.itemId)! + 1);

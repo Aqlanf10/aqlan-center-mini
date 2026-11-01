@@ -5,7 +5,7 @@ const fixture = (): CanonicalPatientCases => ({ projection: "patient-cases-clini
   cases: [{ id: 2, kind: "specialty", orthoCaseId: null, specialty: "endodontics", title: "SYN case", site: "26", problem: null, responsibleName: null, status: "active", startedOn: "2024-01-01", completedAt: null, outcome: null }],
   problems: [{ id: 3, label: "SYN problem", site: null, specialty: null, status: "active", caseId: 2, notedBy: "SYN", notedAt: "2024-01-01T00:00:00Z", resolvedBy: null, resolvedAt: null }],
   items: [4, 5].map(id => ({ id, planId: 6, planTitle: "SYN plan", planStatus: "active", serviceName: `SYN ${id}`, category: null, toothCode: null, surfaces: null, status: id === 5 ? "done" : "planned", doctorName: null, caseId: 2, priority: null, sortOrder: 0 })),
-  dependencies: [{ itemId: 4, requiresItemId: 5, requirement: "completed", note: null, met: true, createdBy: "SYN" }],
+  dependencies: [{ itemId: 4, requiresItemId: 5, requirement: "completed", note: null, met: true, createdBy: "SYN", version: "a".repeat(64) }],
 });
 describe("clinical case allowlist and graph", () => {
   it("accepts saved clinical facts and complete endpoints", () => expect(isCanonicalPatientCases(fixture(), 1)).toBe(true));
@@ -27,4 +27,5 @@ describe("clinical case allowlist and graph", () => {
     expect(isCanonicalPatientCases(body, 1)).toBe(false);
   });
   it("accepts a legitimately empty care projection without plan access", () => expect(isCanonicalPatientCases({ ...fixture(), cases: [], problems: [], items: [], dependencies: [], planVisible: false }, 1)).toBe(true));
+  it.each(["", "a".repeat(63), "X".repeat(64)])("refuses malformed dependency version %s", version => { const body = fixture(); body.dependencies[0].version = version; expect(isCanonicalPatientCases(body, 1)).toBe(false); });
 });

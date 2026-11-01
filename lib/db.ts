@@ -29329,27 +29329,36 @@ export async function addPlanItemDependency(input: AddPlanDependencyInput): Prom
   }
 }
 
-export async function removePlanItemDependency(input: {
+export interface RemovePlanDependencyInput {
   itemId: number; requiresItemId: number; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true } | { ok: false; reason: "not_found" }> {
+}
+export type RemovePlanDependencyResult = { ok: true } | { ok: false; reason: "not_found" };
+
+/** Same deletion and audit, on the caller-owned transaction. */
+export async function removePlanItemDependencyInTransaction(client: DbClient, input: RemovePlanDependencyInput): Promise<RemovePlanDependencyResult> {
+  const { rows } = await client.query<{ patient_id: number; service_name: string; requirement: string }>(
+    `DELETE FROM plan_item_dependencies dep
+      USING plan_items i, treatment_plans t
+      WHERE dep.item_id = $1 AND dep.requires_item_id = $2 AND i.id = dep.item_id AND t.id = i.plan_id
+      RETURNING t.patient_id, i.service_name, dep.requirement`,
+    [input.itemId, input.requiresItemId]);
+  if (!rows[0]) { return { ok: false, reason: "not_found" }; }
+  await insertAuditRow(client, {
+    action: "plan.dependency_remove", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
+    details: { البند: input.itemId, كان_يتطلب: input.requiresItemId, النوع: rows[0].requirement },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+export async function removePlanItemDependency(input: RemovePlanDependencyInput): Promise<RemovePlanDependencyResult> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; service_name: string; requirement: string }>(
-      `DELETE FROM plan_item_dependencies dep
-        USING plan_items i, treatment_plans t
-        WHERE dep.item_id = $1 AND dep.requires_item_id = $2 AND i.id = dep.item_id AND t.id = i.plan_id
-        RETURNING t.patient_id, i.service_name, dep.requirement`,
-      [input.itemId, input.requiresItemId]);
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    await insertAuditRow(client, {
-      action: "plan.dependency_remove", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
-      details: { البند: input.itemId, كان_يتطلب: input.requiresItemId, النوع: rows[0].requirement },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
-    await client.query("COMMIT");
-    return { ok: true };
+    const result = await removePlanItemDependencyInTransaction(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;

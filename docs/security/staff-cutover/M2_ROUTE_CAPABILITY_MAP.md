@@ -30,23 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 41 on WORK)
+### Counts (386 mapped route/method entries, after local slice 42 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 283 |
+| existing | 281 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 61 |
+| canonical-done | 63 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Local slices 40–41 have not yet passed published-head CI; the published base has 59 canonical-done / 285 existing ordinary entries.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Local slices 40–42 have not yet passed published-head CI; the published base has 59 canonical-done / 285 existing ordinary entries.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -596,3 +596,7 @@ Still open, not inferred: the owner decisions (four owner-only operations; empty
 ### Slice 41 — plan-item case and priority
 
 `PUT /api/plan-items/[id]/case` admits the existing `clinical.plans.edit` action, its view prerequisite and current patient scope. Patient/item waits are followed by fresh authority and locked ownership witnesses. Both old/new ortho links require independent ortho visibility. The shared writer preserves retained invoice/agreement attribution, priority-only edits and atomic audit. Exact expected values reject stale requests. The client preserves an uncertain tab intent, verifies current state and requires a new explicit intent; it never automatically replays. This is not a durable receipt. See [the acceptance matrix](../../review/work-plan-case-slice41-20261101.md); source implementation is distinct from exact-head CI and independent review.
+
+### Slice 42 — plan dependency add/remove
+
+`POST` and `DELETE /api/plan-items/[id]/dependencies` use existing plan-edit/view authority and current patient scope. Both endpoints are locked to the same patient; graph mutations share the legacy patient lock, preserve cycle semantics and audit atomically. Add is bounded; removal requires the opaque stored-edge version emitted by the clinical reader, preventing a stale request from deleting a recreated edge. The UI stores only a minimal pending marker and never replays automatically. No permanent request receipt or financial/execution policy is added. See [the acceptance matrix](../../review/work-plan-dependency-slice42-20261101.md). Focused local validation does not replace full exact-head CI or independent review.

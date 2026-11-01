@@ -4443,8 +4443,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 42: clinical.plans.edit with existing view prerequisite and current patient scope; same-patient endpoints, shared legacy patient graph lock, fresh authority after waiting, atomic legacy engine and audit. POST retains cycle detection and bounded graph admission; DELETE compares an opaque stored-edge version before removal. No automatic replay after uncertain response; no durable request receipt. No financial or execution-policy change."
  },
  {
   "route": "/api/plan-items/[id]/dependencies",
@@ -4459,8 +4459,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 42: clinical.plans.edit with existing view prerequisite and current patient scope; same-patient endpoints, shared legacy patient graph lock, fresh authority after waiting, atomic legacy engine and audit. POST retains cycle detection and bounded graph admission; DELETE compares an opaque stored-edge version before removal. No automatic replay after uncertain response; no durable request receipt. No financial or execution-policy change."
  },
  {
   "route": "/api/plan-templates",

@@ -4,6 +4,7 @@ import type { CanonicalSnapshotQuery, CanonicalSnapshotScope } from "./canonical
 import type { VerifiedDurableSession } from "./staff-durable-session";
 import { isDependencyMet } from "./cases";
 import { CASE_READ_LIMITS, isCanonicalPatientCases, type CanonicalPatientCases } from "./canonical-case-projection";
+import { planDependencyVersion } from "./canonical-plan-dependency-version";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 export class CanonicalCaseReadRefusal extends Error {
@@ -33,7 +34,8 @@ const ITEMS = `SELECT i.id,i.plan_id AS "planId",t.title AS "planTitle",t.status
   i.tooth_code AS "toothCode",i.surfaces,i.status,d.name AS "doctorName",CASE WHEN ${visibleCase} THEN i.case_id ELSE NULL END AS "caseId",
   i.priority,i.sort_order AS "sortOrder" FROM plan_items i JOIN treatment_plans t ON t.id=i.plan_id
   LEFT JOIN clinical_cases c ON c.id=i.case_id AND c.patient_id=t.patient_id LEFT JOIN parties d ON d.id=i.doctor_id WHERE t.patient_id=$1`;
-const DEPS = `SELECT d.item_id AS "itemId",d.requires_item_id AS "requiresItemId",d.requirement,d.note,d.created_by AS "createdBy",r.status AS "requiredStatus"
+const DEPS = `SELECT d.item_id AS "itemId",d.requires_item_id AS "requiresItemId",d.requirement,d.note,d.created_by AS "createdBy",r.status AS "requiredStatus",
+  d.created_at::text AS "createdAt",d.xmin::text AS "rowXmin",d.ctid::text AS "rowTid"
   FROM plan_item_dependencies d JOIN plan_items i ON i.id=d.item_id JOIN treatment_plans t ON t.id=i.plan_id
   JOIN plan_items r ON r.id=d.requires_item_id JOIN treatment_plans rt ON rt.id=r.plan_id
   WHERE t.patient_id=$1 AND rt.patient_id=$1`;
@@ -71,8 +73,8 @@ export async function readPatientCasesWith(q: CanonicalSnapshotQuery, scope: Can
   const cases = await boundedRows<CanonicalPatientCases["cases"][number]>(q, CASES, args, CASE_READ_LIMITS.cases);
   const problems = await boundedRows<CanonicalPatientCases["problems"][number]>(q, PROBLEMS, args, CASE_READ_LIMITS.problems);
   const items = planVisible ? await boundedRows<CanonicalPatientCases["items"][number]>(q, ITEMS, args, CASE_READ_LIMITS.items) : [];
-  const dependencies = planVisible ? (await boundedRows<Omit<CanonicalPatientCases["dependencies"][number], "met"> & { requiredStatus: string }>(q, DEPS, [patientId], CASE_READ_LIMITS.dependencies))
-    .map(({ requiredStatus, ...d }) => ({ ...d, met: isDependencyMet(d.requirement, requiredStatus) })) : [];
+  const dependencies = planVisible ? (await boundedRows<Omit<CanonicalPatientCases["dependencies"][number], "met" | "version"> & { requiredStatus: string; createdAt: string; rowXmin: string; rowTid: string }>(q, DEPS, [patientId], CASE_READ_LIMITS.dependencies))
+    .map(({ requiredStatus, createdAt, rowXmin, rowTid, ...d }) => ({ ...d, version: planDependencyVersion({ ...d, createdAt, rowXmin, rowTid }), met: isDependencyMet(d.requirement, requiredStatus) })) : [];
   cases.sort((a, b) => b.startedOn.localeCompare(a.startedOn) || (b.id ?? 0) - (a.id ?? 0) || (b.orthoCaseId ?? 0) - (a.orthoCaseId ?? 0));
   problems.sort((a, b) => b.notedAt.localeCompare(a.notedAt) || b.id - a.id);
   items.sort((a, b) => (a.priority ?? 1000) - (b.priority ?? 1000) || a.planId - b.planId || a.sortOrder - b.sortOrder || a.id - b.id);
