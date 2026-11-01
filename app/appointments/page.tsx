@@ -41,6 +41,13 @@ function isCalendarDate(value: string): boolean {
     && parsed.getUTCDate() === day;
 }
 
+/** The DB mapper emits exactly this UTC shape. A loose Date.parse would mark garbage confirmed. */
+function isCanonicalInstant(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
+}
+
 function todayLocal(): string {
   return clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 }
@@ -106,16 +113,18 @@ export default function AppointmentsPage() {
      حمله نصف حقيقته لأنّ الحساب يفترض يومًا من ١٢ ساعة لم يُهيِّئه أحد. */
   const dayStart = useSetting("clinic.day_start");
   const dayEnd = useSetting("clinic.day_end");
-  const today = useMemo(todayLocal, []);
+  const today = useMemo(() => todayLocal(), []);
   /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
      القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
   const [date, setDate] = useState(today);
   /* اليوم المعروض الآن — يقرؤه الإجراء بعد انتهاء طلبه ليعرف هل انتقل المستخدم
      إلى يومٍ آخر أثناء الانتظار. */
+  const dayOwner = useMemo(() => ({ date }), [date]);
+  const committedDayOwner = useRef(dayOwner);
   const dateRef = useRef(today);
   const dateRevisionRef = useRef(0);
   const [dayList, setDayList] = useState<{
-    date: string; revision: number; request: number;
+    owner: typeof dayOwner; date: string; revision: number; request: number;
     status: "loading" | "ready" | "error"; items: Appointment[]; error: string | null;
     clinicTimeZone?: string;
   } | null>(null);
@@ -135,8 +144,7 @@ export default function AppointmentsPage() {
   const mountedRef = useRef(false);
   const readyRequestRef = useRef<number | null>(null);
   // Ownership is checked during render, before the new date's effects run.
-  const ownsDayList = dayList?.date === date && dayList.revision === dateRevisionRef.current
-    && dayList.request === latestLoadRequestRef.current;
+  const ownsDayList = dayList?.owner === dayOwner;
   const ready = ownsDayList && dayList.status === "ready";
   const loading = !ownsDayList || dayList.status === "loading";
   const error = ownsDayList ? dayList.error : null;
@@ -145,6 +153,7 @@ export default function AppointmentsPage() {
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [patientConfirmedOnly, setPatientConfirmedOnly] = useState(false);
   const [urlStateReady, setUrlStateReady] = useState(false);
 
   /* لا نقرأ window أثناء الـrender: الخادم والمتصفح يبدآن بالحالة نفسها، ثم
@@ -156,6 +165,7 @@ export default function AppointmentsPage() {
     const requestedFilter = params.get("filter");
     if (requestedDate && isCalendarDate(requestedDate)) setDate(requestedDate);
     if (requestedFilter && LINKABLE_FILTERS.includes(requestedFilter)) setStatusFilter(requestedFilter);
+    if (params.get("patientConfirmed") === "true") setPatientConfirmedOnly(true);
     setUrlStateReady(true);
   }, []);
   const [doctorFilter, setDoctorFilter] = useState<string>("all");
@@ -182,6 +192,7 @@ export default function AppointmentsPage() {
   // A slot belongs to one displayed-day lifetime, including leaving and returning.
   useLayoutEffect(() => {
     mountedRef.current = true;
+    committedDayOwner.current = dayOwner;
     // Commit the date fence before browser events can use the previous panel.
     if (dateRef.current !== date) dateRevisionRef.current += 1;
     dateRef.current = date;
@@ -194,7 +205,7 @@ export default function AppointmentsPage() {
       latestLoadRequestRef.current += 1;
       candidateRequestRef.current += 1;
     };
-  }, [date]);
+  }, [date, dayOwner]);
   /* نقلُ موعد — يفتح لوحةً صغيرة على الصفّ نفسه. وقبل هذا لم يكن في النظام نقل:
      كان يُلغى الموعد ويُحجز غيره، فيُحتسب المريض «ملغيًا» وهو لم يُلغِ. */
   const [moving, setMoving] = useState<
@@ -305,7 +316,7 @@ export default function AppointmentsPage() {
     if (!mountedRef.current || target !== dateRef.current) return;
     const requestId = ++latestLoadRequestRef.current;
     const revision = dateRevisionRef.current;
-    const context = { date: target, revision, request: requestId };
+    const context = { owner: committedDayOwner.current, date: target, revision, request: requestId };
     const isCurrent = () => mountedRef.current && requestId === latestLoadRequestRef.current
       && target === dateRef.current && revision === dateRevisionRef.current;
     readyRequestRef.current = null;
@@ -326,6 +337,8 @@ export default function AppointmentsPage() {
         || typeof item.patientName !== "string" || typeof item.scheduledTime !== "string"
         || toMinutes(item.scheduledTime) === null
         || !Number.isInteger(item.durationMinutes) || item.durationMinutes <= 0
+        || (item.patientConfirmedAt !== undefined && item.patientConfirmedAt !== null
+          && !isCanonicalInstant(item.patientConfirmedAt))
         || typeof item.status !== "string" || !Object.hasOwn(STATUS_LABEL, item.status))) {
         failure = "وصل ردٌّ غير صالح من الخادم أثناء تحديث القائمة.";
         throw new Error(failure);
@@ -462,6 +475,7 @@ export default function AppointmentsPage() {
         || (statusFilter === "unreminded" ? awaitsReminder(item)
           : statusFilter === "lab" ? isActiveLabStatus(item.status) && hasPendingLabWork(item.labReadiness)
             : item.status === statusFilter);
+      const matchPatientConfirmation = !patientConfirmedOnly || Boolean(item.patientConfirmedAt);
       const matchDoctor = doctorFilter === "all" || String(item.doctorId) === doctorFilter;
       const typeLabel = (item.appointmentType && getAppointmentTypeLabel(item.appointmentType)) || "";
       const q = searchQuery.toLowerCase().trim();
@@ -472,9 +486,9 @@ export default function AppointmentsPage() {
         (item.note ?? "").toLowerCase().includes(q) ||
         (item.doctorName ?? "").toLowerCase().includes(q) ||
         typeLabel.toLowerCase().includes(q);
-      return matchStatus && matchDoctor && matchSearch;
+      return matchStatus && matchPatientConfirmation && matchDoctor && matchSearch;
     });
-  }, [items, statusFilter, doctorFilter, searchQuery]);
+  }, [items, statusFilter, patientConfirmedOnly, doctorFilter, searchQuery]);
 
   /* مواعيد اليوم النشطة التي تنتظر عمل مختبر لم يصل — لشريط التنبيه أعلى القائمة. */
   const labPendingCount = useMemo(
@@ -837,6 +851,21 @@ export default function AppointmentsPage() {
             </button>
           ))}
 
+          {/* تأكيد المريض من البوابة مستقل عن الوصول والحالة التشغيلية والتذكير اليدوي. */}
+          <button
+            type="button"
+            data-filter="patient-confirmed"
+            aria-pressed={patientConfirmedOnly}
+            onClick={() => setPatientConfirmedOnly((current) => !current)}
+            className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition-all ${
+              patientConfirmedOnly
+                ? "border-navy-800 bg-navy-800 text-white"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            ✓ أكده المريض من البوابة ضمن القائمة اليومية ({ready ? items.filter((item) => Boolean(item.patientConfirmedAt)).length : "؟"})
+          </button>
+
           {doctors.length > 0 && (
             <select
               value={doctorFilter}
@@ -927,6 +956,11 @@ export default function AppointmentsPage() {
                         >
                           {STATUS_LABEL[item.status] ?? item.status}
                         </span>
+                        {item.patientConfirmedAt ? (
+                          <span data-patient-confirmed={item.id} className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                            ✓ أكده المريض من البوابة
+                          </span>
+                        ) : null}
                         <LabReadinessChip item={item} />
                       </div>
                       <p className="mt-0.5 text-xs text-slate-500">
@@ -1175,6 +1209,11 @@ export default function AppointmentsPage() {
                           >
                             {STATUS_LABEL[item.status] ?? item.status}
                           </span>
+                          {item.patientConfirmedAt ? (
+                            <span data-patient-confirmed={item.id} className="rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                              ✓ أكده المريض من البوابة
+                            </span>
+                          ) : null}
                         </div>
 
                         <a

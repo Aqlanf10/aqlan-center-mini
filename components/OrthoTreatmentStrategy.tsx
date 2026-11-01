@@ -94,9 +94,13 @@ export function OrthoTreatmentStrategy(props: OrthoTreatmentStrategyProps) {
 function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId }: OrthoTreatmentStrategyProps) {
   const session = useSession();
   const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
-  const owner = useMemo(() => ({ patientId, orthoCaseId, authority, referenceVisitId, identity: lifetime?.identity, active: false }),
+  const owner = useMemo(() => ({ patientId, orthoCaseId, authority, referenceVisitId, identity: lifetime?.identity }),
     [patientId, orthoCaseId, authority, referenceVisitId, lifetime?.identity]);
-  useLayoutEffect(() => { owner.active = true; return () => { owner.active = false; }; }, [owner]);
+  const activeOwner = useRef<typeof owner | null>(null);
+  useLayoutEffect(() => {
+    activeOwner.current = owner;
+    return () => { if (activeOwner.current === owner) activeOwner.current = null; };
+  }, [owner]);
   const lifetimeRef = useRef(lifetime);
   useLayoutEffect(() => { lifetimeRef.current = lifetime; }, [lifetime]);
   const [selected, setSelected] = useState<number | undefined>();
@@ -117,7 +121,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
   useEffect(() => {
     const life = lifetimeRef.current;
     const controller = new AbortController(); let active = true;
-    const current = () => owner.active && active && !controller.signal.aborted && (!life || life.active());
+    const current = () => (activeOwner.current === owner) && active && !controller.signal.aborted && (!life || life.active());
     setRead({ owner, data: null, error: null, loading: true });
     const timer = setTimeout(() => {
       if (!current()) return;
@@ -160,14 +164,14 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
 
   async function send(retry = false) {
     const retryAllowed = !!lifetime?.beginRetry && lifetime.active() && lifetime.uncertain && !lifetime.busy && data?.state === "ready" && data.canRevise;
-    if ((retry ? !retryAllowed : strategyBlocked) || !lifetime || !data?.clinicalWritable || !owner.active || !draft || !scope) return;
+    if ((retry ? !retryAllowed : strategyBlocked) || !lifetime || !data?.clinicalWritable || !(activeOwner.current === owner) || !draft || !scope) return;
     const checked = checkStrategyCommand({ schemaVersion: 1, commandId: draft.commandId,
       expectedRevisionId: draft.expectedRevisionId, reason: draft.reason,
       rows: draft.rows.map(({ problemId, objective, strategy, rationale, planItemIds }) => ({ problemId, objective, strategy, rationale, planItemIds })) });
     if (!checked.ok) { setMessage(checked.message); return; }
     const operation = retry ? lifetime.beginRetry?.() : lifetime.begin(); if (!operation) return;
     let confirmed = false;
-    const showMessage = (value: string) => { if (owner.active) setMessage(value); };
+    const showMessage = (value: string) => { if ((activeOwner.current === owner)) setMessage(value); };
     setMessage(null);
     try {
       const response = await fetch(`/api/ortho/${orthoCaseId}/strategy`, {
@@ -185,7 +189,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
         if (retry) operation.markUncertain();
         const error = payload && typeof payload === "object" && "message" in payload && typeof payload.message === "string" ? payload.message : "تعذّر الحفظ.";
         showMessage(error);
-        if (response.status === 404 && owner.active) setRead({ owner, data: null, error, loading: false });
+        if (response.status === 404 && (activeOwner.current === owner)) setRead({ owner, data: null, error, loading: false });
         return;
       }
       const result = payload as { ok?: unknown; revision?: unknown; replayed?: unknown } | null;
@@ -199,7 +203,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
       const current = operation.current(); operation.finish();
       if (current && confirmed) {
         lifetime.settle("document", ""); lifetime.refresh();
-        if (owner.active) { setSelected(undefined); setMessage("حُفظ التوثيق؛ جارٍ قراءة السجل المعتمد."); }
+        if ((activeOwner.current === owner)) { setSelected(undefined); setMessage("حُفظ التوثيق؛ جارٍ قراءة السجل المعتمد."); }
       }
     }
   }
