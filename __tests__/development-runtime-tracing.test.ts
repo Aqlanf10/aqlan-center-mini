@@ -62,7 +62,9 @@ const runtimeSources = [...files("app"), ...files("components"), ...files("lib")
   .filter((file) => /\.[cm]?[jt]sx?$/.test(file) && !devLibraries.has(file));
 
 function importedModules(file: string): string[] {
-  const source = ts.createSourceFile(file, readFileSync(path.join(root, file), "utf8"), ts.ScriptTarget.Latest, true);
+  // This visitor only follows children; parent pointers are unused. Building
+  // them for every runtime AST adds work without checking another import.
+  const source = ts.createSourceFile(file, readFileSync(path.join(root, file), "utf8"), ts.ScriptTarget.Latest, false);
   const modules: string[] = [];
   function visit(node: ts.Node) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))

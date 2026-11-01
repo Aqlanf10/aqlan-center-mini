@@ -1,0 +1,28 @@
+{
+  "base": "0210975f394b89e40d3ccf94a5eff17885000424",
+  "change": "Test-only setParentNodes true -> false; visitor uses children only; no timeout, path, matcher, import-kind or assertion removal",
+  "beforeFull": "14782passed1timeout,871passed1failedfiles",
+  "beforeIsolated": "4passed1timeout(5117ms)",
+  "afterIsolated": "5passed,3.75s tests",
+  "afterFull": "14783passed872files,523.79s",
+  "equivalence": {
+    "files": 1379,
+    "imports": 6879,
+    "orderedSourceAndImportsSha256": "fbad0403d15f1905b85e153d2a50746d5ffc56a4e984bfca2805930f3cbafa63",
+    "allModulesIdentical": true,
+    "setParentNodesTimingsMs": {
+      "true": 2810.228542,
+      "false": 1559.0239180000003
+    },
+    "timeoutChanged": false,
+    "filesOrImportKindsExcluded": false
+  },
+  "files": {
+    "slice61-import-equivalence.json": "88d34a083a504a576e24e6ed18eaa8870b5367a385708c4d71760da875183295",
+    "slice61-import-guard-isolated.log": "7846e487511d7fa72f8482cdff7ff29ed1eb79fe82ba96495d4ef8a618f5507d",
+    "slice61-unit-full.log": "7d396bddd21cae4d20fe3d6363ca46b18825fac4a9aaf548e206e50892edf0e3",
+    "slice61-unit-full-parentless.log": "ba028ba7fa09eb170dffb5b294f184b8a617f61f9d045c56f0fa96b4e57ed478",
+    "verify-import-parent-equivalence.cjs": "9fe67613eae87bc572df9a8858cb7043e2287cebe03f867c0635f170b5cf570d",
+    "slice61-import-guard-parentless.log": "7b20df3700d99fd0175678f4812b4e3f84d1f5e387dc29803f2c113bfc7cfb10"
+  }
+}
