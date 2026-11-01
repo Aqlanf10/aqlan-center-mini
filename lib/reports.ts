@@ -607,13 +607,19 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
   // a second ledger principal. Opening history is already net of prior cash.
   const { rows: approvedSources } = await pool.query<{plan_id:number;patient_id:number;invoice_id:number|null;opening_currency:string|null;historical_paid_minor:string;currency:Currency}>(
     "SELECT plan_id,patient_id,invoice_id,opening_currency,historical_paid_minor::text,currency FROM approved_agreement_principals WHERE patient_id=ANY($1::int[])",[ids]);
-  const { rows: deltaAmendments } = await pool.query<{plan_id:number;patient_id:number;delta_invoice_id:number;delta_minor:string}>(
-    `SELECT plan_id, patient_id, delta_invoice_id, delta_minor::text
-       FROM agreement_delta_amendments
-      WHERE patient_id = ANY($1::int[]) AND (occurred_at AT TIME ZONE $2)::date <= $3::date
-      ORDER BY id`,
-    [ids, CLINIC_TIME_ZONE, opts.asOf ?? clinicTodayISO()],
-  );
+  const hasPlans = Array.from(byId.values()).some((patient) => patient.plans.length > 0);
+  const deltaTablePresent = hasPlans
+    ? Boolean((await pool.query<{ present: boolean }>("SELECT to_regclass('agreement_delta_amendments') IS NOT NULL AS present")).rows[0]?.present)
+    : false;
+  const { rows: deltaAmendments } = deltaTablePresent
+    ? await pool.query<{plan_id:number;patient_id:number;delta_invoice_id:number;delta_minor:string}>(
+        `SELECT plan_id, patient_id, delta_invoice_id, delta_minor::text
+           FROM agreement_delta_amendments
+          WHERE patient_id = ANY($1::int[]) AND (occurred_at AT TIME ZONE $2)::date <= $3::date
+          ORDER BY id`,
+        [ids, CLINIC_TIME_ZONE, opts.asOf ?? clinicTodayISO()],
+      )
+    : { rows: [] as Array<{plan_id:number;patient_id:number;delta_invoice_id:number;delta_minor:string}> };
   // مدفوعات الخطة: الدفعة المرتبطة بالخطة مباشرة أو بفاتورة من الخطة — بعملة
   // الخطة نفسها (P-01/D-1): تقدُّم الخطة يُقاس بعملة اتفاقها لا بمكافئ الدفاتر.
   for (const patient of byId.values()) {

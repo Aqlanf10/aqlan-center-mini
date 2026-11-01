@@ -11,7 +11,8 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { formatClinicDate } from "@/lib/clinic-clock";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
-import { PrintButton, ReprintMark } from "@/components/PrintButton";
+import { PrintButton } from "@/components/PrintButton";
+import { ReprintMark } from "@/components/ReprintMark";
 import { PatientStatementDocument } from "@/components/PatientStatementDocument";
 import { loadPatientStatementDocument } from "@/lib/patient-statement-build";
 import { parsePatientStatementOptions, StatementInputError } from "@/lib/patient-statement-options";

@@ -7340,6 +7340,24 @@ export interface CreateLabOrderInput {
   isPosted?: boolean;
 }
 
+export async function createLabOrder(input: CreateLabOrderInput): Promise<LabOrder | null> {
+  const parsedShade = parseLabShadeSpecification(input.shadeSpecification ?? null, Object.keys(parseLabTeeth(input.toothNumbers)).map(Number));
+  if (!parsedShade.ok) throw new Error(parsedShade.error);
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const created = await createLabOrderInTransaction(client, input);
+    await client.query("COMMIT");
+    return created;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function createLabOrderInTransaction(
   client: DbClient,
   input: CreateLabOrderInput,
@@ -7368,13 +7386,13 @@ export async function createLabOrderInTransaction(
 
   let resolvedCost = input.costMinor ?? null;
   let resolvedCurrency = input.costCurrency ?? null;
-  let resolvedExchangeRate = input.exchangeRate;
+  let resolvedExchangeRate = input.exchangeRate ?? null;
   let automaticBaseAmount: number | null = null;
   const effectiveStatus =
     input.status === "needed" || (!resolvedPartyId && (!input.labName?.trim() || input.labName === PENDING_LAB_NAME))
       ? "needed"
       : "sent";
-  if (resolvedCost == null && resolvedPartyId && input.labServiceId && effectiveStatus !== "needed") {
+  if (resolvedCost == null && resolvedPartyId && input.labServiceId && input.status !== "needed") {
     const priceRes = await client.query<{
       cost_minor: string | number;
       cost_currency: string;
@@ -7410,9 +7428,11 @@ export async function createLabOrderInTransaction(
     }
   }
   const effectiveBaseCurrency = input.baseCurrency ?? CLINIC_BASE_CURRENCY;
-  const effectiveExchangeRate = resolvedExchangeRate ?? (resolvedCurrency === effectiveBaseCurrency ? 1 : undefined);
-  const baseAmount = automaticBaseAmount ?? (resolvedCost != null && resolvedCurrency && effectiveExchangeRate != null
-    ? toBaseAmount(resolvedCost, resolvedCurrency, effectiveBaseCurrency, effectiveExchangeRate)
+  if (resolvedExchangeRate == null && resolvedCurrency === effectiveBaseCurrency) {
+    resolvedExchangeRate = 1;
+  }
+  const baseAmount = automaticBaseAmount ?? (resolvedCost != null && resolvedCurrency && resolvedExchangeRate != null
+    ? toBaseAmount(resolvedCost, resolvedCurrency, effectiveBaseCurrency, resolvedExchangeRate)
     : null);
 
   const isPosted = input.isPosted !== false;
@@ -7455,7 +7475,7 @@ export async function createLabOrderInTransaction(
       input.toothNumbers ?? null, input.shade ?? null, input.stumpShade ?? null,
       input.priority ?? "normal", input.impressionType ?? "physical",
       input.technicianName ?? null,
-      baseAmount, effectiveExchangeRate ?? null,
+      baseAmount, resolvedExchangeRate,
       expenseCatId, expenseAccCode, payableAccCode, isPosted,
       parsedShade.value === null ? null : JSON.stringify(parsedShade.value),
     ],
@@ -7473,6 +7493,7 @@ export async function createLabOrderInTransaction(
   );
 
   if (resolvedPartyId && resolvedCost && resolvedCurrency && effectiveStatus !== "needed") {
+    if (resolvedExchangeRate == null) resolvedExchangeRate = 1;
     const { rows: payRows } = await client.query<{ id: number }>(
       `INSERT INTO payables (party_id, category, description, amount_minor, currency,
                              exchange_rate, base_amount_minor, base_currency, lab_order_id, due_date, created_by,
@@ -7493,7 +7514,7 @@ export async function createLabOrderInTransaction(
       [
         resolvedPartyId,
         `${input.workType}${input.toothNumbers ? ` [سن ${input.toothNumbers}]` : ""}${input.details ? ` — ${input.details}` : ""}`,
-        resolvedCost, resolvedCurrency, effectiveExchangeRate ?? 1, baseAmount,
+        resolvedCost, resolvedCurrency, resolvedExchangeRate, baseAmount,
         effectiveBaseCurrency, orderId, input.dueDate, input.createdBy,
         expenseCatId, expenseAccCode, payableAccCode, isPosted,
       ],
@@ -7507,24 +7528,6 @@ export async function createLabOrderInTransaction(
   }
 
   return getLabOrderByIdWith(client, orderId);
-}
-
-export async function createLabOrder(input: CreateLabOrderInput): Promise<LabOrder | null> {
-  const parsedShade = parseLabShadeSpecification(input.shadeSpecification ?? null, Object.keys(parseLabTeeth(input.toothNumbers)).map(Number));
-  if (!parsedShade.ok) throw new Error(parsedShade.error);
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const created = await createLabOrderInTransaction(client, input);
-    await client.query("COMMIT");
-    return created;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
 }
 
 /**
@@ -7672,6 +7675,7 @@ export interface UpdateLabOrderAccountingInput {
   actorRole?: string | null;
   checkPatientMoneyAccess?: (patientId: number) => Promise<boolean>;
   assertStillValid?: () => Promise<void>;
+  skipFinalRead?: boolean;
 }
 
 export async function updateLabOrderAccountingInTransaction(
@@ -7785,7 +7789,7 @@ export async function updateLabOrderAccountingInTransaction(
     || isPosted !== (order.is_posted !== false);
   const needsPayable = !order.payable_id && order.party_id && resolvedCost != null && resolvedCost > 0;
   if (!moneyChanged && !accountingChanged && !needsPayable) {
-    return getLabOrderByIdWith(client, orderId);
+    return input.skipFinalRead ? ({ id: orderId } as LabOrder) : getLabOrderByIdWith(client, orderId);
   }
 
   let linked: { id: number; party_id: number; lab_order_id: number | null; source_type: string; created_date: string }[];
@@ -7926,7 +7930,7 @@ export async function updateLabOrderAccountingInTransaction(
         payableAccountCode: payableAccCode, isPosted },
     },
   });
-  return getLabOrderByIdWith(client, orderId);
+  return input.skipFinalRead ? ({ id: orderId } as LabOrder) : getLabOrderByIdWith(client, orderId);
 }
 
 export async function updateLabOrderAccounting(
@@ -7964,6 +7968,7 @@ export async function updateLabOrderAccounting(
       exchangeRate: input.exchangeRate,
       actor: input.actor,
       actorRole: input.actorRole,
+      skipFinalRead: true,
       checkPatientMoneyAccess: activeSession
         ? async (patientId) => (await import("./patient-access")).canViewPatientMoney(activeSession, patientId)
         : undefined,
@@ -7980,7 +7985,8 @@ export async function updateLabOrderAccounting(
       return null;
     }
     await client.query("COMMIT");
-    return updated;
+    const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [orderId]);
+    return full[0] ? toLabOrder(full[0]) : null;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -18105,8 +18111,9 @@ export async function patientHasVisitToday(patientId: number, client?: DbClient)
 
 export async function doctorOwnsPatient(
   partyId: number, patientId: number, client?: DbClient, ownershipLockMode?: "nowait",
+  snapshotQuery?: Pick<DbClient, "query">,
 ): Promise<boolean> {
-  if (!client) await ensureSchema();
+  if (!client && !snapshotQuery) await ensureSchema();
   // One canonical definition: the legacy EXISTS and transactional witness locks use
   // identical predicates. Any one protected positive witness is sufficient.
   const witnesses = [
@@ -18136,23 +18143,7 @@ export async function doctorOwnsPatient(
       ORDER BY cc.id LIMIT 1 FOR SHARE OF cc, oc${ownershipLockMode === "nowait" ? " NOWAIT" : ""}`, [partyId, patientId]);
     return Boolean(bridge[0]);
   }
-  return doctorOwnsPatientWith(getPool(), partyId, patientId);
-}
-/** Non-locking witness read over a caller-owned query facade (safe inside RR READ ONLY snapshots). */
-export async function doctorOwnsPatientWith(
-  q: Pick<DbClient, "query">, partyId: number, patientId: number,
-): Promise<boolean> {
-  const witnesses = [
-    { table: "treatment_plans", alias: "t", predicate: "t.patient_id = $2 AND t.primary_doctor_id = $1 AND t.status = 'active'" },
-    { table: "visits", alias: "v", predicate: "v.patient_id = $2 AND v.doctor_id = $1" },
-    { table: "planned_visits", alias: "pv", predicate: "pv.patient_id = $2 AND pv.doctor_id = $1" },
-    { table: "patients", alias: "pd", predicate: "pd.id = $2 AND pd.primary_doctor_id = $1" },
-    { table: "appointments", alias: "a", predicate: "a.patient_id = $2 AND a.doctor_id = $1 AND a.status <> 'cancelled'" },
-    { table: "clinical_cases", alias: "cc", predicate: "cc.patient_id = $2 AND cc.ortho_case_id IS NULL AND cc.responsible_party_id = $1 AND cc.status IN ('active', 'waiting')" },
-    { table: "ortho_cases", alias: "oc", predicate: "oc.patient_id = $2 AND oc.responsible_doctor_id = $1 AND oc.status IN ('active', 'retention')" },
-    { table: "patient_referrals", alias: "r", predicate: "r.patient_id = $2 AND r.kind = 'internal' AND r.to_party_id = $1 AND r.workflow_state NOT IN ('declined', 'cancelled')" },
-  ];
-  const { rows } = await q.query<{ ok: boolean }>(
+  const { rows } = await (snapshotQuery ?? getPool()).query<{ ok: boolean }>(
     `SELECT EXISTS (${witnesses.map(({ table, alias, predicate }) =>
       `SELECT 1 FROM ${table} ${alias} WHERE ${predicate}`).join(" UNION ALL ")}
       UNION ALL SELECT 1 FROM clinical_cases cc JOIN ortho_cases oc ON oc.id = cc.ortho_case_id
@@ -18160,6 +18151,12 @@ export async function doctorOwnsPatientWith(
     [partyId, patientId],
   );
   return Boolean(rows[0]?.ok);
+}
+/** Non-locking witness read over a caller-owned query facade (safe inside RR READ ONLY snapshots). */
+export async function doctorOwnsPatientWith(
+  q: Pick<DbClient, "query">, partyId: number, patientId: number,
+): Promise<boolean> {
+  return doctorOwnsPatient(partyId, patientId, undefined, undefined, q);
 }
 
 /**
@@ -20961,16 +20958,23 @@ export type SetVisitProceduresInput = {
   rates?: ForeignRates;
 };
 
-export async function setVisitProceduresInTransaction(
-  client: DbClient,
+export async function setVisitProcedures(
   input: SetVisitProceduresInput,
+  ownedClient?: DbClient,
 ): Promise<boolean> {
-  await client.query("SAVEPOINT visit_procedures_tx");
+  if (!ownedClient) await ensureSchema();
+  const client = ownedClient ?? (await getPool().connect());
   const abortSavepoint = async () => {
-    await client.query("ROLLBACK TO SAVEPOINT visit_procedures_tx");
-    await client.query("RELEASE SAVEPOINT visit_procedures_tx");
+    if (ownedClient) {
+      await client.query("ROLLBACK TO SAVEPOINT visit_procedures_tx");
+      await client.query("RELEASE SAVEPOINT visit_procedures_tx");
+    } else {
+      await client.query("ROLLBACK");
+    }
   };
   try {
+    if (ownedClient) await client.query("SAVEPOINT visit_procedures_tx");
+    else await client.query("BEGIN");
     const lockedPatientId = await lockVisitPatientFirst(client, input.visitId);
     const labApi: typeof import("./lab-work-intent-db") = await import("./lab-work-intent-db");
     if (input.labCommand && (!Number.isSafeInteger(input.labCommand.expectedPatientId) || input.labCommand.expectedPatientId <= 0
@@ -21177,30 +21181,27 @@ export async function setVisitProceduresInTransaction(
       );
     }
     if (labContext && labPreparation) await labApi.recordVisitLabWorkCommandInTransaction(client, labContext, labPreparation.revisions);
-    await client.query("RELEASE SAVEPOINT visit_procedures_tx");
+    if (ownedClient) await client.query("RELEASE SAVEPOINT visit_procedures_tx");
+    else await client.query("COMMIT");
     return true;
   } catch (error) {
-    await client.query("ROLLBACK TO SAVEPOINT visit_procedures_tx").catch(() => {});
-    await client.query("RELEASE SAVEPOINT visit_procedures_tx").catch(() => {});
+    if (ownedClient) {
+      await client.query("ROLLBACK TO SAVEPOINT visit_procedures_tx").catch(() => {});
+      await client.query("RELEASE SAVEPOINT visit_procedures_tx").catch(() => {});
+    } else {
+      await client.query("ROLLBACK").catch(() => {});
+    }
     throw error;
+  } finally {
+    if (!ownedClient) client.release();
   }
 }
 
-export async function setVisitProcedures(input: SetVisitProceduresInput): Promise<boolean> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const ok = await setVisitProceduresInTransaction(client, input);
-    if (ok) await client.query("COMMIT");
-    else await client.query("ROLLBACK");
-    return ok;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+export async function setVisitProceduresInTransaction(
+  client: DbClient,
+  input: SetVisitProceduresInput,
+): Promise<boolean> {
+  return setVisitProcedures(input, client);
 }
 
 /**
@@ -21712,11 +21713,14 @@ export type SignClinicalVisitResult = {
   sessionConflicts?: string[];
 };
 
-export async function signClinicalVisitInTransaction(
-  client: DbClient,
+export async function signClinicalVisit(
   input: SignClinicalVisitInput,
+  ownedClient?: DbClient,
 ): Promise<SignClinicalVisitResult> {
-  const existing = await getClinicalVisitWith(client, input.visitId);
+  if (!ownedClient) await ensureSchema();
+  const existing = ownedClient
+    ? await getClinicalVisitWith(ownedClient, input.visitId)
+    : await getClinicalVisit(input.visitId);
   const emptyResult = (
     reason: SignClinicalVisitResult["reason"],
     extra?: { visit?: ClinicalVisit; invoiceId?: number | null; unmetRequirements?: string[]; sessionConflicts?: string[] },
@@ -21739,7 +21743,7 @@ export async function signClinicalVisitInTransaction(
   const hasOrthoSession = Boolean(input.orthoSession) || existing.ortho?.visitAdjustmentId != null;
   /* (ENDO-3) سجلّ علاج الجذور المهيكل لهذه الزيارة عملٌ سريريٌّ يكفي للتوقيع كذلك. */
   const { hasMeaningfulEndoVisit } = await import("./endodontics-db");
-  const hasEndoRecord = await hasMeaningfulEndoVisit(client, input.visitId);
+  const hasEndoRecord = await hasMeaningfulEndoVisit(ownedClient ?? getPool(), input.visitId);
   const check = canSign({
     status: existing.status,
     procedures: existing.procedures,
@@ -21750,12 +21754,18 @@ export async function signClinicalVisitInTransaction(
   });
   if (!check.ok) return emptyResult("empty", { visit: existing });
 
-  await client.query("SAVEPOINT visit_sign_tx");
+  const client = ownedClient ?? (await getPool().connect());
   const abortSavepoint = async () => {
-    await client.query("ROLLBACK TO SAVEPOINT visit_sign_tx");
-    await client.query("RELEASE SAVEPOINT visit_sign_tx");
+    if (ownedClient) {
+      await client.query("ROLLBACK TO SAVEPOINT visit_sign_tx");
+      await client.query("RELEASE SAVEPOINT visit_sign_tx");
+    } else {
+      await client.query("ROLLBACK");
+    }
   };
   try {
+    if (ownedClient) await client.query("SAVEPOINT visit_sign_tx");
+    else await client.query("BEGIN");
     const lockedPatientId = await lockVisitPatientFirst(client, input.visitId);
 
     const { rows: locked } = await client.query<{
@@ -22278,8 +22288,14 @@ export async function signClinicalVisitInTransaction(
       followupProof ? [input.visitId, input.signedBy, linkedInvoiceId, JSON.stringify(followupProof)] : [input.visitId, input.signedBy, linkedInvoiceId],
     );
 
-    await client.query("RELEASE SAVEPOINT visit_sign_tx");
-    const signedVisit = await getClinicalVisitWith(client, input.visitId);
+    if (ownedClient) {
+      await client.query("RELEASE SAVEPOINT visit_sign_tx");
+    } else {
+      await client.query("COMMIT");
+    }
+    const signedVisit = ownedClient
+      ? await getClinicalVisitWith(ownedClient, input.visitId)
+      : await getClinicalVisit(input.visitId);
     return {
       visit: signedVisit,
       invoiceId, invoiceCurrency, chartUpdates, planItemsDone,
@@ -22288,27 +22304,23 @@ export async function signClinicalVisitInTransaction(
       orthoAdjustmentId, orthoBillingClass, orthoBillingDecision, reason: null,
     };
   } catch (error) {
-    await client.query("ROLLBACK TO SAVEPOINT visit_sign_tx").catch(() => {});
-    await client.query("RELEASE SAVEPOINT visit_sign_tx").catch(() => {});
+    if (ownedClient) {
+      await client.query("ROLLBACK TO SAVEPOINT visit_sign_tx").catch(() => {});
+      await client.query("RELEASE SAVEPOINT visit_sign_tx").catch(() => {});
+    } else {
+      await client.query("ROLLBACK").catch(() => {});
+    }
     throw error;
+  } finally {
+    if (!ownedClient) client.release();
   }
 }
 
-export async function signClinicalVisit(input: SignClinicalVisitInput): Promise<SignClinicalVisitResult> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const result = await signClinicalVisitInTransaction(client, input);
-    if (result.reason === null) await client.query("COMMIT");
-    else await client.query("ROLLBACK");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+export async function signClinicalVisitInTransaction(
+  client: DbClient,
+  input: SignClinicalVisitInput,
+): Promise<SignClinicalVisitResult> {
+  return signClinicalVisit(input, client);
 }
 
 /**
@@ -27432,6 +27444,11 @@ export interface OrthoFollowupRow extends FollowupCase {
  * periodic follow-up. Other/uncertain bookings remain visible for review.
  * Existing no-show history is intentionally independent of this selection.
  */
+export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRow[]> {
+  await ensureSchema();
+  return orthoFollowupBoardWith(getPool(), today, null);
+}
+
 export async function orthoFollowupBoardWith(
   q: Pick<DbClient, "query">,
   today: string,
@@ -27553,11 +27570,6 @@ export async function orthoFollowupBoardWith(
       lastWasNoShow: row.last_no_show,
     };
   });
-}
-
-export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRow[]> {
-  await ensureSchema();
-  return orthoFollowupBoardWith(getPool(), today, null);
 }
 
 /** Read projection only: suppress inconsistent legacy links, never rewrite them. */

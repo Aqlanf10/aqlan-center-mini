@@ -227,7 +227,7 @@ function PartyList({ canMutate, canRead }: { canMutate: boolean; canRead: boolea
                       </a>
                     ) : null}
                     {kind === "employee" ? (
-                      <a href="/hr/payroll" className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
+                      <a href="/hr?tab=payroll" className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">
                         مسيرات الرواتب
                       </a>
                     ) : null}

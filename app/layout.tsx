@@ -63,7 +63,12 @@ export const viewport: Viewport = {
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const publicDisplay = (await headers()).get("x-aqlan-public-display") === "1";
+  let publicDisplay = false;
+  try {
+    publicDisplay = (await headers()).get("x-aqlan-public-display") === "1";
+  } catch {
+    publicDisplay = false;
+  }
   /* قاعدة اختيار واحدة: كوكي موحّدة تُقبل بإثبات القاعدة الحالي ولا تمر أبدًا بالمسار
      القديم؛ غيرها يبقى على requireSession كما كان. */
   const selected = publicDisplay ? { kind: "none" as const } : await selectRequestStaffEnvelope().catch(() => ({ kind: "none" as const }));

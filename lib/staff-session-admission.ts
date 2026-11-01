@@ -31,6 +31,7 @@ export type StaffEnvelopeSelection =
  | { readonly kind: "denied" };
 
 function classify(token: string | undefined): StaffEnvelopeSelection | null {
+ if (!token) return null;
  const envelope = readSignedSessionEnvelope(token);
  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) return null;
  if (!hasCanonicalSessionMarker(envelope)) return Object.freeze({ kind: "legacy", token: token! });

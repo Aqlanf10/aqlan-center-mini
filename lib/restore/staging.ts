@@ -188,7 +188,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
 
     // ── الخطوة ٢أ: مصدرٌ موحّد الهوية (بروتوكول الاستعادة R1): الحجز الدائم قبل أي مخطط أو بيانات.
     // الهدف يجب أن يكون فارغًا تمامًا وبلا أي أثر هوية، ولا خيار لتجاوز ذلك هنا.
-    const canonicalSource = Boolean(validated.manifest.identityProvenance);
+    const canonicalSource = Boolean(validated.manifest?.identityProvenance);
     if (canonicalSource) {
       const manifestBytes = archive.entries.get("manifest.json")!.data;
       try {

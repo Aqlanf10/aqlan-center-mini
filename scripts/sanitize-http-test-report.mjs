@@ -63,15 +63,17 @@ export function sanitizeReport(raw, { root, sourceSha, trackedPaths }) {
   if (!object(raw) || !Array.isArray(raw.testResults) || !raw.testResults.every(validSuite)) return unavailable('malformed', sha);
   const allowed = new Set(trackedPaths.filter(sourcePath));
   const sourceNames = new Map();
+  const rootSlash = typeof root === 'string' ? root.replace(/[/\\]+$/, '') : '';
   for (const source of allowed) {
     sourceNames.set(source, source);
     sourceNames.set(path.resolve(root, source), source);
+    if (rootSlash) sourceNames.set(`${rootSlash}/${source}`, source);
   }
   let remaining = LIMITS.assertions;
   let truncated = raw.testResults.length > LIMITS.suites;
   const suites = [];
   for (const suite of raw.testResults.slice(0, LIMITS.suites)) {
-    const relative = typeof suite.name === 'string' ? path.relative(root, path.resolve(root, suite.name)) : '';
+    const relative = typeof suite.name === 'string' ? sourceNames.get(suite.name) ?? '' : '';
     if (!allowed.has(relative)) { truncated = true; continue; }
     const assertions = suite.assertionResults.slice(0, remaining).map((a, index) => ({
       index,

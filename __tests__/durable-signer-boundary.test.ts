@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STAFF_AUTHORIZATION_POLICY_VERSION } from "../lib/staff-capability-catalogue";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -53,6 +53,12 @@ describe("private durable signer boundary", () => {
 });
 
 describe("private durable signer shape", () => {
+ beforeEach(() => {
+  vi.stubEnv("SESSION_SECRET", "synthetic-unit-test-session-secret-32chars");
+ });
+ afterEach(() => {
+  vi.unstubAllEnvs();
+ });
  const claims = () => ({
   userId: 2, username: "synthetic", expiresAt: Date.now() + 60_000,
   durableIdentity: { schemaVersion: 2, policyVersion: STAFF_AUTHORIZATION_POLICY_VERSION, realmId: "11111111-1111-4111-8111-111111111111", subjectId: "22222222-2222-4222-8222-222222222222",

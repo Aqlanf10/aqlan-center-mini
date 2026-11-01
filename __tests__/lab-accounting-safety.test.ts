@@ -37,7 +37,11 @@ beforeEach(async () => {
   vi.stubEnv("SKIP_SEED", "true");
   boundary.end.mockResolvedValue(undefined);
   await resetPoolForTesting();
-  boundary.poolQuery.mockResolvedValue({ rows: [] });
+  boundary.poolQuery.mockImplementation(async (sql: string) =>
+    sql.includes("pg_catalog.pg_class")
+      ? { rows: [{ markers: "0", users_kind: "r", parties_kind: "r" }], rowCount: 1 }
+      : { rows: [], rowCount: 0 },
+  );
   boundary.query.mockImplementation(async(sql:string)=>({rows:sql.includes("AS present")?[{present:false}]:[]}));
   boundary.connect.mockResolvedValue({ query: boundary.query, release: boundary.release });
   await ensureSchema();

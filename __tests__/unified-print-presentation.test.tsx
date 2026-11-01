@@ -16,7 +16,19 @@ vi.mock("@/lib/db", async importOriginal => ({ ...await importOriginal<typeof im
   getPatient: async () => ({ id: 9001, fullName: "مريض عرض صناعي — اسم طويل للاختبار فقط", patientNumber: "SYNTHETIC-9001", phone: null }),
   getSettingsSafe: async () => settings, printCount: async () => 0,
   getLabOrderById: async () => dispatchOrder({ labName: "مختبر عرض صناعي", doctorName: "طبيب عرض صناعي", workType: "جسر تجريبي للاختبار فقط" }),
-  patientStatementSnapshot: async () => ({ ledger: { invoices: [state.invoice!], payments: [state.payment!], openings: [] }, planCurrencies: new Map(), plans: [], historicalAgreements: [] }),
+  patientStatementSnapshot: async () => ({
+    ledger: { invoices: [state.invoice!], payments: [state.payment!], openings: [] },
+    planCurrencies: new Map(),
+    plans: [],
+    historicalAgreements: [],
+    statementEvidence: {
+      invoiceCorrections: [],
+      invoiceCancellations: [],
+      paymentCorrections: [],
+      openingHistory: [],
+      allocationEffectiveAt: {},
+    },
+  }),
 }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: async () => true }));
 vi.mock("@/lib/receipt-provenance-db", () => ({ readReceiptProvenance: async () => ({}) }));

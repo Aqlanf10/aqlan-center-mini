@@ -1,10 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
 import { createSessionToken, signDurableSessionClaims } from "../lib/auth";
 import { selectStaffEnvelope } from "../lib/staff-session-admission";
 import { STAFF_AUTHORIZATION_POLICY_VERSION, STAFF_CAPABILITIES } from "../lib/staff-capability-catalogue";
 import { STAFF_CAPABILITY_LABELS, staffCapabilityGroup, toggleStaffCapability } from "../lib/staff-capability-labels";
 import { canonicalPageAllowed, canonicalPageFor, canonicalPagesFor, isCanonicalPage } from "../lib/canonical-navigation";
+
+beforeEach(() => {
+ vi.stubEnv("SESSION_SECRET", "synthetic-unit-test-session-secret-32chars");
+});
+afterEach(() => {
+ vi.unstubAllEnvs();
+});
 
 const durable = () => signDurableSessionClaims({
  userId: 2, username: "synthetic", expiresAt: Date.now() + 60_000,

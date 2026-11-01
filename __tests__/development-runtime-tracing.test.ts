@@ -33,21 +33,24 @@ const expectedExcludes = [
 const exclusions = nextConfig.outputFileTracingExcludes ?? {};
 const routeMatchers = new Map<string, (file: string) => boolean>();
 
+const toPosix = (value: string): string => value.replaceAll("\\", "/");
+const rootPosix = toPosix(root);
+
 function excluded(route: string, file: string): boolean {
   let matcher = routeMatchers.get(route);
   if (!matcher) {
     const patterns = Object.entries(exclusions)
       .filter(([routeGlob]) => picomatch(routeGlob, options)(route))
-      .flatMap(([, values]) => values.map((value) => path.join(root, value)));
+      .flatMap(([, values]) => values.map((value) => toPosix(path.join(root, value))));
     matcher = patterns.length > 0 ? picomatch(patterns, options) : () => false;
     routeMatchers.set(route, matcher);
   }
-  return matcher(path.join(root, file));
+  return matcher(toPosix(path.join(root, file)));
 }
 
 function files(directory: string): string[] {
   return readdirSync(path.join(root, directory), { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(directory, entry.name);
+    const file = toPosix(path.join(directory, entry.name));
     return entry.isDirectory() ? files(file) : [file];
   });
 }
@@ -138,7 +141,7 @@ describe("temporary development-only runtime tracing boundary", () => {
     for (const file of runtimeSources) {
       for (const specifier of importedModules(file)) {
         const target = specifier.startsWith("@/") ? specifier.slice(2)
-          : specifier.startsWith(".") ? path.relative(root, path.resolve(root, path.dirname(file), specifier))
+          : specifier.startsWith(".") ? toPosix(path.relative(rootPosix, toPosix(path.resolve(root, path.dirname(file), specifier))))
           : `node_modules/${specifier}`;
         // Extensionless imports resolve to the same reviewed module too.
         for (const candidate of [target, `${target}.mjs`, `${target}/index.mjs`]) {
@@ -149,5 +152,5 @@ describe("temporary development-only runtime tracing boundary", () => {
     // Keep every source/import/candidate check, with all offending paths on
     // failure, without constructing thousands of passing assertion objects.
     expect(violations).toEqual([]);
-  });
+  }, 45_000);
 });

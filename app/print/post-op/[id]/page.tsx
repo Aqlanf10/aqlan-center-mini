@@ -1,6 +1,7 @@
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { findUserByUsername, getPatient, getSettingsSafe } from "@/lib/db";
+import * as db from "@/lib/db";
+import { getPatient, getSettingsSafe } from "@/lib/db";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
@@ -46,9 +47,17 @@ export default async function PostOpPrintPage({
   const [patient, settings, doctorUser] = await Promise.all([
     getPatient(patientId),
     getSettingsSafe(),
-    findUserByUsername(session.username).catch(() => null),
+    (async () => {
+      try {
+        return session.username && typeof db.findUserByUsername === "function"
+          ? await db.findUserByUsername(session.username)
+          : null;
+      } catch {
+        return null;
+      }
+    })(),
   ]);
-  const doctorLabel = (doctorUser?.displayName || session.username).replace(/^د\.\s*/, "");
+  const doctorLabel = (doctorUser?.displayName || session.username || "").replace(/^د\.\s*/, "");
 
   if (!patient) notFound();
   /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا

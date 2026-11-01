@@ -4,10 +4,12 @@ import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import {
   appendCanonicalFollowupCoverage,
-  appendFollowupCoverage,
-  FollowupCoverageError,
   readCanonicalFollowupCoverage,
   readCanonicalFollowupCoverageCommandStatus,
+} from "@/lib/canonical-ortho-followup-coverage";
+import {
+  appendFollowupCoverage,
+  FollowupCoverageError,
   readFollowupCoverage,
   readFollowupCoverageCommandStatus,
 } from "@/lib/ortho-followup-coverage-db";

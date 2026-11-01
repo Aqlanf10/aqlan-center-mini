@@ -1,6 +1,6 @@
 import "server-only";
 import { NextResponse } from "next/server";
-import { collectCanonicalApprovedAgreementInTransaction, hydrateCollectedAgreementPayments } from "./approved-agreements";
+import { collectCanonicalApprovedAgreementInTransaction, hydrateCollectedAgreementPayments } from "./canonical-approved-agreements";
 import { canonicalPatientReadFailure, NO_STORE } from "./canonical-patient-http";
 import { runCanonicalReadSnapshot, type CanonicalSnapshotScope } from "./canonical-read-snapshot";
 import { checkCaseDraft, checkCaseStatusChange, checkDependencyDraft } from "./cases";

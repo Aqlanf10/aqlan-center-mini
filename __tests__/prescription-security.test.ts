@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   ownerAuthority: vi.fn(),
   getPrescription: vi.fn(),
   getClinicalVisit: vi.fn(),
+  listMedicalHistory: vi.fn(),
   savePrescription: vi.fn(),
   voidPrescription: vi.fn(),
   getSettingsSafe: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/lib/db", async (importOriginal) => {
     getParty: mocks.getParty,
     getPrescription: mocks.getPrescription,
     getClinicalVisit: mocks.getClinicalVisit,
+    listMedicalHistory: mocks.listMedicalHistory,
     savePrescription: mocks.savePrescription,
     voidPrescription: mocks.voidPrescription,
     getSettingsSafe: mocks.getSettingsSafe,
@@ -79,6 +81,7 @@ beforeEach(() => {
   });
   mocks.getSettingsSafe.mockResolvedValue({});
   mocks.getPrescription.mockResolvedValue(null);
+  mocks.listMedicalHistory.mockResolvedValue([]);
 });
 
 function pageProps(search: Record<string, string | undefined> = {}) {

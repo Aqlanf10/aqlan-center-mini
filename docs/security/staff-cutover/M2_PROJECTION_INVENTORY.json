@@ -234,6 +234,9 @@
   "canViewMoney("
  ],
  "/api/recall": [
+  "role !== \"admin\"",
+  "role !== \"doctor\"",
+  "role !== \"reception\"",
   "role === \"doctor\""
  ],
  "/api/referrals/mine": [

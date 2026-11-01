@@ -10,9 +10,9 @@ vi.stubEnv("SESSION_SECRET", "synthetic-plans-cases-canonical-20261031");
 
 const db = await import("../../lib/db");
 const plansCases = await import("../../lib/canonical-plans-and-cases");
-const approvedAgreements = await import("../../lib/approved-agreements");
+const approvedAgreements = await import("../../lib/canonical-approved-agreements");
 const amendmentDb = await import("../../lib/agreement-amendment-db");
-const reconcileDb = await import("../../lib/agreement-reconciliation-db");
+const reconcileDb = await import("../../lib/canonical-agreement-reconciliation");
 const shifts = await import("../../lib/canonical-shifts");
 const { CANONICAL_RECORD_READS } = await import("../../lib/canonical-record-reads");
 

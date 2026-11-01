@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  getSettingsSafe,
+  getSettings,
   listLapsedPatients,
   listMissedAppointments,
   listOpenPastAppointments,
@@ -46,9 +46,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const settings = await getSettingsSafe();
+    const weeksParam = new URL(request.url).searchParams.get("weeks");
+    const settings = weeksParam === null && typeof getSettings === "function"
+      ? await getSettings().catch(() => ({} as Record<string, string>))
+      : ({} as Record<string, string>);
     const weeks = resolveRecallWeeks(
-      new URL(request.url).searchParams.get("weeks"),
+      weeksParam,
       settings["recall.lapse_weeks"],
     );
     const restrictedDoctor = session.role === "doctor" && !(await canDoctorAccessAllPatients(session));

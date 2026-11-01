@@ -44,7 +44,8 @@ describe("read-only treatment financial references", () => {
     expect(reference.packageCoverage.state).toBe("unspecified");
     const input = { legacy: true, financialMode: null, openingCurrencies: [], fundedPlan: false } as const;
     expect(classifyOrthoAdjustment({ ...input, legacyAgreement: true })).toBe("LEGACY_INCLUDED");
-    expect(classifyOrthoAdjustment({ ...input, legacyAgreement: false })).toBe("OUTSIDE_CONTRACT");
+    expect(classifyOrthoAdjustment({ ...input, legacyAgreement: false })).toBe("REVIEW_REQUIRED");
+    expect(classifyOrthoAdjustment({ ...input, financialMode: "per_session", legacyAgreement: false })).toBe("OUTSIDE_CONTRACT");
     // Copy contract only: UI lifecycle/classifier rendering is separately exercised
     // by legacy-onboarding-checklist-refresh.test.tsx, including unresolved reads.
     const component = readFileSync(new URL("../components/TreatmentFinancialContext.tsx", import.meta.url), "utf8");

@@ -4,7 +4,8 @@ import { NextResponse } from "next/server";
 import {
   collectCanonicalApprovedAgreementInTransaction,
   hydrateCollectedAgreementPayments,
-} from "./approved-agreements";
+} from "./canonical-approved-agreements";
+import { canonicalLabOperation } from "./canonical-lab-operation";
 import { auditChanges, auditSnapshot, SERVICE_AUDIT_FIELDS } from "./audit-diff";
 import { canonicalPatientReadFailure, NO_STORE } from "./canonical-patient-http";
 import {
@@ -489,7 +490,7 @@ export async function invoicesCreateCanonicalResponse(
                   },
                 }),
             ...(hasInvoiceLabWork(source)
-              ? { canonicalOperation: { handle, action: "finance.invoices.create" } }
+              ? { canonicalOperation: canonicalLabOperation(handle, "finance.invoices.create") }
               : {}),
             requestHash: parsed.idempotencyKey
               ? parsed.template

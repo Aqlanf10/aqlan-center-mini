@@ -25,7 +25,11 @@ beforeEach(async () => {
   vi.stubEnv("DATABASE_URL", "postgresql://synthetic@127.0.0.1:54329/aqlan_p1_test?sslmode=disable");
   vi.stubEnv("USE_LOCAL_DB", undefined); vi.stubEnv("RAILWAY_PROJECT_ID", undefined); vi.stubEnv("SKIP_SEED", "true");
   boundary.end.mockResolvedValue(undefined); await resetPoolForTesting();
-  boundary.poolQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+  boundary.poolQuery.mockImplementation(async (sql: string) =>
+    sql.includes("pg_catalog.pg_class")
+      ? { rows: [{ markers: "0", users_kind: "r", parties_kind: "r" }], rowCount: 1 }
+      : { rows: [], rowCount: 0 },
+  );
   boundary.query.mockImplementation(async (sql: string) => ({ rows: sql.includes("AS present") ? [{ present: false }] : [] }));
   boundary.connect.mockResolvedValue({ query: boundary.query, release: boundary.release });
   await ensureSchema();

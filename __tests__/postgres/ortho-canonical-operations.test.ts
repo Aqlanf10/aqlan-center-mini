@@ -14,7 +14,7 @@ const orthoOps = await import("../../lib/canonical-ortho-operations");
 const orthoReads = await import("../../lib/canonical-ortho-reads");
 const orthoAssessment = await import("../../lib/canonical-ortho-assessment");
 const strategyStore = await import("../../lib/ortho-treatment-strategy-store");
-const coverageStore = await import("../../lib/ortho-followup-coverage-db");
+const coverageStore = await import("../../lib/canonical-ortho-followup-coverage");
 const { CANONICAL_RECORD_READS } = await import("../../lib/canonical-record-reads");
 
 const ORTHO_VIEW = { "clinical.ortho.view": true } as const;

@@ -352,12 +352,18 @@ export type LegacyTreatmentPreviewResult =
   | { ok: true; replayed: boolean; preview: LegacyTreatmentPreview }
   | { ok: false; reason: LegacyTreatmentRefusal };
 
-export async function previewLegacyTreatmentInSnapshot(
-  q: Pick<DbClient, "query">,
+/**
+ * (LEGACY-FIX) معاينة التسجيل من بيانات الاتفاق التاريخي نفسها وبقرار الحفظ نفسه — قراءةٌ فقط في معاملة READ ONLY.
+ * لا سعر فاتورة ولا صلاحية تسعير؛ والحفظ يعيد القرار تحت الأقفال (المعاينة ليست وعدًا).
+ */
+export async function previewLegacyTreatment(
   input: { patientId: number; request: LegacyTreatmentRequest; canEditOpening: boolean },
+  snapshotClient?: Pick<DbClient, "query">,
 ): Promise<LegacyTreatmentPreviewResult> {
-  const client = q as DbClient;
+  if (!snapshotClient) await ensureSchema();
+  const client = snapshotClient ? (snapshotClient as DbClient) : await getPool().connect();
   try {
+    if (!snapshotClient) await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const { rows: [patient] } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
     if (!patient) throw new Refusal("no_patient");
     let replayed = false;
@@ -386,25 +392,19 @@ export async function previewLegacyTreatmentInSnapshot(
   } catch (error) {
     if (error instanceof Refusal) return { ok: false, reason: error.reason as LegacyTreatmentRefusal };
     throw error;
+  } finally {
+    if (!snapshotClient) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+    }
   }
 }
 
-/**
- * (LEGACY-FIX) معاينة التسجيل من بيانات الاتفاق التاريخي نفسها وبقرار الحفظ نفسه — قراءةٌ فقط في معاملة READ ONLY.
- * لا سعر فاتورة ولا صلاحية تسعير؛ والحفظ يعيد القرار تحت الأقفال (المعاينة ليست وعدًا).
- */
-export async function previewLegacyTreatment(input: {
-  patientId: number; request: LegacyTreatmentRequest; canEditOpening: boolean;
-}): Promise<LegacyTreatmentPreviewResult> {
-  await ensureSchema();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    return await previewLegacyTreatmentInSnapshot(client, input);
-  } finally {
-    await client.query("ROLLBACK").catch(() => undefined);
-    client.release();
-  }
+export async function previewLegacyTreatmentInSnapshot(
+  q: Pick<DbClient, "query">,
+  input: { patientId: number; request: LegacyTreatmentRequest; canEditOpening: boolean },
+): Promise<LegacyTreatmentPreviewResult> {
+  return previewLegacyTreatment(input, q);
 }
 
 export type LegacyDocumentLineContext = { documentId: number; line: number; doctorId: number | null };

@@ -6,18 +6,14 @@ import { canAccessPatient } from "./patient-access";
 import { PENDING_LAB_NAME } from "./lab";
 import { validateLabPrescription, type LabPrescriptionInput } from "./lab-prescription-input";
 import { normalizeLabWorkGroups, parseLabWorkDraft, type LabWorkCommand, type LabWorkDraft,  type LabWorkMember, type LabWorkSourceRow } from "./lab-work-intent-contract";
-import {
-  staffOperationCapabilities,
-  staffOperationIdentity,
-  staffOperationPatientScope,
-  type StaffOperationHandle,
-  type StaffRuntimeAction,
-} from "./staff-operation-runtime";
 
 type QueryDb = Pick<DbClient,"query">;
+export const CANONICAL_LAB_OPERATION_BRAND: unique symbol = Symbol("CanonicalLabOperation");
 export interface CanonicalLabOperation {
-  readonly handle: StaffOperationHandle;
-  readonly action: StaffRuntimeAction;
+  readonly [CANONICAL_LAB_OPERATION_BRAND]: (
+    client: DbClient,
+    patientId: number,
+  ) => Promise<{ userId: number; username: string; role: string } | null>;
 }
 export class LabWorkIntentError extends Error {
   readonly status:number;
@@ -53,13 +49,9 @@ export async function labWorkIntentSupported(db:QueryDb):Promise<boolean>{
 }
 async function authorize(client:DbClient,auth:{session?:SessionPayload;canonicalOperation?:CanonicalLabOperation},patientId:number):Promise<{userId:number;username:string;role:string}>{
   if(auth.canonicalOperation){
-    const identity=await staffOperationIdentity(client,auth.canonicalOperation.handle,auth.canonicalOperation.action);
-    const capabilities=await staffOperationCapabilities(client,auth.canonicalOperation.handle,auth.canonicalOperation.action,["clinical.lab.order"] as const);
-    if(!positive(identity.userId)||!capabilities.has("clinical.lab.order"))return fail("unauthorized",403);
-    const scope=await staffOperationPatientScope(client,auth.canonicalOperation.handle,auth.canonicalOperation.action);
-    if(scope.kind==="none")return fail("unauthorized",403);
-    if(scope.kind==="own"&&!await doctorOwnsPatient(scope.clinicianPartyId,patientId,client,"nowait"))return fail("unauthorized",403);
-    return {userId:identity.userId,username:identity.username,role:identity.role};
+    const actor=await auth.canonicalOperation[CANONICAL_LAB_OPERATION_BRAND](client,patientId);
+    if(!actor||!positive(actor.userId))return fail("unauthorized",403);
+    return actor;
   }
   if(!auth.session)return fail("unauthorized",403);
   const active=await revalidateSessionInTransaction(auth.session,client);

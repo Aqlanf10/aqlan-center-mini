@@ -66,6 +66,7 @@ import { withHttpIdempotencyInTx } from "./http-idempotency";
 import { IDEMPOTENCY_KEY_PATTERN } from "./idempotency-key";
 import { InventoryBusy, InventoryTrackingRequired } from "./inventory-domain/legacy-write-guard";
 import { listVisitMaterialReturnsWith, returnVisitMaterialInTransaction, type VisitMaterialReturnLine } from "./inventory-visit-returns";
+import { canonicalLabOperation } from "./canonical-lab-operation";
 import { LabWorkContractError, parseLabWorkDraft, parseLabWorkRetirements } from "./lab-work-intent-contract";
 import { LabWorkIntentError, labWorkIntentSupported, readLabWorkCommandInTransaction } from "./lab-work-intent-db";
 import { CLINIC_BASE_CURRENCY, isCurrency } from "./money";
@@ -656,7 +657,7 @@ export async function handleCanonicalClinicalVisitPost(
             orthoSession: orthoSession.value,
             outsideContractDecision,
             signerRole: identity.role,
-            canonicalOperation: { handle, action: "clinical.visits.sign" },
+            canonicalOperation: canonicalLabOperation(handle, "clinical.visits.sign"),
             labSignVersion: typeof source.labSignVersion === "string" ? source.labSignVersion : null,
           });
           if (result.reason) {
@@ -849,7 +850,7 @@ export async function handleCanonicalClinicalVisitPost(
                     requestKey: source.labRequestKey as string,
                     requestHash: labRequestHash!,
                     retirements: parseLabWorkRetirements(source.labRetirements),
-                    canonicalOperation: { handle, action: "clinical.visits.document" },
+                    canonicalOperation: canonicalLabOperation(handle, "clinical.visits.document"),
                   },
                 }
               : {}),
@@ -949,7 +950,7 @@ export async function handleCanonicalClinicalVisitPost(
             const result = await settleRejectedClinicalLabCommandInTransaction(settleClient, {
               patientId: labPatientId!,
               visitId,
-              canonicalOperation: { handle: settleHandle, action: "clinical.lab.order" },
+              canonicalOperation: canonicalLabOperation(settleHandle, "clinical.lab.order"),
               requestKey: source.labRequestKey as string,
               requestHash: labRequestHash,
               code: rejectionCode,
@@ -1033,7 +1034,7 @@ export async function readCanonicalVisitLabWorkCommand(
       patientId: visit.patient_id,
       sourceKind: "visit",
       sourceId: visitId,
-      canonicalOperation: { handle, action: "clinical.lab.order" },
+      canonicalOperation: canonicalLabOperation(handle, "clinical.lab.order"),
       requestKey,
       requestHash,
     });

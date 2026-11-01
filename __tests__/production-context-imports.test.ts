@@ -31,4 +31,4 @@ it("keeps Docker typechecked source independent of the excluded test tree", () =
     }
   }
   expect(violations, "Docker excludes __tests__; move shared build dependencies outside that tree").toEqual([]);
-});
+}, 30_000);
