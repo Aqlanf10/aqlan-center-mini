@@ -1,0 +1,393 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-decisions
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 2 failed) 5307ms
+   × checked-in exhaustive source inventory has no drift or API export mismatch 518ms
+   × CLI drift success and explicit NOT_READY failure are intentional, not exceptions 4738ms
+ ❯ scripts/audits/m2-route-capability-map.test.mjs (4 tests | 1 failed) 171ms
+   × every request-body branch has its own requirement; neighbouring branches never share by default 108ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/audits/m2-route-capability-map.test.mjs > every request-body branch has its own requirement; neighbouring branches never share by default
+TypeError: Cannot convert undefined or null to object
+ ❯ scripts/audits/m2-route-capability-map.test.mjs:53:40
+     51|   }
+     52|   for (const entry of map.filter(e => e.branches)) {
+     53|     for (const [value, rule] of Object.entries(entry.branches.values))…
+       |                                        ^
+     54|     for (const rule of entry.branches.fields ?? []) for (const c of ru…
+     55|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > checked-in exhaustive source inventory has no drift or API export mismatch
+AssertionError: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    baseCommit: '74b82cea27d407626fb3c5e691bf68e6defb4598',
+    canonicalDirectReferences: [],
+    formatVersion: 2,
+    layouts: [
+...
+          {
++           line: 12,
+-           line: 11,
+            symbol: 'requireSession'
+          },
+          {
++           line: 39,
+-           line: 38,
+            symbol: 'requireSession'
+          },
+          {
++           line: 101,
+-           line: 99,
+            symbol: 'requireSession'
+          },
+          {
++           line: 192,
+-           line: 190,
+            symbol: 'requireSession'
+          },
+          {
++           line: 7,
+-           line: 6,
+            symbol: 'findUserByUsername'
+          },
+          {
++           line: 126,
+-           line: 124,
+            symbol: 'findUserByUsername'
+          }
+        ],
+        file: 'app/api/ortho/[id]/route.ts'
+      },
+...
+          {
++           line: 12,
+-           line: 11,
+            symbol: 'requireSession'
+          },
+          {
++           line: 39,
+-           line: 38,
+            symbol: 'requireSession'
+          },
+          {
++           line: 101,
+-           line: 99,
+            symbol: 'requireSession'
+          },
+          {
++           line: 192,
+-           line: 190,
+            symbol: 'requireSession'
+          },
+          {
++           line: 7,
+-           line: 6,
+            symbol: 'findUserByUsername'
+          },
+          {
++           line: 126,
+-           line: 124,
+            symbol: 'findUserByUsername'
+          }
+        ],
+        file: 'app/api/ortho/[id]/route.ts',
+        httpAccess: [
+...
+          {
++           line: 12,
+-           line: 11,
+            symbol: 'requireSession'
+          },
+          {
++           line: 39,
+-           line: 38,
+            symbol: 'requireSession'
+          },
+          {
++           line: 101,
+-           line: 99,
+            symbol: 'requireSession'
+          },
+          {
++           line: 192,
+-           line: 190,
+            symbol: 'requireSession'
+          },
+          {
++           line: 7,
+-           line: 6,
+            symbol: 'findUserByUsername'
+          },
+          {
++           line: 126,
+-           line: 124,
+            symbol: 'findUserByUsername'
+          }
+        ],
+        file: 'app/api/ortho/[id]/route.ts',
+        httpAccess: [
+...
+          {
++           line: 12,
+-           line: 11,
+            symbol: 'requireSession'
+          },
+          {
++           line: 39,
+-           line: 38,
+            symbol: 'requireSession'
+          },
+          {
++           line: 101,
+-           line: 99,
+            symbol: 'requireSession'
+          },
+          {
++           line: 192,
+-           line: 190,
+            symbol: 'requireSession'
+          },
+          {
++           line: 7,
+-           line: 6,
+            symbol: 'findUserByUsername'
+          },
+          {
++           line: 126,
+-           line: 124,
+            symbol: 'findUserByUsername'
+          }
+        ],
+        file: 'app/api/ortho/[id]/route.ts',
+        httpAccess: [
+...
+    scope: 'All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',
++   sourceDigest: 'e197c3a4cbcb0e9552b1f7c79df4b191aa105f071fc0058c9498def5def6bde1',
+-   sourceDigest: '0a32d85f701fa82645045488a2fdc985dd549b661db8117e791eadc597a120db',
+    sourceEntries: [
+      'app/account/page.tsx',
+      'app/api/accounting/route.ts',
+      'app/api/ai/chat/route.ts',
+      'app/api/ai/confirmation/route.ts',
+
+
+- Expected
++ Received
+
+@@ -1671,31 +1671,31 @@
+        "file": "app/api/ortho/[id]/followup-coverage/route.ts",
+      },
+      {
+        "evidence": [
+          {
+-           "line": 11,
++           "line": 12,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 38,
++           "line": 39,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 99,
++           "line": 101,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 190,
++           "line": 192,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 6,
++           "line": 7,
+            "symbol": "findUserByUsername",
+          },
+          {
+-           "line": 124,
++           "line": 126,
+            "symbol": "findUserByUsername",
+          },
+        ],
+        "file": "app/api/ortho/[id]/route.ts",
+      },
+@@ -9747,31 +9747,31 @@
+      {
+        "boundary": "read-snapshot-required-if-staff",
+        "classification": "staff-legacy-held",
+        "directHelperEvidence": [
+          {
+-           "line": 11,
++           "line": 12,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 38,
++           "line": 39,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 99,
++           "line": 101,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 190,
++           "line": 192,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 6,
++           "line": 7,
+            "symbol": "findUserByUsername",
+          },
+          {
+-           "line": 124,
++           "line": 126,
+            "symbol": "findUserByUsername",
+          },
+        ],
+        "file": "app/api/ortho/[id]/route.ts",
+        "httpAccess": [
+@@ -9787,31 +9787,31 @@
+      {
+        "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+        "classification": "staff-legacy-held",
+        "directHelperEvidence": [
+          {
+-           "line": 11,
++           "line": 12,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 38,
++           "line": 39,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 99,
++           "line": 101,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 190,
++           "line": 192,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 6,
++           "line": 7,
+            "symbol": "findUserByUsername",
+          },
+          {
+-           "line": 124,
++           "line": 126,
+            "symbol": "findUserByUsername",
+          },
+        ],
+        "file": "app/api/ortho/[id]/route.ts",
+        "httpAccess": [
+@@ -9827,31 +9827,31 @@
+      {
+        "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+        "classification": "staff-legacy-held",
+        "directHelperEvidence": [
+          {
+-           "line": 11,
++           "line": 12,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 38,
++           "line": 39,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 99,
++           "line": 101,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 190,
++           "line": 192,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 6,
++           "line": 7,
+            "symbol": "findUserByUsername",
+          },
+          {
+-           "line": 124,
++           "line": 126,
+            "symbol": "findUserByUsername",
+          },
+        ],
+        "file": "app/api/ortho/[id]/route.ts",
+        "httpAccess": [
+@@ -15944,11 +15944,11 @@
+      "clinical.ortho.edit",
+      "finance.invoices.create",
+      "finance.agreements.manage",
+    ],
+    "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
+-   "sourceDigest": "0a32d85f701fa82645045488a2fdc985dd549b661db8117e791eadc597a120db",
++   "sourceDigest": "e197c3a4cbcb0e9552b1f7c79df4b191aa105f071fc0058c9498def5def6bde1",
+    "sourceEntries": [
+      "app/account/page.tsx",
+      "app/api/accounting/route.ts",
+      "app/api/ai/chat/route.ts",
+      "app/api/ai/confirmation/route.ts",
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:7:9
+      5| const report=buildInventory();
+      6| test('checked-in exhaustive source inventory has no drift or API expor…
+      7|  assert.deepEqual(report,JSON.parse(readFileSync(new URL('../../docs/s…
+       |         ^
+      8|  assert.deepEqual(report.matrixExportMismatches,[]);
+      9|  assert.equal(new Set(report.routes.map(r=>`${r.method} ${r.route}`)).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > CLI drift success and explicit NOT_READY failure are intentional, not exceptions
+AssertionError: Inventory drift: regenerate and review with --write.
+
+
+1 !== 0
+
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:87:10
+     85|  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
+     86|   const result=spawnSync(process.execPath,[fileURLToPath(script),...ar…
+     87|   assert.equal(result.status,status,result.stderr);
+       |          ^
+     88|   assert.equal(result.stderr,'');
+     89|   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  3 failed | 17 passed (20)
+   Start at  19:03:27
+   Duration  26.53s (transform 478ms, setup 0ms, import 9.78s, tests 15.46s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

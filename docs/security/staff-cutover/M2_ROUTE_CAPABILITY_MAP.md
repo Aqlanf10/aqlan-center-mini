@@ -30,16 +30,16 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 63 on WORK)
+### Counts (386 mapped route/method entries, after local slice 64 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 264 |
+| existing | 263 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 80 |
+| canonical-done | 81 |
 
 | Record scope | Routes |
 |---|---|
@@ -701,3 +701,9 @@ A bounded native receipt reader projects only the actor's exact command outcome;
 POST `/api/ortho/[id]/followup-coverage?patientId=…` admits the mapped agreement capability and current patient scope on one owning transaction. The native immutable receipt/fingerprint, source validity, included/excluded policy and atomic audit are retained. Command-lock waits are followed by current authority; source parent ownership is checked before child locks. A terminal business refusal commits with its audit; authority/infrastructure failures roll back. Identical requests replay exactly once; altered identity conflicts. No money, prior signed-proof, migration, implicit activation or editor change. [Acceptance and limits](../../review/work-ortho-coverage-command-slice62-20261101.md).
 
 Slice 63 adds an explicit coverage editor read context and the shared durable editor; it adds no method count. Independent invoice/plan/ortho visibility, current scope and fresh source identity remain required. Local in-memory draft retention and exact journal recovery have separate evidence in the slice report.
+
+### Slice 64 — complete the existing case/plan link branch
+
+The `planId` branch of PATCH `/api/ortho/[id]` independently requires plan view and edit in addition to clinical ortho edit and current patient scope, including unlink and no-op requests. The native link writer is extracted without changing its body or the legacy wrapper. Patient then case locks and sorted same-patient plan parent locks preserve current scope and source identity. A stale case observation, terminal case, cancelled target, missing/foreign source, lost authority or inverse lock refuses without effects. The native awaited audit commits atomically; finance and signed history stay unchanged. Only `{ok,caseId,changed}` is returned.
+
+This completes the method's source conversion; the separate context/chooser UI is not implemented in64. A changed link invalidates the old case version but is not a durable receipt. Exact-head CI, independent review and broader release gates remain separate. [Evidence and limitations](../../review/work-ortho-plan-link-slice64-20261101.md).

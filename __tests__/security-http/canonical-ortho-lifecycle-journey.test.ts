@@ -33,10 +33,10 @@ it("HTTP: anonymous, reader, none and foreign patients refuse without effects", 
   await journey.db.query("UPDATE patients SET primary_doctor_id=NULL WHERE id=$1", [patientId]); const own = (await journey.login("own")).cookie;
   const foreign = await mutate(own, caseId, input), absent = await mutate(own, 2147483647, input); expect(foreign.status).toBe(404); expect(absent.status).toBe(404); expect(await foreign.json()).toEqual(await absent.json()); expect(await audits()).toBe(0);
 });
-it("HTTP: strict single clinical operation and independent held funding branch",async()=>{
+it("HTTP: strict single clinical operation and independent plan authority",async()=>{
  const cookie=(await journey.login("own")).cookie,expectedVersion=await version(cookie);
  for(const body of [null,[],{},{expectedVersion,phase:["working"]},{expectedVersion,phase:"working",force:true},{expectedVersion,phase:"working",retainer:"none"}])expect((await mutate(cookie,caseId,body)).status).toBe(400);
- const funding=await mutate(cookie,caseId,{expectedVersion,planId:null});expect(funding.status).toBe(409);expect((await funding.json()).code).toBe("ortho_lifecycle_plan_link_pending");
+ const funding=await mutate(cookie,caseId,{expectedVersion,planId:null});expect(funding.status).toBe(403);expect((await funding.json()).code).toBe("STAFF_OPERATION_CAPABILITY_DENIED");
  expect((await journey.api(`/api/ortho/${caseId}?force=1`,cookie,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion,phase:"working"})})).status).toBe(400);expect(await audits()).toBe(0);
 });
 it("HTTP: retainer and terminal state keep explicit none and no-reopen rules",async()=>{

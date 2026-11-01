@@ -2748,8 +2748,14 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": "M2 slice55 partial: phase, retainer and completed/discontinued branches use clinical.ortho.edit with patient scope, fresh locked authority, observed native case version and atomic state/audit. Existing explicit retainer none remains a valid recorded decision; terminal cases do not reopen. planId financial linkage remains held pending its independent contract; no legacy fallback. This method is not counted canonical-done."
+  "status": "canonical-done",
+  "branches": {
+   "values": {},
+   "fields": [
+    { "field": "planId", "need": ["clinical.plans.view", "clinical.plans.edit"] }
+   ]
+  },
+  "note": "M2 slice64 completes the existing PATCH branches. Clinical phase/retainer/close preserve slice55. planId link/unlink additionally requires clinical.plans.view and clinical.plans.edit plus current patient scope, positive old/new same-patient plan parents, native non-cancelled target and active/retention case. Observed case version after locks, fresh authority after waits, awaited native audit and atomic rollback; minimal acknowledgment omits funding. No financial amount or signed history change; no durable receipt guarantee. Local checks recorded separately from hosted CI/review."
  },
  {
   "route": "/api/ortho/[id]",

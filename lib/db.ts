@@ -24047,37 +24047,42 @@ export type OrthoPlanLinkResult =
  * فتُصنَّف كل شدّة «مشمولة» ما دام الاتفاق قائمًا. لا فاتورة تُنشأ ولا مبلغ يتغيّر هنا:
  * يتغيّر مصدر الفوترة للشدّات القادمة وحدها، والقرار مُدقَّق.
  */
-export async function linkOrthoCasePlan(input: {
+export type OrthoPlanLinkInput = {
   caseId: number; planId: number | null; actor: string; actorRole: string | null;
-}): Promise<OrthoPlanLinkResult> {
+};
+
+/** Caller owns admission, transaction and commit; legacy policy and audit are shared. */
+export async function linkOrthoCasePlanWith(client: DbClient, input: OrthoPlanLinkInput): Promise<OrthoPlanLinkResult> {
+  const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.caseId]);
+  if (!owner) return { ok: false, status: 404, message: "الحالة غير موجودة." };
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
+  const { rows: [found] } = await client.query<{ patient_id: number; status: string; plan_id: number | null }>(
+    `SELECT patient_id, status, plan_id FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.caseId]);
+  if (!found) return { ok: false, status: 404, message: "الحالة غير موجودة." };
+  if (found.status !== "active" && found.status !== "retention") {
+    return { ok: false, status: 409, message: "الحالة مغلقة — لا يُغيَّر اتفاقها." };
+  }
+  if (input.planId !== null) {
+    const problem = await orthoPlanProblem(client, input.planId, found.patient_id);
+    if (problem) return { ok: false, status: 409, message: problem };
+  }
+  const changed = found.plan_id !== input.planId;
+  if (changed) {
+    await client.query(`UPDATE ortho_cases SET plan_id = $2 WHERE id = $1`, [input.caseId, input.planId]);
+    await insertAuditRow(client, {
+      action: "ortho.plan_link", entity: "ortho_cases", entityId: input.caseId, entityLabel: null,
+      details: { المريض: found.patient_id, من_خطة: found.plan_id, إلى_خطة: input.planId },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+  }
+  const { rows: [funded] } = await client.query<{ funded: boolean }>(
+    `SELECT ${ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [input.caseId]);
+  return { ok: true, changed, funded: funded?.funded === true };
+}
+
+export async function linkOrthoCasePlan(input: OrthoPlanLinkInput): Promise<OrthoPlanLinkResult> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client): Promise<OrthoPlanLinkResult> => {
-    const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.caseId]);
-    if (!owner) return { ok: false, status: 404, message: "الحالة غير موجودة." };
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
-    const { rows: [found] } = await client.query<{ patient_id: number; status: string; plan_id: number | null }>(
-      `SELECT patient_id, status, plan_id FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.caseId]);
-    if (!found) return { ok: false, status: 404, message: "الحالة غير موجودة." };
-    if (found.status !== "active" && found.status !== "retention") {
-      return { ok: false, status: 409, message: "الحالة مغلقة — لا يُغيَّر اتفاقها." };
-    }
-    if (input.planId !== null) {
-      const problem = await orthoPlanProblem(client, input.planId, found.patient_id);
-      if (problem) return { ok: false, status: 409, message: problem };
-    }
-    const changed = found.plan_id !== input.planId;
-    if (changed) {
-      await client.query(`UPDATE ortho_cases SET plan_id = $2 WHERE id = $1`, [input.caseId, input.planId]);
-      await insertAuditRow(client, {
-        action: "ortho.plan_link", entity: "ortho_cases", entityId: input.caseId, entityLabel: null,
-        details: { المريض: found.patient_id, من_خطة: found.plan_id, إلى_خطة: input.planId },
-        actor: input.actor, actorRole: input.actorRole,
-      });
-    }
-    const { rows: [funded] } = await client.query<{ funded: boolean }>(
-      `SELECT ${ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [input.caseId]);
-    return { ok: true, changed, funded: funded?.funded === true };
-  });
+  return withTransaction(getPool(), (client) => linkOrthoCasePlanWith(client, input));
 }
 
 /**

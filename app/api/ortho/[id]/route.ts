@@ -1,3 +1,4 @@
+import { CanonicalOrthoPlanLinkRefusal, commandCanonicalOrthoPlanLink } from "@/lib/canonical-ortho-plan-link-command";
 import { CanonicalOrthoLifecycleRefusal, commandCanonicalOrthoLifecycle } from "@/lib/canonical-ortho-lifecycle-command";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -88,11 +89,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     try {
       const body: unknown = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
       if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalOrthoLifecycleRefusal("invalid_ortho_lifecycle", 400, "تحديث الحالة لا يقبل مرشحات إضافية.");
-      return NextResponse.json(await commandCanonicalOrthoLifecycle(selected.handle, (await context.params).id, body), { headers: NO_STORE });
+      const command = body && typeof body === "object" && !Array.isArray(body) && Object.hasOwn(body, "planId") ? commandCanonicalOrthoPlanLink : commandCanonicalOrthoLifecycle;
+      return NextResponse.json(await command(selected.handle, (await context.params).id, body), { headers: NO_STORE });
     } catch (error) {
       const bounded = bodyErrorResponse(error);
       if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
-      if (error instanceof CanonicalOrthoLifecycleRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      if (error instanceof CanonicalOrthoLifecycleRefusal || error instanceof CanonicalOrthoPlanLinkRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
       return canonicalPatientReadFailure(error, "تعذّر تأكيد تحديث حالة التقويم. تحقق من السجل قبل أي طلب جديد.");
     }
   }
