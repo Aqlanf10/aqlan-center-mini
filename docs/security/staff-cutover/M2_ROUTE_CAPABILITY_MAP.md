@@ -30,16 +30,16 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 mapped route/method entries, after slice 34 on WORK)
+### Counts (383 mapped route/method entries, after slice 35 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 291 |
+| existing | 290 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 53 |
+| canonical-done | 54 |
 
 | Record scope | Routes |
 |---|---|
@@ -514,6 +514,14 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - Whole-study limits are checked before materializing content: 256 landmarks, 256 measurements and 2 MiB stored bytes. Excess/invalid finite numeric data or partial calibration rejects; no history repair or silent truncation. Saved draft measurements remain explicitly `saved-unapproved`; approved values derive only from the recorded completed status. No new clinical decision is made.
 - Read-only on-demand panel inside the study list; no editor/tracer, PATCH/DELETE, image fetch or legacy page link. Scope/identity parser, eight-second timeout, clear-on-refresh/hide/denial and delayed-response retirement. Existing legacy GET/PATCH/DELETE and database writers retain their bodies.
 - Tests: `ceph-canonical-study`, full saved-list/calendar regression, `canonical-ceph-study-journey` (portOffset 47), older ortho/assessment and legacy ceph UI journeys. This is one read contract, not the whole ceph workflow.
+
+### Slice 35 — current cephalometric reference catalogue
+
+- `GET /api/ceph-reference-sets`: existing `clinical.xrays.view`, no patient record scope. Register that exact capability in the closed runtime action lists and use the existing owning RR READ ONLY snapshot; never grant access to patient data. A role label or adjacent clinical grant does not suffice. Patient `none` / unlinked `own` may read these non-patient reference facts but still cannot read studies.
+- Explicit `ceph-reference-catalog` with active set key/name/population/age bounds/sex/version and original mean/sd values. No author, database IDs, patients, images, source storage or finance. No clinical engine or automatic reference selection, no replacement of historical study values. Unknown saved codes and precision remain intact.
+- Whole-catalogue bounds before materialization: 200 active sets, 256 values per set, 2 MiB. Excess, invalid ages or non-finite mean/sd refuse without silent truncation/defaults. Inactive sets cannot leak through filters or query expansion. Metadata and values share the same snapshot.
+- Current-reference panel inside the canonical ceph section, explicitly distinguished from the reference used for a historical study. Read only, eight-second timeout, hide/refresh/revocation clearing and delayed-response retirement. Min/max age labels are separate to avoid RTL interval reversal.
+- PostgreSQL and HTTP/browser proof covers independent permission, none/own/all, real fence waiting and revocation, concurrent revisions, failed leases, exact JSON keys and unchanged legacy behavior. Source conversion is not independent acceptance, activation or completion of comparison/tracing workflows.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.

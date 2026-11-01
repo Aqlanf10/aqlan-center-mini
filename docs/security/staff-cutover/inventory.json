@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "f58f41f3e2a6b439bbb7728081327fa5b1a2b83ae311747d08e8866630c0e623",
+  "sourceDigest": "84aa315f9d9eed6614b4f3a62a6e47de878835618d23d667d7414169d8803ec6",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -42,7 +42,8 @@
     "appointments.cancel",
     "appointments.schedule.manage",
     "finance.shifts.view",
-    "finance.shifts.operate"
+    "finance.shifts.operate",
+    "clinical.xrays.view"
   ],
   "summary": {
     "routeMethods": 416,
@@ -742,7 +743,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 15
+          "line": 30
         }
       ]
     },
@@ -5165,7 +5166,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 15
+          "line": 30
         }
       ]
     },

@@ -421,8 +421,8 @@
   ],
   "anyOf": [],
   "scope": null,
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 35: non-patient reference catalogue under clinical.xrays.view; one bounded RR READ ONLY snapshot, no patient grant or clinical recalculation; legacy GET preserved."
  },
  {
   "route": "/api/ceph/[id]",

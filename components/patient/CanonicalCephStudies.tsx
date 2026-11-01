@@ -1,5 +1,6 @@
 "use client";
 import { CanonicalCephStudy } from "./CanonicalCephStudy";
+import { CanonicalCephReferences } from "./CanonicalCephReferences";
 
 import { useEffect, useId, useState } from "react";
 import { CEPH_READ_PHASES,isCanonicalCephList,type CanonicalCephList } from "@/lib/canonical-ceph-projection";
@@ -54,6 +55,7 @@ export function CanonicalCephStudies({ patientId }: { patientId: string }) {
     </div>
     {open?<div id={regionId} className="mt-3 space-y-3" data-testid="canonical-ceph-studies">
       <p className="text-xs text-slate-600">نتائج محفوظة كما سُجلت؛ لم يُعَد حسابها، ولا تُعرض صور هنا.</p>
+      {feed && !error ? <CanonicalCephReferences /> : null}
       <button type="button" onClick={()=>{setFeed(null);setError(null);setRefresh(value=>value+1);}}
         className="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-bold text-navy-800">تحديث الدراسات</button>
       {error?<p role="alert" className="text-sm text-red-700">{error}</p>:!feed?<p role="status">جارٍ تحميل الدراسات…</p>:feed.analyses.length===0?<p>لا توجد دراسات مسجلة لهذا المريض.</p>:
