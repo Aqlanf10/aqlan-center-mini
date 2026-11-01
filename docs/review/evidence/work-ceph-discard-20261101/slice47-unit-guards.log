@@ -1,0 +1,299 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs (6 tests | 2 failed) 3953ms
+   × checked-in exhaustive source inventory has no drift or API export mismatch 317ms
+   × CLI drift success and explicit NOT_READY failure are intentional, not exceptions 3597ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > checked-in exhaustive source inventory has no drift or API export mismatch
+AssertionError: Expected values to be strictly deep-equal:
++ actual - expected
+... Skipped lines
+
+  {
+    baseCommit: '74b82cea27d407626fb3c5e691bf68e6defb4598',
+    canonicalDirectReferences: [],
+    formatVersion: 2,
+    layouts: [
+...
+          {
++           line: 13,
+-           line: 12,
+            symbol: 'requireSession'
+          },
+          {
++           line: 55,
+-           line: 54,
+            symbol: 'requireSession'
+          },
+          {
++           line: 73,
+-           line: 72,
+            symbol: 'requireSession'
+          },
+          {
++           line: 159,
+-           line: 144,
+            symbol: 'requireSession'
+          }
+        ],
+        file: 'app/api/ceph/[id]/route.ts'
+      },
+...
+          {
++           line: 13,
+-           line: 12,
+            symbol: 'requireSession'
+          },
+          {
++           line: 55,
+-           line: 54,
+            symbol: 'requireSession'
+          },
+          {
++           line: 73,
+-           line: 72,
+            symbol: 'requireSession'
+          },
+          {
++           line: 159,
+-           line: 144,
+            symbol: 'requireSession'
+          }
+        ],
+        file: 'app/api/ceph/[id]/route.ts',
+        httpAccess: [
+...
+          {
++           line: 13,
+-           line: 12,
+            symbol: 'requireSession'
+          },
+          {
++           line: 55,
+-           line: 54,
+            symbol: 'requireSession'
+          },
+          {
++           line: 73,
+-           line: 72,
+            symbol: 'requireSession'
+          },
+          {
++           line: 159,
+-           line: 144,
+            symbol: 'requireSession'
+          }
+        ],
+        file: 'app/api/ceph/[id]/route.ts',
+        httpAccess: [
+...
+          {
++           line: 13,
+-           line: 12,
+            symbol: 'requireSession'
+          },
+          {
++           line: 55,
+-           line: 54,
+            symbol: 'requireSession'
+          },
+          {
++           line: 73,
+-           line: 72,
+            symbol: 'requireSession'
+          },
+          {
++           line: 159,
+-           line: 144,
+            symbol: 'requireSession'
+          }
+        ],
+        file: 'app/api/ceph/[id]/route.ts',
+        httpAccess: [
+...
+    scope: 'All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.',
++   sourceDigest: '9724d2568925e8f212e110023549e9f4d946f5ac6ecb50685bcd4d81282672a9',
+-   sourceDigest: 'ce40718714213d3a7ab825516ca70f60153057452503f0ecc16e8c1c55775863',
+    sourceEntries: [
+      'app/account/page.tsx',
+      'app/api/accounting/route.ts',
+      'app/api/ai/chat/route.ts',
+      'app/api/ai/confirmation/route.ts',
+
+
+- Expected
++ Received
+
+@@ -403,23 +403,23 @@
+        "file": "app/api/ceph/[id]/duplicate/route.ts",
+      },
+      {
+        "evidence": [
+          {
+-           "line": 12,
++           "line": 13,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 54,
++           "line": 55,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 72,
++           "line": 73,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 144,
++           "line": 159,
+            "symbol": "requireSession",
+          },
+        ],
+        "file": "app/api/ceph/[id]/route.ts",
+      },
+@@ -5799,23 +5799,23 @@
+      {
+        "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+        "classification": "staff-legacy-held",
+        "directHelperEvidence": [
+          {
+-           "line": 12,
++           "line": 13,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 54,
++           "line": 55,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 72,
++           "line": 73,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 144,
++           "line": 159,
+            "symbol": "requireSession",
+          },
+        ],
+        "file": "app/api/ceph/[id]/route.ts",
+        "httpAccess": [
+@@ -5831,23 +5831,23 @@
+      {
+        "boundary": "read-snapshot-required-if-staff",
+        "classification": "staff-legacy-held",
+        "directHelperEvidence": [
+          {
+-           "line": 12,
++           "line": 13,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 54,
++           "line": 55,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 72,
++           "line": 73,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 144,
++           "line": 159,
+            "symbol": "requireSession",
+          },
+        ],
+        "file": "app/api/ceph/[id]/route.ts",
+        "httpAccess": [
+@@ -5863,23 +5863,23 @@
+      {
+        "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+        "classification": "staff-legacy-held",
+        "directHelperEvidence": [
+          {
+-           "line": 12,
++           "line": 13,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 54,
++           "line": 55,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 72,
++           "line": 73,
+            "symbol": "requireSession",
+          },
+          {
+-           "line": 144,
++           "line": 159,
+            "symbol": "requireSession",
+          },
+        ],
+        "file": "app/api/ceph/[id]/route.ts",
+        "httpAccess": [
+@@ -15940,11 +15940,11 @@
+      "clinical.plans.edit",
+      "clinical.visits.document",
+      "clinical.ceph.analyze",
+    ],
+    "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
+-   "sourceDigest": "ce40718714213d3a7ab825516ca70f60153057452503f0ecc16e8c1c55775863",
++   "sourceDigest": "9724d2568925e8f212e110023549e9f4d946f5ac6ecb50685bcd4d81282672a9",
+    "sourceEntries": [
+      "app/account/page.tsx",
+      "app/api/accounting/route.ts",
+      "app/api/ai/chat/route.ts",
+      "app/api/ai/confirmation/route.ts",
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:7:9
+      5| const report=buildInventory();
+      6| test('checked-in exhaustive source inventory has no drift or API expor…
+      7|  assert.deepEqual(report,JSON.parse(readFileSync(new URL('../../docs/s…
+       |         ^
+      8|  assert.deepEqual(report.matrixExportMismatches,[]);
+      9|  assert.equal(new Set(report.routes.map(r=>`${r.method} ${r.route}`)).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs > CLI drift success and explicit NOT_READY failure are intentional, not exceptions
+AssertionError: Inventory drift: regenerate and review with --write.
+
+
+1 !== 0
+
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ .next/standalone/scripts/audits/staff-cutover-readiness.test.mjs:87:10
+     85|  for(const [args,status] of [[[],0],[['--require-ready'],1]]) {
+     86|   const result=spawnSync(process.execPath,[fileURLToPath(script),...ar…
+     87|   assert.equal(result.status,status,result.stderr);
+       |          ^
+     88|   assert.equal(result.stderr,'');
+     89|   assert.equal(JSON.parse(result.stdout).readiness,'NOT_READY');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  2 failed | 37 passed (39)
+   Start at  09:02:53
+   Duration  22.86s (transform 3.54s, setup 0ms, import 10.73s, tests 10.97s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

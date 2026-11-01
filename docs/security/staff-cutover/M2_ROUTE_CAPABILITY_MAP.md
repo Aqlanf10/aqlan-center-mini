@@ -34,19 +34,19 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 277 |
+| existing | 276 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 67 |
+| canonical-done | 68 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 40–42 are published at e09263fa with exact-head CI running; slices 43–46 remain local. Published map: 63 canonical-done / 281 existing; local map: 67 / 277. Neither state is whole-system acceptance.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 40–42 are published at e09263fa with successful exact-head CI; slices 43–46 are committed locally with separate gates. Slice47 is local and its full gates remain pending. Published map: 63 canonical-done / 281 existing; local map: 68 / 276. Neither state is whole-system acceptance.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -616,3 +616,7 @@ POST `/api/patients/[id]/problems` requires the existing documentation capabilit
 ### Slice 46 — cephalometric correction draft
 
 POST `/api/ceph/[id]/duplicate` requires current analysis authority, its existing imaging-read prerequisite and patient scope. It preserves the approved source, historical copy rules and one-draft constraint, with locked same-patient references and atomic canonical audit. The new draft contains copied landmarks/calibration, no copied approved results or diagnosis. Legacy remains unchanged, including its existing post-commit audit. No automatic replay or durable receipt; see [the acceptance matrix](../../review/work-ceph-copy-slice46-20261101.md). Editing, approval and rejection are separate pending contracts.
+
+### Slice 47 — observed cephalometric draft discard
+
+DELETE `/api/ceph/[id]` uses existing analysis authority and patient scope. The saved draft receives an opaque version of its parent and saved child rows, inside the existing RR snapshot; completed payloads are unchanged and older versionless payloads remain read-only. A fresh explicit intent must match that version after patient/source/reference/child locks. Original draft-only soft-discard and note rules remain; all saved history stays in place. Canonical effect and audit are atomic. The original legacy post-commit audit remains, with a separately reproduced failed-transaction cleanup defect repaired. List-level pending recovery persists after a draft disappears, never treats 404 as a specific request receipt, and never automatically resends. No approved-history, image, financial or migration change. Source conversion is not final acceptance.

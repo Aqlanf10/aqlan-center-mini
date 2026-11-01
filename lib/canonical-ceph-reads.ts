@@ -1,3 +1,4 @@
+import { cephDraftVersionWith } from "./canonical-ceph-draft-version";
 import "server-only";
 import { patientInDoctorScopeWith } from "./db";
 import { runCanonicalReadSnapshot,type CanonicalSnapshotScope } from "./canonical-read-snapshot";
@@ -85,7 +86,7 @@ export async function readCephStudyWith(q:CanonicalSnapshotQuery,scope:Canonical
   if(landmarks.some(p=>!p.code.length||p.code.length>100||!Number.isFinite(p.x)||!Number.isFinite(p.y))||measurements.some(m=>!m.code.length||m.code.length>100||!Number.isFinite(m.value)))throw new CanonicalCephReadRefusal("ceph_stored_data_invalid","قياس أو معلم محفوظ غير صالح؛ لم تُعد كتابة النتائج.");
   const diagnosis=(await q.query<{skeletal:string|null;dental:string|null;soft_tissue:string|null;note:string|null;final_dx:string;created_by:string;updated_at:Date}>("SELECT skeletal,dental,soft_tissue,note,final_dx,created_by,updated_at FROM ceph_diagnoses WHERE analysis_id=$1",[studyId])).rows[0];
   if(analysis.status==="completed"&&measurements.some(m=>["ANB","FMA","WITS"].includes(m.code)))analysis.findings={anb:measurements.find(m=>m.code==="ANB")?.value??null,fma:measurements.find(m=>m.code==="FMA")?.value??null,wits:measurements.find(m=>m.code==="WITS")?.value??null};
-  return {projection:"ceph-saved-study",analysis:{...analysis,device:row.device,refSet:row.ref_set,note:row.note,createdBy:row.created_by,completedBy:row.completed_by,
+  return {projection:"ceph-saved-study",...(analysis.status==="draft"?{discardVersion:await cephDraftVersionWith(q,studyId)}:{}),analysis:{...analysis,device:row.device,refSet:row.ref_set,note:row.note,createdBy:row.created_by,completedBy:row.completed_by,
     calibration:present===5?{x1:row.cal_x1!,y1:row.cal_y1!,x2:row.cal_x2!,y2:row.cal_y2!,mm:row.cal_mm!}:null,mmPerPixel:row.mm_per_pixel},
     measurementsState:analysis.status==="completed"?"saved-approved":"saved-unapproved",landmarks,measurements,
     diagnosis:diagnosis?{skeletal:diagnosis.skeletal,dental:diagnosis.dental,softTissue:diagnosis.soft_tissue,note:diagnosis.note,finalDx:diagnosis.final_dx,createdBy:diagnosis.created_by,updatedAt:diagnosis.updated_at.toISOString()}:null};

@@ -25496,25 +25496,34 @@ export async function completeCephAnalysis(
 }
 
 /** رفض مسودة — بدل حذفٍ صامت: الرفض يُوثَّق باسم رافضه. */
+/** Original draft-only status/note rule on a caller-owned transaction. Caller owns audit. */
+export async function discardCephAnalysisInTransaction(
+  client: DbClient, id: number, note: string | null,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!rows[0]) { return { ok: false, message: "التحليل غير موجود." }; }
+  if (rows[0].status !== "draft") {
+    return { ok: false, message: "المعتمد لا يُرفض — تاريخُ ما قُرئ لا يُمحى. افتح نسخةً للتصحيح." };
+  }
+  await client.query(
+    `UPDATE ceph_analyses SET status='discarded', note=$2 WHERE id=$1`,
+    [id, note?.trim() || null],
+  );
+  return { ok: true };
+}
+
 export async function discardCephAnalysis(
   id: number, by: string, note: string | null,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
+  let discardLease = false;
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (rows[0].status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "المعتمد لا يُرفض — تاريخُ ما قُرئ لا يُمحى. افتح نسخةً للتصحيح." };
-    }
-    await client.query(
-      `UPDATE ceph_analyses SET status='discarded', note=$2 WHERE id=$1`,
-      [id, note?.trim() || null],
-    );
+    const result = await discardCephAnalysisInTransaction(client, id, note);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
     await recordAudit({
       action: "ceph.discard", entity: "ceph_analysis", entityId: String(id),
@@ -25522,8 +25531,11 @@ export async function discardCephAnalysis(
       actor: by,
     });
     return { ok: true };
+  } catch (error) {
+    try { await client.query("ROLLBACK"); } catch { discardLease = true; }
+    throw error;
   } finally {
-    client.release();
+    client.release(discardLease);
   }
 }
 

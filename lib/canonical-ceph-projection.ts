@@ -23,6 +23,8 @@ export function isCanonicalCephList(value:unknown,patientId:number):value is Can
 
 export interface CanonicalCephStudy {
   projection:"ceph-saved-study";
+  /** Absent in older read-only payloads; commands require a fresh observed draft token. */
+  discardVersion?:string|null;
   analysis:CanonicalCephSummary & {
     device:string|null;refSet:string;note:string|null;createdBy:string;completedBy:string|null;
     calibration:{x1:number;y1:number;x2:number;y2:number;mm:number}|null;mmPerPixel:number|null;
@@ -40,6 +42,7 @@ export function isCanonicalCephStudy(value:unknown,patientId:number,studyId:numb
   if(!textOrNull(a.device)||!textOrNull(a.note)||!textOrNull(a.completedBy)||typeof a.refSet!=="string"||typeof a.createdBy!=="string")return false;
   if(a.mmPerPixel!==null&&(!Number.isFinite(a.mmPerPixel)||a.mmPerPixel<=0))return false;
   if(a.calibration!==null&&(!a.calibration||![a.calibration.x1,a.calibration.y1,a.calibration.x2,a.calibration.y2,a.calibration.mm].every(n=>typeof n==="number"&&Number.isFinite(n))||a.calibration.mm<=0))return false;
+  if(v.discardVersion!==undefined&&v.discardVersion!==null&&(a.status!=="draft"||typeof v.discardVersion!=="string"||!/^[a-f0-9]{64}$/.test(v.discardVersion)))return false;
   if(v.measurementsState!==(a.status==="completed"?"saved-approved":"saved-unapproved"))return false;
   if(!Array.isArray(v.landmarks)||v.landmarks.length>256||v.landmarks.some(p=>!p||typeof p.code!=="string"||!p.code.length||p.code.length>100||!Number.isFinite(p.x)||!Number.isFinite(p.y)||(p.source!=="manual"&&p.source!=="suggested")||typeof p.confirmedBy!=="string"))return false;
   if(!Array.isArray(v.measurements)||v.measurements.length>256||v.measurements.some(m=>!m||typeof m.code!=="string"||!m.code.length||m.code.length>100||!Number.isFinite(m.value)))return false;

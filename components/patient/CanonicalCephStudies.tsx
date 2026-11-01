@@ -2,6 +2,7 @@
 import { CanonicalCephComparison } from "./CanonicalCephComparison";
 import { CanonicalCephStudy } from "./CanonicalCephStudy";
 import { CanonicalCephReferences } from "./CanonicalCephReferences";
+import { CanonicalCephDiscard } from "./CanonicalCephDiscard";
 
 import { useEffect, useId, useState } from "react";
 import { CEPH_READ_PHASES,isCanonicalCephList,type CanonicalCephList } from "@/lib/canonical-ceph-projection";
@@ -77,6 +78,8 @@ export function CanonicalCephStudies({ patientId,ownerKey,canAnalyze }: { patien
           <CanonicalCephStudy patientId={patientId} studyId={row.id} ownerKey={ownerKey} canAnalyze={canAnalyze} onCopied={() => { setNotice("أُنشئت مسودة التصحيح وسُجّل أثرها. المسودة غير معتمدة."); setFeed(null); setRefresh(value => value + 1); }} />
         </li>)}</ul>}
       {feed?.hasMore?<p role="status" className="text-sm text-amber-800">تظهر 300 دراسة فقط؛ هذه ليست القائمة الكاملة. المسودة أولًا ثم الأحدث.</p>:null}
+      {feed && !error && canAnalyze ? <CanonicalCephDiscard patientId={patientId} ownerKey={ownerKey} draftId={feed.analyses.find(row => row.status === "draft")?.id ?? null}
+        refresh={() => { setFeed(null); setRefresh(value => value + 1); }} onDiscarded={() => { setNotice("رُفضت المسودة وسُجّل أثرها؛ بقيت بياناتها محفوظة."); setFeed(null); setRefresh(value => value + 1); }} /> : null}
     </div>:null}
   </section>;
 }

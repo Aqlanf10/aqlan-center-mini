@@ -40,7 +40,9 @@ it("HTTP: owner/all/own read the exact clinical snapshot; independent grant and 
 it("HTTP: reads and canonical rejected PATCH/DELETE preserve exact clinical rows, finance and audit",async()=>{
  const session=await journey.login("owner"),sql="SELECT (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM ceph_analyses a) studies,(SELECT jsonb_agg(to_jsonb(m) ORDER BY id) FROM ceph_measurements m) measures,(SELECT jsonb_agg(to_jsonb(d) ORDER BY analysis_id) FROM ceph_diagnoses d) diagnoses,(SELECT count(*) FROM invoices)::int invoices,(SELECT count(*) FROM audit_log)::int audits",before=(await journey.db.query(sql)).rows;
  expect((await journey.api(`/api/ceph/${ids.completed}`,session.cookie)).status).toBe(200);
- for(const method of ["PATCH","DELETE"]){const r=await journey.api(`/api/ceph/${ids.completed}`,session.cookie,{method,body:JSON.stringify({diagnosis:{finalDx:"SYN forbidden"}})});expect([401,403]).toContain(r.status);}
+ const patch=await journey.api(`/api/ceph/${ids.completed}`,session.cookie,{method:"PATCH",body:JSON.stringify({diagnosis:{finalDx:"SYN forbidden"}})});expect([401,403]).toContain(patch.status);
+ const malformed=await journey.api(`/api/ceph/${ids.completed}`,session.cookie,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({diagnosis:{finalDx:"SYN forbidden"}})});expect(malformed.status).toBe(400);
+ const completed=await journey.api(`/api/ceph/${ids.completed}`,session.cookie,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({expectedVersion:"0".repeat(64),note:null})});expect(completed.status).toBe(409);expect((await completed.json()).code).toBe("ceph_discard_conflict");
  expect((await journey.db.query(sql)).rows).toEqual(before);expect(await journey.ddlLog()).toEqual([]);
 });
 async function openStudy(page:import("playwright").Page,key:Key="own",signed=false){

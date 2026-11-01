@@ -1,0 +1,32 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts (30 tests | 1 failed) 14283ms
+   × scope change during the patient wait prevents a stale discard 373ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ceph-discard-canonical-command.test.ts > scope change during the patient wait prevents a stale discard
+TypeError: fx.permissions is not a function
+ ❯ __tests__/postgres/ceph-discard-canonical-command.test.ts:143:131
+    141|     await gate.query("COMMIT"); await expect(pending).rejects.toThrow(…
+    142|     expect((await status(s)).status).toBe(kind === "source" ? "complet…
+    143|   } finally { await gate.query("ROLLBACK"); gate.release(); await pend…
+       |                                                                                                                                   ^
+    144| });
+    145| it("uses one admitted connection without a legacy initializer or post-…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 107 passed (108)
+   Start at  08:56:24
+   Duration  44.58s (transform 3.41s, setup 0ms, import 5.39s, tests 37.60s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

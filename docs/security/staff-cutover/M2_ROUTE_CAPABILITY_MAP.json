@@ -437,8 +437,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice47: current clinical.ceph.analyze and patient scope; draft-only audited soft discard. Shared identity fence, post-patient-wait authority, locked same-patient references and child rows, opaque observation of parent/landmark/measurement/diagnosis versions. Original status/note rule, atomic canonical audit, approved history retained. Bounded explicit version/note request, no auto replay; list-level uncertain-outcome recovery survives a vanished draft. Legacy route/audit semantics preserved; proven failed legacy transaction now rolls back before releasing or discards an uncertain lease. Local implementation, final gates/review separate."
  },
  {
   "route": "/api/ceph/[id]",

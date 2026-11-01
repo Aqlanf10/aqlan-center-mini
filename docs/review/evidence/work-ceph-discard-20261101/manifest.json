@@ -1,0 +1,89 @@
+{
+  "format": "work-ceph-discard-evidence-v1",
+  "baseRevision": "01a75969c19cdc3b935c6237ce80570077ab2c9d",
+  "sourceRevision": null,
+  "buildId": "7VhnR7xAAIIUis6j-UgVq",
+  "results": {
+    "postgres": {
+      "passed": 108,
+      "files": 5,
+      "newCanonical": 31,
+      "legacyCleanup": 1
+    },
+    "httpBrowser": {
+      "passed": 53,
+      "files": 5,
+      "newJourneys": 15
+    },
+    "unitGuards": {
+      "passed": 29,
+      "files": 3,
+      "newParser": 19
+    },
+    "build": "passed",
+    "typecheck": "passed",
+    "fullLint": {
+      "errors": 0,
+      "warnings": 345
+    },
+    "sourcePreservation": 24,
+    "historicalSourceHashes": 572,
+    "fullUnit": {
+      "passed": 14432,
+      "files": 855
+    },
+    "fullPostgres": "running",
+    "exactHeadCI": "unpublished",
+    "independentReview": "pending",
+    "actualDocker": "blocked by previously enforced Alpine destination refusal",
+    "moneyGuard": "passed"
+  },
+  "sourceSha256": {
+    "lib/canonical-ceph-discard-command.ts": "de47a834042028dac0dcd44241cccec23afcae34262357c48994436c95bd998b",
+    "lib/canonical-ceph-draft-version.ts": "317d88acb6f75ee5c67addd8399de0d52d8aca17b36337b63bf83be9ecd00f1a",
+    "lib/canonical-ceph-reads.ts": "e91f2ef3b9ce1c59fff9656db020622ddb77cc8a095eab1e4050ebb590c70fcb",
+    "lib/canonical-ceph-projection.ts": "146e53a579b9b4f15a62adff6007ed78dbdc66c2c2430519688c9b465ddaeb31",
+    "lib/db.ts": "773201443c3a7f7570fa3f217abfd1ae9a100da655d5d468303358a01c1a9908",
+    "app/api/ceph/[id]/route.ts": "d76237e534ec11c14cbb9d95157e72b83949dcbc8a6a549319855b5940f2a10e",
+    "components/patient/CanonicalCephDiscard.tsx": "2320a1dedf189a3fd86f2e65a385177e9461973cd1adaf2fa0ba81a50f084c17",
+    "components/patient/CanonicalCephStudies.tsx": "881c2e6842405ea3dd996f2bb1342471665408e58cd856787cedbe97474e5bb3",
+    "__tests__/canonical-ceph-discard-command.test.ts": "6cd0fcd2efe2675ff3eabb6d5205f94f2f12631a6d1328de09dc75092c864f61",
+    "__tests__/postgres/ceph-discard-canonical-command.test.ts": "7fc8755ecbac03aebddaf766321e08fcdbe4ebf8d52a629103b3fc494f76aeb4",
+    "__tests__/postgres/ceph-discard-legacy-cleanup.test.ts": "231deaeae891eaaaa07ecde2675630b55b1407235188c7b911371ae7208ec8c5",
+    "__tests__/security-http/canonical-ceph-discard-journey.test.ts": "be51573cb9d15ff3226fc6864f943575027cb35a5fcf5a0dc763bd6a4823a1d0",
+    "__tests__/security-http/canonical-ceph-study-journey.test.ts": "65c340a9d4afab0e37549fa9820894ad39e50403b1afb9de8b4f68e0fe01f4fa",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "dfdb5b6ba09c100519fa31c90ce88f81f1b20fcb7830c090f1dc79b7cb180da4",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "0fe5ea48652b55f5de572a70e615538dfcdf4cccb4cb07ba37c07eb214c19847",
+    "docs/security/staff-cutover/inventory.json": "79b4f5e45ff93bc90092d8bb4cc93a27fce8c642ccf87a740491c9bdf589c7e2",
+    "docs/review/work-ceph-discard-slice47-20261101.md": "0638a6c995f9652947e5bea272ba2a5487f909e1b2286d111b5c41fe30819d19",
+    "docs/security/staff-cutover/HANDOFF.md": "d8adaf2faed587501d0de9b5391f27ff7bc80a3b92d2f2f87f3db8c4d56b0a4c",
+    "docs/review/work-remaining-plan-20261101.md": "c66b699e208978a300faa23782cfafbf3fd218643b6f1569e7c6770294984add"
+  },
+  "artifacts": {
+    "ceph-discard-390.png": "4f35bea79b2ed502c58567817a6273ef7fc24d9e28bed19d5ed9ebb2cc3e309f",
+    "slice47-before-http.log": "b6076e03932338fc36953e50ab5f0eb8056d055dfb0797dceae1c05dddb298d1",
+    "slice47-body.log": "388be5d350541a20fc819dfa3ea0e5ad3d85744008c0be0fb09aa5493a7c5163",
+    "slice47-build-final.log": "f35597c567121de301f6b41971bc60568ef1940e2fc5ebca7677a26b53cc02ab",
+    "slice47-build-first.log": "033d28820ea42486a61054f3855614afc996697746d825409c8e327ae329142a",
+    "slice47-http-final.log": "05024a70b5d45dac1c2f2a443725fe1c98027555032e01e4c48712aa06de79e2",
+    "slice47-http-first.log": "aa80c1a89f68a04f6aa0373457614700830f7155b6542b651792f227d32fccd8",
+    "slice47-inventory-final.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice47-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice47-legacy-before-product-pool.log": "1147a4e1659dd160ff44861a7f324b34f9769285d0f65915b931956e430c1659",
+    "slice47-legacy-before.log": "71af7587250c0498e363fd6377be2b5479e391712d4487feba53b6d3509ab9a7",
+    "slice47-lint-full.log": "e1a0d597ad0ae88ec64808de7d4fd59d090df5fb1c70baaeecdc10ee7c60d89a",
+    "slice47-money-final.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice47-pg-expanded.log": "a96cec3ceb01a7f8a5da4b41fade7e137c88231c4d40464130f57e9d6574237e",
+    "slice47-pg-final.log": "12519a5e7e561e4913dedcaa787e5b3aba69f39e6f492dad7272de56e58e400f",
+    "slice47-pg-first.log": "04d6d6522003f05179954968794ca8d37d1ea5d6594488a1c75aa21f0bd7ba00",
+    "slice47-source-proof-final.json": "f2e76be5855424a2012e511169464130e8e29095e231bbd44f601c013f3b678f",
+    "slice47-source-proof.json": "b1fcf52dcb4d617d3ee57e67d9c19fbee72475cd8a27ff818ca0a3a76d4cbaa0",
+    "slice47-types-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice47-types-first.log": "91aed0ac14b2839389fb290d96b981fd8dcdf59396064e88d1a310f87a7546cf",
+    "slice47-unit-first.log": "80d66858ca09b46ba55f99364c3671f091f411c5e38948d7fd38ed425f87a507",
+    "slice47-unit-full.log": "cfd01c8389b482093ee8316bb80c2bcd00c11843b9c489368a42da3add5694af",
+    "slice47-unit-guards-final.log": "48bc5028967a8769ed8308b99cc8f744eb6e6ae164b9b7a1046704f75ad25ee3",
+    "slice47-unit-guards.log": "24374b0ce4f7e402c7fa540bc61756aefad54ac16869b18abb1b2c4be625f7e6",
+    "verify-slice47.py": "14ef1db35040db00a294dd05f16a24bfeecd75116bf9d0533e6d7fae56940994"
+  }
+}
