@@ -102,11 +102,19 @@ export async function verifyLintToolingRuntime(projectRoot) {
     if (relative.endsWith(".nft.json")) {
       const trace = JSON.parse(bytes.toString("utf8"));
       assert(record(trace) && trace.version === 1 && Array.isArray(trace.files) && trace.files.length > 0 && trace.files.every(input => typeof input === "string"), `malformed NFT metadata: ${relative}`);
-      for (const input of trace.files) {
-        assert(!toolingSourcePath(input), `tooling NFT input: ${input}`);
-        const physical = await realpath(path.resolve(path.dirname(file), input));
-        assert(!toolingSourcePath(physical), `tooling physical NFT input: ${input}`);
-        await inspectAncestorManifests(physical, root);
+      // Every occurrence retains its own path resolution and ancestor checks.
+      // Only independent read-only work overlaps; no cache, skipped duplicate,
+      // weakened assertion or changed build/provenance boundary is introduced.
+      for (let offset = 0; offset < trace.files.length; offset += 8) {
+        const checks = await Promise.allSettled(trace.files.slice(offset, offset + 8).map(async input => {
+          assert(!toolingSourcePath(input), `tooling NFT input: ${input}`);
+          const physical = await realpath(path.resolve(path.dirname(file), input));
+          assert(!toolingSourcePath(physical), `tooling physical NFT input: ${input}`);
+          await inspectAncestorManifests(physical, root);
+        }));
+        // Drain the whole bounded group before surfacing its first rejection;
+        // there are no unobserved promises left behind on a refused artifact.
+        for (const check of checks) if (check.status === "rejected") throw check.reason;
       }
       traces++;
     }
