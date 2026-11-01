@@ -1,0 +1,85 @@
+{
+  "format": "work-ortho-coverage-evidence-v1",
+  "baseRevision": "327b12fba84049e2b0f5e4e65fbd48445da42386",
+  "sourceRevision": null,
+  "buildId": "krjMdegCPffqpvKRweu6l",
+  "results": {
+    "focusedPostgres": {
+      "passed": 34,
+      "files": 4,
+      "newCanonical": 25
+    },
+    "httpBrowser": {
+      "passed": 35,
+      "files": 4,
+      "newJourneys": 10
+    },
+    "unitGuards": {
+      "passed": 32,
+      "files": 3,
+      "newProjectionQuery": 22
+    },
+    "build": "passed",
+    "typecheck": "passed",
+    "fullLint": {
+      "errors": 0,
+      "warnings": 345
+    },
+    "rawBodyGuard": "passed",
+    "sourcePreservation": 21,
+    "historicalSourceHashes": 591,
+    "fullUnit": "running",
+    "fullPostgres": "running",
+    "runtimeProvenance": "running",
+    "exactHeadCI": "not published",
+    "independentReview": "pending",
+    "actualDocker": "blocked by prior enforced Alpine destination refusal"
+  },
+  "sourceSha256": {
+    "__tests__/canonical-ortho-coverage-projection.test.ts": "eacc609048e6d73e7f359254a880975d0525e832d5f7ed9df3ca5a124500ccf3",
+    "__tests__/fixtures/canonical-ortho-coverage.ts": "58b161b015b342fe60f87f05a17ad41ddc871ca97138661e191062d9e1766bee",
+    "__tests__/postgres/ortho-canonical-coverage.test.ts": "1db93530e23706e1695ffb07805c531554b187360f0813b412b5c2c4b3ffa418",
+    "__tests__/security-http/canonical-ortho-coverage-journey.test.ts": "5e5117a78f1cf617aeed8e98e0616e2911cad66cde2663929649c7886462fa51",
+    "app/api/ortho/[id]/followup-coverage/route.ts": "6c54e4a8eb7f492e320a4cd6dd7dbf25c2c320f41b07c3f7cfae2030d39c030a",
+    "components/patient/CanonicalOrthoCases.tsx": "cf13022d8d983cb311da349f08e57d48654f49d13eace262cb285908d9d65138",
+    "components/patient/CanonicalOrthoCoverage.tsx": "183171388bd030c0dcb6afe2e609135e5962764af57f610c07804b4b1480ecaa",
+    "components/patient/CanonicalOrthoDetail.tsx": "95ee3752435cbc79f5d96e26f800d3cd9098bbba682260ba74e2a030c79b2a61",
+    "components/patient/CanonicalPatientProfile.tsx": "6af96d4467758ead3dc4d04f00b74406e1262290d27e34fcc85c5c68f8c14fa5",
+    "docs/review/work-ortho-coverage-slice48-20261101.md": "a2f592a0f9dc13c4b524d7bf12c57c9ad703289d186cf01c98bf703e0abdc300",
+    "docs/review/work-remaining-plan-20261101.md": "cf9b560495a5388b6e515246fad41b54572f35e482ca349edcdae8f8934b0854",
+    "docs/security/staff-cutover/HANDOFF.md": "aeb431a45f5951572c62e310a90e4d65a8629dca72e27470a6707d0f0575b8dd",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "c1953b0f498c1093f21daabe82f23e03e82473e6d5ff4566352bdaf62fcd0975",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "d9b964ac3b652a3db98ac6c140a79b3e2b116500a604776b4cee7fdc8dae9162",
+    "docs/security/staff-cutover/inventory.json": "d3bcef0d87df1af3901f4251a496659f63e745cac2768de7ef321b5d8bb60dcf",
+    "lib/canonical-ortho-coverage-projection.ts": "f79985b4591dce22841a2b331ff16f3f8001ddedfef4269858af2d517c0ba028",
+    "lib/canonical-ortho-coverage.ts": "77ac4792a54635b52c729efee086c19bfb9d01965fcc26981fd3d09bb1d64664",
+    "lib/canonical-record-reads.ts": "d0d0429eacf7d0356f1bb45f1defbda0f064db3a13724ce15685e0a4a3736417",
+    "lib/ortho-followup-coverage-db.ts": "404698fc1ba0530102c21e19f703bfe8a33a14efb781323eaebb27492f2eece0"
+  },
+  "artifacts": {
+    "ortho-coverage-390.png": "e103e258d5ecd29330c3d9cc33467400daf811159a0c0177a986b7cf3ec4e2f5",
+    "slice48-body.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice48-build-first.log": "bb1559f1a6b291b8d2c9d8a5074b601e47c5a4bf98f47af12096e01d1e571604",
+    "slice48-http-before.log": "abce0db63a01ada9e32b98cb2e503451f3eda351b49466c758e10a060fcd6184",
+    "slice48-http-final.log": "725ab6ae343a324781eb62b89a5f4ae64c0f32c2874b7eeea76a110fc46f96fa",
+    "slice48-http-first.log": "8efc101aaec5dede31850c2a366f1d427b231a7cf3f8a7f510d6646c1fc68647",
+    "slice48-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice48-lint-full.log": "231f738bd10e3cf6a1b867cc5a2d5f4c4221a3d0fc9ea48443e1a3f4e3101469",
+    "slice48-pg-expanded.log": "707b9e5156b62c253e52ece3e9bb1bb7a05260206d8f904c201fdf39cc8997f1",
+    "slice48-pg-first.log": "36b3da7a35472d2109ac7e731d50c9b9dd0194dba08970d9ff51fcb72da3bc48",
+    "slice48-pg-second.log": "3fb701319eeada75bc47f7df29c6695fabb31dbb0c21be66f67c0cd468875032",
+    "slice48-pg-third.log": "3fbad78a65b18d862e2abf191c8a2710c1d81b864a350ca9284600130a2a17cc",
+    "slice48-source-proof.json": "2cb663ebb50a034b9b376e2009493ead4d0e5146dc6c4d4fc8919b0c0bc6ff2a",
+    "slice48-types-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice48-types-first.log": "2525fe8f496cdf16acf3556ed7109c5272c134924e5dd781d34655879e140b84",
+    "slice48-types-second.log": "b3ebd1f81bd03d1cad95617a98ce493dace286be6d832895c895690bccbadbb0",
+    "slice48-unit-first.log": "6b7431813336bc4efe1c85a870adf44c13e447906a8143ce916cecc74bc54e20",
+    "slice48-unit-guards-first.log": "10f8f460b5db87b1b9b4193260fc8b517a326e73384f270aec6f40ab93a896df",
+    "verify-slice48.py": "96a6c9c03068dcb22c615ee916deee69c4f9fa2c9ede42ebae52f99a449277b7",
+    "slice48-build-first.log.gz": "c6092c58d88c6e5913d380dc982c6030691b72d270957a62bfd42cca88efc32d"
+  },
+  "artifactNormalization": {
+    "slice48-build-first.log": "Trailing terminal progress whitespace normalized for git; byte-exact original retained as slice48-build-first.log.gz",
+    "originalBuildLogSha256": "3d98e8e5db8bb8d960e57bf9a82280ba49f1bbf9353e18d80290360bc21c1b71"
+  }
+}

@@ -2,14 +2,14 @@ import { caseSiteFits, validateLineSite } from "./invoice-clinical-linkage";
 import { createHash } from "node:crypto";
 import type { SessionPayload } from "./auth";
 import { ensureSchema, getPool, insertAuditRow, PLAN_ITEM_PREBILLED_SQL, PLAN_ITEM_FINANCIAL_REVIEW_SQL,
-  PLAN_ITEM_LEGACY_LINEAGE_SQL, usesSharedLocalDatabaseConnection, type DbClient, type DbPool } from "./db";
+  PLAN_ITEM_LEGACY_LINEAGE_SQL, usesSharedLocalDatabaseConnection, type DbClient } from "./db";
 import { revalidateSessionInTransaction } from "./session";
 import { canAccessPatient } from "./patient-access";
 import { withFinancialReadSnapshot } from "./financial-read-snapshot";
 import { parseFollowupCoverageCommand, type FollowupCoverageRead, type FollowupCoverageRevision, type FollowupCoverageCommand,
   type FollowupSourceChoice, type FollowupSourceIdentity } from "./ortho-followup-coverage";
 
-type Runner = DbClient | DbPool;
+type Runner = Pick<DbClient, "query">;
 type SourceRow = FollowupSourceIdentity & { invoiceNumber:string;serviceName:string; snapshot:Record<string,unknown>; valid:boolean; arches:string;clinicalSite:string|null;toothCode:number|null };
 type Stored = { id:string;version:number;supersedes_revision_id:string|null;patient_id:number;ortho_case_id:number;clinical_case_id:number;
   plan_id:number;plan_item_id:number;invoice_id:number;source_fingerprint:string;decision:"included"|"excluded";
@@ -43,8 +43,7 @@ export async function followupCoverageAvailable(db:Runner):Promise<boolean>{
 }
 /** Stable commercial/source identity; payment progress and treatment progress do
  * not change inclusion. Foreign, cancelled, conflicting and unverified lineage do. */
-async function sourceRows(db:Runner,patientId:number,caseId:number):Promise<SourceRow[]>{
-  const {rows}=await db.query<SourceRow>(`SELECT c.patient_id AS "patientId",c.id AS "orthoCaseId",cc.id AS "clinicalCaseId",
+const FOLLOWUP_SOURCE_SQL = `SELECT c.patient_id AS "patientId",c.id AS "orthoCaseId",cc.id AS "clinicalCaseId",
     t.id AS "planId",i.id AS "planItemId",inv.id AS "invoiceId",inv.invoice_number AS "invoiceNumber",i.service_name AS "serviceName",c.arches,cc.site AS "clinicalSite",i.tooth_code AS "toothCode",
     (t.status <> 'cancelled' AND i.status <> 'cancelled' AND inv.status <> 'cancelled'
       AND ${PLAN_ITEM_PREBILLED_SQL} AND NOT ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AND NOT ${PLAN_ITEM_LEGACY_LINEAGE_SQL}
@@ -64,7 +63,12 @@ async function sourceRows(db:Runner,patientId:number,caseId:number):Promise<Sour
     JOIN plan_items i ON i.case_id=cc.id AND i.category='ortho'
     JOIN treatment_plans t ON t.id=i.plan_id AND t.patient_id=c.patient_id
     JOIN invoices inv ON inv.id=i.billed_invoice_id AND inv.patient_id=c.patient_id
-    WHERE c.id=$1 AND c.patient_id=$2 ORDER BY i.id,inv.id`,[caseId,patientId]);
+    WHERE c.id=$1 AND c.patient_id=$2 ORDER BY i.id,inv.id`;
+async function sourceRows(db:Runner,patientId:number,caseId:number):Promise<SourceRow[]>{
+  const {rows}=await db.query<SourceRow>(FOLLOWUP_SOURCE_SQL,[caseId,patientId]);
+  return validateSources(rows);
+}
+function validateSources(rows:SourceRow[]):SourceRow[]{
   return rows.map(r=>{
     const site=validateLineSite({category:"ortho",toothCode:r.toothCode,scope:r.arches});
     return {...r,valid:r.valid&&site.ok&&caseSiteFits("orthodontics",r.clinicalSite,site.site)};
@@ -118,6 +122,36 @@ export async function readFollowupCoverage(input:{session:SessionPayload;patient
       applicable:!!head&&sources.some(r=>r.valid&&matches(r,sourceOf(head))&&hash(r.snapshot)===head.source_fingerprint),
       sources:sources.filter(r=>r.valid).map(choice)};
   },usesSharedLocalDatabaseConnection());
+}
+/** Already admitted caller only: bounded source materialization on its owning RR
+ * connection. Shares the exact commercial SQL, site validation and fingerprint
+ * with the compatibility writer; no initializer, transaction or authority fallback. */
+export async function readFollowupCoverageSnapshotWith(db:Runner,patientId:number,caseId:number){
+  const enabled=await followupCoverageAvailable(db);
+  if(!enabled)return {enabled,current:null,applicable:false,sources:[] as FollowupSourceChoice[]};
+  const {rows:[stored]}=await db.query<{oversized:boolean;head:Stored|null}>(`WITH head AS (
+    SELECT ${columns} FROM ortho_followup_coverage_revisions WHERE ortho_case_id=$1 ORDER BY version DESC LIMIT 1
+  ) SELECT octet_length(to_jsonb(head)::text)>16384 AS oversized,
+    CASE WHEN octet_length(to_jsonb(head)::text)<=16384 THEN to_jsonb(head) ELSE NULL END AS head FROM head`,[caseId]);
+  if(stored?.oversized)throw new Error("STAFF_READ_READ_FAILED");
+  const head=stored?.head??null;
+  if(head&&(head.patient_id!==patientId||head.ortho_case_id!==caseId||!Number.isSafeInteger(head.version)||head.version<1
+    ||!["included","excluded"].includes(head.decision)||typeof head.reason!=="string"||head.reason.length>600
+    ||typeof head.created_by!=="string"||head.created_by.length>1000||!Number.isFinite(new Date(head.created_at).getTime())))
+    throw new Error("STAFF_READ_READ_FAILED");
+  // SQL refuses the whole result before sending a large JSON value to Node. It
+  // never truncates candidates and falsely concludes a saved decision is stale.
+  const {rows:[bounded]}=await db.query<{oversized:boolean;sources:SourceRow[]|null}>(`WITH candidates AS MATERIALIZED (
+    ${FOLLOWUP_SOURCE_SQL} LIMIT 257
+  ), sized AS (SELECT *,octet_length(to_jsonb(candidates)::text) AS bytes FROM candidates)
+  SELECT count(*)>256 OR COALESCE(sum(bytes),0)>2097152 AS oversized,
+    CASE WHEN count(*)<=256 AND COALESCE(sum(bytes),0)<=2097152
+      THEN COALESCE(jsonb_agg(to_jsonb(sized)-'bytes' ORDER BY "planItemId","invoiceId"),'[]'::jsonb) ELSE NULL END AS sources FROM sized`,[caseId,patientId]);
+  if(!bounded||bounded.oversized||!Array.isArray(bounded.sources))throw new Error("STAFF_READ_READ_FAILED");
+  const sources=validateSources(bounded.sources);
+  return {enabled,current:head?project(head):null,
+    applicable:!!head&&sources.some(r=>r.valid&&matches(r,sourceOf(head))&&hash(r.snapshot)===head.source_fingerprint),
+    sources:sources.filter(r=>r.valid).map(choice)};
 }
 type CoverageCommandInput={session:SessionPayload;patientId:number;orthoCaseId:number;command:unknown};
 function exactCommand(input:CoverageCommandInput){

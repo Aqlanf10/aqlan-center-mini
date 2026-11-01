@@ -172,7 +172,7 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
 
       <ContactConsentPanel patientId={patientId} canRecord={canEdit} />
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.ortho.view") && (session.patientScope === "own" || session.patientScope === "all"))
-        ? <CanonicalOrthoCases key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
+        ? <CanonicalOrthoCases key={`${session.username}:${session.patientScope}:${session.capabilities?.join(",")}:${patientId}`} patientId={patientId} canReadCoverage={session.isOwner === true || session.capabilities?.includes("finance.agreements.manage") === true} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.xrays.view") && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalCephStudies key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId} ownerKey={session.username} canAnalyze={session.isOwner === true || !!session.capabilities?.includes("clinical.ceph.analyze")} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.plans.view") && (session.patientScope === "own" || session.patientScope === "all"))

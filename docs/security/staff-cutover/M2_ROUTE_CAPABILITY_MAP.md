@@ -34,19 +34,19 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 276 |
+| existing | 275 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 68 |
+| canonical-done | 69 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 40–42 are published at e09263fa with successful exact-head CI; slices 43–46 are committed locally with separate gates. Slice47 is local and its full gates remain pending. Published map: 63 canonical-done / 281 existing; local map: 68 / 276. Neither state is whole-system acceptance.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 43–47 are published at `327b12fb` with completed local gates; exact-head CI and independent review are pending. Slice 48 is local and its full gates remain pending. Published map: 68 canonical-done / 276 existing; local map: 69 / 275. Neither state is whole-system acceptance.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -620,3 +620,7 @@ POST `/api/ceph/[id]/duplicate` requires current analysis authority, its existin
 ### Slice 47 — observed cephalometric draft discard
 
 DELETE `/api/ceph/[id]` uses existing analysis authority and patient scope. The saved draft receives an opaque version of its parent and saved child rows, inside the existing RR snapshot; completed payloads are unchanged and older versionless payloads remain read-only. A fresh explicit intent must match that version after patient/source/reference/child locks. Original draft-only soft-discard and note rules remain; all saved history stays in place. Canonical effect and audit are atomic. The original legacy post-commit audit remains, with a separately reproduced failed-transaction cleanup defect repaired. List-level pending recovery persists after a draft disappears, never treats 404 as a specific request receipt, and never automatically resends. No approved-history, image, financial or migration change. Source conversion is not final acceptance.
+
+### Slice 48 — saved routine followup agreement coverage
+
+GET `/api/ortho/[id]/followup-coverage` requires independent `finance.agreements.manage` and patient scope. All authority, activation, saved decision and current commercial source checks use one owning RR read-only connection. Original source SQL, validity, site rules and fingerprints are shared unchanged with compatibility workflows. The full candidate context is bounded at 256 rows / 2 MiB; excess refuses without a partial applicability answer. Decision text and provenance are explicit fields; invoice names/references require independent `finance.invoices.view`. No commercial snapshot, totals, clinical detail, receipt or edit grant is projected. POST/PUT and signed proof are unchanged. On-demand read-only UI clears on refresh/hide/revocation and ignores closed-response completions; it is available in the clinical case only when both existing clinical visibility and the independent agreement grant permit it. This does not add a financial-only navigation screen or activate the writer.

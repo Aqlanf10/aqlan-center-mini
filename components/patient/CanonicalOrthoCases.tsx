@@ -6,7 +6,7 @@ import { APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, PHASE_LABEL, usesArch
 
 /** Read-only summary. Opening this section never mounts legacy editors or requests
  * their plan, image, assessment or financial endpoints. */
-export function CanonicalOrthoCases({ patientId }: { patientId: string }) {
+export function CanonicalOrthoCases({ patientId, canReadCoverage = false }: { patientId: string; canReadCoverage?: boolean }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -78,7 +78,7 @@ export function CanonicalOrthoCases({ patientId }: { patientId: string }) {
               </> : null}
             </dl>
             {row.baselineKind === "legacy" ? <p className="mt-2 text-xs text-slate-600">علاج بدأ قبل النظام</p> : null}
-            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} />
+            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} canReadCoverage={canReadCoverage} />
           </li>)}</ul>}
       {feed?.hasMore ? <p role="status" className="text-sm text-amber-800">تظهر أحدث 300 حالة فقط؛ هذه ليست القائمة الكاملة.</p> : null}
     </div> : null}

@@ -1,11 +1,12 @@
 "use client";
+import { CanonicalOrthoCoverage } from "./CanonicalOrthoCoverage";
 import { CanonicalOrthoStrategy } from "./CanonicalOrthoStrategy";
 import { CanonicalOrthoAssessment } from "./CanonicalOrthoAssessment";
 import { useEffect, useId, useState } from "react";
 import { PHASE_LABEL, RETAINER_LABEL, type OrthoClinicalDetail } from "@/lib/ortho";
 
 /** On-demand native clinical record. No old editors or independent image/finance APIs. */
-export function CanonicalOrthoDetail({ patientId, caseId }: { patientId: string; caseId: number }) {
+export function CanonicalOrthoDetail({ patientId, caseId, canReadCoverage = false }: { patientId: string; caseId: number; canReadCoverage?: boolean }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -81,6 +82,7 @@ export function CanonicalOrthoDetail({ patientId, caseId }: { patientId: string;
         {feed.hasMore ? <p role="status" className="text-amber-800">تظهر أحدث 100 شدّة فقط؛ هذا ليس السجل الكامل. العدد أعلاه يشمل جميع الشدّات المسجلة.</p> : null}
         <CanonicalOrthoAssessment patientId={Number(patientId)} caseId={caseId} />
         <CanonicalOrthoStrategy patientId={Number(patientId)} caseId={caseId} />
+        {canReadCoverage ? <CanonicalOrthoCoverage patientId={Number(patientId)} caseId={caseId} /> : null}
       </>}
     </div> : null}
   </div>;
