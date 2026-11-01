@@ -1,3 +1,7 @@
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { canonicalStrategyQuery, readCanonicalOrthoStrategy } from "@/lib/canonical-ortho-strategy";
+import { OrthoStrategyStoreFault } from "@/lib/ortho-treatment-strategy-store";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, getOrthoCase } from "@/lib/db";
 import { guardPatient } from "@/lib/case-route";
@@ -36,6 +40,17 @@ async function scope(context: Context, write: boolean) {
 
 /** Authorized history/current or one exact saved revision. Never creates its bridge. */
 export async function GET(request: Request, context: Context) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const { caseId, revisionId } = canonicalStrategyQuery((await context.params).id, new URL(request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoStrategy(selected.handle, caseId, revisionId), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof OrthoStrategyStoreFault) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر قراءة خطة الحالة؛ لم يُعتبر السجل فارغًا.");
+    }
+  }
   try {
     const owner = await scope(context, false);
     if (!owner.ok) return owner.response;

@@ -2831,8 +2831,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 32: read:ortho.strategy requires clinical.ortho.view and current patient scope in one owning RR READ ONLY snapshot. Reuses validated immutable schema-1 lineage with 5000 revisions/8 MiB and a 128-reference union bound; no silent history truncation. Native historical clinical text is retained. Plan links require independent clinical.plans.view for latest and exact historical selections; current foreign references contribute no content. No editor choices, finance, source-picker data, bridge creation or writes. On-demand reference-only UI clears on refresh/hide/denial, with late-response ownership. Legacy GET and POST bodies remain unchanged."
  },
  {
   "route": "/api/ortho/[id]/strategy",
@@ -4791,7 +4791,13 @@
   "scope": "appointment",
   "status": "canonical-done",
   "note": "M2 slice 25: record read read:provider-blocks in one owning snapshot. With providerId: that doctor's blocks on the day when inside the appointment scope (own = the actor's party only; another doctor answers like one without blocks). Without providerId: the day panel — every in-scope active doctor and its blocks. canManage = appointments.schedule.manage (display only).",
-  "projection": {"legacy": "every admitted role read any doctor's blocks by id.", "groups": {"schedule": "block times and reason of in-scope doctors; doctor names for the day panel"}, "rows": "appointment scope all: every active doctor; own: the actor's own party; none: refused"}
+  "projection": {
+   "legacy": "every admitted role read any doctor's blocks by id.",
+   "groups": {
+    "schedule": "block times and reason of in-scope doctors; doctor names for the day panel"
+   },
+   "rows": "appointment scope all: every active doctor; own: the actor's own party; none: refused"
+  }
  },
  {
   "route": "/api/provider-blocks",
@@ -4834,7 +4840,13 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 24: record read read:recall (patient scope; own = the patient list's condition applied in SQL before the limits) in one owning snapshot; canRecord = appointments.create (display only).",
-  "projection": {"legacy": "every admitted role read every patient's open past bookings, missed appointments and lapsed patients.", "groups": {"identity": "name, phone, dates, note and doctor of the rows inside the patient scope"}, "rows": "patient scope all: every row; own: the clinician's patients only; none: refused"}
+  "projection": {
+   "legacy": "every admitted role read every patient's open past bookings, missed appointments and lapsed patients.",
+   "groups": {
+    "identity": "name, phone, dates, note and doctor of the rows inside the patient scope"
+   },
+   "rows": "patient scope all: every row; own: the clinician's patients only; none: refused"
+  }
  },
  {
   "route": "/api/recall",

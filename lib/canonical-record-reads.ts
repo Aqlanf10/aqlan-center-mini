@@ -20,6 +20,8 @@ export interface CanonicalRecordReadRule {
 }
 
 export const CANONICAL_RECORD_READS = Object.freeze({
+  /** GET /api/ortho/[id]/strategy: saved clinical strategy, separate plan-link grant (M2 slice 32). */
+  "read:ortho.strategy": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ortho/[id]/assessment: immutable clinical assessment read (M2 slice 31). */
   "read:ortho.assessment": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ortho/[id]: native clinical detail only (M2 slice 30). */

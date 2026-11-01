@@ -171,7 +171,7 @@ function historyEntry(revision: StrategyRevision): OrthoStrategyHistoryEntry {
     recordedPatientId: revision.recordedPatientId,
     recordingContext: revision.recordingContext, createdAt: revision.createdAt, createdBy: revision.createdBy, reason: revision.reason };
 }
-async function validatedHistory(client: DbClient, scope: StrategyScope): Promise<{ stored: StoredRow[]; revisions: StrategyRevision[] }> {
+async function validatedHistory(client: Pick<DbClient, "query">, scope: StrategyScope): Promise<{ stored: StoredRow[]; revisions: StrategyRevision[] }> {
   // Validate the whole anchored lineage before any projection, replay or new
   // append. A plausible head must not conceal a skipped or cyclic predecessor.
   const { rows: stored } = await client.query<StoredRow>(`SELECT ${COLUMNS} FROM ortho_strategy_revisions
@@ -189,6 +189,21 @@ async function validatedHistory(client: DbClient, scope: StrategyScope): Promise
   }
   return { stored, revisions };
 }
+/** Canonical read only: bound the complete lineage before materializing it.
+ * Legacy readers/writers retain their existing transaction, decoder and lineage checks. */
+export const STRATEGY_READ_MAX_REVISIONS = 5000;
+export const STRATEGY_READ_MAX_BYTES = 8 * 1024 * 1024;
+export { StoreFault as OrthoStrategyStoreFault };
+export async function readOrthoStrategyHistoryWith(q: Pick<DbClient, "query">, scope: StrategyScope) {
+  const size = (await q.query<{ count: number; bytes: string }>(`SELECT count(*)::int AS count,
+    COALESCE(SUM(octet_length(to_jsonb(r)::text)),0)::text AS bytes
+    FROM ortho_strategy_revisions r WHERE ortho_case_id=$1`, [scope.orthoCaseId])).rows[0];
+  if (!size || size.count > STRATEGY_READ_MAX_REVISIONS || Number(size.bytes) > STRATEGY_READ_MAX_BYTES) {
+    fail(409, "strategy_history_limit", "سجل الخطة يتجاوز حد القراءة الآمنة؛ لم يُختصر التاريخ.");
+  }
+  return validatedHistory(q, scope);
+}
+
 function requirePlanLinks(authority: Authority, revisions: (StrategyRevision | null)[], command: StrategyCommand): void {
   const linked = command.rows.some(row => row.planItemIds.length > 0)
     || revisions.some(revision => revision?.rows.some(row => row.planItems.length > 0));

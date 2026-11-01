@@ -1,4 +1,5 @@
 "use client";
+import { CanonicalOrthoStrategy } from "./CanonicalOrthoStrategy";
 import { CanonicalOrthoAssessment } from "./CanonicalOrthoAssessment";
 import { useEffect, useId, useState } from "react";
 import { PHASE_LABEL, RETAINER_LABEL, type OrthoClinicalDetail } from "@/lib/ortho";
@@ -79,6 +80,7 @@ export function CanonicalOrthoDetail({ patientId, caseId }: { patientId: string;
         </li>)}</ol>}
         {feed.hasMore ? <p role="status" className="text-amber-800">تظهر أحدث 100 شدّة فقط؛ هذا ليس السجل الكامل. العدد أعلاه يشمل جميع الشدّات المسجلة.</p> : null}
         <CanonicalOrthoAssessment patientId={Number(patientId)} caseId={caseId} />
+        <CanonicalOrthoStrategy patientId={Number(patientId)} caseId={caseId} />
       </>}
     </div> : null}
   </div>;

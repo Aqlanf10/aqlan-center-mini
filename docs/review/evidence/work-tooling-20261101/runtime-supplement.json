@@ -1,0 +1,12 @@
+{
+  "head": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+  "buildId": "4U-hzgj9M-9v5nrf1Q_58",
+  "result": "passed",
+  "traceCount": 737,
+  "manifestCount": 86,
+  "sourceMapCount": 367,
+  "proofSha256": "bf08960f9f9e7e55be0f4d3e82af0c9c472d0c614e7346aaf0e6bea78be49793",
+  "scope": "exact package identities and available validated source maps; no opaque bundled-code claim",
+  "ci": "https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/41255485597",
+  "ciStatus": "in progress at supplement creation"
+}

@@ -30,16 +30,16 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 mapped route/method entries, after slice 26 on WORK)
+### Counts (383 mapped route/method entries, after slice 32 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 300 |
+| existing | 293 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 44 |
+| canonical-done | 51 |
 
 | Record scope | Routes |
 |---|---|
@@ -488,6 +488,15 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - No funding, image bytes/URLs, storage paths, source titles, unrelated notes or source-picker data. Only authorized reference ids/hashes and states are returned. `clinicalWritable=false`; editing choices are empty and explicitly incomplete. The owner retains their grants, but this route contract admits no mutation.
 - Existing assessment renderer/async hash verifier reused in explicit read-only mode beneath the case detail. No editor lifetime or POST; on-demand mount, 30-second refresh and clear on hide/focus, generation guards and 15-second read timeout. Existing legacy rendering/writers keep their default behavior. No historical result is rewritten or recalculated using a replacement engine.
 - Tests: `ortho-canonical-assessment`, `canonical-ortho-assessment-journey` (portOffset 43); report `docs/review/work-ortho-assessment-slice31-20261031.md`.
+
+### Slice 32 — saved orthodontic strategy read
+
+- `GET /api/ortho/[id]/strategy`, `read:ortho.strategy`: `clinical.ortho.view` and patient scope; optional exact positive INTEGER `revisionId`, no expansion/query alias or canonical-to-legacy fallback.
+- One owning RR READ ONLY snapshot covers fresh authority, central patient scope, unique owned orthodontic bridge, supported case state, complete saved lineage and current reference status. Missing/outside are the same 404; a legitimate absent bridge remains explicit, while existing orphaned history is rejected.
+- Existing schema-1 decoder and pure historical projection are reused. Entire history is validated before choosing a version. The canonical reader bounds history at 5000 revisions / 8 MiB and the union of linked problem/item identities at 128. Excess fails explicitly, without truncation, repair or writes.
+- Native saved problems, objectives, strategy, rationale and revision reasons are clinical documentation. Saved plan-item links require the independent `clinical.plans.view` grant; otherwise each row exposes only `planLinks:{state:"restricted"}`, with no names, IDs, counts or choices. Current foreign links contribute no content; historical text is never replaced by current names. No prices, agreements, finance, images or editor choices are queried or returned.
+- `clinicalWritable=false`, `planLinksWritable=false`, `canRevise=false`. The existing strategy reference renderer mounts on demand without an editor lifetime; 30-second/visibility/focus refresh, unmount/transport/decoder ownership, and existing 15-second timeout retire old documents. The legacy GET/POST and store reader/writer bodies remain unchanged.
+- Evidence: `ortho-canonical-strategy`, `canonical-ortho-strategy-journey` (portOffset 45), legacy strategy/union regression; `docs/review/work-ortho-strategy-slice32-20261101.md`. Source-map migration status is not activation or independent acceptance.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
