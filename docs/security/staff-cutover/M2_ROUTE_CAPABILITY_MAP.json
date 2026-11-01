@@ -530,8 +530,18 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 39: two individually patient-scoped saved studies in one fresh fenced RR READ ONLY snapshot; independent clinical.xrays.view. Explicit pair DTO, no image identity/bytes, notes, diagnosis, finance or writers. 256 landmarks/measurements and 2MiB per stored study, 2MiB output. Legacy body preserved with separately tested shared date/BIGINT ordering and approved-empty-source corrections.",
+  "projection": {
+   "legacy": "Existing authorized comparison/overlay includes document identities and current reference labels; legacy route bodies remain byte-identical. Shared ordering now consumes the real xrayDate field and exact numeric IDs; a completed empty stored set never substitutes computed values.",
+   "groups": {
+    "admission": "clinical.xrays.view plus non-none patient scope for each study; same-patient match only after both are individually authorized; foreign/missing/discarded share the existing record refusal.",
+    "comparison": "Original saved code/value pairs only, numeric difference, explicitly separate one-sided values; no invented historic norm/unit, grading, engine recalculation or replacement diagnosis.",
+    "geometry": "Existing SN transform/reference-line algorithm over saved finite landmarks/calibration; explicit derived geometry, missing/zero anchors and nonfinite output refuse. No image access or normalization that erases cranial growth.",
+    "excluded": "No document ID/URL/bytes, image dimensions, author/notes/diagnosis, raw ortho/plan links, financial or write authority."
+   },
+   "rows": "One owning fenced RR READ ONLY transaction uses the existing bounded canonical study reader twice. 256 landmarks and measurements and 2MiB source per study; 2MiB final output; patient mismatch refuses before publication. UI selection/focus/visibility/error lifetime binds both IDs and the patient."
+  }
  },
  {
   "route": "/api/ceph/superimpose",
@@ -545,8 +555,18 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 39: two individually patient-scoped saved studies in one fresh fenced RR READ ONLY snapshot; independent clinical.xrays.view. Explicit pair DTO, no image identity/bytes, notes, diagnosis, finance or writers. 256 landmarks/measurements and 2MiB per stored study, 2MiB output. Legacy body preserved with separately tested shared date/BIGINT ordering and approved-empty-source corrections.",
+  "projection": {
+   "legacy": "Existing authorized comparison/overlay includes document identities and current reference labels; legacy route bodies remain byte-identical. Shared ordering now consumes the real xrayDate field and exact numeric IDs; a completed empty stored set never substitutes computed values.",
+   "groups": {
+    "admission": "clinical.xrays.view plus non-none patient scope for each study; same-patient match only after both are individually authorized; foreign/missing/discarded share the existing record refusal.",
+    "comparison": "Original saved code/value pairs only, numeric difference, explicitly separate one-sided values; no invented historic norm/unit, grading, engine recalculation or replacement diagnosis.",
+    "geometry": "Existing SN transform/reference-line algorithm over saved finite landmarks/calibration; explicit derived geometry, missing/zero anchors and nonfinite output refuse. No image access or normalization that erases cranial growth.",
+    "excluded": "No document ID/URL/bytes, image dimensions, author/notes/diagnosis, raw ortho/plan links, financial or write authority."
+   },
+   "rows": "One owning fenced RR READ ONLY transaction uses the existing bounded canonical study reader twice. 256 landmarks and measurements and 2MiB source per study; 2MiB final output; patient mismatch refuses before publication. UI selection/focus/visibility/error lifetime binds both IDs and the patient."
+  }
  },
  {
   "route": "/api/display/notice",

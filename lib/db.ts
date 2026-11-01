@@ -24686,7 +24686,9 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1`,
     [id],
   );
-  const sealed = row.status === "completed" && ms.length > 0
+  // Completed means saved values only, even if the stored set is empty.
+  // Missing approved measurements must not become today's computed results.
+  const sealed = row.status === "completed"
     ? new Map(ms.map((measurement) => [measurement.code, measurement.value]))
     : null;
   const live = computeAll(points, row.mm_per_pixel ?? NaN);
