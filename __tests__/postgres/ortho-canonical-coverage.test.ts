@@ -33,7 +33,8 @@ afterAll(async () => { await side?.end(); await fx?.close(); });
 it.each(["own", "all", "owner"] as const)("%s reads the exact saved decision without granting clinical or invoice access", async key => {
   const result = await read(key);
   expect(result).toMatchObject({ projection: "ortho-followup-coverage", enabled: true, applicable: true, current: { id: base.revision, decision: "included", reason: "SYN سبب الاتفاق المحفوظ" } });
-  expect(Object.keys(result).sort()).toEqual(["applicable", "current", "enabled", "invoiceSources", "orthoCaseId", "patientId", "projection"]);
+  expect(Object.keys(result).sort()).toEqual(["applicable", "clinicTimeZone", "current", "enabled", "invoiceSources", "orthoCaseId", "patientId", "projection"]);
+  expect(result.clinicTimeZone).toBe(db.CLINIC_TIME_ZONE);
   expect(Object.keys(result.current!).sort()).toEqual(["createdAt", "createdBy", "decision", "id", "reason", "version"]);
   expect(JSON.stringify(result)).not.toMatch(/sourceFingerprint|commandId|250000|snapshot|tooth|private clinical|private plan|phone|medical/);
   if (key !== "owner") expect(result.invoiceSources).toEqual({ state: "restricted" });

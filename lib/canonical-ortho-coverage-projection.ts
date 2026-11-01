@@ -1,7 +1,9 @@
+import { isKnownZone } from "./clinicZone";
 /** Explicit read-only projection. Never contains the signed commercial source,
  * command receipt, financial totals, care details or an editing permission. */
 export interface CanonicalOrthoCoverage {
   projection: "ortho-followup-coverage";
+  clinicTimeZone: string;
   patientId: number;
   orthoCaseId: number;
   enabled: boolean;
@@ -12,7 +14,7 @@ export interface CanonicalOrthoCoverage {
 export function isCanonicalOrthoCoverage(value: unknown, patientId: number, caseId: number): value is CanonicalOrthoCoverage {
   if (!value || typeof value !== "object") return false;
   const v = value as CanonicalOrthoCoverage;
-  if (v.projection !== "ortho-followup-coverage" || v.patientId !== patientId || v.orthoCaseId !== caseId
+  if (typeof v.clinicTimeZone !== "string" || !isKnownZone(v.clinicTimeZone) || v.projection !== "ortho-followup-coverage" || v.patientId !== patientId || v.orthoCaseId !== caseId
     || typeof v.enabled !== "boolean" || typeof v.applicable !== "boolean" || !v.invoiceSources) return false;
   if (v.current !== null && (!v.current || typeof v.current.id !== "string" || !/^[1-9]\d*$/.test(v.current.id)
     || !Number.isSafeInteger(v.current.version) || v.current.version < 1 || !["included", "excluded"].includes(v.current.decision)
