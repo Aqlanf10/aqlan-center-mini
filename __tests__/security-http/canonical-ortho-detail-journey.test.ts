@@ -51,7 +51,7 @@ it("HTTP: anonymous, adjacent grants and scope none deny; all and owner retain t
     expect(response.status).toBe(200);
     const body = await response.json(); expect(body.case.note).toBe("SYN-hidden-clinical-note");
     expect(JSON.stringify(body)).not.toMatch(/planId|legacyFinancialMode|photos|visitId|visitSigned|invoice|balance/);
-    expect(Object.keys(body).sort()).toEqual(["projection", "case", "adjustments", "hasMore", "progress", "today"].sort());
+    expect(Object.keys(body).sort()).toEqual(["projection", "case", "adjustments", "editVersion", "hasMore", "progress", "today"].sort());
   }
 });
 it("HTTP: missing equals outside scope and URL expansions cannot fetch independent data", async () => {
@@ -72,10 +72,11 @@ it("HTTP: detail grant admits no case mutation or funding writer and GET has no 
   const sql = "SELECT (SELECT count(*) FROM ortho_adjustments)::int AS adjustments,(SELECT count(*) FROM invoices)::int AS invoices,(SELECT count(*) FROM audit_log)::int AS audits";
   const before = (await journey.db.query(sql)).rows;
   expect((await journey.api(`/api/ortho/${ids.active}`, session.cookie)).status).toBe(200);
-  for (const method of ["POST", "PATCH"]) {
-    const response = await journey.api(`/api/ortho/${ids.active}`, session.cookie, { method, body: JSON.stringify({ phase: "finishing", planId: null, note: "SYN-unwanted" }) });
-    expect([401, 403]).toContain(response.status);
-  }
+  const expectedVersion = (await (await journey.api(`/api/ortho/${ids.active}`, session.cookie)).json()).editVersion;
+  const patch = await journey.api(`/api/ortho/${ids.active}`, session.cookie, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedVersion, phase: "finishing" }) });
+  expect(patch.status).toBe(403);
+  const post = await journey.api(`/api/ortho/${ids.active}`, session.cookie, { method: "POST", body: JSON.stringify({ phase: "finishing", planId: null, note: "SYN-unwanted" }) });
+  expect([401, 403]).toContain(post.status);
   expect((await journey.db.query(sql)).rows).toEqual(before);
   expect(await journey.ddlLog()).toEqual([]);
 });

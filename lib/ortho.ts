@@ -386,6 +386,8 @@ export interface OrthoClinicalAdjustment {
   recordedBy: string;
 }
 export interface OrthoClinicalDetail {
+  /** Present on the canonical saved-detail projection; not mutation authority. */
+  editVersion?: string | null;
   projection: "case-clinical";
   case: OrthoClinicalCase;
   adjustments: OrthoClinicalAdjustment[];

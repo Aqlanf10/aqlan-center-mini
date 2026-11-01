@@ -96,7 +96,7 @@ export type AuditAction =
   | "diagnosis.create" | "ortho.book_next"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
   | "ortho.followup_coverage.append" | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
-  | "ortho.case_create" | "visit.create"
+  | "ortho.case_create" | "ortho.case_update" | "visit.create"
   | "ortho.strategy_revision" | "ortho.assessment.append"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
@@ -380,6 +380,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
   "ortho.case_create": "فتح حالة تقويم",
+  "ortho.case_update": "تحديث مرحلة أو مثبت أو إقفال حالة تقويم",
   "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
   "ortho.assessment.append": "حفظ مراجعة تقييم وقياسات الحالة التقويمية",
   "visit.create": "فتح زيارة اليوم",

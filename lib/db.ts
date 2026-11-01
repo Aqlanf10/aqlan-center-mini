@@ -24320,23 +24320,26 @@ export async function recordAdjustment(input: {
   }
 }
 
-export async function setOrthoPhase(id: number, phase: OrthoPhase): Promise<boolean> {
-  await ensureSchema();
-  const { rowCount } = await getPool().query(
+export async function setOrthoPhaseInTransaction(client: DbClient | DbPool, id: number, phase: OrthoPhase): Promise<boolean> {
+  const { rowCount } = await client.query(
     `UPDATE ortho_cases SET phase = $2 WHERE id = $1 AND status IN ('active','retention')`,
     [id, phase],
   );
   return (rowCount ?? 0) > 0;
 }
 
+export async function setOrthoPhase(id: number, phase: OrthoPhase): Promise<boolean> {
+  await ensureSchema();
+  return setOrthoPhaseInTransaction(getPool(), id, phase);
+}
+
 /** يسجّل المثبّت — وهو شرط إغلاق الحالة. */
-export async function setRetainer(input: {
+export async function setRetainerInTransaction(client: DbClient | DbPool, input: {
   id: number; retainer: RetainerType; deliveredOn: string | null;
   /** Type-only saves preserve a known date only when the current stored type matches. */
   preserveExistingDeliveryDate?: boolean;
 }): Promise<boolean> {
-  await ensureSchema();
-  const { rowCount } = await getPool().query(
+  const { rowCount } = await client.query(
     `UPDATE ortho_cases SET retainer = $2,
             retainer_on = CASE
               WHEN $4::boolean AND $2::text <> 'none'
@@ -24351,53 +24354,68 @@ export async function setRetainer(input: {
   return (rowCount ?? 0) > 0;
 }
 
+export async function setRetainer(input:  {
+  id: number; retainer: RetainerType; deliveredOn: string | null;
+  /** Type-only saves preserve a known date only when the current stored type matches. */
+  preserveExistingDeliveryDate?: boolean;
+}): Promise<boolean> {
+  await ensureSchema();
+  return setRetainerInTransaction(getPool(), input);
+}
+
 /**
  * يُغلق الحالة.
  *
  * ويشترط المثبّت: حالةٌ تُغلق بلا مثبّت هي أكثر ما يُفسد نتيجة سنتين — الأسنان
  * ترتدّ، ويعود المريض بعد عامٍ فيجد النتيجة ضاعت فيلوم المركز بحق.
  */
+export async function closeOrthoCaseInTransaction(client: DbClient, input: {
+  id: number; status: "completed" | "discontinued"; actor: string; note: string | null;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.id]);
+  if (!owner) { return { ok: false, message: "الحالة غير موجودة." }; }
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
+  const { rows } = await client.query<{ status: string; retainer: string | null }>(
+    `SELECT status, retainer FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.id],
+  );
+  if (!rows[0]) { return { ok: false, message: "الحالة غير موجودة." }; }
+
+  // التوقّف غير الإكمال: مريضٌ سافر أو انقطع تُغلق حالته بلا مثبّت — والشرط
+  // على الإكمال وحده، لأنه الادّعاء بأن العلاج انتهى كما يجب.
+  if (input.status === "completed") {
+    const guard = canComplete({
+      status: rows[0].status as CaseStatus,
+      retainer: (rows[0].retainer as RetainerType) ?? null,
+    });
+    if (!guard.ok) { return guard; }
+  } else if (rows[0].status === "completed" || rows[0].status === "discontinued") {
+    return { ok: false, message: "الحالة مغلقة سلفًا." };
+  }
+
+  await client.query(
+    `UPDATE ortho_cases SET status = $2, closed_at = NOW(), closed_by = $3, closed_note = $4::text
+      WHERE id = $1`,
+    [input.id, input.status, input.actor, input.note?.trim() || null],
+  );
+  return { ok: true };
+}
+
 export async function closeOrthoCase(input: {
   id: number; status: "completed" | "discontinued"; actor: string; note: string | null;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
+  let discardLease = false;
   try {
     await client.query("BEGIN");
-    const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.id]);
-    if (!owner) { await client.query("ROLLBACK"); return { ok: false, message: "الحالة غير موجودة." }; }
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
-    const { rows } = await client.query<{ status: string; retainer: string | null }>(
-      `SELECT status, retainer FROM ortho_cases WHERE id = $1 FOR UPDATE`, [input.id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "الحالة غير موجودة." }; }
-
-    // التوقّف غير الإكمال: مريضٌ سافر أو انقطع تُغلق حالته بلا مثبّت — والشرط
-    // على الإكمال وحده، لأنه الادّعاء بأن العلاج انتهى كما يجب.
-    if (input.status === "completed") {
-      const guard = canComplete({
-        status: rows[0].status as CaseStatus,
-        retainer: (rows[0].retainer as RetainerType) ?? null,
-      });
-      if (!guard.ok) { await client.query("ROLLBACK"); return guard; }
-    } else if (rows[0].status === "completed" || rows[0].status === "discontinued") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "الحالة مغلقة سلفًا." };
-    }
-
-    await client.query(
-      `UPDATE ortho_cases SET status = $2, closed_at = NOW(), closed_by = $3, closed_note = $4::text
-        WHERE id = $1`,
-      [input.id, input.status, input.actor, input.note?.trim() || null],
-    );
+    const result = await closeOrthoCaseInTransaction(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
-    return { ok: true };
+    return result;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    try { await client.query("ROLLBACK"); } catch { discardLease = true; }
     throw error;
-  } finally {
-    client.release();
-  }
+  } finally { client.release(discardLease); }
 }
 
 /* ═════════════════ متابعة التقويم والصور والتشخيص والخطّ الزمني ═════════════════

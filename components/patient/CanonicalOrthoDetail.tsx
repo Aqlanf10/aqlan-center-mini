@@ -1,4 +1,5 @@
 "use client";
+import { CanonicalOrthoLifecycleEditor } from "./CanonicalOrthoLifecycleEditor";
 import { CanonicalOrthoCoverage } from "./CanonicalOrthoCoverage";
 import { CanonicalOrthoStrategy } from "./CanonicalOrthoStrategy";
 import { CanonicalOrthoAssessment } from "./CanonicalOrthoAssessment";
@@ -6,7 +7,7 @@ import { useEffect, useId, useState } from "react";
 import { PHASE_LABEL, RETAINER_LABEL, type OrthoClinicalDetail } from "@/lib/ortho";
 
 /** On-demand native clinical record. No old editors or independent image/finance APIs. */
-export function CanonicalOrthoDetail({ patientId, caseId, canReadCoverage = false }: { patientId: string; caseId: number; canReadCoverage?: boolean }) {
+export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = false, canReadCoverage = false, onChanged }: { patientId: string; caseId: number; ownerKey: string; canEdit?: boolean; canReadCoverage?: boolean; onChanged: () => void }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -84,6 +85,7 @@ export function CanonicalOrthoDetail({ patientId, caseId, canReadCoverage = fals
         <CanonicalOrthoStrategy patientId={Number(patientId)} caseId={caseId} />
         {canReadCoverage ? <CanonicalOrthoCoverage patientId={Number(patientId)} caseId={caseId} /> : null}
       </>}
+      {canEdit ? <CanonicalOrthoLifecycleEditor key={`${ownerKey}:${patientId}:${caseId}`} patientId={patientId} caseId={caseId} ownerKey={ownerKey} feed={feed} refresh={() => { setFeed(null); setError(null); setRefresh(value => value + 1); }} onChanged={onChanged} /> : null}
     </div> : null}
   </div>;
 }

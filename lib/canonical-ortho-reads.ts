@@ -1,4 +1,5 @@
 import "server-only";
+import { orthoLifecycleVersionWith } from "./canonical-ortho-lifecycle-version";
 import { CLINIC_TIME_ZONE, getOrthoClinicalDetailWith, listOrthoCaseSummariesWith } from "./db";
 import { CanonicalPatientReadRefusal, readCanonicalPatientRecord } from "./canonical-patient-reads";
 import { runCanonicalReadSnapshot, type CanonicalSnapshotQuery, type CanonicalSnapshotScope } from "./canonical-read-snapshot";
@@ -42,6 +43,6 @@ export async function readCanonicalOrthoCase(session: VerifiedDurableSession, ca
       scope.patientScope.kind === "own" ? scope.patientScope.clinicianPartyId : null,
       clinicDateString(new Date(), CLINIC_TIME_ZONE));
     if (!result) throw new CanonicalPatientReadRefusal("patient_not_found", "الحالة غير موجودة ضمن مرضاك.");
-    return result;
+    return { ...result, editVersion: await orthoLifecycleVersionWith(query, caseId) };
   }, { errorPrefix: "STAFF_READ", maxBytes: 1024 * 1024 });
 }

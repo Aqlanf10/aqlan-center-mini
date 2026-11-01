@@ -1,3 +1,4 @@
+import { CanonicalOrthoLifecycleRefusal, commandCanonicalOrthoLifecycle } from "@/lib/canonical-ortho-lifecycle-command";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -81,6 +82,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
 /** تغيير المرحلة، أو تسجيل المثبّت، أو إغلاق الحالة. */
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body: unknown = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalOrthoLifecycleRefusal("invalid_ortho_lifecycle", 400, "تحديث الحالة لا يقبل مرشحات إضافية.");
+      return NextResponse.json(await commandCanonicalOrthoLifecycle(selected.handle, (await context.params).id, body), { headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+      if (error instanceof CanonicalOrthoLifecycleRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد تحديث حالة التقويم. تحقق من السجل قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const caseId = await idFrom(context);

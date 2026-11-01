@@ -2749,7 +2749,7 @@
   "anyOf": [],
   "scope": "patient",
   "status": "existing",
-  "note": ""
+  "note": "M2 slice55 partial: phase, retainer and completed/discontinued branches use clinical.ortho.edit with patient scope, fresh locked authority, observed native case version and atomic state/audit. Existing explicit retainer none remains a valid recorded decision; terminal cases do not reopen. planId financial linkage remains held pending its independent contract; no legacy fallback. This method is not counted canonical-done."
  },
  {
   "route": "/api/ortho/[id]",

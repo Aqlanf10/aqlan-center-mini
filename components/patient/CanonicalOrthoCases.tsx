@@ -4,10 +4,12 @@ import { CanonicalOrthoDetail } from "./CanonicalOrthoDetail";
 import { useEffect, useId, useState } from "react";
 import { APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, PHASE_LABEL, usesArchwires, type OrthoCaseSummaryFeed } from "@/lib/ortho";
 
-/** Read-only summary. Opening this section never mounts legacy editors or requests
+/** Clinical summary with independently authorized native lifecycle actions.
+ * Opening this section never mounts legacy editors or requests
  * their plan, image, assessment or financial endpoints. */
-export function CanonicalOrthoCases({ patientId, canReadCoverage = false }: { patientId: string; canReadCoverage?: boolean }) {
+export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canReadCoverage = false }: { patientId: string; ownerKey: string; canEdit?: boolean; canReadCoverage?: boolean }) {
   const regionId = useId();
+  const [notice, setNotice] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [feed, setFeed] = useState<OrthoCaseSummaryFeed | null>(null);
@@ -55,6 +57,7 @@ export function CanonicalOrthoCases({ patientId, canReadCoverage = false }: { pa
         className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">{open ? "إغلاق الحالات" : "عرض حالات التقويم"}</button>
     </div>
     {open ? <div id={regionId} className="mt-3 space-y-3" data-testid="canonical-ortho-cases">
+      {notice ? <p role="status">{notice}</p> : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-slate-600">ملخص الحالة والطبيب المسؤول والأسلاك المسجلة.</p>
         <button type="button" onClick={() => { setFeed(null); setError(null); setRefresh(value => value + 1); }}
@@ -78,7 +81,7 @@ export function CanonicalOrthoCases({ patientId, canReadCoverage = false }: { pa
               </> : null}
             </dl>
             {row.baselineKind === "legacy" ? <p className="mt-2 text-xs text-slate-600">علاج بدأ قبل النظام</p> : null}
-            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} canReadCoverage={canReadCoverage} />
+            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} ownerKey={ownerKey} canEdit={canEdit} canReadCoverage={canReadCoverage} onChanged={() => { setNotice("حُفظ تحديث حالة التقويم وسُجّل أثره."); setFeed(null); setRefresh(value => value + 1); }} />
           </li>)}</ul>}
       {feed?.hasMore ? <p role="status" className="text-sm text-amber-800">تظهر أحدث 300 حالة فقط؛ هذه ليست القائمة الكاملة.</p> : null}
     </div> : null}
