@@ -1,8 +1,10 @@
+import { issuePrescriptionTransaction } from "@/lib/prescription-issuance";
+import { validPrescriptionCommandKey } from "@/lib/prescription-command";
 import { getPrescriptionOwnerAuthority } from "@/lib/prescription-owner";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getClinicalVisit, getParty, getPatient, findUserByUsername, savePrescription } from "@/lib/db";
+import { getClinicalVisit, getParty, findUserByUsername } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
 import { checkPrescriptionDraft } from "@/lib/prescription";
@@ -71,6 +73,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
+  if (!validPrescriptionCommandKey(body.commandKey)) {
+    return NextResponse.json({ code: "issuance_protocol_required", message: "حدّث صفحة الوصفة قبل الإصدار؛ يلزم مفتاح إصدار دائم لمنع التكرار." }, { status: 400 });
+  }
+
   const patientId = Number(body.patientId);
   const rawVisit = Number(body.visitId);
   if (body.visitId !== undefined && body.visitId !== null && (!Number.isSafeInteger(rawVisit) || rawVisit <= 0)) {
@@ -132,20 +138,10 @@ export async function POST(request: Request) {
     }
   }
 
-  /* فحص السلامة الدوائي على الخادم: التنبيهات الطبية المسجلة تُقرأ من الملف
-     لا من العميل، والتعارض الحرج يمنع الحفظ حتى يفصل الطبيب (بتحديث الملف
-     أو بوصفةٍ بديلة). والتحذيرات غير الحرجة لا تُحفظ وتُنسى: تُعرض، ويُقرّها
-     الطبيب صراحةً، وربطُ الإقرار بالوصفة نفسها **وبالتحذيرات التي رآها**
-     برمزٍ خادمي قصير العمر (Blocker B ثم الجولة الثالثة). */
-  let patient: Awaited<ReturnType<typeof getPatient>>;
-  try {
-    patient = await getPatient(draft.value.patientId);
-  } catch {
-    return NextResponse.json({ message: "تعذر تحميل ملف المريض للتحقق من السلامة؛ أعد المحاولة." }, { status: 503 });
-  }
-  if (!patient) {
-    return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
-  }
+  return issuePrescriptionTransaction({ session, key: body.commandKey, draft: draft.value }, async ({ draft: currentDraft, patient, persist }) => {
+  const draft = { value: currentDraft };
+  // The transaction supplies freshly locked medical alerts and current identity;
+  // successful replay is resolved before this new-issuance safety callback.
   if (patient) {
     /* دائمًا يُعاد التقييم من الملف الحالي وقت كل طلب — لا حالة عميل. */
     const alerts = evaluatePrescriptionSafety(
@@ -232,7 +228,7 @@ export async function POST(request: Request) {
       }
       /* الإقرار صالح ومطابق: تُحفظ الوصفة وتُعاد التحذيرات معها للاطلاع. */
       try {
-        const record = await savePrescription(draft.value, session.username, doctorPartyId);
+        const record = await persist(warnings);
         return NextResponse.json(
           { id: record.id, createdAt: record.createdAt, safetyWarnings: warnings, acknowledged: true },
           { status: 201 },
@@ -244,9 +240,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const record = await savePrescription(draft.value, session.username, doctorPartyId);
+    const record = await persist();
     return NextResponse.json({ id: record.id, createdAt: record.createdAt }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ الوصفة." }, { status: 500 });
   }
+  });
 }

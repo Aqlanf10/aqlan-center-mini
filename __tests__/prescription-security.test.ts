@@ -40,7 +40,20 @@ vi.mock("@/lib/db", async (importOriginal) => {
 });
 
 import PrescriptionPrintPage from "../app/print/prescription/[id]/page";
-import { POST as createPrescription } from "../app/api/prescriptions/route";
+import { POST as createPrescriptionRoute } from "../app/api/prescriptions/route";
+// Existing clinical safety cases use the v1 client protocol; the keyless
+// no-write contract has its own regression below.
+async function createPrescription(request: Request) {
+  const body = await request.json();
+  return createPrescriptionRoute(new Request(request.url, { method: "POST", headers: request.headers,
+    body: JSON.stringify({ commandKey: "11111111-1111-4111-8111-111111111111", ...body }) }));
+}
+vi.mock("@/lib/prescription-issuance", () => ({ issuePrescriptionTransaction: async (input: { draft: import("../lib/prescription").PrescriptionDraft; session: { username: string } }, issue: (context: import("../lib/prescription-issuance").IssuanceContext) => Promise<unknown>) => {
+  let patient;
+  try { patient = await mocks.getPatient(input.draft.patientId); } catch { return new Response(JSON.stringify({ message: "Synthetic context unavailable" }), { status: 503 }); }
+  if (!patient) return new Response(JSON.stringify({ message: "Missing synthetic patient" }), { status: 404 });
+  return issue({ draft: input.draft, patient, persist: () => mocks.savePrescription(input.draft, input.session.username, 5) });
+} }));
 import { POST as voidPrescription } from "../app/api/prescriptions/[id]/void/route";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -882,4 +895,9 @@ describe("owner-only cross-clinician issuance", () => {
     owner(); mocks.findUserByUsername.mockResolvedValue({ id: 2, username: "owner-synthetic", role: "admin", isActive: true, partyId: null });
     expect((await createPrescription(request())).status).toBe(403); expect(mocks.savePrescription).not.toHaveBeenCalled();
   });
+});
+
+it('refuses legacy keyless issuance without saving any prescription', async () => {
+ const response = await createPrescriptionRoute(new Request('http://localhost/api/prescriptions', { method: 'POST', body: JSON.stringify({ patientId: 42, items: [] }) }));
+ expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ code: 'issuance_protocol_required' }); expect(mocks.savePrescription).not.toHaveBeenCalled();
 });

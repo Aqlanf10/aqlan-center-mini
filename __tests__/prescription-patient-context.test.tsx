@@ -365,3 +365,54 @@ describe("optional PrescriptionModal context status", () => {
     expect(display).not.toContain("تنبيه طبي وحساسية للمريض:");
   });
 });
+
+describe('durable issuance async owner fencing', () => {
+  const storageData = new Map<string, string>();
+  const digestMock = vi.fn();
+  async function prepare() {
+    readPatient = async id => response(200, patientFile(id, null, null));
+    storageData.clear(); digestMock.mockReset().mockResolvedValue(new Uint8Array(32).buffer);
+    Object.assign(window, { sessionStorage: { getItem: (key: string) => storageData.get(key) ?? null, setItem: (key: string, value: string) => storageData.set(key, value), removeItem: (key: string) => storageData.delete(key) }, crypto: { subtle: { digest: digestMock }, randomUUID: () => '11111111-1111-4111-8111-111111111111' } });
+    await mount(); await open(); renderModal(); await tick(); renderModal();
+    click(button(renderModal(), 'إضافة دواء جديد'));
+    for (const [placeholder, value] of [['Drug name (e.g. Augmentin / Brufen)', 'SyntheticRx'], ['Dose (1g / 500mg)', '500mg'], ['Form (Tablets / Syrup)', 'tablet'], ['Frequency (every 8 hours)', 'fixture frequency'], ['Duration (5 days)', 'fixture duration'], ['Clinician-entered amount per dose', '1 tablet']])
+      change(find(renderModal(), node => node.props.placeholder === placeholder), value);
+    (find(renderModal(), node => node.type === 'input' && node.props.type === 'checkbox').props.onChange as (event: { target: { checked: boolean } }) => void)({ target: { checked: true } });
+    renderModal();
+  }
+  const posts = () => fetchMock.mock.calls.filter(([url]) => url === '/api/prescriptions');
+  it('retires a deferred digest on close without sending and reopens without a stuck busy state', async () => {
+    await prepare(); const digest = deferred<ArrayBuffer>(); digestMock.mockReturnValueOnce(digest.promise);
+    click(button(renderModal(), 'طباعة الروشتة (A5)')); close(); digest.resolve(new Uint8Array(32).buffer); await tick();
+    expect(posts()).toHaveLength(0); expect(openMock).not.toHaveBeenCalled();
+    await open(); renderModal(); await tick(); expect(button(renderModal(), 'طباعة الروشتة (A5)').props.disabled).toBe(false);
+  });
+  it.each(['patient', 'principal', 'close'])('does not publish or print a delayed POST after %s owner changes', async kind => {
+    await prepare(); const saved = deferred<ReadResponse>(); const normal = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? saved.promise : normal(url, init));
+    click(button(renderModal(), 'طباعة الروشتة (A5)')); await tick(); expect(posts()).toHaveLength(1);
+    const props = { ...modalProps(), patientId: kind === 'patient' ? patientId + 1 : patientId };
+    if (kind === 'principal') state.username = 'different-synthetic-clinician';
+    if (kind === 'close') close(); else renderModal(props);
+    saved.resolve(response(201, { id: 1234 })); await tick(); expect(openMock).not.toHaveBeenCalled();
+    if (kind !== 'close') expect(text(renderModal(props))).not.toContain('النسخة المحفوظة #1234');
+  });
+  it('uses one request for rapid double click, blocks discard in flight, and reconciles replay without automatic print', async () => {
+    await prepare(); const saved = deferred<ReadResponse>(); const normal = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? saved.promise : normal(url, init));
+    const print = button(renderModal(), 'طباعة الروشتة (A5)'); click(print); click(print); await tick();
+    expect(digestMock).toHaveBeenCalledTimes(1); expect(posts()).toHaveLength(1);
+    click(button(renderModal(), 'بدء إصدار جديد بعد مراجعة السجل')); expect(window.confirm).not.toHaveBeenCalled(); expect(storageData.size).toBe(1);
+    saved.resolve(response(201, { id: 1234, status: 'active', replayed: true })); await tick();
+    expect(openMock).not.toHaveBeenCalled(); expect(text(renderModal())).toContain('فتح النسخة المحفوظة #1234');
+  });
+  it('hides recovered document link when the same username permissions change until fresh recovery', async () => {
+    await prepare(); const normal = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/prescriptions' ? Promise.resolve(response(201, { id: 1234, status: 'active', replayed: true })) : normal(url, init));
+    click(button(renderModal(), 'طباعة الروشتة (A5)')); await tick(); expect(text(renderModal())).toContain('فتح النسخة المحفوظة #1234');
+    const props = modalProps();
+    state.permissions = { canViewAllPatients: false } as import('../lib/doctor-permissions').DoctorPermissions;
+    expect(text(renderModal(props))).not.toContain('فتح النسخة المحفوظة #1234'); await tick(); expect(text(renderModal(props))).not.toContain('فتح النسخة المحفوظة #1234'); expect(openMock).not.toHaveBeenCalled();
+  });
+
+});

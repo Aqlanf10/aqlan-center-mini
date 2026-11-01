@@ -380,3 +380,15 @@ describe("قوالب الإجراءات والتشخيصات — لا أدوية
     expect(all).not.toContain("لا موانع");
   });
 });
+
+describe('durable issuance response reconciliation', () => {
+ it('never automatically prints an authorized replay', () => { expect(interpretPrescriptionSaveResponse(201, { id: 81, status: 'active', replayed: true })).toEqual({ kind: 'recoveredIssuance', prescriptionId: 81 }); });
+ it('blocks stale void replay and unknown commit instead of opening draft or official print', () => {
+  expect(interpretPrescriptionSaveResponse(201, { id: 81, status: 'void', replayed: true }).kind).toBe('issuanceBlocked');
+  expect(interpretPrescriptionSaveResponse(503, { code: 'issuance_outcome_unknown' }).kind).toBe('issuanceBlocked');
+ });
+});
+
+it('refuses a replay that omits its freshly checked status', () => { expect(interpretPrescriptionSaveResponse(201, { id: 81, replayed: true }).kind).toBe('issuanceBlocked'); });
+
+it.each([undefined, 0, -1, Number.MAX_SAFE_INTEGER + 1])('never falls through malformed replay id %s to automatic print', id => { expect(interpretPrescriptionSaveResponse(201, { id, status: 'active', replayed: true }).kind).toBe('issuanceBlocked'); });

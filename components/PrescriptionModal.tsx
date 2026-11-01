@@ -1,7 +1,10 @@
 "use client";
+import { canonicalPrescriptionCommand } from "@/lib/prescription-command";
+import { getOrCreatePrescriptionCommand, readPrescriptionCommand, prescriptionCommandStorageKey, createPrescriptionOperationFence, type PrescriptionOperation, type PendingPrescriptionCommand } from "@/lib/prescription-command-client";
+
 import { createManualMedicationSelection, manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "./SessionProvider";
 import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
@@ -9,7 +12,7 @@ import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
 import { PrescriptionMedicationLibrary } from "./PrescriptionMedicationLibrary";
 import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
-import { MAX_ITEMS, sanitizeRxItems } from "@/lib/prescription";
+import { MAX_ITEMS, sanitizeRxItems, checkPrescriptionDraft } from "@/lib/prescription";
 import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workflow";
 
 /**
@@ -101,9 +104,31 @@ export function PrescriptionModal({
    * قبل الوصف — القالب عبّأ الحالة فقط، والدواء قراره هو. */
   const [appliedChecklist, setAppliedChecklist] = useState<string[] | null>(null);
   /* الوصفة وثيقة تُحفى كُما طُبِعت (من مستودع الوكيل الآخر): الحفظ قبل الطباعة
-     يبقي في السجل ما صُرِف فعلاً من دواء، والاقتراحات مما سبق وصفه للمريض
+     يبقي في السجل ما صدر من وصفة، دون ادعاء صرف الصيدلية، والاقتراحات مما سبق وصفه للمريض
      نفسه تقلّل النقر — ولا تُفرض. */
-  const [preserving, setPreserving] = useState(false);
+  const commandScope = session?.username && patientId ? prescriptionCommandStorageKey(session.username, patientId, visitId ?? null) : null;
+  const operationScope = isOpen ? JSON.stringify([commandScope, prescriberKey, selectedDoctorId]) : null;
+  const operationFence = useRef(createPrescriptionOperationFence());
+  const [preservingScope, setPreservingScope] = useState<string | null>(null);
+  const preserving = operationScope !== null && preservingScope === operationScope;
+  const setPreserving = (value: boolean) => setPreservingScope(value ? operationScope : null);
+  const [commandRead, setCommandRead] = useState<{ scope: string; owner: string | null; entry: PendingPrescriptionCommand | null; message: string; recoveredId?: number; status?: string } | null>(null);
+  useLayoutEffect(() => {
+    const fence = operationFence.current;
+    fence.setScope(operationScope);
+    setPreservingScope(null);
+    return () => { fence.retire(); setCommandRead(null); };
+  }, [operationScope]);
+
+  const commandState = commandRead?.scope === commandScope && commandRead?.owner === operationScope ? commandRead : null;
+  useEffect(() => {
+    if (!isOpen || !commandScope) return;
+    try {
+      const entry = readPrescriptionCommand(window.sessionStorage, commandScope);
+      if (entry) setCommandRead({ scope: commandScope, owner: operationScope, entry, message: "يوجد مفتاح إصدار سابق محفوظ في هذه الصفحة. تحقق من النتيجة قبل بدء وصفة جديدة." });
+    } catch { setCommandRead({ scope: commandScope, owner: operationScope, entry: null, message: "تعذرت قراءة مفتاح الإصدار السابق؛ راجع السجل قبل بدء وصفة جديدة." }); }
+  }, [isOpen, commandScope, operationScope]);
+
   const [preserveError, setPreserveError] = useState<string | null>(null);
   /* مراجعة الجولة الثانية (Blocker B) — الخادم هو المرجع: */
   /* عرض تحذيرات الخادم غير الحرجة قبل الحفظ، مع رمز الإقرار المرتبط بالوصفة. */
@@ -240,11 +265,20 @@ export function PrescriptionModal({
   };
 
   /** إرسال الوصفة إلى الخادم — برمز إقرارٍ إن كان الطبيب أقرّ التحذيرات. */
-  const submitToServer = async (acknowledgedSafetyToken?: string) => {
+  const submitToServer = async (operation: PrescriptionOperation, acknowledgedSafetyToken?: string) => {
+    if (!commandScope || !patientId || !selectedDoctorId) throw new Error("لم يكتمل سياق الإصدار.");
+    const checked = checkPrescriptionDraft({ patientId, visitId: visitId ?? null, prescribingDoctorPartyId: selectedDoctorId, diagnosis, notes, instructionsLang: lang, items });
+    if (!checked.ok) throw new Error(checked.message);
+    const bytes = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalPrescriptionCommand(checked.value)));
+    if (!operationFence.current.current(operation)) return null;
+    const digest = Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
+    const entry = getOrCreatePrescriptionCommand(window.sessionStorage, commandScope, digest, selectedDoctorId, () => window.crypto.randomUUID());
+    setCommandRead({ scope: commandScope, owner: operationScope, entry, message: "مفتاح الإصدار محفوظ. عند تعذر الاتصال أعد المحاولة بالمفتاح نفسه." });
     const response = await fetch("/api/prescriptions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        commandKey: entry.key,
         patientId,
         ...(visitId ? { visitId } : {}),
         ...(selectedDoctorId ? { prescribingDoctorPartyId: selectedDoctorId } : {}),
@@ -256,7 +290,39 @@ export function PrescriptionModal({
       }),
     });
     const payload = await response.json().catch(() => null);
-    return interpretPrescriptionSaveResponse(response.status, payload);
+    if (!operationFence.current.current(operation)) return null;
+    const outcome = interpretPrescriptionSaveResponse(response.status, payload);
+    if (outcome.kind === "officialPrint" || outcome.kind === "recoveredIssuance") setCommandRead({ scope: commandScope, owner: operationScope, entry, recoveredId: outcome.prescriptionId, status: "active", message: "الإصدار محفوظ؛ تكرار الطلب يعيد الوصفة نفسها ولا ينشئ وصفة أخرى." });
+    return outcome;
+  };
+
+  const recoverIssuance = async () => {
+    if (!commandScope || !patientId) return;
+    const operation = operationFence.current.start();
+    if (!operation) return;
+    setPreserving(true);
+    try {
+      const entry = readPrescriptionCommand(window.sessionStorage, commandScope);
+      if (!entry) throw new Error("لا يوجد مفتاح إصدار محفوظ في هذه الصفحة.");
+      const query = new URLSearchParams({ patientId: String(patientId), prescribingDoctorPartyId: String(entry.prescribingDoctorPartyId) });
+      if (visitId) query.set("visitId", String(visitId));
+      const response = await fetch(`/api/prescriptions/commands/${entry.key}?${query}`, { cache: "no-store" });
+      const body = await response.json();
+      if (!operationFence.current.current(operation)) return;
+      if (!response.ok || body.state !== "completed" || !Number.isSafeInteger(body.id) || body.id <= 0 || !["active", "void"].includes(body.status)) {
+        setCommandRead({ scope: commandScope, owner: operationScope, entry, message: body.message || "لم تتأكد النتيجة؛ احتفظ بالمفتاح ولا تبدأ إصدارًا جديدًا." });
+        return;
+      }
+      setCommandRead({ scope: commandScope, owner: operationScope, entry, recoveredId: body.id, status: body.status,
+        message: body.status === "void" ? "الإصدار السابق محفوظ لكنه مبطل؛ لا تعاد طباعته." : "تم العثور على الإصدار المحفوظ. لم تُنشأ وصفة جديدة ولم تبدأ الطباعة تلقائيًا." });
+    } catch (error) { if (operationFence.current.current(operation)) setPreserveError(error instanceof Error ? error.message : "تعذر التحقق من نتيجة الإصدار؛ احتفظ بالمفتاح."); }
+    finally { if (operationFence.current.current(operation)) setPreserving(false); operationFence.current.finish(operation); }
+  };
+  const startNewIssuance = () => {
+    if (!commandScope || preserving || operationFence.current.isBusy()) return;
+    if (!window.confirm("قد تكون الوصفة السابقة صدرت حتى لو انقطع الرد. راجع سجل المريض أولًا. هل تريد صراحةً بدء إصدار جديد بمفتاح مستقل؟ لا يحذف هذا الإجراء أي وصفة محفوظة.")) return;
+    try { window.sessionStorage.removeItem(commandScope); setCommandRead(null); setPreserveError(null); setSafetyPreview(null); }
+    catch { setPreserveError("تعذر تحديث مفتاح الإصدار؛ لم تبدأ وصفة جديدة."); }
   };
 
   const openOfficialPrint = (prescriptionId: number) => {
@@ -269,6 +335,8 @@ export function PrescriptionModal({
 
   const handlePrint = async () => {
     if (!validatePrintableItems()) return;
+    const operation = operationFence.current.start();
+    if (!operation) return;
     // Printing claims this diagnosis for the prescription being submitted.
     // Later visit-note updates cannot silently change its display or the
     // canonical content while save/safety acknowledgement is in progress.
@@ -278,7 +346,7 @@ export function PrescriptionModal({
      * - تعارضٌ حرج (409) ⇒ توقّف تام: لا طباعة رسمية ولا سقوط تلقائي إلى
      *   مسودة؛ يُعرض سبب المنع، والمسودة زرّ منفصل صريح فقط.
      * - تحذيرات غير حرجة ⇒ عرضٌ وإقرارٌ صريح قبل الحفظ والطباعة الرسمية.
-     * - فشلٌ غير حرج (شبكة/500) لا يحرم المريض وصفته: مسودة معلنة مع سببٍ ظاهر. */
+     * - فشل الشبكة/500 قد يخفي إصدارًا ناجحًا: لا طباعة تلقائية ولا مفتاح جديد. */
     setCriticalBlock(null);
     setSafetyPreview(null);
     setAckInvalidMessage(null);
@@ -286,7 +354,9 @@ export function PrescriptionModal({
       setPreserving(true);
       setPreserveError(null);
       try {
-        const outcome = await submitToServer();
+        const outcome = await submitToServer(operation);
+        if (!outcome || !operationFence.current.current(operation)) return;
+        if (outcome.kind === "recoveredIssuance") return;
         if (outcome.kind === "officialPrint") {
           openOfficialPrint(outcome.prescriptionId);
           return;
@@ -309,15 +379,21 @@ export function PrescriptionModal({
           setAckInvalidMessage(outcome.message);
           return;
         }
+        if (outcome.kind === "issuanceBlocked") { setPreserveError(outcome.message); return; }
         setPreserveError(outcome.reason);
-      } catch {
-        setPreserveError("تعذّر حفظ الوصفة كوثيقة — ستُطبع بالطريقة السريعة.");
+        return;
+      } catch (error) {
+        if (!operationFence.current.current(operation)) return;
+        setPreserveError(error instanceof Error ? error.message : "لم تتأكد نتيجة الإصدار؛ أعد المحاولة بالمفتاح نفسه أو تحقق من السجل.");
+        return;
       } finally {
-        setPreserving(false);
+        if (operationFence.current.current(operation)) setPreserving(false);
+        operationFence.current.finish(operation);
       }
     }
     const url = buildPrintUrl();
-    if (url) window.open(url, "_blank");
+    if (url && operationFence.current.current(operation)) window.open(url, "_blank");
+    operationFence.current.finish(operation);
   };
 
   /** إقرار الطبيب قراءة التحذيرات غير الحرجة ثم الحفظ والطباعة الرسمية —
@@ -326,10 +402,14 @@ export function PrescriptionModal({
   const handleAcknowledgeAndPrint = async () => {
     if (!safetyPreview?.token || !patientId) return;
     if (!validatePrintableItems()) return;
+    const operation = operationFence.current.start();
+    if (!operation) return;
     setPreserving(true);
     setAckInvalidMessage(null);
     try {
-      const outcome = await submitToServer(safetyPreview.token);
+      const outcome = await submitToServer(operation, safetyPreview.token);
+      if (!outcome || !operationFence.current.current(operation)) return;
+      if (outcome.kind === "recoveredIssuance") { setSafetyPreview(null); return; }
       if (outcome.kind === "officialPrint") {
         setSafetyPreview(null);
         openOfficialPrint(outcome.prescriptionId);
@@ -356,13 +436,14 @@ export function PrescriptionModal({
         return;
       }
       setSafetyPreview(null);
+      if (outcome.kind === "issuanceBlocked") { setPreserveError(outcome.message); return; }
       setPreserveError(outcome.reason);
-      const url = buildPrintUrl();
-      if (url) window.open(url, "_blank");
-    } catch {
-      setAckInvalidMessage("تعذّر الاتصال بالخادم — حاول الإقرار من جديد.");
+    } catch (error) {
+      if (!operationFence.current.current(operation)) return;
+      setAckInvalidMessage(error instanceof Error ? error.message : "لم تتأكد نتيجة الإصدار؛ أعد المحاولة بالمفتاح نفسه أو تحقق من السجل.");
     } finally {
-      setPreserving(false);
+      if (operationFence.current.current(operation)) setPreserving(false);
+      operationFence.current.finish(operation);
     }
   };
 
@@ -590,6 +671,14 @@ export function PrescriptionModal({
             </div>
           ) : null}
 
+          {commandState && <div className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm" role="status">
+            <p>{commandState.message}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {commandState.entry && <button type="button" disabled={preserving} onClick={() => void recoverIssuance()} className="rounded border bg-white px-3 py-2">التحقق من نتيجة الإصدار السابق</button>}
+              {commandState.recoveredId && commandState.status === "active" && <a href={`/print/prescription/${patientId}?rx=${commandState.recoveredId}`} target="_blank" rel="noopener noreferrer" className="rounded border bg-white px-3 py-2">فتح النسخة المحفوظة #{commandState.recoveredId}</a>}
+              <button type="button" disabled={preserving} onClick={startNewIssuance} className="rounded border bg-white px-3 py-2">بدء إصدار جديد بعد مراجعة السجل</button>
+            </div>
+          </div>}
           {preserveError ? (
             <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
               {preserveError}

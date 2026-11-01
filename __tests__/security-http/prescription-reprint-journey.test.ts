@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
 import { mkdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { authedMutation, baseUrl, harness } from "./_server";
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
 beforeAll(async () => {
@@ -20,10 +21,15 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     const result = await authedMutation(`/api/users/${reception.id}`, h.sessions.admin, "PATCH", JSON.stringify({ permissions: { ...(reception.permissions ?? {}), canPrintSavedPrescriptions: enabled } }));
     expect(result.status, await result.text()).toBe(200);
   };
-  const body = { patientId: patient.id, visitId: visit.id, prescribingDoctorPartyId: doctor.party_id, diagnosis: "Synthetic private diagnosis", notes: "Synthetic private notes", items: [{ name: "SyntheticRxOnly", dose: "fixture", form: "Synthetic form", frequency: "fixture", duration: "Synthetic duration", selection: { id: "manual", amount: "Synthetic amount only", confirmed: true } }] };
+  const body = { commandKey: randomUUID(), patientId: patient.id, visitId: visit.id, prescribingDoctorPartyId: doctor.party_id, diagnosis: "Synthetic private diagnosis", notes: "Synthetic private notes", items: [{ name: "SyntheticRxOnly", dose: "fixture", form: "Synthetic form", frequency: "fixture", duration: "Synthetic duration", selection: { id: "manual", amount: "Synthetic amount only", confirmed: true } }] };
   try {
     await setGrant(false);
     expect((await read(`/api/patients/${patient.id}/prescriptions/saved`)).status).toBe(403);
+    const { commandKey: _key, ...legacyBody } = body;
+    const keyless = await post("/api/prescriptions", legacyBody);
+    expect(keyless.status).toBe(400);
+    expect((await keyless.json()).code).toBe("issuance_protocol_required");
+    expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescriptions WHERE patient_id=$1", [patient.id])).rows[0].n)).toBe(0);
     expect((await post("/api/prescriptions", { ...body, visitId: h.seeded.visitId })).status).toBe(400);
     // Direct requests cannot downgrade new issuance to legacy by deleting metadata.
     const { selection: _review, ...withoutReview } = body.items[0];
@@ -38,6 +44,10 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
       expect((await post("/api/prescriptions", { ...body, items: [{ ...body.items[0], selection }] })).status).toBe(400);
     }
     const created = await post("/api/prescriptions", body); expect(created.status).toBe(201); const { id } = await created.json();
+    const replay = await post("/api/prescriptions", body);
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toEqual(expect.objectContaining({ id, status: "active", replayed: true }));
+    expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescription_issuance_commands WHERE command_key=$1", [body.commandKey])).rows[0].n)).toBe(1);
     const before = (await db.query("SELECT * FROM prescriptions WHERE id=$1", [id])).rows[0];
     expect((typeof before.items === "string" ? JSON.parse(before.items) : before.items)[0].selection).toEqual(body.items[0].selection);
     expect(before.visit_id).toBe(visit.id); expect(before.created_by).toBe("secdoctora"); expect(before.prescribing_doctor_party_id).toBe(doctor.party_id);
