@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "4f32ae78324e09ceb4f523cdaf474d4057e63d1a03fd6f67a810b0f178880fa3",
+  "sourceDigest": "54dd0a5a4e1ba237e59f2d605076427304f26a50d8e03c3b1d796ea86c6aaa81",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -44,6 +44,7 @@
     "finance.shifts.view",
     "finance.shifts.operate",
     "clinical.xrays.view",
+    "clinical.xrays.upload",
     "clinical.plans.view",
     "clinical.plans.edit",
     "clinical.visits.document",
@@ -2250,15 +2251,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 45
+          "line": 46
         },
         {
           "symbol": "requireSession",
-          "line": 76
+          "line": 91
         }
       ]
     },
@@ -9996,15 +9997,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 45
+          "line": 46
         },
         {
           "symbol": "requireSession",
-          "line": 76
+          "line": 91
         }
       ]
     },
@@ -10024,15 +10025,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 12
         },
         {
           "symbol": "requireSession",
-          "line": 45
+          "line": 46
         },
         {
           "symbol": "requireSession",
-          "line": 76
+          "line": 91
         }
       ]
     },

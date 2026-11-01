@@ -1,0 +1,83 @@
+{
+  "format": "work-ceph-create-v1",
+  "preparedAt": "2026-11-01T16:14:24.001814+00:00",
+  "baseRevision": "520f00cabfbe7cef15748fcc5e6ad86d49d51331",
+  "buildId": "q-_8KHs4niR6vSuHDSj8Y",
+  "scope": "server command only, existing reader browser witness; source picker/create UI separate",
+  "acceptance": {
+    "PostgreSQL": {
+      "passed": 81,
+      "files": 4,
+      "firstAttempt": "80passed1failed due reserved test SQL alias day; changed to recorded_day, no product correction"
+    },
+    "unit": {
+      "passed": 108,
+      "files": 4
+    },
+    "mapInventory": {
+      "passed": 10,
+      "files": 2,
+      "firstAttempt": "6/1, requested second path did not exist; not counted as two-file coverage"
+    },
+    "typeBuildLint": "passed; targeted lint0errors8preexisting db warnings",
+    "HTTPChromium": {
+      "distinctCases": 87,
+      "files": 7,
+      "commandAndCopyDiscard": {
+        "passed": 37,
+        "files": 3
+      },
+      "compatibilityFirst": {
+        "passed": 49,
+        "failed": 1,
+        "files": 4
+      },
+      "correctedReadFile": {
+        "passed": 9,
+        "files": 1
+      },
+      "qualification": "Not a single87-case passing run. Old owner blanket-denial expectation was obsolete after this conversion; now a read-only actor submits a valid owned document and must receive exact403 with unchanged studies/money/audit. No assertion waived. One nonexistent fourth path in first command is not counted."
+    },
+    "fullCombinedGates": "not run on59;56\u201358 gates are a distinct frozen source",
+    "exactHeadCI": "not published",
+    "independentReview": "pending"
+  },
+  "before": "Actual previous57build GET200/POST401vs201 for scoped uploader. Exact create route unchanged at520f00ca.",
+  "limits": [
+    "Single current draft is not durable idempotency. After subsequent closure a later request may create another draft; caller must verify unknown outcome and obtain a new explicit intention.",
+    "Image picker and create control not implemented in this API slice. Browser evidence uses actual scoped saved-study reader after a browser-origin command.",
+    "Existing legacy route/defaults/INSERT retained; legacy audit stays post-commit, canonical effect/audit are atomic.",
+    "No actual image bytes, file publication, migrations, patient assignments, approved results, finance changes or live operations.",
+    "Inventory NOT_READY; actual Docker destination denial, schema/integration/operational acceptance remain open."
+  ],
+  "sourceSha256": {
+    "app/api/patients/[id]/ceph/route.ts": "21ec87fa813e750e9503107af90d39ae608303a8fa778bb5bd60b136bb64f0c1",
+    "lib/db.ts": "127ab68c46ebd7619f0bf64c3f78a13a7eb55457ff400dcfe3fa7f475982c3ff",
+    "lib/staff-operation-runtime.ts": "42b3854a69f0996b6792a7afce27064ac9869efe913304849e8ba29b31311e55",
+    "lib/canonical-ceph-create-command.ts": "7564d66c033e3767676da16b00159be393224fba7f6066fc79f1de7e45d893cf",
+    "__tests__/canonical-ceph-create-command.test.ts": "e7847c31e212a8b31dae8f13cc6d9371b48822d4f0743a7dfb30796ceb37eff7",
+    "__tests__/postgres/ceph-create-canonical-command.test.ts": "af827ff2efc548be3b73c78bf1f2d518d6a902a619e037c0af1f77e0ff34a50c",
+    "__tests__/security-http/canonical-ceph-create-journey.test.ts": "d0e5413bcdbc510ccd89523765f8ee1e9fafaaa9f7e21c0fc245c07cbca497a5",
+    "__tests__/security-http/canonical-ceph-list-journey.test.ts": "932013dabcc331437da7e37ab3ce78f3c4bd49662de0e234e4d0213c459467b5",
+    "scripts/audits/staff-cutover-readiness.test.mjs": "bd46e961a1cd85b03dd644ca467b46fdd3fc4d4bce9ea106b32f40dd9acd2def"
+  },
+  "evidenceSha256": {
+    "slice59-before-build-provenance.json": "35663c83902c769d15269690622c011b2a00abd9bd51211cf6cfdc9e3106d602",
+    "slice59-build-first.log": "8fadb04fe2e154fe714f2571bffb1c33c04195c02e0c1f009b54b780a6ba478d",
+    "slice59-design.md": "c7b995e51b05a8f43ccc32f52c88ebbd6f989cfb2ab612a7116af1788cd8343c",
+    "slice59-http-before.log": "1fee66c1c2a880f8834308a430742fea53dd9d7a0df27d17b567d3d2844fcd83",
+    "slice59-http-compatibility.log": "44ebea8788f7b590c75917e3c42324cea876ca24478a1f2d2f6e1440041fc490",
+    "slice59-http-first.log": "c4ebe5198f7e3b6250d32e5f1ab607d9e5a41f4c084b46f79d9b03c495adf886",
+    "slice59-http-reader-corrected.log": "e1d7fc842f25ce5ca5589b7e823a44eceb5be8d373f93581c34131738656f60a",
+    "slice59-inventory-build.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice59-lint-first.log": "f12222892fd03e3011081990877bf6a4fb002c29c4d44f00adaed76c18e24817",
+    "slice59-map-corrected.log": "537f1fcc9ec6643c814b6525e14ae68614b8aacdec542ef18abbca2da673736d",
+    "slice59-map-first.log": "b18f091fbe1e101c49fc2b572949803ba0cf9fa10b9d2e5514bc4446c0c0b697",
+    "slice59-pg-corrected.log": "a97fe41ad1311d704291e3730c2cf5e9117d95ef75944d1d368e73c511669b54",
+    "slice59-pg-first.log": "f2956dd2c22c82dc6d6bf4eaa77dc3f9e666b4ea37968647302471878c827a1a",
+    "slice59-product-freeze.json": "a2f6bb3e51cf6a49dd2db66a4f24dda99f86ed29dc0bceb493fb2388849a3001",
+    "slice59-source-proof.json": "2331092cb84899acb8b4d378fecc0c0171b5ca7b142fb9bdb439358a630af1f3",
+    "slice59-tsc-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice59-unit-first.log": "131ecddabb29bd66ee6b6dbb846b1273f960018c213517a84e4e23438912379f"
+  }
+}

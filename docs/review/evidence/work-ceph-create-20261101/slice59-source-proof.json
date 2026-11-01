@@ -1,0 +1,10 @@
+{
+  "base": "520f00cabfbe7cef15748fcc5e6ad86d49d51331",
+  "checks": {
+    "SELECT id, mime_type, removed_at FROM patient_documents WHERE id = $1 AND patient_id = $2": true,
+    "SELECT id FROM ortho_cases WHERE id = $1 AND patient_id = $2": true,
+    "INSERT INTO ceph_analyses": true,
+    "legacy POST remainder": true
+  },
+  "qualification": "Original native document/case SELECT and INSERT clauses, legacy route body preserved. Canonical uses own transaction and atomic audit; legacy retains post-commit audit. Shared wrapper now catches validation-query errors for rollback before release."
+}

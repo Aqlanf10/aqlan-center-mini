@@ -38,10 +38,11 @@ it("HTTP: independent grant, scope, empty file and strict query; no image identi
  expect(await(await journey.api(`/api/patients/${ids.empty}/ceph`,own.cookie)).json()).toMatchObject({analyses:[],hasMore:false});
  for(const query of ["includeImages=1","status=discarded","patientId=1","limit=999"]){const r=await journey.api(`${path}?${query}`,own.cookie);expect(r.status).toBe(400);expect(r.headers.get("cache-control")).toContain("no-store");}
 });
-it("HTTP: the read and rejected writer do not change saved studies, money, schema or audit",async()=>{
- const session=await journey.login("owner"),sql="SELECT (SELECT count(*) FROM ceph_analyses)::int studies,(SELECT count(*) FROM ceph_measurements)::int measures,(SELECT count(*) FROM invoices)::int invoices,(SELECT count(*) FROM audit_log)::int audits",before=(await journey.db.query(sql)).rows;
+it("HTTP: the imaging-only reader cannot write or change saved studies, money, schema or audit",async()=>{
+ const session=await journey.login("own"),sql="SELECT (SELECT count(*) FROM ceph_analyses)::int studies,(SELECT count(*) FROM ceph_measurements)::int measures,(SELECT count(*) FROM invoices)::int invoices,(SELECT count(*) FROM audit_log)::int audits",before=(await journey.db.query(sql)).rows;
  expect((await journey.api(`/api/patients/${ids.own}/ceph`,session.cookie)).status).toBe(200);
- const response=await journey.api(`/api/patients/${ids.own}/ceph`,session.cookie,{method:"POST",body:JSON.stringify({documentId:1})});expect([401,403]).toContain(response.status);
+ const documentId=Number((await journey.db.query("SELECT document_id FROM ceph_analyses WHERE id=$1",[ids.completed])).rows[0].document_id);
+ const response=await journey.api(`/api/patients/${ids.own}/ceph`,session.cookie,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({documentId})});expect(response.status).toBe(403);
  expect((await journey.db.query(sql)).rows).toEqual(before);expect(await journey.ddlLog()).toEqual([]);
 });
 async function openStudies(page:import("playwright").Page,key:Key="own",signed=false){

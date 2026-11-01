@@ -24821,6 +24821,59 @@ function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
   };
 }
 
+/** Opens the existing empty draft on a caller-owned transaction. No schema or commit. */
+export async function createCephAnalysisInTransaction(client: DbClient, input: {
+  patientId: number;
+  documentId: number;
+  createdBy: string;
+  orthoCaseId?: number | null;
+  phase?: CephPhase;
+  xrayDate?: string | null;
+  device?: string | null;
+  refSet?: string | null;
+}): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
+    // الشععة تُنتمي للمريض نفسه: تحليلٌ على شععة غيره يضع قياسات مريضٍ في ملف آخر.
+    const { rows: docs } = await client.query<{ id: number; mime_type: string; removed_at: Date | null }>(
+      `SELECT id, mime_type, removed_at FROM patient_documents WHERE id = $1 AND patient_id = $2`,
+      [input.documentId, input.patientId],
+    );
+    const doc = docs[0];
+    if (!doc) {
+      return { ok: false, message: "المستند غير موجود لهذا المريض." };
+    }
+    if (doc.removed_at) {
+      return { ok: false, message: "المستند مخفيّ — أظهره أولًا أو اختر شععة أخرى." };
+    }
+    if (!doc.mime_type.startsWith("image/")) {
+      return { ok: false, message: "التحليل السيفالومتري على صورة — اختر شععة أو صورة من المستندات." };
+    }
+    // حالة التقويم المرتبطة إن ذُكرت — لا يصل دراسةٌ لحالة تقويم مريضٍ آخر.
+    if (input.orthoCaseId != null) {
+      const { rows: cases } = await client.query<{ id: number }>(
+        `SELECT id FROM ortho_cases WHERE id = $1 AND patient_id = $2`,
+        [input.orthoCaseId, input.patientId],
+      );
+      if (!cases[0]) {
+        return { ok: false, message: "حالة التقويم غير موجودة لهذا المريض." };
+      }
+    }
+      const { rows } = await client.query<{ id: number }>(
+        `INSERT INTO ceph_analyses
+           (patient_id, document_id, created_by, ortho_case_id, phase, xray_date, device, ref_set)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id`,
+        [
+          input.patientId, input.documentId, input.createdBy,
+          input.orthoCaseId ?? null,
+          input.phase ?? "pretreatment",
+          input.xrayDate ?? null,
+          input.device?.trim() || null,
+          input.refSet?.trim() || "builtin_default",
+        ],
+      );
+      return { ok: true, id: rows[0].id };
+}
+
 /** يفتح مسودة تحليل على شععة موجودة للمريض نفسه — الصورة مرجعٌ لا نسخة. */
 export async function createCephAnalysis(input: {
   patientId: number;
@@ -24836,57 +24889,16 @@ export async function createCephAnalysis(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // الشععة تُنتمي للمريض نفسه: تحليلٌ على شععة غيره يضع قياسات مريضٍ في ملف آخر.
-    const { rows: docs } = await client.query<{ id: number; mime_type: string; removed_at: Date | null }>(
-      `SELECT id, mime_type, removed_at FROM patient_documents WHERE id = $1 AND patient_id = $2`,
-      [input.documentId, input.patientId],
-    );
-    const doc = docs[0];
-    if (!doc) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "المستند غير موجود لهذا المريض." };
-    }
-    if (doc.removed_at) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "المستند مخفيّ — أظهره أولًا أو اختر شععة أخرى." };
-    }
-    if (!doc.mime_type.startsWith("image/")) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل السيفالومتري على صورة — اختر شععة أو صورة من المستندات." };
-    }
-    // حالة التقويم المرتبطة إن ذُكرت — لا يصل دراسةٌ لحالة تقويم مريضٍ آخر.
-    if (input.orthoCaseId != null) {
-      const { rows: cases } = await client.query<{ id: number }>(
-        `SELECT id FROM ortho_cases WHERE id = $1 AND patient_id = $2`,
-        [input.orthoCaseId, input.patientId],
-      );
-      if (!cases[0]) {
-        await client.query("ROLLBACK");
-        return { ok: false, message: "حالة التقويم غير موجودة لهذا المريض." };
-      }
-    }
     try {
-      const { rows } = await client.query<{ id: number }>(
-        `INSERT INTO ceph_analyses
-           (patient_id, document_id, created_by, ortho_case_id, phase, xray_date, device, ref_set)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id`,
-        [
-          input.patientId, input.documentId, input.createdBy,
-          input.orthoCaseId ?? null,
-          input.phase ?? "pretreatment",
-          input.xrayDate ?? null,
-          input.device?.trim() || null,
-          input.refSet?.trim() || "builtin_default",
-        ],
-      );
+      const result = await createCephAnalysisInTransaction(client, input);
+      if (!result.ok) { await client.query("ROLLBACK"); return result; }
       await client.query("COMMIT");
       await recordAudit({
-        action: "ceph.create", entity: "ceph_analysis", entityId: String(rows[0].id),
+        action: "ceph.create", entity: "ceph_analysis", entityId: String(result.id),
         entityLabel: `على المستند #${input.documentId} — مرحلة ${input.phase ?? "pretreatment"}`,
         actor: input.createdBy,
       });
-      return { ok: true, id: rows[0].id };
+      return result;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       // مسودة واحدة لكل مريض: فتحَ ثانية يعني وضعين لنفس المعالم بأيدي مختلفة.

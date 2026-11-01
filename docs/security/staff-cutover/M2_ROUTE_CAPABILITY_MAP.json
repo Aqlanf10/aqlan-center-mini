@@ -3293,8 +3293,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 59: new ceph draft command under clinical.xrays.upload with its central view prerequisite and fresh patient scope. Same owned transaction reuses native document/case validation and empty-study INSERT. Patient serialization, post-wait session/scope and NOWAIT owned image/optional ortho reference locks, atomic actual-actor audit, final authority. Current open draft conflicts; unique constraint also arbitrates legacy contenders. Minimal id and bounded duplicate warning; no image bytes, historical clinical copies, source reassignment or finance. Canonical does not use legacy schema/reader. Server-only contract; image picker and create UI remain separate. Single-draft rule is not durable idempotency: unknown response requires fresh study review and new explicit intent before another opening. Local validation and exact-head CI/review are tracked separately."
  },
  {
   "route": "/api/patients/[id]/chart",
