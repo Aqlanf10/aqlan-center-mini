@@ -1,3 +1,4 @@
+import { validCatalogId } from "./medication-catalog";
 import type { RxItem } from "./prescription";
 
 /** Generic-name metadata is not approval of a dosing regimen. Every new line,
@@ -8,9 +9,19 @@ export const MEDICATION_NAME_CHOICES = [
   { id: "ibuprofen", name: "Ibuprofen" },
   { id: "amoxicillin", name: "Amoxicillin" },
   { id: "chlorhexidine", name: "Chlorhexidine" },
+  {"id": "penicillin-v", "name": "Phenoxymethylpenicillin (Penicillin V)"},
+  {"id": "metronidazole", "name": "Metronidazole"},
+  {"id": "amoxicillin-clavulanate", "name": "Amoxicillin + Clavulanate"},
+  {"id": "azithromycin", "name": "Azithromycin"},
+  {"id": "clarithromycin", "name": "Clarithromycin"},
+  {"id": "nystatin", "name": "Nystatin"},
+  {"id": "miconazole", "name": "Miconazole oral gel"},
+  {"id": "fluconazole", "name": "Fluconazole"},
+  {"id": "benzydamine", "name": "Benzydamine hydrochloride mouthwash"},
+  {"id": "sodium-fluoride", "name": "Sodium fluoride"},
 ] as const;
 export type MedicationNameChoiceId = typeof MEDICATION_NAME_CHOICES[number]["id"];
-export interface ManualMedicationSelection { id: MedicationNameChoiceId | "manual"; amount: string; confirmed: boolean }
+export interface ManualMedicationSelection { id: MedicationNameChoiceId | "manual"; amount: string; confirmed: boolean; catalog?: { id: string; revision: number } }
 export function createManualMedicationSelection(id: string): RxItem | null {
   const choice = MEDICATION_NAME_CHOICES.find(value => value.id === id);
   return choice ? { name: choice.name, dose: "", form: "", frequency: "", duration: "", instructions: "", instructionsEn: "",
@@ -27,6 +38,7 @@ export function manualMedicationSelectionError(items: unknown): string | null {
     if (![item.name, item.form, item.dose, selection.amount, item.frequency, item.duration].every(value => typeof value === "string" && value.trim())
       || !/[A-Za-z]/.test(item.name))
       return `أكمل اسم الدواء والشكل والتركيز ومقدار الجرعة والتكرار والمدة في السطر ${index + 1} قبل الإصدار أو المعاينة.`;
+    if (selection.catalog !== undefined && (!selection.catalog || typeof selection.catalog !== "object" || !validCatalogId(selection.catalog.id) || !Number.isSafeInteger(selection.catalog.revision) || selection.catalog.revision < 1 || Object.keys(selection.catalog).sort().join() !== "id,revision")) return "مرجع الدواء في الدليل غير صالح.";
     if (selection.confirmed !== true) return `راجع وأكّد تفاصيل الدواء في السطر ${index + 1} قبل الإصدار أو المعاينة.`;
   }
   return null;

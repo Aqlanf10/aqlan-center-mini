@@ -13,8 +13,8 @@ describe("explicit manual generic name selection", () => {
     expect(MEDICATION_TEMPLATES).toEqual([]);
   });
   it("does not provide an automatic alternative or unknown choice", () => {
-    expect(MEDICATION_NAME_CHOICES).toHaveLength(4);
-    for (const value of ["clindamycin", "azithromycin", "unknown"]) expect(createManualMedicationSelection(value)).toBeNull();
+    expect(MEDICATION_NAME_CHOICES).toHaveLength(14);
+    for (const value of ["clindamycin", "unknown"]) expect(createManualMedicationSelection(value)).toBeNull();
     expect(createManualMedicationSelection("chlorhexidine")!.name).toBe("Chlorhexidine");
   });
   it.each(["name", "dose", "form", "frequency", "duration"])("server draft validation rejects missing %s before sanitization can drop the line", field => {

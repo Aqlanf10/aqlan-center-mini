@@ -18,15 +18,15 @@ export function PrescriptionMedicationLibrary({ onSelectName, disabled = false }
   return (
     <details className="rounded-xl border border-slate-200 p-3 text-xs" data-medication-library="review-only">
       <summary className="cursor-pointer font-bold">مكتبة أدوية إرشادية — تُراجع الجرعة والتعليمات ويعتمدها الطبيب لكل مريض</summary>
-      <p className="my-2 text-slate-600">أربعة مدخلات أولية للمراجعة؛ ليست مكتبة كاملة أو اعتمادًا محليًا. يمكن اختيار اسم المادة فقط لمسودة يملؤها الطبيب. الجرعات المرجعية والحساب السريري غير مفعّلين.</p>
+      <p className="my-2 text-slate-600">أربعة عشر مرجعًا علميًا للمراجعة؛ بعضها خط ثانٍ أو لحالات محددة، وليست توصية بكل دواء أو اعتمادًا لمنتج محلي. يمكن اختيار اسم المادة فقط لمسودة يملؤها الطبيب. الجرعات المرجعية والحساب السريري غير مفعّلين.</p>
       <div className="flex flex-wrap gap-2">
         <label>بحث باسم الدواء<input aria-label="بحث في مكتبة الأدوية" value={query} onChange={e => setQuery(e.target.value)} className="mx-2 rounded border p-2" /></label>
         <label>الفئة<select aria-label="الفئة العمرية للمراجع" value={population} onChange={e => setPopulation(e.target.value as "adult" | "child")} className="mx-2 rounded border p-2"><option value="adult">بالغ</option><option value="child">طفل</option></select></label>
       </div>
-      {entries.length === 0 && <p className="mt-3">لا توجد نتيجة في المدخلات الأولية.</p>}
+      {entries.length === 0 && <p className="mt-3">لا توجد نتيجة في المراجع المتاحة.</p>}
       {entries.map(entry => <article key={entry.id} className="mt-3 rounded-lg border border-slate-200 p-3">
         <h4 className="font-bold"><span dir="ltr">{entry.genericName}</span> — {entry.arabicName}</h4>
-        <p className="mt-1 text-slate-500">بانتظار مراجعة المالك · {entry.version}</p>
+        <p className="mt-1 text-slate-500">مرجع للمراجعة السريرية — لا اعتماد تلقائي · {entry.version}</p>
         <p className="mt-2 leading-6">{referenceText(entry[population])}</p>
         <p className="mt-2 leading-6">{referenceText(entry.instructions)}</p>
         <p dir="ltr" className="mt-2 text-slate-500">{entry.units}</p>

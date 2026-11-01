@@ -1,3 +1,4 @@
+import { MEDICATION_CATALOG_KEY, EMPTY_MEDICATION_CATALOG, parseMedicationCatalog, catalogTransitionProblem } from "./medication-catalog";
 import { PRESCRIPTION_ISSUANCE_MIGRATIONS } from "./prescription-issuance-migration";
 import { querySavedPrescriptionHistory } from "./prescription-history";
 import { encodePrescriptionPrintCursor, type PrescriptionPrintCursor } from "./prescription-print-pagination";
@@ -7995,6 +7996,7 @@ export async function getSettingsSafe(): Promise<SettingsMap> {
  * يمسح أقسامًا أخرى. والمفاتيح المجهولة تُرفض قبل الوصول إلى هنا.
  */
 export async function saveSettings(values: Partial<Record<SettingKey, string>>): Promise<SettingsMap> {
+  if (MEDICATION_CATALOG_KEY in values) throw new Error("MEDICATION_CATALOG_AUDITED_WRITE_REQUIRED");
   await ensureSchema();
   const entries = ALL_SETTING_KEYS
     .filter((key) => values[key] !== undefined)
@@ -8099,6 +8101,7 @@ async function documentPrefixProblemInTx(
  * ٣) **الأسرار**: لا تُنقل قيمتها إلى السجل بحالٍ — الحالة المعنوية وحدها.
  */
 export async function saveSettingsAudited(input: {
+  session?: import("./auth").SessionPayload;
   values: Readonly<Record<string, string>>;
   /** الطابع المتوقَّع لكل مفتاح: نصٌّ للمخزَّن، و`null` لِما لم يُخزَّن بعد. */
   expected?: Readonly<Record<string, string | null>>;
@@ -8113,6 +8116,8 @@ export async function saveSettingsAudited(input: {
   const keys = Object.keys(input.values);
   if (keys.length === 0) return { ok: true, settings: await getSettings(), changed: [] };
 
+  const catalogWrite = keys.includes(MEDICATION_CATALOG_KEY);
+  const atomicAudit = input.transactionalAudit || catalogWrite;
   const audits: { key: string; details: Record<string, unknown> }[] = [];
   const client = await getPool().connect();
   try {
@@ -8131,6 +8136,17 @@ export async function saveSettingsAudited(input: {
       [keys],
     );
     const stored = new Map(rows.map((row) => [row.key, row]));
+    if (catalogWrite) {
+      // Revalidate AFTER waiting on settings locks; no stale role or audit identity.
+      const current = input.session ? await (await import("./session")).revalidateSessionInTransaction(input.session, client) : null;
+      if (!current || current.role !== "admin" || current.username !== input.actor || current.role !== input.actorRole
+        || !input.expected || !(MEDICATION_CATALOG_KEY in input.expected) || !input.reason?.trim()) throw new Error("MEDICATION_CATALOG_AUTHORITY_REQUIRED");
+      const before = parseMedicationCatalog(stored.get(MEDICATION_CATALOG_KEY)?.value ?? EMPTY_MEDICATION_CATALOG);
+      const after = parseMedicationCatalog(input.values[MEDICATION_CATALOG_KEY]);
+      const problem = !before.ok || !after.ok ? "دليل الأدوية غير صالح." : catalogTransitionProblem(before.value, after.value);
+      if (problem) { await client.query("ROLLBACK"); return { ok: false, problem }; }
+    }
+
 
     if (input.expected) {
       for (const key of keys) {
@@ -8176,7 +8192,7 @@ export async function saveSettingsAudited(input: {
         details: settingAuditDetails({ definition, before, after, reason: input.reason, previouslyStored: !!current }),
       });
     }
-    if (input.transactionalAudit) {
+    if (atomicAudit) {
       for (const entry of audits) {
         await insertAuditRow(client, {
           action: input.mode === "reset" ? SETTINGS_AUDIT_RESET : SETTINGS_AUDIT_UPDATE,
@@ -8185,11 +8201,12 @@ export async function saveSettingsAudited(input: {
         });
       }
     }
+    if (catalogWrite && (!input.session || !await (await import("./session")).revalidateSessionInTransaction(input.session, client))) throw new Error("MEDICATION_CATALOG_SESSION_EXPIRED");
     await client.query("COMMIT");
 
     invalidateSettingsCache();
     /* التدقيق بعد الإتمام: صفُّ تدقيقٍ لتغييرٍ تراجع أسوأ من غياب الصفّ. */
-    for (const entry of input.transactionalAudit ? [] : audits) {
+    for (const entry of atomicAudit ? [] : audits) {
       await recordAudit({
         action: input.mode === "reset" ? SETTINGS_AUDIT_RESET : SETTINGS_AUDIT_UPDATE,
         entity: SETTINGS_AUDIT_ENTITY,

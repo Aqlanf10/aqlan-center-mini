@@ -95,6 +95,7 @@ export function sanitizeRxItem(input: unknown): RxItem | null {
       id: (source.selection as ManualMedicationSelection).id,
       amount: text((source.selection as ManualMedicationSelection).amount, MAX_FIELD),
       confirmed: (source.selection as ManualMedicationSelection).confirmed === true,
+      ...((source.selection as ManualMedicationSelection).catalog ? { catalog: { ...(source.selection as ManualMedicationSelection).catalog! } } : {}),
     } } : {}),
     dose: text(source.dose, MAX_FIELD),
     form: text(source.form, MAX_FIELD),

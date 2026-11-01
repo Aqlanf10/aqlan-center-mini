@@ -11,6 +11,7 @@ import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
+import { PrescriptionClinicCatalog } from "./PrescriptionClinicCatalog";
 import { PrescriptionMedicationLibrary } from "./PrescriptionMedicationLibrary";
 import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
 import { MAX_ITEMS, sanitizeRxItems, checkPrescriptionDraft } from "@/lib/prescription";
@@ -593,6 +594,7 @@ export function PrescriptionModal({
             </div>
           )}
 
+          <PrescriptionClinicCatalog key={`${patientId}:${visitId ?? "none"}:${selectedDoctorId ?? "none"}:${prescriberStatus}`} disabled={items.length >= MAX_ITEMS || prescriberStatus !== "ready"} onSelect={item => setItems(previous => previous.length < MAX_ITEMS ? [...previous, item] : previous)} />
           <PrescriptionMedicationLibrary disabled={items.length >= MAX_ITEMS || prescriberStatus !== "ready"} onSelectName={id => {
             const item = createManualMedicationSelection(id);
             if (item) setItems(previous => previous.length < MAX_ITEMS ? [...previous, item] : previous);

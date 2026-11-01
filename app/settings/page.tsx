@@ -33,7 +33,7 @@ interface SettingsSnapshot {
   secrets: Record<string, boolean>;
 }
 
-interface MePayload { role?: string | null; displayName?: string | null; }
+interface MePayload { username?: string | null; role?: string | null; displayName?: string | null; }
 
 interface ManualBackupPayload {
   ok?: boolean;
@@ -51,6 +51,7 @@ interface ManualBackupPayload {
 type EditMode = "edit" | "reset";
 
 interface EditorState {
+  expectedActor: string | null;
   definition: SettingDefinition;
   mode: EditMode;
   draft: string;
@@ -73,6 +74,7 @@ const CATEGORY_HELP: Partial<Record<SettingCategory, string>> = {
 };
 
 const SPECIALIZED_LINKS = [
+  ["/settings/medications", "دليل الأدوية والتركيزات والتعليمات"],
   ["/settings/users", "المستخدمون والصلاحيات"],
   ["/settings/appointment-services", "خدمات المواعيد وأنواع الزيارات"],
   ["/settings/service-materials", "ربط الخدمات بالمواد"],
@@ -164,6 +166,7 @@ export default function SettingsPage() {
   const categories = useMemo(() => visibleCategories(), []);
   const [selectedCategory, setSelectedCategory] = useState<SettingCategory>(categories[0] ?? "general");
   const [snapshot, setSnapshot] = useState<SettingsSnapshot>({ values: {}, versions: {}, secrets: {} });
+  const [expectedActor, setExpectedActor] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -192,6 +195,7 @@ export default function SettingsPage() {
       const me = await readJson(meResponse) as MePayload;
       if (!meResponse.ok) throw new Error("تعذّر التحقق من صلاحيات المستخدم.");
       setSnapshot(nextSnapshot);
+      setExpectedActor(typeof me.username === "string" ? me.username : null);
       setRole(typeof me.role === "string" ? me.role : null);
       setDisplayName(typeof me.displayName === "string" ? me.displayName : null);
       setError(null);
@@ -213,6 +217,7 @@ export default function SettingsPage() {
   const openEditor = (definition: SettingDefinition, mode: EditMode) => {
     const current = snapshot.values[definition.key] ?? definition.defaultValue;
     setEditor({
+      expectedActor,
       definition,
       mode,
       draft: definition.sensitivity === "secret" ? "" : mode === "reset" ? definition.defaultValue : current,
@@ -248,8 +253,8 @@ export default function SettingsPage() {
     const attempted = editor.mode === "reset" ? editor.definition.defaultValue : editor.draft;
     try {
       const body = editor.mode === "reset"
-        ? { action: "reset", keys: [key], __versions: { [key]: snapshot.versions[key] ?? null }, reason: editor.reason.trim() || null }
-        : { [key]: editor.draft, __versions: { [key]: snapshot.versions[key] ?? null }, __reason: editor.reason.trim() || null };
+        ? { action: "reset", keys: [key], __versions: { [key]: snapshot.versions[key] ?? null }, __expectedActor: editor.expectedActor, reason: editor.reason.trim() || null }
+        : { [key]: editor.draft, __versions: { [key]: snapshot.versions[key] ?? null }, __expectedActor: editor.expectedActor, __reason: editor.reason.trim() || null };
       const response = await fetch("/api/settings", {
         method: editor.mode === "reset" ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },

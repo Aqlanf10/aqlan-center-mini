@@ -156,3 +156,16 @@ it('fresh relink denies cached replay and recovery without leaking the saved pre
  for(const response of [replay,recovery]){expect(response.status).toBe(403);expect(await response.json()).not.toHaveProperty('id');}
  expect(await counts()).toEqual({rx:1,commands:1,audits:1});
 });
+
+it('catalogue disable blocks new issuance, not replay/recovery of immutable saved prescription', async () => {
+ const entry = {id:randomUUID(),revision:1,enabled:true,name:'SyntheticRx',arabicName:'',form:'tablet',strength:'500mg',population:'adult',amount:'1 tablet',frequency:'fixture',duration:'fixture',instructionsAr:'',instructionsEn:'',indication:'Synthetic test only',cautions:'',sourceUrl:''};
+ const selected = {...draft,items:draft.items.map(item=>({...item,selection:{...item.selection,catalog:{id:entry.id,revision:1}}}))};
+ const store = async (enabled:boolean,revision:number) => transport.pool.query("INSERT INTO settings(key,value) VALUES('clinical.medication_catalog',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify({schemaVersion:1,entries:[{...entry,enabled,revision}]})]);
+ await store(true,1);
+ const issued=await issuePrescriptionTransaction({session:session(),key,draft:selected},issue);expect(issued.status).toBe(201);const saved=await issued.json();
+ await store(false,2);
+ const replay=await issuePrescriptionTransaction({session:session(),key,draft:selected},issue);expect(replay.status).toBe(201);expect(await replay.json()).toMatchObject({id:saved.id,replayed:true});
+ const refused=await issuePrescriptionTransaction({session:session(),key:randomUUID(),draft:selected},issue);expect(refused.status).toBe(409);expect(await refused.json()).toMatchObject({code:'medication_catalog_changed'});
+ expect(await counts()).toEqual({rx:1,commands:1,audits:1});
+ const recovery=await recoverPrescriptionCommand(session(),key,{patientId:7,visitId:9,prescribingDoctorPartyId:5});expect(recovery.status).toBe(200);
+});

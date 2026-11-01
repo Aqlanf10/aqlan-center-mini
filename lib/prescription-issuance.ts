@@ -1,3 +1,4 @@
+import { MEDICATION_CATALOG_KEY, EMPTY_MEDICATION_CATALOG, parseMedicationCatalog, catalogSelectionProblem } from "./medication-catalog";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ensureSchema, getPool, findUserByUsername, getPrescription, savePrescription, type DbClient } from "./db";
@@ -71,6 +72,13 @@ export async function issuePrescriptionTransaction(input: { session: SessionPayl
         const record = await getPrescription(receipt.prescription_id, client);
         if (!record || record.patientId !== draft.patientId) refuse(409, "تعذر مطابقة الإصدار المحفوظ.");
         return NextResponse.json({ id: record.id, createdAt: record.createdAt, status: record.status, replayed: true }, { status: 201 });
+      }
+      if (draft.items.some(item => item.selection?.catalog)) {
+        const { rows } = await client.query<{ value: string }>("SELECT value FROM settings WHERE key=$1 FOR SHARE NOWAIT", [MEDICATION_CATALOG_KEY]);
+        const catalog = parseMedicationCatalog(rows[0]?.value ?? EMPTY_MEDICATION_CATALOG);
+        if (!catalog.ok) refuse(409, "تعذر التحقق من دليل الأدوية.", "medication_catalog_unavailable");
+        const problem = catalogSelectionProblem(draft.items, catalog.value);
+        if (problem) refuse(409, problem, "medication_catalog_changed");
       }
       const currentDraft = { ...draft, prescribingDoctorName: authority.doctorName, ownerAuthority: authority.ownerAuthority };
       let completed = false;
