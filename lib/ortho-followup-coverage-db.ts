@@ -99,14 +99,20 @@ async function owner(client:DbClient,patientId:number,caseId:number,write:boolea
 }
 /** Locks for both the decision writer and the sign-time proof reader. Patient
  * is first; NOWAIT refuses inverted legacy source writers rather than deadlocks. */
-async function lockSource(client:DbClient,s:FollowupSourceIdentity){
-  await client.query("SELECT id FROM clinical_cases WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT",[s.clinicalCaseId,s.patientId]);
-  await client.query("SELECT id FROM treatment_plans WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT",[s.planId,s.patientId]);
-  await client.query("SELECT id FROM plan_items WHERE id=$1 AND plan_id=$2 FOR SHARE NOWAIT",[s.planItemId,s.planId]);
+async function lockSource(client:DbClient,s:FollowupSourceIdentity,strictOwnership=false){
+  const clinical=await client.query("SELECT id FROM clinical_cases WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT",[s.clinicalCaseId,s.patientId]);
+  if(strictOwnership&&!clinical.rows.length)return false;
+  const plan=await client.query("SELECT id FROM treatment_plans WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT",[s.planId,s.patientId]);
+  if(strictOwnership&&!plan.rows.length)return false;
+  const item=await client.query(strictOwnership
+    ? "SELECT id FROM plan_items WHERE id=$1 AND plan_id=$2 AND case_id=$3 FOR SHARE NOWAIT"
+    : "SELECT id FROM plan_items WHERE id=$1 AND plan_id=$2 FOR SHARE NOWAIT",strictOwnership?[s.planItemId,s.planId,s.clinicalCaseId]:[s.planItemId,s.planId]);
+  if(strictOwnership&&!item.rows.length)return false;
   await client.query("SELECT p.id FROM parties p JOIN plan_items i ON i.doctor_id=p.id WHERE i.id=$1 FOR SHARE OF p NOWAIT",[s.planItemId]);
   const invoiceIds=(await client.query<{id:number}>("SELECT id FROM invoices WHERE patient_id=$2 AND (id=$1 OR id=(SELECT origin_invoice_id FROM plan_items WHERE id=$3)) ORDER BY id FOR SHARE NOWAIT",[s.invoiceId,s.patientId,s.planItemId])).rows.map(r=>r.id);
   await client.query("SELECT id FROM invoice_items WHERE invoice_id=ANY($1::int[]) ORDER BY id FOR SHARE NOWAIT",[invoiceIds]);
   await client.query("SELECT id FROM invoice_corrections WHERE original_invoice_id=ANY($1::int[]) OR corrected_invoice_id=ANY($1::int[]) ORDER BY id FOR SHARE NOWAIT",[invoiceIds]);
+  return true;
 }
 export async function readFollowupCoverage(input:{session:SessionPayload;patientId:number;orthoCaseId:number}):Promise<FollowupCoverageRead>{
   if(!positive(input.patientId)||!positive(input.orthoCaseId))fail(400,"invalid_scope","معرف الحالة غير صالح.");
@@ -125,12 +131,7 @@ export async function readFollowupCoverage(input:{session:SessionPayload;patient
       sources:sources.filter(r=>r.valid).map(choice)};
   },usesSharedLocalDatabaseConnection());
 }
-/** Already admitted caller only: bounded source materialization on its owning RR
- * connection. Shares the exact commercial SQL, site validation and fingerprint
- * with the compatibility writer; no initializer, transaction or authority fallback. */
-export async function readFollowupCoverageSnapshotWith(db:Runner,patientId:number,caseId:number){
-  const enabled=await followupCoverageAvailable(db);
-  if(!enabled)return {enabled,current:null,applicable:false,sources:[] as FollowupSourceChoice[]};
+async function boundedCurrentHead(db:Runner,patientId:number,caseId:number){
   const {rows:[stored]}=await db.query<{oversized:boolean;head:Stored|null}>(`WITH head AS (
     SELECT ${columns} FROM ortho_followup_coverage_revisions WHERE ortho_case_id=$1 ORDER BY version DESC LIMIT 1
   ) SELECT octet_length(to_jsonb(head)::text)>16384 AS oversized,
@@ -141,6 +142,9 @@ export async function readFollowupCoverageSnapshotWith(db:Runner,patientId:numbe
     ||!["included","excluded"].includes(head.decision)||typeof head.reason!=="string"||head.reason.length>600
     ||typeof head.created_by!=="string"||head.created_by.length>1000||!Number.isFinite(new Date(head.created_at).getTime())))
     throw new Error("STAFF_READ_READ_FAILED");
+  return head;
+}
+async function boundedSourceRows(db:Runner,patientId:number,caseId:number){
   // SQL refuses the whole result before sending a large JSON value to Node. It
   // never truncates candidates and falsely concludes a saved decision is stale.
   const {rows:[bounded]}=await db.query<{oversized:boolean;sources:SourceRow[]|null}>(`WITH candidates AS MATERIALIZED (
@@ -151,6 +155,16 @@ export async function readFollowupCoverageSnapshotWith(db:Runner,patientId:numbe
       THEN COALESCE(jsonb_agg(to_jsonb(sized)-'bytes' ORDER BY "planItemId","invoiceId"),'[]'::jsonb) ELSE NULL END AS sources FROM sized`,[caseId,patientId]);
   if(!bounded||bounded.oversized||!Array.isArray(bounded.sources))throw new Error("STAFF_READ_READ_FAILED");
   const sources=validateSources(bounded.sources);
+  return sources;
+}
+/** Already admitted caller only: bounded source materialization on its owning RR
+ * connection. Shares the exact commercial SQL, site validation and fingerprint
+ * with the compatibility writer; no initializer, transaction or authority fallback. */
+export async function readFollowupCoverageSnapshotWith(db:Runner,patientId:number,caseId:number){
+  const enabled=await followupCoverageAvailable(db);
+  if(!enabled)return {enabled,current:null,applicable:false,sources:[] as FollowupSourceChoice[]};
+  const head=await boundedCurrentHead(db,patientId,caseId);
+  const sources=await boundedSourceRows(db,patientId,caseId);
   return {enabled,current:head?project(head):null,
     applicable:!!head&&sources.some(r=>r.valid&&matches(r,sourceOf(head))&&hash(r.snapshot)===head.source_fingerprint),
     sources:sources.filter(r=>r.valid).map(choice)};
@@ -199,39 +213,50 @@ export async function readFollowupCoverageCommandStatus(input:CoverageCommandInp
     await client.query("COMMIT");return result;
   }catch(error){try{await client.query("ROLLBACK");}catch{destroy=true;}throw error;}finally{client.release(destroy);}
 }
-export async function appendFollowupCoverage(input:CoverageCommandInput){
-  const command=exactCommand(input);
-  await ensureSchema();const client=await getPool().connect();let destroy=false;
-  try{
-    await client.query("BEGIN");
-    const {actor,currentPatientId}=await authorizeCurrentCase(client,input.session,input.orthoCaseId);
+export type FollowupCoverageAppendOutcome =
+  | {state:"committed";ok:true;replayed:boolean;revision:FollowupCoverageRevision}
+  | {state:"rejected";rejection:FollowupCoverageRejection};
+/** Caller-owned transaction. The native decision/source SQL, request identity and
+ * durable rejection are shared. A rejection is returned so the owner can commit
+ * its audit and receipt before translating it to HTTP; errors still roll back. */
+export async function appendFollowupCoverageWith(client:DbClient,input:{patientId:number;orthoCaseId:number},
+  command:FollowupCoverageCommand,actor:{userId:number;username:string;role:string},currentPatientId:number,
+  hooks?:{bounded:true;assertCurrent:()=>Promise<void>}):Promise<FollowupCoverageAppendOutcome>{
     if(!await followupCoverageAvailable(client))fail(503,"coverage_not_ready","تسجيل نطاق المتابعات لم يُفعّل بعد؛ لا تغيّر الاتفاق أو تنشئ فاتورة بديلة.");
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["ortho-followup-command:"+command.commandId]);
+    await hooks?.assertCurrent();
     const caseStatus=await owner(client,currentPatientId,input.orthoCaseId,true);
+    await hooks?.assertCurrent();
     const requestFingerprint=hash({patientId:input.patientId,orthoCaseId:input.orthoCaseId,actorUserId:actor.userId,command});
-    const replay=await terminalReceipt(client,command,requestFingerprint);
+    const replay=await terminalReceipt(client,command,requestFingerprint,hooks?.bounded===true);
     if(replay.state!=="unresolved"){
-      await client.query("COMMIT");
-      if(replay.state==="rejected")throw new FollowupCoverageError(409,replay.rejection.code,replay.rejection.message,replay.rejection);
-      return {ok:true as const,replayed:true,revision:replay.revision};
+      await hooks?.assertCurrent();
+      if(replay.state==="rejected")return replay;
+      return {state:"committed",ok:true,replayed:true,revision:replay.revision};
     }
-    const reject=async(code:FollowupCoverageRejection["code"],message:string):Promise<never>=>{
+    const reject=async(code:FollowupCoverageRejection["code"],message:string):Promise<FollowupCoverageAppendOutcome>=>{
       const row=(await client.query<StoredRejection>(`INSERT INTO ortho_followup_coverage_rejections
         (command_id,request_fingerprint,patient_id,ortho_case_id,actor_user_id,command,code,message,actor)
         VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9) RETURNING *`,
         [command.commandId,requestFingerprint,input.patientId,input.orthoCaseId,actor.userId,JSON.stringify(command),code,message,actor.username])).rows[0];
       await insertAuditRow(client,{action:"ortho.followup_coverage.append",entity:"ortho_case",entityId:input.orthoCaseId,
         actor:actor.username,actorRole:actor.role,details:{outcome:"rejected",commandId:command.commandId,patientId:input.patientId,code,requestFingerprint}});
-      await client.query("COMMIT");
-      throw new FollowupCoverageError(409,code,message,projectRejection(row));
+      await hooks?.assertCurrent();
+      return {state:"rejected",rejection:projectRejection(row)};
     };
-    if(currentPatientId!==input.patientId)await reject("source_changed","تغيّر مالك الحالة؛ راجع الربط قبل اعتماد قرار جديد.");
-    if(!["active","retention"].includes(caseStatus))await reject("case_closed","الحالة مغلقة؛ لا يتغير نطاق المتابعات الجديدة لها.");
-    const head=await currentHead(client,input.orthoCaseId);
-    if((head?String(head.id):null)!==command.expectedRevisionId)await reject("stale_coverage","تغيّر نطاق المتابعات منذ فتح الشاشة؛ أعد التحميل وراجع القرار.");
-    await lockSource(client,command.source);
-    const source=(await sourceRows(client,input.patientId,input.orthoCaseId)).find(r=>matches(r,command.source));
-    if(!source?.valid||hash(source.snapshot)!==command.expectedSourceFingerprint)await reject("source_changed","تغيّر مصدر الاتفاق أو لم تعد هويته مثبتة؛ راجع الفاتورة والربط قبل الاعتماد.");
+    if(currentPatientId!==input.patientId)return reject("source_changed","تغيّر مالك الحالة؛ راجع الربط قبل اعتماد قرار جديد.");
+    if(!["active","retention"].includes(caseStatus))return reject("case_closed","الحالة مغلقة؛ لا يتغير نطاق المتابعات الجديدة لها.");
+    const head=hooks?.bounded ? await boundedCurrentHead(client,input.patientId,input.orthoCaseId) : await currentHead(client,input.orthoCaseId);
+    if((head?String(head.id):null)!==command.expectedRevisionId)return reject("stale_coverage","تغيّر نطاق المتابعات منذ فتح الشاشة؛ أعد التحميل وراجع القرار.");
+    if(hooks?.bounded){
+      // A supplied foreign item/plan must not acquire locks outside the admitted
+      // patient. Recheck the same native fingerprint again after source locks.
+      const observed=(await boundedSourceRows(client,input.patientId,input.orthoCaseId)).find(r=>matches(r,command.source));
+      if(!observed?.valid||hash(observed.snapshot)!==command.expectedSourceFingerprint)return reject("source_changed","تغيّر مصدر الاتفاق أو لم تعد هويته مثبتة؛ راجع الفاتورة والربط قبل الاعتماد.");
+    }
+    if(!await lockSource(client,command.source,hooks?.bounded===true))return reject("source_changed","تغيّر مصدر الاتفاق أو لم تعد هويته مثبتة؛ راجع الفاتورة والربط قبل الاعتماد.");
+    const source=(await (hooks?.bounded ? boundedSourceRows(client,input.patientId,input.orthoCaseId) : sourceRows(client,input.patientId,input.orthoCaseId))).find(r=>matches(r,command.source));
+    if(!source?.valid||hash(source.snapshot)!==command.expectedSourceFingerprint)return reject("source_changed","تغيّر مصدر الاتفاق أو لم تعد هويته مثبتة؛ راجع الفاتورة والربط قبل الاعتماد.");
     if(!source)throw new Error("Coverage source missing after validation");
     const {rows:[saved]}=await client.query<Stored>(`INSERT INTO ortho_followup_coverage_revisions
       (patient_id,ortho_case_id,clinical_case_id,plan_id,plan_item_id,invoice_id,version,supersedes_revision_id,scope,decision,source_fingerprint,source_snapshot,reason,actor_user_id,created_by,command_id,request_fingerprint)
@@ -239,7 +264,19 @@ export async function appendFollowupCoverage(input:CoverageCommandInput){
       [input.patientId,input.orthoCaseId,source.clinicalCaseId,source.planId,source.planItemId,source.invoiceId,(head?.version??0)+1,head?.id??null,command.decision,command.expectedSourceFingerprint,JSON.stringify(source.snapshot),command.reason,actor.userId,actor.username,command.commandId,requestFingerprint]);
     await insertAuditRow(client,{action:"ortho.followup_coverage.append",entity:"ortho_case",entityId:input.orthoCaseId,actor:actor.username,actorRole:actor.role,
       details:{before:head?project(head):null,after:project(saved),scope:"routine_adjustments",reason:command.reason}});
-    await client.query("COMMIT");return {ok:true as const,replayed:false,revision:project(saved)};
+    await hooks?.assertCurrent();
+    return {state:"committed",ok:true,replayed:false,revision:project(saved)};
+}
+export async function appendFollowupCoverage(input:CoverageCommandInput){
+  const command=exactCommand(input);
+  await ensureSchema();const client=await getPool().connect();let destroy=false;
+  try{
+    await client.query("BEGIN");
+    const {actor,currentPatientId}=await authorizeCurrentCase(client,input.session,input.orthoCaseId);
+    const outcome=await appendFollowupCoverageWith(client,input,command,{userId:actor.userId!,username:actor.username,role:actor.role},currentPatientId);
+    await client.query("COMMIT");
+    if(outcome.state==="rejected")throw new FollowupCoverageError(409,outcome.rejection.code,outcome.rejection.message,outcome.rejection);
+    return {ok:true as const,replayed:outcome.replayed,revision:outcome.revision};
   }catch(error){try{await client.query("ROLLBACK");}catch{destroy=true;}throw error;}finally{client.release(destroy);}
 }
 /** Current explicit head only. No head is NOT an exclusion. A stale source is

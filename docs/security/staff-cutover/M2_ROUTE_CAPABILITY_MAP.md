@@ -30,23 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 57 on WORK)
+### Counts (386 mapped route/method entries, after local slice 62 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 267 |
+| existing | 264 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 77 |
+| canonical-done | 80 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts are source conversion states, not an acceptance percentage. The broader inventory has 420 methods / 97 pages and remains NOT_READY. Published batch 53–55 at `7f586db2` has 75 canonical-done / 269 existing ordinary methods; exact-head CI and review are separate. Local slices 56–57 add immutable assessment and strategy append contracts, giving 77 / 267. Full gates and review remain pending; the strategy editor has not been enabled. Partial lifecycle PATCH, source pickers, bridge creation and image tracing are not implied by these counts.
+Counts are source conversion states, not an acceptance percentage. The broader inventory has 420 methods / 97 pages and remains NOT_READY. Published batch56–58 at `aa2388b0` has 77 canonical-done / 267 existing ordinary methods. Local59,61,62 add three methods, giving 80 / 264; UI60 adds no method. Full gates and review are tracked per slice, with no implication of whole-module readiness. Source pickers, bridge creation, image tracing, inventory and schema convergence remain separate.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -694,3 +694,8 @@ The optional ortho link is gated on the server by the same fresh `clinical.ortho
 PUT `/api/ortho/[id]/followup-coverage?patientId=…` is an explicit status lookup under mapped `finance.agreements.manage` and current patient scope. It shares the native actor-bound request fingerprint and immutable receipt semantics. Command-lock waiting is followed by fresh authority, current positive ownership and same-patient case locks; final proof is checked before return. A missing receipt is unresolved, never rejection or permission for a replacement request.
 
 A bounded native receipt reader projects only the actor's exact command outcome; no financial source snapshot, invoice amounts, other actor receipt, mutation or audit write. Each row is refused above16KiB before unbounded Node materialization; exact native recovery matchers check the projected result. This command uses an owning READ COMMITTED transaction for its fences and locks; it is not described as RR or SQL READ ONLY. Legacy GET/POST/PUT behavior is retained. POST decision writer and editor remain separate. Conversion status is not CI/review or release acceptance.
+
+
+### Slice 62 — explicit durable followup-coverage decision
+
+POST `/api/ortho/[id]/followup-coverage?patientId=…` admits the mapped agreement capability and current patient scope on one owning transaction. The native immutable receipt/fingerprint, source validity, included/excluded policy and atomic audit are retained. Command-lock waits are followed by current authority; source parent ownership is checked before child locks. A terminal business refusal commits with its audit; authority/infrastructure failures roll back. Identical requests replay exactly once; altered identity conflicts. No money, prior signed-proof, migration, implicit activation or editor change. [Acceptance and limits](../../review/work-ortho-coverage-command-slice62-20261101.md).

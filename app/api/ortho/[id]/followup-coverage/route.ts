@@ -1,3 +1,4 @@
+import { commandCanonicalFollowupCoverage } from "@/lib/canonical-ortho-coverage-command";
 import { readCanonicalCoverageCommandStatus } from "@/lib/canonical-ortho-coverage-status";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
@@ -32,6 +33,20 @@ export async function GET(request:Request,context:Context){
   }catch(e){return e instanceof FollowupCoverageError?error(e.message,e.status,e.code,e.rejection):error("تعذّر التحقق من نطاق المتابعات؛ لم يُعتبر مشمولًا أو خارج الاتفاق.",500,"coverage_read_failed");}
 }
 export async function POST(request:Request,context:Context){
+  const selected=await selectRequestStaffEnvelope();
+  if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});
+  if(selected.kind==="canonical"){
+    try{
+      const {caseId,patientId}=canonicalCoverageQuery((await context.params).id,new URL(request.url).searchParams);
+      const command=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);
+      const result=await commandCanonicalFollowupCoverage(selected.handle,patientId,caseId,command);
+      return NextResponse.json(result,{status:result.replayed?200:201,headers:NO_STORE});
+    }catch(e){
+      const bounded=bodyErrorResponse(e);if(bounded)return bounded;
+      if(e instanceof FollowupCoverageError)return error(e.message,e.status,e.code,e.rejection);
+      return canonicalPatientReadFailure(e,"تعذّر تأكيد حفظ القرار؛ تحقق من نتيجة الطلب نفسه قبل المتابعة.");
+    }
+  }
   try{const a=await admit(request,context);if(!a.ok)return a.response;
     let command:unknown;try{command=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);}catch(e){return bodyErrorResponse(e)??error("طلب غير صالح.",400);}
     const result=await appendFollowupCoverage({...a,command});

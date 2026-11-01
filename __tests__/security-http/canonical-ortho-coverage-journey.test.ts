@@ -63,7 +63,8 @@ it("HTTP: GET and refused command/status writes preserve money, signed proof, hi
   const sql = "SELECT (SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM ortho_followup_coverage_revisions r) revisions,(SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i) invoices,(SELECT count(*) FROM audit_log)::int audits,(SELECT count(*) FROM ortho_followup_coverage_rejections)::int refusals";
   const session = await journey.login("owner"), adjacent = await journey.login("adjacent"), before = (await journey.db.query(sql)).rows;
   expect((await journey.api(path(), session.cookie)).status).toBe(200);
-  expect((await journey.api(path(), session.cookie, { method: "POST", body: "{}" })).status).toBe(401);
+  expect((await journey.api(path(), session.cookie, { method: "POST", body: "{}" })).status).toBe(400);
+  expect((await journey.api(path(), adjacent.cookie, { method: "POST", body: JSON.stringify(statusCommand) })).status).toBe(403);
   expect((await journey.api(path(), session.cookie, { method: "PUT", body: "{}" })).status).toBe(400);
   const denied = await journey.api(path(), adjacent.cookie, { method: "PUT", body: JSON.stringify(statusCommand) });
   expect(denied.status).toBe(403);

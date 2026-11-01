@@ -2840,8 +2840,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice62: finance.agreements.manage with central prerequisite and current patient scope; exact native durable command/fingerprint, caller-owned transaction, command fence and patient/case/source locks. Fresh authority after waits and before commit; canonical bounded 256/2MiB sources,16KiB receipts, strict parent ownership before child locks. Original included/excluded policy, signed proofs and money unchanged. Rejections commit atomically with audit; infrastructure/auth failures roll back. Legacy wrapper retained; editor separate."
  },
  {
   "route": "/api/ortho/[id]/followup-coverage",
