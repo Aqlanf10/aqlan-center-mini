@@ -1,11 +1,12 @@
+import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { decodePrescriptionPrintCursor } from "@/lib/prescription-print-pagination";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
-import { getClinicalVisit, getPatient, listSavedPrescriptionPrints } from "@/lib/db";
+import { getClinicalVisit, getPatient, getParty, findUserByUsername, listSavedPrescriptionHistory, listSavedPrescriptionPrints } from "@/lib/db";
 export const dynamic = "force-dynamic";
-/** Minimal print picker; no medications, notes, suggestions or issuer options. */
+/** Clinical history for verified clinicians; unchanged minimal print picker for other authorized staff. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "سجّل الدخول من جديد." }, { status: 401 });
@@ -23,6 +24,19 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     let cursor;
     try { cursor = decodePrescriptionPrintCursor(new URL(request.url).searchParams.get("cursor"), patientId, visitId); }
     catch { return NextResponse.json({ message: "مؤشر الصفحة غير صالح؛ حدّث القائمة." }, { status: 400 }); }
+    // A reception print grant is not clinical-history authority. Never infer a
+    // clinician from an administrative role or from a stale session party link.
+    if (session.role === "doctor" || session.role === "admin") {
+      const user = await findUserByUsername(session.username);
+      if (!user || !user.isActive || user.id !== session.userId || user.role !== session.role)
+        return NextResponse.json({ message: "تغيّرت صلاحية الحساب؛ أعد تسجيل الدخول." }, { status: 403 });
+      const capability = clinicalCapabilityOf({ role: user.role, doctorPartyId: user.partyId });
+      const party = capability.ok && capability.partyId ? await getParty(capability.partyId) : null;
+      if (party?.kind === "doctor" && party.isActive) {
+        const page = await listSavedPrescriptionHistory(patientId, visitId, cursor);
+        return NextResponse.json({ ...page, mode: "clinical-history" }, { headers: { "Cache-Control": "no-store" } });
+      }
+    }
     const page = await listSavedPrescriptionPrints(patientId, visitId, cursor);
     return NextResponse.json(page, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ message: "تعذرت قراءة الوصفات المحفوظة." }, { status: 500 }); }

@@ -1,3 +1,4 @@
+import { querySavedPrescriptionHistory } from "./prescription-history";
 import { encodePrescriptionPrintCursor, type PrescriptionPrintCursor } from "./prescription-print-pagination";
 import { PRESCRIPTION_LINEAGE_MIGRATIONS } from "./prescription-migration-lineage";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
@@ -24060,6 +24061,12 @@ export async function listSavedPrescriptionPrints(patientId: number, visitId: nu
     prescriptions: page.map(row => ({ id: row.id, visitId: row.visit_id, createdAt: row.created_at.toISOString(), prescribingDoctorName: row.prescribing_doctor_name })),
     nextCursor: rows.length > 50 && last ? encodePrescriptionPrintCursor({ patientId, visitId, id: last.id, createdAt: last.cursor_created_at }) : null,
   };
+}
+
+/** Clinical history is authorized separately from the minimal reception picker. */
+export async function listSavedPrescriptionHistory(patientId: number, visitId: number | null = null, cursor: PrescriptionPrintCursor | null = null) {
+  await ensureSchema();
+  return querySavedPrescriptionHistory(getPool(), patientId, visitId, cursor, CLINIC_TIME_ZONE);
 }
 
 /**
