@@ -620,3 +620,51 @@ Application shade edits commit their audit record in the same transaction and
 use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
+
+
+### 0090_booking_request_preferences.sql
+
+Retains the historical booking metadata migration byte-for-byte (SHA-256
+`608eeee37b44a59cb4d26e915bd0b2610cf619103905be1fca0c2abe77c52e25`).
+Adds nullable request key/hash, non-null JSONB preferences, and a partial unique
+request-key index. This preserves existing requests and does not enable booking
+application routes. The previously unshipped Rx name-snapshot migration moves
+to 0092; an existing registry identifying 0090 as that Rx migration is rejected,
+never renamed or adopted automatically.
+
+### 0091_prescribing_doctor_identity.sql
+
+Adds nullable `prescriptions.prescribing_doctor_party_id` INTEGER for that
+separate prescribing identity. Existing `doctor_party_id` remains the issuing
+clinician and retains its void-authorization contract; `created_by` and audit
+actor remain the actual issuing account. No legacy backfill or permission grant.
+### 0092_prescribing_doctor_snapshot.sql
+
+Adds nullable `prescriptions.prescribing_doctor_name` TEXT, populated only for
+new prescriptions from the server-validated prescribing doctor. Legacy rows
+remain NULL; current registry or printing-user names are not historical evidence.
+0091 does not depend on this name column. Its SQL bytes remain unchanged.
+
+All three migrations use identical numbered/runtime SQL and checksum registration.
+CLI and runtime migration preflight reject wrong names/checksums, adopted rows,
+missing or differently typed registered columns, incorrect booking indexes, and
+unregistered column residue before applying the pending extension. Historical
+registry rows and their timestamps are retained on in-place upgrade.
+
+SQL and full-archive restore share the version/checksum provenance guard from
+PR490 commit a818f1e89e678c54d5dc74139f0c3a0a8573faba. The guard runs before
+connecting to the restore target; existing login-photo restore checks remain.
+Known archived registry rows are verified before their INSERTs are discarded;
+the target registers its own compatible migration history, so restored registry
+timestamps are not asserted to equal archive timestamps. Unknown or mismatched
+migration versions/checksums are rejected. No patient-numbering migration was
+imported as part of this guard.
+
+Synthetic tests cover clean creation, retained historical 0090, malformed
+registry/catalog, and both application restore paths with empty/populated booking
+metadata and legacy Rx rows. Native backup recovery into a separate database is
+not evidence that an older application binary can safely run on this schema.
+Deploy remains gated on the actual target's full registry checksums/catalog and
+confirmation that the superseded Rx0090 was never applied there.
+Application rollback must preserve the columns and migration history. Exact-head
+PostgreSQL/schema/restore gates and review are required before any rollout.
