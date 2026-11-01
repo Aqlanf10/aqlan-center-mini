@@ -3,7 +3,7 @@ import { lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const TARGET = '__tests__/security-http/legacy-reconciliation-preview-built-page.test.ts';
+export const TARGET = '__tests__/security-http/radiology-request-journey.test.ts';
 export const MAX_REPORT_BYTES = 32 * 1024 * 1024;
 const unavailable = { schemaVersion: 1, status: 'unavailable-or-invalid' };
 const positive = value => Number.isSafeInteger(value) && value > 0;
