@@ -1,0 +1,16 @@
+# WORK HTTP job deadline and complete execution
+
+CI 41325557900 on `aa2388b0` ended cancelled and its required aggregate failed. The check-run annotation explicitly reports the 75-minute maximum execution time. The HTTP job began at 16:57:10Z; runtime verification consumed 25m13s, and the HTTP test step was cancelled at 18:12:13Z. This is not a passing HTTP run. The push run also cancelled; a fresh all-events head lookup found no complete replacement. The log connector returned Transport closed twice; only permitted job/check metadata supplied this diagnosis.
+
+Two separable corrections preserve all assertions and deadlines:
+
+- The lint-tooling verifier overlaps at most eight independent NFT input inspections. Every occurrence still checks raw paths, resolves physical paths and validates every ancestor manifest. There is no cache, omitted duplicate, flag or skipped rejection. Each group is fully drained before surfacing its first rejection. All 149 focused guard tests pass. On the unchanged slice61 build, the resulting complete proof matched all 10,722 files, 741 traces and 86 manifests; observed time fell from 1,485.24s to 912.87s. This is a local measurement, not a hosted timing guarantee. Original braces, npm graph and artifact-byte checks remain.
+- The existing HTTP job becomes two isolated matrix runners with fail-fast disabled. Installed Vitest's actual sequencer partitions all 326 normal files as 163 + 163, each exactly once. Both runners still build and verify their own artifacts; the full explicitly enabled inventory suite remains on each. All 63 uploaded artifacts receive shard suffixes; sanitization, retention and runner-local raw reports are unchanged. The fail-closed aggregate still depends on the complete HTTP job result. The 75-minute job bound and individual test/hook bounds remain unchanged.
+
+Final focused verification passed 420 tests in five files, including the aggregate shell's 256 combinations, guard negatives, sanitization and actual file partition. Typecheck passed. Initial new-test lint failed on repeated literal regex spaces; equivalent `{2}` / `{10}` quantifiers fixed it without changing assertions, and final targeted lint passed. No repository workflow/script consumer of the renamed artifact names was found; YAML parsing verified the two-runner matrix.
+
+An additional prototype full-unit invocation omitted the synthetic session secret and failed five auth cases plus one existing import-guard timeout under concurrent work. The failure is retained, not counted as success. Corrected-environment targeted recheck passed 24 cases with the same five-second limit. The final full-unit run is still running at preparation time. Clinical 59–61 full local evidence remains separately recorded; no PostgreSQL product or build bytes changed in these CI corrections.
+
+Hosted CI on the final published head and independent review remain open. Docker image execution is still blocked by the previously recorded Alpine destination denial, and no image workflow eligibility or network restriction was changed. No main merge, Stage/Production deployment, live data/settings or independent Rx change.
+
+[Metadata, complete partition, timings, failures and source hashes](evidence/work-ci-http-budget-20261101/manifest.json).

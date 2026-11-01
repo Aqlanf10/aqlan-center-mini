@@ -1,0 +1,67 @@
+{
+  "format": "work-ci-http-budget-v1",
+  "preparedAt": "2026-11-01T18:46:35.993605+00:00",
+  "failedPublishedHead": "aa2388b06da30856f0fae31c9acd48a6bb60942e",
+  "run": 41325557900,
+  "job": 124914677457,
+  "provenCause": "Check-run failure annotation: job exceeded maximum execution time of 1h15m0s",
+  "hostedAcceptance": "Failed/cancelled; no HTTP pass claim; no alternative complete same-head CI run found",
+  "runtime": {
+    "change": "Bounded groups of eight independent read-only NFT input inspections; original checks repeated for every occurrence, no cache or omitted duplicate",
+    "focusedTests": 149,
+    "files": 2,
+    "oldSeconds": 1485.24,
+    "newSeconds": 912.87,
+    "sameBuild": "kjAZTJfRtOflAgY_0Na6p",
+    "proofExactlyIdentical": true,
+    "provenanceFiles": 10722,
+    "traces": 741,
+    "manifests": 86,
+    "qualification": "Observed local timings with concurrent test work; hosted timing and total CI acceptance must be measured separately"
+  },
+  "workflow": {
+    "matrixShards": 2,
+    "normalFiles": 326,
+    "partition": [
+      163,
+      163
+    ],
+    "everyNormalFileExactlyOnce": true,
+    "inventory": "Full unchanged explicit inventory suite in each isolated runner",
+    "artifactNamesScoped": 63,
+    "jobTimeoutUnchangedMinutes": 75,
+    "requiredAggregateUnchanged": true,
+    "focusedFinal": {
+      "passed": 420,
+      "files": 5
+    },
+    "typecheck": "passed",
+    "lint": "Initial no-regex-spaces in new test corrected with equivalent quantifiers; final zero errors/warnings; original failure retained",
+    "fullUnit": "Final correct-environment run ongoing; no pass claim"
+  },
+  "prototypeFailure": "An additional overlap experiment full unit invocation omitted SESSION_SECRET: five auth failures plus one unchanged 5000ms import-guard timeout. Original run14783pass6fail retained; corrected-environment targeted24cases passed; no bound changed. Final complete run separate.",
+  "sourceSha256": {
+    "scripts/dependency-security/verify-lint-tooling-runtime.mjs": "f148a0128bbd37940951a4ce086445d9c048018b39aab77dcb7b992dcaa55932",
+    "__tests__/lint-tooling-runtime.test.mjs": "d95be29c21248c071a6da88e1d711c6d1592cff30f22fc9eb0f863fae70acc71",
+    ".github/workflows/ci.yml": "800309a4aeb712f17dd4a1339988a0ab79c9fadec703276eb359837677fa2300",
+    "__tests__/ci-http-sharding.test.ts": "e9000c85a48f60dfce5ab26d95262a01809bc38f173a79da130d941154c361a1"
+  },
+  "evidenceSha256": {
+    "aa-http-timeout-diagnosis.md": "5a290b25955acb753ee05ac093370a244f0c91d8f1b89b62863eda764831eac9",
+    "aa-http-job-metadata.json": "9f122477fef99762d1d37f0ed4b70c38ba1658eaf462f76df21a0fccf069ea83",
+    "aa-http-check-annotations.json": "e054642a8ea9b3a2ef52375348b54ae9b7d32d37d8244ec1c11e5c3294c2d2db",
+    "aa-all-head-runs-check.json": "22639994b387955ec0a61a8d9961132d13ad0565a446eea173298b8546bfb006",
+    "aa-runtime-duplicate-measurement.json": "1b5e799f1dc454623c7564e52c5ff2242be79428c3833b81cd848918ecb3875d",
+    "aa-runtime-overlap-benchmark.json": "b09eb3770c1345e945c25919ec1d10b27f25143276610ee3eb749787c256ef81",
+    "aa-runtime-overlap-proof.log": "85e4402f2657b32be35c49abe465da0144d05234807d6f349c7f5db995381e9a",
+    "aa-runtime-overlap-negative-tests.log": "d9c31e12111de7fd4db7ea2d1ac986938918341a994535ecdd39a9f7a25a0ce7",
+    "aa-http-shard-coverage.json": "3f782245a66d17c648c1bda92c3829ab2fb0a37866175c5e369f89c23e52b3d9",
+    "aa-http-sharding-guards.log": "e2c0f23b7e2eb828899836490057ce9a199db7ad95f5ed33aaf28fa7c1564709",
+    "aa-http-sharding-type.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "aa-http-sharding-lint.log": "6f63ef775c7dca188df18692b9d269b465e66756a54f6c905fe184b9658f354a",
+    "aa-http-sharding-lint-corrected.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "aa-ci-recovery-focused-final.log": "a59da0dc10ceec3f4de0d1b37b3f85caf4850f0c7274170079fe952c6eab3ba2",
+    "aa-runtime-overlap-unit-full.log": "9e60523b5b56bb931632f14c7b63ba144d98b2529f95f716a59633723beb535a",
+    "aa-final-environment-recheck.log": "75f6f5e470dacc99c889947dd66c3b471cb1fae36ddcd4465a96385f48b753a1"
+  }
+}
