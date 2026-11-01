@@ -83,8 +83,8 @@ export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = fa
           </dl>
         </li>)}</ol>}
         {feed.hasMore ? <p role="status" className="text-amber-800">تظهر أحدث 100 شدّة فقط؛ هذا ليس السجل الكامل. العدد أعلاه يشمل جميع الشدّات المسجلة.</p> : null}
-        <CanonicalOrthoAssessment patientId={Number(patientId)} caseId={caseId} />
-        <CanonicalOrthoStrategy patientId={Number(patientId)} caseId={caseId} />
+        <CanonicalOrthoAssessment patientId={Number(patientId)} caseId={caseId} clinicTimeZone={feed.clinicTimeZone!} />
+        <CanonicalOrthoStrategy patientId={Number(patientId)} caseId={caseId} clinicTimeZone={feed.clinicTimeZone!} />
         {canReadCoverage ? <CanonicalOrthoCoverage patientId={Number(patientId)} caseId={caseId} /> : null}
       </>}
       {canEdit ? <CanonicalOrthoLifecycleEditor key={`${ownerKey}:${patientId}:${caseId}`} patientId={patientId} caseId={caseId} ownerKey={ownerKey} feed={feed} refresh={() => { setFeed(null); setError(null); setRefresh(value => value + 1); }} onChanged={onChanged} /> : null}

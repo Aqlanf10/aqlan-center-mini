@@ -29,8 +29,8 @@ beforeAll(async () => {
       const planId = (await db.query("INSERT INTO treatment_plans(patient_id,title,total_minor,created_by) VALUES($1,'SYN private funding',9900,'SYN') RETURNING id", [ids.own])).rows[0].id;
       const itemId = (await db.query("INSERT INTO plan_items(plan_id,service_name,case_id) VALUES($1,'SYN current plan',$2) RETURNING id", [planId,bridgeId])).rows[0].id;
       const rows = [{problem:{id:problemId,label:"SYN مشكلة محفوظة",site:null},objective:"SYN هدف محفوظ",strategy:"SYN استراتيجية محفوظة",rationale:null,planItems:[{id:itemId,serviceName:"SYN بند خطة محجوب",toothCode:null,caseSite:null}]}];
-      const first=await seedCanonicalStrategy(db,{patientId:ids.own,caseId:ids.active,bridgeId,problemId,actorId:accounts.owner,rows,reason:"SYN محفوظ أول"});
-      await seedCanonicalStrategy(db,{patientId:ids.own,caseId:ids.active,bridgeId,problemId,actorId:accounts.owner,rows,version:2,previous:first.id,reason:"SYN محفوظ ثان"});
+      const first=await seedCanonicalStrategy(db,{patientId:ids.own,caseId:ids.active,bridgeId,problemId,actorId:accounts.owner,rows,reason:"SYN محفوظ أول",createdAt:"2026-10-31T22:30:00.000Z"});
+      await seedCanonicalStrategy(db,{patientId:ids.own,caseId:ids.active,bridgeId,problemId,actorId:accounts.owner,rows,version:2,previous:first.id,reason:"SYN محفوظ ثان",createdAt:"2026-10-31T22:30:00.000Z"});
 
     },
   });
@@ -137,4 +137,25 @@ it("browser: delayed response cannot restore a closed document; reopening admits
     expect(await page.getByTestId("canonical-ortho-strategy").count()).toBe(0);
     await page.getByRole("button",{name:"عرض الاستراتيجية المحفوظة"}).click();await panel.getByTestId("ortho-strategy-saved").waitFor();
   } finally {release();await context.close();}
+});
+
+it("browser: strategy revision midnight uses the clinic day after refresh on a different device zone", async () => {
+  const context = await journey.browser.newContext({ timezoneId: "America/Los_Angeles", locale: "ar" });
+  try {
+    const page = await context.newPage(), panel = await openStrategy(page);
+    const selector = panel.getByLabel("نسخة خطة الحالة");
+    expect(await selector.locator("option").allTextContents()).toEqual([
+      "نسخة 2 · الأحد 01/11/2026 · SYN strategy recorder · تصحيح توثيقي",
+      "نسخة 1 · الأحد 01/11/2026 · SYN strategy recorder · تصحيح توثيقي",
+    ]);
+    expect(await panel.locator("time").textContent()).toBe("الأحد 01/11/2026");
+    expect(await panel.locator("time").getAttribute("datetime")).toBe("2026-10-31T22:30:00.000Z");
+    const older = await selector.locator("option").nth(1).getAttribute("value");
+    await selector.selectOption(older!);
+    await panel.getByText("سبب النسخة: SYN محفوظ أول", { exact: true }).waitFor();
+    await panel.getByRole("button", { name: "تحديث سجل الخطة" }).click();
+    await panel.getByText("سبب النسخة: SYN محفوظ أول", { exact: true }).waitFor();
+    expect(await panel.locator("time").textContent()).toBe("الأحد 01/11/2026");
+    expect(await panel.getByTestId("ortho-strategy-editor").count()).toBe(0);
+  } finally { await context.close(); }
 });

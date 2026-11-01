@@ -4,7 +4,7 @@ import { OrthoCaseAssessmentV2 } from "@/components/OrthoCaseAssessmentV2";
 
 /** Reuse the version-pinned clinical reader, with no editor lifetime. Unmount old
  * verified payloads on visibility/focus refresh; in-flight decoders lose ownership. */
-export function CanonicalOrthoAssessment({ patientId, caseId }: { patientId: number; caseId: number }) {
+export function CanonicalOrthoAssessment({ patientId, caseId, clinicTimeZone }: { patientId: number; caseId: number; clinicTimeZone: string }) {
   const region = useId();
   const [open, setOpen] = useState(false), [visible, setVisible] = useState(true), [epoch, setEpoch] = useState(0);
   useEffect(() => {
@@ -19,7 +19,7 @@ export function CanonicalOrthoAssessment({ patientId, caseId }: { patientId: num
     <button type="button" className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800" aria-expanded={open} aria-controls={region}
       onClick={() => { setVisible(document.visibilityState !== "hidden"); setOpen(value => !value); }}>{open ? "إغلاق التقييم والقياسات" : "عرض التقييم والقياسات"}</button>
     {open && visible ? <div id={region} data-testid="canonical-ortho-assessment">
-      <OrthoCaseAssessmentV2 key={`${patientId}:${caseId}:${epoch}`} patientId={patientId} orthoCaseId={caseId} readOnly />
+      <OrthoCaseAssessmentV2 key={`${patientId}:${caseId}:${epoch}`} patientId={patientId} orthoCaseId={caseId} clinicTimeZone={clinicTimeZone} readOnly />
     </div> : null}
   </div>;
 }

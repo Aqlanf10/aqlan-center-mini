@@ -7,6 +7,7 @@ import { readAssessmentResponseV2 } from "@/lib/ortho-assessment-client-v2";
 import { newAssessmentEditorV2, readAssessmentEditorV2, assessmentEditorCommandV2, type AssessmentEditorV2 } from "@/lib/ortho-assessment-editor-v2";
 import type { AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import type { AssessmentReadResponseV2, AssessmentSaveExpectationV2 } from "@/lib/ortho-assessment-response-v2";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { plain } from "@/lib/ortho-assessment-model";
 export interface AssessmentLifetimeV2 {
   identity: object; active(): boolean; editable(): boolean; denied(): void;
@@ -18,7 +19,7 @@ export interface AssessmentLifetimeV2 {
 }
 export interface OrthoCaseAssessmentV2Props {
   patientId: number; orthoCaseId: number; clinicalCaseId?: number; lifetime?: AssessmentLifetimeV2;
-  readOnly?: boolean;
+  readOnly?: boolean; clinicTimeZone?: string;
   sectionView?: "interview" | "extraoral" | "intraoral" | "measurements";
 }
 const control = "min-h-11 min-w-11 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-40";
@@ -33,7 +34,7 @@ export function OrthoCaseAssessmentV2(props: OrthoCaseAssessmentV2Props) {
   const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
   return <Workspace key={`${props.patientId}:${props.orthoCaseId}:${props.clinicalCaseId ?? "unresolved"}:${authority}`} {...props} />;
 }
-function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionView, readOnly = false }: OrthoCaseAssessmentV2Props) {
+function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionView, readOnly = false, clinicTimeZone }: OrthoCaseAssessmentV2Props) {
   const owner = useMemo(() => ({ identity: lifetime?.identity }), [lifetime?.identity]);
   const activeOwner = useRef<typeof owner | null>(null);
   useLayoutEffect(() => {
@@ -140,7 +141,7 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       {data.recordingContext === "retrospective" && <p>توثيق لاحق لحالة سابقة؛ لا يعيد فتح العلاج.</p>}
       {!!data.history.length && <label className="block">نسخة التقييم<select className={`${control} w-full`} value={selected ?? data.history[0].id}
         disabled={!!draft || !!lifetime?.busy || !!lifetime?.uncertain} onChange={event => { if (currentDraft() && !draft && !latest.current?.busy && !latest.current?.uncertain) setSelected(Number(event.target.value)); }}>
-        {data.history.map(row => <option key={row.id} value={row.id}>نسخة {row.version} · {row.createdAt.slice(0, 10)} · {row.createdBy}</option>)}</select></label>}
+        {data.history.map(row => <option key={row.id} value={row.id}>نسخة {row.version} · {clinicTimeZone ? formatClinicDate(row.createdAt, clinicTimeZone) : row.createdAt.slice(0, 10)} · {row.createdBy}</option>)}</select></label>}
       {data.revision ? <details className="rounded-lg border p-3" data-testid="assessment-v2-saved"><summary className="min-h-11 cursor-pointer">السجل المحفوظ: نسخة {data.revision.version}</summary>
         <p>{data.revision.createdAt} · {data.revision.createdBy} · {data.revision.reason}</p>
         <p className="break-all text-xs">البصمة: {data.revision.contentHash}</p>

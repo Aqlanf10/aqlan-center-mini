@@ -4,7 +4,7 @@ import { OrthoTreatmentStrategy } from "@/components/OrthoTreatmentStrategy";
 
 /** Reuse the saved clinical strategy reader, with no editor lifetime. Unmount old
  * verified payloads on visibility/focus refresh; in-flight decoders lose ownership. */
-export function CanonicalOrthoStrategy({ patientId, caseId }: { patientId: number; caseId: number }) {
+export function CanonicalOrthoStrategy({ patientId, caseId, clinicTimeZone }: { patientId: number; caseId: number; clinicTimeZone: string }) {
   const region = useId();
   const [open, setOpen] = useState(false), [visible, setVisible] = useState(true), [epoch, setEpoch] = useState(0);
   useEffect(() => {
@@ -19,7 +19,7 @@ export function CanonicalOrthoStrategy({ patientId, caseId }: { patientId: numbe
     <button type="button" className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800" aria-expanded={open} aria-controls={region}
       onClick={() => { setVisible(document.visibilityState !== "hidden"); setOpen(value => !value); }}>{open ? "إغلاق الاستراتيجية المحفوظة" : "عرض الاستراتيجية المحفوظة"}</button>
     {open && visible ? <div id={region} data-testid="canonical-ortho-strategy">
-      <OrthoTreatmentStrategy key={`${patientId}:${caseId}:${epoch}`} patientId={patientId} orthoCaseId={caseId} />
+      <OrthoTreatmentStrategy key={`${patientId}:${caseId}:${epoch}`} patientId={patientId} orthoCaseId={caseId} clinicTimeZone={clinicTimeZone} />
     </div> : null}
   </div>;
 }

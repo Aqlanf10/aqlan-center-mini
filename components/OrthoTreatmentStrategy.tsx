@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { formatClinicDate } from "@/lib/clinic-clock";
 import { useSession } from "./SessionProvider";
 import { checkStrategyCommand, ORTHO_STRATEGY_LIMITS, type StrategyProjection } from "@/lib/ortho-treatment-strategy";
 import { readStrategyProjection, readStrategyResponse, strategyProjectionMatchesCommand, type StrategyRead } from "@/lib/ortho-strategy-client";
@@ -61,9 +62,9 @@ const currentText = (link: StrategyProjection["rows"][number]["currentProblem"])
   ? `الحالة الحالية: ${link.status ?? "غير معروفة"}`
   : link.state === "missing" ? "المرجع الحالي غير موجود" : link.state === "moved" ? "نُقل المرجع من هذه الحالة" : "تعذّر التحقق من المرجع الحالي";
 
-function Revision({ revision }: { revision: StrategyProjection }) {
+function Revision({ revision, clinicTimeZone }: { revision: StrategyProjection; clinicTimeZone?: string }) {
   return <div data-testid="ortho-strategy-saved" className="space-y-3">
-    <p className="text-xs text-slate-600">نسخة {revision.version} · {revision.createdBy} · <time dateTime={revision.createdAt}>{revision.createdAt.slice(0, 10)}</time></p>
+    <p className="text-xs text-slate-600">نسخة {revision.version} · {revision.createdBy} · <time dateTime={revision.createdAt}>{clinicTimeZone ? formatClinicDate(revision.createdAt, clinicTimeZone) : revision.createdAt.slice(0, 10)}</time></p>
     {revision.recordingContext === "retrospective" ? <p className="text-xs font-bold text-amber-900">تصحيح توثيقي لحالة سابقة؛ لا يعيد فتح الحالة ولا يسجّل تنفيذ علاج.</p> : null}
     {revision.recordedPatientId !== revision.patientId ? <p className="text-xs text-slate-600">احتُفظ بمصدر التوثيق السابق بعد دمج ملف المريض.</p> : null}
     <p className="whitespace-pre-wrap text-xs text-slate-700">سبب النسخة: {revision.reason}</p>
@@ -82,7 +83,7 @@ function Revision({ revision }: { revision: StrategyProjection }) {
 }
 
 export interface OrthoTreatmentStrategyProps {
-  patientId: number; orthoCaseId: number; caseTitle?: string; lifetime?: StrategyLifetime; referenceVisitId?: number;
+  patientId: number; orthoCaseId: number; caseTitle?: string; clinicTimeZone?: string; lifetime?: StrategyLifetime; referenceVisitId?: number;
 }
 export function OrthoTreatmentStrategy(props: OrthoTreatmentStrategyProps) {
   const session = useSession();
@@ -91,7 +92,7 @@ export function OrthoTreatmentStrategy(props: OrthoTreatmentStrategyProps) {
   // In particular, B must never request A's selected history revision.
   return <StrategyWorkspace key={`${props.patientId}:${props.orthoCaseId}:${props.referenceVisitId ?? "case"}:${authority}`} {...props} />;
 }
-function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId }: OrthoTreatmentStrategyProps) {
+function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId, clinicTimeZone }: OrthoTreatmentStrategyProps) {
   const session = useSession();
   const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
   const owner = useMemo(() => ({ patientId, orthoCaseId, authority, referenceVisitId, identity: lifetime?.identity }),
@@ -226,9 +227,9 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
       {data.history.length ? <label className="block text-xs font-bold text-slate-600">النسخة المعروضة
         <select aria-label="نسخة خطة الحالة" className={fieldClass} disabled={!!draft || !!lifetime?.busy || !!lifetime?.uncertain} value={selected ?? data.history[0].revisionId}
           onChange={event => { setSelected(Number(event.target.value)); setMessage(null); }}>
-          {data.history.map(entry => <option key={entry.revisionId} value={entry.revisionId}>نسخة {entry.version} · {entry.createdAt.slice(0, 10)} · {entry.createdBy}{entry.recordingContext === "retrospective" ? " · تصحيح توثيقي" : ""}</option>)}
+          {data.history.map(entry => <option key={entry.revisionId} value={entry.revisionId}>نسخة {entry.version} · {clinicTimeZone ? formatClinicDate(entry.createdAt, clinicTimeZone) : entry.createdAt.slice(0, 10)} · {entry.createdBy}{entry.recordingContext === "retrospective" ? " · تصحيح توثيقي" : ""}</option>)}
         </select></label> : <p className="text-sm text-slate-500">لا توجد نسخة موثّقة لخطة هذه الحالة بعد.</p>}
-      {data.revision ? <Revision revision={data.revision} /> : null}
+      {data.revision ? <Revision revision={data.revision} clinicTimeZone={clinicTimeZone} /> : null}
       {lifetime && data.revision && !data.canRevise ? <p className="text-xs text-slate-500">هذه النسخة للقراءة فقط بصلاحياتك الحالية. لا تُحذف الروابط المحجوبة بفتح مسودة فارغة.</p> : null}
       {lifetime && data.clinicalWritable && !draft && !malformedDraft ? <button type="button" className={buttonClass}
         disabled={blocked || !!data.revision && (data.history[0]?.revisionId !== data.revision.revisionId || !data.canRevise)} onClick={beginRevision}>

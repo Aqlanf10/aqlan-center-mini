@@ -25,8 +25,8 @@ beforeAll(async () => {
       ids.active = (await db.query<{ id: number }>("INSERT INTO ortho_cases(patient_id,status,start_date,created_by,upper_wire,responsible_doctor_id) VALUES($1,'active','2026-10-01','SYN','0.014 NiTi',$2) RETURNING id", [ids.own, parties.doctor!])).rows[0].id;
       await db.query("INSERT INTO ortho_cases(patient_id,created_by,note) VALUES($1,'SYN','SYN-outside-private')", [ids.outside]);
       const bridgeId=(await db.query<{id:number}>("INSERT INTO clinical_cases(patient_id,specialty,title,ortho_case_id,created_by) VALUES($1,'orthodontics','SYN bridge',$2,'SYN') RETURNING id",[ids.own,ids.active])).rows[0].id;
-      const first=await seedCanonicalAssessment(db,{patientId:ids.own,caseId:ids.active,bridgeId,actorId:accounts.owner,reason:"SYN محفوظ أول"});
-      await seedCanonicalAssessment(db,{patientId:ids.own,caseId:ids.active,bridgeId,actorId:accounts.owner,version:2,previous:first.id,reason:"SYN محفوظ ثان"});
+      const first=await seedCanonicalAssessment(db,{patientId:ids.own,caseId:ids.active,bridgeId,actorId:accounts.owner,reason:"SYN محفوظ أول",createdAt:"2026-10-31T22:30:00.000Z"});
+      await seedCanonicalAssessment(db,{patientId:ids.own,caseId:ids.active,bridgeId,actorId:accounts.owner,version:2,previous:first.id,reason:"SYN محفوظ ثان",createdAt:"2026-10-31T22:30:00.000Z"});
 
     },
   });
@@ -127,4 +127,23 @@ it("browser: a delayed response cannot restore a closed assessment; older revisi
     const selector=panel.getByLabel("نسخة التقييم"),options=await selector.locator("option").evaluateAll(nodes=>nodes.map(n=>(n as HTMLOptionElement).value));
     await selector.selectOption(options[1]);await panel.getByText("السجل المحفوظ: نسخة 1",{exact:true}).waitFor();
   }finally{release();await context.close();}
+});
+
+it("browser: assessment history midnight uses the clinic day after refresh on a different device zone", async () => {
+  const context = await journey.browser.newContext({ timezoneId: "America/Los_Angeles", locale: "ar" });
+  try {
+    const page = await context.newPage(), panel = await openAssessment(page);
+    const selector = panel.getByLabel("نسخة التقييم");
+    expect(await selector.locator("option").allTextContents()).toEqual([
+      "نسخة 2 · الأحد 01/11/2026 · SYN assessment recorder",
+      "نسخة 1 · الأحد 01/11/2026 · SYN assessment recorder",
+    ]);
+    const older = await selector.locator("option").nth(1).getAttribute("value");
+    await selector.selectOption(older!);
+    await panel.getByText("السجل المحفوظ: نسخة 1", { exact: true }).waitFor();
+    await panel.getByRole("button", { name: "تحديث سجل التقييم" }).click();
+    await panel.getByText("السجل المحفوظ: نسخة 1", { exact: true }).waitFor();
+    expect(await selector.locator("option:checked").textContent()).toBe("نسخة 1 · الأحد 01/11/2026 · SYN assessment recorder");
+    expect(await panel.getByRole("button", { name: /فتح مراجعة|بدء تقييم|حفظ/ }).count()).toBe(0);
+  } finally { await context.close(); }
 });
