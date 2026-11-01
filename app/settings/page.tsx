@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoginPhotoEditor } from "@/components/settings/LoginPhotoEditor";
 import { LOGIN_PHOTO_KEYS } from "@/lib/login-photo";
+import { RadiologyCentersEditor } from "@/components/settings/RadiologyCentersEditor";
+import { RADIOLOGY_CENTERS_KEY } from "@/lib/radiology-centers";
 import { ClinicHoursEditor } from "@/components/settings/ClinicHoursEditor";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 import { InstallApp } from "@/components/InstallApp";
@@ -79,6 +81,7 @@ const SPECIALIZED_LINKS = [
   ["/settings/finance-expenses", "بنود وميزانيات المصروفات"],
   ["/settings/material-rates", "نسب إهلاك المواد"],
   ["/settings/laboratories", "المختبرات"],
+  ["/settings/radiology", "مراكز الأشعة"],
   ["/settings/lab-services", "دليل خدمات المختبر"],
   ["/settings/lab-pricing", "تسعير المختبر"],
   ["/settings/export", "النسخ والتصدير"],
@@ -401,7 +404,11 @@ export default function SettingsPage() {
                     editable={Boolean(role && canManageCategory(role, "hours"))}
                     onSaved={(payload) => { setSnapshot(parseSettingsPayload(payload)); router.refresh(); }} />
                 ) : null}
-                {searchResults.filter((definition) => !LOGIN_PHOTO_KEYS.some(key => key === definition.key) && !CLINIC_HOURS_KEYS.some((key) => key === definition.key)).map((definition) => {
+                {searchResults.some(definition => definition.key === RADIOLOGY_CENTERS_KEY) ? <RadiologyCentersEditor
+                  values={snapshot.values} versions={snapshot.versions}
+                  editable={Boolean(role && canManageCategory(role, "clinical"))}
+                  onSaved={payload => { setSnapshot(parseSettingsPayload(payload)); router.refresh(); }} /> : null}
+                {searchResults.filter((definition) => definition.key !== RADIOLOGY_CENTERS_KEY && !LOGIN_PHOTO_KEYS.some(key => key === definition.key) && !CLINIC_HOURS_KEYS.some((key) => key === definition.key)).map((definition) => {
                   const value = snapshot.values[definition.key] ?? definition.defaultValue;
                   const editable = Boolean(role && canManageCategory(role, definition.category) && !definition.systemLocked);
                   const isDefault = definition.sensitivity === "secret" ? false : isDefaultSettingValue(definition, value);
