@@ -158,6 +158,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/opening-balances/access": { GET: CLINIC },
   "/api/ortho": { GET: CLINIC, POST: CLINIC },
   "/api/ortho/[id]": { GET: CLINIC, POST: CLINIC, PATCH: CLINIC },
+  "/api/ortho/[id]/plan-link": { GET: CLINIC },
   "/api/ortho/[id]/strategy": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/[id]/assessment": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/adjustments/[id]/billing-decision": { POST: CLINIC },
