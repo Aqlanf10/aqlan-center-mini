@@ -667,11 +667,15 @@ use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
 
-### 0090_prescribing_doctor_snapshot.sql
+### 0090_booking_request_preferences.sql
 
-Adds nullable `prescriptions.prescribing_doctor_name` TEXT, populated only for
-new prescriptions from the server-validated prescribing doctor. Legacy rows
-remain NULL; current registry or printing-user names are not historical evidence.
+Retains the historical booking metadata migration byte-for-byte (SHA-256
+`608eeee37b44a59cb4d26e915bd0b2610cf619103905be1fca0c2abe77c52e25`).
+Adds nullable request key/hash, non-null JSONB preferences, and a partial unique
+request-key index. This preserves existing requests and does not enable booking
+application routes. The previously unshipped Rx name-snapshot migration moves
+to 0092; an existing registry identifying 0090 as that Rx migration is rejected,
+never renamed or adopted automatically.
 
 ### 0091_prescribing_doctor_identity.sql
 
@@ -679,14 +683,26 @@ Adds nullable `prescriptions.prescribing_doctor_party_id` INTEGER for that
 separate prescribing identity. Existing `doctor_party_id` remains the issuing
 clinician and retains its void-authorization contract; `created_by` and audit
 actor remain the actual issuing account. No legacy backfill or permission grant.
-Both migrations use identical numbered/runtime SQL and checksum registration.
+
+### 0092_prescribing_doctor_snapshot.sql
+
+Adds nullable `prescriptions.prescribing_doctor_name` TEXT, populated only for
+new prescriptions from the server-validated prescribing doctor. Legacy rows
+remain NULL; current registry or printing-user names are not historical evidence.
+0091 does not depend on this name column. Its SQL bytes remain unchanged.
+
+All three migrations use identical numbered/runtime SQL and checksum registration.
+CLI and runtime migration preflight reject wrong names/checksums, adopted rows,
+missing or differently typed registered columns, incorrect booking indexes, and
+unregistered column residue before applying the pending extension. Historical
+registry rows and their timestamps are retained on in-place upgrade.
 Application rollback must preserve the columns and migration history. Exact-head
 PostgreSQL/schema/restore gates and review are required before any rollout.
 
 ### 0095_remediation_security_and_indexes.sql
 
 Additive security and performance migration:
-- Adds `users.session_version`, `users.is_owner`, and `patients.portal_secret_version`.
+- Adds `users.session_version`, `users.is_owner` (strictly explicit owner issuance; no automatic promotion of admin accounts), and `patients.portal_secret_version`.
 - Aligns uncustomized non-lab `parties` GL account defaults with `lib/accounting.ts` (`5201/2105`, `5301/2106`, `5401/2107`).
 - Adds `audit_log_no_truncate` statement guard on `audit_log`.
 - Permits transaction-scoped owner paper-archive `< 7000` collision override while preserving immutable `retired_patient_numbers`.

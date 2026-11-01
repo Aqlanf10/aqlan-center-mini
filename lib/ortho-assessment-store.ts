@@ -1,5 +1,5 @@
 import { permitsOrthoDocumentation, orthoDocumentationContext } from "./ortho-documentation-context";
-import { ensureSchema,getPool,insertAuditRow,patientInDoctorScopeWith,type DbClient,type DbPool } from "./db";
+import { ensureSchema,getPool,insertAuditRow,type DbClient } from "./db";
 import { AssessmentStoreFault,assessmentFail,authorizeAssessment,assertAssessmentAuthorityCurrent,type AssessmentOwnerInput,type AssessmentAuthority } from "./ortho-assessment-authority";
 import { checkAnyAssessmentCommand,assessmentDraftSources } from "./ortho-assessment-command-v2";
 import { assessmentJsonHash,assessmentRevisionSources,createPersistedAssessmentV2,type AnyAssessmentRevision,type AssessmentRevisionV2 } from "./ortho-assessment-persisted-v2";
@@ -7,13 +7,9 @@ import { positiveId } from "./ortho-assessment-model";
 import { ASSESSMENT_COLUMNS,collectAssessmentSourceClosure,decodeAssessmentStoredRow,listAssessmentSourceChoices,resolveAssessmentSourceGraph,validateAssessmentCopies,type AssessmentStoredRow } from "./ortho-assessment-versioned-sources";
 import type { AssessmentReadResponseV2,AssessmentHistoryEntryV2,AssessmentScope } from "./ortho-assessment-response-v2";
 import { ASSESSMENT_HISTORY_MAX_BYTES,ASSESSMENT_HISTORY_MAX_REVISIONS,assessmentStoredByteCount } from "./ortho-assessment-limits";
-import { runCanonicalReadSnapshot } from "./canonical-read-snapshot";
-import { staffAdmissionRefusal } from "./staff-capability-editor";
-import type { VerifiedDurableSession } from "./staff-durable-session";
-import { staffOperationCapabilities,staffOperationIdentity,staffOperationPatientScope,withStaffOperation } from "./staff-operation-runtime";
 export interface AssessmentFailure {ok:false;status:number;code:string;message:string}
 interface OwnerSnapshot {clinicalCaseId:number|null;recordingContext:"current"|"retrospective"}
-async function ownerSnapshot(client:Pick<DbClient,"query">,input:Pick<AssessmentOwnerInput,"orthoCaseId"|"patientId">,lock:boolean,write:boolean):Promise<OwnerSnapshot>{
+async function ownerSnapshot(client:DbClient,input:AssessmentOwnerInput,lock:boolean,write:boolean):Promise<OwnerSnapshot>{
   const row=(await client.query<{id:number;patient_id:number;status:string}>(`SELECT id,patient_id,status FROM ortho_cases WHERE id=$1 AND patient_id=$2 ${lock?(write?"FOR UPDATE":"FOR SHARE"):""}`,[input.orthoCaseId,input.patientId])).rows[0];
   if(!row)assessmentFail(404,"ortho_case_not_found","حالة التقويم غير متاحة لهذا المريض.");
   if(!permitsOrthoDocumentation(row.status))assessmentFail(409,"unsupported_case_state","مرحلة الحالة غير مدعومة في هذا الإصدار.");
@@ -24,7 +20,7 @@ async function ownerSnapshot(client:Pick<DbClient,"query">,input:Pick<Assessment
 function sameOwner(before:OwnerSnapshot,after:OwnerSnapshot){
   if(before.clinicalCaseId!==after.clinicalCaseId||before.recordingContext!==after.recordingContext)assessmentFail(409,"case_changed","تغيرت هوية الحالة أو مرحلتها أثناء القراءة؛ أعد تحميلها.");
 }
-const scopeOf=(input:Pick<AssessmentOwnerInput,"orthoCaseId"|"patientId">,owner:OwnerSnapshot):AssessmentScope=>{
+const scopeOf=(input:AssessmentOwnerInput,owner:OwnerSnapshot):AssessmentScope=>{
   if(owner.clinicalCaseId===null)assessmentFail(409,"bridge_missing","اربط الحالة سريريًا بالإجراء الصريح أولًا.");
   return {patientId:input.patientId,orthoCaseId:input.orthoCaseId,clinicalCaseId:owner.clinicalCaseId};
 };
@@ -45,7 +41,7 @@ async function history(client:Pick<DbClient,"query">,scope:AssessmentScope):Prom
   return {rows,revisions};
 }
 function entry(r:AnyAssessmentRevision):AssessmentHistoryEntryV2{return {schemaVersion:r.schemaVersion,id:r.id,version:r.version,supersedesRevisionId:r.supersedesRevisionId,recordedPatientId:r.recordedPatientId,recordingContext:r.recordingContext,createdBy:r.createdBy,createdAt:r.createdAt,reason:r.reason};}
-async function checkHeadVisibility(client:Pick<DbClient,"query">,scope:AssessmentScope,authority:Pick<AssessmentAuthority,"imagingVisible">,revision:AnyAssessmentRevision|undefined){
+async function checkHeadVisibility(client:DbClient,scope:AssessmentScope,authority:AssessmentAuthority,revision:AnyAssessmentRevision|undefined){
   if(!revision)return;const closure=await collectAssessmentSourceClosure(client,scope,assessmentRevisionSources(revision));
   if(!authority.imagingVisible&&closure.external.some(s=>s.kind==="document"||s.kind==="ceph_study"))assessmentFail(403,"imaging_restricted","المراجعة الحالية تستند إلى مصادر مقيدة؛ لا يمكن إسقاطها بصمت.");
 }
@@ -118,117 +114,6 @@ export async function appendOrthoAssessment(input:AssessmentOwnerInput&{command:
   });
 }
 
-function mapCanonicalAssessmentError(error:unknown):AssessmentFailure|null{
-  if(error instanceof AssessmentStoreFault)return {ok:false,status:error.status,code:error.code,message:error.message};
-  const refusal=staffAdmissionRefusal(error);
-  if(refusal){
-    const message=/RECORD_SCOPE_DENIED$/.test(refusal.code)?"لا تملك صلاحية عرض ملفات المرضى.":refusal.message;
-    return {ok:false,status:refusal.status,code:refusal.code,message};
-  }
-  return null;
-}
-
-export async function getCanonicalOrthoAssessment(
-  session:VerifiedDurableSession,
-  orthoCaseId:number,
-  options:{revisionId?:number;acceptedSchemas?:readonly number[]},
-):Promise<AssessmentReadResponseV2|AssessmentFailure>{
-  if(!positiveId(orthoCaseId))return {ok:false,status:400,code:"invalid_scope",message:"معرّف حالة التقويم غير صالح."};
-  if(!options.acceptedSchemas?.includes(2))return {ok:false,status:409,code:"schema_negotiation_required",message:"يلزم قارئ يدعم الإصدار الثاني؛ لم يُعتبر السجل فارغًا."};
-  if(options.revisionId!==undefined&&!positiveId(options.revisionId))return {ok:false,status:400,code:"invalid_revision",message:"رقم المراجعة غير صالح."};
-  try{
-    return await runCanonicalReadSnapshot(session,"read:ortho.case",async(query,snapshotScope)=>{
-      const caseRow=(await query.query<{patient_id:number}>("SELECT patient_id FROM ortho_cases WHERE id=$1",[orthoCaseId])).rows[0];
-      if(!caseRow)assessmentFail(404,"case_missing","حالة التقويم غير موجودة.");
-      if(snapshotScope.patientScope.kind==="own"&&!(await patientInDoctorScopeWith(query,snapshotScope.patientScope.clinicianPartyId,caseRow.patient_id))){
-        assessmentFail(404,"case_missing","حالة التقويم غير موجودة.");
-      }
-      const input={patientId:caseRow.patient_id,orthoCaseId};
-      const clinicalWritable=snapshotScope.granted("clinical.ortho.edit");
-      const imagingVisible=snapshotScope.granted("clinical.xrays.view");
-      const before=await ownerSnapshot(query,input,false,false);
-      if(before.clinicalCaseId===null){
-        if((await query.query("SELECT id FROM ortho_assessment_revisions WHERE ortho_case_id=$1 LIMIT 1",[orthoCaseId])).rows.length){
-          assessmentFail(409,"scope_mismatch","سجل موجود فقد رابطه السريري؛ لم يُخفَ السجل.");
-        }
-        if(options.revisionId!==undefined)assessmentFail(404,"revision_not_found","المراجعة غير متاحة.");
-        return {ok:true as const,representation:2 as const,state:"bridge_missing" as const,patientId:input.patientId,orthoCaseId,clinicalCaseId:null,recordingContext:before.recordingContext,clinicalWritable,revision:null,history:[],sourceStates:[],sources:{items:[],truncated:false,imaging:imagingVisible?"allowed" as const:"restricted" as const}};
-      }
-      const scope=scopeOf(input,before),saved=await history(query,scope);
-      const selected=options.revisionId===undefined?saved.revisions[0]??null:saved.revisions.find(r=>r.id===options.revisionId)??null;
-      if(options.revisionId!==undefined&&!selected)assessmentFail(404,"revision_not_found","المراجعة لا تخص الحالة المطلوبة.");
-      await checkHeadVisibility(query,scope,{imagingVisible},saved.revisions[0]);
-      const graph=await resolveAssessmentSourceGraph(query,scope,selected?assessmentRevisionSources(selected):[],imagingVisible,false);
-      const sources=await listAssessmentSourceChoices(query,scope,imagingVisible,saved.revisions);
-      return {ok:true as const,representation:2 as const,state:"ready" as const,...scope,recordingContext:before.recordingContext,clinicalWritable,revision:selected,history:saved.revisions.map(entry),sources,sourceStates:graph.states};
-    },{errorPrefix:"STAFF_READ",maxBytes:2*1024*1024});
-  }catch(error){
-    const mapped=mapCanonicalAssessmentError(error);
-    if(mapped)return mapped;
-    throw error;
-  }
-}
-
-export async function appendCanonicalOrthoAssessment(
-  session:VerifiedDurableSession,
-  orthoCaseId:number,
-  rawCommand:unknown,
-  pool:DbPool=getPool(),
-):Promise<AssessmentFailure|{ok:true;revision:AssessmentRevisionV2;replayed:boolean}>{
-  if(!positiveId(orthoCaseId))return {ok:false,status:400,code:"invalid_scope",message:"معرّف حالة التقويم غير صالح."};
-  try{
-    return await withStaffOperation(pool,session,"clinical.ortho.edit",async(client,handle)=>{
-      const checked=checkAnyAssessmentCommand(rawCommand);
-      if(!checked.ok||checked.value.schemaVersion!==2){
-        assessmentFail(400,checked.ok?"unsupported_schema":checked.code,"طلب التقييم غير صالح أو غير مدعوم.");
-      }
-      const command=checked.value;
-      const requestFingerprint=assessmentJsonHash({schemaVersion:2,expectedRevisionId:command.expectedRevisionId,reason:command.reason,content:command.content});
-      const initialCase=(await client.query<{patient_id:number}>("SELECT patient_id FROM ortho_cases WHERE id=$1",[orthoCaseId])).rows[0];
-      if(!initialCase)assessmentFail(404,"case_missing","حالة التقويم غير موجودة.");
-      const lockedPatient=(await client.query<{id:number}>("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[initialCase.patient_id])).rows[0];
-      const identity=await staffOperationIdentity(client,handle,"clinical.ortho.edit");
-      const patientScope=await staffOperationPatientScope(client,handle,"clinical.ortho.edit");
-      if(patientScope.kind==="none")assessmentFail(403,"patient_access_denied","غير مصرّح لك بملف هذا المريض.");
-      if(!lockedPatient)assessmentFail(404,"case_missing","حالة التقويم غير موجودة.");
-      if(patientScope.kind==="own"&&!(await patientInDoctorScopeWith(client,patientScope.clinicianPartyId,lockedPatient.id))){
-        assessmentFail(404,"case_missing","حالة التقويم غير موجودة.");
-      }
-      const granted=await staffOperationCapabilities(client,handle,"clinical.ortho.edit",["clinical.xrays.view"] as const);
-      const imagingVisible=granted.has("clinical.xrays.view");
-      const userRow=(await client.query<{display_name:string|null}>("SELECT display_name FROM users WHERE id=$1",[identity.userId])).rows[0];
-      const actorName=userRow?.display_name?.trim()||identity.username;
-      const input={patientId:lockedPatient.id,orthoCaseId};
-      const before=await ownerSnapshot(client,input,false,true),scope=scopeOf(input,before);
-      const saved=await history(client,scope);await checkHeadVisibility(client,scope,{imagingVisible},saved.revisions[0]);
-      const graph=await resolveAssessmentSourceGraph(client,scope,assessmentDraftSources(command.content),imagingVisible,true);
-      sameOwner(before,await ownerSnapshot(client,input,true,true));
-      const fresh=await history(client,scope);
-      if(fresh.revisions[0]?.id!==saved.revisions[0]?.id)assessmentFail(409,"head_changed","تغيرت المراجعة الحالية؛ أعد تحميل السجل.");
-      const replay=fresh.rows.find(r=>r.actor_user_id===identity.userId&&r.command_id===command.commandId);
-      if(replay){
-        if(replay.request_fingerprint!==requestFingerprint)assessmentFail(409,"command_conflict","معرّف الطلب مستخدم لمحتوى آخر.");
-        const revision=decodeAssessmentStoredRow(replay,scope);if(revision.schemaVersion!==2)assessmentFail(409,"unsupported_schema","صيغة الطلب التاريخي غير مدعومة.");
-        if(graph.external.some(s=>!graph.historicallyReadable.has(`${s.kind}:${s.id}`)))assessmentFail(403,"source_access_changed","لم تعد ملكية أحد المصادر أو صلاحية عرضه متاحة لهذا الطلب التاريخي.");
-        return {ok:true as const,revision,replayed:true};
-      }
-      if((fresh.revisions[0]?.id??null)!==command.expectedRevisionId)assessmentFail(409,"head_changed","المراجعة السابقة لا تطابق الرأس الحالي.");
-      if(graph.states.some(s=>s.state!=="available"))assessmentFail(409,"source_unavailable","مرجع مفقود أو تغير إصداره؛ لم يُحفظ بديل مفترض.");
-      for(const r of graph.revisions.values())if(r.version>(fresh.revisions[0]?.version??0))assessmentFail(409,"future_assessment_source","المرجع لا يسبق المراجعة الجديدة.");
-      validateAssessmentCopies(command.content,graph);
-      const content=createPersistedAssessmentV2(command.content);if(!content.ok)assessmentFail(400,content.code,"تعذّر التحقق من القياسات والنتائج.");
-      const contentHash=assessmentJsonHash(content.value);
-      const row=(await client.query<AssessmentStoredRow>(`INSERT INTO ortho_assessment_revisions(patient_id,recorded_patient_id,ortho_case_id,clinical_case_id,schema_version,version,supersedes_revision_id,actor_user_id,created_by,reason,recording_context,command_id,request_fingerprint,content_sha256,content)
-        VALUES($1,$1,$2,$3,2,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) RETURNING ${ASSESSMENT_COLUMNS}`,
-        [scope.patientId,scope.orthoCaseId,scope.clinicalCaseId,(fresh.revisions[0]?.version??0)+1,command.expectedRevisionId,identity.userId,actorName,command.reason,before.recordingContext,command.commandId,requestFingerprint,contentHash,JSON.stringify(content.value)])).rows[0];
-      const revision=decodeAssessmentStoredRow(row,scope);if(revision.schemaVersion!==2)assessmentFail(500,"invalid_insert","تعذّر التحقق من النسخة الجديدة.");
-      await insertAuditRow(client,{action:"ortho.assessment.append",entity:"ortho_case",entityId:scope.orthoCaseId,entityLabel:`نسخة تقييم ${revision.version}`,actor:actorName,actorRole:identity.role,
-        details:{patientId:scope.patientId,revisionId:revision.id,version:revision.version,contentHash,reason:command.reason}});
-      return {ok:true as const,revision,replayed:false};
-    });
-  }catch(error){
-    const mapped=mapCanonicalAssessmentError(error);
-    if(mapped)return mapped;
-    throw error;
-  }
-}
+/** SELECT-only history/lineage decoder for the owning canonical read snapshot.
+ * The legacy reader and writer keep the same function and resource limits. */
+export const readOrthoAssessmentHistoryWith = history;

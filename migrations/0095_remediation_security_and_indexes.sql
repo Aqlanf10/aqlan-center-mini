@@ -3,11 +3,6 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFA
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_owner BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_secret_version INTEGER NOT NULL DEFAULT 0 CHECK (portal_secret_version >= 0);
 
-UPDATE users
-SET is_owner = TRUE
-WHERE id = (SELECT MIN(id) FROM users WHERE role = 'admin' AND is_active = TRUE)
-  AND NOT EXISTS (SELECT 1 FROM users WHERE is_owner = TRUE);
-
 UPDATE parties
 SET expense_account_code = CASE kind
       WHEN 'supplier' THEN '5201'

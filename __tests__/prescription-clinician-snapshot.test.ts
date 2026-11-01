@@ -12,7 +12,7 @@ afterAll(async () => { await db.resetPoolForTesting(); });
 describe("prescribing clinician snapshot persistence", () => {
   it("migration and runtime DDL match", () => {
     expect(readFileSync(new URL("../migrations/0091_prescribing_doctor_identity.sql", import.meta.url), "utf8")).toBe(PRESCRIBING_DOCTOR_IDENTITY_SQL);
-    expect(readFileSync(new URL("../migrations/0090_prescribing_doctor_snapshot.sql", import.meta.url), "utf8")).toBe(PRESCRIBING_DOCTOR_SNAPSHOT_SQL);
+    expect(readFileSync(new URL("../migrations/0092_prescribing_doctor_snapshot.sql", import.meta.url), "utf8")).toBe(PRESCRIBING_DOCTOR_SNAPSHOT_SQL);
   });
   it("saves immutable clinician name independently from actor and registry updates", async () => {
     const pool = db.getPool();

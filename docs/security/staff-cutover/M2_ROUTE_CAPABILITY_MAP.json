@@ -2912,13 +2912,14 @@
     "anyOf": [],
     "scope": "patient",
     "status": "canonical-done",
-    "note": "M2 slice 31: read:ortho.case in one owning RR read-only snapshot; outside patient scope reads as 404; photos redacted unless clinical.xrays.view is granted and planId redacted unless clinical.plans.view is granted.",
+    "note": "M2 slice 30: read:ortho.case; native clinical case and latest 100 adjustments, explicit hasMore; no finance, plan, document or linked-visit payload. Legacy GET and all writers unchanged.",
     "projection": {
-      "legacy": "patient-scoped read; photosVisible and adjustments[].photos gated by canViewXrays.",
+      "legacy": "Full case and financial-link metadata; photos conditional on canViewXrays.",
       "groups": {
-        "photos": "clinical.xrays.view",
-        "planId": "clinical.plans.view"
-      }
+        "clinical": "clinical.ortho.view: native case fields, native ortho notes, bounded adjustment history and complete case progress; no unrelated visit notes",
+        "independent": "Plan/funding, images, document metadata and visit records are omitted, including for owner; their independent readers are outside this slice"
+      },
+      "rows": "Current patient scope with central witnesses in the owning snapshot; outside and missing cases share the same 404"
     }
   },
   {
@@ -2979,13 +2980,16 @@
     "anyOf": [],
     "scope": "patient",
     "status": "canonical-done",
-    "note": "M2 slice 31: getCanonicalOrthoAssessment runs inside read:ortho.case RR read-only snapshot with zero row locks; clinicalWritable from clinical.ortho.edit and imagingVisible from clinical.xrays.view; outside scope reads as 404 case_missing.",
+    "note": "M2 slice 31: read:ortho.assessment; verified immutable schema2 history on one owning snapshot, separate source grants/ownership, no source-picker or writes. Legacy GET/POST unchanged.",
     "projection": {
-      "legacy": "admin/doctor/reception patient-scoped read; clinicalWritable for doctor/admin; imagingVisible from canViewXrays.",
+      "legacy": "Versioned clinical assessment/history plus mutable source choices; legacy authority and row locks.",
       "groups": {
-        "clinicalWritable": "clinical.ortho.edit",
-        "imaging": "clinical.xrays.view"
-      }
+        "clinical": "clinical.ortho.view and patient scope; exact saved revision, pinned hash verification, complete bounded history metadata and current source states",
+        "imaging": "Document/ceph references and derived data require clinical.xrays.view, including every historical ancestor; no document bytes, paths, titles or unreferenced source choices",
+        "care": "Patient-history/clinical-visit sources require the existing PATIENT_CARE_CAPABILITIES group; source facts are hashed privately without returning their raw payload",
+        "writes": "clinicalWritable=false; source hints explicitly incomplete and empty; no edit, bridge repair, billing or schema mutation"
+      },
+      "rows": "Current patient membership, unique owned ortho bridge, revision scope and all external source ownership in the same read-only RR snapshot; missing/outside share 404"
     }
   },
   {
@@ -3000,8 +3004,8 @@
     ],
     "anyOf": [],
     "scope": "patient",
-    "status": "canonical-done",
-    "note": "M2 slice 31: appendCanonicalOrthoAssessment runs inside withStaffOperation(clinical.ortho.edit) + patient scope, preserving source-graph FOR SHARE locks, idempotent replay witness, and atomic insertAuditRow."
+    "status": "existing",
+    "note": ""
   },
   {
     "route": "/api/ortho/[id]/followup-coverage",

@@ -13,7 +13,7 @@ import { readPlannedVisitContexts } from "./planned-visit-context-db";
 import type { PlannedVisitContext } from "./planned-visit-context";
 import {labVisitSignatureVersion} from "./lab-visit-signature";
 import { encodePrescriptionPrintCursor, type PrescriptionPrintCursor } from "./prescription-print-pagination";
-import { PRESCRIBING_DOCTOR_SNAPSHOT_SQL, PRESCRIBING_DOCTOR_IDENTITY_SQL } from "./prescribing-doctor-schema";
+import { PRESCRIPTION_LINEAGE_MIGRATIONS } from "./prescription-migration-lineage";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
@@ -2241,8 +2241,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0082", name: "invoice_service_additions", filename: "0082_invoice_service_additions.sql", sql: INVOICE_SERVICE_ADDITIONS_SQL, checksum: checksumOf(INVOICE_SERVICE_ADDITIONS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
-    await applyRuntimeMigrationFiles(getPool(), [{ version: "0090", name: "prescribing_doctor_snapshot", filename: "0090_prescribing_doctor_snapshot.sql", sql: PRESCRIBING_DOCTOR_SNAPSHOT_SQL, checksum: checksumOf(PRESCRIBING_DOCTOR_SNAPSHOT_SQL) }]);
-    await applyRuntimeMigrationFiles(getPool(), [{ version: "0091", name: "prescribing_doctor_identity", filename: "0091_prescribing_doctor_identity.sql", sql: PRESCRIBING_DOCTOR_IDENTITY_SQL, checksum: checksumOf(PRESCRIBING_DOCTOR_IDENTITY_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -3403,19 +3402,12 @@ export async function createStaffUser(input: {
   await withTransaction(getPool(), client => assertLegacyStaffWrite(client, authorization, null, "create"));
   await ensureSchema();
   let assignedPartyId: number | null = input.partyId ?? null;
-  let promoteFirstOwner = false;
   const auditContext = { ...ctx };
   const { result: rows } = await withDoctorCommissionChange(
     auditContext, "advanced",
     async client => {
       const actor = await assertLegacyStaffWrite(client, authorization, null, "create");
       auditContext.actor = actor.username; auditContext.actorRole = actor.role;
-      if (input.role === "admin") {
-        const { rows: existingOwners } = await client.query<{ id: number }>(
-          `SELECT id FROM users WHERE role = 'admin' AND is_active LIMIT 1`,
-        );
-        promoteFirstOwner = existingOwners.length === 0;
-      }
       // (SEC-08) Create a dedicated doctor party with canonical doctor accounts (5301/2106)
       // instead of silently binding by display name (which could hijack another doctor's patients).
       if (input.role === "doctor" && !assignedPartyId) {
@@ -3431,10 +3423,9 @@ export async function createStaffUser(input: {
     },
     async client => (await client.query<UserRow>(
       `INSERT INTO users (username,display_name,password_hash,role,party_id,specialty,branch,permissions,commission_config,is_owner)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE) RETURNING *`,
       [input.username,input.displayName,input.passwordHash,input.role,assignedPartyId,input.specialty??null,input.branch??null,
-        input.permissions?JSON.stringify(input.permissions):null,input.commissionConfig?JSON.stringify(input.commissionConfig):null,
-        promoteFirstOwner],
+        input.permissions?JSON.stringify(input.permissions):null,input.commissionConfig?JSON.stringify(input.commissionConfig):null],
     )).rows,
     undefined,
     client => finishLegacyStaffWrite(client, authorization!, null),
@@ -26322,7 +26313,7 @@ import {
   canComplete, caseProgress, nextWire,
   type Appliance, type Arches, type CaseProgress, type CaseStatus,
   type ElasticClass, type OrthoPhase, type RetainerType, type SlotSize,
-  type OrthoCaseSummary,
+  type OrthoCaseSummary, type OrthoClinicalDetail,
 } from "./ortho";
 import { checkOrthoSessionDraft, resolveOrthoWire, isLegacyFinancialMode, type BaselineDraft, type LegacyFinancialMode, type OrthoSessionDraft } from "./ortho-baseline";
 
@@ -26564,6 +26555,61 @@ export async function listOrthoCaseSummariesWith(
     responsibleDoctorId: row.responsible_doctor_id, responsibleDoctorName: row.responsible_doctor_name,
     baselineKind: row.baseline_kind === "legacy" ? "legacy" : null,
   })) };
+}
+
+/** M2 slice 30. A scoped clinical projection, never hydrateCases/CASE_SELECT.
+ * All three SELECTs use the caller's owning RR READ ONLY snapshot. No finance,
+ * document, visit or generic-note table is touched. Native ortho notes belong to
+ * clinical.ortho.view; this does not grant access to other clinical records. */
+export async function getOrthoClinicalDetailWith(
+  q: Pick<DbClient, "query">, caseId: number, clinicianPartyId: number | null, today: string,
+): Promise<OrthoClinicalDetail | null> {
+  const { rows } = await q.query<Omit<CaseRow, "plan_id" | "legacy_financial_mode" | "closed_by">>(
+    `SELECT c.id,c.patient_id,p.full_name,c.appliance,c.arches,c.slot,c.bracket_system,
+       c.status,c.phase,c.start_date,c.planned_months,c.upper_wire,c.lower_wire,
+       c.retainer,c.retainer_on,c.note,c.closed_at,c.closed_note,
+       c.baseline_kind,c.baseline_recorded_at,c.elastics,c.responsible_doctor_id,
+       rd.name AS responsible_doctor_name,c.remaining_objectives
+     FROM ortho_cases c JOIN patients p ON p.id=c.patient_id
+     LEFT JOIN parties rd ON rd.id=c.responsible_doctor_id
+     WHERE c.id=$1 ${clinicianPartyId === null ? "" : `AND EXISTS (SELECT 1 FROM patients WHERE patients.id=c.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$2")})`}`,
+    clinicianPartyId === null ? [caseId] : [caseId, clinicianPartyId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  // Aggregate over the whole scoped case, not the bounded history page.
+  const stats = (await q.query<{ count: number; last: Date | null }>(
+    "SELECT count(*)::int AS count,max(done_on) AS last FROM ortho_adjustments WHERE case_id=$1", [caseId],
+  )).rows[0];
+  const history = (await q.query<Omit<AdjustmentRow, "case_id" | "visit_id" | "visit_signed">>(
+    `SELECT id,done_on,phase,upper_wire,lower_wire,elastics,elastic_note,done,next_weeks,note,recorded_by
+     FROM ortho_adjustments WHERE case_id=$1 ORDER BY done_on DESC,id DESC LIMIT 101`, [caseId],
+  )).rows;
+  return {
+    projection: "case-clinical", today,
+    case: {
+      id: row.id, patientId: row.patient_id, patientName: row.full_name,
+      appliance: row.appliance as Appliance, arches: row.arches as Arches,
+      slot: row.slot as SlotSize, bracketSystem: row.bracket_system,
+      status: row.status as CaseStatus, phase: row.phase as OrthoPhase,
+      startDate: dateText(row.start_date), plannedMonths: row.planned_months,
+      upperWire: row.upper_wire, lowerWire: row.lower_wire,
+      retainer: row.retainer as RetainerType | null, retainerOn: row.retainer_on ? dateText(row.retainer_on) : null,
+      note: row.note, closedAt: row.closed_at?.toISOString() ?? null, closedNote: row.closed_note,
+      baselineKind: row.baseline_kind === "legacy" ? "legacy" : null,
+      baselineRecordedAt: row.baseline_recorded_at?.toISOString() ?? null,
+      elastics: row.elastics, remainingObjectives: row.remaining_objectives,
+      responsibleDoctorId: row.responsible_doctor_id, responsibleDoctorName: row.responsible_doctor_name,
+    },
+    adjustments: history.slice(0, 100).map(a => ({
+      id: a.id, doneOn: dateText(a.done_on), phase: a.phase as OrthoPhase | null,
+      upperWire: a.upper_wire, lowerWire: a.lower_wire, elastics: a.elastics as ElasticClass,
+      elasticNote: a.elastic_note, done: a.done, nextWeeks: a.next_weeks, note: a.note, recordedBy: a.recorded_by,
+    })),
+    hasMore: history.length > 100,
+    progress: caseProgress({ startDate: dateText(row.start_date), plannedMonths: row.planned_months,
+      adjustments: stats.count, lastAdjustmentDate: stats.last ? dateText(stats.last) : null, today }),
+  };
 }
 
 /**

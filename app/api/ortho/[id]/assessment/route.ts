@@ -1,12 +1,16 @@
+import { NextResponse } from "next/server";
+import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
+import { canonicalAssessmentQuery, readCanonicalOrthoAssessment } from "@/lib/canonical-ortho-assessment";
+import { AssessmentStoreFault } from "@/lib/ortho-assessment-authority";
 import { journeyRouteError, routeId, type JourneyRouteContext } from "@/lib/ortho-journey-route";
 import { readJsonBody } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { orthoQuery, orthoResult, orthoRouteFailure } from "@/lib/ortho-route-handler";
-import { getOrthoAssessment, appendOrthoAssessment, getCanonicalOrthoAssessment, appendCanonicalOrthoAssessment } from "@/lib/ortho-assessment-store";
+import { getOrthoAssessment, appendOrthoAssessment } from "@/lib/ortho-assessment-store";
 import { ensureSchema, getPool } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { requireSession } from "@/lib/session";
-import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 export const dynamic = "force-dynamic";
 async function scope(context: JourneyRouteContext, write: boolean) {
   const session = await requireSession();
@@ -23,18 +27,18 @@ async function scope(context: JourneyRouteContext, write: boolean) {
   return { ok: true as const, session, patientId: row.patient_id, orthoCaseId };
 }
 export async function GET(request: Request, context: JourneyRouteContext) {
-  try {
-    const selected = await selectRequestStaffEnvelope();
-    if (selected.kind === "denied") return journeyRouteError(401, "session_expired");
-    if (selected.kind === "canonical") {
-      const orthoCaseId = routeId((await context.params).id);
-      if (!orthoCaseId) return journeyRouteError(400, "invalid_scope");
-      const query = orthoQuery(request, ["acceptSchema", "revisionId"]);
-      const revisionId = query?.has("revisionId") ? routeId(query.get("revisionId")) : undefined;
-      if (!query || revisionId === null) return journeyRouteError(400, "invalid_query");
-      if (query.get("acceptSchema") !== "1,2" && query.get("acceptSchema") !== "2") return journeyRouteError(409, "schema_negotiation_required");
-      return orthoResult(await getCanonicalOrthoAssessment(selected.handle, orthoCaseId, { revisionId, acceptedSchemas: [2] }));
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const { caseId, revisionId } = canonicalAssessmentQuery((await context.params).id, new URL(request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoAssessment(selected.handle, caseId, revisionId), { headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof AssessmentStoreFault) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر قراءة التقييم؛ لم يُعتبر السجل فارغًا.");
     }
+  }
+  try {
     const owner = await scope(context, false); if (!owner.ok) return owner.response;
     const query = orthoQuery(request, ["acceptSchema", "revisionId"]);
     const revisionId = query?.has("revisionId") ? routeId(query.get("revisionId")) : undefined;
@@ -45,15 +49,6 @@ export async function GET(request: Request, context: JourneyRouteContext) {
 }
 export async function POST(request: Request, context: JourneyRouteContext) {
   try {
-    const selected = await selectRequestStaffEnvelope();
-    if (selected.kind === "denied") return journeyRouteError(401, "session_expired");
-    if (selected.kind === "canonical") {
-      const orthoCaseId = routeId((await context.params).id);
-      if (!orthoCaseId) return journeyRouteError(400, "invalid_scope");
-      if (!orthoQuery(request, [])) return journeyRouteError(400, "invalid_query");
-      const command = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
-      return orthoResult(await appendCanonicalOrthoAssessment(selected.handle, orthoCaseId, command), true);
-    }
     const owner = await scope(context, true); if (!owner.ok) return owner.response;
     if (!orthoQuery(request, [])) return journeyRouteError(400, "invalid_query");
     const command = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);

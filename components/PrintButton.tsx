@@ -56,7 +56,7 @@ export function PrintButton({ docType, docId, patientId }: {
   return (
     <div className="print-actions">
       {error && <p role="alert">{error}</p>}
-      <button type="button" onClick={() => void print()} disabled={busy}>
+      <button type="button" data-print-document-action onClick={() => void print()} disabled={busy}>
         {busy ? "…" : "اطبع"}
       </button>
     </div>

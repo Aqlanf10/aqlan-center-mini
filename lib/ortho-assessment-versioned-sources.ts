@@ -58,22 +58,22 @@ export async function collectAssessmentSourceClosure(client:Pick<DbClient,"query
   if(external.length>128)assessmentFail(400,"source_reference_limit","عدد المراجع يتجاوز الحد.");
   return {external,revisions};
 }
-export async function resolveAssessmentSourceGraph(client:Pick<DbClient,"query">,scope:AssessmentScope,direct:AssessmentSourceV2[],imagingVisible:boolean,lock=true):Promise<AssessmentSourceGraph>{
+export async function resolveAssessmentSourceGraph(client:DbClient,scope:AssessmentScope,direct:AssessmentSourceV2[],imagingVisible:boolean):Promise<AssessmentSourceGraph>{
   const {external,revisions}=await collectAssessmentSourceClosure(client,scope,direct);
   if(!imagingVisible&&external.some(s=>s.kind==="document"||s.kind==="ceph_study"))assessmentFail(403,"imaging_restricted","المراجع المصورة مقيدة بالصلاحية الحالية.");
-  const current=await captureAssessmentExternalSources(client,scope,external,imagingVisible,lock);
+  const current=await captureAssessmentExternalSources(client,scope,external,imagingVisible);
   return {external,revisions,states:assessmentSourceStates({external,revisions},current),historicallyReadable:current.historicallyReadable};
 }
 /** Multi-document callers expand every immutable graph first, capture the union
  * once before any Ortho/bridge lock, then evaluate each expected version separately.
  * A union may contain two historical versions of one identity: that is not a new
  * write conflict and must not erase either graph's expected witness. */
-export async function captureAssessmentExternalSources(client:Pick<DbClient,"query">,scope:AssessmentScope,union:readonly Pick<AssessmentSourceV2,"kind"|"id">[],imagingVisible:boolean,lock=true):Promise<AssessmentExternalCapture>{
+export async function captureAssessmentExternalSources(client:DbClient,scope:AssessmentScope,union:readonly Pick<AssessmentSourceV2,"kind"|"id">[],imagingVisible:boolean):Promise<AssessmentExternalCapture>{
   if(union.some(s=>!positiveId(s.id)||!["document","ceph_study","patient_history","clinical_visit"].includes(s.kind)))assessmentFail(400,"invalid_source_target","هدف المرجع الخارجي غير صالح.");
   if(!imagingVisible&&union.some(s=>s.kind==="document"||s.kind==="ceph_study"))assessmentFail(403,"imaging_restricted","المراجع المصورة مقيدة بالصلاحية الحالية.");
   const unique=[...new Map(union.filter(s=>s.kind!=="assessment_revision").map(s=>[key(s),s])).values()];
   if(unique.length>128)assessmentFail(400,"source_reference_limit","عدد المراجع يتجاوز الحد.");
-  return currentAssessmentExternalSources(client,scope,unique,lock);
+  return currentAssessmentExternalSources(client,scope,unique,true);
 }
 export function assessmentSourceStates(closure:{external:AssessmentSourceV2[];revisions:Map<number,AnyAssessmentRevision>},current:Map<string,AssessmentSourceChoiceV2>):AssessmentSourceStateV2[]{
   const {external,revisions}=closure;
@@ -144,7 +144,7 @@ export function validateAssessmentCopies(draft:AssessmentDraftV2,graph:Assessmen
   }
 }
 /** Choices are bounded hints, never save authority; POST revalidates every exact version. */
-export async function listAssessmentSourceChoices(client:Pick<DbClient,"query">,scope:AssessmentScope,imagingVisible:boolean,history:AnyAssessmentRevision[]):Promise<{items:AssessmentSourceChoiceV2[];truncated:boolean;imaging:"allowed"|"restricted"}>{
+export async function listAssessmentSourceChoices(client:DbClient,scope:AssessmentScope,imagingVisible:boolean,history:AnyAssessmentRevision[]):Promise<{items:AssessmentSourceChoiceV2[];truncated:boolean;imaging:"allowed"|"restricted"}>{
   const sources:AssessmentSourceV2[]=[];let truncated=false;
   const collect=async(kind:AssessmentSourceV2["kind"],sql:string,params:unknown[])=>{
     const rows=(await client.query<{id:number|string}>(sql,params)).rows;truncated ||= rows.length>100;
@@ -159,4 +159,13 @@ export async function listAssessmentSourceChoices(client:Pick<DbClient,"query">,
   const candidates=[...(await currentAssessmentExternalSources(client,scope,sources,false)).values(),...history.slice(0,100).map(r=>({kind:"assessment_revision" as const,id:r.id,version:`sha256:${r.contentHash}`,label:`تقييم محفوظ · نسخة ${r.version}`}))];
   truncated ||= history.length>100||candidates.length>100;
   return {items:candidates.slice(0,100),truncated,imaging:imagingVisible?"allowed":"restricted"};
+}
+
+/** SELECT-only capture on a caller-owned canonical RR READ ONLY snapshot.
+ * This entry does not alter the locking capture used by existing writers. */
+export async function readAssessmentExternalSourcesWith(client:Pick<DbClient,"query">,scope:AssessmentScope,union:readonly Pick<AssessmentSourceV2,"kind"|"id">[]):Promise<AssessmentExternalCapture>{
+  if(union.some(s=>!positiveId(s.id)||!["document","ceph_study","patient_history","clinical_visit"].includes(s.kind)))assessmentFail(400,"invalid_source_target","هدف المرجع الخارجي غير صالح.");
+  const unique=[...new Map(union.map(s=>[key(s),s])).values()];
+  if(unique.length>128)assessmentFail(409,"source_reference_limit","مراجع السجل تتجاوز حد القراءة الآمنة؛ لم يُختصر السجل.");
+  return currentAssessmentExternalSources(client,scope,unique,false);
 }

@@ -1,3 +1,4 @@
+import { validatePrescriptionMigrationLineage } from "./prescription-migration-lineage";
 import { createHash } from "node:crypto";
 import { guardOrthoRevisionMigration, validateOrthoRevisionRegistry } from "./ortho-revision-migration-guard";
 import { BASELINE_VERSION, loadMigrationFiles, type MigrationFile } from "./migration-files";
@@ -103,6 +104,7 @@ export async function applyRuntimeMigrationFiles(pool: DbPool, files: MigrationF
     await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
     try {
       const applied = await listAppliedMigrations(client);
+      await validatePrescriptionMigrationLineage(client, files, applied);
       // Check every supplied contract before making any extension change.
       for (const file of files) {
         if (createHash('sha256').update(file.sql).digest('hex') !== file.checksum) throw new Error(`RUNTIME_MIGRATION_SOURCE_MISMATCH: ${file.version}`);
@@ -278,19 +280,9 @@ export async function migrationStatus(pool: DbPool, files?: MigrationFile[]): Pr
 
   const appliedVersions = new Set(applied.map((row) => row.version));
   const fileVersions = new Map(migrationFiles.map((file) => [file.version, file]));
-  /**
-   * (BR-492-01) الهجرات التاريخية المتقاعدة: الرقم 0090 محجوز كأثر تاريخي لفرع #492 الملغى
-   * بحيث لا يُعاد استخدام الرقم 0090 أبدًا ولا يفشل فحص الاتساق إن وُجد صفّه التاريخي الخامل
-   * في قاعدة سبق تجربتها، دون إعادة أي كود من الميزة الملغاة.
-   */
-  const retiredHistoricalMigrations = new Map<string, string>([
-    ["0090", "booking_request_preferences"],
-  ]);
 
   const pending = migrationFiles.filter((file) => !appliedVersions.has(file.version));
-  const unknownApplied = applied.filter(
-    (row) => !fileVersions.has(row.version) && retiredHistoricalMigrations.get(row.version) !== row.name,
-  );
+  const unknownApplied = applied.filter((row) => !fileVersions.has(row.version));
   const checksumMismatches = [];
   for (const row of applied) {
     const file = fileVersions.get(row.version);
@@ -365,6 +357,7 @@ async function migrateHoldingLock(
   onPoisonClient?: () => void,
 ): Promise<MigrationRunResult> {
   let applied = await listAppliedMigrations(client);
+  await validatePrescriptionMigrationLineage(client, files, applied);
   // Validate only the two pinned Ortho contracts before skipping applied files.
   for (const file of files) {
     if (file.version === "0051" || file.version === "0052") validateOrthoRevisionRegistry(file, applied.find(row => row.version === file.version));

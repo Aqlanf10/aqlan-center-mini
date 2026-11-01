@@ -8,18 +8,19 @@ import { validatePostgresTestTarget } from "./_safe-target";
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
   if (files.at(-1)?.version === "0095") {
-    if (!["0089", "0091"].includes(files.at(-2)?.version ?? "") || files.at(-1)?.filename !== "0095_remediation_security_and_indexes.sql") {
+    if (!["0089", "0091", "0092"].includes(files.at(-2)?.version ?? "") || files.at(-1)?.filename !== "0095_remediation_security_and_indexes.sql") {
       throw new Error("Unreviewed 0095 migration suffix.");
     }
     return periodontalCandidateMigrationVersion(files.slice(0, -1));
   }
-  if (files.at(-1)?.version === "0091") {
-    if (files.at(-3)?.version !== "0089" || files.at(-2)?.version !== "0090"
-      || files.at(-2)?.filename !== "0090_prescribing_doctor_snapshot.sql"
-      || files.at(-1)?.filename !== "0091_prescribing_doctor_identity.sql") {
+  if (files.at(-1)?.version === "0092") {
+    if (files.at(-4)?.version !== "0089"
+      || files.at(-3)?.version !== "0090" || files.at(-3)?.filename !== "0090_booking_request_preferences.sql"
+      || files.at(-2)?.version !== "0091" || files.at(-2)?.filename !== "0091_prescribing_doctor_identity.sql"
+      || files.at(-1)?.filename !== "0092_prescribing_doctor_snapshot.sql") {
       throw new Error("Unreviewed prescribing doctor migration suffix.");
     }
-    return periodontalCandidateMigrationVersion(files.slice(0, -2));
+    return periodontalCandidateMigrationVersion(files.slice(0, -3));
   }
   if (files.at(-1)?.version === "0089") {
     if (files.at(-2)?.version !== "0087" || files.at(-2)?.filename !== "0087_agreement_reminder_metadata.sql"
@@ -55,10 +56,11 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
     "0078": "0078_agreement_reconciliation.sql",
     "0087": "0087_agreement_reminder_metadata.sql",
     "0089": "0089_lab_shade_specification.sql",
-    "0090": "0090_prescribing_doctor_snapshot.sql",
+    "0090": "0090_booking_request_preferences.sql",
     "0091": "0091_prescribing_doctor_identity.sql",
+    "0092": "0092_prescribing_doctor_snapshot.sql",
   };
-  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0068,0069,0078", "0066,0067,0068,0069,0078", "0066,0068,0069,0074", "0066,0067,0068,0069,0074", "0066,0068,0069,0074,0078", "0066,0067,0068,0069,0074,0078", "0066,0068,0069,0078,0087", "0066,0067,0068,0069,0078,0087", "0066,0068,0069,0078,0087,0089", "0066,0067,0068,0069,0078,0087,0089", "0066,0068,0069,0078,0087,0089,0090,0091", "0066,0067,0068,0069,0078,0087,0089,0090,0091"];
+  const reviewedTails = ["0066", "0067", "0066,0067", "0066,0068", "0066,0067,0068", "0066,0068,0069", "0066,0067,0068,0069", "0066,0068,0069,0078", "0066,0067,0068,0069,0078", "0066,0068,0069,0074", "0066,0067,0068,0069,0074", "0066,0068,0069,0074,0078", "0066,0067,0068,0069,0074,0078", "0066,0068,0069,0078,0087", "0066,0067,0068,0069,0078,0087", "0066,0068,0069,0078,0087,0089", "0066,0067,0068,0069,0078,0087,0089", "0066,0068,0069,0078,0087,0089,0090,0091,0092", "0066,0067,0068,0069,0078,0087,0089,0090,0091,0092"];
   if (files.length > 59 && reviewedTails.includes(files.slice(59).map(file => file.version).join(",")) &&
       files.slice(59).every(file => reviewedAdditions[file.version] === file.filename)) {
     return periodontalCandidateMigrationVersion(files.slice(0, 59));

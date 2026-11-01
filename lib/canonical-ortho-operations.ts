@@ -8,7 +8,6 @@ import {
   closeOrthoCaseWith,
   createOrthoCaseWith,
   decideOrthoAdjustmentBillingWith,
-  getOrthoCaseWith,
   getPool,
   insertAuditRow,
   linkOrthoCasePlanWith,
@@ -126,38 +125,6 @@ async function lockPatientAndAssertOrthoScope(
 /* ---------------------------------------------------------------------------
  * Reads
  * ------------------------------------------------------------------------- */
-
-export async function readCanonicalOrthoCaseDetail(session: VerifiedDurableSession, rawCaseId: unknown) {
-  const caseId = positiveId(rawCaseId);
-  if (!caseId) throw new CanonicalOrthoRefusal("invalid_ortho_input", 400, "رقم الحالة غير صالح.");
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  return runCanonicalReadSnapshot(
-    session,
-    "read:ortho.case",
-    async (query, scope) => {
-      const found = await getOrthoCaseWith(query, caseId, today);
-      if (!found) throw new CanonicalOrthoRefusal("ortho_case_not_found", 404, "الحالة غير موجودة.");
-      if (
-        scope.patientScope.kind === "own"
-        && !(await patientInDoctorScopeWith(query, scope.patientScope.clinicianPartyId, found.patientId))
-      ) {
-        throw new CanonicalOrthoRefusal("ortho_case_not_found", 404, "الحالة غير موجودة.");
-      }
-      const photosVisible = scope.granted("clinical.xrays.view");
-      const planVisible = scope.granted("clinical.plans.view");
-      return {
-        ...found,
-        planId: planVisible ? found.planId : null,
-        photosVisible,
-        adjustments: found.adjustments.map(entry => ({
-          ...entry,
-          photos: photosVisible ? entry.photos : [],
-        })),
-      };
-    },
-    { errorPrefix: "STAFF_READ", maxBytes: 2 * 1024 * 1024 },
-  );
-}
 
 export async function readCanonicalOrthoFollowups(session: VerifiedDurableSession) {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);

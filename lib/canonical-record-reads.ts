@@ -20,10 +20,12 @@ export interface CanonicalRecordReadRule {
 }
 
 export const CANONICAL_RECORD_READS = Object.freeze({
+  /** GET /api/ortho/[id]/assessment: immutable clinical assessment read (M2 slice 31). */
+  "read:ortho.assessment": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
+  /** GET /api/ortho/[id]: native clinical detail only, and /api/ortho/[id]/strategy (M2 slice 30/31). */
+  "read:ortho.case": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ortho: bounded case summaries, never funding or imaging (M2 slice 29). */
   "read:ortho.cases": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
-  /** GET /api/ortho/[id], /api/ortho/[id]/assessment, /api/ortho/[id]/strategy (M2 slice 31). */
-  "read:ortho.case": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ortho/followups: daily follow-up board inside patient scope (M2 slice 31). */
   "read:ortho.followups": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ortho/billing-decisions: pending outside-contract adjustment decisions inside patient scope (M2 slice 31). */

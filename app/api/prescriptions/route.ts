@@ -157,12 +157,24 @@ export async function POST(request: Request) {
      أو بوصفةٍ بديلة). والتحذيرات غير الحرجة لا تُحفظ وتُنسى: تُعرض، ويُقرّها
      الطبيب صراحةً، وربطُ الإقرار بالوصفة نفسها **وبالتحذيرات التي رآها**
      برمزٍ خادمي قصير العمر (Blocker B ثم الجولة الثالثة). */
-  const [patient, historyRows] = await Promise.all([
-    getPatient(draft.value.patientId).catch(() => null),
-    typeof listMedicalHistory === "function"
-      ? listMedicalHistory(draft.value.patientId, 1).catch(() => [])
-      : Promise.resolve([]),
-  ]);
+  let patient: Awaited<ReturnType<typeof getPatient>>;
+  let historyRows: Awaited<ReturnType<typeof listMedicalHistory>>;
+  try {
+    [patient, historyRows] = await Promise.all([
+      getPatient(draft.value.patientId),
+      typeof listMedicalHistory === "function"
+        ? listMedicalHistory(draft.value.patientId, 1)
+        : Promise.resolve([]),
+    ]);
+  } catch {
+    return NextResponse.json(
+      { message: "تعذر تحميل ملف المريض للتحقق من السلامة؛ أعد المحاولة." },
+      { status: 503 },
+    );
+  }
+  if (!patient) {
+    return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
+  }
   const latestMedicalHistory = historyRows[0] ?? null;
   if (patient || latestMedicalHistory) {
     /* دائمًا يُعاد التقييم من الملف والتاريخ الطبي المهيكل الحاليين وقت كل طلب — لا حالة عميل. */

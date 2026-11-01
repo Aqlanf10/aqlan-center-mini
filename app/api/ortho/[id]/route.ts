@@ -10,12 +10,12 @@ import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
-import { NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
+import { canonicalOrthoCaseId, readCanonicalOrthoCase } from "@/lib/canonical-ortho-reads";
 import {
   canonicalOrthoFailure,
   commandCanonicalOrthoPatch,
   commandCanonicalOrthoRecordAdjustment,
-  readCanonicalOrthoCaseDetail,
 } from "@/lib/canonical-ortho-operations";
 
 import { checkOrthoSessionDraft } from "@/lib/ortho-baseline";
@@ -213,10 +213,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   if (selected.kind === "canonical") {
     try {
-      const { id } = await context.params;
-      return NextResponse.json(await readCanonicalOrthoCaseDetail(selected.handle, id), { headers: NO_STORE });
+      const caseId = canonicalOrthoCaseId((await context.params).id, new URL(_request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoCase(selected.handle, caseId), { headers: NO_STORE });
     } catch (error) {
-      return canonicalOrthoFailure(error, "تعذّر تحميل تفاصيل الحالة.");
+      return canonicalPatientReadFailure(error, "تعذّر تحميل تفاصيل التقويم.");
     }
   }
   const session = await requireSession();

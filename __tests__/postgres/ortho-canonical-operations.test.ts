@@ -11,7 +11,8 @@ vi.stubEnv("SESSION_SECRET", "synthetic-ortho-canonical-20261031-secret");
 
 const db = await import("../../lib/db");
 const orthoOps = await import("../../lib/canonical-ortho-operations");
-const assessmentStore = await import("../../lib/ortho-assessment-store");
+const orthoReads = await import("../../lib/canonical-ortho-reads");
+const orthoAssessment = await import("../../lib/canonical-ortho-assessment");
 const strategyStore = await import("../../lib/ortho-treatment-strategy-store");
 const coverageStore = await import("../../lib/ortho-followup-coverage-db");
 const { CANONICAL_RECORD_READS } = await import("../../lib/canonical-record-reads");
@@ -134,7 +135,12 @@ afterAll(async () => {
   await fx?.close();
 });
 
-it("registers all four orthodontic canonical record reads on patient scope", () => {
+it("registers all five orthodontic canonical record reads on patient scope", () => {
+  expect(CANONICAL_RECORD_READS["read:ortho.assessment"]).toEqual({
+    record: "patient",
+    need: ["clinical.ortho.view"],
+    anyOf: [],
+  });
   expect(CANONICAL_RECORD_READS["read:ortho.case"]).toEqual({
     record: "patient",
     need: ["clinical.ortho.view"],
@@ -203,22 +209,21 @@ it("creates, reads with capability-projected photos/planId, adjusts, links plan,
     [ids.ownPatient, created.id, adj.id],
   );
 
-  // Clinician with xrays+plans sees photos & planId
-  const fullDetail = await orthoOps.readCanonicalOrthoCaseDetail(await fx.session("ownClinician"), created.id);
-  expect(fullDetail.photosVisible).toBe(true);
-  expect(fullDetail.planId).toBe(ids.ownPlanId);
-  expect(fullDetail.adjustments[0].photos.length).toBe(1);
+  // Native clinical detail omits photos & planId even for clinicians/owners
+  const fullDetail = await orthoReads.readCanonicalOrthoCase(await fx.session("ownClinician"), created.id);
+  expect(fullDetail.projection).toBe("case-clinical");
+  expect("planId" in fullDetail.case).toBe(false);
+  expect("photos" in fullDetail.adjustments[0]).toBe(false);
 
-  // Reception with clinical.ortho.view ONLY gets redacted photos & redacted planId
-  const redactedDetail = await orthoOps.readCanonicalOrthoCaseDetail(await fx.session("viewOnlyAll"), created.id);
-  expect(redactedDetail.photosVisible).toBe(false);
-  expect(redactedDetail.planId).toBeNull();
-  expect(redactedDetail.adjustments[0].photos).toEqual([]);
+  // Reception with clinical.ortho.view gets the same native clinical projection
+  const redactedDetail = await orthoReads.readCanonicalOrthoCase(await fx.session("viewOnlyAll"), created.id);
+  expect(redactedDetail.projection).toBe("case-clinical");
+  expect("planId" in redactedDetail.case).toBe(false);
 
   // Own clinician reading foreign case gets non-disclosing 404
   await expect(
-    orthoOps.readCanonicalOrthoCaseDetail(await fx.session("ownClinician"), ids.foreignCaseId),
-  ).rejects.toMatchObject({ code: "ortho_case_not_found", status: 404 });
+    orthoReads.readCanonicalOrthoCase(await fx.session("ownClinician"), ids.foreignCaseId),
+  ).rejects.toMatchObject({ code: "patient_not_found" });
 
   // Clinician without clinical.plans.edit cannot PATCH planId even on own patient
   await fx.pool.query("UPDATE patients SET primary_doctor_id = $2 WHERE id = $1", [
@@ -343,62 +348,18 @@ it("runs canonical assessment, treatment strategy, followup coverage (including 
     [pId, clinicalCaseId],
   )).rows[0].id;
 
-  // 1. Canonical Assessment V2 read (lock=false inside RR read-only snapshot) + append + replay
-  const initialAssessment = await assessmentStore.getCanonicalOrthoAssessment(
+  // 1. Canonical Assessment V2 read is strictly immutable read-only (clinicalWritable: false)
+  const initialAssessment = await orthoAssessment.readCanonicalOrthoAssessment(
     await fx.session("ownClinician"),
     createdCase.id,
-    { acceptedSchemas: [2] },
   );
-  expect(initialAssessment.ok).toBe(true);
-  if (!initialAssessment.ok || initialAssessment.state !== "ready") throw new Error("expected ready assessment");
-  expect(initialAssessment.revision).toBeNull();
-
-  const assessmentCmd = {
-    schemaVersion: 2,
-    commandId: "syn_assess_cmd_000001",
-    expectedRevisionId: null,
-    reason: "SYN initial orthodontic assessment",
-    content: {
-      schemaVersion: 2,
-      observations: {
-        schemaVersion: 2,
-        dentitionObservationId: "obs_dent_1",
-        observations: [
-          {
-            id: "obs_dent_1",
-            definition: "dentition",
-            definitionVersion: 1,
-            label: "Dentition stage",
-            unit: "qualitative",
-            target: { kind: "case" },
-            value: { state: "recorded", text: "permanent" },
-            occurredOn: { state: "known", date: "2026-04-01" },
-            provenance: {
-              performer: { state: "documented", attribution: "SYN Ortho Clinician" },
-              method: { version: 1, kind: "direct_examination", description: "Chairside exam" },
-              sources: [],
-              copiedFrom: null,
-            },
-          },
-        ],
-      },
-      measurementSets: [],
-      analyses: [],
-    },
-  };
-
-  const appendedAssess = await assessmentStore.appendCanonicalOrthoAssessment(
-    await fx.session("ownClinician"),
-    createdCase.id,
-    assessmentCmd,
-  );
-  expect(appendedAssess).toMatchObject({ ok: true, replayed: false });
-  const replayedAssess = await assessmentStore.appendCanonicalOrthoAssessment(
-    await fx.session("ownClinician"),
-    createdCase.id,
-    assessmentCmd,
-  );
-  expect(replayedAssess).toMatchObject({ ok: true, replayed: true });
+  expect(initialAssessment).toMatchObject({
+    ok: true,
+    state: "ready",
+    revision: null,
+    clinicalWritable: false,
+    sources: { items: [], truncated: true, imaging: "allowed" },
+  });
 
   // 2. Canonical Treatment Strategy read + append + replay
   const initialStrategy = await strategyStore.getCanonicalOrthoTreatmentStrategy(
