@@ -30,7 +30,7 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 62 on WORK)
+### Counts (386 mapped route/method entries, after local slice 63 on WORK)
 
 | Status | Routes |
 |---|---|
@@ -46,7 +46,7 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 | patient | 149 |
 | appointment | 13 |
 
-Counts are source conversion states, not an acceptance percentage. The broader inventory has 420 methods / 97 pages and remains NOT_READY. Published batch56–58 at `aa2388b0` has 77 canonical-done / 267 existing ordinary methods. Local59,61,62 add three methods, giving 80 / 264; UI60 adds no method. Full gates and review are tracked per slice, with no implication of whole-module readiness. Source pickers, bridge creation, image tracing, inventory and schema convergence remain separate.
+Counts are source conversion states, not an acceptance percentage. The broader inventory has 420 methods / 97 pages and remains NOT_READY. Published batch56–58 at `aa2388b0` has 77 canonical-done / 267 existing ordinary methods. Local59,61,62 add three methods, giving 80 / 264; UI60 and UI63 add no method. Full gates and review are tracked per slice, with no implication of whole-module readiness. Source pickers, bridge creation, image tracing, inventory and schema convergence remain separate.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -699,3 +699,5 @@ A bounded native receipt reader projects only the actor's exact command outcome;
 ### Slice 62 — explicit durable followup-coverage decision
 
 POST `/api/ortho/[id]/followup-coverage?patientId=…` admits the mapped agreement capability and current patient scope on one owning transaction. The native immutable receipt/fingerprint, source validity, included/excluded policy and atomic audit are retained. Command-lock waits are followed by current authority; source parent ownership is checked before child locks. A terminal business refusal commits with its audit; authority/infrastructure failures roll back. Identical requests replay exactly once; altered identity conflicts. No money, prior signed-proof, migration, implicit activation or editor change. [Acceptance and limits](../../review/work-ortho-coverage-command-slice62-20261101.md).
+
+Slice 63 adds an explicit coverage editor read context and the shared durable editor; it adds no method count. Independent invoice/plan/ortho visibility, current scope and fresh source identity remain required. Local in-memory draft retention and exact journal recovery have separate evidence in the slice report.

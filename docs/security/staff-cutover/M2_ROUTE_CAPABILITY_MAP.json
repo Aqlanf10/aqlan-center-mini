@@ -2820,12 +2820,13 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 48: independent finance.agreements.manage and current patient scope in one owning fenced RR read-only snapshot. Shares original commercial source SQL, validity and fingerprint without entering legacy authority or initializing schema. At most 256 candidates / 2 MiB and one bounded saved head; oversized context refuses whole read rather than silently truncating applicability. Only decision/reason/provenance plus applicability are returned; invoice references/names need independent finance.invoices.view. No totals, source snapshot, clinical fields, command receipts, editing grants or writer changes. UI requires an independent agreement grant, clears stale/hidden/failed reads and rejects delayed responses.",
+  "note": "M2 slice 48: independent finance.agreements.manage and current patient scope in one owning fenced RR read-only snapshot. Shares original commercial source SQL, validity and fingerprint without entering legacy authority or initializing schema. At most 256 candidates / 2 MiB and one bounded saved head; oversized context refuses whole read rather than silently truncating applicability. Only decision/reason/provenance plus applicability are returned; invoice references/names need independent finance.invoices.view. No totals, source snapshot, clinical fields, command receipts, editing grants or writer changes. UI requires an independent agreement grant, clears stale/hidden/failed reads and rejects delayed responses. Slice63 explicit edit=1 source context additionally requires current finance.invoices.view, clinical.plans.view and clinical.ortho.view. Same bounded native fingerprint/query; no raw commercial snapshot/amounts. Default saved-decision projection unchanged. Source picker reuses the durable financial journal with exact status/replay and no automatic resends.",
   "projection": {
    "groups": {
     "decision": "finance.agreements.manage AND current patient scope: exact saved decision, reason, version, author/date, availability and applicability only",
     "invoiceSources": "independent finance.invoices.view AND same current patient scope: valid invoice ID/number and service name only; restricted otherwise",
-    "excluded": "No raw commercial snapshot/fingerprint, source plan/case IDs, clinical/tooth/image data, totals, command IDs, receipt status or editing choices"
+    "excluded": "Default saved-decision view excludes raw commercial snapshot/fingerprint, source plan/case IDs, clinical/tooth/image data, totals, command IDs, receipt status and editing choices. Explicit edit=1 has a separate bounded allowlist and independent source grants.",
+    "editorSources": "Explicit edit=1 only: agreement management AND invoice-view AND plan-view AND ortho-view AND current patient scope; exact source IDs/fingerprint and invoice/service labels, minimal current head, current canEdit. No stored commercial snapshot, amounts or historical command IDs."
    }
   }
  },

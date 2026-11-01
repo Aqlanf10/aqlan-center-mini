@@ -1,7 +1,8 @@
 import type { ReactElement,ReactNode } from "react";
 import { afterEach,beforeEach,describe,expect,it,vi } from "vitest";
+import { makeCanonicalCoverageDraft } from "../lib/canonical-ortho-coverage-draft";
 import { OrthoFollowupCoveragePanel } from "../components/OrthoFollowupCoveragePanel";
-const state=vi.hoisted(()=>({session:{username:"synthetic-admin",role:"admin",permissions:{}} as {username:string;role:string;permissions:object}|null}));
+const state=vi.hoisted(()=>({session:{username:"synthetic-admin",role:"admin",permissions:{}} as {username:string;role:string;permissions:object;canonical?:boolean;isOwner?:boolean;capabilities?:string[];patientScope?:"none"|"own"|"all"}|null}));
 vi.mock("../components/SessionProvider",()=>({useSession:()=>state.session}));
 const persistence=vi.hoisted(()=>({rows:new Map<string,import("../lib/financial-command-journal").FinancialJournal>(),fail:false,acknowledged:0}));
 vi.mock("../lib/financial-command-journal",()=>({
@@ -29,7 +30,7 @@ vi.mock("react",async original=>{
 type Node=ReactElement<Record<string,unknown>>;
 const nodes=(node:ReactNode):Node[]=>Array.isArray(node)?node.flatMap(nodes):node&&typeof node==='object'&&'props'in node?[node as Node,...nodes((node as Node).props.children as ReactNode)]:[];
 function clear(){for(const e of hooks.effects.values())e.cleanup?.();hooks.values=[];hooks.cursor=0;hooks.effects.clear();hooks.pending=[];hooks.memo.clear();}
-let props={patientId:101,orthoCaseId:201,onSaved:vi.fn()};
+let props:Parameters<typeof OrthoFollowupCoveragePanel>[0]={patientId:101,orthoCaseId:201,onSaved:vi.fn()};
 function render(){
   const outer=OrthoFollowupCoveragePanel(props);if(!outer){clear();return null;}
   if(hooks.key!==outer.key){clear();hooks.key=String(outer.key);}
@@ -175,4 +176,24 @@ describe('explicit routine-followup coverage editor',()=>{
     expect(persistence.rows.get(JSON.stringify({actor:'synthetic-admin',patientId:102}))?.command).toEqual(secondCommand);
   });
 
+});
+
+const canonicalGrants=["finance.agreements.manage","finance.invoices.view","clinical.plans.view","clinical.ortho.view"];
+function canonicalEditor(){props={...props,canonical:true};state.session={username:"synthetic-admin",role:"doctor",permissions:{},canonical:true,patientScope:"own",capabilities:canonicalGrants};vi.stubGlobal("document",Object.assign(new EventTarget(),{visibilityState:"visible"}));fetchMock.mockImplementation(()=>json({...read(),projection:"ortho-followup-coverage-editor"}));}
+describe("canonical native coverage editor adapter",()=>{
+ it("requires explicit canonical mode and all source grants instead of admin role",async()=>{canonicalEditor();props={...props,canonical:false};expect(render()).toBeNull();props={...props,canonical:true};state.session={...state.session!,role:"admin",capabilities:[]};expect(render()).toBeNull();expect(fetchMock).not.toHaveBeenCalled();});
+ it.each(canonicalGrants)("missing %s never borrows an adjacent grant",grant=>{canonicalEditor();state.session={...state.session!,capabilities:canonicalGrants.filter(c=>c!==grant)};expect(render()).toBeNull();expect(fetchMock).not.toHaveBeenCalled();});
+ it("delegated doctor explicitly requests the bounded context without auto-selecting or submitting",async()=>{canonicalEditor();await open();expect(fetchMock.mock.calls.every(([url,init])=>url.endsWith("&edit=1")&&!init.method)).toBe(true);expect(button("اعتماد نطاق").props.disabled).toBe(true);});
+ it("rejects legacy-shaped or injected source context even when HTTP succeeds",async()=>{canonicalEditor();fetchMock.mockImplementation(()=>json(read()));await open();expect(nodes(render()).some(n=>n.type==='select')).toBe(false);expect(nodes(render()).some(n=>n.props.role==='alert')).toBe(true);});
+ it("clears current source on focus and permanently hides late values after revoked authority",async()=>{canonicalEditor();await open();let finish!:(v:Response)=>void;fetchMock.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));window.dispatchEvent(new Event('focus'));await settle();expect(nodes(render()).some(n=>n.type==='select')).toBe(false);fetchMock.mockImplementation(()=>json({message:'SYN revoked'},403));window.dispatchEvent(new Event('focus'));await settle();finish(new Response(JSON.stringify({...read(),projection:"ortho-followup-coverage-editor"})));await settle();expect(nodes(render()).some(n=>n.type==='select')).toBe(false);expect(nodes(render()).some(n=>n.props.role==='alert')).toBe(true);expect(fetchMock.mock.calls.some(([,init])=>init.method==='POST')).toBe(false);});
+ it("restores an unsent canonical draft after polling remount without keeping confirmation",async()=>{
+  canonicalEditor();props={...props,draftOwner:makeCanonicalCoverageDraft({authorized:()=>true,deny:vi.fn()})};await open();fill();
+  clear();hooks.key='';await open();
+  expect(find(n=>n.props['aria-label']==='سبب اعتماد نطاق المتابعات').props.value).toBe('Synthetic explicit agreement');
+  expect(find(n=>n.props['aria-label']==='مصدر تغطية المتابعات').props.value).toBe('601:501');
+  expect(find(n=>n.props['aria-label']==='قرار نطاق المتابعات').props.value).toBe('included');
+  expect(find(n=>n.type==='input'&&n.props.type==='checkbox').props.checked).toBe(false);
+  expect(button('اعتماد نطاق').props.disabled).toBe(true);expect(fetchMock.mock.calls.some(([,init])=>init.method==='POST')).toBe(false);
+ });
+ it("a canonical write denial retains the exact durable request while hiding its private source",async()=>{canonicalEditor();await open();fill();fetchMock.mockImplementation((_url:string,init:RequestInit)=>init.method==='POST'?json({message:'SYN denied'},403):json({...read(),projection:"ortho-followup-coverage-editor"}));click(button('اعتماد نطاق'));await settle();expect(stored()).toBeTruthy();expect(persistence.acknowledged).toBe(0);expect(nodes(render()).some(n=>n.type==='select'||n.type==='textarea')).toBe(false);expect(fetchMock.mock.calls.filter(([,init])=>init.method==='POST')).toHaveLength(1);});
 });

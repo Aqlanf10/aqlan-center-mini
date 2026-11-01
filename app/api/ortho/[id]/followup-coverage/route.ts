@@ -1,3 +1,4 @@
+import { canonicalCoverageReadQuery, readCanonicalCoverageEditor } from "@/lib/canonical-ortho-coverage-editor";
 import { commandCanonicalFollowupCoverage } from "@/lib/canonical-ortho-coverage-command";
 import { readCanonicalCoverageCommandStatus } from "@/lib/canonical-ortho-coverage-status";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
@@ -24,8 +25,8 @@ export async function GET(request:Request,context:Context){
   if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});
   if(selected.kind==="canonical"){
     try{
-      const {caseId,patientId}=canonicalCoverageQuery((await context.params).id,new URL(request.url).searchParams);
-      return NextResponse.json(await readCanonicalOrthoCoverage(selected.handle,patientId,caseId),{headers:NO_STORE});
+      const {caseId,patientId,edit}=canonicalCoverageReadQuery((await context.params).id,new URL(request.url).searchParams);
+      return NextResponse.json(await (edit?readCanonicalCoverageEditor(selected.handle,patientId,caseId):readCanonicalOrthoCoverage(selected.handle,patientId,caseId)),{headers:NO_STORE});
     }catch(e){return canonicalPatientReadFailure(e,"تعذّر التحقق من نطاق المتابعات؛ لم يُعتبر مشمولًا أو خارج الاتفاق.");}
   }
   try{const a=await admit(request,context);if(!a.ok)return a.response;

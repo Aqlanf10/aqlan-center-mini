@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "./SessionProvider";
-import { parseFollowupCoverageCommand, type FollowupCoverageRead } from "@/lib/ortho-followup-coverage";
+import type { CanonicalCoverageDraft } from "@/lib/canonical-ortho-coverage-draft";
+import { parseFollowupCoverageCommand } from "@/lib/ortho-followup-coverage";
 
+import { isCanonicalCoverageEditor, type CoverageEditorRead } from "@/lib/canonical-ortho-coverage-editor-projection";
 import { MONEY_JOURNAL_EVENT } from "./useDurableMoneyAttempt";
 import { acknowledgeFinancialCommand, readFinancialJournal, readFinancialJournalsForActor, reserveFinancialCommand, type FinancialJournal } from "@/lib/financial-command-journal";
 import { followupCoverageJournal, restoreFollowupCoverage, readFollowupCoverageReceipt, isFollowupCoverageRejection, type FollowupCoverageAttempt } from "@/lib/ortho-followup-coverage-recovery";
@@ -11,17 +13,21 @@ import { followupCoverageJournal, restoreFollowupCoverage, readFollowupCoverageR
 const UNKNOWN = "لم تُحسم نتيجة الحفظ. الطلب محفوظ؛ تحقّق من حالته أو أعد الطلب نفسه، ولا تنشئ قرارًا جديدًا.";
 const announce = () => window.dispatchEvent(new Event(MONEY_JOURNAL_EVENT));
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-type Props={patientId:number;orthoCaseId:number;onSaved:()=>void};
-/** This standalone current-version action is administrator-only. The canonical
- * owner version must substitute its central agreement grant, never role hints. */
+type Props={patientId:number;orthoCaseId:number;onSaved:()=>void;canonical?:boolean;draftOwner?:CanonicalCoverageDraft};
+/** Compatibility admission stays role-based. Canonical callers must opt into
+ * central grants explicitly; a canonical session never enters the legacy editor. */
 export function OrthoFollowupCoveragePanel(props:Props){
   const session=useSession();
-  if(!session||session.role!=="admin")return null;
-  const owner=JSON.stringify([props.patientId,props.orthoCaseId,session.username,session.role,session.permissions??null]);
+  if(!session)return null;
+  if(props.canonical){
+    if(!session.canonical||!["own","all"].includes(session.patientScope??"none")||!session.isOwner&&!["finance.agreements.manage","finance.invoices.view","clinical.plans.view","clinical.ortho.view"].every(c=>session.capabilities?.includes(c)))return null;
+  }else if(session.canonical||session.role!=="admin")return null;
+  const owner=JSON.stringify([props.patientId,props.orthoCaseId,session.username,session.role,session.permissions??null,props.canonical??false,session.capabilities??null,session.patientScope??null]);
   return <CoverageEditor key={owner} {...props} actor={session.username} />;
 }
-function CoverageEditor({patientId,orthoCaseId,onSaved,actor}:Props & {actor:string}){
-  const [open,setOpen]=useState(false),[read,setRead]=useState<FollowupCoverageRead|null>(null);
+function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,draftOwner}:Props & {actor:string}){
+  const [open,setOpen]=useState(false),[read,setRead]=useState<CoverageEditorRead|null>(null);
+  const [denied,setDenied]=useState(false);
   const [error,setError]=useState<string|null>(null),[notice,setNotice]=useState<string|null>(null);
   const [selected,setSelected]=useState(""),[decision,setDecision]=useState<""|"included"|"excluded">("");
   const [reason,setReason]=useState(""),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false);
@@ -31,7 +37,8 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor}:Props & {actor:str
   const pending=recoveries.find(attempt=>followupCoverageJournal(attempt).original===selectedRecovery)??null;
   const otherPending=!!journal?.command&&(!pending||journal.command.original!==followupCoverageJournal(pending).original);
   const recoveryBlocked=recoveries.length>0;
-  const url=`/api/ortho/${orthoCaseId}/followup-coverage?patientId=${patientId}`;
+  const url=`/api/ortho/${orthoCaseId}/followup-coverage?patientId=${patientId}${canonical?"&edit=1":""}`;
+  const deny=useCallback(()=>{if(!canonical)return;draftOwner?.deny();lifetime.current++;loading.current?.abort();writing.current?.abort();setRead(null);setReason("");setSelected("");setDecision("");setConfirmed(false);setDenied(true);},[canonical,draftOwner]);
   useEffect(()=>{const owner=++lifetime.current;return()=>{lifetime.current=owner+1;loading.current?.abort();writing.current?.abort();};},[]);
   const syncJournal=useCallback(async()=>{
     const owner=lifetime.current,sequence=++journalRead.current;
@@ -54,26 +61,44 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor}:Props & {actor:str
     return()=>{window.removeEventListener(MONEY_JOURNAL_EVENT,sync);window.removeEventListener("focus",sync);};
   },[syncJournal]);
   const load=useCallback(async()=>{
-    loading.current?.abort();const controller=new AbortController();loading.current=controller;
+    if(denied)return;
+    if(canonical){setRead(null);setError(null);setSelected("");setDecision("");setConfirmed(false);}
+    loading.current?.abort();
+    if(canonical&&document.visibilityState==="hidden")return;const controller=new AbortController();loading.current=controller;
     const owner=lifetime.current,timeout=setTimeout(()=>controller.abort(),20000);
     try{
       const response=await fetch(url,{cache:"no-store",redirect:"manual",signal:controller.signal});
       const payload=await response.json();
       if(owner!==lifetime.current||controller.signal.aborted)return;
-      if(response.redirected||!response.ok){setRead(null);setError(payload.message??"تعذّر قراءة نطاق المتابعات.");return;}
+      if(response.redirected||!response.ok){if(canonical&&[401,403].includes(response.status)){deny();return;}setRead(null);setError(canonical?"تعذّر قراءة مصدر نطاق المتابعات.":payload.message??"تعذّر قراءة نطاق المتابعات.");return;}
+      if(canonical&&!isCanonicalCoverageEditor(payload,patientId,orthoCaseId))throw new Error("Invalid canonical coverage context");
       if(payload.patientId!==patientId||payload.orthoCaseId!==orthoCaseId||!Array.isArray(payload.sources)||typeof payload.enabled!=="boolean"||typeof payload.canEdit!=="boolean")throw new Error("Invalid coverage context");
-      setRead(payload);setSelected("");setDecision("");setConfirmed(false);
+      setRead(payload);
+      const savedDraft=canonical?draftOwner?.restore(payload):undefined;
+      setSelected(savedDraft?.selected??"");setDecision(savedDraft?.decision??"");setConfirmed(false);
+      if(savedDraft)setReason(savedDraft.reason);
     }catch{if(owner===lifetime.current&&loading.current===controller){setRead(null);setError("تعذّر التحقق من نطاق المتابعات؛ لا تفترض أنه مشمول أو خارج الاتفاق.");}}
     finally{clearTimeout(timeout);}
-  },[url,patientId,orthoCaseId]);
+  },[url,patientId,orthoCaseId,canonical,denied,deny,draftOwner]);
   useEffect(()=>{if(open)void load();return()=>loading.current?.abort();},[open,load]);
+  useEffect(()=>{
+    if(!canonical||!open||denied)return;
+    const refresh=()=>{void load();};
+    window.addEventListener("focus",refresh);document.addEventListener("visibilitychange",refresh);
+    return()=>{window.removeEventListener("focus",refresh);document.removeEventListener("visibilitychange",refresh);};
+  },[canonical,open,denied,load]);
   useEffect(()=>{
     if(!recoveryBlocked)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue="";};
     window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn);
   },[recoveryBlocked]);
+  function changeDraft(patch:Partial<{selected:string;decision:""|"included"|"excluded";reason:string}>){
+    const next={selected,decision,reason,...patch};
+    if(canonical)draftOwner?.remember(next,read);
+    setSelected(next.selected);setDecision(next.decision);setReason(next.reason);
+  }
   const source=read?.sources.find(s=>`${s.invoiceId}:${s.planItemId}`===selected);
   async function send(mode:"submit"|"status",fresh?:FollowupCoverageAttempt){
-    if(sending.current||!journal||journalError||(!pending&&(otherPending||recoveryBlocked))||(pending&&otherPending&&mode==="submit"))return;
+    if(denied||sending.current||!journal||journalError||(!pending&&(otherPending||recoveryBlocked))||(pending&&otherPending&&mode==="submit"))return;
     const attempt=pending??fresh;if(!attempt)return;
     const owner=lifetime.current,current=()=>owner===lifetime.current;
     sending.current=true;setBusy(true);setError(null);setNotice(null);
@@ -104,12 +129,14 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor}:Props & {actor:str
         result=await response.json();
       }finally{clearTimeout(timeout);}
       if(!current()||controller.signal.aborted)return;
+      if(canonical&&[401,403].includes(response.status)){deny();return;}
       const receipt=!response.redirected&&response.ok&&(mode!=="status"||response.status===200)&&record(result)
         ?readFollowupCoverageReceipt(mode==="status"&&result.state==="committed"?result.revision:mode==="submit"&&result.ok===true?result.revision:null,attempt):null;
       const rejected=!response.redirected&&response.status===200&&mode==="status"&&isFollowupCoverageRejection(result,attempt);
       if(receipt||rejected){
         await acknowledgeFinancialCommand(originalScope,durable);
         if(!current())return;
+        if(canonical)draftOwner?.clear();
         ++journalRead.current;announce();await syncJournal();
         if(!current())return;
         setNotice(receipt?"سُجل نطاق المتابعات القادمة مع المصدر والسبب. الزيارات الموقعة سابقًا لم تتغير.":"ثبت رفض الطلب الأصلي دون حفظ. يمكنك مراجعة المصدر وتأكيد قرار جديد صراحةً.");
@@ -120,13 +147,14 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor}:Props & {actor:str
     finally{sending.current=false;if(current())setBusy(false);}
   }
   function save(){
-    if(!read?.canEdit||!source||!decision||!confirmed||recoveryBlocked||busy||!journal||journalError||otherPending)return;
+    if(denied||!read?.canEdit||!source||!decision||!confirmed||recoveryBlocked||busy||!journal||journalError||otherPending)return;
     const {fingerprint,invoiceNumber:_n,serviceName:_s,...identity}=source;
     const command=parseFollowupCoverageCommand({schemaVersion:1,commandId:crypto.randomUUID(),expectedRevisionId:read.current?.id??null,
       source:identity,expectedSourceFingerprint:fingerprint,scope:"routine_adjustments",decision,reason});
     if(!command){setError("اختر المصدر والنطاق وأدخل سببًا من 3 إلى 600 حرف.");return;}
     void send("submit",{actor,patientId,orthoCaseId,command});
   }
+  if(canonical&&denied)return <p role="alert" className="mt-3 text-sm text-rose-800">تغيّرت الجلسة أو الصلاحية. أُخفي المصدر؛ يبقى أي طلب محفوظ للتحقق بالحساب المصرّح له، دون إعادة تلقائية.</p>;
   return <section className="mt-2 rounded-xl border border-navy-200 bg-navy-50/40 p-3" aria-label="نطاق المتابعات الروتينية للتقويم">
     <button type="button" className="min-h-11 text-sm font-bold text-navy-900" disabled={busy||recoveryBlocked}
       onClick={()=>setOpen(value=>!value)}>نطاق المتابعات الروتينية ضمن الاتفاق {open?"−":"+"}</button>
@@ -143,7 +171,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor}:Props & {actor:str
         {!read.enabled?<p>الميزة لم تُفعّل في قاعدة البيانات بعد؛ لا تنشئ اتفاق أقساط أو فاتورة بديلة.</p>:!read.canEdit?<p>الحالة مغلقة. السجل للقراءة، ولا يتغير نطاق متابعات جديدة.</p>:null}
         {read.enabled&&read.canEdit?<fieldset disabled={busy||recoveryBlocked||otherPending||!journal||!!journalError} className="space-y-2">
           <label className="block">مصدر الاتفاق المثبت لهذه الحالة
-            <select aria-label="مصدر تغطية المتابعات" value={selected} onChange={e=>{setSelected(e.target.value);setConfirmed(false);}} className="mt-1 min-h-11 w-full rounded-lg border bg-white p-2">
+            <select aria-label="مصدر تغطية المتابعات" value={selected} onChange={e=>{changeDraft({selected:e.target.value});setConfirmed(false);}} className="mt-1 min-h-11 w-full rounded-lg border bg-white p-2">
               <option value="">اختر الفاتورة والبند صراحةً</option>
               {read.sources.map(s=><option key={`${s.invoiceId}:${s.planItemId}`} value={`${s.invoiceId}:${s.planItemId}`}>{s.invoiceNumber} · خطة {s.planId} · بند {s.planItemId} · {s.serviceName}</option>)}
             </select>
@@ -155,7 +183,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor}:Props & {actor:str
             </select>
           </label>
           <label className="block">سبب الاعتماد أو مرجع الاتفاق مع المريض
-            <textarea aria-label="سبب اعتماد نطاق المتابعات" value={reason} maxLength={600} onChange={e=>setReason(e.target.value)} className="mt-1 w-full rounded-lg border bg-white p-2" />
+            <textarea aria-label="سبب اعتماد نطاق المتابعات" value={reason} maxLength={600} onChange={e=>changeDraft({reason:e.target.value})} className="mt-1 w-full rounded-lg border bg-white p-2" />
           </label>
           <label className="flex min-h-11 items-start gap-2"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)} className="mt-1" />أؤكد أن هذا هو نطاق المتابعات الروتينية المتفق عليه لهذه الحالة والمصدر المحدد، وليس إعفاءً عامًا للخدمات الإضافية.</label>
           <button type="button" onClick={save} disabled={busy||recoveryBlocked||otherPending||!journal||!!journalError||!source||!decision||!confirmed||reason.trim().length<3} className="min-h-11 rounded-lg bg-navy-900 px-4 py-2 font-bold text-white disabled:opacity-40">اعتماد نطاق المتابعات القادمة</button>

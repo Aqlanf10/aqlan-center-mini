@@ -1,0 +1,21 @@
+{
+  "base": "0f7f3a20bd99390d6ed8971dffd4ebc8afe7d106",
+  "unchanged": {
+    "lib/canonical-ortho-coverage-command.ts": "c911b5feb4fb1f98e091eab0424aed29cfd392dd2aa9bc2a834b958b2d509fcc",
+    "lib/canonical-ortho-coverage-status.ts": "e7d6f3f292e670cfdd5b16aa9d572f78dac2c174b31746d365e46da1acbf07ac",
+    "lib/canonical-ortho-coverage.ts": "9f42ef6f92d87d819ba8b8d0f117151f5c3de5b0f0c75d0cbfe71261b3ed7146",
+    "lib/canonical-patient-reads.ts": "33548602692362557af627afc52a107f1e5dd524a5168b0aba1863a49db0d51f",
+    "lib/ortho-followup-coverage-db.ts": "857d3332889e8f046a298060a12d7151f59da06db5cf7d4f0a6cb9e39c8f310e",
+    "lib/ortho-followup-coverage.ts": "e9a6caf118a9bdce55def35867a4e6d3e30b799b986181f5406a356bbf240aa3",
+    "lib/ortho-followup-coverage-recovery.ts": "a98621048bf9bd967646308dbcdf2c355f4aefe0b77f710294bcc341fba52d8e",
+    "lib/financial-command-journal.ts": "766ea6bd3602f4d0d869eb15d6c702f72c4efaf135439e201a984137e6db2e6b",
+    "lib/staff-operation-runtime.ts": "0e3033b8bcd2766aa237dfd7b667b8dc06a3752da521a4c7670aa92953ba6a89",
+    "components/useDurableMoneyAttempt.ts": "d01619846ba93c0cda32c04dffae5d118bf75ce473ed04acd5abbdc797499b9f"
+  },
+  "routeBranches": {
+    "POST": "byte-exact body through EOF",
+    "PUT": "byte-exact body through EOF"
+  },
+  "noMigrationsChanged": true,
+  "noLiveData": "Only isolated local PostgreSQL fixtures and local built browser used"
+}

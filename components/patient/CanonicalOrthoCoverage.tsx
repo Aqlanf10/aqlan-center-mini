@@ -1,11 +1,14 @@
 "use client";
-import { useEffect, useId, useState } from "react";
+import type { CanonicalCoverageDraft } from "@/lib/canonical-ortho-coverage-draft";
+import { useEffect, useId, useMemo, useState } from "react";
+import { OrthoFollowupCoveragePanel } from "../OrthoFollowupCoveragePanel";
 import { formatClinicDate } from "@/lib/clinic-clock";
 import { isCanonicalOrthoCoverage, type CanonicalOrthoCoverage as Coverage } from "@/lib/canonical-ortho-coverage-projection";
 
 /** Independent agreement read; the clinical case never supplies this grant. */
-export function CanonicalOrthoCoverage({ patientId, caseId }: { patientId: number; caseId: number }) {
+export function CanonicalOrthoCoverage({ patientId, caseId, ownerFor }: { patientId: number; caseId: number; ownerFor?: (caseId: number) => CanonicalCoverageDraft }) {
   const regionId = useId();
+  const draftOwner = useMemo(() => ownerFor?.(caseId), [ownerFor, caseId]);
   const [open, setOpen] = useState(false), [refresh, setRefresh] = useState(0);
   const [feed, setFeed] = useState<Coverage | null>(null), [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -52,5 +55,6 @@ export function CanonicalOrthoCoverage({ patientId, caseId }: { patientId: numbe
         <p className="text-xs text-slate-600">هذا عرض للقرار المحفوظ، ولا يغيّر الاتفاق أو الفواتير أو اعتماد الزيارات.</p>
       </div>}
     </div> : null}
+    <OrthoFollowupCoveragePanel canonical draftOwner={draftOwner} patientId={patientId} orthoCaseId={caseId} onSaved={() => { setFeed(null); setRefresh(value => value + 1); }} />
   </section>;
 }

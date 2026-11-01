@@ -1,5 +1,6 @@
 "use client";
 
+import { makeCanonicalCoverageDraft, type CanonicalCoverageDraft } from "@/lib/canonical-ortho-coverage-draft";
 import { makeCanonicalStrategyOwner, type CanonicalStrategyOwner } from "@/lib/canonical-ortho-strategy-owner";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { CanonicalOrthoDetail } from "./CanonicalOrthoDetail";
@@ -18,10 +19,10 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
   const [error, setError] = useState<string | null>(null);
   // Reuse the existing assessment owner across list/detail polling unmounts.
   // Clinical text stays only in this exact patient/session component lifetime.
-  const assessments = useRef({ active: false, denied: false, allowed: new Set<number>(), owners: new Map<number, AssessmentOwnerV2>(), strategies: new Map<number, CanonicalStrategyOwner>() });
+  const assessments = useRef({ active: false, denied: false, allowed: new Set<number>(), owners: new Map<number, AssessmentOwnerV2>(), strategies: new Map<number, CanonicalStrategyOwner>(), coverage: new Map<number, CanonicalCoverageDraft>() });
   useLayoutEffect(() => {
     const registry = assessments.current; registry.active = true;
-    return () => { registry.active = false; for (const owner of [...registry.owners.values(), ...registry.strategies.values()]) owner.retire(); registry.owners.clear(); registry.strategies.clear(); };
+    return () => { registry.active = false; for (const owner of [...registry.owners.values(), ...registry.strategies.values(), ...registry.coverage.values()]) owner.retire(); registry.owners.clear(); registry.strategies.clear(); registry.coverage.clear(); };
   }, [assessments]);
   const assessmentOwnerFor = useCallback((id: number) => {
     const existing = assessments.current.owners.get(id); if (existing) return existing;
@@ -29,7 +30,7 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
       authorized: () => assessments.current.active && !assessments.current.denied && canEdit && assessments.current.allowed.has(id),
       deny: () => {
         assessments.current.denied = true; assessments.current.allowed.clear();
-        for (const saved of [...assessments.current.owners.values(), ...assessments.current.strategies.values()]) saved.retire();
+        for (const saved of [...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()]) saved.retire();
         setFeed(null); setError("انتهت صلاحية التوثيق. أعد التحقق من الجلسة قبل فتح أي مسودة.");
       },
     });
@@ -41,22 +42,34 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
       authorized: () => assessments.current.active && !assessments.current.denied && canEdit && assessments.current.allowed.has(id),
       deny: () => {
         assessments.current.denied = true; assessments.current.allowed.clear();
-        for (const saved of [...assessments.current.owners.values(), ...assessments.current.strategies.values()]) saved.retire();
+        for (const saved of [...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()]) saved.retire();
         setFeed(null); setError("انتهت صلاحية التوثيق. أعد التحقق من الجلسة قبل فتح أي مسودة.");
       },
     });
     assessments.current.strategies.set(id, owner); return owner;
   }, [assessments, canEdit]);
+  const coverageOwnerFor = useCallback((id: number) => {
+    const existing = assessments.current.coverage.get(id); if (existing) return existing;
+    const owner = makeCanonicalCoverageDraft({
+      authorized: () => assessments.current.active && !assessments.current.denied && canReadCoverage && assessments.current.allowed.has(id),
+      deny: () => {
+        assessments.current.denied = true; assessments.current.allowed.clear();
+        for (const saved of [...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()]) saved.retire();
+        setFeed(null); setError("انتهت صلاحية التوثيق. أعد التحقق من الجلسة قبل فتح أي مسودة.");
+      },
+    });
+    assessments.current.coverage.set(id, owner); return owner;
+  }, [assessments, canReadCoverage]);
   const canLeaveAssessments = useCallback(() => {
-    if ([...assessments.current.owners.values(), ...assessments.current.strategies.values()].some(owner => !owner.canLeave(() => true))) {
+    if ([...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()].some(owner => !owner.canLeave(() => true))) {
       setNotice("هناك طلب توثيق جارٍ أو نتيجته غير مؤكدة. افتح التوثيق وتحقق من الطلب نفسه قبل المغادرة."); return false;
     }
-    return ![...assessments.current.owners.values(), ...assessments.current.strategies.values()].some(owner => owner.needsUnloadWarning())
+    return ![...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()].some(owner => owner.needsUnloadWarning())
       || window.confirm("هناك توثيق غير محفوظ. هل تريد تجاهل المسودة ومغادرة القسم؟");
   }, [assessments]);
   useEffect(() => {
     const unload = (event: BeforeUnloadEvent) => {
-      if ([...assessments.current.owners.values(), ...assessments.current.strategies.values()].some(owner => owner.needsUnloadWarning())) { event.preventDefault(); event.returnValue = ""; }
+      if ([...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()].some(owner => owner.needsUnloadWarning())) { event.preventDefault(); event.returnValue = ""; }
     };
     const navigate = (event: MouseEvent) => {
       const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
@@ -73,7 +86,7 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
     if (!open) return;
     let alive = true, sequence = 0;
     let controller: AbortController | undefined;
-    const clear = () => { sequence++; controller?.abort(); assessments.current.allowed.clear(); for (const owner of [...assessments.current.owners.values(), ...assessments.current.strategies.values()]) owner.invalidateRead(); setFeed(null); setError(null); };
+    const clear = () => { sequence++; controller?.abort(); assessments.current.allowed.clear(); for (const owner of [...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()]) owner.invalidateRead(); setFeed(null); setError(null); };
     const load = async () => {
       clear();
       if (document.visibilityState === "hidden") return;
@@ -86,7 +99,7 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
         const payload = await response.json().catch(() => null);
         if (!alive || request !== sequence) return;
         if (!response.ok) {
-          if ([401, 403].includes(response.status)) { assessments.current.denied = true; for (const owner of [...assessments.current.owners.values(), ...assessments.current.strategies.values()]) owner.retire(); }
+          if ([401, 403].includes(response.status)) { assessments.current.denied = true; for (const owner of [...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()]) owner.retire(); }
           throw new Error(payload?.message ?? "تعذّر تحميل حالات التقويم.");
         }
         if (payload?.projection !== "case-summary" || !Array.isArray(payload.cases)
@@ -94,6 +107,7 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
           throw new Error("تعذّر التحقق من قائمة الحالات. أعد تحميلها.");
         }
         assessments.current.allowed = new Set<number>(payload.cases.map((row: { id: number }) => row.id));
+        for (const [id, draft] of assessments.current.coverage) if (!assessments.current.allowed.has(id)) { draft.retire(); assessments.current.coverage.delete(id); }
         setFeed(payload);
       } catch (failure) {
         if (alive && request === sequence) setError(failure instanceof Error && failure.name === "Error" ? failure.message : "تعذّر الاتصال بالخادم. أعد تحميل الحالات.");
@@ -112,7 +126,7 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="text-sm font-bold text-navy-900">حالات التقويم</h2>
       <button type="button" aria-expanded={open} aria-controls={regionId}
-        onClick={() => { if (open && !canLeaveAssessments()) return; if (open) { for (const owner of [...assessments.current.owners.values(), ...assessments.current.strategies.values()]) owner.retire(); assessments.current.owners.clear(); assessments.current.strategies.clear(); } setFeed(null); setError(null); setOpen(value => !value); }}
+        onClick={() => { if (open && !canLeaveAssessments()) return; if (open) { for (const owner of [...assessments.current.owners.values(), ...assessments.current.strategies.values(), ...assessments.current.coverage.values()]) owner.retire(); assessments.current.owners.clear(); assessments.current.strategies.clear(); assessments.current.coverage.clear(); } setFeed(null); setError(null); setOpen(value => !value); }}
         className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">{open ? "إغلاق الحالات" : "عرض حالات التقويم"}</button>
     </div>
     {open ? <div id={regionId} className="mt-3 space-y-3" data-testid="canonical-ortho-cases">
@@ -140,7 +154,7 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
               </> : null}
             </dl>
             {row.baselineKind === "legacy" ? <p className="mt-2 text-xs text-slate-600">علاج بدأ قبل النظام</p> : null}
-            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} ownerKey={ownerKey} canEdit={canEdit} canReadCoverage={canReadCoverage} assessmentOwnerFor={canEdit ? assessmentOwnerFor : undefined} strategyOwnerFor={canEdit ? strategyOwnerFor : undefined} onChanged={() => { setNotice("حُفظ تحديث حالة التقويم وسُجّل أثره."); setFeed(null); setRefresh(value => value + 1); }} />
+            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} ownerKey={ownerKey} canEdit={canEdit} canReadCoverage={canReadCoverage} assessmentOwnerFor={canEdit ? assessmentOwnerFor : undefined} strategyOwnerFor={canEdit ? strategyOwnerFor : undefined} coverageOwnerFor={canReadCoverage ? coverageOwnerFor : undefined} onChanged={() => { setNotice("حُفظ تحديث حالة التقويم وسُجّل أثره."); setFeed(null); setRefresh(value => value + 1); }} />
           </li>)}</ul>}
       {feed?.hasMore ? <p role="status" className="text-sm text-amber-800">تظهر أحدث 300 حالة فقط؛ هذه ليست القائمة الكاملة.</p> : null}
     </div> : null}
