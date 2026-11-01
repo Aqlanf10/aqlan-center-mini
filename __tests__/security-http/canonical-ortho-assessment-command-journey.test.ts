@@ -190,3 +190,17 @@ it("browser: an explicitly linked empty case starts an unfilled assessment witho
   } finally { await context.close(); }
   expect(await journey.ddlLog()).toEqual([]);
 });
+it("browser: detail-only unmount keeps an unacknowledged assessment receipt until explicit identical replay",async()=>{
+  const context=await journey.browser.newContext();let release!:()=>void,reached!:()=>void,finished!:()=>void,intercepted=false,responseStatus=0;
+  const held=new Promise<void>(r=>{release=r;}),ready=new Promise<void>(r=>{reached=r;}),done=new Promise<void>(r=>{finished=r;});
+  try{const page=await context.newPage();let panel=await openAssessment(page);await panel.getByRole("button",{name:"فتح مراجعة تصحيحية من النسخة الحالية",exact:true}).click();await panel.getByLabel("سبب إنشاء هذه المراجعة").fill("SYN assessment detail-only retired reply");
+    const path=`**/api/ortho/${caseId}/assessment`,requests:string[]=[];page.on("request",r=>{if(r.method()==="POST"&&new URL(r.url()).pathname===`/api/ortho/${caseId}/assessment`)requests.push(r.postData()!);});
+    await page.route(path,async route=>{if(route.request().method()!=="POST")return route.continue();intercepted=true;try{const response=await route.fetch({timeout:15000});responseStatus=response.status();if(responseStatus!==201)console.log("assessment detail witness refusal",responseStatus,await response.text());reached();await held;await route.fulfill({response});}finally{reached();finished();}});
+    await panel.getByRole("button",{name:"حفظ مراجعة تقييم جديدة",exact:true}).click();await ready;expect(responseStatus).toBe(201);await page.getByRole("button",{name:"تحديث التفاصيل",exact:true}).click();await page.getByRole("button",{name:"عرض التقييم والقياسات",exact:true}).waitFor();
+    const returned=page.waitForResponse(r=>r.request().method()==="POST"&&new URL(r.url()).pathname===`/api/ortho/${caseId}/assessment`);release();await done;await returned;await page.waitForTimeout(200);
+    await page.getByRole("button",{name:"عرض التقييم والقياسات",exact:true}).click();panel=page.getByTestId("canonical-ortho-assessment");const retry=panel.getByRole("button",{name:"التحقق بإعادة نفس طلب الحفظ",exact:true});await retry.waitFor({timeout:2500});await expect.poll(()=>retry.isEnabled()).toBe(true);
+    expect(await panel.getByLabel("سبب إنشاء هذه المراجعة").inputValue()).toBe("SYN assessment detail-only retired reply");expect(requests).toHaveLength(1);
+    const committed=(await journey.db.query("SELECT id,version,content_sha256,content FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY version",[caseId])).rows;await page.unroute(path);await retry.click();await expect.poll(()=>panel.getByTestId("assessment-v2-draft").count()).toBe(0);expect(requests[1]).toBe(requests[0]);
+    expect((await journey.db.query("SELECT id,version,content_sha256,content FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY version",[caseId])).rows).toEqual(committed);
+  }finally{release();if(intercepted)await done;await context.close();}
+});

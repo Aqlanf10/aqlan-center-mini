@@ -1,0 +1,37 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+[security-http] الخادم جاهز على http://127.0.0.1:7917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts (9 tests | 1 failed | 8 skipped) 36146ms
+   × browser: detail-only unmount keeps an unacknowledged assessment receipt until explicit identical replay 31770ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts > browser: detail-only unmount keeps an unacknowledged assessment receipt until explicit identical replay
+TimeoutError: locator.waitFor: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-ortho-assessment').getByTestId('assessment-v2-saved') to be visible[22m
+
+ ❯ openAssessment __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts:48:50
+     46|   await page.getByRole("button", {name:"عرض التقييم والقياسات",exact:t…
+     47|   const panel=page.getByTestId("canonical-ortho-assessment");
+     48|   await panel.getByTestId("assessment-v2-saved").waitFor(); return pan…
+       |                                                  ^
+     49| }
+     50| it("HTTP: anonymous, read-only and none refuse; outside equals missing…
+ ❯ __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts:196:52
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  15:30:14
+   Duration  40.52s (transform 130ms, setup 0ms, import 494ms, tests 36.15s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

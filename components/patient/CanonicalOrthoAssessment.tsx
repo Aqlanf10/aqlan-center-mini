@@ -33,7 +33,9 @@ function OwnedAssessment({ patientId, caseId, clinicTimeZone, ownerFor }: { pati
   const [, redraw] = useState(0);
   useLayoutEffect(() => {
     owner.activate(); const unsubscribe = owner.subscribe(() => redraw(value => value + 1));
-    return unsubscribe;
+    // Detail refresh/close also retires this view, independently of list polls.
+    // Preserve pending request bytes, but never settle them from its late reply.
+    return () => { unsubscribe(); owner.invalidateRead(); };
   }, [owner]);
   const lifetime: AssessmentLifetimeV2 = {
     identity: owner, active: owner.active, editable: owner.editable, denied: owner.denied,
