@@ -37,7 +37,13 @@
     },
     "typecheck": "passed",
     "lint": "Initial no-regex-spaces in new test corrected with equivalent quantifiers; final zero errors/warnings; original failure retained",
-    "fullUnit": "Final correct-environment run ongoing; no pass claim"
+    "fullUnit": {
+      "passed": 14794,
+      "files": 873,
+      "seconds": 468.85,
+      "skipped": 0,
+      "environment": "Correct synthetic SESSION_SECRET, Asia/Aden, Node22.23.3"
+    }
   },
   "prototypeFailure": "An additional overlap experiment full unit invocation omitted SESSION_SECRET: five auth failures plus one unchanged 5000ms import-guard timeout. Original run14783pass6fail retained; corrected-environment targeted24cases passed; no bound changed. Final complete run separate.",
   "sourceSha256": {
@@ -62,6 +68,7 @@
     "aa-http-sharding-lint-corrected.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "aa-ci-recovery-focused-final.log": "a59da0dc10ceec3f4de0d1b37b3f85caf4850f0c7274170079fe952c6eab3ba2",
     "aa-runtime-overlap-unit-full.log": "9e60523b5b56bb931632f14c7b63ba144d98b2529f95f716a59633723beb535a",
-    "aa-final-environment-recheck.log": "75f6f5e470dacc99c889947dd66c3b471cb1fae36ddcd4465a96385f48b753a1"
+    "aa-final-environment-recheck.log": "75f6f5e470dacc99c889947dd66c3b471cb1fae36ddcd4465a96385f48b753a1",
+    "aa-ci-recovery-unit-full.log": "579ea585c85308272463af7fc39ead9d33f494563199dae713c4658d6b42b937"
   }
 }
