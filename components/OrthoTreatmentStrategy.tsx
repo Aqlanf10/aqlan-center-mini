@@ -83,7 +83,7 @@ function Revision({ revision, clinicTimeZone }: { revision: StrategyProjection; 
 }
 
 export interface OrthoTreatmentStrategyProps {
-  patientId: number; orthoCaseId: number; caseTitle?: string; clinicTimeZone?: string; lifetime?: StrategyLifetime; referenceVisitId?: number;
+  patientId: number; orthoCaseId: number; caseTitle?: string; clinicTimeZone?: string; lifetime?: StrategyLifetime; referenceVisitId?: number; canonicalEdit?: boolean;
 }
 export function OrthoTreatmentStrategy(props: OrthoTreatmentStrategyProps) {
   const session = useSession();
@@ -92,7 +92,7 @@ export function OrthoTreatmentStrategy(props: OrthoTreatmentStrategyProps) {
   // In particular, B must never request A's selected history revision.
   return <StrategyWorkspace key={`${props.patientId}:${props.orthoCaseId}:${props.referenceVisitId ?? "case"}:${authority}`} {...props} />;
 }
-function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId, clinicTimeZone }: OrthoTreatmentStrategyProps) {
+function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId, clinicTimeZone, canonicalEdit = false }: OrthoTreatmentStrategyProps) {
   const session = useSession();
   const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
   const owner = useMemo(() => ({ patientId, orthoCaseId, authority, referenceVisitId, identity: lifetime?.identity }),
@@ -130,7 +130,8 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId,
     }, 15_000);
     void (async () => {
       try {
-        const response = await fetch(`/api/ortho/${orthoCaseId}/strategy${selected === undefined ? "" : `?revisionId=${selected}`}`, { cache: "no-store", signal: controller.signal });
+        const query = new URLSearchParams(); if (selected !== undefined) query.set("revisionId", String(selected)); if (canonicalEdit) query.set("edit", "1");
+        const response = await fetch(`/api/ortho/${orthoCaseId}/strategy${query.size ? `?${query}` : ""}`, { cache: "no-store", signal: controller.signal });
         if (!current()) return;
         if ([401, 403].includes(response.status)) { life?.denied(); throw new Error("غير مصرّح لك بخطة هذه الحالة."); }
         if (!response.ok || response.redirected) throw new Error("تعذّر قراءة خطة الحالة؛ لا تعني النتيجة أن السجل فارغ.");
@@ -143,7 +144,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId,
       } finally { clearTimeout(timer); }
     })();
     return () => { active = false; controller.abort(); clearTimeout(timer); };
-  }, [owner, patientId, orthoCaseId, selected, reload, readVersion]);
+  }, [owner, patientId, orthoCaseId, selected, reload, readVersion, canonicalEdit]);
 
   const update = (next: Draft) => { if (!strategyBlocked) lifetime?.change("document", JSON.stringify(next)); };
   const changeRow = (index: number, patch: Partial<DraftRow>) => { if (draft) update({ ...draft, rows: draft.rows.map((row, i) => i === index ? { ...row, ...patch } : row) }); };
@@ -172,11 +173,13 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId,
     if (!checked.ok) { setMessage(checked.message); return; }
     const operation = retry ? lifetime.beginRetry?.() : lifetime.begin(); if (!operation) return;
     let confirmed = false;
+    const controller = canonicalEdit ? new AbortController() : undefined;
+    const timeout = controller ? setTimeout(() => controller.abort(), 15_000) : undefined;
     const showMessage = (value: string) => { if ((activeOwner.current === owner)) setMessage(value); };
     setMessage(null);
     try {
       const response = await fetch(`/api/ortho/${orthoCaseId}/strategy`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(checked.value),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(checked.value), ...(controller ? { signal: controller.signal } : {}),
       });
       if (!operation.current() || !operation.checkHeaders(response)) return;
       if (response.redirected || response.status >= 500) {
@@ -201,6 +204,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId,
     } catch {
       if (operation.current()) { operation.markUncertain(); showMessage("نتيجة الحفظ غير مؤكدة؛ احتفظ بنفس الطلب ولا تنشئ معرّفًا جديدًا."); }
     } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
       const current = operation.current(); operation.finish();
       if (current && confirmed) {
         lifetime.settle("document", ""); lifetime.refresh();

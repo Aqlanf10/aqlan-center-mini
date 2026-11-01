@@ -1,4 +1,5 @@
 "use client";
+import { makeDraft, currentMutation, beginMutation, endMutation, beginRetryMutation, type Draft, type Mutation } from "@/lib/ortho-draft-lifetime";
 
 import { useReturnBookingContext } from "@/components/useReturnBookingContext";
 import PatientResponsibilitySettings from "./PatientResponsibilitySettings";
@@ -147,12 +148,6 @@ interface SavedAdjustment {
 
 export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
 type OrthoReadState = "loading" | "ready" | "error" | "denied";
-type Draft = { values: Map<string, unknown>; edits: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean; dirty: boolean;
-  strategyView: { readonly readVersion: number; subscribe(listener: () => void): () => void; notify(refresh?: boolean): void; clear(): void };
-  settleField(name: string, value: unknown): void;
-  activate: () => void; markUncertain: () => void; trackEdit: (name: string, previous: unknown, next: unknown) => void;
-};
-type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
 type OrthoOwner = {
   active: boolean; denied: boolean; clinical: boolean; contact: boolean; standalone: boolean;
   readSequence: number; mutationSequence: number; denialSequence: number;
@@ -212,39 +207,6 @@ function makeOwner(standalone = false): OrthoOwner {
   };
   return owner;
 }
-function sameDraftValue(before: unknown, after: unknown) {
-  return Object.is(before, after) || (Array.isArray(before) && Array.isArray(after)
-    && before.length === after.length && before.every((value, index) => Object.is(value, after[index])));
-}
-function makeDraft(): Draft {
-  const strategyListeners = new Set<() => void>();
-  let strategyReadVersion = 0;
-  const draft: Draft = { values: new Map(), edits: new Map(), urls: new Set(), active: true, busy: false, uncertain: false, dirty: false,
-    strategyView: {
-      get readVersion() { return strategyReadVersion; },
-      subscribe: (listener) => { strategyListeners.add(listener); return () => { strategyListeners.delete(listener); }; },
-      notify: (refresh = false) => {
-        if (refresh) strategyReadVersion++;
-        for (const listener of [...strategyListeners]) listener();
-      },
-      clear: () => { strategyListeners.clear(); },
-    },
-    settleField: (name, value) => {
-      draft.values.set(name, value); draft.edits.delete(name); draft.dirty = draft.edits.size > 0;
-    },
-    activate: () => { draft.active = true; },
-    markUncertain: () => { draft.uncertain = true; },
-    trackEdit: (name, previous, next) => {
-      // Opening/closing the booking form changes presentation, not its data.
-      if (name === "booking") return;
-      const baseline = draft.edits.has(name) ? draft.edits.get(name) : previous;
-      if (sameDraftValue(baseline, next)) draft.edits.delete(name);
-      else draft.edits.set(name, baseline);
-      draft.dirty = draft.edits.size > 0;
-    },
-  };
-  return draft;
-}
 function makeViewLease() {
   let active = false;
   return { get active() { return active; }, activate: () => { active = true; }, retire: () => { active = false; } };
@@ -272,27 +234,6 @@ function retireOwner(owner: OrthoOwner) {
 }
 function sessionScope(session: SessionInfo | null) {
   return JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
-}
-function currentMutation(owner: OrthoOwner, operation: Mutation | null): operation is Mutation {
-  return !!operation && owner.active && !owner.denied && operation.active && operation.draft.active
-    && operation.denial === owner.denialSequence;
-}
-function beginMutation(owner: OrthoOwner, draft: Draft, allowed: boolean): Mutation | null {
-  if (!owner.active || owner.denied || !owner.clinical || !draft.active || draft.busy || draft.uncertain || !allowed) return null;
-  draft.busy = true;
-  const operation = { draft, sequence: ++owner.mutationSequence, denial: owner.denialSequence, active: true };
-  owner.mutations.add(operation); return operation;
-}
-function endMutation(owner: OrthoOwner, operation: Mutation) {
-  operation.active = false; operation.draft.busy = false; owner.mutations.delete(operation);
-}
-function beginRetryMutation(owner: OrthoOwner, draft: Draft, allowed: boolean): Mutation | null {
-  if (!allowed || !draft.active || !draft.uncertain || draft.busy) return null;
-  // Reconcile only the frozen command; a failed admission keeps it uncertain.
-  draft.uncertain = false;
-  const operation = beginMutation(owner, draft, true);
-  if (!operation) draft.uncertain = true;
-  return operation;
 }
 function mayUpload(session: SessionInfo | null) {
   return !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"

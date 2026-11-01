@@ -1,0 +1,19 @@
+# Slice 58 — explicit orthodontic strategy editor
+
+The default saved-strategy reader stays unchanged. Explicit `edit=1` requires current ortho edit authority inside the same fenced, repeatable-read transaction. This contract reuses the native editor and draft transitions; it does not create a second strategy engine.
+
+| Requirement | Implemented and tested evidence |
+|---|---|
+| Minimal editing context | Bridge-owned clinical problems only; plan choices require both independent plan view and edit. The complete combined set is bounded at 128 with refusal above it. Own/all/owner, none/read-only/unlinked/outside, strict query, 128/129 and default-reader witnesses pass. No finance or foreign case content. |
+| Fresh authorization and snapshot | Existing owning read connection, post-fence authority, actual lock waits with expiry/revocation, consistent concurrent snapshots and no implicit DDL or writes. |
+| Native clinical meaning | Six draft/mutation function bodies extracted unchanged from PatientOrtho. Strategy engine, strict receipt matcher, fingerprint and immutable INSERT remain unchanged. Source proof has ten bounded checks; this is not whole-system equivalence. |
+| Explicit recovery | Parent-owned in-memory draft survives refresh. A 15-second canonical write timeout, lost response, late reply or detail-only unmount preserves the exact command for explicit identical retry. No automatic resend. Retired owners cannot trap navigation. |
+| Empty receipt correction | A writer without plan-view permission could save a truly unlinked strategy but could not verify the redacted receipt. A failing PG/browser witness precedes the fix. Only an actually empty stored link set is affirmed in the command receipt after the original authority/binding checks. Nonempty links and default GET remain protected; legacy defaults unchanged. |
+| Detail-only unmount correction | Real assessment and strategy witnesses proved that a late reply could settle a closed detail view. Cleanup now invalidates reply ownership while preserving the parent draft. The assessment correction is separately committed as `2040a46a`; no historical clinical record is rewritten. |
+| Compatibility | Legacy real editor and recovery, existing read-only canonical UI, mobile RTL layout and stale-read clearing pass. Screenshot uses synthetic data. No new bridge/problem/plan writer, finance, migration or authority shortcut. |
+
+Focused PostgreSQL passed **86 tests in four files**; focused unit/map tests passed **323 in eight files**. Final build **`8rud9Vg2t4DBvpQ76A7Qo`**, typecheck and targeted lint pass. HTTP/Chromium covers **86 distinct cases in seven files**: the first final-build run passed 84 and failed two deliberate stale-response waits; both affected files then passed **20/20** after replacing an unconsumed network-body wait with header arrival plus owner-idle assertions. Product hashes, exact draft/retry checks and timeouts were unchanged. This is not described as a single 86-pass execution. Earlier failed attempts and causal before witnesses remain in the manifest.
+
+Full unit tests passed **14,731 in 869 files**. Full combined PG and runtime gates are running; their results, exact-head CI and independent review must be recorded separately before acceptance. The map remains **77 canonical-done / 267 existing ordinary methods** locally; this editor does not add another converted method. Published WORK still has 75 / 269 at this report's preparation.
+
+No reload persistence or universal SPA-back interception guarantee. Actual Docker remains blocked by enforced Alpine destination denial; inventory, schema convergence, integration review and operational acceptance stay open. No main merge, deployment or live change. See [original evidence and hashes](evidence/work-ortho-strategy-editor-20261101/manifest.json).

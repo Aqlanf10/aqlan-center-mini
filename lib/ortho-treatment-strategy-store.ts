@@ -338,6 +338,9 @@ export interface StrategyAppendAuthority {
   actor: { id: number; name: string; role: string };
   clinicalWritable: boolean; planVisible: boolean; planLinksWritable: boolean;
   nowait?: boolean;
+  /** Command receipt only: affirm an actually empty authored link set. This is
+   * never a plan-reading grant and never unmasks a nonempty stored set. */
+  confirmEmptyLinks?: boolean;
   assertCurrent(): void | Promise<void>;
   history?: typeof validatedHistory;
   context?(client: DbClient, scope: StrategyScope, revisions: StrategyRevision[], command?: StrategyCommand): Promise<StrategyCanonicalContext>;
@@ -347,6 +350,11 @@ export async function appendOrthoTreatmentStrategyWith(
   client: DbClient, input: Pick<OwnerInput, "patientId" | "orthoCaseId">,
   command: StrategyCommand, authority: StrategyAppendAuthority,
 ): Promise<Exclude<OrthoStrategyWriteResult, OrthoStrategyFailure>> {
+    const projectReceipt = (revision: StrategyRevision, context: StrategyCanonicalContext) => {
+      const receiptContext = authority.confirmEmptyLinks && revision.rows.every(row => row.planItems.length === 0)
+        ? { ...context, planVisibility: "allowed" as const } : context;
+      return checked(projectStrategyRevision(revision, receiptContext), 500);
+    };
     const owner = await lockOwner(client, input, true, authority.nowait);
     const scope = scopeOf(owner);
     const hash = fingerprint(command);
@@ -362,7 +370,7 @@ export async function appendOrthoTreatmentStrategyWith(
       if (stored[replayIndex].request_fingerprint !== hash) fail(409, "command_conflict", "استُخدم معرّف الحفظ لطلب مختلف.");
       const context = await (authority.context ? authority.context(client, scope, [original]) : canonicalContext(client, scope, authority, [original]));
       await authority.assertCurrent();
-      return { ok: true, revision: checked(projectStrategyRevision(original, context), 500), replayed: true };
+      return { ok: true, revision: projectReceipt(original, context), replayed: true };
     }
     const previous = revisions[0] ?? null;
     requirePlanLinks(authority, [previous], command);
@@ -406,7 +414,7 @@ export async function appendOrthoTreatmentStrategyWith(
         recordingContext: revision.recordingContext, reason: revision.reason, rowCount: revision.rows.length,
         linkCount: revision.rows.reduce((count, row) => count + row.planItems.length, 0) } });
     await authority.assertCurrent();
-    return { ok: true, revision: checked(projectStrategyRevision(revision, context), 500), replayed: false };
+    return { ok: true, revision: projectReceipt(revision, context), replayed: false };
 }
 export async function appendOrthoTreatmentStrategy(
   input: OwnerInput & { command: unknown },

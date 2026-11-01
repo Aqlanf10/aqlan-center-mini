@@ -4,13 +4,14 @@ import { isKnownZone } from "@/lib/clinicZone";
 import { formatClinicDate } from "@/lib/clinic-clock";
 import { CanonicalOrthoLifecycleEditor } from "./CanonicalOrthoLifecycleEditor";
 import { CanonicalOrthoCoverage } from "./CanonicalOrthoCoverage";
+import type { CanonicalStrategyOwner } from "@/lib/canonical-ortho-strategy-owner";
 import { CanonicalOrthoStrategy } from "./CanonicalOrthoStrategy";
 import { CanonicalOrthoAssessment } from "./CanonicalOrthoAssessment";
 import { useEffect, useId, useState } from "react";
 import { PHASE_LABEL, RETAINER_LABEL, type OrthoClinicalDetail } from "@/lib/ortho";
 
 /** On-demand native clinical record. Independent image/finance APIs remain separate. */
-export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = false, canReadCoverage = false, assessmentOwnerFor, onChanged }: { patientId: string; caseId: number; ownerKey: string; canEdit?: boolean; canReadCoverage?: boolean; assessmentOwnerFor?: (caseId: number) => AssessmentOwnerV2; onChanged: () => void }) {
+export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = false, canReadCoverage = false, assessmentOwnerFor, strategyOwnerFor, onChanged }: { patientId: string; caseId: number; ownerKey: string; canEdit?: boolean; canReadCoverage?: boolean; assessmentOwnerFor?: (caseId: number) => AssessmentOwnerV2; strategyOwnerFor?: (caseId: number) => CanonicalStrategyOwner; onChanged: () => void }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -85,7 +86,7 @@ export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = fa
         </li>)}</ol>}
         {feed.hasMore ? <p role="status" className="text-amber-800">تظهر أحدث 100 شدّة فقط؛ هذا ليس السجل الكامل. العدد أعلاه يشمل جميع الشدّات المسجلة.</p> : null}
         <CanonicalOrthoAssessment patientId={Number(patientId)} caseId={caseId} clinicTimeZone={feed.clinicTimeZone!} ownerFor={assessmentOwnerFor} />
-        <CanonicalOrthoStrategy patientId={Number(patientId)} caseId={caseId} clinicTimeZone={feed.clinicTimeZone!} />
+        <CanonicalOrthoStrategy patientId={Number(patientId)} caseId={caseId} clinicTimeZone={feed.clinicTimeZone!} ownerFor={strategyOwnerFor} />
         {canReadCoverage ? <CanonicalOrthoCoverage patientId={Number(patientId)} caseId={caseId} /> : null}
       </>}
       {canEdit ? <CanonicalOrthoLifecycleEditor key={`${ownerKey}:${patientId}:${caseId}`} patientId={patientId} caseId={caseId} ownerKey={ownerKey} feed={feed} refresh={() => { setFeed(null); setError(null); setRefresh(value => value + 1); }} onChanged={onChanged} /> : null}

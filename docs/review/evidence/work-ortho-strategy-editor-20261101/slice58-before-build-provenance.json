@@ -1,0 +1,8 @@
+{
+  "sourceRevision": "d15a5967c8abe84c0e04f55da19a290c1d5bf99d",
+  "buildId": "1MgY7wIDuGln87vYnj4UN",
+  "test": "slice58-http-before.log",
+  "expected": "200",
+  "observed": "400",
+  "scope": "explicit editor read was unsupported; default read/POST previous gates remain independent"
+}

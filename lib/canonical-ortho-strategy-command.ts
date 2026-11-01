@@ -95,7 +95,7 @@ export async function commandCanonicalOrthoStrategy(session: VerifiedDurableSess
       await assertCurrent();
       return appendOrthoTreatmentStrategyWith(client, scope, input.command, {
         actor: { id: actor.userId, name: actor.username, role: actor.role }, clinicalWritable: true, planVisible, planLinksWritable,
-        nowait: true, assertCurrent, history: readOrthoStrategyHistoryWith,
+        nowait: true, confirmEmptyLinks: true, assertCurrent, history: readOrthoStrategyHistoryWith,
         context: async (q, current, revisions, command) => {
           if (current.clinicalCaseId !== scope.clinicalCaseId) fail(409, "case_changed", "تغير الرابط السريري؛ أعد قراءة الحالة.");
           return contextWith(q, current, revisions, command, planVisible, planLinksWritable);

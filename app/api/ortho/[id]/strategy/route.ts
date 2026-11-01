@@ -45,8 +45,8 @@ export async function GET(request: Request, context: Context) {
   if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
   if (selected.kind === "canonical") {
     try {
-      const { caseId, revisionId } = canonicalStrategyQuery((await context.params).id, new URL(request.url).searchParams);
-      return NextResponse.json(await readCanonicalOrthoStrategy(selected.handle, caseId, revisionId), { headers: NO_STORE });
+      const { caseId, revisionId, edit } = canonicalStrategyQuery((await context.params).id, new URL(request.url).searchParams);
+      return NextResponse.json(await readCanonicalOrthoStrategy(selected.handle, caseId, revisionId, edit), { headers: NO_STORE });
     } catch (error) {
       if (error instanceof OrthoStrategyStoreFault) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
       return canonicalPatientReadFailure(error, "تعذّر قراءة خطة الحالة؛ لم يُعتبر السجل فارغًا.");

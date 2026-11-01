@@ -1,0 +1,49 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+[security-http] الخادم جاهز على http://127.0.0.1:7917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts (9 tests | 1 failed) 145379ms
+   × browser: detail-only unmount keeps an unacknowledged assessment receipt until explicit identical replay 120019ms
+ ❯ __tests__/security-http/canonical-ortho-strategy-editor-journey.test.ts (11 tests | 1 failed) 171457ms
+   × browser: a reply after detail-only unmount cannot erase the frozen draft while its editor is closed 120015ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts > browser: detail-only unmount keeps an unacknowledged assessment receipt until explicit identical replay
+Error: Test timed out in 120000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/security-http/canonical-ortho-assessment-command-journey.test.ts:193:1
+    191|   expect(await journey.ddlLog()).toEqual([]);
+    192| });
+    193| it("browser: detail-only unmount keeps an unacknowledged assessment re…
+       | ^
+    194|   const context=await journey.browser.newContext();let release!:()=>vo…
+    195|   const held=new Promise<void>(r=>{release=r;}),ready=new Promise<void…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/canonical-ortho-strategy-editor-journey.test.ts > browser: a reply after detail-only unmount cannot erase the frozen draft while its editor is closed
+Error: Test timed out in 120000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/security-http/canonical-ortho-strategy-editor-journey.test.ts:143:1
+    141|   }finally{release();if(intercepted)await done;await context.close();}
+    142| });
+    143| it("browser: a reply after detail-only unmount cannot erase the frozen…
+       | ^
+    144|   const context=await journey.browser.newContext();let release!:()=>vo…
+    145|   const held=new Promise<void>(r=>{release=r;}),ready=new Promise<void…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 5 passed (7)
+      Tests  2 failed | 84 passed (86)
+   Start at  15:38:31
+   Duration  499.59s (transform 587ms, setup 0ms, import 1.20s, tests 492.79s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

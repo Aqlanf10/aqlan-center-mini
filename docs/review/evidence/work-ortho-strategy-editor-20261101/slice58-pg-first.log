@@ -1,0 +1,33 @@
+
+ RUN  v4.1.12 /workspace/aqlan-ortho-lifecycle
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-strategy-canonical-editor.test.ts (14 tests | 1 failed) 4647ms
+   × choices exclude foreign and other-bridge records even for owner and keep existing closed-reference meanings 18ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-strategy-canonical-editor.test.ts > choices exclude foreign and other-bridge records even for owner and keep existing closed-reference meanings
+error: new row for relation "patient_problems" violates check constraint "patient_problems_check"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ __tests__/postgres/ortho-strategy-canonical-editor.test.ts:81:3
+     79|   const s = await scenario(), foreign = await scenario(false), linked …
+     80|   await fx.pool.query("INSERT INTO patient_problems(patient_id,label,n…
+     81|   await fx.pool.query("UPDATE patient_problems SET status='resolved' W…
+       |   ^
+     82|   const value = await read("owner",s); expect(value.choices.problems).…
+     83|   expect(value.choices.problems[0].status).toBe("resolved"); expect(va…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 70 passed (71)
+   Start at  15:15:07
+   Duration  27.51s (transform 2.54s, setup 0ms, import 3.87s, tests 22.72s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
