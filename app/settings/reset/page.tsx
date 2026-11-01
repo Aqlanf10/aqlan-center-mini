@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
 
 /**
  * إعادة الضبط — مسح البيانات التجريبية وبدء العمل الحقيقي من الصفر.
@@ -67,14 +68,12 @@ export default function ResetPage() {
   const total = (groups ?? []).reduce((sum, group) => sum + group.count, 0);
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
-      <header className="mb-4">
-        <h1 className="text-xl font-extrabold leading-tight text-rose-800">إعادة الضبط — مسح البيانات التجريبية</h1>
-        <p className="text-xs text-slate-500">لبيانات تجريبية لا تتضمن ملفات مرضى أو سجلًا محميًا. يبقى الإعداد وترقيم المرضى.</p>
-        <div className="mt-2">
-          <a href="/settings" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">‹ الإعدادات</a>
-        </div>
-      </header>
+    <main className="mx-auto max-w-3xl p-4 pb-24" dir="rtl">
+      <PageHeader
+        title="إعادة الضبط — مسح البيانات التجريبية"
+        subtitle="لبيانات تجريبية لا تتضمن ملفات مرضى أو سجلًا محميًا — يبقى الإعداد وترقيم المرضى وسجل التدقيق"
+        back={{ href: "/settings", label: "الإعدادات المركزية" }}
+      />
 
       {done ? (
         <section className="rounded-2xl border-2 border-emerald-600/40 bg-emerald-50/60 p-4" aria-label="تمت إعادة الضبط">

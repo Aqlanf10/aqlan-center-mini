@@ -2,7 +2,7 @@ import {readFileSync} from "node:fs";
 import React from "react";
 import {renderToStaticMarkup} from "react-dom/server";
 import {beforeEach,expect,it,vi} from "vitest";
-const auth=vi.hoisted(()=>({session:null as null|{role:string;username:string}}));
+const auth=vi.hoisted(()=>({session:null as null|{role:string;username:string;canonical?:boolean;isOwner?:boolean;capabilities?:string[]}}));
 vi.mock("../components/SessionProvider",()=>({useSession:()=>auth.session}));
 import {PatientNumberEditor} from "../components/patient/PatientNumberEditor";
 import PatientNumberingPage from "../app/settings/patient-numbering/page";
@@ -34,4 +34,12 @@ it("binds settings drafts to session ownership and synchronously fences queued l
  expect(settings).toContain('const load = useCallback(async () => {\n    if (saving.current) return;');
  expect(editor).toContain('async function load() {\n    if (saving.current) return;');
  expect(editor).toContain('onClick={()=>{if(saving.current)return;generation.current++');
+});
+
+it("honors canonical settings.operational.edit / isOwner on PatientNumberingPage rather than legacy role label",()=>{
+ auth.session={role:"admin",username:"canon-no-ops",canonical:true,isOwner:false,capabilities:["settings.view"]};
+ expect(renderToStaticMarkup(<PatientNumberingPage/>)).toContain("لا توجد صلاحية");
+
+ auth.session={role:"reception",username:"canon-ops",canonical:true,isOwner:false,capabilities:["settings.view","settings.operational.edit"]};
+ expect(renderToStaticMarkup(<PatientNumberingPage/>)).toContain("P-07000");
 });

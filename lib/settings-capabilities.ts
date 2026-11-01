@@ -49,6 +49,8 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   "clinic.lead_doctor_credentials": k("operational", "Report identity: confirm delegates may edit it, or make it owner-only."),
   "clinic.phone": k("operational"),
   "clinic.address": k("operational"),
+  "clinic.login_photo_asset": k("operational"),
+  "clinic.login_photo_visible": k("operational"),
   "display.tagline": k("operational"),
   // Hours, capacity and scheduling.
   "clinic.day_start": k("operational"), "clinic.day_end": k("operational"),

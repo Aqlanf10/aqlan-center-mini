@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
 import { CHANNEL_LABEL, SECRET_FIELDS, type Channel } from "@/lib/messaging-channels";
 
 /**
@@ -223,25 +224,24 @@ export default function MessagingSettingsPage() {
 
   useEffect(() => {
     void (async () => {
-      const response = await fetch("/api/settings/messaging", { cache: "no-store" });
-      const payload = await readJson(response);
-      if (!response.ok) { setError(String(payload.message ?? "تعذّر التحميل.")); return; }
-      setChannels(payload.channels as ChannelView[]);
+      try {
+        const response = await fetch("/api/settings/messaging", { cache: "no-store" });
+        const payload = await readJson(response);
+        if (!response.ok) { setError(String(payload.message ?? "تعذّر التحميل.")); return; }
+        setChannels(payload.channels as ChannelView[]);
+      } catch {
+        setError("تعذّر الاتصال بالخادم لتحميل قنوات الرسائل.");
+      }
     })();
   }, []);
 
   return (
-    <main className="mx-auto max-w-4xl space-y-4 p-4 pb-24">
-      <header>
-        <h1 className="text-xl font-extrabold text-navy-900">قنوات الرسائل</h1>
-        <p className="text-xs text-slate-500">
-          واتساب للأعمال والرسائل النصية والبريد — لكل قناةٍ رقمها أو عنوانها وسرّها. السرّ يُحفظ مشفّرًا ولا يظهر بعد الحفظ.
-          والرسائل الداخلية بين الطاقم تبقى كما هي في صفحة الرسائل.
-        </p>
-        <div className="mt-2">
-          <a href="/settings" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">‹ الإعدادات</a>
-        </div>
-      </header>
+    <main className="mx-auto max-w-4xl space-y-4 p-4 pb-24" dir="rtl">
+      <PageHeader
+        title="قنوات الرسائل"
+        subtitle="واتساب للأعمال والرسائل النصية والبريد — لكل قناةٍ رقمها أو عنوانها وسرّها المشفّر، والرسائل الداخلية بين الطاقم تبقى في صفحة الرسائل"
+        back={{ href: "/settings", label: "الإعدادات المركزية" }}
+      />
       {error ? <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-700">{error}</p> : null}
       {channels ? channels.map((channel) => (
         <ChannelCard key={`${channel.channel}-${channel.secretKeys.join(",")}-${channel.updatedAt}-${channel.lastTestAt}`} initial={channel}

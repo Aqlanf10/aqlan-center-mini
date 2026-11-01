@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
@@ -32,14 +33,12 @@ export default function ExportPage() {
   const [to, setTo] = useState(today);
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
-      <header className="mb-4">
-        <h1 className="text-xl font-extrabold leading-tight">النسخ والتصدير</h1>
-        <p className="text-xs text-slate-500">نسخة كاملة للاستعادة، وجداول CSV للمراجعة</p>
-        <div className="mt-2">
-          <a href="/settings" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">‹ الإعدادات</a>
-        </div>
-      </header>
+    <main className="mx-auto max-w-3xl p-4 pb-24" dir="rtl">
+      <PageHeader
+        title="النسخ والتصدير"
+        subtitle="نسخة كاملة للاستعادة، وجداول CSV للمراجعة البشرية"
+        back={{ href: "/settings", label: "الإعدادات المركزية" }}
+      />
 
       {/* النسخة الكاملة فوق كل شيء: هي وحدها التي تُعيد العيادة إن ضاع كل شيء.
           وملفات CSV تحتها للمراجعة — تُقرأ ولا تُستعاد. */}

@@ -113,7 +113,7 @@ ${items.join("\n")}
     textSummary,
     cards,
     table,
-    actions: [{ label: "شاشة دليل الخدمات", href: "/settings/services", actionType: "navigate" }],
+    actions: [{ label: "شاشة دليل الخدمات", href: "/finance/services", actionType: "navigate" }],
     data: filtered,
   };
 }

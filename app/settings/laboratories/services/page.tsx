@@ -1,1 +1,5 @@
-export { default } from "@/app/settings/lab-services/page";
+import { redirect } from "next/navigation";
+
+export default function LegacyLaboratoriesServicesRedirectPage() {
+  redirect("/settings/lab-services");
+}

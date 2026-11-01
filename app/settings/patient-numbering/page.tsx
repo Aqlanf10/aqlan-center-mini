@@ -8,7 +8,14 @@ import { parseNumberingFloor, parsePatientNumber, numberingReason, type Numberin
 
 export default function PatientNumberingPage() {
   const session = useSession();
-  if (!session || !isAdmin(session.role)) return <p role="alert">لا توجد صلاحية لإعداد ترقيم الملفات.</p>;
+  const allowed = Boolean(
+    session && (
+      session.canonical === true
+        ? (session.isOwner === true || (session.capabilities ?? []).includes("settings.operational.edit"))
+        : isAdmin(session.role)
+    ),
+  );
+  if (!session || !allowed) return <p role="alert">لا توجد صلاحية لإعداد ترقيم الملفات.</p>;
   return <PatientNumberingWorkspace key={JSON.stringify([session.username, session.role, session.permissions ?? null])} />;
 }
 

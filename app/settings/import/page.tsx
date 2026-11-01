@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PageHeader } from "@/components/PageHeader";
 import { formatMoney, type Currency } from "@/lib/money";
 import { browserInflateRaw, readFirstSheet, rowsToCsv } from "@/lib/xlsx-reader";
 import { LegacyImportSection } from "@/components/LegacyImportSection";
@@ -159,14 +160,12 @@ export default function PatientImportPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl p-4 pb-24">
-      <header className="mb-4">
-        <h1 className="text-xl font-extrabold leading-tight">استيراد مرضى المركز القديم</h1>
-        <p className="text-xs text-slate-500">من ملف Excel محفوظ بصيغة CSV — معاينة كاملة قبل أي حفظ</p>
-        <div className="mt-2">
-          <a href="/settings" className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">‹ الإعدادات</a>
-        </div>
-      </header>
+    <main className="mx-auto max-w-4xl p-4 pb-24" dir="rtl">
+      <PageHeader
+        title="استيراد مرضى المركز القديم"
+        subtitle="من ملف Excel أو CSV — معاينة كاملة وكشف للتكرار قبل أي حفظ"
+        back={{ href: "/settings", label: "الإعدادات المركزية" }}
+      />
 
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4" aria-label="اختيار الملف">
         <ol className="mb-3 list-decimal space-y-1 pr-5 text-[12px] font-bold leading-6 text-slate-600">
