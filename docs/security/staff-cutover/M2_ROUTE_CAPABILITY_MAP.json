@@ -405,8 +405,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 43: clinical.plans.edit with current patient scope, view prerequisite and independent ortho visibility; bridged ortho remains native-lifecycle-only. Patient/case locks, fresh authority after waits, opaque observed row-version comparison and atomic original transition/audit. Terminal cases cannot reopen; cancellation needs a reason. Minimal acknowledgement, no rich financial return, no reassignment. No automatic replay after uncertain result."
  },
  {
   "route": "/api/ceph-reference-sets",

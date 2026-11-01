@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isCanonicalPatientCases, type CanonicalPatientCases } from "../lib/canonical-case-projection";
 
 const fixture = (): CanonicalPatientCases => ({ projection: "patient-cases-clinical", patientId: 1, planVisible: true, orthoVisible: false,
-  cases: [{ id: 2, kind: "specialty", orthoCaseId: null, specialty: "endodontics", title: "SYN case", site: "26", problem: null, responsibleName: null, status: "active", startedOn: "2024-01-01", completedAt: null, outcome: null }],
+  cases: [{ id: 2, kind: "specialty", orthoCaseId: null, specialty: "endodontics", title: "SYN case", site: "26", problem: null, responsibleName: null, status: "active", startedOn: "2024-01-01", completedAt: null, outcome: null, version: "b".repeat(64) }],
   problems: [{ id: 3, label: "SYN problem", site: null, specialty: null, status: "active", caseId: 2, notedBy: "SYN", notedAt: "2024-01-01T00:00:00Z", resolvedBy: null, resolvedAt: null }],
   items: [4, 5].map(id => ({ id, planId: 6, planTitle: "SYN plan", planStatus: "active", serviceName: `SYN ${id}`, category: null, toothCode: null, surfaces: null, status: id === 5 ? "done" : "planned", doctorName: null, caseId: 2, priority: null, sortOrder: 0 })),
   dependencies: [{ itemId: 4, requiresItemId: 5, requirement: "completed", note: null, met: true, createdBy: "SYN", version: "a".repeat(64) }],

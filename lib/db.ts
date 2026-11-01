@@ -29005,32 +29005,42 @@ export async function createClinicalCase(input: CaseDraft & {
 }
 
 /** انتقال الحالة: المسار المسموح وحده، والمنتهية لا تعود — والإلغاء بسببٍ مكتوب (قيد في القاعدة أيضًا). */
-export async function changeClinicalCaseStatus(input: {
+export interface ChangeClinicalCaseStatusInput {
   id: number; status: SpecialtyCaseStatus; outcome: string | null; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "not_found" | "invalid_transition" | "ortho_managed" }> {
+}
+export type ChangeClinicalCaseStatusResult = { ok: true } | { ok: false; reason: "not_found" | "invalid_transition" | "ortho_managed" };
+
+/** The original state transition and audit, without owning a transaction or reading the rich legacy projection. */
+export async function changeClinicalCaseStatusInTransaction(client: DbClient, input: ChangeClinicalCaseStatusInput): Promise<ChangeClinicalCaseStatusResult> {
+  const { rows } = await client.query<{ patient_id: number; status: SpecialtyCaseStatus; title: string; ortho_case_id: number | null }>(
+    `SELECT patient_id, status, title, ortho_case_id FROM clinical_cases WHERE id = $1 FOR UPDATE`, [input.id]);
+  if (!rows[0]) { return { ok: false, reason: "not_found" }; }
+  // حالة التقويم المجسورة تُدار من وحدة التقويم (الإغلاق بمثبّته وملاحظته) — لا مصدران لحالتها.
+  if (rows[0].ortho_case_id !== null) { return { ok: false, reason: "ortho_managed" }; }
+  if (!canMoveCase(rows[0].status, input.status)) { return { ok: false, reason: "invalid_transition" }; }
+  const terminal = CASE_TERMINAL.includes(input.status);
+  await client.query(
+    `UPDATE clinical_cases
+        SET status = $2, completed_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+            outcome = COALESCE($4::text, outcome)
+      WHERE id = $1`,
+    [input.id, input.status, terminal, input.outcome],
+  );
+  await insertAuditRow(client, {
+    action: "case.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].title,
+    details: { الحالة: input.id, من: rows[0].status, إلى: input.status, النتيجة: input.outcome ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+export async function changeClinicalCaseStatus(input: ChangeClinicalCaseStatusInput): Promise<{ ok: true; case: SpecialtyCase } | Exclude<ChangeClinicalCaseStatusResult,{ ok: true }>> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ patient_id: number; status: SpecialtyCaseStatus; title: string; ortho_case_id: number | null }>(
-      `SELECT patient_id, status, title, ortho_case_id FROM clinical_cases WHERE id = $1 FOR UPDATE`, [input.id]);
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    // حالة التقويم المجسورة تُدار من وحدة التقويم (الإغلاق بمثبّته وملاحظته) — لا مصدران لحالتها.
-    if (rows[0].ortho_case_id !== null) { await client.query("ROLLBACK"); return { ok: false, reason: "ortho_managed" }; }
-    if (!canMoveCase(rows[0].status, input.status)) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
-    const terminal = CASE_TERMINAL.includes(input.status);
-    await client.query(
-      `UPDATE clinical_cases
-          SET status = $2, completed_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
-              outcome = COALESCE($4::text, outcome)
-        WHERE id = $1`,
-      [input.id, input.status, terminal, input.outcome],
-    );
-    await insertAuditRow(client, {
-      action: "case.status", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].title,
-      details: { الحالة: input.id, من: rows[0].status, إلى: input.status, النتيجة: input.outcome ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
+    const result = await changeClinicalCaseStatusInTransaction(client, input);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
     return { ok: true, case: (await getClinicalCase(input.id)) as SpecialtyCase };
   } catch (error) {

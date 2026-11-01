@@ -1,0 +1,73 @@
+{
+  "format": "work-case-status-evidence-v1",
+  "baseRevision": "fff3e57efe9a6371c37757e73be039c2d89f52ea",
+  "sourceRevision": null,
+  "buildId": "OI3Xqu80lWKOB2FetNgT8",
+  "results": {
+    "postgres": {
+      "passed": 118,
+      "files": 5,
+      "newTests": 29
+    },
+    "httpBrowser": {
+      "passed": 49,
+      "files": 4,
+      "newTests": 12
+    },
+    "unit": {
+      "passed": 45,
+      "files": 3,
+      "newTests": 20
+    },
+    "mapGuards": {
+      "passed": 10,
+      "files": 2
+    },
+    "build": "pass",
+    "typecheck": "pass",
+    "focusedLint": "pass; zero errors/warnings",
+    "sourcePreservationChecks": 14,
+    "historicalSourceHashes": 490,
+    "fullExactHeadCI": "not yet run",
+    "independentReview": "pending",
+    "firstPostgres": "62 passed, 10 skipped; setup failed due shared-schema test collision; rerun after dedicated server isolation passed"
+  },
+  "sourceSha256": {
+    "lib/canonical-case-status-command.ts": "f2344c6881c601938c4b2eeb043e5a2cf494d3275ab665f9830c54663e1c8810",
+    "lib/canonical-case-status-version.ts": "fbc82e2be6b442cf751751660c5d70c0096aa4aa11e3560c21a05157ff661ab5",
+    "lib/canonical-case-reads.ts": "668fb0793c15c1278a2eb37d82a0248dc442f2ff431d293e385b857ce1fafa04",
+    "lib/canonical-case-projection.ts": "e8fe1ce766422544b5cb0309e6828de6a82864da4eb44ffe6b227fb98373d283",
+    "lib/db.ts": "b8a96b8a9eb7e5f4d04a884faadf9df5babd6057e647e416901dd40a3b681df9",
+    "app/api/cases/[id]/route.ts": "b8370f8e508745192827c8332c1b0a81d9effa34b5a46c5fbe8b569c4e80e26f",
+    "components/patient/CanonicalCaseStatusEditor.tsx": "ba373b2b5ac683746eaf8155f9da7211a45bdd0536f2f63036fdf49cf3346f7d",
+    "components/patient/CanonicalPatientCases.tsx": "21f4196e5feba4516c1eb33664cc0d8af452d41f981518c3cb76f2ca48bd161a",
+    "__tests__/canonical-case-status-command.test.ts": "54e09f558c4ff18f8210a2c4b9c74c0a22e57e8bda918e12bdc150a8b8fcf349",
+    "__tests__/canonical-case-projection.test.ts": "de249df7251596fe4d1b0fd8afc9f33d1d17a69319a95da0de50fad5061b6799",
+    "__tests__/postgres/case-status-canonical-command.test.ts": "da6d555d9bdb98bb3fcc3fe6ccf17143a983019ae149aa3480322a8d68717e28",
+    "__tests__/security-http/canonical-case-status-journey.test.ts": "441256d073e69c84ff822421cc84b7984e1fe4428f90cce8a37360193bff85ba",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "92f0fd8304b0ee367870a7468975211b2098d8d2270824efd078462341dc617f",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "28c77348d2aaded599f72cd553ea63647378f3b34cc444f5404344032489fcea",
+    "docs/security/staff-cutover/inventory.json": "37efb6aec95dbf8607e02cabe44574b84e5e99b8169bb99d6ebc10641bb7027f",
+    "docs/security/staff-cutover/HANDOFF.md": "f704e04a7dad36a44d8e1842b52a2054c5e68df0fe8aa88a3ca24f7e66c6edb8",
+    "docs/review/work-case-status-slice43-20261101.md": "408d3d1e30d939406d65f496a1e06e4f104e5691efa024ffe840036ffbdb7165"
+  },
+  "artifacts": {
+    "case-status-editor-390.png": "7d928569e319208dabf4aaedaf74fa6199a04961d2e2ca38ab21244530b00be8",
+    "slice43-before-http.log": "ceabbd6f527d2b828daef452669a920ebd070a526f6e6390fed8d5488f505a1c",
+    "slice43-build.log": "c3ae4deab8ee88472d3fb6be6f2c5ff5648e6d64dd6e0598482d811f68b0cde3",
+    "slice43-http-first.log": "89aacf4b7886eab6289fe74f9d50e0a22fe97c9a237e985a6671339a8fb785c5",
+    "slice43-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice43-lint-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice43-lint.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice43-map-guards.log": "07b18dcdeb46ed48079d70c96a4d2ad2a30896eabccb231a520b5f2023e073ad",
+    "slice43-pg-final.log": "a1a9e6c7a1f87913d2394a39a8b2a3ca67e93e04dd7d6b82b0b49592ecf06eac",
+    "slice43-pg-first.log": "49360a75aed41a3cf94ea7286da8f44730f85646a5cab3f371d5a37857ae1c83",
+    "slice43-pg-isolated.log": "e58c3ee0f804d737d74660d772d687f96a5d9653bb8a8e5c53f1dcd1570a4a21",
+    "slice43-source-proof.json": "42879523a561719a86c7a37efc88872e97513289c79a8647487724491361facc",
+    "slice43-types-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice43-types-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice43-types-ui.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice43-unit.log": "d82472ce3dfdc9ef137bd8783cbd3bff31060eebc2f7d50a4033dcc62013e9e3",
+    "verify-slice43.py": "6179274ccf0091f74688752e1ab7a827b692a7caed79b7682da2636b788a455a"
+  }
+}

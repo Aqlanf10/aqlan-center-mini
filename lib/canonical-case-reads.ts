@@ -5,6 +5,7 @@ import type { VerifiedDurableSession } from "./staff-durable-session";
 import { isDependencyMet } from "./cases";
 import { CASE_READ_LIMITS, isCanonicalPatientCases, type CanonicalPatientCases } from "./canonical-case-projection";
 import { planDependencyVersion } from "./canonical-plan-dependency-version";
+import { clinicalCaseStatusVersion } from "./canonical-case-status-version";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 export class CanonicalCaseReadRefusal extends Error {
@@ -15,13 +16,13 @@ const visibleCase = "($2::boolean OR (c.ortho_case_id IS NULL AND c.specialty <>
 const CASES = `SELECT c.id,'specialty'::text kind,c.ortho_case_id AS "orthoCaseId",c.specialty,c.title,c.site,c.problem,
   d.name AS "responsibleName",CASE WHEN o.id IS NULL THEN c.status WHEN o.status IN ('active','retention') THEN 'active' WHEN o.status='completed' THEN 'completed' WHEN o.status='discontinued' THEN 'closed' ELSE o.status END status,
   c.started_on::text AS "startedOn",(CASE WHEN o.id IS NULL THEN c.completed_at ELSE o.closed_at END)::text AS "completedAt",
-  CASE WHEN o.id IS NULL THEN c.outcome ELSE o.closed_note END outcome
+  CASE WHEN o.id IS NULL THEN c.outcome ELSE o.closed_note END outcome,c.xmin::text AS "versionXmin",c.ctid::text AS "versionTid"
   FROM clinical_cases c LEFT JOIN ortho_cases o ON o.id=c.ortho_case_id AND o.patient_id=c.patient_id
   LEFT JOIN parties d ON d.id=COALESCE(o.responsible_doctor_id,c.responsible_party_id)
   WHERE c.patient_id=$1 AND ${visibleCase}
   UNION ALL SELECT NULL,'ortho',o.id,'orthodontics','تقويم الأسنان',NULL,NULL,d.name,
   CASE WHEN o.status IN ('active','retention') THEN 'active' WHEN o.status='completed' THEN 'completed' WHEN o.status='discontinued' THEN 'closed' ELSE o.status END,
-  o.start_date::text,o.closed_at::text,o.closed_note FROM ortho_cases o
+  o.start_date::text,o.closed_at::text,o.closed_note,NULL,NULL FROM ortho_cases o
   LEFT JOIN treatment_plans t ON t.id=o.plan_id AND t.patient_id=o.patient_id
   LEFT JOIN parties d ON d.id=COALESCE(o.responsible_doctor_id,t.primary_doctor_id)
   WHERE o.patient_id=$1 AND $2::boolean AND NOT EXISTS(SELECT 1 FROM clinical_cases c WHERE c.ortho_case_id=o.id)`;
@@ -70,7 +71,9 @@ export async function readPatientCasesWith(q: CanonicalSnapshotQuery, scope: Can
     if (invalidPlan !== false) throw new CanonicalCaseReadRefusal("case_reference_unavailable", "تعذّر التحقق من مراجع بنود الخطة؛ لم تُعرض بيانات جزئية.");
   }
   const args: [number, boolean] = [patientId, orthoVisible];
-  const cases = await boundedRows<CanonicalPatientCases["cases"][number]>(q, CASES, args, CASE_READ_LIMITS.cases);
+  const cases = (await boundedRows<Omit<CanonicalPatientCases["cases"][number], "version"> & { versionXmin: string; versionTid: string }>(q, CASES, args, CASE_READ_LIMITS.cases))
+    .map(({ versionXmin, versionTid, ...row }) => ({ ...row, version: row.kind === "specialty" && row.id !== null && row.orthoCaseId === null
+      ? clinicalCaseStatusVersion({ ...row, id: row.id, patientId, versionXmin, versionTid }) : null }));
   const problems = await boundedRows<CanonicalPatientCases["problems"][number]>(q, PROBLEMS, args, CASE_READ_LIMITS.problems);
   const items = planVisible ? await boundedRows<CanonicalPatientCases["items"][number]>(q, ITEMS, args, CASE_READ_LIMITS.items) : [];
   const dependencies = planVisible ? (await boundedRows<Omit<CanonicalPatientCases["dependencies"][number], "met" | "version"> & { requiredStatus: string; createdAt: string; rowXmin: string; rowTid: string }>(q, DEPS, [patientId], CASE_READ_LIMITS.dependencies))

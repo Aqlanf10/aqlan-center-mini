@@ -4,7 +4,7 @@ export const CASE_READ_LIMITS = { cases: 1000, problems: 1000, items: 2000, depe
 export interface CanonicalCaseRow {
   id: number | null; kind: "specialty" | "ortho"; orthoCaseId: number | null; specialty: string;
   title: string; site: string | null; problem: string | null; responsibleName: string | null;
-  status: CaseStatus; startedOn: string; completedAt: string | null; outcome: string | null;
+  status: CaseStatus; startedOn: string; completedAt: string | null; outcome: string | null; version: string | null;
 }
 export interface CanonicalProblemRow {
   id: number; label: string; site: string | null; specialty: string | null; status: ProblemStatus;
@@ -39,10 +39,11 @@ export function isCanonicalPatientCases(value: unknown, patientId: number): valu
   for (const group of ["cases", "problems", "items", "dependencies"] as const) if (!Array.isArray(b[group]) || b[group].length > CASE_READ_LIMITS[group]) return false;
   const cases = new Set<number>(), native = new Set<number>(), problems = new Set<number>(), items = new Set<number>(), edges = new Set<string>();
   for (const c of b.cases) {
-    if (!keys(c, "id kind orthoCaseId specialty title site problem responsibleName status startedOn completedAt outcome")
+    if (!keys(c, "id kind orthoCaseId specialty title site problem responsibleName status startedOn completedAt outcome version")
       || !nullableId(c.id) || !nullableId(c.orthoCaseId) || !text(c.specialty) || !text(c.title) || !nullableText(c.site)
       || !nullableText(c.problem) || !nullableText(c.responsibleName) || !CASE_STATUSES.includes(c.status) || !date(c.startedOn)
-      || c.completedAt !== null && !time(c.completedAt) || !nullableText(c.outcome)) return false;
+      || c.completedAt !== null && !time(c.completedAt) || !nullableText(c.outcome)
+      || (c.kind === "specialty" && c.orthoCaseId === null ? typeof c.version !== "string" || !/^[a-f0-9]{64}$/.test(c.version) : c.version !== null)) return false;
     if (c.kind === "specialty") { if (!id(c.id) || cases.has(c.id)) return false; cases.add(c.id); }
     else if (c.kind !== "ortho" || c.id !== null || !id(c.orthoCaseId)) return false;
     if (c.orthoCaseId !== null) { if (native.has(c.orthoCaseId) || !b.orthoVisible || c.specialty !== "orthodontics") return false; native.add(c.orthoCaseId); }
