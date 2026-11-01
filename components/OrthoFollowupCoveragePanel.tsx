@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSession } from "./SessionProvider";
 import type { CanonicalCoverageDraft } from "@/lib/canonical-ortho-coverage-draft";
 import { parseFollowupCoverageCommand } from "@/lib/ortho-followup-coverage";
@@ -32,19 +32,23 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
   const [selected,setSelected]=useState(""),[decision,setDecision]=useState<""|"included"|"excluded">("");
   const [reason,setReason]=useState(""),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false);
   const [journal,setJournal]=useState<FinancialJournal|null>(null),[journalError,setJournalError]=useState<string|null>(null);
-  const lifetime=useRef(0),journalRead=useRef(0),loading=useRef<AbortController|null>(null),writing=useRef<AbortController|null>(null),sending=useRef(false);
+  const active=useRef(false),lifetime=useRef(0),journalRead=useRef(0),loading=useRef<AbortController|null>(null),writing=useRef<AbortController|null>(null),sending=useRef(false);
   const [recoveries,setRecoveries]=useState<FollowupCoverageAttempt[]>([]),[selectedRecovery,setSelectedRecovery]=useState<string|null>(null);
   const pending=recoveries.find(attempt=>followupCoverageJournal(attempt).original===selectedRecovery)??null;
   const otherPending=!!journal?.command&&(!pending||journal.command.original!==followupCoverageJournal(pending).original);
   const recoveryBlocked=recoveries.length>0;
   const url=`/api/ortho/${orthoCaseId}/followup-coverage?patientId=${patientId}${canonical?"&edit=1":""}`;
-  const deny=useCallback(()=>{if(!canonical)return;draftOwner?.deny();lifetime.current++;loading.current?.abort();writing.current?.abort();setRead(null);setReason("");setSelected("");setDecision("");setConfirmed(false);setDenied(true);},[canonical,draftOwner]);
-  useEffect(()=>{const owner=++lifetime.current;return()=>{lifetime.current=owner+1;loading.current?.abort();writing.current?.abort();};},[]);
+  const deny=useCallback(()=>{if(!canonical||!active.current)return;draftOwner?.deny();active.current=false;lifetime.current++;loading.current?.abort();writing.current?.abort();setRead(null);setReason("");setSelected("");setDecision("");setConfirmed(false);setDenied(true);},[canonical,draftOwner]);
+  // Retire at commit, before passive effects: an already-started journal
+  // transaction may finish, but stale continuations must not reserve, POST or
+  // acknowledge another command. Keep any committed intent recoverable.
+  useLayoutEffect(()=>{active.current=true;const owner=++lifetime.current;return()=>{active.current=false;lifetime.current=owner+1;loading.current?.abort();writing.current?.abort();};},[]);
   const syncJournal=useCallback(async()=>{
+    if(!active.current)return;
     const owner=lifetime.current,sequence=++journalRead.current;
     try{
       const [saved,scopes]=await Promise.all([readFinancialJournal({actor,patientId}),readFinancialJournalsForActor(actor)]);
-      if(owner!==lifetime.current||sequence!==journalRead.current)return;
+      if(!active.current||owner!==lifetime.current||sequence!==journalRead.current)return;
       setJournal(saved);setJournalError(null);
       const found=scopes.flatMap(({scope,journal:historical})=>{
         const attempt=historical.command&&restoreFollowupCoverage(historical.command,actor,scope.patientId);
@@ -53,7 +57,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
       setRecoveries(found);
       setSelectedRecovery(previous=>found.length===1?followupCoverageJournal(found[0]).original:found.some(a=>followupCoverageJournal(a).original===previous)?previous:null);
       if(found.length){setOpen(true);if(found.length===1)setReason(found[0].command.reason);}
-    }catch{if(owner===lifetime.current&&sequence===journalRead.current){setJournal(null);setJournalError("تعذّر قراءة الطلب المالي المحفوظ؛ لم يُرسل طلب جديد. لا تمسح بيانات المتصفح.");}}
+    }catch{if(active.current&&owner===lifetime.current&&sequence===journalRead.current){setJournal(null);setJournalError("تعذّر قراءة الطلب المالي المحفوظ؛ لم يُرسل طلب جديد. لا تمسح بيانات المتصفح.");}}
   },[actor,patientId,orthoCaseId]);
   useEffect(()=>{
     void syncJournal();const sync=()=>{void syncJournal();};
@@ -61,7 +65,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
     return()=>{window.removeEventListener(MONEY_JOURNAL_EVENT,sync);window.removeEventListener("focus",sync);};
   },[syncJournal]);
   const load=useCallback(async()=>{
-    if(denied)return;
+    if(!active.current||denied)return;
     if(canonical){setRead(null);setError(null);setSelected("");setDecision("");setConfirmed(false);}
     loading.current?.abort();
     if(canonical&&document.visibilityState==="hidden")return;const controller=new AbortController();loading.current=controller;
@@ -69,7 +73,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
     try{
       const response=await fetch(url,{cache:"no-store",redirect:"manual",signal:controller.signal});
       const payload=await response.json();
-      if(owner!==lifetime.current||controller.signal.aborted)return;
+      if(!active.current||owner!==lifetime.current||controller.signal.aborted)return;
       if(response.redirected||!response.ok){if(canonical&&[401,403].includes(response.status)){deny();return;}setRead(null);setError(canonical?"تعذّر قراءة مصدر نطاق المتابعات.":payload.message??"تعذّر قراءة نطاق المتابعات.");return;}
       if(canonical&&!isCanonicalCoverageEditor(payload,patientId,orthoCaseId))throw new Error("Invalid canonical coverage context");
       if(payload.patientId!==patientId||payload.orthoCaseId!==orthoCaseId||!Array.isArray(payload.sources)||typeof payload.enabled!=="boolean"||typeof payload.canEdit!=="boolean")throw new Error("Invalid coverage context");
@@ -77,7 +81,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
       const savedDraft=canonical?draftOwner?.restore(payload):undefined;
       setSelected(savedDraft?.selected??"");setDecision(savedDraft?.decision??"");setConfirmed(false);
       if(savedDraft)setReason(savedDraft.reason);
-    }catch{if(owner===lifetime.current&&loading.current===controller){setRead(null);setError("تعذّر التحقق من نطاق المتابعات؛ لا تفترض أنه مشمول أو خارج الاتفاق.");}}
+    }catch{if(active.current&&owner===lifetime.current&&loading.current===controller){setRead(null);setError("تعذّر التحقق من نطاق المتابعات؛ لا تفترض أنه مشمول أو خارج الاتفاق.");}}
     finally{clearTimeout(timeout);}
   },[url,patientId,orthoCaseId,canonical,denied,deny,draftOwner]);
   useEffect(()=>{if(open)void load();return()=>loading.current?.abort();},[open,load]);
@@ -92,15 +96,16 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
     window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn);
   },[recoveryBlocked]);
   function changeDraft(patch:Partial<{selected:string;decision:""|"included"|"excluded";reason:string}>){
+    if(!active.current)return;
     const next={selected,decision,reason,...patch};
     if(canonical)draftOwner?.remember(next,read);
     setSelected(next.selected);setDecision(next.decision);setReason(next.reason);
   }
   const source=read?.sources.find(s=>`${s.invoiceId}:${s.planItemId}`===selected);
   async function send(mode:"submit"|"status",fresh?:FollowupCoverageAttempt){
-    if(denied||sending.current||!journal||journalError||(!pending&&(otherPending||recoveryBlocked))||(pending&&otherPending&&mode==="submit"))return;
+    if(!active.current||denied||sending.current||!journal||journalError||(!pending&&(otherPending||recoveryBlocked))||(pending&&otherPending&&mode==="submit"))return;
     const attempt=pending??fresh;if(!attempt)return;
-    const owner=lifetime.current,current=()=>owner===lifetime.current;
+    const owner=lifetime.current,current=()=>active.current&&owner===lifetime.current;
     sending.current=true;setBusy(true);setError(null);setNotice(null);
     let sent=!!pending;
     try{
@@ -134,6 +139,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
         ?readFollowupCoverageReceipt(mode==="status"&&result.state==="committed"?result.revision:mode==="submit"&&result.ok===true?result.revision:null,attempt):null;
       const rejected=!response.redirected&&response.status===200&&mode==="status"&&isFollowupCoverageRejection(result,attempt);
       if(receipt||rejected){
+        if(!current())return;
         await acknowledgeFinancialCommand(originalScope,durable);
         if(!current())return;
         if(canonical)draftOwner?.clear();
@@ -147,7 +153,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
     finally{sending.current=false;if(current())setBusy(false);}
   }
   function save(){
-    if(denied||!read?.canEdit||!source||!decision||!confirmed||recoveryBlocked||busy||!journal||journalError||otherPending)return;
+    if(!active.current||denied||!read?.canEdit||!source||!decision||!confirmed||recoveryBlocked||busy||!journal||journalError||otherPending)return;
     const {fingerprint,invoiceNumber:_n,serviceName:_s,...identity}=source;
     const command=parseFollowupCoverageCommand({schemaVersion:1,commandId:crypto.randomUUID(),expectedRevisionId:read.current?.id??null,
       source:identity,expectedSourceFingerprint:fingerprint,scope:"routine_adjustments",decision,reason});
@@ -178,7 +184,7 @@ function CoverageEditor({patientId,orthoCaseId,onSaved,actor,canonical=false,dra
           </label>
           {!read.sources.length?<p>لا يوجد مصدر فاتورة حالي مثبت لنفس المريض والحالة والبند. راجع الربط أو التصحيح في الحساب، ولا تنشئ دينًا مكررًا.</p>:null}
           <label className="block">ما اتُّفق عليه للمتابعات الروتينية
-            <select aria-label="قرار نطاق المتابعات" value={decision} onChange={e=>{setDecision(e.target.value as typeof decision);setConfirmed(false);}} className="mt-1 min-h-11 w-full rounded-lg border bg-white p-2">
+            <select aria-label="قرار نطاق المتابعات" value={decision} onChange={e=>{changeDraft({decision:e.target.value as typeof decision});setConfirmed(false);}} className="mt-1 min-h-11 w-full rounded-lg border bg-white p-2">
               <option value="">اختر نطاقًا صريحًا</option><option value="included">مشمولة ضمن الاتفاق المحدد — بلا رسم شدّة إضافي</option><option value="excluded">غير مشمولة — كل شدّة تحتاج قرار فوترة مستقلًا</option>
             </select>
           </label>

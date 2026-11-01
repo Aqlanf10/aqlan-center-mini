@@ -17,24 +17,26 @@ vi.mock("../lib/financial-command-journal",()=>({
     persistence.acknowledged++;const next={revision:row.revision+1,command:null};persistence.rows.set(key,next);return next;
   }),
 }));
-const hooks=vi.hoisted(()=>({values:[] as unknown[],cursor:0,key:"",effects:new Map<number,{deps:readonly unknown[];cleanup?:()=>void}>(),pending:[] as (()=>void)[],memo:new Map<number,{deps:readonly unknown[];value:unknown}>()}));
+const hooks=vi.hoisted(()=>({values:[] as unknown[],cursor:0,key:"",effects:new Map<number,{deps:readonly unknown[];cleanup?:()=>void;layout?:boolean}>(),pendingLayout:[] as (()=>void)[],pending:[] as (()=>void)[],memo:new Map<number,{deps:readonly unknown[];value:unknown}>()}));
 vi.mock("react",async original=>{
   const react=await original<typeof import("react")>();
   const same=(a:readonly unknown[],b:readonly unknown[])=>a.length===b.length&&a.every((x,i)=>Object.is(x,b[i]));
   const memo=(value:unknown,deps:readonly unknown[])=>{const i=hooks.cursor++,old=hooks.memo.get(i);if(old&&same(old.deps,deps))return old.value;hooks.memo.set(i,{deps,value});return value;};
+  const effect=(fn:()=>void|(()=>void),deps:readonly unknown[],layout=false)=>{const i=hooks.cursor++,old=hooks.effects.get(i);if(old&&same(old.deps,deps))return;old?.cleanup?.();const record={deps,layout,cleanup:undefined as (()=>void)|undefined};hooks.effects.set(i,record);(layout?hooks.pendingLayout:hooks.pending).push(()=>{record.cleanup=fn()||undefined;});};
   return {...react,useState:(initial:unknown)=>{const i=hooks.cursor++,values=hooks.values;if(!(i in values))values[i]=typeof initial==='function'?initial():initial;return [values[i],(v:unknown)=>{values[i]=typeof v==='function'?v(values[i]):v;}];},
     useRef:(initial:unknown)=>{const i=hooks.cursor++;if(!(i in hooks.values))hooks.values[i]={current:initial};return hooks.values[i];},
     useCallback:(fn:unknown,deps:readonly unknown[])=>memo(fn,deps),
-    useEffect:(fn:()=>void|(()=>void),deps:readonly unknown[])=>{const i=hooks.cursor++,old=hooks.effects.get(i);if(old&&same(old.deps,deps))return;old?.cleanup?.();const record={deps,cleanup:undefined as (()=>void)|undefined};hooks.effects.set(i,record);hooks.pending.push(()=>{record.cleanup=fn()||undefined;});}};
+    useEffect:(fn:()=>void|(()=>void),deps:readonly unknown[])=>effect(fn,deps),
+    useLayoutEffect:(fn:()=>void|(()=>void),deps:readonly unknown[])=>effect(fn,deps,true)};
 });
 type Node=ReactElement<Record<string,unknown>>;
 const nodes=(node:ReactNode):Node[]=>Array.isArray(node)?node.flatMap(nodes):node&&typeof node==='object'&&'props'in node?[node as Node,...nodes((node as Node).props.children as ReactNode)]:[];
-function clear(){for(const e of hooks.effects.values())e.cleanup?.();hooks.values=[];hooks.cursor=0;hooks.effects.clear();hooks.pending=[];hooks.memo.clear();}
+function clear(){for(const e of hooks.effects.values())e.cleanup?.();hooks.values=[];hooks.cursor=0;hooks.effects.clear();hooks.pending=[];hooks.pendingLayout=[];hooks.memo.clear();}
 let props:Parameters<typeof OrthoFollowupCoveragePanel>[0]={patientId:101,orthoCaseId:201,onSaved:vi.fn()};
 function render(){
   const outer=OrthoFollowupCoveragePanel(props);if(!outer){clear();return null;}
   if(hooks.key!==outer.key){clear();hooks.key=String(outer.key);}
-  hooks.cursor=0;const result=(outer.type as (p:typeof props)=>ReactNode)(outer.props);hooks.pending.splice(0).forEach(fn=>fn());return result;
+  hooks.cursor=0;const result=(outer.type as (p:typeof props)=>ReactNode)(outer.props);hooks.pendingLayout.splice(0).forEach(fn=>fn());hooks.pending.splice(0).forEach(fn=>fn());return result;
 }
 async function settle(){for(let i=0;i<15;i++)await Promise.resolve();render();for(let i=0;i<15;i++)await Promise.resolve();return render();}
 const find=(test:(node:Node)=>boolean)=>{const found=nodes(render()).find(test);if(!found)throw new Error('Missing UI control');return found;};
@@ -196,4 +198,44 @@ describe("canonical native coverage editor adapter",()=>{
   expect(button('اعتماد نطاق').props.disabled).toBe(true);expect(fetchMock.mock.calls.some(([,init])=>init.method==='POST')).toBe(false);
  });
  it("a canonical write denial retains the exact durable request while hiding its private source",async()=>{canonicalEditor();await open();fill();fetchMock.mockImplementation((_url:string,init:RequestInit)=>init.method==='POST'?json({message:'SYN denied'},403):json({...read(),projection:"ortho-followup-coverage-editor"}));click(button('اعتماد نطاق'));await settle();expect(stored()).toBeTruthy();expect(persistence.acknowledged).toBe(0);expect(nodes(render()).some(n=>n.type==='select'||n.type==='textarea')).toBe(false);expect(fetchMock.mock.calls.filter(([,init])=>init.method==='POST')).toHaveLength(1);});
+});
+
+// A deterministic phase model, not a substitute for the real React browser
+// witness: commit runs layout cleanup while passive cleanup is deliberately held.
+function retireBeforePassive(){for(const effect of hooks.effects.values())if(effect.layout)effect.cleanup?.();}
+async function microtasks(){for(let i=0;i<40;i++)await Promise.resolve();}
+describe("coverage editor committed-owner retirement",()=>{
+ it("preserves the last decision change across a polling remount",async()=>{
+  canonicalEditor();props={...props,draftOwner:makeCanonicalCoverageDraft({authorized:()=>true,deny:vi.fn()})};await open();fill();
+  change("قرار نطاق المتابعات","excluded");render();
+  clear();hooks.key="";await open();
+  expect(find(n=>n.props["aria-label"]==="قرار نطاق المتابعات").props.value).toBe("excluded");
+  expect(find(n=>n.props["aria-label"]==="سبب اعتماد نطاق المتابعات").props.value).toBe("Synthetic explicit agreement");
+  expect(find(n=>n.type==="input"&&n.props.type==="checkbox").props.checked).toBe(false);
+  expect(fetchMock.mock.calls.some(([,init])=>init.method==="POST")).toBe(false);
+ });
+ it("a captured save handler cannot reserve or POST after owner commit retirement",async()=>{
+  canonicalEditor();await open();fill();const captured=button("اعتماد نطاق");
+  const reserve=await import("../lib/financial-command-journal");vi.mocked(reserve.reserveFinancialCommand).mockClear();
+  retireBeforePassive();click(captured);await microtasks();
+  expect(reserve.reserveFinancialCommand).not.toHaveBeenCalled();
+  expect(fetchMock.mock.calls.some(([,init])=>init.method==="POST")).toBe(false);expect(stored()).toBeUndefined();
+ });
+ it("an already-started reservation may finish but its retired continuation cannot POST",async()=>{
+  canonicalEditor();await open();fill();const persistenceApi=await import("../lib/financial-command-journal");
+  let complete!:()=>void;
+  vi.mocked(persistenceApi.reserveFinancialCommand).mockImplementationOnce((scope,revision,command)=>new Promise(resolve=>{complete=()=>{const row={revision,command};persistence.rows.set(JSON.stringify(scope),row);resolve(row);};}));
+  click(button("اعتماد نطاق"));await microtasks();expect(complete).toBeTypeOf("function");
+  retireBeforePassive();complete();await microtasks();
+  expect(stored()).toBeTruthy();expect(persistence.acknowledged).toBe(0);expect(props.onSaved).not.toHaveBeenCalled();
+  expect(fetchMock.mock.calls.some(([,init])=>init.method==="POST")).toBe(false);
+ });
+ it("a committed JSON reply before passive cleanup keeps the durable command unacknowledged",async()=>{
+  canonicalEditor();await open();fill();let complete!:(v:unknown)=>void,jsonReached=false;let command:Record<string,unknown>={};
+  fetchMock.mockImplementation((_url:string,init:RequestInit)=>{if(init.method!=="POST")return json({...read(),projection:"ortho-followup-coverage-editor"});command=JSON.parse(String(init.body));return Promise.resolve({ok:true,status:200,redirected:false,json:()=>{jsonReached=true;return new Promise(resolve=>{complete=resolve;});}});});
+  click(button("اعتماد نطاق"));await microtasks();expect(jsonReached).toBe(true);const original=stored();expect(original).toBeTruthy();
+  retireBeforePassive();complete({ok:true,revision:receipt(command)});await microtasks();
+  expect(persistence.acknowledged).toBe(0);expect(stored()).toEqual(original);expect(props.onSaved).not.toHaveBeenCalled();
+  expect(fetchMock.mock.calls.filter(([,init])=>init.method==="POST")).toHaveLength(1);
+ });
 });
