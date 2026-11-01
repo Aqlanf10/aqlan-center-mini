@@ -236,6 +236,29 @@ describe("orthodontic agreement scope retirement", () => {
 });
 
 describe("existing explicit linking actions", () => {
+  it.each(["active", "completed"])("saves an explicitly selected %s approved agreement without installments", async (status) => {
+    fetchMock.mockResolvedValueOnce(response([fixture({ status, installments: [], agreementApproved: true })]))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    render({ planId: null }); await settle();
+    const select = nodes(render({ planId: null })).find((node) => node.type === "select")!;
+    expect(nodes(select).filter((node) => node.type === "option").map((node) => node.props.value)).toEqual(["", 51]);
+    (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "51" } });
+    click(button(render({ planId: null }), "اربط")); await settle();
+    expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planId: 51 }) }]]);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { status: "cancelled", installments: [], agreementApproved: true },
+    { status: "active", installments: [], agreementApproved: false },
+  ])("rejects a forced ineligible selection despite another eligible option: %j", async (ineligible) => {
+    fetchMock.mockResolvedValue(response([fixture(), fixture({ id: 52, ...ineligible })]));
+    render({ planId: null }); await settle();
+    const select = nodes(render({ planId: null })).find((node) => node.type === "select")!;
+    expect(nodes(select).filter((node) => node.type === "option").map((node) => node.props.value)).toEqual(["", 51]);
+    (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "52" } });
+    click(button(render({ planId: null }), "اربط")); await settle();
+    expect(writes()).toEqual([]); expect(onChanged).not.toHaveBeenCalled();
+  });
   it("keeps the canonical unlink PATCH exact and suppresses same-turn duplicate clicks", async () => {
     const write = deferred(); fetchMock.mockResolvedValueOnce(response()).mockReturnValueOnce(write.promise);
     render(); await settle(); const unlink = button(render(), "فكّ الربط"); click(unlink); click(unlink);
