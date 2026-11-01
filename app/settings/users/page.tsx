@@ -153,7 +153,7 @@ export default function UsersAndDoctorsPage() {
     }
   }, []);
 
-  const handleAddSpecialRate = (override?: {
+  const handleAddSpecialRate = useCallback((override?: {
     name: string;
     percent: number;
     category?: string;
@@ -205,7 +205,7 @@ export default function UsersAndDoctorsPage() {
 
     // Reset input fields
     setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
-  };
+  }, [newSpecialRate, setEditForm, setNewSpecialRate]);
 
   const handleRemoveSpecialRate = (rateId: string, serviceName: string, serviceId?: number) => {
     setEditForm((c) => {
@@ -2322,6 +2322,11 @@ export default function UsersAndDoctorsPage() {
                       </div>
                     </div>
 
+                    {editForm.role === "reception" && <label className="flex gap-3 rounded-xl border p-4">
+                      <input type="checkbox" checked={editForm.permissions.canPrintSavedPrescriptions === true}
+                        onChange={event => setEditForm(current => ({ ...current, permissions: { ...current.permissions, canPrintSavedPrescriptions: event.target.checked } }))} />
+                      <span>إعادة طباعة الوصفات المحفوظة الفاعلة فقط — دون إنشاء أو تعديل أو إبطال</span>
+                    </label>}
                     {/* Section: AI Chatbot Permissions */}
                     <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 shadow-xs">
                       <h4 className="mb-3 flex items-center gap-2 text-xs font-black text-indigo-950">

@@ -106,16 +106,18 @@ export default function AppointmentsPage() {
      حمله نصف حقيقته لأنّ الحساب يفترض يومًا من ١٢ ساعة لم يُهيِّئه أحد. */
   const dayStart = useSetting("clinic.day_start");
   const dayEnd = useSetting("clinic.day_end");
-  const today = useMemo(todayLocal, []);
+  const today = useMemo(() => todayLocal(), []);
   /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
      القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
   const [date, setDate] = useState(today);
   /* اليوم المعروض الآن — يقرؤه الإجراء بعد انتهاء طلبه ليعرف هل انتقل المستخدم
      إلى يومٍ آخر أثناء الانتظار. */
+  const dayOwner = useMemo(() => ({ date }), [date]);
+  const committedDayOwner = useRef(dayOwner);
   const dateRef = useRef(today);
   const dateRevisionRef = useRef(0);
   const [dayList, setDayList] = useState<{
-    date: string; revision: number; request: number;
+    owner: typeof dayOwner; date: string; revision: number; request: number;
     status: "loading" | "ready" | "error"; items: Appointment[]; error: string | null;
     clinicTimeZone?: string;
   } | null>(null);
@@ -135,8 +137,7 @@ export default function AppointmentsPage() {
   const mountedRef = useRef(false);
   const readyRequestRef = useRef<number | null>(null);
   // Ownership is checked during render, before the new date's effects run.
-  const ownsDayList = dayList?.date === date && dayList.revision === dateRevisionRef.current
-    && dayList.request === latestLoadRequestRef.current;
+  const ownsDayList = dayList?.owner === dayOwner;
   const ready = ownsDayList && dayList.status === "ready";
   const loading = !ownsDayList || dayList.status === "loading";
   const error = ownsDayList ? dayList.error : null;
@@ -182,6 +183,7 @@ export default function AppointmentsPage() {
   // A slot belongs to one displayed-day lifetime, including leaving and returning.
   useLayoutEffect(() => {
     mountedRef.current = true;
+    committedDayOwner.current = dayOwner;
     // Commit the date fence before browser events can use the previous panel.
     if (dateRef.current !== date) dateRevisionRef.current += 1;
     dateRef.current = date;
@@ -194,7 +196,7 @@ export default function AppointmentsPage() {
       latestLoadRequestRef.current += 1;
       candidateRequestRef.current += 1;
     };
-  }, [date]);
+  }, [date, dayOwner]);
   /* نقلُ موعد — يفتح لوحةً صغيرة على الصفّ نفسه. وقبل هذا لم يكن في النظام نقل:
      كان يُلغى الموعد ويُحجز غيره، فيُحتسب المريض «ملغيًا» وهو لم يُلغِ. */
   const [moving, setMoving] = useState<
@@ -305,7 +307,7 @@ export default function AppointmentsPage() {
     if (!mountedRef.current || target !== dateRef.current) return;
     const requestId = ++latestLoadRequestRef.current;
     const revision = dateRevisionRef.current;
-    const context = { date: target, revision, request: requestId };
+    const context = { owner: committedDayOwner.current, date: target, revision, request: requestId };
     const isCurrent = () => mountedRef.current && requestId === latestLoadRequestRef.current
       && target === dateRef.current && revision === dateRevisionRef.current;
     readyRequestRef.current = null;

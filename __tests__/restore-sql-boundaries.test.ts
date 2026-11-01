@@ -59,3 +59,49 @@ describe('writer backup SQL boundaries', () => {
     expect(() => prepareBackupSql(sql)).toThrow();
   });
 });
+
+describe('guarded restore migration provenance',()=>{
+  const checksum='a'.repeat(64);
+  // Deliberately limited fixture inventory. This tests supplied-set semantics;
+  // the actual Rx chain's known0090 is covered by restore-migration-provenance.
+  const migrationFiles=[{version:'0001',checksum},{version:'0080',checksum}];
+  const record=(version:string,hash=checksum)=>`INSERT INTO schema_migrations (version,name,checksum) VALUES ('${version}','synthetic','${hash}');`;
+  const guard=(body:string)=>prepareBackupSql(`BEGIN;${body}COMMIT;`,{migrationFiles});
+  it('allows historical subsets, gaps and legacy absence without claiming schema equivalence',()=>{
+    expect(guard(record('0080')).skippedMigrationRecordLines).toBe(1);
+    expect(guard('').skippedMigrationRecordLines).toBe(0);
+  });
+  it('refuses unknown versions even when there are no application rows',()=>{
+    expect(()=>guard(record('0090'))).toThrow('Unknown archived migration version: 0090');
+  });
+  it('refuses reused versions with different SQL and duplicate records',()=>{
+    expect(()=>guard(record('0080','b'.repeat(64)))).toThrow('Archived migration checksum mismatch: 0080');
+    expect(()=>guard(record('0080')+record('0080'))).toThrow('Duplicate archived migration version');
+  });
+  it('supports known columnless history and explicit reordered quoted columns',()=>{
+    expect(guard(`INSERT INTO schema_migrations VALUES ('0080','old name','${checksum}',NOW(),FALSE);`).skippedMigrationRecordLines).toBe(1);
+    expect(guard(`INSERT INTO schema_migrations ("checksum", "name", "version") VALUES ('${checksum}','historical, name','0080');`).skippedMigrationRecordLines).toBe(1);
+  });
+  it('ignores migration-looking application literals and comments, not real metadata',()=>{
+    const note="literal ' quote;\nINSERT INTO schema_migrations (version) VALUES ('0090');";
+    const row=insertStatement('hr_staff',['id','note'],{id:1,note});
+    const metadata=insertStatement('schema_migrations',['version','name','checksum'],{version:'0080',name:note,checksum});
+    const body=`/* INSERT INTO schema_migrations VALUES ('0090'); */\n${row}\n${metadata}`;
+    expect(guard(body).sql).toContain(row);
+    expect(guard(body).skippedMigrationRecordLines).toBe(1);
+  });
+  it.each([
+    "INSERT INTO schema_migrations (version) VALUES ('0080');",
+    "INSERT/**/INTO schema_migrations (version,checksum) VALUES ('0090','bad');",
+    "INSERT INTO/**/schema_migrations (version,checksum) VALUES ('0090','bad');",
+    "INSERT INTO ONLY schema_migrations (version,checksum) VALUES ('0090','bad');",
+    "INSERT INTO only schema_migrations (version,checksum) VALUES ('0090','bad');",
+    "insert into schema_migrations (version,checksum) values ('0090','bad');",
+    `INSERT INTO "schema_migrations" (version,checksum) VALUES ('0090','bad');`,
+    "INSERT INTO public.schema_migrations (version,checksum) VALUES ('0090','bad');",
+    "INSERT INTO schema_migrations (version,checksum) VALUES ('0080',NULL);",
+    "INSERT INTO schema_migrations (version,checksum) VALUES ('0080','bad');",
+    "INSERT INTO schema_migrations (version,version,checksum) VALUES ('0080','0080','bad');",
+    "INSERT INTO schema_migrations (version,checksum) VALUES ('0080','bad'),('0090','bad');",
+  ])('refuses unsupported metadata: %s',body=>expect(()=>guard(body)).toThrow());
+});

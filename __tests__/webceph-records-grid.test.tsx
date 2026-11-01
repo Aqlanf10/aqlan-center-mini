@@ -84,7 +84,7 @@ const fetchMock = vi.fn();
 let props: Parameters<typeof WebCephRecordsGrid>[0];
 let read: (url: string) => unknown;
 let write: (url: string) => unknown;
-let location: { href: string };
+let location: { href: string; assign: (url: string) => void };
 function render(effects = true) {
   let tree: ReturnType<typeof WebCephRecordsGrid> | null = null;
   let round = 0;
@@ -117,11 +117,25 @@ beforeEach(() => {
   read = (url) => response(url.endsWith("/documents") ? { documents: [document()] } : { analyses: [study()] });
   write = () => response({ id: 71 }, 201);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => Promise.resolve(init?.method === "POST" ? write(url) : read(url)));
-  location = { href: "" }; vi.stubGlobal("window", { location }); vi.stubGlobal("fetch", fetchMock);
+  location = { href: "", assign: vi.fn((url: string) => { location.href = url; }) }; vi.stubGlobal("window", { location }); vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => { unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("case record slot ownership", () => {
+  it("retires a read across effect cleanup/setup replay even when the render owner token is reused", async () => {
+    const pending = deferred<ReturnType<typeof response>>();
+    read = () => pending.promise;
+    render();
+    const firstSignal = fetchMock.mock.calls[0][1].signal as AbortSignal;
+    // StrictMode-style effect replay preserves hook state/memos, but cleans up
+    // every committed effect before running the new setup for the same token.
+    unmount(); expect(firstSignal.aborted).toBe(true);
+    read = url => response(url.endsWith("/documents") ? { documents: [document({ id: 55 })] } : { analyses: [] });
+    await ready(); expect(imageSources()).toEqual(["/api/documents/55"]);
+    pending.resolve(response({ documents: [document()], analyses: [study()] })); await ready();
+    expect(imageSources()).toEqual(["/api/documents/55"]);
+    expect(writes()).toHaveLength(0);
+  });
   it("fills slots only from the current case and keeps other/unassigned images as explicit references", async () => {
     read = url => response(url.endsWith("/documents") ? { documents: [
       document({ id: 52, orthoCaseId: 20, title: "Historical image" }),
