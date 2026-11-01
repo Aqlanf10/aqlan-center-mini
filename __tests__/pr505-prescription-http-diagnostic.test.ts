@@ -29,5 +29,5 @@ it('validates head via environment only, rejecting malformed identity before git
   const shell = source.match(/run: \|\n([\s\S]*?)\n {6}- name: Verify environment/)![1].split('\n').map(line => line.slice(10)).join('\n');
   expect(shell).not.toContain('${{'); expect(shell).toContain('^[0-9a-f]{40}$');
   expect(spawnSync('bash', ['-n'], { input: shell }).status).toBe(0);
-  expect(spawnSync('bash', ['-c', shell], { env: { PATH: process.env.PATH, EXPECTED_HEAD: 'invalid\nmetadata' } }).status).not.toBe(0);
+  expect(spawnSync('bash', ['-c', shell], { env: { NODE_ENV: "test", PATH: process.env.PATH, EXPECTED_HEAD: 'invalid\nmetadata' } }).status).not.toBe(0);
 });
