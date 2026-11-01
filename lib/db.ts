@@ -25280,6 +25280,31 @@ export interface CephCalibrationInput {
  * المتصفّح يعرض الأرقام من دوالّ الوحدة نفسها، لكن القيمة المختومة تُحسَب على
  * الخادم من نقطتي المعايرة — فلا يقنَع أحد المقياس في الطلب ويُختم مقياسٌ زوّار.
  */
+/** Caller owns transaction and audit. Existing draft guard and stored SQL semantics. */
+export async function updateCephCalibrationInTransaction(
+  client: DbClient, id: number, cal: CephCalibrationInput
+): Promise<{ ok: true; mmPerPixel: number } | { ok: false; message: string }> {
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!rows[0]) { return { ok: false, message: "التحليل غير موجود." }; }
+  if (rows[0].status !== "draft") {
+    return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
+  }
+  const px = Math.hypot(cal.x2 - cal.x1, cal.y2 - cal.y1);
+  if (!Number.isFinite(px) || px <= 0 || !Number.isFinite(cal.mm) || cal.mm <= 0) {
+    return { ok: false, message: "نقطتا المعايرة متطابقتان أو المسافة غير صالحة." };
+  }
+  const scale = cal.mm / px;
+  await client.query(
+    `UPDATE ceph_analyses
+     SET cal_x1=$2, cal_y1=$3, cal_x2=$4, cal_y2=$5, cal_mm=$6, mm_per_pixel=$7
+     WHERE id=$1`,
+    [id, cal.x1, cal.y1, cal.x2, cal.y2, cal.mm, scale],
+  );
+  return { ok: true, mmPerPixel: scale };
+}
+
 export async function updateCephCalibration(
   id: number, cal: CephCalibrationInput, by: string,
 ): Promise<{ ok: true; mmPerPixel: number } | { ok: false; message: string }> {
@@ -25287,33 +25312,16 @@ export async function updateCephCalibration(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (rows[0].status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
-    }
+    const result = await updateCephCalibrationInTransaction(client, id, cal);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     const px = Math.hypot(cal.x2 - cal.x1, cal.y2 - cal.y1);
-    if (!Number.isFinite(px) || px <= 0 || !Number.isFinite(cal.mm) || cal.mm <= 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "نقطتا المعايرة متطابقتان أو المسافة غير صالحة." };
-    }
-    const scale = cal.mm / px;
-    await client.query(
-      `UPDATE ceph_analyses
-       SET cal_x1=$2, cal_y1=$3, cal_x2=$4, cal_y2=$5, cal_mm=$6, mm_per_pixel=$7
-       WHERE id=$1`,
-      [id, cal.x1, cal.y1, cal.x2, cal.y2, cal.mm, scale],
-    );
     await client.query("COMMIT");
     await recordAudit({
       action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
       entityLabel: `معايرة ${cal.mm} مم على ${px.toFixed(1)} بكسل`,
       actor: by,
     });
-    return { ok: true, mmPerPixel: scale };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -25328,6 +25336,34 @@ export async function updateCephCalibration(
  * المصدر يُسجَّل كما جاء: يدُ الطبيب `manual`، أو اقتراحٌ `suggested` أقرّ به
  * بتأكيده — فالمقترح لا يصير معلمًا إلا بمصادقةٍ تُختم باسمه.
  */
+/** Caller owns transaction and audit. Existing draft guard and stored SQL semantics. */
+export async function updateCephLandmarksInTransaction(
+  client: DbClient, id: number, points: { code: LandmarkCode; x: number; y: number; source?: "manual" | "suggested" }[], by: string
+): Promise<{ ok: true; count: number } | { ok: false; message: string }> {
+  if (points.length === 0) return { ok: true, count: 0 };
+  const clean = points.filter((pt) => isCephLandmarkCode(pt.code) && Number.isFinite(pt.x) && Number.isFinite(pt.y));
+  if (clean.length === 0) return { ok: false, message: "لا معلم صالح في الطلب." };
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!rows[0]) { return { ok: false, message: "التحليل غير موجود." }; }
+  if (rows[0].status !== "draft") {
+    return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
+  }
+  for (const pt of clean) {
+    await client.query(
+      `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (analysis_id, code)
+       DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y,
+          source = EXCLUDED.source, confirmed_by = EXCLUDED.confirmed_by,
+          confirmed_at = NOW()`,
+      [id, pt.code, pt.x, pt.y, pt.source === "suggested" ? "suggested" : "manual", by],
+    );
+  }
+  return { ok: true, count: clean.length };
+}
+
 export async function updateCephLandmarks(
   id: number,
   points: { code: LandmarkCode; x: number; y: number; source?: "manual" | "suggested" }[],
@@ -25344,32 +25380,15 @@ export async function updateCephLandmarks(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (rows[0].status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
-    }
-    for (const pt of clean) {
-      await client.query(
-        `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (analysis_id, code)
-         DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y,
-            source = EXCLUDED.source, confirmed_by = EXCLUDED.confirmed_by,
-            confirmed_at = NOW()`,
-        [id, pt.code, pt.x, pt.y, pt.source === "suggested" ? "suggested" : "manual", by],
-      );
-    }
+    const result = await updateCephLandmarksInTransaction(client, id, clean, by);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
     await recordAudit({
       action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
       entityLabel: `كتابة ${clean.length} معلمًا (${clean.map((p) => p.code).join("، ")})`,
       actor: by,
     });
-    return { ok: true, count: clean.length };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -25389,6 +25408,40 @@ export interface CephCompleteResult {
  * يكتب التشخيص المنظم على مسودة — اقتراحُ النظام يقفز في الحقول والمُحرِّر
  * فوقها بيد الطبيب. المعتمد لا يُكتب عليه: تعديلُه طريقه نسخةٌ جديدة.
  */
+/** Caller owns transaction and audit. Existing draft guard and stored SQL semantics. */
+export async function updateCephDiagnosisInTransaction(
+  client: DbClient, id: number, dx: { skeletal?: string | null; dental?: string | null; softTissue?: string | null; note?: string | null; finalDx: string }, by: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const finalDx = dx.finalDx.trim();
+  if (!finalDx) return { ok: false, message: "الاستنتاج السيفالومتري لا يُترك فارغًا." };
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  if (!rows[0]) { return { ok: false, message: "التحليل غير موجود." }; }
+  if (rows[0].status !== "draft") {
+    return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
+  }
+  const clean = (v: string | null | undefined, cap: number): string | null => {
+    const t = v?.trim();
+    return t ? t.slice(0, cap) : null;
+  };
+  await client.query(
+    `INSERT INTO ceph_diagnoses
+       (analysis_id, skeletal, dental, soft_tissue, note, final_dx, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (analysis_id) DO UPDATE SET
+       skeletal = EXCLUDED.skeletal, dental = EXCLUDED.dental,
+       soft_tissue = EXCLUDED.soft_tissue, note = EXCLUDED.note,
+       final_dx = EXCLUDED.final_dx, updated_at = NOW()`,
+    [
+      id,
+      clean(dx.skeletal, 2000), clean(dx.dental, 2000), clean(dx.softTissue, 2000),
+      clean(dx.note, 2000), finalDx.slice(0, 2000), by,
+    ],
+  );
+  return { ok: true };
+}
+
 export async function updateCephDiagnosis(
   id: number,
   dx: { skeletal?: string | null; dental?: string | null; softTissue?: string | null; note?: string | null; finalDx: string },
@@ -25400,39 +25453,15 @@ export async function updateCephDiagnosis(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (rows[0].status !== "draft") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
-    }
-    const clean = (v: string | null | undefined, cap: number): string | null => {
-      const t = v?.trim();
-      return t ? t.slice(0, cap) : null;
-    };
-    await client.query(
-      `INSERT INTO ceph_diagnoses
-         (analysis_id, skeletal, dental, soft_tissue, note, final_dx, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (analysis_id) DO UPDATE SET
-         skeletal = EXCLUDED.skeletal, dental = EXCLUDED.dental,
-         soft_tissue = EXCLUDED.soft_tissue, note = EXCLUDED.note,
-         final_dx = EXCLUDED.final_dx, updated_at = NOW()`,
-      [
-        id,
-        clean(dx.skeletal, 2000), clean(dx.dental, 2000), clean(dx.softTissue, 2000),
-        clean(dx.note, 2000), finalDx.slice(0, 2000), by,
-      ],
-    );
+    const result = await updateCephDiagnosisInTransaction(client, id, dx, by);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
     await recordAudit({
       action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
       entityLabel: `تشخيص منظّم: ${finalDx.slice(0, 80)}`,
       actor: by,
     });
-    return { ok: true };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

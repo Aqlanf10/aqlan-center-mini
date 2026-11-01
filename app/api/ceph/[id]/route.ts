@@ -1,3 +1,4 @@
+import { CanonicalCephEditRefusal, commandCanonicalCephEdit } from "@/lib/canonical-ceph-edit-command";
 import { CanonicalCephDiscardRefusal, commandCanonicalCephDiscard } from "@/lib/canonical-ceph-discard-command";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE,canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
@@ -70,6 +71,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      const body: unknown = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      if ([...new URL(request.url).searchParams.keys()].length) throw new CanonicalCephEditRefusal("invalid_ceph_edit", 400, "حفظ المسودة لا يقبل مرشحات إضافية.");
+      return NextResponse.json(await commandCanonicalCephEdit(selected.handle, (await context.params).id, body), { headers: NO_STORE });
+    } catch (error) {
+      const bounded = bodyErrorResponse(error);
+      if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+      if (error instanceof CanonicalCephEditRefusal) return NextResponse.json({ code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد حفظ المسودة. تحقق من الدراسة الحالية قبل أي طلب جديد.");
+    }
+  }
   const session = await requireSession();
   if (!session) return denied();
   const id = await idFrom(context);

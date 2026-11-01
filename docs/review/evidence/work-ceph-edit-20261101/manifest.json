@@ -1,0 +1,82 @@
+{
+  "format": "work-ceph-edit-v1",
+  "baseRevision": "1990b9666961e23a4e15dccd5919d868f6be2dc2",
+  "sourceRevision": "recorded by next evidence commit; hashes pin this source",
+  "buildId": "8dLEKtaabiYlOEioDU6d0",
+  "acceptance": {
+    "focusedPostgres": {
+      "passed": 81,
+      "files": 3,
+      "newCases": 32,
+      "skipped": 0
+    },
+    "unitAndGuards": {
+      "passed": 58,
+      "files": 3
+    },
+    "HTTPBrowser": {
+      "passed": 35,
+      "files": 3,
+      "newCases": 13,
+      "buildId": "8dLEKtaabiYlOEioDU6d0"
+    },
+    "buildTypeLintBodyEnvironmentMoneyPreflight": "passed; lint 0 errors, 345 existing warnings",
+    "sourcePreservationChecks": 20,
+    "causalBudgetWitness": "2 failures before; same 2 pass after, then complete focused suite81/3",
+    "fullCombinedGates": "pending next coherent batch, not asserted passed",
+    "exactHeadCI": "unpublished",
+    "independentReview": "pending",
+    "actualDocker": "blocked by previously enforced Alpine destination refusal; no retry"
+  },
+  "sourceSha256": {
+    "__tests__/canonical-ceph-edit-command.test.ts": "a7be31c93f8f1b139d0485aa3fc0b864f89011e96c4e1ed549ac87864f76edbf",
+    "__tests__/postgres/ceph-edit-canonical-command.test.ts": "9f507bad2316d350b1ddf3f098203ce7318ce3b501a339ebabdedda01319ed8c",
+    "__tests__/security-http/canonical-ceph-edit-journey.test.ts": "ee92c6e80b4e9acaf45297586ae6bacda35549dfeed34b566b1abf933d777753",
+    "__tests__/security-http/canonical-ceph-study-journey.test.ts": "b872ca3917c35c43a38f08d5849f3b9d36e4a3a2acc3700b7e2a92ca4504a827",
+    "app/api/ceph/[id]/route.ts": "c60a715d1a0cd52e1d05f965cf8aff7c770d654b1c56fb5d5047bb11f2fc1930",
+    "components/patient/CanonicalCephDraftDiagnosis.tsx": "b8812771ca761db7c0ea2b253e8efe5404ba5c6a857cd22dfd514f22efbea081",
+    "components/patient/CanonicalCephStudy.tsx": "bf0fd599873cc227744817b18e01cacd6df0017c9e97371bea6e103f0b503f3d",
+    "docs/review/work-ceph-edit-slice53-20261101.md": "a33fa1f814b95a9cb346858ce75d2a0bf7231bfb667e4ff7c9946071e4cd3722",
+    "docs/security/staff-cutover/HANDOFF.md": "c8b81e3b1482b3c698ffdf9be62672c554796cf28734697e9a496bc8d5f6d2db",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "0fe295ebc3826d5d12d730dfc9baa3534dbc180509611670a2df54d628ef06d0",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "e8cf4c0ce77791c4ba2d4955ade0e54bc1c58041421b6a12ab2a2f41a6137214",
+    "docs/security/staff-cutover/inventory.json": "c89411567fb5fcd8939bda03212a90839549fa5f6770c0e554734027aa4d3751",
+    "lib/canonical-ceph-edit-command.ts": "fecb5845c8f0636ab2755a664bc86b3ced7db7d691043c9ce78aea2db360adda",
+    "lib/db.ts": "7946a1b18d5d172215e781366edce7cd3089467bfbc721b1a55c638a04df1614"
+  },
+  "artifacts": {
+    "ceph-draft-diagnosis-390.png": "f10f5bb4af9cf227a8d260de35bd29d54180e1b48f50f83fa82ecb310b317d3a",
+    "slice53-before-build-equivalence.json": "c9d14ac1e9668784b279918889e9256c9d48d12ec2068f4b01e165e8306a534d",
+    "slice53-before-http.log": "6fd6e9853f6bcadb43ecd896d00fdf78b786bbaaf1174c589822c985fe36ad24",
+    "slice53-body-final.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice53-build-final.log": "2b12f0fc1b0bea45ba1fea50cbf518f85147b469f0f4584e35ec375e3ac4a7bf",
+    "slice53-build-first.log": "49c655c9b30e7d61b7f2d1133e1c3f30ee689942d767a60f79d1a05e607e09d9",
+    "slice53-design.md": "bdca48879de69716a171f9bf415320069957fdf260134a478e424a1f0ab9b997",
+    "slice53-environment-final.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
+    "slice53-extraction.json": "75a41688c30a8add3cda8be669a01cb723f161027ee5de7c020471255d471908",
+    "slice53-final-focused-unit-guards-corrected-path.log": "cc1647517a5c7184424db586ca87844d96c06d754d770d691cf00d948c93b501",
+    "slice53-final-focused-unit-guards.log": "4c0a64fdabef3150b469483afaedf69e1439e00649ff22ecfbe59e4af2106d8e",
+    "slice53-final-source-freeze.json": "a8fabb1e49eb6a81e1e595c63e965f701c265fa5838feea9eae01fd47e34d613",
+    "slice53-http-final.log": "70290f5916fc68330fa5e575a6f9217f9d5d088496ae9769e7e514649653cbd5",
+    "slice53-http-first.log": "a81350accd7bcd3fd6b476911a3cb7da133123e8df6e81056cbdd6453a861207",
+    "slice53-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice53-lint-final.log": "4ab6d7102221ddd25350aa476573d8f71ca9ec1adfceb3cad3f746d48cb00717",
+    "slice53-money-final.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
+    "slice53-pg-final-focused.log": "03cd0aa7cc54c81c42331457127c1d753598dad472aa79fcb4a8c0e9d6bbac55",
+    "slice53-pg-first.log": "df89a6e58d24a376e9c187a2a9057e4d01d8031a263c5fb9a44cbb865f0da675",
+    "slice53-pg-preserved-image-policy.log": "665bc20a74283d79e8852a3235d2c3a6c9b1b4d9b2298a47b8d88abf64bc438a",
+    "slice53-preflight-final.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
+    "slice53-readable-budget-after.log": "e0d4f4bb7821cef2a013e0871e75c8a60818bd739312b1b31c149459d2efdb51",
+    "slice53-readable-budget-before-command.ts.txt": "a2490dd89c5cde472dacab7adbc1ee8963f0bf52b492d3582eb5fe8a52b93b96",
+    "slice53-readable-budget-before.log": "79f98064f56a04de35d9c83524cd5dd3dea160f4bcca9dc04a301dd50e31c725",
+    "slice53-readable-budget-fix.json": "44d24d4ba8b300c5f652bbd685787c1bd3d235a0bae845d784f08cb43f7899bc",
+    "slice53-readable-budget-witness.ts.txt": "9f507bad2316d350b1ddf3f098203ce7318ce3b501a339ebabdedda01319ed8c",
+    "slice53-source-proof.json": "f046e03ee0ee2d2e118adfc0f0b5435748e7d78cd3815857de6c5e7eb2d5e75b",
+    "slice53-tsc-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice53-tsc-first.log": "05cec5fc150d8da7d892b1e594481274f1b257d48b6999506b5d980a8729f3ff",
+    "slice53-tsc-second.log": "804ff645b49632f0e4a661a78fbbfc26dfe1ca5eaf988ca8f44dbd8e3480c423",
+    "slice53-tsc-third.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice53-unit-corrected-cases.log": "067f03ea06929eb02c62db8d21603bd1525911543f6149bcd1dbf42a4f2f1513",
+    "slice53-unit-first.log": "4243884633a2ae3e914fceb5ad0df74e8d5700a5649297971f9bc8be0425ff4c"
+  }
+}

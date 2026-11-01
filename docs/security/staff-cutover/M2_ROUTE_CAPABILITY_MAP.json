@@ -469,8 +469,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 53: explicit observed draft edits require clinical.ceph.analyze, its existing imaging prerequisite and fresh patient scope. Patient then analysis and same-patient document/case/child locks; fresh authority after waits, strict complete-body validation, existing same-connection domain SQL, atomic per-group ceph.update audit and final authority. No completed/discarded history, measurement engine, image access, finances or assignment changes. Preserves unknown saved codes and existing owned unavailable-image semantics. Existing 256-row / 2 MiB read budget rechecked before commit; no silent point drop, duplicate code or diagnosis truncation. Canonical UI covers explicit structured diagnosis only; image tracing, calibration/landmark interactive UI and completion remain separate. Unknown results never auto-resend; observation and tab marker are not durable receipts."
  },
  {
   "route": "/api/ceph/[id]/ai-analyze",

@@ -34,19 +34,19 @@ Cashier shift for money movements, treasury balance rule, signed-visit addenda, 
 
 | Status | Routes |
 |---|---|
-| existing | 272 |
+| existing | 270 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 72 |
+| canonical-done | 74 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Slices 43–47 are published at `327b12fb` with completed local gates; exact-head CI and independent review are pending. Slices 48–51 are local and their full gates remain pending. Published map: 68 canonical-done / 276 existing; local map: 72 / 272. Neither state is whole-system acceptance.
+Counts above are generated from the JSON map, not an acceptance percentage. Wider inventory: 420 methods / 97 pages, still NOT_READY. Published batch 48–52 at `1990b966` has 73 canonical-done / 271 existing methods; local gates passed and exact-head CI is running. Previous 43–47 CI and bounded review are complete. Local slice 53 brings the source map to 74 / 270; its final-build acceptance remains pending. Interactive image tracing and completion are not implied by its draft-edit API. Neither state is whole-system acceptance.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -639,4 +639,8 @@ GET `/api/ortho/billing-decisions` uses its approved ortho-view capability and c
 
 ### Slice 52 — existing pending orthodontic decision command
 
-POST `/api/ortho/adjustments/[id]/billing-decision` retains its approved independent branches: `clinical.ortho.edit` plus native responsibility/protected ownership for no_charge, or `finance.invoices.create` for linking an existing same-patient non-cancelled invoice. Both require current patient scope. The minimal queue adds only an opaque observed version and same-snapshot permitted choices, never invoice details or a reusable grant. The command checks fresh authority after patient-lock waits, stable adjustment/case/visit/invoice witnesses, unchanged original decision/audit writer, one transaction and final authority. The list-level editor never automatically resends an uncertain result; a disappeared row is not a receipt. No new price, coverage rule, invoice, migration or money movement. Local acceptance is in progress; canonical-done describes source conversion, not deployment or whole-system completion.
+POST `/api/ortho/adjustments/[id]/billing-decision` retains its approved independent branches: `clinical.ortho.edit` plus native responsibility/protected ownership for no_charge, or `finance.invoices.create` for linking an existing same-patient non-cancelled invoice. Both require current patient scope. The minimal queue adds only an opaque observed version and same-snapshot permitted choices, never invoice details or a reusable grant. The command checks fresh authority after patient-lock waits, stable adjustment/case/visit/invoice witnesses, unchanged original decision/audit writer, one transaction and final authority. The list-level editor never automatically resends an uncertain result; a disappeared row is not a receipt. No new price, coverage rule, invoice, migration or money movement. Local 48–52 acceptance passed 14,528 full unit and 5,264 full PG cases plus final built HTTP/runtime gates; exact-head CI and review remain separate. canonical-done describes source conversion, not deployment or whole-system completion.
+
+### Slice 53 — explicit draft edits and structured diagnosis
+
+PATCH `/api/ceph/[id]` uses the existing analysis capability with patient scope and the same saved draft observation. All requested calibration, known landmark upsert and diagnosis groups are validated before effects and share the admitted transaction with their original ceph.update audit events. Same-patient references and child observations remain locked; session and scope are rechecked after waits and before commit. Approved/discarded history and saved measurements are not rewritten. Unknown historical codes remain intact; an owned unavailable image retains its existing semantics without any image bytes or new retention rule. The existing 256-row / 2 MiB readable-study budget is enforced after edits, with full rollback instead of leaving an unreadable draft. UI covers explicit structured draft diagnosis only. Image tracing and interactive calibration/landmark editing, and final clinical approval, remain separate contracts. No automatic retry or durable receipt is claimed. Local final gates are pending; this is source conversion only.

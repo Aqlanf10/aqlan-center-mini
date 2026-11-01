@@ -3,9 +3,10 @@
 import { useEffect, useId, useState } from "react";
 import { isCanonicalCephStudy,type CanonicalCephStudy as SavedCephStudy } from "@/lib/canonical-ceph-projection";
 import { CanonicalCephCopy } from "./CanonicalCephCopy";
+import { CanonicalCephDraftDiagnosis } from "./CanonicalCephDraftDiagnosis";
 
-/** Saved study reference only. Opening this section never mounts legacy editors or requests
- * their plan, image, assessment or financial endpoints. */
+/** Saved study projection with independently authorized draft diagnosis and correction actions.
+ * Never mounts the legacy tracer or requests its image, plan or financial endpoints. */
 export function CanonicalCephStudy({ patientId,studyId,ownerKey,canAnalyze,onCopied }: { patientId: string;studyId:number;ownerKey:string;canAnalyze:boolean;onCopied:()=>void }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
@@ -84,6 +85,8 @@ export function CanonicalCephStudy({ patientId,studyId,ownerKey,canAnalyze,onCop
           <div><dt className="text-slate-500">سجله</dt><dd>{feed.diagnosis.createdBy} — {feed.diagnosis.updatedAt.slice(0,10)}</dd></div>
         </dl>:<p className="text-xs">لا يوجد تشخيص محفوظ؛ لم يُولّد تشخيص بديل.</p>}
       </div>}
+      {canAnalyze ? <CanonicalCephDraftDiagnosis key={`${ownerKey}:${patientId}:${studyId}`} patientId={patientId} studyId={studyId} ownerKey={ownerKey} feed={feed}
+        refresh={() => { setFeed(null); setError(null); setRefresh(value => value + 1); }} /> : null}
     </section>:null}
   </div>;
 }
