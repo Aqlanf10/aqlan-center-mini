@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CEPH_READ_PHASES, isCanonicalCephList, type CanonicalCephList, type CephReadPhase } from "@/lib/canonical-ceph-projection";
 import { isCanonicalCephCreateContext, type CanonicalCephCreateContext } from "@/lib/canonical-ceph-create-projection";
 import { formatClinicDate } from "@/lib/clinic-clock";
@@ -27,12 +27,14 @@ export function CanonicalCephCreate({ patientId, ownerKey, visible, list, onCrea
   const validReference = context !== null && (context.referenceSets.some(r => r.key === refSet) || context.referenceSets.length === 0 && refSet === "builtin_default");
   const currentChecked = checked && checked.list === list ? checked.status : null;
   const loading = checkBusy !== null && checkBusy.list === list;
-  useEffect(() => { const owner = lifetime.current; active.current = true; return () => { active.current = false; owner.generation++; readController.current?.abort(); writeController.current?.abort(); }; }, [storageKey]);
+  // Retire the committed owner synchronously: a queued response may settle
+  // between commit and passive effects, even after AbortController is cancelled.
+  useLayoutEffect(() => { const owner = lifetime.current; active.current = true; return () => { active.current = false; owner.generation++; readController.current?.abort(); writeController.current?.abort(); }; }, [storageKey]);
   useEffect(() => {
     const leave = (event: BeforeUnloadEvent) => { if (sending.current || pendingRef.current) { event.preventDefault(); event.returnValue = ""; } };
     window.addEventListener("beforeunload", leave); return () => window.removeEventListener("beforeunload", leave);
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     view.current = visible; const lease = ++lifetime.current.generation;
     readController.current?.abort(); writeController.current?.abort();
     if (!visible || !list || !armed || pendingRef.current) return;
