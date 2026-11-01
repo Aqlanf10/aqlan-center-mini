@@ -8,7 +8,7 @@ Allocation update, 2026-10-31: migration 0092 is now allocated to the Rx prescri
 
 WORK `lib/legacy-staff-schema.mjs` selects canonical mode on ANY enumerated authority table/function/trigger or `users.authorization_mode`, `users.authorization_epoch`, `users.staff_subject_id`, `parties.clinical_authority_epoch`. No such artifact, ready seal, login marker or canonical permission document may be created by this proposal. Its `readStaffEntryMode` is SELECT-only and fails on unreadable state; selection is deployment-wide, not a fallback per failed request.
 
-The current `savePrescription` in `lib/db.ts` inserts with the pool and starts `void recordAudit(...)` separately. That is **not atomic audit** and must be refactored before on-behalf issuance is admitted. The current read-only owner adapter plus mocked opaque resolver tests is not a functioning owner feature.
+Update against reviewed Rx507 (`258f0b9e`): the actual issuance path now reserves durable command0093, saves the immutable prescription snapshot and inserts the audit row on one client/transaction. Replay revalidates fresh authority and does not create another prescription or audit. This atomicity prerequisite is solved; the old non-transaction caller is not the API issuance path. Protected owner admission remains a separate unresolved prerequisite: the read-only owner adapter and mocked opaque resolver tests are not a functioning owner feature.
 
 ## Proposed files and schema (names subject to review)
 
@@ -82,3 +82,67 @@ The minimal proposed witness is a non-secret random installation identifier held
 No safe placement/exclusion/rotation integration is approved in the current restore contract. Therefore no witness file, environment setting, schema migration or live binding is created, and issuance as another doctor remains closed. Restore tools are unchanged. A future patch must review backup exclusions, target-file ownership and all supported restore entry points together before enabling the adapter.
 
 No migration number is reserved for this owner-binding proposal. In particular, 0092 belongs to the prescribing-doctor snapshot. Future allocation must recheck all active branches and target history; this design introduces no schema.
+
+
+## 2026-11-01: canonical integration boundary, not legacy activation
+
+This earlier shared legacy-binding proposal is **not authorized for implementation**
+in the current tranche. Do not create its relations, revision triggers, installation
+file or provisioning command. Do not infer ownership from the username `admin`, an
+administrative role, broad patient scope, an environment flag or staff-editable grants.
+The requested owner/manager workflow remains unavailable until the canonical
+foundation is coherently integrated; do not describe self-doctor binding as completion.
+
+Exact inspected sources: Rx507 `258f0b9ef596383e64f7bf579f791a85e1b19656`
+(tree `1c27b298708da16c3aeaabee31a63002a711f0c8`) and read-only WORK506
+`1990b9666961e23a4e15dccd5919d868f6be2dc2`. WORK's actual owner proof is in
+`lib/staff-authority-proof-internal.ts`, not a user-ID owner lookup. It requires the
+active protected control/binding epoch, ready owner subject and identity history,
+realm/generation/registry revision, canonical account/permission/credential epochs,
+and active linked provider epoch. `staff-operation-runtime.ts` owns the shared
+lifecycle fence and READ COMMITTED transaction; opaque handles bind client, XID,
+exact action and authority fingerprint, with final revalidation before commit.
+
+The catalogue contains `clinical.prescriptions.write`, but the inspected runtime
+**does not admit that action**. `staff-session-admission.ts` selects a signed durable
+canonical envelope without falling back to legacy on refusal. Copying only an owner
+row reader or filling the released `loadCanonicalOwnerAuthority(userId)` placeholder
+would omit those boundaries. The new transaction seam intentionally has only an
+unavailable result and no provider setter/success factory. Legacy `SessionPayload`
+is merely current caller context, never a substitute for `VerifiedDurableSession`.
+
+### Minimum integration contract (pending, not an active provider)
+
+1. Integrate the reviewed canonical admission, lifecycle writers, schema probes and
+   restore/quarantine lineage as a coherent dependency; do not import all WORK or
+   introduce a parallel Rx owner identity. No binding/provisioning is done here.
+2. Register the exact Rx action in that runtime and obtain its protected-owner proof
+   inside the same owning transaction as receipt reservation/replay and Rx/audit.
+   Reconcile lock order explicitly: canonical lifecycle fence before domain locks;
+   fresh admission after any receipt wait, final session/epoch check before commit.
+   Do not nest a separately committing owner transaction inside issuance.
+3. Keep regular clinician self-only and reception non-issuing. Validate the selected
+   existing active doctor, fresh issuer link and patient/visit scope. Selecting a
+   doctor changes only the immutable printed prescribing-doctor snapshot; the
+   actual authenticated issuer remains separately recorded in audit and receipt.
+4. Bind command identity/audit to canonical realm/subject/generation and protected
+   binding version without rewriting legacy receipts or exposing saved IDs on
+   conflict. Review replay after revocation/relink/restore before any activation.
+5. The owner-selection preview is informational only. It cannot authorize issuance,
+   recovery or reprint; every operation must use its own fresh exact authority.
+
+### Acceptance gates
+
+Implemented negative tests cover ordinary doctor and legacy admin (even with broad
+patient access) selecting another doctor: refusal rolls back command/Rx/audit, self
+issuance still works, and a fresh relink blocks cached replay/recovery without IDs.
+The existing reception denial, inactive-provider, same-key concurrency, audit-failure
+rollback and financial non-effect tests stay mandatory. Local in-memory tests are
+not native PostgreSQL or built-browser evidence.
+
+Pending positive canonical tests must prove the explicitly protected owner can
+choose an existing active clinician while the printed snapshot and actual issuer
+remain distinct, with no financial/commission side effect. Add real lifecycle writer
+races, revocation/disable/relink/permission/expiry, cross-actor/key/payload conflict,
+lost response, restore quarantine, exact audit lineage and saved-history preservation.
+A mocked opaque access object does not establish those acceptance gates.

@@ -136,3 +136,23 @@ it('official SQL and full archive restore keep Rx, audit, receipt and same-comma
   for(const table of ['prescriptions','prescription_issuance_commands','audit_log']) expect((await pool.query(`SELECT to_jsonb(t)::text AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows).toEqual((await fixture.source.query(`SELECT to_jsonb(t)::text AS row FROM ${table} t ORDER BY to_jsonb(t)::text`)).rows);
  }
 },180_000);
+
+it.each(['doctor', 'admin'])('legacy %s cannot select another doctor or retain a command reservation; self issuance remains valid', async role => {
+ await fixture.source.query("INSERT INTO parties(id,name,kind) VALUES(6,'Other synthetic doctor','doctor') ON CONFLICT(id) DO NOTHING");
+ await fixture.source.query('UPDATE users SET role=$1 WHERE id=3',[role]);
+ const beforeMoney = await financial();
+ const response = await issuePrescriptionTransaction({session:{...session(),role},key,draft:{...draft,prescribingDoctorPartyId:6}},issue);
+ expect(response.status).toBe(403); expect(await response.json()).toMatchObject({code:'canonical_prescription_owner_unavailable'});
+ expect(await counts()).toEqual({rx:0,commands:0,audits:0}); expect(await financial()).toEqual(beforeMoney);
+ expect((await issuePrescriptionTransaction({session:{...session(),role},key,draft},issue)).status).toBe(201);
+ expect(await counts()).toEqual({rx:1,commands:1,audits:1}); expect(await financial()).toEqual(beforeMoney);
+});
+it('fresh relink denies cached replay and recovery without leaking the saved prescription ID', async () => {
+ await issuePrescriptionTransaction({session:session(),key,draft},issue);
+ await fixture.source.query("INSERT INTO parties(id,name,kind) VALUES(6,'Other synthetic doctor','doctor') ON CONFLICT(id) DO NOTHING");
+ await fixture.source.query('UPDATE users SET party_id=6 WHERE id=3');
+ const replay=await issuePrescriptionTransaction({session:session(),key,draft},issue);
+ const recovery=await recoverPrescriptionCommand(session(),key,{patientId:7,visitId:9,prescribingDoctorPartyId:5});
+ for(const response of [replay,recovery]){expect(response.status).toBe(403);expect(await response.json()).not.toHaveProperty('id');}
+ expect(await counts()).toEqual({rx:1,commands:1,audits:1});
+});

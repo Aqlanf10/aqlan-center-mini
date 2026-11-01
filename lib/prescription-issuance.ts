@@ -5,7 +5,7 @@ import type { SessionPayload } from "./auth";
 import { revalidateSessionInTransaction } from "./session";
 import { canAccessPatient } from "./patient-access";
 import { clinicalCapabilityOf } from "./clinical-identity";
-import { getPrescriptionOwnerAuthority } from "./prescription-owner";
+import { admitPrescriptionOwnerInTransaction } from "./prescription-owner-transaction";
 import type { PrescriptionDraft } from "./prescription";
 import { canonicalPrescriptionCommand } from "./prescription-command";
 import { withTransaction } from "./transactions";
@@ -31,8 +31,11 @@ async function authorize(client: DbClient, admitted: SessionPayload, scope: Scop
   const { rows: doctors } = await client.query<{ id: number; kind: string; is_active: boolean; name: string }>(
     "SELECT id, kind, is_active, name FROM parties WHERE id=ANY($1::int[]) ORDER BY id FOR SHARE NOWAIT", [doctorIds]);
   if (doctors.length !== doctorIds.length || doctors.some(doctor => doctor.kind !== "doctor" || !doctor.is_active || !doctor.name.trim())) refuse(403, "هوية الطبيب غير نشطة أو غير صالحة.");
-  const ownerAuthority = scope.prescribingDoctorPartyId !== capability.partyId ? await getPrescriptionOwnerAuthority(user) : null;
-  if (scope.prescribingDoctorPartyId !== capability.partyId && !ownerAuthority) refuse(403, "غير مصرح باختيار طبيب آخر.");
+  if (scope.prescribingDoctorPartyId !== capability.partyId) {
+    const unavailable = await admitPrescriptionOwnerInTransaction({ client, session, actor: user, prescribingDoctorPartyId: scope.prescribingDoctorPartyId });
+    refuse(403, unavailable.message, unavailable.code);
+  }
+  const ownerAuthority = null;
   if (scope.visitId !== null) {
     const { rows: visits } = await client.query<{ patient_id: number }>("SELECT patient_id FROM visits WHERE id=$1 FOR SHARE NOWAIT", [scope.visitId]);
     if (visits[0]?.patient_id !== scope.patientId) refuse(404, "الزيارة لا تطابق المريض.");

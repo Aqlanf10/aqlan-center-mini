@@ -95,3 +95,21 @@ it('denies replay after actual patient-scope witnesses and broad access are revo
  await db.exec("UPDATE users SET permissions='{}'; UPDATE patients SET primary_doctor_id=NULL; UPDATE visits SET doctor_id=NULL;");
  const response = await issuePrescriptionTransaction({ session: session(), key, draft }, issue); expect(response.status).toBe(403); expect(await counts()).toEqual({ rx: 1, commands: 1, audits: 1 });
 });
+
+it.each(['doctor', 'admin'] as const)('refuses another doctor for legacy %s despite all-patient access, without reserving or writing', async role => {
+ await db.exec("INSERT INTO parties VALUES(6,'doctor',true,'Selected Other Doctor');");
+ await db.query('UPDATE users SET role=$1 WHERE id=3', [role]);
+ const response = await issuePrescriptionTransaction({ session: { ...session(), role }, key, draft: { ...draft, prescribingDoctorPartyId: 6 } }, issue);
+ expect(response.status).toBe(403); expect(await response.json()).toMatchObject({ code: 'canonical_prescription_owner_unavailable' });
+ expect(await counts()).toEqual({ rx: 0, commands: 0, audits: 0 });
+ expect((await issuePrescriptionTransaction({ session: { ...session(), role }, key, draft }, issue)).status).toBe(201);
+ expect(await counts()).toEqual({ rx: 1, commands: 1, audits: 1 });
+});
+it('denies cached replay and recovery after relinking to another doctor without exposing the saved ID', async () => {
+ await issuePrescriptionTransaction({ session: session(), key, draft }, issue);
+ await db.exec("INSERT INTO parties VALUES(6,'doctor',true,'Relinked Doctor'); UPDATE users SET party_id=6 WHERE id=3;");
+ const replay = await issuePrescriptionTransaction({ session: session(), key, draft }, issue);
+ const recovery = await recoverPrescriptionCommand(session(), key, { patientId: 7, visitId: 9, prescribingDoctorPartyId: 5 });
+ for (const response of [replay, recovery]) { expect(response.status).toBe(403); expect(await response.json()).not.toHaveProperty('id'); }
+ expect(await counts()).toEqual({ rx: 1, commands: 1, audits: 1 });
+});

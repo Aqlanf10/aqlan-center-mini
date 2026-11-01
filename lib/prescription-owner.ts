@@ -1,7 +1,9 @@
 import { staffAuthorizationFingerprint } from "./staff-capabilities";
 import { loadCanonicalOwnerAuthority } from "./staff-owner-authority";
 
-/** Opaque canonical authority must match the freshly loaded actor AND provider.
+/** Preview policy only: never transaction admission for issuance/replay/recovery.
+ * The transaction boundary remains unavailable until coherent canonical integration.
+ * Opaque canonical authority must match the freshly loaded actor AND provider.
  * Relinking the account cannot carry an old owner-clinician proof forward. */
 export async function getPrescriptionOwnerAuthority(user: {
   id: number; username: string; role: string; isActive: boolean; partyId: number | null;
