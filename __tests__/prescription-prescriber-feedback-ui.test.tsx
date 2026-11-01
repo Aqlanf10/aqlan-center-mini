@@ -3,9 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PrescriptionModal } from "../components/PrescriptionModal";
 import { PRESCRIBER_UNAVAILABLE_MESSAGES } from "../lib/prescription-prescriber-feedback";
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], setters: [] as Array<(value: unknown) => void>, cursor: 0, changed: false,
-  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(), pending: [] as Array<() => void> }));
+  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(), layouts: [] as Array<() => void>, pending: [] as Array<() => void> }));
 vi.mock("react", async original => {
   const actual = await original<typeof import("react")>();
+  const scheduleEffect = (layout: boolean) => (effect: () => void | (() => void), deps?: readonly unknown[]) => {
+    const index = hooks.cursor++, previous = hooks.effects.get(index);
+    if (previous?.deps && deps && previous.deps.length === deps.length && deps.every((v, i) => Object.is(v, previous.deps![i]))) return;
+    hooks[layout ? "layouts" : "pending"].push(() => { previous?.cleanup?.(); const cleanup = effect(); hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined }); });
+  };
   return { ...actual,
     useState: (initial: unknown) => {
       const index = hooks.cursor++;
@@ -20,11 +25,13 @@ vi.mock("react", async original => {
       return [hooks.values[index], hooks.setters[index]];
     },
     useMemo: (factory: () => unknown) => { hooks.cursor++; return factory(); },
-    useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
-      const index = hooks.cursor++, previous = hooks.effects.get(index);
-      if (previous?.deps && deps && previous.deps.length === deps.length && deps.every((v, i) => Object.is(v, previous.deps![i]))) return;
-      hooks.pending.push(() => { previous?.cleanup?.(); const cleanup = effect(); hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined }); });
+    useRef: (initial: unknown) => {
+      const index = hooks.cursor++;
+      if (!(index in hooks.values)) hooks.values[index] = { current: initial };
+      return hooks.values[index];
     },
+    useLayoutEffect: scheduleEffect(true),
+    useEffect: scheduleEffect(false),
   };
 });
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic", role: "doctor", permissions: null }) }));
@@ -40,7 +47,9 @@ const fetchMock = vi.fn(), open = vi.fn();
 function render() {
   for (let count = 0; count < 20; count++) {
     hooks.cursor = 0; hooks.changed = false;
-    const tree = PrescriptionModal(props); hooks.pending.splice(0).forEach(effect => effect());
+    const tree = PrescriptionModal(props);
+    hooks.layouts.splice(0).forEach(effect => effect());
+    hooks.pending.splice(0).forEach(effect => effect());
     if (!hooks.changed) return tree;
   }
   throw new Error("Modal did not settle");
@@ -48,9 +57,13 @@ function render() {
 async function ready() { render(); for (let i = 0; i < 20; i++) await Promise.resolve(); return render(); }
 const response = (options: unknown) => ({ ok: true, json: async () => ({ suggestions: [], prescriberOptions: options }) });
 beforeEach(() => {
-  hooks.values = []; hooks.setters = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.pending = [];
+  hooks.values = []; hooks.setters = []; hooks.cursor = 0; hooks.changed = false; hooks.effects.clear(); hooks.layouts = []; hooks.pending = [];
   props = { isOpen: true, onClose: vi.fn(), patientId: 7, patientName: "Synthetic patient" };
-  fetchMock.mockReset(); open.mockReset(); vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { open });
+  fetchMock.mockReset(); open.mockReset(); vi.stubGlobal("fetch", fetchMock); const storage = new Map<string, string>();
+  vi.stubGlobal("window", { open, sessionStorage: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value); }, removeItem: (key: string) => { storage.delete(key); },
+  } });
 });
 afterEach(() => { hooks.effects.forEach(effect => effect.cleanup?.()); vi.unstubAllGlobals(); });
 describe("prescriber identity feedback in the actual modal", () => {
