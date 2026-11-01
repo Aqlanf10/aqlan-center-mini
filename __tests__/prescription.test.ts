@@ -34,12 +34,12 @@ describe("فحص المسوّدة — البطلان بأسبابٍ مصرّحة
   it("المسوّدة السليمة تعود كاملةً بلغةٍ صالحة أو الافتراضية", () => {
     const check = checkPrescriptionDraft({
       patientId: 1, visitId: null, diagnosis: "خراج", notes: "",
-      instructionsLang: "weird", items: [{ name: "Amoxicillin", dose: "500mg" }],
+      instructionsLang: "weird", items: [{ name: "SyntheticMedicine", dose: "fixture strength", form: "fixture form", frequency: "fixture interval", duration: "fixture duration", selection: { id: "manual", amount: "fixture amount", confirmed: true } }],
     });
     expect(check.ok).toBe(true);
     if (check.ok) {
       expect(check.value.instructionsLang).toBe("both");
-      expect(check.value.items[0].name).toBe("Amoxicillin");
+      expect(check.value.items[0].name).toBe("SyntheticMedicine");
     }
   });
 

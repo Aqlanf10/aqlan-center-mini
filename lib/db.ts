@@ -1,3 +1,5 @@
+import { encodePrescriptionPrintCursor, type PrescriptionPrintCursor } from "./prescription-print-pagination";
+import { PRESCRIPTION_LINEAGE_MIGRATIONS } from "./prescription-migration-lineage";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
@@ -2108,6 +2110,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0078", name: "agreement_reconciliation", filename: "0078_agreement_reconciliation.sql", sql: AGREEMENT_RECONCILIATION_SQL, checksum: checksumOf(AGREEMENT_RECONCILIATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -7914,9 +7917,15 @@ export async function getSettingsInTransaction(
   return readSettings(client, options);
 }
 
+/** Prescription identity must reflect current stored values, including blanks. */
+export async function getPrescriptionPrintSettings(): Promise<SettingsMap> {
+  await ensureSchema();
+  return readSettings(getPool(), { preserveClinicIdentity: true });
+}
+
 async function readSettings(
   executor: Pick<DbClient, "query">,
-  options: { requireStoredExchangeRates?: boolean } = {},
+  options: { requireStoredExchangeRates?: boolean; preserveClinicIdentity?: boolean } = {},
 ): Promise<SettingsMap> {
   const { rows } = await executor.query<{ key: string; value: string }>(
     `SELECT key, value FROM settings`,
@@ -7924,6 +7933,11 @@ async function readSettings(
   const stored: Record<string, string> = {};
   for (const row of rows) stored[row.key] = row.value;
   const settings = withDefaults(stored);
+  if (options.preserveClinicIdentity) {
+    for (const key of ["clinic.name", "clinic.lead_doctor", "clinic.lead_doctor_title", "clinic.lead_doctor_credentials", "clinic.phone", "clinic.address"] as const) {
+      settings[key] = stored[key] ?? "";
+    }
+  }
   if (options.requireStoredExchangeRates) {
     // Financial snapshots must not mistake display defaults for configured FX.
     // Preserve the raw rates from this same SELECT, including missing/blank values.
@@ -23922,6 +23936,8 @@ import {
 } from "./prescription";
 
 export interface PrescriptionRecord {
+  prescribingDoctorName?: string | null;
+  prescribingDoctorPartyId?: number | null;
   id: number;
   patientId: number;
   visitId: number | null;
@@ -23940,6 +23956,8 @@ export interface PrescriptionRecord {
 }
 
 interface PrescriptionRow {
+  prescribing_doctor_name: string | null;
+  prescribing_doctor_party_id: number | null;
   id: number; patient_id: number; visit_id: number | null; diagnosis: string | null;
   notes: string | null; instructions_lang: string; items: unknown; status: string;
   void_reason: string | null; voided_by: string | null; voided_at: Date | null;
@@ -23947,6 +23965,8 @@ interface PrescriptionRow {
 }
 
 const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
+  prescribingDoctorName: row.prescribing_doctor_name ?? null,
+  prescribingDoctorPartyId: row.prescribing_doctor_party_id ?? null,
   id: row.id,
   patientId: row.patient_id,
   visitId: row.visit_id,
@@ -23965,7 +23985,7 @@ const toPrescription = (row: PrescriptionRow): PrescriptionRecord => ({
 });
 
 const PRESCRIPTION_COLUMNS = `id, patient_id, visit_id, diagnosis, notes, instructions_lang,
-       items, status, void_reason, voided_by, voided_at, created_by, doctor_party_id, created_at`;
+       items, status, void_reason, voided_by, voided_at, created_by, doctor_party_id, prescribing_doctor_name, prescribing_doctor_party_id, created_at`;
 
 /**
  * يحفظ الوصفة كوثيقة — مجمّدة لحظة إصدارها.
@@ -23981,18 +24001,19 @@ export async function savePrescription(
   await ensureSchema();
   const { rows } = await getPool().query<PrescriptionRow>(
     `INSERT INTO prescriptions
-       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by, doctor_party_id)
-     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7, $8::int)
+       (patient_id, visit_id, diagnosis, notes, instructions_lang, items, created_by, doctor_party_id, prescribing_doctor_name, prescribing_doctor_party_id)
+     VALUES ($1, $2::int, $3, $4, $5, $6::jsonb, $7, $8::int, $9, $10::int)
      RETURNING ${PRESCRIPTION_COLUMNS}`,
     [draft.patientId, draft.visitId, draft.diagnosis, draft.notes,
       draft.instructionsLang, JSON.stringify(draft.items), actor,
-      Number.isInteger(doctorPartyId) && (doctorPartyId as number) > 0 ? doctorPartyId : null],
+      Number.isInteger(doctorPartyId) && (doctorPartyId as number) > 0 ? doctorPartyId : null,
+      draft.prescribingDoctorName || null, draft.prescribingDoctorPartyId ?? null],
   );
   const record = toPrescription(rows[0]);
   void recordAudit({
     action: "prescription.create", entity: "prescription", entityId: record.id,
     entityLabel: `وصفة للمريض #${record.patientId}`,
-    details: { المريض: record.patientId, الأدوية: record.items.map((item) => item.name).join("، ") },
+    details: { نسخة_ربط_المالك: draft.ownerAuthority?.bindingVersion ?? null, بصمة_صلاحية_المالك: draft.ownerAuthority?.fingerprint ?? null, معرف_الطبيب_الواصف: record.prescribingDoctorPartyId ?? null, معرف_المصدر: record.doctorPartyId, الطبيب_المدون: record.prescribingDoctorName ?? null, المريض: record.patientId, الأدوية: record.items.map((item) => item.name).join("، ") },
     actor,
   });
   return record;
@@ -24019,6 +24040,26 @@ export async function listPatientPrescriptions(
     [patientId, limit],
   );
   return rows.map(toPrescription);
+}
+
+/** Minimal print picker; scope/status and exact microsecond keyset precede limit. */
+export async function listSavedPrescriptionPrints(patientId: number, visitId: number | null = null, cursor: PrescriptionPrintCursor | null = null): Promise<{
+  prescriptions: { id: number; visitId: number | null; createdAt: string; prescribingDoctorName: string | null }[];
+  nextCursor: string | null;
+}> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; visit_id: number | null; created_at: Date; cursor_created_at: string; prescribing_doctor_name: string | null }>(
+    `SELECT id, visit_id, created_at, prescribing_doctor_name,
+      to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at
+      FROM prescriptions WHERE patient_id=$1 AND status='active' AND ($2::int IS NULL OR visit_id=$2::int)
+      AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::int))
+      ORDER BY created_at DESC, id DESC LIMIT 51`, [patientId, visitId, cursor?.createdAt ?? null, cursor?.id ?? null],
+  );
+  const page = rows.slice(0, 50), last = page.at(-1);
+  return {
+    prescriptions: page.map(row => ({ id: row.id, visitId: row.visit_id, createdAt: row.created_at.toISOString(), prescribingDoctorName: row.prescribing_doctor_name })),
+    nextCursor: rows.length > 50 && last ? encodePrescriptionPrintCursor({ patientId, visitId, id: last.id, createdAt: last.cursor_created_at }) : null,
+  };
 }
 
 /**

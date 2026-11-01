@@ -2,6 +2,7 @@
 import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
+import { loadRestoreMigrationChecksums } from "../lib/restore/migration-provenance.mjs";
 import { prepareBackupSql } from "../lib/restore/sql.mjs";
 import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
@@ -41,7 +42,7 @@ try {
 
 let sql;
 try {
-  sql = prepareBackupSql(readFileSync(file, "utf8")).sql;
+  sql = prepareBackupSql(readFileSync(file, "utf8"), {migrationFiles: await loadRestoreMigrationChecksums()}).sql;
 } catch (error) {
   console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
   process.exit(1);
