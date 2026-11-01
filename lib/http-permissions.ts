@@ -239,6 +239,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/portal/messages": { GET: PORTAL, POST: PORTAL, PATCH: PORTAL, DELETE: PORTAL },
   "/api/portal/statement": { GET: PORTAL },
   "/api/prescriptions": { POST: CLINICAL },
+  "/api/prescriptions/commands/[key]": { GET: CLINICAL },
   "/api/prescriptions/[id]/void": { POST: CLINICAL },
   "/api/print-log": { POST: ["admin", "reception", "doctor", "cashier", "accountant"] },
   "/api/problems/[id]": { PATCH: CLINIC },

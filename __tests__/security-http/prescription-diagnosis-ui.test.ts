@@ -222,28 +222,41 @@ describe("prescription diagnosis draft in the built visit page", () => {
       expect(await prints(f.page)).toEqual([]);
 
       const expected = {
+        commandKey: "",
         patientId, visitId, prescribingDoctorPartyId: 98104, diagnosis: "Updated diagnosis before prescription print", notes: draftNotes,
         instructionsLang: "en", items: [medicine],
       };
       f.holdPrescriptionPreview();
       await f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }).click();
       await expect.poll(() => f.requests.length).toBe(1);
+      expect(f.requests[0].commandKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      expected.commandKey = f.requests[0].commandKey as string;
       expect(f.requests).toEqual([expected]);
       expect(await prints(f.page)).toEqual([]);
-      // The same ownership applies while the initial POST is still in flight,
-      // before any safety response has returned.
+      // Closing retires the asynchronous owner, not the pinned draft or durable key.
+      // A late response must not publish a safety acknowledgement or print.
       await f.close();
       await f.visitDiagnosis.fill("Later visit edit while save is pending");
       await f.open();
       expect(await f.diagnosis.inputValue()).toBe(expected.diagnosis);
       expect(await f.notes.inputValue()).toBe(draftNotes);
       await assertMedicine(f.page);
-      expect(await f.page.getByRole("button", { name: "جارٍ حفظ الوصفة…", exact: true }).isDisabled()).toBe(true);
+      const printButton = f.page.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true });
+      await expect.poll(() => printButton.isEnabled()).toBe(true);
       expect(f.requests).toEqual([expected]);
       expect(await prints(f.page)).toEqual([]);
+      const lateResponse = f.page.waitForResponse(response => new URL(response.url()).pathname === "/api/prescriptions" && response.request().method() === "POST");
       await f.releasePrescriptionPreview();
+      await (await lateResponse).finished();
+      await f.page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       const acknowledge = f.page.getByRole("button", { name: "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا", exact: true });
+      expect(await acknowledge.count()).toBe(0);
+      expect(await prints(f.page)).toEqual([]);
+      expect(f.requests).toEqual([expected]);
+      // Only an explicit retry owned by the reopened modal may show a new preview.
+      await printButton.click();
       await acknowledge.waitFor();
+      expect(f.requests).toEqual([expected, expected]);
       // Printing now owns the reviewed Rx draft: a later visit edit must not
       // silently change the diagnosis carried by the acknowledgement retry.
       await f.close();
@@ -258,7 +271,7 @@ describe("prescription diagnosis draft in the built visit page", () => {
       await f.page.screenshot({ path: ".settings-ui-artifacts/prescription-diagnosis-pinned.png" });
       await acknowledge.click();
       await expect.poll(() => prints(f.page)).toEqual([`/print/prescription/${patientId}?rx=${prescriptionId}`]);
-      expect(f.requests).toEqual([expected, { ...expected, acknowledgedSafetyToken: acknowledgementToken }]);
+      expect(f.requests).toEqual([expected, expected, { ...expected, acknowledgedSafetyToken: acknowledgementToken }]);
       // Pinning a submitted draft must not disable a deliberate later edit.
       await f.diagnosis.fill("Deliberately revised prescription diagnosis");
       expect(await f.diagnosis.inputValue()).toBe("Deliberately revised prescription diagnosis");

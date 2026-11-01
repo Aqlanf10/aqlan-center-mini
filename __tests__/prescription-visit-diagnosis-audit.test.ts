@@ -45,6 +45,17 @@ vi.mock("react", async (original) => {
         hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
       });
     },
+    useLayoutEffect: (effect: () => undefined | (() => void), deps?: readonly unknown[]) => {
+      const index = slot(undefined);
+      const previous = hooks.effects.get(index);
+      if (previous && deps && previous.deps && deps.length === previous.deps.length
+        && deps.every((value, position) => Object.is(value, previous.deps![position]))) return;
+      hooks.pending.push(() => {
+        previous?.cleanup?.();
+        const cleanup = effect();
+        hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
+      });
+    },
   };
 });
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic" }));
@@ -137,7 +148,11 @@ beforeEach(() => {
     throw new Error(`Unexpected mock request: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
-  vi.stubGlobal("window", { open: openMock });
+  const storage = new Map<string, string>();
+  vi.stubGlobal("window", { open: openMock, confirm: vi.fn(() => false),
+    sessionStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) },
+    crypto: { randomUUID: () => "11111111-1111-4111-8111-111111111111", subtle: { digest: async () => new Uint8Array(32).buffer } },
+  });
 });
 afterEach(() => {
   hooks.effects.forEach((effect) => effect.cleanup?.());
@@ -260,6 +275,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     completeManualLine();
     await ready();
     click("طباعة الروشتة (A5)");
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => url === "/api/prescriptions" && options?.method === "POST")).toBe(true));
     const post = fetchMock.mock.calls.find(([url, options]) => url === "/api/prescriptions" && options?.method === "POST");
     expect(JSON.parse(post![1].body).diagnosis).toBe("Synthetic submitted diagnosis");
     render({ defaultDiagnosis: "Synthetic newer visit diagnosis" });
@@ -270,7 +286,8 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic submitted diagnosis");
     expect(openMock).not.toHaveBeenCalled();
     completeSave!({ status: 201, json: async () => ({ id: 92001 }) });
-    await vi.waitFor(() => expect(openMock).toHaveBeenCalledExactlyOnceWith("/print/prescription/91001?rx=92001", "_blank"));
+    await Promise.resolve(); await Promise.resolve();
+    expect(openMock).not.toHaveBeenCalled();
     expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic submitted diagnosis");
   });
 
@@ -370,7 +387,7 @@ describe("empty prescription caller fails closed before save or draft navigation
     expect(contents(render().tree)).toContain("أكمل اسم الدواء");
   });
 
-  it("preserves a valid explicit draft fallback after save failure", async () => {
+  it("does not automatically print a draft after an uncertain save failure", async () => {
     render({ isOpen: true });
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
@@ -379,11 +396,9 @@ describe("empty prescription caller fails closed before save or draft navigation
     fetchMock.mockResolvedValue({ status: 500, json: async () => ({ message: "Synthetic failure" }) });
     await ready();
     click(printLabel);
-    await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(contents(render().tree)).toContain("Synthetic failure"));
     expect(writes()).toHaveLength(1);
-    const url = new URL(openMock.mock.calls[0][0], "https://synthetic.invalid");
-    expect(url.searchParams.get("draft")).toBe("1");
-    expect(JSON.parse(url.searchParams.get("items")!)[0].name).toBe("SyntheticDrug");
+    expect(openMock).not.toHaveBeenCalled();
   });
 
   it.each(["critical", "acknowledge"])("rejects emptied items from the %s secondary path", async (path) => {
