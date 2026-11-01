@@ -20,6 +20,8 @@ export interface CanonicalRecordReadRule {
 }
 
 export const CANONICAL_RECORD_READS = Object.freeze({
+  /** GET /api/ortho/followups: clinical follow-up; appointment facts separately scoped. */
+  "read:ortho.followups": Object.freeze({ record: "patient", need: Object.freeze(["clinical.ortho.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/patients/[id]/plans: clinical facts only, independent plan grant and patient scope. */
   "read:plans.clinical": Object.freeze({ record: "patient", need: Object.freeze(["clinical.plans.view"] as const), anyOf: Object.freeze([]) }),
   /** GET /api/ceph/[id]: saved measurements and diagnosis, no image payload or mutations. */

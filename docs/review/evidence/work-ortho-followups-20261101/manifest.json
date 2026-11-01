@@ -1,0 +1,232 @@
+{
+  "base": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+  "status": "implemented; all declared local checks passed; publication, exact-head CI and independent review pending",
+  "buildId": "Xj2bNirkRiWrC4Fi4MHoc",
+  "scope": "GET ortho follow-up and canonical read-only board; independent patient/appointment scope; no writers, finance logic, migration or live changes",
+  "results": {
+    "baselineHttp": {
+      "failed": 1,
+      "actualStatus": 401,
+      "expectedStatus": 200
+    },
+    "postgres": {
+      "passed": 55,
+      "files": 2,
+      "new": 22,
+      "legacyBoard": 33
+    },
+    "httpBrowser": {
+      "passed": 23,
+      "files": 4,
+      "new": 9,
+      "shiftAndBookingScopeRegression": 10,
+      "legacyPageRegression": 4,
+      "ddl": 0
+    },
+    "focusedUnits": {
+      "passed": 94,
+      "files": 5
+    },
+    "legacyUiUnits": {
+      "passed": 21,
+      "files": 1
+    },
+    "mapInventoryGuards": {
+      "passed": 10,
+      "files": 2
+    },
+    "fullUnit": {
+      "passed": 13599,
+      "files": 808
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 346
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "preflight": "passed",
+    "moneyGuard": "passed",
+    "rawBodyGuard": "passed",
+    "legacySourceWitnesses": 24,
+    "historicalSourceHashes": 147,
+    "runtime": {
+      "traceCount": 737,
+      "manifestCount": 86,
+      "availableSourceMapCount": 367,
+      "scope": "Available validated maps only; no opaque-code absence claim"
+    }
+  },
+  "failedAttempts": [
+    {
+      "stage": "first PG fixtures",
+      "failed": 2,
+      "passed": 19,
+      "reason": "Existing one-open-case constraint and indexed oversized single patient name; fixtures corrected without changing constraints/limits"
+    },
+    {
+      "stage": "first full unit",
+      "failed": 22,
+      "passed": 13577,
+      "reason": "21 legacy UI harness calls lacked the new session/component boundary; one missing map projection declaration; all assertions retained and full suite rerun"
+    },
+    {
+      "stage": "first focused map guards",
+      "failed": 2,
+      "passed": 18,
+      "files": 4,
+      "reason": "Generated .next/standalone copies collected; rerun source guards with .next/** excluded, 10/10 passed"
+    }
+  ],
+  "pending": [
+    "normal publication after previous head CI",
+    "full exact-head CI",
+    "independent source review",
+    "conservative main reconciliation after e718 CI"
+  ],
+  "notRun": [
+    "WORK Docker image: proxy CONNECT HTTP403 blocks Alpine indexes; no image produced",
+    "deployment or real-account/data changes",
+    "unrelated next-slice writers"
+  ],
+  "sourceSha256": {
+    "__tests__/canonical-ortho-followup-projection.test.ts": "4151da7a6ffadad2c299376bf96f48c8dee31d0444925fb946bc8a7082d1c5b7",
+    "__tests__/fixtures/canonical-ortho-followups.ts": "b54cfac8e39d2290f8f7526b09660054bf2781d9c039a6b6b5cf76c3577950d4",
+    "__tests__/ortho-followup-board-route.test.ts": "8cbe07fece4bf32f1f7077f623f20e08ca2b923e2b33d03f883ae5126520b9ca",
+    "__tests__/ortho-followup-reminder-ui.test.tsx": "02f8208164a73c3e790cb87bb03f9f8cd2bf28195f9538d05acf3bb6d0c6a975",
+    "__tests__/postgres/ortho-canonical-followups.test.ts": "34dfb362b98c3d6cdd66b9bb43f71df4922721c369ced5e47b73eb2f7b30fbd6",
+    "__tests__/security-http/canonical-ortho-followups-journey.test.ts": "89c27ef8dac848df841685bb127a0aa26881896bcfc7252ef284523f7dc91687",
+    "__tests__/staff-session-selection.test.ts": "b5627d2b05eed4b6d44496fb4c7d379bd863c5468a23b203170b5836e9c1422f",
+    "app/api/ortho/followups/route.ts": "8328fea6653f373da113880edf0a605d1ee886c1a394459f04adc351417b5d72",
+    "app/ortho/page.tsx": "e0a663d895b7594d87b2bc3768597c59ce56ebd76fd0d9ba91f5ee5589083a93",
+    "components/CanonicalOrthoFollowups.tsx": "9bbfac5b9ba9bfd7d224c9958b683e685f21b78cbf9edddf121c06e7267d50b9",
+    "docs/security/staff-cutover/M2_PROJECTION_INVENTORY.json": "5cb4cfde1cf9a1f389f12e2bd9e076b4cffb1062f6b3497a4b16e82783b07524",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "51681a13895dd613f2b5b701b0a4453d25fff38b4ce2529c5229160eee42a3b0",
+    "docs/security/staff-cutover/inventory.json": "cb82f8e8c7ca663b8fcf5096bf361389bc006ddded7e65d812c2f9242b0f26d3",
+    "lib/canonical-navigation.ts": "cfceb1ab17ca73662604a3ae01212c9a6e35726169f79f0e2a8a294753d71ded",
+    "lib/canonical-ortho-followup-projection.ts": "5c88d1b32644dd6419c04a06d3477b370fd6aedc404a2f77b233fd01f9f8f5ef",
+    "lib/canonical-ortho-followups.ts": "30db2812c7136e3cd5233d43594608cf4c93242aa987b28c42a60289d3f9a78e",
+    "lib/canonical-record-reads.ts": "29db2a58471ccc4122c0ac2b84caadc7bbcb9e7543fc92eff11c9760f8e0812a",
+    "lib/db.ts": "09616942c1f36833b0ead1fde832e463d77b2a847f1ff81c92e162cc888fcb06"
+  },
+  "evidence": {
+    "a7-ci-final.json": {
+      "sha256": "5a343320f94c2439c5f6062f056e1708da4222d96e53fd6372deef9710bb3454",
+      "bytes": 14457
+    },
+    "alpine-access-diagnosis.json": {
+      "sha256": "aa87c08436c7685e70cad975d21fac1e543a17bdcf1824149921f5d51c7bcc33",
+      "bytes": 621
+    },
+    "alpine-index-diagnostic-head.txt": {
+      "sha256": "63695378f7dfb652ab42397a440316692226ea023b9faee2832d5818d81d4659",
+      "bytes": 135
+    },
+    "docker-base-source-inspection.txt": {
+      "sha256": "472e1e18485de2d503d154f19489ef4014c34455c3ae69ba32d9c8082fe1e289",
+      "bytes": 151
+    },
+    "e718-main-merge-tree.txt": {
+      "sha256": "165fb44740b785ebd722ab3c5206a6f9c7944e143561ed257e35ea776d3ede06",
+      "bytes": 6525
+    },
+    "historical-source-verification.json": {
+      "sha256": "ae69d6e39cf1fcf1c7d7bde51eb21c60c8722300c2665936da75fc9918f487d2",
+      "bytes": 47079
+    },
+    "ortho-followups-390.png": {
+      "sha256": "773d67bbcaa992ba6fc20c4935c8303c567c55d68d3437721e827a26f0a30e45",
+      "bytes": 56942
+    },
+    "runtime-proof.json": {
+      "sha256": "67505334fa81cbd0fccefca8eade7e1ec72c65115514711f558d1efed2dbe42d",
+      "bytes": 1427074
+    },
+    "slice37-before-http.log": {
+      "sha256": "3646c97c205944579233a557e47ea5448d672a613aa268ec6f61076db3d44155",
+      "bytes": 1858
+    },
+    "slice37-body-guard.log": {
+      "sha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "bytes": 197
+    },
+    "slice37-build.log": {
+      "sha256": "35e2488aa675a6c63ea1449c557982b68afa3edb7e21ecf75bb384450bcec764",
+      "bytes": 13583
+    },
+    "slice37-full-unit-final.log": {
+      "sha256": "7f7726021e93bdd1ab89e946d07c71a51bb67b7e0fbbf3120abf160fa07ab54f",
+      "bytes": 568
+    },
+    "slice37-full-unit.log": {
+      "sha256": "4b4c47681cacea08920792a33bb2986d6cf5a258dd0fe873758c9176fb0b7bbe",
+      "bytes": 29811
+    },
+    "slice37-http.log": {
+      "sha256": "260207d0b12a58de26e7c7f196be5d7226f033298b0170a4d1003923e1ba08bd",
+      "bytes": 980
+    },
+    "slice37-legacy-fixture-lint.log": {
+      "sha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "bytes": 209
+    },
+    "slice37-legacy-proof.cjs": {
+      "sha256": "2d7f1880745c3ad0b5651dc3a9349a2d57ca74cb1d761095db0bfa5bc775b901",
+      "bytes": 3052
+    },
+    "slice37-legacy-proof.json": {
+      "sha256": "96809c424fb418feeb334aaaa1aa9dcfcf8df2e4411cd8a8bec06d9ca85ed265",
+      "bytes": 4678
+    },
+    "slice37-legacy-ui-unit.log": {
+      "sha256": "4b3c866564a2db23eada6689fdaeda2ff2b2d713e44cb03527d549f147e74858",
+      "bytes": 429
+    },
+    "slice37-lint.log": {
+      "sha256": "537bd81f49fad0d2ce87e541c4873ab5cf358a4c4dff09e8b2d972d04b89398b",
+      "bytes": 271572
+    },
+    "slice37-map-guards-final.log": {
+      "sha256": "505c69c412170863e4dccaa290880008bc550307d9be451cfda2cacf7454b3ca",
+      "bytes": 429
+    },
+    "slice37-map-guards.log": {
+      "sha256": "c6e88f06c0f50bd5d163faeed78597f7be957ce5f020ea010fd7f6d1c5955cec",
+      "bytes": 5905
+    },
+    "slice37-money-guard.log": {
+      "sha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "bytes": 1844
+    },
+    "slice37-pg-final.log": {
+      "sha256": "f844d5ecb0bbdf847b1f47fc33a015b6da45e14eafdcc48ee3ec346e656d858b",
+      "bytes": 565
+    },
+    "slice37-pg-first.log": {
+      "sha256": "76e31d8f0370592274de80c36e08864e1342c12af6748cb68fec8bfd5e4aeb0f",
+      "bytes": 2059
+    },
+    "slice37-preflight.log": {
+      "sha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "bytes": 1144
+    },
+    "slice37-runtime.log": {
+      "sha256": "80cc3b935a11a03347bc1cedea478aefb1a9b08e6af465f8eac110f784a42657",
+      "bytes": 137
+    },
+    "slice37-types-final.log": {
+      "sha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "bytes": 209
+    },
+    "slice37-units-focused.log": {
+      "sha256": "e2f7055f07cb5431da8d607a01dad3c2cc36638af10afdb360b71b54b89905d1",
+      "bytes": 428
+    }
+  },
+  "publishedEvidenceNormalization": "CRLF converted to LF and line-ending whitespace trimmed only; raw originals remain in the local review directory. No test result, assertion, failure or error line was removed.",
+  "rawEvidenceSha256": {
+    "slice37-build.log": "d17be69b67b2c6b38c22c576e715a7b32ce978a33e51d3e0b1971957f180ad3f",
+    "slice37-full-unit.log": "b0fd55e9dab67e0ff9dcb07d784957a2785c4dafa27c6720d286eb40286fd8e8",
+    "alpine-index-diagnostic-head.txt": "6e1c8134301d19f9d0adb1b9e5b476a90f8d9a2557855cb53573d08635d70bba"
+  }
+}

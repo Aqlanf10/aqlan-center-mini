@@ -51,7 +51,7 @@ describe("capability presentation", () => {
  it("navigation is a projection of current grants over accepted canonical pages only", () => {
   expect(canonicalPagesFor([], false)).toEqual([]);
   expect(canonicalPagesFor(["staff.view"], false).map(p => p.href)).toEqual(["/staff-access"]);
-  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/appointments", "/requests", "/waiting-list", "/recall", "/patients", "/finance", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
+  expect(canonicalPagesFor([], true).map(p => p.href)).toEqual(["/visits", "/appointments", "/requests", "/waiting-list", "/recall", "/patients", "/ortho", "/finance", "/staff-access", "/settings", "/inventory/procurement", "/inventory/procurement/review", "/inventory/procurement/operations", "/inventory/custody", "/inventory/procurement/setup"]);
   expect(canonicalPagesFor(["finance.shifts.view"], false, { patientScope: "none" }).map(p => p.href)).toEqual(["/finance"]);
   expect(isCanonicalPage("/finance/reports")).toBe(false);
   expect(canonicalPagesFor(["inventory.custody.view"], false).map(p => p.href)).toEqual(["/inventory/custody"]);
@@ -94,4 +94,12 @@ describe("capability presentation", () => {
   const requester = canonicalPagesFor(["inventory.requests.view"], false);
   expect(requester.includes(canonicalPageFor("/inventory/procurement/operations")!)).toBe(false);
  });
+});
+
+
+it("ortho navigation requires its own clinical grant and patient scope, never admits nested editors", () => {
+  expect(canonicalPageAllowed(canonicalPageFor("/ortho")!, ["clinical.ortho.view"], false, { patientScope: "own", appointmentScope: "none" })).toBe(true);
+  expect(canonicalPageAllowed(canonicalPageFor("/ortho")!, ["clinical.ortho.view"], false, { patientScope: "none", appointmentScope: "all" })).toBe(false);
+  expect(canonicalPageAllowed(canonicalPageFor("/ortho")!, ["clinical.plans.view"], false, { patientScope: "all" })).toBe(false);
+  expect(isCanonicalPage("/ortho/new")).toBe(false);
 });

@@ -2924,8 +2924,19 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 37: fresh fenced RR read-only clinical follow-up; patient scope before 300-case bound (hasMore). Independent appointment none/own/all projection; no absent-booking inference for none/own. Existing booking lineage/classification preserved; no contact, finance or writer UI. 2000 bookings/sessions and 2MiB selected payload bounds; legacy unchanged.",
+  "projection": {
+   "legacy": "Full board with patient phone, wires, appointment lineage and historical no-show facts; legacy doctor filtering preserved unchanged.",
+   "groups": {
+    "clinical": "clinical.ortho.view and patient scope: native case identity, phase and recorded adjustment interval; existing lapsed/retention classification only.",
+    "appointmentNone": "No appointment payload or appointment-derived buckets; a hidden booking never becomes an absence claim.",
+    "appointmentOwn": "Only bookings and historical no-show facts for the validated linked provider; no whole-patient no_appointment bucket.",
+    "appointmentAll": "All bookings for admitted patients, classified with the existing lineage projector; absence label concerns confirmed periodic follow-up, not absence of every booking.",
+    "removed": "No phone/contact action, private notes, wires, financial fields or raw plan/session/referral links. Ortho grant never widens appointment or patient scope."
+   },
+   "rows": "Central patient predicate before first 300 open cases ordered by start_date,id, with hasMore. Separate appointment scope before booking/session expansion. Fenced RR READ ONLY; 2000 bookings/sessions and 2MiB selected-row transfer bounds."
+  }
  },
  {
   "route": "/api/parties",

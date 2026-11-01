@@ -210,5 +210,7 @@
       "sha256": "8dd4f78258d24cc00d8b27e253711527ef19d02d3a703f0d3adcb75f5d7281c9",
       "bytes": 137
     }
-  }
+  },
+  "sourceRevision": "e718e9f7fcc8eead9301ad4e8d7f6b7e3776791a",
+  "sourceScope": "Historical source hashes refer to sourceRevision, not later WORK integrations."
 }

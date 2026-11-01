@@ -23575,6 +23575,15 @@ export async function listOrthoCaseSummariesWith(
   })) };
 }
 
+/** Slice 37: scope before the bounded identifier page; reuse the central patient
+ * relationship predicate. No appointment or financial fields are read here. */
+export async function listOrthoFollowupCaseIdsWith(q: Pick<DbClient, "query">, clinicianPartyId: number | null) {
+  const { rows } = await q.query<{ id: number }>(`SELECT c.id FROM ortho_cases c
+    WHERE c.status IN ('active','retention') ${clinicianPartyId === null ? "" : `AND EXISTS (SELECT 1 FROM patients WHERE patients.id=c.patient_id AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", "$1")})`}
+    ORDER BY c.start_date,c.id LIMIT 301`, clinicianPartyId === null ? [] : [clinicianPartyId]);
+  return { ids: rows.slice(0, 300).map(row => Number(row.id)), hasMore: rows.length > 300 };
+}
+
 /** M2 slice 30. A scoped clinical projection, never hydrateCases/CASE_SELECT.
  * All three SELECTs use the caller's owning RR READ ONLY snapshot. No finance,
  * document, visit or generic-note table is touched. Native ortho notes belong to
