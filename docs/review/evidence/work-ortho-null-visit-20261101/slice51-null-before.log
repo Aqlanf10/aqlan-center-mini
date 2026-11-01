@@ -1,0 +1,32 @@
+
+ RUN  v4.1.12 /workspace/aqlan-null-visit-repro
+
+No test files found, exiting with code 1
+
+filter: __tests__/postgres/ortho-null-visit-witness.test.ts
+include: __tests__/postgres/**/*.test.ts
+exclude:  **/node_modules/**, **/.git/**
+
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+error: database "aqlan_p1_test" does not exist
+ ❯ parseErrorMessage node_modules/pg-protocol/dist/parser.js:306:11
+ ❯ Parser.handlePacket node_modules/pg-protocol/dist/parser.js:143:27
+ ❯ Parser.parse node_modules/pg-protocol/dist/parser.js:37:38
+ ❯ Socket.<anonymous> node_modules/pg-protocol/dist/index.js:12:42
+ ❯ Socket.emit node:events:519:28
+ ❯ addChunk node:internal/streams/readable:561:12
+ ❯ readableAddChunkPushByteMode node:internal/streams/readable:512:3
+ ❯ Socket.Readable.push node:internal/streams/readable:392:5
+ ❯ TCP.onStreamRead node:internal/stream_base_commons:189:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { length: 99, severity: 'FATAL', code: '3D000', detail: undefined, hint: undefined, position: undefined, internalPosition: undefined, internalQuery: undefined, where: undefined, schema: undefined, table: undefined, dataType: undefined, constraint: undefined, file: 'postinit.c', routine: 'InitPostgres' }
+
+
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

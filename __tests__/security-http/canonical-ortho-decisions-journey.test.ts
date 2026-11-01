@@ -39,6 +39,23 @@ it("HTTP: no caller query can expand scope, and read grants never authorize a de
   expect((await journey.api("/api/ortho/billing-decisions", session.cookie)).status).toBe(200); expect(await snapshot()).toEqual(before); expect(await journey.ddlLog()).toEqual([]);
 });
 async function openQueue(page: import("playwright").Page, key: keyof typeof ACCOUNTS = "own") { await journey.browserLogin(page, key); await page.goto(`${journey.baseUrl}/ortho`); const panel = page.getByTestId("canonical-ortho-decisions"); await panel.getByTestId("ortho-decision-summary").waitFor(); return panel; }
+it("HTTP/browser: a legacy visit without patient ownership fails closed and clears stale queue data", async () => {
+  const context = await journey.browser.newContext();
+  try {
+    const page = await context.newPage(), panel = await openQueue(page), session = await journey.login("own");
+    const doctor = (await journey.db.query("INSERT INTO parties(kind,name) VALUES('doctor','SYN private unlinked clinician') RETURNING id")).rows[0].id;
+    const visit = (await journey.db.query("INSERT INTO visits(patient_name,doctor_id) VALUES('SYN unlinked visit',$1) RETURNING id", [doctor])).rows[0].id;
+    await journey.db.query("UPDATE ortho_adjustments SET visit_id=$1 WHERE id=$2", [visit, ids.adjustmentId]);
+    const response = await journey.api("/api/ortho/billing-decisions", session.cookie);
+    expect(response.status).toBe(500); expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({ message: "تعذّر التحقق من قائمة المراجعة؛ لم تُعتبر فارغة." });
+    await panel.getByRole("button", { name: "تحديث قائمة المراجعة" }).click(); await panel.getByRole("alert").waitFor();
+    expect(await panel.getByTestId("ortho-decision-summary").count()).toBe(0);
+    expect(await panel.textContent()).not.toMatch(/مريض مراجعة اصطناعي|SYN private|SYN unlinked/);
+    expect((await journey.db.query("SELECT patient_id FROM visits WHERE id=$1", [visit])).rows[0].patient_id).toBeNull();
+    expect((await journey.db.query("SELECT visit_id FROM ortho_adjustments WHERE id=$1", [ids.adjustmentId])).rows[0].visit_id).toBe(visit);
+  } finally { await journey.db.query("UPDATE ortho_adjustments SET visit_id=NULL WHERE id=$1", [ids.adjustmentId]); await context.close(); }
+});
 it("browser: 390px scoped queue preserves identity without decision buttons, financial data or visit access", async () => {
   const context = await journey.browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar" });
   try { const page = await context.newPage(), calls: string[] = []; page.on("request", r => { if (new URL(r.url()).pathname.startsWith("/api/")) calls.push(`${r.method()} ${new URL(r.url()).pathname}`); }); const panel = await openQueue(page);
