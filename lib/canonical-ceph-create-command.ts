@@ -1,7 +1,7 @@
 import "server-only";
 import { createCephAnalysisInTransaction, doctorOwnsPatient, getPool, insertAuditRow, patientInDoctorScopeWith, type CephPhase } from "./db";
 import type { VerifiedDurableSession } from "./staff-durable-session";
-import { assertStaffOperation, staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
+import { assertStaffOperation, staffOperationCapabilities, staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
 
 export class CanonicalCephCreateRefusal extends Error {
   constructor(readonly code: "invalid_ceph_create" | "ceph_create_not_found" | "ceph_create_conflict" | "ceph_create_reference_invalid", readonly status: 400 | 404 | 409, message: string) {
@@ -47,6 +47,10 @@ export async function commandCanonicalCephCreate(session: VerifiedDurableSession
       const { rows: [document] } = await client.query<{ mime_type: string; removed_at: Date | null }>("SELECT mime_type,removed_at FROM patient_documents WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT", [input.documentId, input.patientId]);
       if (!document || document.removed_at !== null || !document.mime_type.startsWith("image/")) throw reference();
       if (input.orthoCaseId !== null) {
+        // The same independent grant that admits the case chooser also gates a
+        // hand-crafted link. The exact operation reloads authority after waiting.
+        const grants = await staffOperationCapabilities(client, handle, action, ["clinical.ortho.view"]);
+        if (!grants.has("clinical.ortho.view")) throw new Error("STAFF_OPERATION_CAPABILITY_DENIED");
         const ortho = await client.query("SELECT id FROM ortho_cases WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT", [input.orthoCaseId, input.patientId]);
         if (!ortho.rows.length) throw reference();
       }

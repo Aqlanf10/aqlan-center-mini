@@ -10,7 +10,7 @@ const db = await import("../../lib/db"), command = await import("../../lib/canon
 const UPLOAD = { "clinical.xrays.view": true, "clinical.xrays.upload": true };
 const ACCOUNTS = {
   owner: { username: "SYN-CCR-OWNER", role: "admin" },
-  own: { username: "SYN-CCR-OWN", role: "doctor", doctor: true, patientScope: "own", grants: UPLOAD },
+  own: { username: "SYN-CCR-OWN", role: "doctor", doctor: true, patientScope: "own", grants: { ...UPLOAD, "clinical.ortho.view": true } },
   all: { username: "SYN-CCR-ALL", role: "reception", patientScope: "all", grants: UPLOAD },
   none: { username: "SYN-CCR-NONE", role: "doctor", doctor: true, patientScope: "none", grants: UPLOAD },
   unlinked: { username: "SYN-CCR-UNLINKED", role: "doctor", patientScope: "own", grants: UPLOAD },
@@ -55,7 +55,7 @@ it.each(["foreign", "missing", "removed", "non-image"] as const)("%s document re
 });
 it("foreign or missing ortho links refuse without reading or waiting on foreign content", async () => {
   const s = await scenario(), foreign = await scenario(false), ortho = Number((await fx.pool.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id", [foreign.patientId])).rows[0].id), gate = await side.connect();
-  try { await gate.query("BEGIN"); await gate.query("SELECT id FROM ortho_cases WHERE id=$1 FOR UPDATE", [ortho]); for (const id of [ortho, 2147483647]) await expect(create("all", s, { orthoCaseId: id })).rejects.toMatchObject({ code: "ceph_create_reference_invalid" }); expect(await drafts(s)).toEqual([]); }
+  try { await gate.query("BEGIN"); await gate.query("SELECT id FROM ortho_cases WHERE id=$1 FOR UPDATE", [ortho]); for (const id of [ortho, 2147483647]) await expect(create("owner", s, { orthoCaseId: id })).rejects.toMatchObject({ code: "ceph_create_reference_invalid" }); expect(await drafts(s)).toEqual([]); }
   finally { await gate.query("ROLLBACK"); gate.release(); }
 });
 it("duplicate warning excludes discarded history, stays bounded, and does not prevent a legitimate new draft", async () => {
@@ -110,4 +110,18 @@ it.each(["document", "ortho"] as const)("inverse %s lock refuses without hanging
   const s = await scenario(), ortho = Number((await fx.pool.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id", [s.patientId])).rows[0].id), gate = await side.connect();
   try { await gate.query("BEGIN"); await gate.query(`SELECT id FROM ${target === "document" ? "patient_documents" : "ortho_cases"} WHERE id=$1 FOR UPDATE`, [target === "document" ? s.documentId : ortho]); await expect(create("own", s, { orthoCaseId: ortho })).rejects.toMatchObject({ code: "ceph_create_conflict" }); expect(await drafts(s)).toEqual([]); }
   finally { await gate.query("ROLLBACK"); gate.release(); }
+});
+it("an uploader without ortho view cannot submit an undisclosed case link directly",async()=>{
+ const s=await scenario(),ortho=Number((await fx.pool.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id",[s.patientId])).rows[0].id);
+ await expect(create("all",s,{orthoCaseId:ortho})).rejects.toThrow(/CAPABILITY_DENIED/);
+ expect(await drafts(s)).toEqual([]);expect(await audits(s)).toEqual([]);
+});
+
+it("ortho view withdrawal behind the identity fence forbids an otherwise authorized link",async()=>{
+ const s=await scenario(),ortho=Number((await fx.pool.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id",[s.patientId])).rows[0].id),session=await fx.session("own"),gate=await side.connect();let pending:Promise<unknown>|undefined;
+ try{await gate.query("BEGIN");const pid=(await gate.query("SELECT pg_backend_pid() pid")).rows[0].pid;await gate.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["aqlan.canonical.identity.substrate.v1:public"]);pending=command.commandCanonicalCephCreate(session,String(s.patientId),{documentId:s.documentId,orthoCaseId:ortho});void pending.catch(()=>undefined);expect((await waitForBlockedBy(side,pid,7000)).length).toBeGreaterThan(0);
+ // Use the actual authority-writer fence. Mutating a locked user behind a
+ // patient lock instead creates an inverse-lock deadlock, not a revocation witness.
+ await gate.query("UPDATE users SET permissions=$1 WHERE id=$2",[JSON.stringify(capabilityDocument({grants:UPLOAD,patientScope:"own"},2)),fx.ids.own]);await gate.query("COMMIT");await expect(pending).rejects.toThrow(/STALE|AUTHORITY_CHANGED|CAPABILITY_DENIED/);await expect(create("own",s,{orthoCaseId:ortho})).rejects.toThrow(/CAPABILITY_DENIED/);expect(await drafts(s)).toEqual([]);expect(await audits(s)).toEqual([]);
+ }finally{await gate.query("ROLLBACK");gate.release();if(pending)await pending.catch(()=>undefined);await fx.setGrants("own",{...UPLOAD,"clinical.ortho.view":true},{patientScope:"own"});}
 });
