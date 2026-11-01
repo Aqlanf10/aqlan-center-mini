@@ -8,6 +8,7 @@ type Frame = { slots: Slot[]; cursor: number; dirty: boolean; live: boolean;
   layouts: { slot: Slot; effect: Effect }[]; effects: { slot: Slot; effect: Effect }[] };
 const runtime = vi.hoisted(() => ({
   frame: null as Frame | null,
+  destinations: [] as Array<{ tab: string; sub: string }>,
   params: { id: "7" },
   session: { username: "doctor-a", role: "doctor", permissions: null } as
     { username: string; role: string; permissions: Record<string, boolean> | null } | null,
@@ -45,8 +46,10 @@ vi.mock("@/components/patient/TodayVisitTab", () => ({ TodayVisitTab: "mock-toda
 vi.mock("@/components/patient/PatientCockpit", () => ({ PatientCockpit: "mock-cockpit" }));
 vi.mock("@/lib/patient-navigation", async (original) => ({
   ...await original<typeof import("../lib/patient-navigation")>(),
-  // These tests do not navigate tabs; retain the real initial URL parser.
-  createPatientNavigation: () => ({ navigate: () => true, dispose: () => undefined }),
+  // Observe requested destinations while keeping leaf routing out of this owner harness.
+  createPatientNavigation: () => ({ navigate: (destination: { tab: string; sub: string }) => {
+    runtime.destinations.push(destination); return true;
+  }, dispose: () => undefined }),
 }));
 
 vi.mock("react", async (original) => {
@@ -204,7 +207,7 @@ function seedFetch(patientId = 7, projection: unknown = workflow(patientId)) {
 const urls = (fetcher: ReturnType<typeof seedFetch>) => fetcher.mock.calls.map(([url]) => url);
 
 beforeEach(() => {
-  runtime.frame = null;
+  runtime.frame = null; runtime.destinations = [];
   runtime.session = { username: "doctor-a", role: "doctor", permissions: null };
   vi.stubGlobal("window", Object.assign(new EventTarget(), { location: new URL("http://test.invalid/patients/7") }));
   vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
@@ -462,3 +465,74 @@ describe("real patient page workflow owner", () => {
   });
 });
 
+
+// Public button effects, not source-shape assertions: the descriptor must retain
+// the workflow's navigation/write behavior and still consult live authority.
+describe("primary patient workflow actions", () => {
+  const primary = (tree: ReactNode): Element => {
+    const action = child(tree, "mock-cockpit").props.primaryAction;
+    if (!action || typeof action !== "object" || !("props" in action)) throw new Error("Missing primary workflow action");
+    return action as Element;
+  };
+  const click = (action: Element) => (action.props.onClick as () => void)();
+  const noVisit = () => ({ ...workflow(), openVisit: null, assessmentCases: [] });
+
+  it("continues the existing visit without creating a visit", async () => {
+    const fetcher = seedFetch(); const view = mountPage(); await flush();
+    const action = primary(view.render()); expect(words(action)).toBe("استكمال زيارة اليوم"); click(action);
+    expect(runtime.destinations).toEqual([expect.objectContaining({ tab: "today" })]);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
+  it("starts today's appointment through the existing visit endpoint then opens Today", async () => {
+    const projection = { ...noVisit(), nextAppointment: { id: 81, date: "2000-01-01", status: "confirmed" } };
+    const fetcher = seedFetch(7, projection);
+    fetcher.mockResolvedValueOnce(reply({ id: 42 })).mockResolvedValueOnce(reply(patientFile())).mockResolvedValueOnce(reply(workflow()));
+    const view = mountPage(); await flush(); const action = primary(view.render());
+    expect(words(action)).toBe("بدء زيارة اليوم"); click(action); await flush(); view.render();
+    const posts = fetcher.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(posts).toHaveLength(1); expect(posts[0][0]).toBe("/api/visits");
+    expect(JSON.parse(String(posts[0][1]?.body))).toMatchObject({ patientId: 7, patientName: "Synthetic patient 7" });
+    expect(runtime.destinations.at(-1)).toMatchObject({ tab: "today" });
+  });
+
+  it("opens collection only when the verified summary grants financial visibility", async () => {
+    const fetcher = seedFetch(7, { ...noVisit(), canSeeFinancial: true, financial: { balanceMinor: 500 } });
+    const view = mountPage(); await flush(); const action = primary(view.render());
+    expect(words(action)).toBe("تحصيل دفعة"); click(action);
+    expect(child(view.render(), "mock-collect").props.isOpen).toBe(true);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  });
+
+  it.each([["orthodontics", "ortho"], ["endodontics", "endo"], ["general", "cases"]])(
+    "routes %s assessment to %s without creating clinical data", async (specialty, sub) => {
+      const projection = { ...noVisit(), assessmentCases: [{ ...workflow().assessmentCases[0], specialty }] };
+      const fetcher = seedFetch(7, projection); const view = mountPage(); await flush();
+      const action = primary(view.render()); expect(words(action)).toContain("بدء التقييم السريري"); click(action);
+      expect(runtime.destinations).toEqual([
+        expect.objectContaining({ tab: "treatment" }), expect.objectContaining({ tab: "treatment", sub }),
+      ]);
+      expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    },
+  );
+
+  it("opens the summary for an unscheduled planned visit", async () => {
+    seedFetch(7, { ...noVisit(), plannedVisits: [{ id: 31, status: "planned", appointmentDate: null }] });
+    const view = mountPage(); await flush(); const action = primary(view.render());
+    expect(words(action)).toBe("حجز الجلسة القادمة"); click(action);
+    expect(runtime.destinations).toEqual([expect.objectContaining({ tab: "summary" })]);
+  });
+
+  it.each(["refresh", "principal"])("rejects captured navigation and visit creation after %s retirement", async (retirement) => {
+    const projection = { ...noVisit(), nextAppointment: { id: 81, date: "2000-01-01", status: "confirmed" } };
+    const fetcher = seedFetch(7, projection); const view = mountPage(); await flush();
+    const captured = primary(view.render()), pending = deferred<Reply>();
+    fetcher.mockImplementation(() => pending.promise);
+    if (retirement === "refresh") window.dispatchEvent(new Event("focus"));
+    else { runtime.session = { username: "doctor-b", role: "doctor", permissions: null }; view.render(); }
+    // Invoke before a successful replacement read can grant fresh authority.
+    click(captured); await flush();
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    expect(runtime.destinations).toHaveLength(0);
+  });
+});

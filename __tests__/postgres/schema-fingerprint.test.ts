@@ -124,7 +124,9 @@ function validateCandidate(candidate: Awaited<ReturnType<typeof generatePrefligh
   }
 }
 
-const database = `aqlan_schema_ownership_drilldown_${randomUUID().replace(/-/g, "")}`;
+// Keep the complete generated identifier within PostgreSQL's 63-byte limit;
+// the diagnostic must still match the actual database name exactly.
+const database = `aqlan_schema_ownership_drilldown_${randomUUID().replace(/-/g, "").slice(0, 30)}`;
 let client: Client;
 let maintenance: string;
 let url: string;
