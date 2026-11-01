@@ -351,7 +351,7 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     unit: "أسبوع", defaultValue: SETTING_DEFAULTS["recall.lapse_weeks"], order: 20,
     scope: "clinic", sensitivity: "normal", permission: "settings.manage" }),
   def({ key: "clinical.medication_catalog", category: "clinical", label: "دليل أدوية الوصفات", type: "JSON",
-    defaultValue: SETTING_DEFAULTS["clinical.medication_catalog"], order: 9, scope: "clinic", requiresReason: true,
+    defaultValue: SETTING_DEFAULTS["clinical.medication_catalog"], order: 9, scope: "clinic", sensitivity: "normal", requiresReason: true,
     permission: "settings.manage", description: "أسماء وأشكال وتركيزات وتعليمات مرجعية؛ ليست اعتمادًا سريريًا. إدارة مخصصة من دليل الأدوية." }),
   def({ key: "documents.max_megabytes", keywords: ["أشعة", "ملف", "حجم", "رفع", "upload", "size"],
     category: "clinical",

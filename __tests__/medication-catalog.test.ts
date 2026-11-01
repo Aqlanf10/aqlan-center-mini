@@ -1,3 +1,4 @@
+import { settingDefinition } from "../lib/settings-definitions";
 import { describe, expect, it } from 'vitest';
 import { parseMedicationCatalog, catalogTransitionProblem, catalogMedicationToDraft, catalogSelectionProblem, type CatalogMedication } from '../lib/medication-catalog';
 import { validateTypedSetting } from '../lib/settings-validate';
@@ -25,4 +26,8 @@ it('binds safety acknowledgement to catalogue revision but keeps plain acknowled
  const original=canonicalPrescriptionForAck(draft);item.selection!.catalog!.revision=2;expect(canonicalPrescriptionForAck(draft)).not.toBe(original);
  delete item.selection!.catalog;
  expect(canonicalPrescriptionForAck(draft)).toBe(JSON.stringify({ownerAuthority:null,prescribingDoctorName:'',prescribingDoctorPartyId:null,patientId:1,visitId:null,diagnosis:'',notes:'',instructionsLang:'both',items:[[item.name,item.dose,item.form,item.frequency,item.duration,item.instructions,item.instructionsEn,'manual','',false]]}));
+});
+
+it('declares catalogue as normal audited clinic metadata, never a secret or authority grant',()=>{
+ expect(settingDefinition('clinical.medication_catalog')).toMatchObject({category:'clinical',scope:'clinic',type:'JSON',sensitivity:'normal',requiresReason:true,permission:'settings.manage'});
 });
