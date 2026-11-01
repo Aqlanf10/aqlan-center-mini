@@ -668,3 +668,28 @@ Deploy remains gated on the actual target's full registry checksums/catalog and
 confirmation that the superseded Rx0090 was never applied there.
 Application rollback must preserve the columns and migration history. Exact-head
 PostgreSQL/schema/restore gates and review are required before any rollout.
+
+
+## 0093 — durable prescription issuance commands
+
+`0093_prescription_issuance_commands.sql` adds the immutable issuance receipt table,
+its prescription foreign key, final-row deferred completion/binding validation,
+and completed-receipt update/delete/nonempty-truncate guards. A command reservation,
+Rx snapshot, audit row and receipt completion commit atomically; no committed
+pending lease, timeout reclaim or post-commit receipt deletion is permitted.
+0090–0092 remain unchanged. The CLI/runtime registry and catalog validators reject
+unknown checksums or incompatible schema rather than adopting residue.
+
+Replay and read-only command recovery revalidate current credentials and clinical
+patient access; a recovered result never automatically prints. Receipt-bearing
+source patients cannot be merged, bound visits cannot be deleted or reparented,
+and nonempty command history blocks test-data reset. These are explicit protective
+limitations, not an archival or history-reassignment facility. Legacy prescriptions
+without commands retain their prior behavior.
+
+Rollout requires draining/replacing all pre-protocol issuance servers before the
+keyed UI is enabled: old servers ignore command keys and can duplicate issuance.
+Rollback to an old binary must keep issuance disabled. Do not remove the receipt
+table or rewrite history. Native PostgreSQL 18 concurrency, both official restore
+paths, exact generated schema contract and full CI remain release gates. See
+`docs/review/rx-history-integrity-20261101/PROTOCOL.md` for the complete protocol.

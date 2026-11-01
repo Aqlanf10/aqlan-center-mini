@@ -6,6 +6,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request, context: { params: Promise<{ key: string }> }) {
   const session = await readSessionPayload();
   if (!session?.credentialVersion) return NextResponse.json({ message: "سجّل الدخول من جديد." }, { status: 401 });
+  // Signed role only narrows admission; fresh database authority is still mandatory below.
+  if (session.role !== "admin" && session.role !== "doctor") return NextResponse.json({ message: "غير مصرّح لك باستعادة إصدار وصفة." }, { status: 403 });
   const { key } = await context.params;
   const query = new URL(request.url).searchParams;
   const patientId = Number(query.get("patientId")), prescribingDoctorPartyId = Number(query.get("prescribingDoctorPartyId"));

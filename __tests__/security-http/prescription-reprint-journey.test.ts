@@ -48,6 +48,12 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     expect(replay.status).toBe(201);
     expect(await replay.json()).toEqual(expect.objectContaining({ id, status: "active", replayed: true }));
     expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescription_issuance_commands WHERE command_key=$1", [body.commandKey])).rows[0].n)).toBe(1);
+    const recoveryPath = `/api/prescriptions/commands/${body.commandKey}?patientId=${patient.id}&visitId=${visit.id}&prescribingDoctorPartyId=${doctor.party_id}`;
+    const recovered = await read(recoveryPath, "doctorA");
+    expect(recovered.status).toBe(200); expect(recovered.headers.get("cache-control")).toBe("no-store");
+    expect(await recovered.json()).toEqual(expect.objectContaining({ state: "completed", id, status: "active" }));
+    expect((await read(recoveryPath, "reception")).status).toBe(403);
+    expect((await read(recoveryPath, "doctorB")).status).toBe(403);
     const before = (await db.query("SELECT * FROM prescriptions WHERE id=$1", [id])).rows[0];
     expect((typeof before.items === "string" ? JSON.parse(before.items) : before.items)[0].selection).toEqual(body.items[0].selection);
     expect(before.visit_id).toBe(visit.id); expect(before.created_by).toBe("secdoctora"); expect(before.prescribing_doctor_party_id).toBe(doctor.party_id);

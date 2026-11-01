@@ -11,3 +11,9 @@ it('uses signature-only admission then the transactional recovery authority path
  expect(mocks.recover).toHaveBeenCalledWith(expect.objectContaining({ credentialVersion: 'synthetic-signed' }), key, { patientId: 7, visitId: 9, prescribingDoctorPartyId: 5 });
 });
 it.each([null, { userId: 3 }])('rejects missing signed credential without querying recovery', async payload => { mocks.readSessionPayload.mockResolvedValue(payload); expect((await read()).status).toBe(401); expect(mocks.recover).not.toHaveBeenCalled(); });
+
+it('denies reception before parsing scope without schema-initializing auth or receipt lookup', async () => {
+ mocks.readSessionPayload.mockResolvedValue({ userId: 4, role: 'reception', credentialVersion: 'signed' });
+ const response = await GET(new Request('http://localhost/api/prescriptions/commands/invalid'), { params: Promise.resolve({ key: 'invalid' }) });
+ expect(response.status).toBe(403); expect(mocks.recover).not.toHaveBeenCalled(); expect(mocks.requireSession).not.toHaveBeenCalled();
+});
