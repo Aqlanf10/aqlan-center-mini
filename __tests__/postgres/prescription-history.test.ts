@@ -14,7 +14,15 @@ it('isolates patients/visits, retains legacy/void snapshots, and never depends o
  await fixture.source.query(`INSERT INTO prescriptions(patient_id,visit_id,created_at,status,items,void_reason) VALUES (7,9,'2026-10-31T22:30:00.123456Z','void',$1,'Synthetic void'),(7,10,'2026-10-31T22:30:00.123457Z','active',$1,NULL),(8,9,'2026-10-31T22:30:00.123458Z','active',$1,NULL)`, [JSON.stringify(items)]);
  const page = await read(7, 9); expect(page.prescriptions).toHaveLength(1);
  expect(page.prescriptions[0]).toMatchObject({ status: 'void', prescribingDoctorName: null, visitId: 9, voidReason: 'Synthetic void', items: [{ name: 'SyntheticRx', dose: '500mg', selection: { amount: '1 tablet' }, instructions: 'تعليمات أصلية' }] });
- expect(page.prescriptions[0].createdAtLabel).toContain('01'); expect(page.nextCursor).toBeNull();
+ const instant = new Date('2026-10-31T22:30:00.123456Z');
+ const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
+ // ar-YE may render Arabic digits. Assert the complete locale contract and
+ // clinic-midnight transition, never an ASCII substring inside localized text.
+ expect(page.prescriptions[0].createdAtLabel).toBe(new Intl.DateTimeFormat('ar-YE', { ...options, timeZone: 'Asia/Aden' }).format(instant));
+ expect(page.prescriptions[0].createdAtLabel).not.toBe(new Intl.DateTimeFormat('ar-YE', { ...options, timeZone: 'UTC' }).format(instant));
+ const clinicParts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { ...options, timeZone: 'Asia/Aden', numberingSystem: 'latn' }).formatToParts(instant).map(part => [part.type, part.value]));
+ expect(clinicParts).toMatchObject({ year: '2026', month: '11', day: '01', hour: '01', minute: '30' });
+ expect(page.prescriptions[0].timeZone).toBe('Asia/Aden'); expect(page.nextCursor).toBeNull();
  expect((await read(7)).prescriptions).toHaveLength(2); expect((await read(8)).prescriptions).toHaveLength(1);
 });
 it('paginates 50/51 with equal timestamps and full microseconds without duplicates or loss', async () => {
