@@ -1,0 +1,31 @@
+{
+  "preparedAt": "2026-11-01T19:25:43.021185+00:00",
+  "base": "bf71b8b9f3873513f788472ccc71cb8280bb725d",
+  "acceptance": {
+    "before": "16 passed, 2 failed: ungated workflow and helper root trailing slash",
+    "final": "23 passed in 2 files; targeted lint passed",
+    "CLI": "Both assignments passed: 164+163 normal files, 163+140 required patterns",
+    "hostedCI": "Pending corrected head; bf71 has known upload defect"
+  },
+  "limits": [
+    "60 required artifact families and 303 existing patterns retained; common reports remain required on both runners.",
+    "Existing optional settings artifact is unchanged, not a new missing-evidence exception.",
+    "327 normal files at this source, partition computed afresh by installed Vitest.",
+    "No timeout, test selection, sanitizer, hidden-file policy or retention relaxation.",
+    "An intermediate final invocation misspelled the second test filename: only18/1 ran; the final combined run explicitly covers23/2."
+  ],
+  "sourceSha256": {
+    ".github/workflows/ci.yml": "ab82032788a55f122ff749707a0303f09c6414321bc05f9afc2ee835db894fcb",
+    "scripts/dependency-security/http-evidence-owners.json": "104726566a0f871002387b11a43756b7c036d07b53e7b57e5bf14de0eeab258b",
+    "scripts/dependency-security/http-evidence-ownership.mjs": "f341ee5c44616933dd2ffb0738aeb698aee1994f2557d94580b922ab2245a6c6",
+    "__tests__/http-evidence-ownership.test.mjs": "36a46606d873cc06ae76d16ed051828fae16ba0b1f000e4d7cad906fed38b78c"
+  },
+  "evidenceSha256": {
+    "bf71-evidence-owner-final-combined.log": "a4bf189343f5f93d09ee2dd3c691badf859f4a096e0ab6499535a2e75b7bdc8f",
+    "bf71-evidence-owner-partition.json": "7a499ae0a7c86a92ad694b7b884098b53d5e19668a05ddb39a1415400665986c",
+    "bf71-evidence-owner-lint.log": "4f042f09792cfd34e287e48af58f29af40ba329d9c1219c09eaa746beb892df9",
+    "bf71-evidence-owner-before.log": "38a66cc0b9fbb30cb783fadd5f71c47ae763e233de3d8380f94cb49c37811b62",
+    "bf71-evidence-owner-final.log": "778dc6da1ea0a2e91595dd137693264026083f2479b3849e4521612f9ed0d85f",
+    "bf71-evidence-owner-corrected.log": "8a5cee7280b522b09d4322dec1f380b7b2e8003ba37f3770c3e87023da12423f"
+  }
+}
