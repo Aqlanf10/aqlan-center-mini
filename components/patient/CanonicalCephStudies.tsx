@@ -8,12 +8,13 @@ import { CEPH_READ_PHASES,isCanonicalCephList,type CanonicalCephList } from "@/l
 
 /** Read-only summary. Opening this section never mounts legacy editors or requests
  * their plan, image, assessment or financial endpoints. */
-export function CanonicalCephStudies({ patientId }: { patientId: string }) {
+export function CanonicalCephStudies({ patientId,ownerKey,canAnalyze }: { patientId: string;ownerKey:string;canAnalyze:boolean }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [feed, setFeed] = useState<CanonicalCephList | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
     let alive = true, sequence = 0;
@@ -56,6 +57,7 @@ export function CanonicalCephStudies({ patientId }: { patientId: string }) {
     </div>
     {open?<div id={regionId} className="mt-3 space-y-3" data-testid="canonical-ceph-studies">
       <p className="text-xs text-slate-600">نتائج محفوظة كما سُجلت؛ لم يُعَد حسابها، ولا تُعرض صور هنا.</p>
+      {notice ? <p role="status">{notice}</p> : null}
       {feed && !error ? <CanonicalCephReferences /> : null}
       {feed && !error && feed.analyses.length > 1 ? <CanonicalCephComparison patientId={patientId} studies={feed.analyses} /> : null}
       <button type="button" onClick={()=>{setFeed(null);setError(null);setRefresh(value=>value+1);}}
@@ -72,7 +74,7 @@ export function CanonicalCephStudies({ patientId }: { patientId: string }) {
             <div><dt>ANB (°)</dt><dd>{row.findings.anb??"—"}</dd></div><div><dt>FMA (°)</dt><dd>{row.findings.fma??"—"}</dd></div><div><dt>WITS (mm)</dt><dd>{row.findings.wits??"—"}</dd></div>
           </dl>:<p className="mt-2 text-xs text-slate-600">لا توجد قيم ملخص محفوظة؛ لم تُحسب قيم بديلة.</p>}
           {row.imageState==="unavailable"?<p className="mt-2 text-xs text-amber-800">مرجع الصورة غير متاح؛ تبقى بيانات الدراسة المحفوظة دون عرض الصورة.</p>:null}
-          <CanonicalCephStudy patientId={patientId} studyId={row.id} />
+          <CanonicalCephStudy patientId={patientId} studyId={row.id} ownerKey={ownerKey} canAnalyze={canAnalyze} onCopied={() => { setNotice("أُنشئت مسودة التصحيح وسُجّل أثرها. المسودة غير معتمدة."); setFeed(null); setRefresh(value => value + 1); }} />
         </li>)}</ul>}
       {feed?.hasMore?<p role="status" className="text-sm text-amber-800">تظهر 300 دراسة فقط؛ هذه ليست القائمة الكاملة. المسودة أولًا ثم الأحدث.</p>:null}
     </div>:null}

@@ -174,7 +174,7 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.ortho.view") && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalOrthoCases key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.xrays.view") && (session.patientScope === "own" || session.patientScope === "all"))
-        ? <CanonicalCephStudies key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
+        ? <CanonicalCephStudies key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId} ownerKey={session.username} canAnalyze={session.isOwner === true || !!session.capabilities?.includes("clinical.ceph.analyze")} /> : null}
       {session?.isOwner === true || (session?.capabilities?.includes("clinical.plans.view") && (session.patientScope === "own" || session.patientScope === "all"))
         ? <CanonicalClinicalPlans key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
       {projection.care ? <ClinicalPanels patientId={patientId} /> : null}

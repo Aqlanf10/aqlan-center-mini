@@ -25533,6 +25533,52 @@ export async function discardCephAnalysis(
  * المعالم والمعايرة تُنسخ كما هي إلى مسودة جديدة على الشععة نفسها: الطبيب يعدّل
  * ما غيّره لا يبدأ من الصفر، والمعتمد يبقى شهادةً على ما كان.
  */
+/** Original copy rules and SQL on the caller-owned transaction. The caller owns audit and commit. */
+export async function duplicateCephAnalysisInTransaction(
+  client: DbClient, id: number, by: string,
+): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
+  // DATE يُقرأ نصًّا: Date المحلي يُزيح اليوم إن أُعيد تسلسله (انظر CephAnalysisReadRow).
+  const { rows } = await client.query<CephAnalysisReadRow & { study_kind: string }>(
+    `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+  );
+  const source = rows[0];
+  if (!source) { return { ok: false, message: "التحليل غير موجود." }; }
+  if (source.status !== "completed") {
+    return { ok: false, message: "النسخ من المعتمد فقط — المسودة تُعدَّل كما هي." };
+  }
+  // مسودة أخرى قائمة؟ النسخة ستكون مسودة — فيحكمها القيد ذاته.
+  const { rows: open } = await client.query<{ n: string }>(
+    `SELECT 1 AS n FROM ceph_analyses WHERE patient_id = $1 AND status = 'draft'`,
+    [source.patient_id],
+  );
+  if (open[0]) {
+    return { ok: false, message: "للمريض مسودة مفتوحة — أكملها أو أرفضها أولًا." };
+  }
+  const { rows: created } = await client.query<{ id: number }>(
+    `INSERT INTO ceph_analyses
+       (patient_id, document_id, status, cal_x1, cal_y1, cal_x2, cal_y2, cal_mm,
+        mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind)
+     VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8,
+       $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16) RETURNING id`,
+    [
+      source.patient_id, source.document_id,
+      source.cal_x1, source.cal_y1, source.cal_x2, source.cal_y2, source.cal_mm,
+      source.mm_per_pixel,
+      `نسخة تصحيح عن التحليل #${id} (المعتمد ${source.completed_at ? new Date(source.completed_at).toISOString().slice(0, 10) : ""})`,
+      by,
+      // (ORTHO-ID) التصحيح دراسةٌ بهوية المعتمد نفسها — الحالة والمرحلة والتاريخ والجهاز والمرجع — فلا يعود T2/T3 إلى T1.
+      source.ortho_case_id, source.phase, source.xray_date_text, source.device, source.ref_set, source.study_kind,
+    ],
+  );
+  const newId = created[0].id;
+  await client.query(
+    `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
+     SELECT $2, code, x, y, source, $3 FROM ceph_landmarks WHERE analysis_id = $1`,
+    [id, newId, by],
+  );
+  return { ok: true, id: newId };
+}
+
 export async function duplicateCephAnalysis(
   id: number, by: string,
 ): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
@@ -25540,54 +25586,15 @@ export async function duplicateCephAnalysis(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // DATE يُقرأ نصًّا: Date المحلي يُزيح اليوم إن أُعيد تسلسله (انظر CephAnalysisReadRow).
-    const { rows } = await client.query<CephAnalysisReadRow & { study_kind: string }>(
-      `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
-    );
-    const source = rows[0];
-    if (!source) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    if (source.status !== "completed") {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "النسخ من المعتمد فقط — المسودة تُعدَّل كما هي." };
-    }
-    // مسودة أخرى قائمة؟ النسخة ستكون مسودة — فيحكمها القيد ذاته.
-    const { rows: open } = await client.query<{ n: string }>(
-      `SELECT 1 AS n FROM ceph_analyses WHERE patient_id = $1 AND status = 'draft'`,
-      [source.patient_id],
-    );
-    if (open[0]) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "للمريض مسودة مفتوحة — أكملها أو أرفضها أولًا." };
-    }
-    const { rows: created } = await client.query<{ id: number }>(
-      `INSERT INTO ceph_analyses
-         (patient_id, document_id, status, cal_x1, cal_y1, cal_x2, cal_y2, cal_mm,
-          mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind)
-       VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8,
-         $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16) RETURNING id`,
-      [
-        source.patient_id, source.document_id,
-        source.cal_x1, source.cal_y1, source.cal_x2, source.cal_y2, source.cal_mm,
-        source.mm_per_pixel,
-        `نسخة تصحيح عن التحليل #${id} (المعتمد ${source.completed_at ? new Date(source.completed_at).toISOString().slice(0, 10) : ""})`,
-        by,
-        // (ORTHO-ID) التصحيح دراسةٌ بهوية المعتمد نفسها — الحالة والمرحلة والتاريخ والجهاز والمرجع — فلا يعود T2/T3 إلى T1.
-        source.ortho_case_id, source.phase, source.xray_date_text, source.device, source.ref_set, source.study_kind,
-      ],
-    );
-    const newId = created[0].id;
-    await client.query(
-      `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
-       SELECT $2, code, x, y, source, $3 FROM ceph_landmarks WHERE analysis_id = $1`,
-      [id, newId, by],
-    );
+    const result = await duplicateCephAnalysisInTransaction(client, id, by);
+    if (!result.ok) { await client.query("ROLLBACK"); return result; }
     await client.query("COMMIT");
     await recordAudit({
-      action: "ceph.create", entity: "ceph_analysis", entityId: String(newId),
+      action: "ceph.create", entity: "ceph_analysis", entityId: String(result.id),
       entityLabel: `نسخة تصحيح عن #${id}`,
       actor: by,
     });
-    return { ok: true, id: newId };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     if ((error as { code?: string }).code === "23505") {

@@ -1,0 +1,97 @@
+{
+  "format": "work-ceph-copy-evidence-v1",
+  "baseRevision": "f3ce7bbb7b22ea0a4800154b6a1d7dbe037bf2a0",
+  "sourceRevision": null,
+  "buildId": "2YmZnQbtnQzGuREAMNekw",
+  "results": {
+    "postgres": {
+      "passed": 108,
+      "files": 4,
+      "invocations": 2,
+      "newTests": 25
+    },
+    "httpBrowser": {
+      "passed": 50,
+      "files": 5,
+      "invocations": 2,
+      "newTests": 13
+    },
+    "unitAndGuards": {
+      "passed": 27,
+      "files": 3,
+      "newParserTests": 17,
+      "mapGuards": 10
+    },
+    "build": "passed",
+    "typecheck": "passed",
+    "fullLint": {
+      "errors": 0,
+      "warnings": 345
+    },
+    "rawBodyGuard": "passed without exception",
+    "preservationChecks": 22,
+    "historicalSourceHashes": 554,
+    "fullUnit": "current-source rerun running; prior 14413 before copied-source guard is historical",
+    "fullPostgres": "running on isolated frozen source",
+    "exactHeadCI": "not published",
+    "independentReview": "pending",
+    "actualDocker": "blocked: existing enforced Alpine destination refusal",
+    "beforeCopiedSourceGuard": {
+      "failed": 4,
+      "passed": 1,
+      "filteredOut": 19
+    }
+  },
+  "sourceSha256": {
+    "lib/canonical-ceph-copy-command.ts": "ed4f3767975a36b927dddac43aee6e6134245519fff1998c10d2e05bb765c4f9",
+    "lib/db.ts": "c15a51215b4a8ccb825fb9b5bce64d71779e9770752bdd9cf1a7a9404b5e6f23",
+    "lib/staff-operation-runtime.ts": "c7917b5d30647830923bf358f2754604df0168a2cea6988ecdd38765ed06c0e3",
+    "app/api/ceph/[id]/duplicate/route.ts": "97f79055fd693dad3e1bf384bf63000da903931294c5477f258b009891899e19",
+    "components/patient/CanonicalCephCopy.tsx": "a00d54c67a855f66ac667fc45f9c5c3a3db18a95a050a06dfc5cda11de4cbb78",
+    "components/patient/CanonicalCephStudy.tsx": "bc0a4db6d25f6fde9c8063857efd74bb2198ddd2be6ed51a17b9247e790a4c5c",
+    "components/patient/CanonicalCephStudies.tsx": "800be153fa07baf56536b1815cd1d46b64ca57abec133caaeea8e6010f55227c",
+    "components/patient/CanonicalPatientProfile.tsx": "cd92c3fd7311244c2b792baaef208729313645add3a2bd1a3d59d2dc59f3b31d",
+    "__tests__/canonical-ceph-copy-command.test.ts": "4774b5e0bbadea86357d01563baa958e8be11260d6bdecf353643f5df1ede9bb",
+    "__tests__/postgres/ceph-copy-canonical-command.test.ts": "006763655153f3d36a40e21fe3606c264da3fc3f35ae7e2396c65a3c3e62477b",
+    "__tests__/security-http/canonical-ceph-copy-journey.test.ts": "a89dcd0b0f0ca6be1b53c9378fa97ae4e52640ab41e2dc6aefc30089fb7dff22",
+    "scripts/audits/staff-cutover-readiness.test.mjs": "4cada171b2dc21cf6a5f4e814512b107abead420f822c59e5ea342ef42318cdf",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "37a49d1dcad8e99707949330658e4fae76d3a27583a5b11934d973f591def6e5",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.md": "7b495b495b7f46acf36b9d80f6779045df3e22e4239f5819e15db2c177624d22",
+    "docs/security/staff-cutover/inventory.json": "1b95630b1ae8698569209ebbc9e53cfad3ff75d99b3540ce2339e7ccd26795b3",
+    "docs/security/staff-cutover/HANDOFF.md": "1131cc24c83e7cb4ff0cfe75df7ae7abf8b1be9f4aefe641487336eb089a1084",
+    "docs/review/work-remaining-plan-20261101.md": "d7966e72e0e0cbf8529ec9d2a6d4f63ed670a15f08d549635f53101e7bb8bbbc",
+    "docs/review/work-ceph-copy-slice46-20261101.md": "e4639459be00d556043682ce6a825edc35ab2eb0c4425629da1b68811e046451"
+  },
+  "artifacts": {
+    "ceph-copy-390.png": "ca1298a5fe6008b6e632f583da9787559d202dcf668435c6bd2513111837bb49",
+    "slice46-before-http.log": "65ceec4331b609980f1b1c032802bd85617e3f09697a77931ce3f42bb1c7f3cb",
+    "slice46-body-validated.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice46-body.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice46-build-final.log": "88ea16453af197ad88197842458e8ff78fd90a07dcc10112cc719e32459f8c08",
+    "slice46-build-first.log": "e8337913530e6ef79ae587d5f92250ecc3b60e372127bd29510030b6821cffb2",
+    "slice46-build-validated.log": "50e397bad570bc68c3206d0ba83428be43cc5f40b9af87fb89280425fcf0f35b",
+    "slice46-http-final.log": "558b74b359f3e95d5e5d3c41358b54a10704511f6df0ec9a1204978acdd7a26c",
+    "slice46-http-first.log": "0f80377c610adc88d59bb9a8e6256ba4889d87a29656f687237fc26d0634811a",
+    "slice46-http-read-regressions.log": "1c7e54016bdf91b5527fa949f837732817af41af40a9d428f8a4c4f529276388",
+    "slice46-http-validated.log": "d6d7c3e9b1aa0860f4c4cd5243c4116d936da0cf3a56d0b23a5c1c6f2174bb7f",
+    "slice46-inventory-validated.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice46-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice46-lint-full.log": "231f738bd10e3cf6a1b867cc5a2d5f4c4221a3d0fc9ea48443e1a3f4e3101469",
+    "slice46-lint-validated.log": "231f738bd10e3cf6a1b867cc5a2d5f4c4221a3d0fc9ea48443e1a3f4e3101469",
+    "slice46-pg-calendar-validated.log": "e26b8bc8765e26817df2ac0b8a523ab4484cbe67d9f4dc9aec7ba909742ace20",
+    "slice46-pg-correct-phase.log": "9b256db1caadb4a7bdb073e9ef0485b904c6325e49bec1f244a40f45c8dfaf3d",
+    "slice46-pg-expanded.log": "340bcf842afab72073bc0e5938cdc86bf10732ca71f53790759e1627123c7010",
+    "slice46-pg-first.log": "d8eb23d4518a4a88ac7b40bd8ddca1f3bb11a2f9a088494eca8bdad2dfb14707",
+    "slice46-pg-validated.log": "cbd00563b367d8c652fba6a64f5f8ca9610b57e7e0679748ab5d97007383eab3",
+    "slice46-source-proof-validated.json": "311677728cc2896c4664e5b1dde1f60daca9e091e4eb449519a1d9f10d84adb6",
+    "slice46-source-proof.json": "311677728cc2896c4664e5b1dde1f60daca9e091e4eb449519a1d9f10d84adb6",
+    "slice46-source-validity-before.log": "309b2e4be5d010f523785346f68c99e8c47b34ef4d1e66d496bd250c36cce8e6",
+    "slice46-types-final.log": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+    "slice46-types-first.log": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+    "slice46-types-validated.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice46-unit-first.log": "3ced69f83630139d75d968c44793c2b7f1f0555e9ef962d94cac9a4d7f29960b",
+    "slice46-unit-full.log": "48ad9499a0304556eb29e0d080a8ebb3f08c3dd7c32fca03b692224bfc135ff8",
+    "slice46-unit-guards.log": "3547c65ba7d3caca733eef8c7dceec29bf2a7b45d3ad503e052a619fd3678d7e",
+    "verify-slice46.py": "3cb5fd2e05b666db690094aea5b2e2bd7b80f4196d48a680159ce26fb25d1f84"
+  }
+}

@@ -515,8 +515,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Slice 46: clinical.ceph.analyze with the existing xrays.view prerequisite and current none/own/all patient scope. One admitted transaction revalidates after the patient lock, locks the approved source and same-patient retained references, preserves original copy rules and the unique current draft constraint, then commits copy and audit atomically. Stored calibration, dates, identity and raw historical landmarks are preserved; no approved measurements/diagnosis are copied or recalculated. At most 256 landmarks/2 MiB, refuse without truncation. Minimal acknowledgment; no automatic resend or durable request receipt. Legacy route/copy SQL and its existing post-commit audit remain unchanged."
  },
  {
   "route": "/api/ceph/compare",

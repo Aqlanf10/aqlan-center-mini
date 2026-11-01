@@ -2,10 +2,11 @@
 
 import { useEffect, useId, useState } from "react";
 import { isCanonicalCephStudy,type CanonicalCephStudy as SavedCephStudy } from "@/lib/canonical-ceph-projection";
+import { CanonicalCephCopy } from "./CanonicalCephCopy";
 
 /** Saved study reference only. Opening this section never mounts legacy editors or requests
  * their plan, image, assessment or financial endpoints. */
-export function CanonicalCephStudy({ patientId,studyId }: { patientId: string;studyId:number }) {
+export function CanonicalCephStudy({ patientId,studyId,ownerKey,canAnalyze,onCopied }: { patientId: string;studyId:number;ownerKey:string;canAnalyze:boolean;onCopied:()=>void }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -51,9 +52,10 @@ export function CanonicalCephStudy({ patientId,studyId }: { patientId: string;st
     {open?<section id={regionId} data-testid="canonical-ceph-study" aria-label="الدراسة المحفوظة" className="mt-3 space-y-3 [overflow-wrap:anywhere]">
       <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold text-navy-900">السجل المحفوظ للسيفالومتري</h4>
         <button type="button" onClick={()=>{setFeed(null);setError(null);setRefresh(value=>value+1);}} className="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-bold text-navy-800">تحديث الدراسة</button></div>
-      <p className="text-xs text-slate-600">عرض البيانات المسجلة فقط؛ التعديل والاعتماد غير متاحين من هذا القسم.</p>
+      <p className="text-xs text-slate-600">عرض البيانات المسجلة كما حُفظت؛ يبقى الأصل المعتمد دون تغيير.</p>
       {error?<p role="alert" className="text-sm text-red-700">{error}</p>:!feed?<p role="status">جارٍ تحميل الدراسة…</p>:<div data-testid="canonical-ceph-saved" className="space-y-3">
         {feed.analysis.status==="draft"?<p className="text-amber-800">مسودة غير معتمدة؛ القياسات والملاحظات المحفوظة هنا ليست نتائج معتمدة.</p>:<p className="text-navy-800">حالة السجل: دراسة معتمدة</p>}
+        {canAnalyze && feed.analysis.status === "completed" ? <CanonicalCephCopy key={`${ownerKey}:${patientId}:${studyId}`} patientId={patientId} studyId={studyId} ownerKey={ownerKey} onCopied={onCopied} refreshStudy={() => { setFeed(null); setRefresh(value => value + 1); }} /> : null}
         <dl className="grid gap-2 sm:grid-cols-2">
           <div><dt className="text-xs text-slate-500">الجهاز المسجل</dt><dd>{feed.analysis.device??"غير مسجل"}</dd></div>
           <div><dt className="text-xs text-slate-500">المجموعة المرجعية المسجلة</dt><dd dir="ltr">{feed.analysis.refSet}</dd></div>
