@@ -22,7 +22,8 @@
     "slice61-import-guard-isolated.log": "7846e487511d7fa72f8482cdff7ff29ed1eb79fe82ba96495d4ef8a618f5507d",
     "slice61-unit-full.log": "7d396bddd21cae4d20fe3d6363ca46b18825fac4a9aaf548e206e50892edf0e3",
     "slice61-unit-full-parentless.log": "ba028ba7fa09eb170dffb5b294f184b8a617f61f9d045c56f0fa96b4e57ed478",
-    "verify-import-parent-equivalence.cjs": "9fe67613eae87bc572df9a8858cb7043e2287cebe03f867c0635f170b5cf570d",
-    "slice61-import-guard-parentless.log": "7b20df3700d99fd0175678f4812b4e3f84d1f5e387dc29803f2c113bfc7cfb10"
-  }
+    "slice61-import-guard-parentless.log": "7b20df3700d99fd0175678f4812b4e3f84d1f5e387dc29803f2c113bfc7cfb10",
+    "verify-import-parent-equivalence.cjs.txt": "9fe67613eae87bc572df9a8858cb7043e2287cebe03f867c0635f170b5cf570d"
+  },
+  "comparisonArtifact": "Exact standalone comparison program recorded as text evidence; copy to a temporary .cjs and pass the source checkout path to reproduce. It is not a runtime or repository tool."
 }
