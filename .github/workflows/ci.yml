@@ -293,10 +293,14 @@ jobs:
   # It still rebuilds in its own runner with its own disposable PostgreSQL service.
   # Nothing from the serial security suite is omitted or marked continue-on-error.
   security_http:
-    name: Built-app HTTP security and hosted browser
+    name: Built-app HTTP security and hosted browser (${{ matrix.shard }}/2)
     needs: [quality]
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     services:
       postgres:
         image: postgres:18-alpine
@@ -354,7 +358,7 @@ jobs:
         env:
           HR_EVIDENCE_DIR: /tmp/hr-evidence
         # Raw JSON stays runner-local. Preserve Vitest's original exit status.
-        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-security-raw.json --includeTaskLocation
+        run: npm run test:security-http -- --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/http-security-raw.json --includeTaskLocation --shard=${{ matrix.shard }}/2
 
       - name: Sanitize security HTTP test locations
         if: always()
@@ -364,7 +368,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: http-security-test-locations
+          name: http-security-test-locations-${{ matrix.shard }}
           path: ${{ runner.temp }}/http-security-locations.json
           if-no-files-found: error
           retention-days: 7
@@ -383,7 +387,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: http-inventory-test-locations
+          name: http-inventory-test-locations-${{ matrix.shard }}
           path: ${{ runner.temp }}/http-inventory-locations.json
           if-no-files-found: error
           retention-days: 7
@@ -394,7 +398,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: login-reference-ui
+          name: login-reference-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/login-reference/login-1280.png
             .settings-ui-artifacts/login-reference/login-390.png
@@ -410,7 +414,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: invoice-grouped-entry-ui
+          name: invoice-grouped-entry-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/invoice-grouped-entry/grouped-1280.png
             .settings-ui-artifacts/invoice-grouped-entry/grouped-1280.json
@@ -430,7 +434,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: leadership-hub-ui
+          name: leadership-hub-ui-${{ matrix.shard }}
           path: |
             /tmp/leadership-hub-evidence/leadership-hub-populated-1440.png
             /tmp/leadership-hub-evidence/leadership-hub-populated-390.png
@@ -463,7 +467,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lab-open-backlog-ui
+          name: lab-open-backlog-ui-${{ matrix.shard }}
           path: |
             /tmp/lab-backlog-evidence/lab-backlog-summary-1280.png
             /tmp/lab-backlog-evidence/lab-backlog-summary-390.png
@@ -478,7 +482,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hr-workflow-ui
+          name: hr-workflow-ui-${{ matrix.shard }}
           path: |
             /tmp/hr-evidence/hr-workforce-390.png
             /tmp/hr-evidence/hr-profile-390.png
@@ -509,7 +513,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: daily-report-selected-date-ui
+          name: daily-report-selected-date-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/daily-report-selected-day-1280.png
             .settings-ui-artifacts/daily-report-selected-day-390.png
@@ -525,7 +529,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: daily-report-design-ui
+          name: daily-report-design-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/daily-report-design-1280.png
             .settings-ui-artifacts/daily-report-design-390.png
@@ -546,7 +550,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-statement-cutoff-ui
+          name: patient-statement-cutoff-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-statement-cutoff-screen.png
             .settings-ui-artifacts/patient-statement-cutoff-print.png
@@ -560,7 +564,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lab-pricing-ui-screenshots
+          name: lab-pricing-ui-screenshots-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/lab-pricing-scope.png
             .settings-ui-artifacts/lab-pricing-scope-mobile.png
@@ -573,7 +577,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: quick-booking-frozen-ui-screenshots
+          name: quick-booking-frozen-ui-screenshots-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/quick-booking-frozen-desktop.png
             .settings-ui-artifacts/quick-booking-frozen-mobile.png
@@ -587,7 +591,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: prescription-patient-context-ui
+          name: prescription-patient-context-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/prescription-patient-context-warning-1280.png
             .settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json
@@ -606,7 +610,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: prescription-diagnosis-ui-screenshot
+          name: prescription-diagnosis-ui-screenshot-${{ matrix.shard }}
           path: .settings-ui-artifacts/prescription-diagnosis-pinned.png
           include-hidden-files: true
           if-no-files-found: error
@@ -617,7 +621,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: positive-print-routes-ui
+          name: positive-print-routes-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/positive-print-routes/*.png
             .settings-ui-artifacts/positive-print-routes/*.pdf
@@ -631,7 +635,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: finance-report-visibility-ui-screenshots
+          name: finance-report-visibility-ui-screenshots-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/finance-report-revenue-only-1280.png
             .settings-ui-artifacts/finance-report-revenue-only-390.png
@@ -644,7 +648,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: finance-shift-read-ui-screenshots
+          name: finance-shift-read-ui-screenshots-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/finance-shift-unavailable.png
             .settings-ui-artifacts/finance-shift-draft-restored.png
@@ -657,7 +661,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: expense-catalogue-visibility-ui-screenshots
+          name: expense-catalogue-visibility-ui-screenshots-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/expense-catalogue-restricted-1280.png
             .settings-ui-artifacts/expense-catalogue-restricted-390.png
@@ -671,7 +675,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-dossier-endo-print-ui
+          name: patient-dossier-endo-print-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-dossier-endo-screen.png
             .settings-ui-artifacts/patient-dossier-endo-mobile-390.png
@@ -686,7 +690,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-statement-current-print-ui
+          name: patient-statement-current-print-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-statement-current/screen.png
             .settings-ui-artifacts/patient-statement-current/print.png
@@ -703,7 +707,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-statement-workflow-ui
+          name: patient-statement-workflow-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-statement-workflow/preview-*.png
             .settings-ui-artifacts/patient-statement-workflow/statement-*.pdf
@@ -719,7 +723,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: portal-historical-details-evidence
+          name: portal-historical-details-evidence-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/portal-historical-evidence/corrupt-history-390.png
             .settings-ui-artifacts/portal-historical-evidence/corrupt-history-1280.png
@@ -737,7 +741,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-pending-notes-ui
+          name: clinical-visit-pending-notes-ui-${{ matrix.shard }}
           path: .settings-ui-artifacts/clinical-visit-pending-notes.png
           include-hidden-files: true
           if-no-files-found: error
@@ -749,7 +753,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-owner-ui
+          name: clinical-visit-owner-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/clinical-visit-owner-pending-1280.png
             .settings-ui-artifacts/clinical-visit-owner-pending-390.png
@@ -767,7 +771,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-adjustment-wire-defaults-ui
+          name: ortho-adjustment-wire-defaults-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-adjustment-current-wires-1280.png
             .settings-ui-artifacts/ortho-adjustment-current-wires-390.png
@@ -783,7 +787,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-regimen-defaults-ui
+          name: ortho-regimen-defaults-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-regimen-ongoing-1280.png
             .settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json
@@ -810,7 +814,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-alert-freshness-ui
+          name: patient-alert-freshness-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-alert-freshness-1280.png
             .settings-ui-artifacts/patient-alert-freshness-390.png
@@ -824,7 +828,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-diagnosis-reference-ui
+          name: clinical-visit-diagnosis-reference-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png
             .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json
@@ -847,7 +851,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-ortho-entry-ui
+          name: clinical-visit-ortho-entry-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/clinical-visit-ortho-entry-1280.png
             .settings-ui-artifacts/clinical-visit-ortho-entry-390.png
@@ -860,7 +864,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: accounting-carry-forward-ui
+          name: accounting-carry-forward-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/accounting-carry-forward.png
             .settings-ui-artifacts/accounting-carry-forward-mobile.png
@@ -873,7 +877,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: manual-cash-containment-ui
+          name: manual-cash-containment-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/manual_cash_requires_linked_movement.png
             .settings-ui-artifacts/manual_cash_shift_busy.png
@@ -886,7 +890,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-navigation-draft-ui
+          name: patient-navigation-draft-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-navigation-draft-1280.png
             .settings-ui-artifacts/patient-navigation-draft-390.png
@@ -899,7 +903,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-compact-context-ui
+          name: patient-compact-context-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-compact-today-ordinary-1280.png
             .settings-ui-artifacts/patient-compact-today-ordinary-390.png
@@ -918,7 +922,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: endodontics-cockpit-ui
+          name: endodontics-cockpit-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/endodontics-cockpit-1280.png
             .settings-ui-artifacts/endodontics-cockpit-390.png
@@ -931,7 +935,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: endodontics-reference-read-safety-ui
+          name: endodontics-reference-read-safety-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/endodontics-read-denied-1280.png
             .settings-ui-artifacts/endodontics-read-denied-390.png
@@ -946,7 +950,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-cockpit-readiness-ui
+          name: patient-cockpit-readiness-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-cockpit-readiness-1280.png
             .settings-ui-artifacts/patient-cockpit-readiness-390.png
@@ -961,7 +965,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-patient-guidance-ui
+          name: legacy-patient-guidance-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/legacy-patient-plan-1280.png
             .settings-ui-artifacts/legacy-patient-plan-390.png
@@ -978,7 +982,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-diagnosis-case-ui
+          name: ortho-diagnosis-case-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-diagnosis-case-1280.png
             .settings-ui-artifacts/ortho-diagnosis-case-390.png
@@ -991,7 +995,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-archive-reader-screenshots
+          name: legacy-archive-reader-screenshots-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/legacy-archive-reader-1280.png
             .settings-ui-artifacts/legacy-archive-reader-390.png
@@ -1005,7 +1009,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-package-read-state-ui
+          name: ortho-package-read-state-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-package-unavailable-1280.png
             .settings-ui-artifacts/ortho-package-unavailable-390.png
@@ -1020,7 +1024,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: plan-payment-visibility-ui
+          name: plan-payment-visibility-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/plan-payment-hidden-1280.png
             .settings-ui-artifacts/plan-payment-hidden-390.png
@@ -1035,7 +1039,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-records-case-ui
+          name: ortho-records-case-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-records-case-1280.png
             .settings-ui-artifacts/ortho-records-references-1280.png
@@ -1055,7 +1059,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-checklist-refresh-ui
+          name: legacy-checklist-refresh-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/legacy-checklist-independent-1280.png
             .settings-ui-artifacts/legacy-checklist-independent-390.png
@@ -1070,7 +1074,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: commission-category-editor-ui
+          name: commission-category-editor-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/commission-category-editor-1280.png
             .settings-ui-artifacts/commission-category-editor-390.png
@@ -1084,7 +1088,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phone-doctor-filter-ui
+          name: phone-doctor-filter-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/phone-doctor-filter-home-390.png
             .settings-ui-artifacts/phone-doctor-filter-appointments-390.png
@@ -1098,7 +1102,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: appointment-reminder-compact-ui
+          name: appointment-reminder-compact-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/appointment-reminder-compact-1280.png
             .settings-ui-artifacts/appointment-reminder-compact-390.png
@@ -1111,7 +1115,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: settings-ui-screenshots
+          name: settings-ui-screenshots-${{ matrix.shard }}
           path: .settings-ui-artifacts/
           if-no-files-found: ignore
           retention-days: 7
@@ -1122,7 +1126,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-invoice-recovery-labels-ui
+          name: patient-invoice-recovery-labels-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/invoice-recovery-partial-1280.png
             .settings-ui-artifacts/invoice-recovery-credit-1280.png
@@ -1139,7 +1143,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-ortho-parent-read-safety-ui
+          name: patient-ortho-parent-read-safety-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png
             .settings-ui-artifacts/patient-ortho-parent-read-safety-390.png
@@ -1155,7 +1159,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-ceph-post-uncertainty-ui
+          name: patient-ceph-post-uncertainty-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-ceph-post-uncertain-1280.png
             .settings-ui-artifacts/patient-ceph-post-uncertain-390.png
@@ -1170,7 +1174,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-photo-completeness-ui
+          name: ortho-photo-completeness-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-photo-completeness-1280.png
             .settings-ui-artifacts/ortho-photo-completeness-390.png
@@ -1184,7 +1188,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-unbooked-followup-ui
+          name: ortho-unbooked-followup-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-unbooked-followup-390.png
             .settings-ui-artifacts/ortho-unbooked-followup-1280.png
@@ -1199,7 +1203,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-planned-case-followup-ui
+          name: ortho-planned-case-followup-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-planned-followup-exact-390.png
             .settings-ui-artifacts/ortho-planned-followup-exact-1280.png
@@ -1222,7 +1226,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: display-public-synthetic-ui
+          name: display-public-synthetic-ui-${{ matrix.shard }}
           path: .settings-ui-artifacts/display-public-1440.png
           include-hidden-files: true
           if-no-files-found: error
@@ -1234,7 +1238,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: today-readiness-read-lifetime-ui
+          name: today-readiness-read-lifetime-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/today-readiness-1280.png
             .settings-ui-artifacts/today-readiness-390.png
@@ -1248,7 +1252,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: service-raw-category-display-ui
+          name: service-raw-category-display-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/service-raw-category-1280.png
             .settings-ui-artifacts/service-raw-category-390.png
@@ -1262,7 +1266,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-reconciliation-preview-ui
+          name: legacy-reconciliation-preview-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/legacy-reconciliation-preview-390.png
             .settings-ui-artifacts/legacy-reconciliation-preview-1280.png
@@ -1280,7 +1284,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-cases-navigation-ui
+          name: patient-cases-navigation-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/patient-cases-navigation-1280.png
             .settings-ui-artifacts/patient-cases-navigation-390.png
@@ -1296,7 +1300,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dental-chart-read-retry-ui
+          name: dental-chart-read-retry-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/dental-chart-ready-390.png
             .settings-ui-artifacts/dental-chart-ready-1280.png
@@ -1316,7 +1320,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-prescription-truth-ui
+          name: ortho-prescription-truth-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-prescription-unrecorded-390.png
             .settings-ui-artifacts/ortho-prescription-unrecorded-1280.png
@@ -1333,7 +1337,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-booking-default-ui
+          name: ortho-booking-default-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/ortho-booking-service-390.png
             .settings-ui-artifacts/ortho-booking-service-1280.png
@@ -1350,7 +1354,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recall-mutation-refusal-ui
+          name: recall-mutation-refusal-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/recall-refusal-390.png
             .settings-ui-artifacts/recall-refusal-1280.png
@@ -1369,7 +1373,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-lab-status-refusal-ui
+          name: patient-lab-status-refusal-ui-${{ matrix.shard }}
           path: |
             .settings-ui-artifacts/lab-status-refusal-390.png
             .settings-ui-artifacts/lab-status-refusal-1280.png
