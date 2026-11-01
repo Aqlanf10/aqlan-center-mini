@@ -2854,8 +2854,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice61: exact actor-bound durable command status only under finance.agreements.manage and fresh patient scope. Same native command fingerprint and advisory fence; current authority after waits, patient/case NOWAIT locks and bounded16KiB immutable receipt projection. Missing receipt stays unresolved; no new decision, rejection, audit, financial effect, source snapshot or legacy fallback. POST/editor remain a separate contract; CI/review acceptance is separate."
  },
  {
   "route": "/api/ortho/[id]/strategy",

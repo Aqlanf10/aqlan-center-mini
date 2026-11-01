@@ -1,0 +1,69 @@
+{
+  "format": "work-ortho-coverage-status-v1",
+  "preparedAt": "2026-11-01T17:21:25.301599+00:00",
+  "baseRevision": "3acfee5d867afda56e0e9c6ad8255cea91c5fbac",
+  "buildId": "kjAZTJfRtOflAgY_0Na6p",
+  "scope": "Exact durable command status only; POST decision writer and editor separate",
+  "acceptance": {
+    "PostgreSQL": {
+      "passed": 35,
+      "files": 4,
+      "newStatusCases": 26
+    },
+    "unitFocused": {
+      "passed": 45,
+      "files": 6
+    },
+    "typeBuildLint": "passed, targeted lint0errors0warnings; earlier expanded TSC failed synthetic test query-facade/literal types, corrected without product changes",
+    "HTTPChromium": {
+      "passed": 19,
+      "files": 2,
+      "first": "15 passed4 failed because login events followed audit baselines; moved login before snapshots and retained full audit equality. No product changes or weakened invariants."
+    },
+    "fullUnit": "running; no pass claim",
+    "fullPostgreSQL": "running; no pass claim",
+    "runtime": "not yet run for this final build",
+    "exactHeadCI": "not published",
+    "independentReview": "pending"
+  },
+  "before": "Actual frozen59 build GET200 PUT401vs200. Full coverage route unchanged at60 base.",
+  "limits": [
+    "READ COMMITTED owning transaction with fences and SHARE locks; not SQL READ ONLY or RR. No status-path mutation, initializer, audit or new terminal decision.",
+    "Command identity and actor-bound fingerprint remain required. Missing receipt is unresolved, never rejection or authorization to resend.",
+    "No source snapshot, invoice amounts, file publication, financial recalculation, migration, responsibility grants or live effects.",
+    "No new recovery control/editor is implemented in this server-only contract. Explicit authenticated browser fetch is verified; existing reader and stale-response UI remain covered.",
+    "Inventory NOT_READY, Docker destination denial and absent eligible WORK image CI job, schema convergence and remaining integration/operational review remain."
+  ],
+  "sourceSha256": {
+    "app/api/ortho/[id]/followup-coverage/route.ts": "3d44da189225d581b344fc9aa8e4552166e8cd0211c1357d7a67af186b291902",
+    "lib/canonical-ortho-coverage-status.ts": "e7d6f3f292e670cfdd5b16aa9d572f78dac2c174b31746d365e46da1acbf07ac",
+    "lib/ortho-followup-coverage-db.ts": "9a39822c6f0dcf13a9673257121befe33f9ffcd97c8f2ab8054fe59a4e65c08e",
+    "lib/staff-operation-runtime.ts": "0e3033b8bcd2766aa237dfd7b667b8dc06a3752da521a4c7670aa92953ba6a89",
+    "__tests__/canonical-ortho-coverage-status.test.ts": "88d1b38c07650b388b1f33760580507cfb46763630c9ada99bfe82e1727cb5a3",
+    "__tests__/postgres/ortho-coverage-canonical-status.test.ts": "bf71d6ae9bfe92c18b16a7f2e04a86463f8b3a2520255aa8c665e97cbdf17f6e",
+    "__tests__/security-http/canonical-ortho-coverage-status-journey.test.ts": "3052ef9976d8f8be269fdf98cc7b5bbc0c1b1258f16781083f897a2c650c438b",
+    "__tests__/security-http/canonical-ortho-coverage-journey.test.ts": "cf404139108a2bf697cb94925db3500fd0dd5bb567bbeb9dded246d9eb7ee93a",
+    "scripts/audits/staff-cutover-readiness.test.mjs": "f4336ca49ac0231fd32fe33aa63207c64adaa5c378b6df92bff3b62710816893"
+  },
+  "evidenceSha256": {
+    "ortho-coverage-390.png": "ae116f65f541ae97628ffa7f054574354ac4dfdb3a5277fbca41a170d92ea866",
+    "ortho-coverage-clinic-midnight-390.png": "ae116f65f541ae97628ffa7f054574354ac4dfdb3a5277fbca41a170d92ea866",
+    "slice61-before-build-provenance.json": "928df8a160522ff25fa00f3290bbb63af3d3fff9806273ff595653364fad8b1b",
+    "slice61-build-first.log": "59ebac8361c0964b40f41e46468cda319ee62a748f75fa58845694e53558e270",
+    "slice61-design.md": "d007a7d79b62f8018afab197d9c3072ffc87be04d3923d0bfd83100a67e6151f",
+    "slice61-http-before.log": "c7d9bb728f4136ffb9fe456c232a056b086b0dc56bc8d45b959e35343c7ab0ce",
+    "slice61-http-corrected.log": "79dc2da4c7111b798c944993e08f4d373c957993c4e84861060eedaed8616125",
+    "slice61-http-first.log": "be51adcff290cb42e14a5d8263474bb1ca6ac21e72a53e53265bb67da6a825f3",
+    "slice61-inventory-first.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice61-lint-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice61-pg-expanded.log": "cd9ebb87ad6aedcbc38bdb5c8f5df0b9c28b6208c569f9e53f88e5014a03739e",
+    "slice61-pg-first.log": "3c61c7bd1fbe989649a417ca36ecdf5eb63fb4342aecbedba3d86b89c56fbcb6",
+    "slice61-product-freeze.json": "0d393d8299a40a87650b67f0ac50c26a4cb1a58beb3dc82d3a2c2ef6f7624086",
+    "slice61-source-proof.json": "92719ac7b1c8ae0072af4ff440a0750182432b34212f63286d3db4210ffa8f98",
+    "slice61-type-expanded.log": "176cda27b09085f1d1f2004d0dce88d407546c72bbe20478c90502614ac7efe3",
+    "slice61-type-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice61-type-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice61-unit-first.log": "58b67c25810a263f17732ed0e15d6a7bceb4ee90b9dff0c6ddd8a894ced6a681",
+    "work-docker-ci-availability.json": "b2fbfd03e786f7ff3a9916556ce336023b68d5d5eee1c5d6336ff3f92247efba"
+  }
+}

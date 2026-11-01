@@ -1,4 +1,5 @@
 /** Slice 48: synthetic canonical coverage read, never admission to its writers. */
+import { randomUUID } from "node:crypto";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -15,13 +16,16 @@ const ACCOUNTS = {
   adjacent: { username: "canon-cov-adjacent", password: "Canon#CoverageAdjacent1", role: "admin", display: "منحة مجاورة", patientScope: "all", grants: { "clinical.ortho.view": true } },
 } as const;
 let journey: CanonicalJourney<keyof typeof ACCOUNTS>;
+let statusCommand: unknown;
 const ids = { patient: 0, ortho: 0, outside: 0 };
 beforeAll(async () => {
   journey = await openCanonicalJourney({ portOffset: 63, secret: "canonical-coverage-secret-0123456789abcdef", accounts: ACCOUNTS, ownerKey: "owner", async seed(db, _users, parties) {
     ids.patient = (await db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-COVJ-own','مريض تجريبي',$1) RETURNING id", [parties.own!])).rows[0].id;
     ids.outside = (await db.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-COVJ-outside','مريض خارج النطاق') RETURNING id")).rows[0].id;
     ids.ortho = (await db.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id", [ids.patient])).rows[0].id;
-    await seedCanonicalCoverage(db, { patientId: ids.patient, caseId: ids.ortho, actorId: _users.owner, doctorId: parties.own!, createdAt: "2026-10-31T22:30:00.000Z" });
+    const seeded = await seedCanonicalCoverage(db, { patientId: ids.patient, caseId: ids.ortho, actorId: _users.owner, doctorId: parties.own!, createdAt: "2026-10-31T22:30:00.000Z" });
+    const { fingerprint, invoiceNumber: _invoice, serviceName: _service, ...source } = seeded.source;
+    statusCommand = { schemaVersion: 1, commandId: randomUUID(), expectedRevisionId: null, source, expectedSourceFingerprint: fingerprint, scope: "routine_adjustments", decision: "included", reason: "SYN current status request" };
   } });
 }, 300_000);
 afterAll(async () => { await journey?.close(); }, 60_000);
@@ -57,9 +61,12 @@ it("HTTP: foreign patient aliases and URL expansions cannot disclose invoice or 
 });
 it("HTTP: GET and refused command/status writes preserve money, signed proof, history and audit", async () => {
   const sql = "SELECT (SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM ortho_followup_coverage_revisions r) revisions,(SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i) invoices,(SELECT count(*) FROM audit_log)::int audits,(SELECT count(*) FROM ortho_followup_coverage_rejections)::int refusals";
-  const session = await journey.login("owner"), before = (await journey.db.query(sql)).rows;
+  const session = await journey.login("owner"), adjacent = await journey.login("adjacent"), before = (await journey.db.query(sql)).rows;
   expect((await journey.api(path(), session.cookie)).status).toBe(200);
-  for (const method of ["POST", "PUT"]) expect((await journey.api(path(), session.cookie, { method, body: "{}" })).status).toBe(401);
+  expect((await journey.api(path(), session.cookie, { method: "POST", body: "{}" })).status).toBe(401);
+  expect((await journey.api(path(), session.cookie, { method: "PUT", body: "{}" })).status).toBe(400);
+  const denied = await journey.api(path(), adjacent.cookie, { method: "PUT", body: JSON.stringify(statusCommand) });
+  expect(denied.status).toBe(403);
   expect((await journey.db.query(sql)).rows).toEqual(before); expect(await journey.ddlLog()).toEqual([]);
 });
 async function openCoverage(page: import("playwright").Page, key: keyof typeof ACCOUNTS = "ui") {

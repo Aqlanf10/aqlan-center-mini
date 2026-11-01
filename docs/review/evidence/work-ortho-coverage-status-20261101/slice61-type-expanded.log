@@ -1,0 +1,17 @@
+__tests__/postgres/ortho-coverage-canonical-status.test.ts(20,38): error TS2345: Argument of type '{ query: (sql: string, values?: unknown[]) => Promise<QueryResult<any>>; }' is not assignable to parameter of type 'Pick<Pool, "query">'.
+  Types of property 'query' are incompatible.
+    Type '(sql: string, values?: unknown[]) => Promise<QueryResult<any>>' is not assignable to type '{ <T extends Submittable>(queryStream: T): T; <R extends any[] = any[], I = any[]>(queryConfig: QueryArrayConfig<I>, values?: QueryConfigValues<I> | undefined): Promise<...>; <R extends QueryResultRow = any, I = any[]>(queryConfig: QueryConfig<...>): Promise<...>; <R extends QueryResultRow = any, I = any[]>(queryTex...'.
+      Types of parameters 'sql' and 'queryConfig' are incompatible.
+        Type 'QueryArrayConfig<any>' is not assignable to type 'string'.
+__tests__/postgres/ortho-coverage-canonical-status.test.ts(66,200): error TS2345: Argument of type 'string' is not assignable to parameter of type '"SYN-CST-OWNER" | "SYN-CST-OWN" | "SYN-CST-ALL" | "SYN-CST-NONE" | "SYN-CST-UNLINKED" | "SYN-CST-READ" | undefined'.
+__tests__/postgres/ortho-coverage-canonical-status.test.ts(67,148): error TS2345: Argument of type '"SYN incorrect actor"' is not assignable to parameter of type '"SYN-CST-OWNER" | "SYN-CST-OWN" | "SYN-CST-ALL" | "SYN-CST-NONE" | "SYN-CST-UNLINKED" | "SYN-CST-READ" | undefined'.
+__tests__/security-http/canonical-ortho-coverage-status-journey.test.ts(19,43): error TS2345: Argument of type '{ query: (sql: string, values?: unknown[]) => Promise<QueryResult<any>>; }' is not assignable to parameter of type 'Pick<Pool, "query">'.
+  Types of property 'query' are incompatible.
+    Type '(sql: string, values?: unknown[]) => Promise<QueryResult<any>>' is not assignable to type '{ <T extends Submittable>(queryStream: T): T; <R extends any[] = any[], I = any[]>(queryConfig: QueryArrayConfig<I>, values?: QueryConfigValues<I> | undefined): Promise<...>; <R extends QueryResultRow = any, I = any[]>(queryConfig: QueryConfig<...>): Promise<...>; <R extends QueryResultRow = any, I = any[]>(queryTex...'.
+      Types of parameters 'sql' and 'queryConfig' are incompatible.
+        Type 'QueryArrayConfig<any>' is not assignable to type 'string'.
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

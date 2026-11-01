@@ -1,3 +1,4 @@
+import { readCanonicalCoverageCommandStatus } from "@/lib/canonical-ortho-coverage-status";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { canonicalCoverageQuery, readCanonicalOrthoCoverage } from "@/lib/canonical-ortho-coverage";
@@ -39,6 +40,19 @@ export async function POST(request:Request,context:Context){
 }
 
 export async function PUT(request:Request,context:Context){
+  const selected=await selectRequestStaffEnvelope();
+  if(selected.kind==="denied")return NextResponse.json({message:"انتهت الجلسة. سجّل الدخول من جديد."},{status:401,headers:NO_STORE});
+  if(selected.kind==="canonical"){
+    try{
+      const {caseId,patientId}=canonicalCoverageQuery((await context.params).id,new URL(request.url).searchParams);
+      const command=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);
+      return NextResponse.json(await readCanonicalCoverageCommandStatus(selected.handle,patientId,caseId,command),{headers:NO_STORE});
+    }catch(e){
+      const bounded=bodyErrorResponse(e);if(bounded)return bounded;
+      if(e instanceof FollowupCoverageError)return error(e.message,e.status,e.code);
+      return canonicalPatientReadFailure(e,"تعذّر التحقق من نتيجة الطلب؛ يبقى معلّقًا.");
+    }
+  }
   try{const a=await admit(request,context);if(!a.ok)return a.response;
     let command:unknown;try{command=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);}catch(e){return bodyErrorResponse(e)??error("طلب غير صالح.",400);}
     return NextResponse.json(await readFollowupCoverageCommandStatus({...a,command}),{headers:{"Cache-Control":"private, no-store"}});

@@ -162,13 +162,28 @@ function exactCommand(input:CoverageCommandInput){
     fail(400,"invalid_command","طلب نطاق التغطية غير صالح.");
   return command;
 }
-async function terminalReceipt(client:DbClient,command:FollowupCoverageCommand,fingerprint:string){
-  const saved=(await client.query<Stored>(`SELECT ${columns} FROM ortho_followup_coverage_revisions WHERE command_id=$1`,[command.commandId])).rows[0];
-  const rejected=(await client.query<StoredRejection>("SELECT * FROM ortho_followup_coverage_rejections WHERE command_id=$1",[command.commandId])).rows[0];
+async function terminalReceipt(client:Runner,command:FollowupCoverageCommand,fingerprint:string,bounded=false){
+  const read = async <T>(sql:string):Promise<T|undefined> => {
+    if(!bounded)return (await client.query<T>(sql,[command.commandId])).rows[0];
+    const {rows:[row]}=await client.query<{oversized:boolean;receipt:T|null}>(`WITH candidate AS (${sql})
+      SELECT octet_length(to_jsonb(candidate)::text)>16384 AS oversized,
+        CASE WHEN octet_length(to_jsonb(candidate)::text)<=16384 THEN to_jsonb(candidate) ELSE NULL END AS receipt FROM candidate`,[command.commandId]);
+    if(row?.oversized)fail(409,"coverage_receipt_invalid","تعذّر التحقق من إيصال الطلب؛ يبقى معلّقًا.");
+    return row?.receipt??undefined;
+  };
+  const saved=await read<Stored>(`SELECT ${columns} FROM ortho_followup_coverage_revisions WHERE command_id=$1`);
+  const rejected=await read<StoredRejection>("SELECT command_id,patient_id,ortho_case_id,actor_user_id,request_fingerprint,actor,code,message,rejected_at,command FROM ortho_followup_coverage_rejections WHERE command_id=$1");
   if(saved&&rejected)fail(409,"terminal_conflict","تعارض سجل الطلب؛ لا تُنشئ طلبًا بديلًا.");
   if((saved&&saved.request_fingerprint!==fingerprint)||(rejected&&rejected.request_fingerprint!==fingerprint))
     fail(409,"command_conflict","رقم الطلب مستخدم لقرار مختلف؛ راجع السجل.");
   return saved?{state:"committed" as const,revision:project(saved)}:rejected?{state:"rejected" as const,rejection:projectRejection(rejected)}:{state:"unresolved" as const};
+}
+/** Trusted already-admitted caller on its owning transaction, after command and
+ * patient/case locks. Shares the immutable receipt and exact actor-bound request
+ * fingerprint; no initializer, authority fallback, mutation or transaction control. */
+export async function readFollowupCoverageReceiptWith(client:Runner,input:{patientId:number;orthoCaseId:number;actorUserId:number;command:FollowupCoverageCommand}){
+  const fingerprint=hash({patientId:input.patientId,orthoCaseId:input.orthoCaseId,actorUserId:input.actorUserId,command:input.command});
+  return terminalReceipt(client,input.command,fingerprint,true);
 }
 /** Read exact durable outcome; missing receipt is unresolved, never a rejection. */
 export async function readFollowupCoverageCommandStatus(input:CoverageCommandInput){

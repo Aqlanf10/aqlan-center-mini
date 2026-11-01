@@ -1,0 +1,6 @@
+{
+  "builtSource": "a9a75d866dccfb520c246747198e282314574130",
+  "buildId": "q-_8KHs4niR6vSuHDSj8Y",
+  "unchangedRouteSha256": "6c54e4a8eb7f492e320a4cd6dd7dbf25c2c320f41b07c3f7cfae2030d39c030a",
+  "qualification": "Actual frozen59 build; coverage route identical at local60 base3acfee5d. Before witness GET200 and exact status PUT401vs200."
+}
