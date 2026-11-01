@@ -55,6 +55,14 @@ it("HTTP: exact input refuses actor/finance fields, query aliases, foreign targe
   const foreign=await add(cookie,ids.next,ids.outsideItem); expect(foreign.status).toBe(404); expect(JSON.stringify(await foreign.json())).not.toMatch(/SYN outside|SELECT/);
   expect((await add(cookie,ids.prerequisite,ids.item)).status).toBe(409); expect(await auditCount()).toBe(before);
 });
+it.each([{ requirement: ["completed"] }, { requirement: { toString: "completed" } }])("HTTP: non-string requirement %# is rejected before graph or audit effects", async ({ requirement }) => {
+  const cookie = (await journey.login("own")).cookie, before = await auditCount();
+  const response = await add(cookie, ids.next, ids.item, { requiresItemId: ids.item, requirement, note: null });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ code: "invalid_plan_dependency" });
+  expect(await auditCount()).toBe(before);
+  expect((await journey.db.query("SELECT 1 FROM plan_item_dependencies WHERE item_id=$1", [ids.next])).rows).toEqual([]);
+});
 it("HTTP: deletion requires its observed edge version and stale replay never deletes a recreated edge", async () => {
   const cookie=(await journey.login("own")).cookie,before=await auditCount(),old=(await graph(cookie)).dependencies[0].version;
   expect((await erase(cookie,old)).status).toBe(200); expect((await erase(cookie,old)).status).toBe(404);

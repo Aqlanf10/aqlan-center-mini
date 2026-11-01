@@ -1,0 +1,38 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-plan-dependency-journey.test.ts (15 tests | 15 skipped) 11ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-plan-dependency-journey.test.ts [ __tests__/security-http/canonical-plan-dependency-journey.test.ts ]
+Error: SCHEMA_OWNERSHIP_UNSAFE_TARGET: TEST_DATABASE_URL must target aqlan_p1_test.
+ ❯ validateLocalVerificationTarget lib/verification-target-policy.mjs:89:11
+     87|   }
+     88|   if (databaseName !== undefined && configuredDb !== databaseName) {
+     89|     throw new Error(`${errorPrefix}: ${varName} must target ${database…
+       |           ^
+     90|   }
+     91|   if (!configuredDb.trim()) {
+ ❯ validateOwnershipHarnessEnvironment scripts/verify-schema-ownership.ts:32:19
+ ❯ validatePostgresTestTarget __tests__/postgres/_safe-target.ts:17:10
+ ❯ validateBackupTimestampFixtureTarget __tests__/postgres/_backup-timestamp-fixture.ts:13:10
+ ❯ openBackupTimestampFixture __tests__/postgres/_backup-timestamp-fixture.ts:26:18
+ ❯ openCanonicalJourney __tests__/security-http/_canonical-journey-harness.ts:77:23
+ ❯ __tests__/security-http/canonical-plan-dependency-journey.test.ts:18:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  15 skipped (15)
+   Start at  07:49:09
+   Duration  4.27s (transform 126ms, setup 0ms, import 539ms, tests 11ms, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

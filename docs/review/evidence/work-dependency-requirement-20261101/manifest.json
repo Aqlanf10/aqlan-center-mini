@@ -1,0 +1,34 @@
+{
+  "format": "strict-plan-dependency-requirement-v1",
+  "baseRevision": "e09263fa79bd627cf88b47ae0dbf59ea7b335499",
+  "sourceRevision": null,
+  "sourceSha256": {
+    "lib/canonical-plan-dependency-command.ts": "f56f474a959cdc59fb0047509b7d4951971fb81ddffc2b521e87e72b35354dde",
+    "__tests__/canonical-plan-dependency-command.test.ts": "3ba07697e87e558e96bd20fb3d359a8c520f2daaf4809629490d4baf8859d7d2",
+    "__tests__/security-http/canonical-plan-dependency-journey.test.ts": "1d9ae8af75c594789f63dfe966890c0eefc705f700fea0ab6ed6200ab36e0eed"
+  },
+  "results": {
+    "beforeUnit": "21 passed, 2 intended failures",
+    "afterUnit": {
+      "passed": 23,
+      "files": 1
+    },
+    "beforeBuiltHttp": "2 intended failures: HTTP500 instead of400; 13 deliberately filtered",
+    "afterBuiltHttp": {
+      "passed": 74,
+      "files": 6,
+      "dependencyCases": 15,
+      "buildId": "DyLznC2ConMfswaBdRqwY"
+    },
+    "publishedParserChangedOnlyByStrictTypeCheck": true,
+    "buildIncludesOtherUncommittedSlice45Changes": true,
+    "exactHeadCI": "not yet published"
+  },
+  "artifacts": {
+    "batch43-45-http-final.log": "7a8dde3325cf5fa629a34b9db5fb29af01161f2ad4905a340e5472fd1c80bc37",
+    "dependency-requirement-after-unit.log": "6bc8324b580d6c3778a0d020023fea758b9d42552b9b99865013c7c5cade0828",
+    "dependency-requirement-before-http-fixed-target.log": "b0c0946572352ca32a9e16ccb46cf5804911dcc63a2d55b48c3b0074887044c7",
+    "dependency-requirement-before-http.log": "804a918c2e39508ad7140d978b221c5ad2bbdbcff9694ad049829dbcb2d2366a",
+    "dependency-requirement-before-unit.log": "67611bbc3a1858450569ab8f9a973c22c635d663db986efd91e8ac6b2b6eb4b5"
+  }
+}

@@ -21,7 +21,7 @@ export function parseCanonicalPlanDependency(kind: "add" | "remove", rawId: stri
     if (Object.keys(row).sort().join(",") !== "expectedVersion,requiresItemId" || typeof row.expectedVersion !== "string" || !/^[a-f0-9]{64}$/.test(row.expectedVersion)) throw invalid();
     return { kind, itemId, requiresItemId: row.requiresItemId, expectedVersion: row.expectedVersion };
   }
-  if (Object.keys(row).sort().join(",") !== "note,requirement,requiresItemId" || !["completed", "clearance"].includes(String(row.requirement))
+  if (Object.keys(row).sort().join(",") !== "note,requirement,requiresItemId" || typeof row.requirement !== "string" || !["completed", "clearance"].includes(row.requirement)
     || row.note !== null && (typeof row.note !== "string" || row.note.length > 500)) throw invalid();
   return { kind, itemId, requiresItemId: row.requiresItemId, requirement: row.requirement as "completed" | "clearance", note: typeof row.note === "string" ? row.note.trim() || null : null };
 }
