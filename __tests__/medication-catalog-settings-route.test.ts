@@ -24,3 +24,12 @@ it('does not require new protocol metadata for unrelated settings',async()=>{exp
 it.each([null,[],"text",42])('rejects malformed settings body without writer calls: %j',async body=>{expect((await PATCH(req(body))).status).toBe(400);expect((await POST(req(body))).status).toBe(400);expect(mock.write).not.toHaveBeenCalled();});
 
 it('returns a permission refusal when in-transaction session authority was revoked after admission',async()=>{mock.write.mockRejectedValueOnce(new Error('MEDICATION_CATALOG_AUTHORITY_REQUIRED'));expect((await PATCH(req({[KEY]:EMPTY_MEDICATION_CATALOG,__versions:{[KEY]:null},__reason:'test',__expectedActor:'current-admin'}))).status).toBe(403);});
+
+it('retains catalogue session authority in mixed PATCH and reset batches',async()=>{
+ const values={[KEY]:EMPTY_MEDICATION_CATALOG,'clinic.name':'Synthetic clinic'};
+ const versions={[KEY]:null,'clinic.name':null};
+ expect((await PATCH(req({...values,__versions:versions,__reason:'test',__expectedActor:'current-admin'}))).status).toBe(200);
+ expect(mock.write).toHaveBeenLastCalledWith(expect.objectContaining({values,session:mock.session}));
+ expect((await POST(req({action:'reset',keys:Object.keys(values),__versions:versions,reason:'test',__expectedActor:'current-admin'}))).status).toBe(200);
+ expect(mock.write).toHaveBeenLastCalledWith(expect.objectContaining({mode:'reset',session:mock.session}));
+});

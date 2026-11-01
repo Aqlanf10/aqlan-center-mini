@@ -125,7 +125,8 @@ export async function PATCH(request: Request) {
 
     const result = await saveSettingsAudited({
       values, expected, reason,
-      actor: session.username, actorRole: session.role, session,
+      actor: session.username, actorRole: session.role,
+      ...(MEDICATION_CATALOG_KEY in values ? { session } : {}),
     });
     if (!result.ok && "problem" in result) {
       return NextResponse.json({ message: result.problem }, { status: 400 });
@@ -207,7 +208,8 @@ export async function POST(request: Request) {
     const result = await saveSettingsAudited({
       values, expected, mode: "reset",
       reason,
-      actor: session.username, actorRole: session.role, session,
+      actor: session.username, actorRole: session.role,
+      ...(MEDICATION_CATALOG_KEY in values ? { session } : {}),
     });
     if (!result.ok && "problem" in result) {
       return NextResponse.json({ message: result.problem }, { status: 400 });
