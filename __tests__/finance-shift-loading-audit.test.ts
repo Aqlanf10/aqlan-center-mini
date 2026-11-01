@@ -16,8 +16,9 @@ import type { Role } from "../lib/roles";
 const hooks = vi.hoisted(() => ({
   values: [] as unknown[], cursor: 0, changed: false,
   memo: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
-  effects: new Map<number, { effect: () => void; deps?: readonly unknown[] }>(),
+  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
   pending: [] as Array<() => void>,
+  layouts: [] as Array<() => void>,
   session: { username: "synthetic-admin", role: "admin" as Role, permissions: { financeAccess: {} as Record<string, boolean> } },
 }));
 vi.mock("react", async (original) => {
@@ -31,6 +32,16 @@ vi.mock("react", async (original) => {
     const value = compute();
     hooks.memo.set(index, { value, deps });
     return value;
+  };
+  const effect = (layout: boolean) => (run: () => void | (() => void), deps?: readonly unknown[]) => {
+    const index = hooks.cursor++;
+    const previous = hooks.effects.get(index);
+    if (previous && same(previous.deps, deps)) return;
+    (layout ? hooks.layouts : hooks.pending).push(() => {
+      previous?.cleanup?.();
+      const cleanup = run();
+      hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
+    });
   };
   return {
     ...react,
@@ -46,13 +57,8 @@ vi.mock("react", async (original) => {
     useRef: (initial: unknown) => memo(() => ({ current: initial }), []),
     useMemo: memo,
     useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
-    useEffect: (effect: () => void, deps?: readonly unknown[]) => {
-      const index = hooks.cursor++;
-      const previous = hooks.effects.get(index);
-      if (previous && same(previous.deps, deps)) return;
-      hooks.effects.set(index, { effect, deps });
-      hooks.pending.push(effect);
-    },
+    useEffect: effect(false),
+    useLayoutEffect: effect(true),
   };
 });
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
@@ -107,6 +113,7 @@ function render(page: Page) {
     hooks.cursor = 0;
     hooks.changed = false;
     tree = page();
+    hooks.layouts.splice(0).forEach((effect) => effect());
     hooks.pending.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
   return {
@@ -172,7 +179,7 @@ function expectUnknown(view: ReturnType<typeof render>) {
 }
 beforeEach(() => {
   hooks.values = []; hooks.cursor = 0; hooks.changed = false;
-  hooks.memo.clear(); hooks.effects.clear(); hooks.pending = [];
+  hooks.memo.clear(); hooks.effects.clear(); hooks.pending = []; hooks.layouts = [];
   hooks.session = { username: "synthetic-admin", role: "admin", permissions: { financeAccess: {} } };
   request = deferred<Reply>();
   fetchMock.mockReset();
@@ -191,6 +198,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
+  hooks.effects.forEach((effect) => effect.cleanup?.());
   expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   vi.unstubAllGlobals();
 });

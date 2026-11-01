@@ -33,7 +33,10 @@ vi.mock("react", async (original) => {
   const memo = (factory: () => unknown, deps?: readonly unknown[]) => {
     const index = slot(undefined); const previous = hooks.memos.get(index);
     if (previous && same(previous.deps, deps)) return previous.value;
-    const value = factory(); hooks.memos.set(index, { deps, value }); return value;
+    const value = factory();
+    // Memoized ownership identities are render snapshots, never effect storage.
+    if (value && typeof value === "object" && "scope" in value) Object.freeze(value);
+    hooks.memos.set(index, { deps, value }); return value;
   };
   const effect = (effect: () => void | (() => void), deps?: readonly unknown[]) => {
     const index = slot(undefined); const previous = hooks.effects.get(index);
