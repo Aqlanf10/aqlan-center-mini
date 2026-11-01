@@ -14,7 +14,7 @@ const ACCOUNTS = {
 } as const;
 type Key = keyof typeof ACCOUNTS;
 let journey: CanonicalJourney<Key>;
-const ids = { own: 0, outside: 0, empty: 0, active: 0, closed: 0 };
+const ids = { own: 0, outside: 0, empty: 0, active: 0, closed: 0, problem: 0 };
 beforeAll(async () => {
   journey = await openCanonicalJourney({ portOffset: 45, secret: "canonical-ortho-strategy-secret-0123456789abcdef", accounts: ACCOUNTS, ownerKey: "owner",
     async seed(db, accounts, parties) {
@@ -26,6 +26,7 @@ beforeAll(async () => {
       await db.query("INSERT INTO ortho_cases(patient_id,created_by,note) VALUES($1,'SYN','SYN-outside-private')", [ids.outside]);
       const bridgeId=(await db.query<{id:number}>("INSERT INTO clinical_cases(patient_id,specialty,title,ortho_case_id,created_by) VALUES($1,'orthodontics','SYN bridge',$2,'SYN') RETURNING id",[ids.own,ids.active])).rows[0].id;
       const problemId = (await db.query("INSERT INTO patient_problems(patient_id,case_id,label,noted_by) VALUES($1,$2,'SYN current problem','SYN') RETURNING id", [ids.own,bridgeId])).rows[0].id;
+      ids.problem = problemId;
       const planId = (await db.query("INSERT INTO treatment_plans(patient_id,title,total_minor,created_by) VALUES($1,'SYN private funding',9900,'SYN') RETURNING id", [ids.own])).rows[0].id;
       const itemId = (await db.query("INSERT INTO plan_items(plan_id,service_name,case_id) VALUES($1,'SYN current plan',$2) RETURNING id", [planId,bridgeId])).rows[0].id;
       const rows = [{problem:{id:problemId,label:"SYN مشكلة محفوظة",site:null},objective:"SYN هدف محفوظ",strategy:"SYN استراتيجية محفوظة",rationale:null,planItems:[{id:itemId,serviceName:"SYN بند خطة محجوب",toothCode:null,caseSite:null}]}];
@@ -77,8 +78,8 @@ it("HTTP: missing/outside are identical and selected history cannot bypass scope
 it("HTTP: reads and canonical rejected writes preserve strategy history, financing and audit", async () => {
   const session = await journey.login("doctor"), sql = "SELECT (SELECT count(*) FROM ortho_strategy_revisions)::int revisions,(SELECT sum(total_minor)::text FROM treatment_plans) money,(SELECT count(*) FROM audit_log)::int audits", before = (await journey.db.query(sql)).rows;
   expect((await journey.api(`/api/ortho/${ids.active}/strategy`, session.cookie)).status).toBe(200);
-  const denied = await journey.api(`/api/ortho/${ids.active}/strategy`, session.cookie, {method:"POST",body:JSON.stringify({reason:"SYN forbidden writer"})});
-  expect([401,403]).toContain(denied.status); expect((await journey.db.query(sql)).rows).toEqual(before); expect(await journey.ddlLog()).toEqual([]);
+  const denied = await journey.api(`/api/ortho/${ids.active}/strategy`, session.cookie, {method:"POST",body:JSON.stringify({schemaVersion:1,commandId:"synthetic_forbidden_strategy_001",expectedRevisionId:null,reason:"SYN forbidden writer",rows:[{problemId:ids.problem,objective:null,strategy:null,rationale:null,planItemIds:[]}]})});
+  expect(denied.status).toBe(403); expect((await journey.db.query(sql)).rows).toEqual(before); expect(await journey.ddlLog()).toEqual([]);
 });
 async function openStrategy(page: import("playwright").Page, key:Key="doctor", alreadyLoggedIn=false) {
   if (!alreadyLoggedIn) await journey.browserLogin(page,key);

@@ -2885,8 +2885,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 57: immutable strategy POST under clinical.ortho.edit and current patient scope. Existing independent clinical.plans.view/edit are required for adding, retaining, removing or replaying removal of plan links. One owned transaction, patient serialization, NOWAIT plan/reference/case/bridge locks, fresh post-wait/final authority and native snapshot/fingerprint/audit. Exact same-actor receipt is distinct from new intent. Canonical history stays within the accepted 5000-revision/8 MiB and128-reference bounds; legacy resource policy is unchanged. No treatment, finance, bridge or migration side effect. Default GET/UI remains reference-only; explicit editor admission and shared draft lifetime are the next bounded contract, not claimed here."
  },
  {
   "route": "/api/ortho/adjustments/[id]/billing-decision",

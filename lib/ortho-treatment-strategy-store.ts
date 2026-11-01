@@ -111,11 +111,11 @@ function assertUnexpired(authority: Authority): void {
   if (authority.actor.session.expiresAt < Date.now()) fail(401, "session_expired", "انتهت الجلسة. سجّل الدخول من جديد.");
 }
 
-async function lockOwner(client: DbClient, input: OwnerInput, write: boolean): Promise<LockedOwner> {
+async function lockOwner(client: DbClient, input: Pick<OwnerInput, "patientId" | "orthoCaseId">, write: boolean, nowait = false): Promise<LockedOwner> {
   // Never add a funding-plan lock after these locks. Existing item deletion
   // starts at its plan; taking the reverse order here would introduce deadlock.
   const { rows: cases } = await client.query<{ id: number; patient_id: number; status: string }>(
-    `SELECT id, patient_id, status FROM ortho_cases WHERE id = $1 AND patient_id = $2 ${write ? "FOR UPDATE" : "FOR SHARE"}`,
+    `SELECT id, patient_id, status FROM ortho_cases WHERE id = $1 AND patient_id = $2 ${write ? "FOR UPDATE" : "FOR SHARE"}${nowait ? " NOWAIT" : ""}`,
     [input.orthoCaseId, input.patientId]);
   const ortho = cases[0];
   if (!ortho || ortho.patient_id !== input.patientId) fail(404, "ortho_case_not_found", "حالة التقويم غير متاحة لهذا المريض.");
@@ -123,7 +123,7 @@ async function lockOwner(client: DbClient, input: OwnerInput, write: boolean): P
     fail(409, "invalid_case_state", "تعذّر التحقق من حالة التقويم الحالية.");
   }
   const { rows: bridges } = await client.query<{ id: number; patient_id: number; ortho_case_id: number; specialty: string }>(
-    `SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 ${write ? "FOR UPDATE" : "FOR SHARE"}`,
+    `SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 ${write ? "FOR UPDATE" : "FOR SHARE"}${nowait ? " NOWAIT" : ""}`,
     [input.orthoCaseId]);
   if (bridges.length > 1 || (bridges[0] && (bridges[0].patient_id !== ortho.patient_id || bridges[0].ortho_case_id !== ortho.id || bridges[0].specialty !== "orthodontics"))) {
     fail(409, "scope_mismatch", "الرابط السريري لا يطابق المريض وحالة التقويم المحددين.");
@@ -194,23 +194,28 @@ async function validatedHistory(client: Pick<DbClient, "query">, scope: Strategy
 export const STRATEGY_READ_MAX_REVISIONS = 5000;
 export const STRATEGY_READ_MAX_BYTES = 8 * 1024 * 1024;
 export { StoreFault as OrthoStrategyStoreFault };
-export async function readOrthoStrategyHistoryWith(q: Pick<DbClient, "query">, scope: StrategyScope) {
+export async function assertOrthoStrategyHistoryBudgetWith(q: Pick<DbClient, "query">, orthoCaseId: number) {
   const size = (await q.query<{ count: number; bytes: string }>(`SELECT count(*)::int AS count,
     COALESCE(SUM(octet_length(to_jsonb(r)::text)),0)::text AS bytes
-    FROM ortho_strategy_revisions r WHERE ortho_case_id=$1`, [scope.orthoCaseId])).rows[0];
+    FROM ortho_strategy_revisions r WHERE ortho_case_id=$1`, [orthoCaseId])).rows[0];
   if (!size || size.count > STRATEGY_READ_MAX_REVISIONS || Number(size.bytes) > STRATEGY_READ_MAX_BYTES) {
     fail(409, "strategy_history_limit", "سجل الخطة يتجاوز حد القراءة الآمنة؛ لم يُختصر التاريخ.");
   }
+}
+export async function readOrthoStrategyHistoryWith(q: Pick<DbClient, "query">, scope: StrategyScope) {
+  await assertOrthoStrategyHistoryBudgetWith(q, scope.orthoCaseId);
   return validatedHistory(q, scope);
 }
 
-function requirePlanLinks(authority: Authority, revisions: (StrategyRevision | null)[], command: StrategyCommand): void {
+function requirePlanLinks(authority: Pick<Authority, "planVisible" | "planLinksWritable">, revisions: (StrategyRevision | null)[], command: StrategyCommand): void {
   const linked = command.rows.some(row => row.planItemIds.length > 0)
     || revisions.some(revision => revision?.rows.some(row => row.planItems.length > 0));
   if (linked && (!authority.planVisible || !authority.planLinksWritable)) {
     fail(403, "plan_links_unavailable", "يلزم تصريح عرض الخطط وتعديلها عند إضافة الروابط أو الاحتفاظ بها أو حذفها.");
   }
 }
+
+export const assertStrategyPlanLinksAuthority = requirePlanLinks;
 
 async function lockReferences(client: DbClient, scope: StrategyScope, command: StrategyCommand): Promise<void> {
   const problemIds = sortedIds(command.rows.map(row => row.problemId));
@@ -227,7 +232,7 @@ async function lockReferences(client: DbClient, scope: StrategyScope, command: S
 /** Returns only minimal clinical fields. A historical ID now owned by somebody
  * else gets an identity-only unavailable marker, never that owner's data. */
 async function canonicalContext(
-  client: DbClient, scope: StrategyScope, authority: Authority, revisions: StrategyRevision[], command?: StrategyCommand,
+  client: DbClient, scope: StrategyScope, authority: Pick<Authority, "planVisible" | "clinicalWritable" | "planLinksWritable">, revisions: StrategyRevision[], command?: StrategyCommand,
 ): Promise<StrategyCanonicalContext> {
   const problemIds = sortedIds([...revisions.flatMap(revision => revision.rows.map(row => row.problem.id)),
     ...(command?.rows.map(row => row.problemId) ?? [])]);
@@ -326,17 +331,27 @@ export async function getOrthoTreatmentStrategy(
   });
 }
 
-export async function appendOrthoTreatmentStrategy(
-  input: OwnerInput & { command: unknown },
-): Promise<OrthoStrategyWriteResult> {
-  return transaction<Exclude<OrthoStrategyWriteResult, OrthoStrategyFailure>>(true, async client => {
-    validOwner(input);
-    const command = checked(checkStrategyCommand(input.command), 400);
-    const authority = await authorize(client, input, true);
-    const owner = await lockOwner(client, input, true);
+/** Supplied-connection immutable command core. Admission belongs to the caller;
+ * legacy keeps its actual session and the canonical adapter supplies fresh authority.
+ * Native fingerprint, binding, snapshots, INSERT and audit remain shared. */
+export interface StrategyAppendAuthority {
+  actor: { id: number; name: string; role: string };
+  clinicalWritable: boolean; planVisible: boolean; planLinksWritable: boolean;
+  nowait?: boolean;
+  assertCurrent(): void | Promise<void>;
+  history?: typeof validatedHistory;
+  context?(client: DbClient, scope: StrategyScope, revisions: StrategyRevision[], command?: StrategyCommand): Promise<StrategyCanonicalContext>;
+  afterInsert?(client: DbClient, scope: StrategyScope): Promise<void>;
+}
+export async function appendOrthoTreatmentStrategyWith(
+  client: DbClient, input: Pick<OwnerInput, "patientId" | "orthoCaseId">,
+  command: StrategyCommand, authority: StrategyAppendAuthority,
+): Promise<Exclude<OrthoStrategyWriteResult, OrthoStrategyFailure>> {
+    const owner = await lockOwner(client, input, true, authority.nowait);
     const scope = scopeOf(owner);
     const hash = fingerprint(command);
-    const { stored, revisions } = await validatedHistory(client, scope);
+    await authority.assertCurrent();
+    const { stored, revisions } = await (authority.history ?? validatedHistory)(client, scope);
     const replayIndex = stored.findIndex(row => row.actor_user_id === authority.actor.id && row.command_id === command.commandId);
     if (replayIndex >= 0) {
       const original = revisions[replayIndex];
@@ -345,8 +360,8 @@ export async function appendOrthoTreatmentStrategy(
       // authority. A later head or changed labels must never replace the result.
       requirePlanLinks(authority, [original, predecessor], command);
       if (stored[replayIndex].request_fingerprint !== hash) fail(409, "command_conflict", "استُخدم معرّف الحفظ لطلب مختلف.");
-      const context = await canonicalContext(client, scope, authority, [original]);
-      assertUnexpired(authority);
+      const context = await (authority.context ? authority.context(client, scope, [original]) : canonicalContext(client, scope, authority, [original]));
+      await authority.assertCurrent();
       return { ok: true, revision: checked(projectStrategyRevision(original, context), 500), replayed: true };
     }
     const previous = revisions[0] ?? null;
@@ -355,8 +370,8 @@ export async function appendOrthoTreatmentStrategy(
     await lockReferences(client, scope, command);
     // This is a fresh statement after all reference locks, so a waited-on move
     // or delete cannot pass using the pre-lock snapshot.
-    const context = await canonicalContext(client, scope, authority, [], command);
-    assertUnexpired(authority);
+    const context = await (authority.context ? authority.context(client, scope, [], command) : canonicalContext(client, scope, authority, [], command));
+    await authority.assertCurrent();
     requirePlanLinks(authority, [previous], command);
     context.clinicalWriteAllowed = authority.clinicalWritable;
     context.planVisibility = authority.planVisible ? "allowed" : "restricted";
@@ -382,14 +397,28 @@ export async function appendOrthoTreatmentStrategy(
     [revision.id, scope.patientId, revision.recordedPatientId, scope.orthoCaseId, scope.clinicalCaseId, revision.version, revision.supersedesRevisionId,
       revision.schemaVersion, authority.actor.id, revision.createdBy, revision.createdAt, command.commandId, hash,
       revision.reason, revision.recordingContext, JSON.stringify(revision.rows)]);
+    await authority.afterInsert?.(client, scope);
     await insertAuditRow(client, { action: "ortho.strategy_revision", entity: "patient", entityId: scope.patientId,
-      actor: authority.actor.name, actorRole: authority.actor.session.role,
+      actor: authority.actor.name, actorRole: authority.actor.role,
       details: { revisionId: revision.id, recordedPatientId: revision.recordedPatientId,
         orthoCaseId: scope.orthoCaseId, clinicalCaseId: scope.clinicalCaseId,
         version: revision.version, supersedesRevisionId: revision.supersedesRevisionId, actorUserId: authority.actor.id,
         recordingContext: revision.recordingContext, reason: revision.reason, rowCount: revision.rows.length,
         linkCount: revision.rows.reduce((count, row) => count + row.planItems.length, 0) } });
-    assertUnexpired(authority);
+    await authority.assertCurrent();
     return { ok: true, revision: checked(projectStrategyRevision(revision, context), 500), replayed: false };
+}
+export async function appendOrthoTreatmentStrategy(
+  input: OwnerInput & { command: unknown },
+): Promise<OrthoStrategyWriteResult> {
+  return transaction<Exclude<OrthoStrategyWriteResult, OrthoStrategyFailure>>(true, async client => {
+    validOwner(input);
+    const command = checked(checkStrategyCommand(input.command), 400);
+    const authority = await authorize(client, input, true);
+    return appendOrthoTreatmentStrategyWith(client, input, command, {
+      actor: { id: authority.actor.id, name: authority.actor.name, role: authority.actor.session.role },
+      clinicalWritable: authority.clinicalWritable, planVisible: authority.planVisible, planLinksWritable: authority.planLinksWritable,
+      assertCurrent: () => assertUnexpired(authority),
+    });
   });
 }

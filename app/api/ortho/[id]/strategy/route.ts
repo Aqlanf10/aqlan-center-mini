@@ -1,4 +1,5 @@
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
+import { commandCanonicalOrthoStrategy } from "@/lib/canonical-ortho-strategy-command";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
 import { canonicalStrategyQuery, readCanonicalOrthoStrategy } from "@/lib/canonical-ortho-strategy";
 import { OrthoStrategyStoreFault } from "@/lib/ortho-treatment-strategy-store";
@@ -70,6 +71,21 @@ export async function GET(request: Request, context: Context) {
 
 /** One explicit append-only documentation command; no treatment or financial side effects. */
 export async function POST(request: Request, context: Context) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      if ([...new URL(request.url).searchParams.keys()].length) return NextResponse.json({ message: "طلب الحفظ غير صالح." }, { status: 400, headers: NO_STORE });
+      const body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      const result = await commandCanonicalOrthoStrategy(selected.handle, (await context.params).id, body);
+      return NextResponse.json(result, { status: result.replayed ? 200 : 201, headers: NO_STORE });
+    } catch (error) {
+      const invalidBody = bodyErrorResponse(error);
+      if (invalidBody) { invalidBody.headers.set("Cache-Control", "private, no-store"); return invalidBody; }
+      if (error instanceof OrthoStrategyStoreFault) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد حفظ المراجعة؛ احتفظ بنفس الطلب للتحقق من نتيجته.");
+    }
+  }
   try {
     const owner = await scope(context, true);
     if (!owner.ok) return owner.response;
