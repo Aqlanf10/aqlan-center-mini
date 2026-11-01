@@ -67,7 +67,7 @@ function artifact(name: string, markup: string, paper: "A4" | "A5" | "A6") {
   if (!process.env.PRINT_RENDER_OUTPUT) return;
   const output = resolve(process.env.PRINT_RENDER_OUTPUT); mkdirSync(output, { recursive: true });
   const tailwind = process.env.PRINT_RENDER_TAILWIND_CSS ? readFileSync(resolve(process.env.PRINT_RENDER_TAILWIND_CSS), "utf8") : reset;
-  const css = tailwind + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + `@page { size: ${paper}; }`;
+  const css = tailwind + readFileSync(resolve("components/print-document.css"), "utf8") + readFileSync(resolve("app/print/print.css"), "utf8") + readFileSync(resolve("app/print/prescription/[id]/prescription.css"), "utf8") + `@page { size: ${paper}; }`;
   const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
   const syntheticSignature = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="520" height="70"><rect width="520" height="70" fill="white"/><text x="10" y="42" font-size="20" fill="#334155">SYNTHETIC SIGNATURE PLACEHOLDER — NOT REAL</text></svg>').toString("base64")}`;
   const body = markup.replaceAll('src="/logo.png"', `src="${logo}"`).replaceAll('href="/logo.png"', `href="${logo}"`).replaceAll('src="/api/documents/99011"', `src="${syntheticSignature}"`);
@@ -94,20 +94,22 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
     for (const text of [patient.medicalAlert, source.diagnosis, source.notes, source.prescribingDoctorName, ...Object.values(source.items[0])]) expect(html).toContain(text);
     expect(html).not.toContain("UNTRUSTED-OVERRIDE"); expect(html).not.toContain("UNTRUSTED-NOTES"); expect(html).toContain("Signature &amp; Stamp");
     if (status === "void") expect(html).toContain("VOIDED"); else expect(html).not.toContain("مسودة للمراجعة");
-    expect(source).toEqual(before); artifact(`prescription-${status}`, html, "A5");
+    expect(html).toContain("sheet sheet-a6 prescription-a6-sheet");
+    expect(html).toContain("prescription-page-identity");
+    expect(source).toEqual(before); artifact(`prescription-${status}`, html, "A6");
   });
   it("long saved prescription retains all 20 instructions across natural page breaks", async () => {
     const source = { ...prescription, items: Array.from({ length: 20 }, (_, index) => ({ ...prescription.items[0], name: `SYNTHETIC-DRUG-${String(index + 1).padStart(2, "0")} (NOT FOR USE)`, instructions: `تعليمات عربية صناعية طويلة لفحص التفاف النص وترقيم الصفحات فقط، لا تستخدم للعلاج — بند ${index + 1}` })) };
     readers.prescription.mockResolvedValue(source); const before = structuredClone(source);
     const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002" }) }));
     for (const item of source.items) { expect(html).toContain(item.name); expect(html).toContain(item.instructions); }
-    expect(source).toEqual(before); artifact("prescription-long-20", html, "A5");
+    expect(source).toEqual(before); artifact("prescription-long-20", html, "A6");
   });
   it("draft prescription remains explicitly unapproved, with no stored clinician invented", async () => {
     readers.prescription.mockResolvedValue(null);
     const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", items: JSON.stringify(reviewedDraftItems), diagnosis: "تشخيص مسودة صناعي", date: "2031-01-04", lang: "en" }) }));
     expect(html).toContain("مسودة للمراجعة"); expect(html).not.toContain("UNAPPROVED DRAFT"); expect(html).not.toContain("#fffbeb"); expect(html).toContain(prescription.items[0].instructionsEn); expect(html).not.toContain(prescription.items[0].instructions);
-    expect(html).toContain("اسم الطبيب غير موثق في المسودة"); expect(html).not.toContain("synthetic-session"); expect(html).not.toContain(prescription.createdBy); artifact("prescription-draft", html, "A5");
+    expect(html).toContain("اسم الطبيب غير موثق في المسودة"); expect(html).not.toContain("synthetic-session"); expect(html).not.toContain(prescription.createdBy); artifact("prescription-draft", html, "A6");
   });
   it("referral preserves reason, FDI, alert, urgency and recorded physician signature block", async () => {
     const before = structuredClone(referral); const html = render(await ReferralPage({ params: params(referral.id) }));

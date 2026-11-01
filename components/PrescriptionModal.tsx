@@ -1041,7 +1041,7 @@ export function PrescriptionModal({
               className="flex items-center gap-1.5 rounded-xl bg-brand-navy px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-900 transition-all disabled:opacity-50"
             >
               <Icon name="print" className="h-4 w-4" />
-              <span>{preserving ? "جارٍ حفظ الوصفة…" : "طباعة الروشتة (A5)"}</span>
+              <span>{preserving ? "جارٍ حفظ الوصفة…" : "طباعة الروشتة (A6)"}</span>
             </button>
           </div>
         </div>

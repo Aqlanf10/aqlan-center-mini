@@ -1,3 +1,4 @@
+import "./prescription.css";
 import { manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
 import { canPrintSavedPrescription } from "@/lib/prescription-print-access";
 import { prescriptionPrescriberOptions } from "@/lib/prescription-prescriber";
@@ -33,7 +34,7 @@ function parseInstructionsLang(value: string | undefined): InstructionsLang {
 }
 
 /**
- * الوصفة والروشتة الطبية السنية — مقاس A5 قياسي.
+ * الوصفة والروشتة الطبية السنية — مقاس A6 (ربع A4)، مع صفحات متابعة عند الحاجة.
  *
  * وثيقة رسمية تصدر باسم المريض بعد الكشف أو الجراحة، متضمنة التشخيص
  * والتنبيهات الطبية (الحساسية والأمراض المزمنة) وجدول الأدوية والجرعات
@@ -137,9 +138,11 @@ export default async function PrescriptionPrintPage({
   return (
     <>
       {stored ? <PrintButton docType="prescription" docId={stored.id} patientId={patientId} /> : null}
-      <div className="sheet sheet-a5">
+      <div className="sheet sheet-a6 prescription-a6-sheet">
         <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact strictIdentity />
 
+        <table className="prescription-pages"><thead><tr><td>
+        {/* Repeated by the print engine on continuation pages. */}
         {/* معلومات المريض */}
         <PrintMetadata>
           <div className="line">
@@ -159,6 +162,11 @@ export default async function PrescriptionPrintPage({
             <span>{friendlyDateLong(dateStr)}</span>
           </div>
         </PrintMetadata>
+        <div className="prescription-page-identity" dir="auto">
+          الطبيب: <bdi>{prescribingDoctorName}</bdi> · {stored ? `Rx #${stored.id}` : "مسودة غير معتمدة"}
+          <span> · بيانات الوصفة لجميع صفحاتها</span>
+        </div>
+        </td></tr></thead><tbody><tr><td>
 
         {/* تنبيه الحساسية والأمراض المزمنة */}
         {patient.medicalAlert ? (
@@ -243,14 +251,15 @@ export default async function PrescriptionPrintPage({
             return (
               <div
                 key={idx}
+                className="prescription-medication"
                 style={{
                   borderBottom: "1px dashed #cbd5e1",
                   paddingBottom: "2.5mm",
                   fontSize: "9pt",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: "2mm" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "1mm", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", minWidth: 0, alignItems: "baseline", gap: "2mm" }}>
                     <span style={{ fontWeight: 800, color: "#0f172a", fontSize: "10pt" }}>
                       {idx + 1}. {item.name}
                     </span>
@@ -307,7 +316,7 @@ export default async function PrescriptionPrintPage({
           </div>
         )}
 
-        <div className="sign-row" dir="ltr" style={{ textAlign: "left", marginTop: "12mm", alignItems: "flex-end" }}>
+        <div className="sign-row" dir="ltr" style={{ textAlign: "left", marginTop: "4mm", alignItems: "flex-end" }}>
           <div>
             <div style={{ fontSize: "8pt", color: "#64748b" }}><span dir="ltr">Physician</span> · <span dir="rtl">الطبيب المعالج</span></div>
             <div style={{ fontWeight: 800, fontSize: "9pt", marginTop: "1mm" }}>
@@ -323,6 +332,7 @@ export default async function PrescriptionPrintPage({
 
         </section>
         <PrintFooter settings={settings} strictIdentity />
+        </td></tr></tbody></table>
       </div>
     </>
   );

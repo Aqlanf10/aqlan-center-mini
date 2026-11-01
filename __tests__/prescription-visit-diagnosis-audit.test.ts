@@ -187,7 +187,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     change(medicinePlaceholder, "SyntheticDrug");
     completeManualLine();
     await ready();
-    click("طباعة الروشتة (A5)");
+    click("طباعة الروشتة (A6)");
     await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
     const writes = fetchMock.mock.calls.filter(([url, options]) => url === "/api/prescriptions" && options?.method === "POST");
     expect(writes).toHaveLength(1);
@@ -274,7 +274,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     change(medicinePlaceholder, "SyntheticDrug");
     completeManualLine();
     await ready();
-    click("طباعة الروشتة (A5)");
+    click("طباعة الروشتة (A6)");
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => url === "/api/prescriptions" && options?.method === "POST")).toBe(true));
     const post = fetchMock.mock.calls.find(([url, options]) => url === "/api/prescriptions" && options?.method === "POST");
     expect(JSON.parse(post![1].body).diagnosis).toBe("Synthetic submitted diagnosis");
@@ -320,7 +320,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     change(medicinePlaceholder, "SyntheticDrug");
     completeManualLine();
     await ready();
-    click("طباعة الروشتة (A5)");
+    click("طباعة الروشتة (A6)");
     const acknowledgement = "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا";
     await vi.waitFor(() => expect(() => render().find((node) => node.type === "button"
       && contents(node.props.children as ReactNode) === acknowledgement)).not.toThrow());
@@ -347,7 +347,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
 });
 
 describe("empty prescription caller fails closed before save or draft navigation", () => {
-  const printLabel = "طباعة الروشتة (A5)";
+  const printLabel = "طباعة الروشتة (A6)";
   const validation = "أضف دواءً واحدًا على الأقل باسم مكتوب بالإنجليزية";
   const writes = () => fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
 
@@ -438,12 +438,12 @@ it("never silently replaces a mismatched visit prescriber with the current clini
   await vi.waitFor(() => expect(contents(render().tree)).toContain("لم نغيّر الاختيار تلقائيًا"));
   const physician = render().find(node => node.props["aria-label"] === "الطبيب الواصف");
   expect(physician.props.value).toBe("Dr Visit");
-  click("إضافة دواء جديد"); change(medicinePlaceholder, "SYNTHETIC"); completeManualLine(); click("طباعة الروشتة (A5)");
+  click("إضافة دواء جديد"); change(medicinePlaceholder, "SYNTHETIC"); completeManualLine(); click("طباعة الروشتة (A6)");
   expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(0);
   const accept = render().find(node => node.type === "button" && contents(node.props.children as ReactNode).startsWith("إصدار باسمي:"));
   (accept.props.onClick as () => void)();
   expect(render().find(node => node.props["aria-label"] === "الطبيب الواصف").props.value).toBe("Dr Self");
-  click("طباعة الروشتة (A5)");
+  click("طباعة الروشتة (A6)");
   await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
   const write = fetchMock.mock.calls.find(([, options]) => options?.method === "POST");
   expect(JSON.parse(write![1].body).prescribingDoctorPartyId).toBe(5);
@@ -452,7 +452,7 @@ it("never silently replaces a mismatched visit prescriber with the current clini
 
 describe("prescriber lookup ownership and retry", () => {
   const payload = (id: number, name: string) => ({ ok: true, status: 200, json: async () => ({ suggestions: [], prescriberOptions: { issuerId: id, canChooseAnyDoctor: false, doctors: [{ id, name }] } }) });
-  const printButton = () => render().find(node => node.type === "button" && contents(node.props.children as ReactNode) === "طباعة الروشتة (A5)");
+  const printButton = () => render().find(node => node.type === "button" && contents(node.props.children as ReactNode) === "طباعة الروشتة (A6)");
   const physician = () => render().find(node => node.props["aria-label"] === "الطبيب الواصف");
   it("cannot keep a verified physician when the patient context disappears", async () => {
     fetchMock.mockResolvedValueOnce(payload(5, "Dr First")); render({ isOpen: true }); await ready();
@@ -465,7 +465,7 @@ describe("prescriber lookup ownership and retry", () => {
     render({ isOpen: true, defaultDoctorName: "Unverified name" });
     click("إضافة دواء جديد"); change(medicinePlaceholder, "SyntheticDrug");
     expect(printButton().props.disabled).toBe(true); expect(physician().props.value).toBe("");
-    click("طباعة الروشتة (A5)"); expect(openMock).not.toHaveBeenCalled();
+    click("طباعة الروشتة (A6)"); expect(openMock).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(0);
     resolve({ ok: false, status: 503 });
     await vi.waitFor(() => expect(contents(render().tree)).toContain("تعذر التحقق من هوية الطبيب الواصف"));
