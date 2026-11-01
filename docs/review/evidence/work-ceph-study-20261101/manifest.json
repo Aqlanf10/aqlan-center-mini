@@ -1,6 +1,6 @@
 {
   "base": "340e3429027bfef93b9f516272f3cf171e9599fa",
-  "status": "implemented and local unit/lint plus focused PostgreSQL/HTTP verification passed; final runtime, exact-head CI and independent review pending",
+  "status": "implemented and local verification passed; final exact-head CI and independent review pending",
   "buildId": "joFjNTOOauXbtAfOMktoe",
   "results": {
     "baselineHttp": {
@@ -47,10 +47,17 @@
     "fullLint": {
       "errors": 0,
       "warnings": 346
+    },
+    "runtime": {
+      "passed": true,
+      "buildId": "joFjNTOOauXbtAfOMktoe",
+      "traces": 737,
+      "manifests": 86,
+      "sourceMaps": 367,
+      "limits": "available validated maps only; no opaque-code absence claim"
     }
   },
   "pending": [
-    "runtime artifact proof for build joFjNTOOauXbtAfOMktoe",
     "final exact-head CI",
     "independent parent review"
   ],
@@ -156,6 +163,16 @@
     "batch-lint-final.log": {
       "rawSha256": "0436980a95b60da6cb69412151b9d707e908238083a31792e27b1caf216fa5e4",
       "publishedSha256": "0436980a95b60da6cb69412151b9d707e908238083a31792e27b1caf216fa5e4",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "batch-runtime-final.log": {
+      "rawSha256": "590be9a93594c617ac718b56158a86b218c13a5e737074d6d9d0b0819a2644eb",
+      "publishedSha256": "590be9a93594c617ac718b56158a86b218c13a5e737074d6d9d0b0819a2644eb",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "runtime-proof.json": {
+      "rawSha256": "887c1abd4fc53d03b88a9db4d3865808cbc89b1b80139f95aaf00ed9c9f9323c",
+      "publishedSha256": "887c1abd4fc53d03b88a9db4d3865808cbc89b1b80139f95aaf00ed9c9f9323c",
       "normalization": "trailing whitespace/CR only"
     }
   }

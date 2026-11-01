@@ -1,0 +1,99 @@
+{
+  "base": "5a5b25f4fcc3b79408e1ae646bbf1c3b557b5a66",
+  "failingCi": {
+    "run": 41255485597,
+    "head": "b014fe68799794066d11959f3d767ce0a3d7a05f",
+    "job": 124697649628,
+    "postgres": {
+      "failed": 3,
+      "passed": 4704,
+      "files": 378
+    }
+  },
+  "reproduction": {
+    "baseline77803ed9": {
+      "failed": 3,
+      "passed": 15
+    },
+    "before": {
+      "failed": 3,
+      "passed": 15
+    },
+    "after": {
+      "passed": 18,
+      "files": 2
+    },
+    "finalWithCutoffRegression": {
+      "passed": 18,
+      "files": 2
+    }
+  },
+  "sourceSha256": {
+    "__tests__/postgres/lab-commission-lineage.test.ts": "255db6aed8e08231b5f171651ff152f1a7fa2e259198d842d42daf1c8237cbe9",
+    "__tests__/postgres/performer-commission-reconciliation.test.ts": "16b258ac8163f1f0a227503da251077fe97e906cf87ff8313f6a30084413be5e"
+  },
+  "unchangedProduction": {
+    "lib/db.ts": {
+      "sha256": "ca59467d9f3424c0eab870564606eb438c30bb253d786d459e92510edbeb07c7",
+      "matches": "77803ed9"
+    },
+    "lib/hr-payroll.ts": {
+      "sha256": "df5db4921d350ccf7c71e64acc07b124fbe6d8689739cf3dace2b7aa93584a4d",
+      "matches": "77803ed9"
+    },
+    "lib/invoice-currency-evidence.ts": {
+      "sha256": "2f773de3ad4d81b3c2bceb6e2f7ccdb56f9e5c40720e679adcf3557c03aa74e0",
+      "matches": "77803ed9"
+    },
+    "lib/accounting.ts": {
+      "sha256": "4277871cc4b5ddb1f8b9500dc10618df10f4d4f92ca7256314dbd1ebb6076e27",
+      "matches": "77803ed9"
+    },
+    "lib/invoice-revision-db.ts": {
+      "sha256": "32dd7bfd617afdd7436a6da959ecd1e2906e06ee65f6a8cd26c3af430f5bf6f0",
+      "matches": "77803ed9"
+    }
+  },
+  "evidence": {
+    "ci-calendar-github-failure.log": {
+      "rawSha256": "ce70a33865fce7131d812aed761a7bfdb1042a1081f7554a6f1acc59cb84379b",
+      "publishedSha256": "a1a84abf3c5725ae59d8dcff785400a22c27bae6e289a1f26ab9b6ef213d9406",
+      "normalization": "trailing whitespace/CR and extra terminal blank line only"
+    },
+    "ci-calendar-before.log": {
+      "rawSha256": "2143379589502bc24b9e1211756ec114d1cde0b291ca7f734b90adf5c3ec85c2",
+      "publishedSha256": "2143379589502bc24b9e1211756ec114d1cde0b291ca7f734b90adf5c3ec85c2",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ci-calendar-baseline778.log": {
+      "rawSha256": "cf8884da73c5684c6e38961e1bf5ac37f180c389af9c01dfddd49e7c26558495",
+      "publishedSha256": "cf8884da73c5684c6e38961e1bf5ac37f180c389af9c01dfddd49e7c26558495",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ci-calendar-after.log": {
+      "rawSha256": "8804b40d7653efcc9c71be94fb941e5e0c6856dba7dd5bf4d779411da478fe4a",
+      "publishedSha256": "8804b40d7653efcc9c71be94fb941e5e0c6856dba7dd5bf4d779411da478fe4a",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ci-calendar-final.log": {
+      "rawSha256": "884fa19c48585436314dfb4cf85eae09251fd1084296d8c26e4a2d6fa421addf",
+      "publishedSha256": "884fa19c48585436314dfb4cf85eae09251fd1084296d8c26e4a2d6fa421addf",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ci-calendar-typecheck.log": {
+      "rawSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "publishedSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ci-calendar-lint.log": {
+      "rawSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "publishedSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "normalization": "trailing whitespace/CR only"
+    }
+  },
+  "checks": {
+    "typecheck": "passed",
+    "focusedLint": "passed; 0 errors, 0 warnings",
+    "fullFinalCi": "pending"
+  }
+}

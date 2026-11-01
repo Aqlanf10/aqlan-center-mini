@@ -160,7 +160,10 @@ it("refuses ambiguous active invoice lineage and rolls back payroll calculation"
     FROM lab_prescription_source_memberships WHERE invoice_item_id=$2`, [item.id, f.invoice.items[0].id]);
   await expect(report(f.doctorId)).rejects.toMatchObject({ code: "commission_lab_lineage_review", status: 409 });
   const payroll = await import("../../lib/hr-payroll");
-  const period = await payroll.getOrCreatePayrollPeriod("2026-10", actor);
+  // The writer uses PostgreSQL NOW(). Exercise the month containing this exact
+  // invoice, rather than silently excluding the ambiguity after October ends.
+  const [{ period_key }] = await q("SELECT to_char(created_at AT TIME ZONE $2,'YYYY-MM') AS period_key FROM invoices WHERE id=$1", [f.invoice.id, db.CLINIC_TIME_ZONE]);
+  const period = await payroll.getOrCreatePayrollPeriod(period_key, actor);
   const before = await q("SELECT id FROM payables ORDER BY id");
   await expect(payroll.calculatePayrollRun(period.id, "YER", actor)).rejects.toMatchObject({ name: "HrPayrollError", code: "commission_lab_lineage_review", status: 409 });
   expect(await q("SELECT id FROM hr_payroll_runs WHERE period_id=$1", [period.id])).toHaveLength(0);
