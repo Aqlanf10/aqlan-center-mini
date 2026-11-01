@@ -50,7 +50,9 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
     expect(Number((await db.query("SELECT COUNT(*) AS n FROM prescription_issuance_commands WHERE command_key=$1", [body.commandKey])).rows[0].n)).toBe(1);
     const recoveryPath = `/api/prescriptions/commands/${body.commandKey}?patientId=${patient.id}&visitId=${visit.id}&prescribingDoctorPartyId=${doctor.party_id}`;
     const recovered = await read(recoveryPath, "doctorA");
-    expect(recovered.status).toBe(200); expect(recovered.headers.get("cache-control")).toBe("no-store");
+    expect(recovered.status).toBe(200);
+    const cacheDirectives = recovered.headers.get("cache-control")?.split(",").map(value => value.trim().toLowerCase());
+    expect(cacheDirectives).toContain("no-store"); expect(cacheDirectives).not.toContain("public");
     expect(await recovered.json()).toEqual(expect.objectContaining({ state: "completed", id, status: "active" }));
     expect((await read(recoveryPath, "reception")).status).toBe(403);
     expect((await read(recoveryPath, "doctorB")).status).toBe(403);
@@ -84,7 +86,7 @@ it("doctor saves and closes visit; explicitly authorized reception reprints immu
       await mkdir(".settings-ui-artifacts/prescription-reprint", { recursive: true });
       for (const suffix of ["", `?tab=today&checkoutVisit=${visit.id}`]) {
         await page.goto(`${baseUrl}/patients/${patient.id}${suffix}`);
-        await page.getByText(/الوصفات المحفوظة — إعادة الطباعة/).click();
+        await page.locator("summary").filter({ hasText: /^الوصفات المحفوظة(?: للزيارة #\d+)?$/ }).click();
         const link = page.getByRole("link", { name: "فتح الوصفة للطباعة", exact: true }); await link.waitFor(); expect(await link.getAttribute("href")).toBe(printPath);
         await page.screenshot({ path: `.settings-ui-artifacts/prescription-reprint/${suffix ? "checkout" : "patient"}.png`, fullPage: true });
       }
