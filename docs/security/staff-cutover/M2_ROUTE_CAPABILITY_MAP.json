@@ -2781,14 +2781,14 @@
   "anyOf": [],
   "scope": "patient",
   "status": "canonical-done",
-  "note": "M2 slice 31: read:ortho.assessment; verified immutable schema2 history on one owning snapshot, separate source grants/ownership, no source-picker or writes. Legacy GET/POST unchanged.",
+  "note": "M2 slice 31 read:ortho.assessment retains verified immutable schema2 history, independent source grants and all-history ownership in one fenced RR read-only snapshot. Slice 56 adds only a descriptive edit-capability preview; POST independently reauthorizes. No source-picker, bridge creation or historical rewrite.",
   "projection": {
    "legacy": "Versioned clinical assessment/history plus mutable source choices; legacy authority and row locks.",
    "groups": {
     "clinical": "clinical.ortho.view and patient scope; exact saved revision, pinned hash verification, complete bounded history metadata and current source states",
     "imaging": "Document/ceph references and derived data require clinical.xrays.view, including every historical ancestor; no document bytes, paths, titles or unreferenced source choices",
     "care": "Patient-history/clinical-visit sources require the existing PATIENT_CARE_CAPABILITIES group; source facts are hashed privately without returning their raw payload",
-    "writes": "clinicalWritable=false; source hints explicitly incomplete and empty; no edit, bridge repair, billing or schema mutation"
+    "writes": "clinicalWritable previews clinical.ortho.edit only; it is not write authorization. Separate POST checks current scope, all historical/new sources and fresh authority after locks. Source hints remain incomplete and empty; no bridge repair, finance or schema change."
    },
    "rows": "Current patient membership, unique owned ortho bridge, revision scope and all external source ownership in the same read-only RR snapshot; missing/outside share 404"
   }
@@ -2805,8 +2805,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 56: clinical.ortho.edit (central prerequisite clinical.ortho.view) and current patient scope, no role-based fallback. One owned transaction locks the patient, sorted all-history/proposed source closure, then current positive membership and case/bridge NOWAIT. Fresh authority follows waits and audit. Reuses immutable schema2 append, existing calculator/copy validation and same-actor commandId/fingerprint receipt. Every history ancestor retains independent imaging/care grants and current ownership, including replay. Shared legacy/canonical post-insert aggregate budget rolls back overflow beyond 5000 revisions/8 MiB. Existing editor owner retains in-memory draft/exact retry bytes across parent refresh, with explicit same-request recovery and no automatic replay. No schema1 promotion, source-picker, bridge creation, finance or migration; reload does not preserve transient draft bytes."
  },
  {
   "route": "/api/ortho/[id]/followup-coverage",

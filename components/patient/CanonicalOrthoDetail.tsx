@@ -1,4 +1,5 @@
 "use client";
+import type { AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { isKnownZone } from "@/lib/clinicZone";
 import { formatClinicDate } from "@/lib/clinic-clock";
 import { CanonicalOrthoLifecycleEditor } from "./CanonicalOrthoLifecycleEditor";
@@ -8,8 +9,8 @@ import { CanonicalOrthoAssessment } from "./CanonicalOrthoAssessment";
 import { useEffect, useId, useState } from "react";
 import { PHASE_LABEL, RETAINER_LABEL, type OrthoClinicalDetail } from "@/lib/ortho";
 
-/** On-demand native clinical record. No old editors or independent image/finance APIs. */
-export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = false, canReadCoverage = false, onChanged }: { patientId: string; caseId: number; ownerKey: string; canEdit?: boolean; canReadCoverage?: boolean; onChanged: () => void }) {
+/** On-demand native clinical record. Independent image/finance APIs remain separate. */
+export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = false, canReadCoverage = false, assessmentOwnerFor, onChanged }: { patientId: string; caseId: number; ownerKey: string; canEdit?: boolean; canReadCoverage?: boolean; assessmentOwnerFor?: (caseId: number) => AssessmentOwnerV2; onChanged: () => void }) {
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -83,7 +84,7 @@ export function CanonicalOrthoDetail({ patientId, caseId, ownerKey, canEdit = fa
           </dl>
         </li>)}</ol>}
         {feed.hasMore ? <p role="status" className="text-amber-800">تظهر أحدث 100 شدّة فقط؛ هذا ليس السجل الكامل. العدد أعلاه يشمل جميع الشدّات المسجلة.</p> : null}
-        <CanonicalOrthoAssessment patientId={Number(patientId)} caseId={caseId} clinicTimeZone={feed.clinicTimeZone!} />
+        <CanonicalOrthoAssessment patientId={Number(patientId)} caseId={caseId} clinicTimeZone={feed.clinicTimeZone!} ownerFor={assessmentOwnerFor} />
         <CanonicalOrthoStrategy patientId={Number(patientId)} caseId={caseId} clinicTimeZone={feed.clinicTimeZone!} />
         {canReadCoverage ? <CanonicalOrthoCoverage patientId={Number(patientId)} caseId={caseId} /> : null}
       </>}

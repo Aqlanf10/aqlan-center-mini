@@ -24,7 +24,8 @@ export function canonicalAssessmentQuery(raw: string, params: URLSearchParams) {
 }
 
 /** Same-snapshot clinical data read. Nothing in this function grants mutation or
- * uses the legacy authority, source-picker or transaction-owning reader. */
+ * uses the legacy authority, source-picker or transaction-owning reader. The edit
+ * preview is descriptive; POST independently admits its current operation. */
 export async function readOrthoAssessmentSnapshotWith(q: CanonicalSnapshotQuery, authority: CanonicalSnapshotScope, caseId: number, revisionId?: number): Promise<AssessmentReadResponseV2> {
   const found = (await q.query<{ patient_id: number; status: string }>(
     "SELECT c.patient_id,c.status FROM ortho_cases c JOIN patients p ON p.id=c.patient_id WHERE c.id=$1", [caseId],
@@ -40,7 +41,7 @@ export async function readOrthoAssessmentSnapshotWith(q: CanonicalSnapshotQuery,
   const imaging = authority.granted("clinical.xrays.view");
   const care = PATIENT_CARE_CAPABILITIES.some(capability => authority.granted(capability));
   const common = { ok: true as const, representation: 2 as const, patientId: found.patient_id, orthoCaseId: caseId,
-    recordingContext: orthoDocumentationContext(found.status), clinicalWritable: false };
+    recordingContext: orthoDocumentationContext(found.status), clinicalWritable: authority.granted("clinical.ortho.edit") };
   if (!bridges.length) {
     if ((await q.query("SELECT id FROM ortho_assessment_revisions WHERE ortho_case_id=$1 LIMIT 1", [caseId])).rows.length) assessmentFail(409, "scope_mismatch", "سجل موجود فقد رابطه السريري؛ لم يُخفَ السجل.");
     if (revisionId !== undefined) assessmentFail(404, "revision_not_found", "المراجعة غير متاحة.");

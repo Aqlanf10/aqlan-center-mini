@@ -1,7 +1,8 @@
 "use client";
 
+import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { CanonicalOrthoDetail } from "./CanonicalOrthoDetail";
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, PHASE_LABEL, usesArchwires, type OrthoCaseSummaryFeed } from "@/lib/ortho";
 
 /** Clinical summary with independently authorized native lifecycle actions.
@@ -14,11 +15,52 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
   const [refresh, setRefresh] = useState(0);
   const [feed, setFeed] = useState<OrthoCaseSummaryFeed | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Reuse the existing assessment owner across list/detail polling unmounts.
+  // Clinical text stays only in this exact patient/session component lifetime.
+  const assessments = useRef({ active: false, denied: false, allowed: new Set<number>(), owners: new Map<number, AssessmentOwnerV2>() });
+  useLayoutEffect(() => {
+    const registry = assessments.current; registry.active = true;
+    return () => { registry.active = false; for (const owner of registry.owners.values()) owner.retire(); registry.owners.clear(); };
+  }, [assessments]);
+  const assessmentOwnerFor = useCallback((id: number) => {
+    const existing = assessments.current.owners.get(id); if (existing) return existing;
+    const owner = makeAssessmentOwnerV2({ patientId: Number(patientId), orthoCaseId: id,
+      authorized: () => assessments.current.active && !assessments.current.denied && canEdit && assessments.current.allowed.has(id),
+      deny: () => {
+        assessments.current.denied = true; assessments.current.allowed.clear();
+        for (const saved of assessments.current.owners.values()) saved.retire();
+        setFeed(null); setError("انتهت صلاحية التوثيق. أعد التحقق من الجلسة قبل فتح أي مسودة.");
+      },
+    });
+    assessments.current.owners.set(id, owner); return owner;
+  }, [assessments, canEdit, patientId]);
+  const canLeaveAssessments = useCallback(() => {
+    if ([...assessments.current.owners.values()].some(owner => !owner.canLeave(() => true))) {
+      setNotice("هناك طلب تقييم جارٍ أو نتيجته غير مؤكدة. افتح التقييم وتحقق من الطلب نفسه قبل المغادرة."); return false;
+    }
+    return ![...assessments.current.owners.values()].some(owner => owner.needsUnloadWarning())
+      || window.confirm("هناك تقييم غير محفوظ. هل تريد تجاهل المسودة ومغادرة القسم؟");
+  }, [assessments]);
+  useEffect(() => {
+    const unload = (event: BeforeUnloadEvent) => {
+      if ([...assessments.current.owners.values()].some(owner => owner.needsUnloadWarning())) { event.preventDefault(); event.returnValue = ""; }
+    };
+    const navigate = (event: MouseEvent) => {
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!anchor || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || anchor.getAttribute("target") === "_blank") return;
+      const destination = new URL(anchor.getAttribute("href")!, window.location.href);
+      if (anchor.hasAttribute("download") || destination.origin !== window.location.origin
+        || destination.pathname === window.location.pathname && destination.search === window.location.search) return;
+      if (!canLeaveAssessments()) { event.preventDefault(); event.stopImmediatePropagation(); }
+    };
+    window.addEventListener("beforeunload", unload); document.addEventListener("click", navigate, true);
+    return () => { window.removeEventListener("beforeunload", unload); document.removeEventListener("click", navigate, true); };
+  }, [assessments, canLeaveAssessments]);
   useEffect(() => {
     if (!open) return;
     let alive = true, sequence = 0;
     let controller: AbortController | undefined;
-    const clear = () => { sequence++; controller?.abort(); setFeed(null); setError(null); };
+    const clear = () => { sequence++; controller?.abort(); assessments.current.allowed.clear(); for (const owner of assessments.current.owners.values()) owner.invalidateRead(); setFeed(null); setError(null); };
     const load = async () => {
       clear();
       if (document.visibilityState === "hidden") return;
@@ -30,11 +72,15 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
         const response = await fetch(`/api/ortho?patientId=${encodeURIComponent(patientId)}`, { cache: "no-store", signal: current.signal });
         const payload = await response.json().catch(() => null);
         if (!alive || request !== sequence) return;
-        if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل حالات التقويم.");
+        if (!response.ok) {
+          if ([401, 403].includes(response.status)) { assessments.current.denied = true; for (const owner of assessments.current.owners.values()) owner.retire(); }
+          throw new Error(payload?.message ?? "تعذّر تحميل حالات التقويم.");
+        }
         if (payload?.projection !== "case-summary" || !Array.isArray(payload.cases)
           || payload.cases.some((row: { patientId?: unknown }) => row.patientId !== Number(patientId))) {
           throw new Error("تعذّر التحقق من قائمة الحالات. أعد تحميلها.");
         }
+        assessments.current.allowed = new Set<number>(payload.cases.map((row: { id: number }) => row.id));
         setFeed(payload);
       } catch (failure) {
         if (alive && request === sequence) setError(failure instanceof Error && failure.name === "Error" ? failure.message : "تعذّر الاتصال بالخادم. أعد تحميل الحالات.");
@@ -47,13 +93,13 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
     window.addEventListener("focus", focus);
     document.addEventListener("visibilitychange", visible);
     return () => { alive = false; sequence++; controller?.abort(); clearInterval(timer); window.removeEventListener("focus", focus); document.removeEventListener("visibilitychange", visible); };
-  }, [open, patientId, refresh]);
+  }, [open, patientId, refresh, assessments]);
 
   return <section aria-label="حالات التقويم" className="max-w-full rounded-2xl border border-slate-200 bg-white p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="text-sm font-bold text-navy-900">حالات التقويم</h2>
       <button type="button" aria-expanded={open} aria-controls={regionId}
-        onClick={() => { setFeed(null); setError(null); setOpen(value => !value); }}
+        onClick={() => { if (open && !canLeaveAssessments()) return; if (open) { for (const owner of assessments.current.owners.values()) owner.retire(); assessments.current.owners.clear(); } setFeed(null); setError(null); setOpen(value => !value); }}
         className="min-h-11 rounded-xl border border-slate-300 px-3 text-xs font-bold text-navy-800">{open ? "إغلاق الحالات" : "عرض حالات التقويم"}</button>
     </div>
     {open ? <div id={regionId} className="mt-3 space-y-3" data-testid="canonical-ortho-cases">
@@ -81,7 +127,7 @@ export function CanonicalOrthoCases({ patientId, ownerKey, canEdit = false, canR
               </> : null}
             </dl>
             {row.baselineKind === "legacy" ? <p className="mt-2 text-xs text-slate-600">علاج بدأ قبل النظام</p> : null}
-            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} ownerKey={ownerKey} canEdit={canEdit} canReadCoverage={canReadCoverage} onChanged={() => { setNotice("حُفظ تحديث حالة التقويم وسُجّل أثره."); setFeed(null); setRefresh(value => value + 1); }} />
+            <CanonicalOrthoDetail patientId={patientId} caseId={row.id} ownerKey={ownerKey} canEdit={canEdit} canReadCoverage={canReadCoverage} assessmentOwnerFor={canEdit ? assessmentOwnerFor : undefined} onChanged={() => { setNotice("حُفظ تحديث حالة التقويم وسُجّل أثره."); setFeed(null); setRefresh(value => value + 1); }} />
           </li>)}</ul>}
       {feed?.hasMore ? <p role="status" className="text-sm text-amber-800">تظهر أحدث 300 حالة فقط؛ هذه ليست القائمة الكاملة.</p> : null}
     </div> : null}

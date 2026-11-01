@@ -1,6 +1,7 @@
 /** M2 slice 31: the clinical orthodontic case detail, synthetic built-app evidence. */
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { seedCanonicalAssessment } from "../fixtures/canonical-ortho-assessment";
+import { assessmentCommandV2 } from "../fixtures/ortho-assessment-schema2";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
@@ -42,11 +43,11 @@ it("HTTP: a canonical orthodontic viewer reads the assessment state of its case"
   expect(await response.json()).toMatchObject({ok:true,representation:2,state:"ready",revision:{version:2,reason:"SYN محفوظ ثان"},clinicalWritable:false});
   expect(await journey.ddlLog()).toEqual([]);
 });
-it("HTTP: no grant, no scope and anonymous deny; owner/all read immutable history with no write authority",async()=>{
+it("HTTP: no grant, no scope and anonymous deny; immutable history previews the independent edit authority",async()=>{
   const path=`/api/ortho/${ids.active}/assessment?acceptSchema=2`;
   expect((await journey.api(path,"")).status).toBe(401);
   for(const key of ["denied","none"] as const){const session=await journey.login(key),response=await journey.api(path,session.cookie);expect(response.status).toBe(403);expect(response.headers.get("cache-control")).toContain("no-store");}
-  for(const key of ["owner","desk"] as const){const session=await journey.login(key),response=await journey.api(path,session.cookie);expect(response.status).toBe(200);const body=await response.json();expect(body.history).toHaveLength(2);expect(body.clinicalWritable).toBe(false);expect(body.sources.items).toEqual([]);expect(JSON.stringify(body)).not.toMatch(/planId|invoice|legacyFinancialMode|storage_key|mime_type/);}
+  for(const key of ["owner","desk"] as const){const session=await journey.login(key),response=await journey.api(path,session.cookie);expect(response.status).toBe(200);const body=await response.json();expect(body.history).toHaveLength(2);expect(body.clinicalWritable).toBe(key === "owner");expect(body.sources.items).toEqual([]);expect(JSON.stringify(body)).not.toMatch(/planId|invoice|legacyFinancialMode|storage_key|mime_type/);}
 });
 it("HTTP: outside equals missing, revision scope and negotiation are strict, legitimate missing bridge remains explicit",async()=>{
   const session=await journey.login("doctor"),foreign=(await journey.db.query("SELECT id FROM ortho_cases WHERE patient_id=$1",[ids.outside])).rows[0].id,bodies=[];
@@ -65,7 +66,7 @@ it("HTTP: independent imaging sources cannot be exposed by ortho view, URL revis
 it("HTTP: assessment reads and denied POST preserve revisions, money and audit",async()=>{
   const session=await journey.login("doctor"),sql="SELECT (SELECT count(*) FROM ortho_assessment_revisions)::int revisions,(SELECT count(*) FROM invoices)::int invoices,(SELECT count(*) FROM audit_log)::int audits",before=(await journey.db.query(sql)).rows;
   expect((await journey.api(`/api/ortho/${ids.active}/assessment?acceptSchema=2`,session.cookie)).status).toBe(200);
-  const r=await journey.api(`/api/ortho/${ids.active}/assessment`,session.cookie,{method:"POST",body:JSON.stringify({schemaVersion:2,reason:"SYN denied"})});expect([401,403]).toContain(r.status);
+  const r=await journey.api(`/api/ortho/${ids.active}/assessment`,session.cookie,{method:"POST",body:JSON.stringify(assessmentCommandV2())});expect(r.status).toBe(403);
   expect((await journey.db.query(sql)).rows).toEqual(before);expect(await journey.ddlLog()).toEqual([]);
 });
 async function openAssessment(page: import("playwright").Page,key:Key="doctor",alreadyLoggedIn=false) {

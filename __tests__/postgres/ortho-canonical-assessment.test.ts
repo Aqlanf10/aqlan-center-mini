@@ -50,8 +50,8 @@ it("plain own assessment preserves exact historical content and hashes without f
   expect(result).toMatchObject({ ok: true, representation: 2, state: "ready", clinicalWritable: false, revision: { id: plain.id, contentHash: plain.hash, content: plain.content }, sources: { items: [], truncated: true } });
   expect(JSON.stringify(result)).not.toMatch(/storage_key|planId|invoice|legacyFinancialMode|SYN private title/);
 });
-it.each(["all", "owner"] as const)("%s reads the same immutable clinical representation without admitting writes", async key => {
-  expect((await read(key)).revision?.contentHash).toBe(plain.hash); expect((await read(key)).clinicalWritable).toBe(false);
+it.each(["all", "owner"] as const)("%s reads the same immutable clinical representation with only its independent edit grant", async key => {
+  expect((await read(key)).revision?.contentHash).toBe(plain.hash); expect((await read(key)).clinicalWritable).toBe(key === "owner");
 });
 it.each(["none", "unlinked", "adjacent"] as const)("denies %s without role or neighboring-capability expansion", async key => {
   await expect(read(key)).rejects.toThrow(/CAPABILITY_DENIED|RECORD_SCOPE_DENIED|PROVIDER/);

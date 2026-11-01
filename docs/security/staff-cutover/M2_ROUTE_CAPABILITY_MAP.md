@@ -30,23 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (386 mapped route/method entries, after local slice 54 on WORK)
+### Counts (386 mapped route/method entries, after local slice 56 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 269 |
+| existing | 268 |
 | owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 75 |
+| canonical-done | 76 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts above are generated from the JSON map, not an acceptance percentage. Wider inventory: 420 methods / 97 pages, still NOT_READY. Published batch 48–52 at `1990b966` has 73 canonical-done / 271 existing methods; local gates passed and exact-head CI is running. Previous 43–47 CI and bounded review are complete. Local slice 53 brings the source map to 74 / 270; its final-build acceptance remains pending. Interactive image tracing and completion are not implied by its draft-edit API. Neither state is whole-system acceptance.
+Counts are source conversion states, not an acceptance percentage. The broader inventory has 420 methods / 97 pages and remains NOT_READY. Published batch 53–55 at `7f586db2` has 75 canonical-done / 269 existing ordinary methods; exact-head CI and review are separate. Local slice 56 adds the assessment append contract, giving 76 / 268. Its full gates and review remain pending. Partial lifecycle PATCH, source pickers, bridge creation and image tracing are not implied by these counts.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -650,3 +650,12 @@ PATCH `/api/ceph/[id]` uses the existing analysis capability with patient scope 
 `PATCH /api/ortho/[id]` admits phase, retainer and completed/discontinued operations under `clinical.ortho.edit` and current patient scope. Strict one-operation bodies carry an opaque observation of the native case. Patient then native-case locks, scope/session revalidation after waits, existing same-connection state writers and atomic `ortho.case_update` audit preserve the original rules. A recorded `none` retainer choice remains valid; null is not a completion decision. Closed cases cannot reopen. The independent `planId` financial branch remains held, so the method stays `existing` and ordinary conversion counts remain 75 / 269.
 
 An acknowledged edit refreshes the summary. Unknown results never resend automatically; fresh-state review is not a durable receipt. A responsible clinician whose only patient relationship was the now-closed case does not retain access from that closed relationship. No assignment or financial side effect creates a new grant.
+
+
+### Slice 56 — immutable assessment append and shared history budget
+
+`POST /api/ortho/[id]/assessment` independently requires `clinical.ortho.edit` (including its central view prerequisite) and current patient scope. Strict schema-2 commands reuse the existing command ID, fingerprint, calculator, copy verification, immutable INSERT and atomic audit. The actual canonical identity is supplied on the admitted connection; no legacy session is fabricated. Every historical and proposed source retains independent imaging/care capabilities and same-patient ownership, including receipt replay. Patient serialization, sorted source locks, NOWAIT positive-membership/case/bridge locks and post-wait/final authority checks protect concurrent commands.
+
+The shared legacy/canonical append now rejects a final history above the original 5000 revisions / 8 MiB budget in the same transaction. A real legacy failing witness is retained; no reader limit is raised and no history is removed. The GET projection adds only an edit-capability preview. It remains read-only with incomplete/empty source choices and the accepted historical-source policy.
+
+The existing assessment editor and parent-owned command protocol are reused on the canonical patient page. Draft bytes stay in memory across list/detail refresh; an uncertain response can be reconciled only by explicit replay of the same immutable request. They are not persisted across reload, and universal SPA-back navigation interception is not claimed. Schema-1 promotion, new bridges, source picker, strategy writes, financial changes and migrations remain separate. Local focused evidence and full gates are recorded in the slice report; source conversion is not deployment acceptance.

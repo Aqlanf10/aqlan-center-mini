@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-01T14:29:06.047652+00:00",
+  "base": "7f586db2d869e33ea439ec85ef14d20cc4a59ae9",
+  "buildId": "3z14eeN--y0pT8zpEarSE",
+  "sourceSha256": {
+    "app/api/ortho/[id]/assessment/route.ts": "ce58a9b495f073afc7114584eecea7f1465572841df0269e84247d0104130d63",
+    "components/patient/CanonicalOrthoAssessment.tsx": "d611c0baaf6e20a644eb10df384c230012fabcfa55fc2bd25438b7532be88982",
+    "components/patient/CanonicalOrthoCases.tsx": "22b9d7fd379fc7ab8d73d4e363a7569e10dfafb9e112a63d3c7ca26e0087abba",
+    "components/patient/CanonicalOrthoDetail.tsx": "3b117e387f82e52fe47b47630ba8463453b3e3ec0a29b9b08473c1b05c3cfba7",
+    "lib/canonical-ortho-assessment-command.ts": "d79bb017f2a3f95bcc78589e900127cd064414f8a04921c638da271bd0bafa6a",
+    "lib/canonical-ortho-assessment.ts": "b3406854112b6b33c8a01ecd175033dac762a8311b7a1c93d63da72f38f48ecb",
+    "lib/ortho-assessment-store.ts": "0bb667d160da656f868e3931df899318d14541e9abdf45abca6628a951ba4924"
+  },
+  "qualification": "Product source frozen during built HTTP checks. Test-only witness corrections after build are recorded separately."
+}

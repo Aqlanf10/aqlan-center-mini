@@ -1,3 +1,5 @@
+import { commandCanonicalOrthoAssessment } from "@/lib/canonical-ortho-assessment-command";
+import { BodyTooLargeError, MalformedBodyError } from "@/lib/http-body";
 import { NextResponse } from "next/server";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { NO_STORE, canonicalPatientReadFailure } from "@/lib/canonical-patient-http";
@@ -48,6 +50,19 @@ export async function GET(request: Request, context: JourneyRouteContext) {
   } catch (error) { return orthoRouteFailure(error, false); }
 }
 export async function POST(request: Request, context: JourneyRouteContext) {
+  const selected = await selectRequestStaffEnvelope();
+  if (selected.kind === "denied") return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE });
+  if (selected.kind === "canonical") {
+    try {
+      if (!orthoQuery(request, [])) return journeyRouteError(400, "invalid_query");
+      const command = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
+      return orthoResult(await commandCanonicalOrthoAssessment(selected.handle, (await context.params).id, command), true);
+    } catch (error) {
+      if (error instanceof BodyTooLargeError || error instanceof MalformedBodyError) return orthoRouteFailure(error, true);
+      if (error instanceof AssessmentStoreFault) return NextResponse.json({ ok: false, code: error.code, message: error.message }, { status: error.status, headers: NO_STORE });
+      return canonicalPatientReadFailure(error, "تعذّر تأكيد الحفظ؛ احتفظ بمعرّف الطلب ومحتواه للتحقق.");
+    }
+  }
   try {
     const owner = await scope(context, true); if (!owner.ok) return owner.response;
     if (!orthoQuery(request, [])) return journeyRouteError(400, "invalid_query");
