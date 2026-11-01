@@ -2,7 +2,7 @@
 .radiology-document { width:100%; border-collapse:collapse; table-layout:fixed; }
 .radiology-document td { padding:0; vertical-align:top; }
 .radiology-document p { margin:1mm 0; white-space:pre-wrap; overflow-wrap:anywhere; }
-.radiology-document h1 { font-size:13pt; font-weight:800; text-align:center; margin:2mm 0; }
+.radiology-repeat-identity h1 { font-size:10pt; font-weight:800; line-height:1.25; margin:0; }
 .radiology-document h2 { font-size:10pt; font-weight:700; border-top:1px solid #bbb; margin:2mm 0 1mm; }
 .radiology-brand { display:flex; flex-direction:column; align-items:center; text-align:center; overflow-wrap:anywhere; }
 .radiology-brand strong { font-size:12pt; }

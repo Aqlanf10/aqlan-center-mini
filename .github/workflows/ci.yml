@@ -1398,6 +1398,12 @@ jobs:
             .settings-ui-artifacts/unified-print/*.pdf
             .settings-ui-artifacts/unified-print/*.png
             .settings-ui-artifacts/unified-print/*.json
+            .settings-ui-artifacts/radiology-a6/short.pdf
+            .settings-ui-artifacts/radiology-a6/short-geometry.json
+            .settings-ui-artifacts/radiology-a6/short-text.txt
+            .settings-ui-artifacts/radiology-a6/overflow.pdf
+            .settings-ui-artifacts/radiology-a6/overflow-geometry.json
+            .settings-ui-artifacts/radiology-a6/overflow-text.txt
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
