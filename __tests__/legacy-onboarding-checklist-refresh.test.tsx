@@ -249,7 +249,8 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     expect(text(checklist())).toContain("✓ مرجع مالي موثّق لهذه الحالة");
     expect(text(checklist())).toContain("فاتورة #81"); expect(text(checklist())).toContain(OUTSIDE);
     expect(text(render())).not.toContain("لا اتفاق مالي مربوط بالحالة");
-    expect(elements(section(PACKAGE_LABEL)).some(node => node.type === "select")).toBe(false);
+    // Explicit optional selection does not invalidate the independent invoice reference.
+    expect(elements(section(PACKAGE_LABEL)).some(node => node.type === "select")).toBe(true);
     const cards = elements(parentTree).filter(node => node.type === TreatmentFinancialContext);
     expect(cards).toHaveLength(1); expect(cards[0].props).toMatchObject({ patientId: 19, orthoCaseId: 41, canView: false });
     expect(writes()).toEqual([]);
