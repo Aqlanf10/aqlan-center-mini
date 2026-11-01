@@ -756,7 +756,13 @@
           ".settings-ui-artifacts/ortho-regimen-baseline-1280.png",
           ".settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json",
           ".settings-ui-artifacts/ortho-regimen-baseline-390.png",
-          ".settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json",
+          ".settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json"
+        ]
+      },
+      {
+        "test": "clinical-visit-ortho-entry-ui.test.ts",
+        "witness": "clinical-visit-regimen-${kind}-${width}",
+        "paths": [
           ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png",
           ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json",
           ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png",

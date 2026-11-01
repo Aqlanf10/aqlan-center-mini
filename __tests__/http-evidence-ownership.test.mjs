@@ -105,3 +105,13 @@ it("verifies exact files and basename globs without unrelated files satisfying a
   assert.deepEqual(matchingEvidence(".settings-ui-artifacts/absent.png", temporary), []);
   assert.deepEqual(matchingEvidence(".settings-ui-artifacts/scene-*.pdf", temporary), []);
 });
+
+it("assigns clinical visit regimen evidence to its actual producer, even when shards change", () => {
+  const entry = evidenceOwners.find(e => e.name === "ortho-regimen-defaults-ui");
+  const clinical = entry.producers.find(p => p.test === "clinical-visit-ortho-entry-ui.test.ts");
+  const adjustment = entry.producers.find(p => p.test === "ortho-adjustment-wire-defaults-ui.test.ts");
+  assert.ok(clinical, "clinical visit regimen captures have a separate producer");
+  assert.deepEqual([...clinical.paths].sort(), entry.paths.filter(p => p.includes("/clinical-visit-regimen-")).sort());
+  assert.deepEqual([...adjustment.paths].sort(), entry.paths.filter(p => p.includes("/ortho-regimen-")).sort());
+  assert.equal(clinical.paths.length, 8); assert.equal(adjustment.paths.length, 8);
+});
