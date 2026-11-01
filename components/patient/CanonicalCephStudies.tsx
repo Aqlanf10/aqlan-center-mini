@@ -1,4 +1,5 @@
 "use client";
+import { CanonicalCephStudy } from "./CanonicalCephStudy";
 
 import { useEffect, useId, useState } from "react";
 import { CEPH_READ_PHASES,isCanonicalCephList,type CanonicalCephList } from "@/lib/canonical-ceph-projection";
@@ -67,6 +68,7 @@ export function CanonicalCephStudies({ patientId }: { patientId: string }) {
             <div><dt>ANB (°)</dt><dd>{row.findings.anb??"—"}</dd></div><div><dt>FMA (°)</dt><dd>{row.findings.fma??"—"}</dd></div><div><dt>WITS (mm)</dt><dd>{row.findings.wits??"—"}</dd></div>
           </dl>:<p className="mt-2 text-xs text-slate-600">لا توجد قيم ملخص محفوظة؛ لم تُحسب قيم بديلة.</p>}
           {row.imageState==="unavailable"?<p className="mt-2 text-xs text-amber-800">مرجع الصورة غير متاح؛ تبقى بيانات الدراسة المحفوظة دون عرض الصورة.</p>:null}
+          <CanonicalCephStudy patientId={patientId} studyId={row.id} />
         </li>)}</ul>}
       {feed?.hasMore?<p role="status" className="text-sm text-amber-800">تظهر 300 دراسة فقط؛ هذه ليست القائمة الكاملة. المسودة أولًا ثم الأحدث.</p>:null}
     </div>:null}

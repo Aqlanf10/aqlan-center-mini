@@ -453,8 +453,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "M2 slice 34: read:ceph.study requires clinical.xrays.view and patient scope in one owning RR READ ONLY snapshot. Proves study, backing document and optional ortho-case ownership. Explicit ceph-saved-study allowlist returns saved calibration, metadata, landmarks, measurements and diagnosis; no engine recalculation, image/document identity/URL/bytes/storage, finance or editors. Preserves unknown historical codes literally; draft values are explicitly unapproved. Whole-study bounds: 256 landmarks, 256 measurements and 2 MiB before materialization; invalid numeric/calibration data rejects without rewriting. On-demand reference-only panel in canonical study list retires old/late data on refresh, visibility and revocation. Legacy GET/PATCH/DELETE and db writers unchanged."
  },
  {
   "route": "/api/ceph/[id]",

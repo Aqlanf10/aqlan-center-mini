@@ -12,3 +12,8 @@ it.each([{patientId:7},{status:"discarded"},{id:0},{phase:"__proto__"},{xrayDate
 it("rejects an oversized response rather than silently discarding results in the browser",()=>{
  const feed=saved();feed.analyses=Array.from({length:301},(_,i)=>({...feed.analyses[0],id:i+1}));expect(isCanonicalCephList(feed,3)).toBe(false);
 });
+
+import {isCanonicalCephStudy,type CanonicalCephStudy} from "../lib/canonical-ceph-projection";
+const study=():CanonicalCephStudy=>({projection:"ceph-saved-study",analysis:{...saved().analyses[0],device:null,refSet:"SYN old",note:null,createdBy:"SYN",completedBy:"SYN",calibration:null,mmPerPixel:null},measurementsState:"saved-approved",landmarks:[{code:"SYN_OLD",x:1.25,y:2.5,source:"manual",confirmedBy:"SYN"}],measurements:[{code:"SYN_OLD",value:123.123456}],diagnosis:{skeletal:null,dental:null,softTissue:null,note:null,finalDx:"SYN saved",createdBy:"SYN",updatedAt:"2024-03-01T12:00:00Z"}});
+it("accepts saved unknown historical codes without interpreting or rounding them",()=>{const v=study();expect(isCanonicalCephStudy(v,3,4)).toBe(true);expect(v.measurements[0].value).toBe(123.123456);});
+it.each([null,{}, {...study(),projection:"legacy"},{...study(),measurementsState:"saved-unapproved"},{...study(),analysis:{...study().analysis,patientId:99}},{...study(),analysis:{...study().analysis,id:99}},{...study(),analysis:{...study().analysis,calibration:{x1:0,y1:0,x2:1,y2:1,mm:0}}},{...study(),landmarks:[{code:"S",x:NaN,y:1,source:"manual",confirmedBy:"SYN"}]},{...study(),measurements:[{code:"ANB",value:Infinity}]},{...study(),diagnosis:{...study().diagnosis,updatedAt:"invalid"}}])("rejects malformed/foreign study data instead of exposing stale values: %j",value=>expect(isCanonicalCephStudy(value,3,4)).toBe(false));

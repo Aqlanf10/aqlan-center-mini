@@ -1,0 +1,162 @@
+{
+  "base": "340e3429027bfef93b9f516272f3cf171e9599fa",
+  "status": "implemented and local unit/lint plus focused PostgreSQL/HTTP verification passed; final runtime, exact-head CI and independent review pending",
+  "buildId": "joFjNTOOauXbtAfOMktoe",
+  "results": {
+    "baselineHttp": {
+      "expectedFailed": 1,
+      "actualStatus": 401,
+      "expectedStatus": 200
+    },
+    "postgresBatch": {
+      "passed": 169,
+      "files": 7,
+      "studyNew": 36
+    },
+    "httpBrowserBatch": {
+      "passed": 38,
+      "files": 5,
+      "studyNew": 7,
+      "ddl": 0
+    },
+    "focusedUnit": {
+      "passed": 167,
+      "files": 7
+    },
+    "mapInventory": {
+      "passed": 10,
+      "files": 2
+    },
+    "focusedLint": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "moneyGuard": "passed",
+    "bodyGuard": "passed",
+    "preflight": "passed",
+    "legacyProof": {
+      "unchanged": 15
+    },
+    "fullUnit": {
+      "passed": 13534,
+      "files": 804,
+      "excluded": "generated .next/** only"
+    },
+    "fullLint": {
+      "errors": 0,
+      "warnings": 346
+    }
+  },
+  "pending": [
+    "runtime artifact proof for build joFjNTOOauXbtAfOMktoe",
+    "final exact-head CI",
+    "independent parent review"
+  ],
+  "notRun": [
+    "full PostgreSQL suite locally",
+    "full HTTP suite locally",
+    "WORK Docker image: Alpine HTTP 403 blocker"
+  ],
+  "sourceSha256": {
+    "lib/canonical-ceph-reads.ts": "e31416667f7b87344ed703e9fbb2a21c001b6b860b8c76e929dc0828ced0c525",
+    "lib/canonical-ceph-projection.ts": "a775c47e4a0190a3c1760f5faa68acde28ea1d06264843ec0143ff9c296d9a71",
+    "lib/canonical-record-reads.ts": "40bb8dfe6645a3bd5b733006c22b9b2677e24c05a8be488abef048490afd34b1",
+    "app/api/ceph/[id]/route.ts": "11c52e513d65516ccccdc6ab8f508ab22fa6be27a02d95d7786b54416f8c42c8",
+    "components/patient/CanonicalCephStudy.tsx": "85a7fe96f60bd20caef3b1c54014628159b4f972ee7c7fea0b4d4193773a5f8f",
+    "components/patient/CanonicalCephStudies.tsx": "7ead8e4898fc509e397c59e3846c2a69d2c108270d6f21494cea01c9b503cf1e",
+    "__tests__/canonical-ceph-projection.test.ts": "fdbe90405b3d4324f020f5db51f87e50daa76c7301f93fd8b53b557616fbe77f",
+    "__tests__/postgres/ceph-canonical-study.test.ts": "ac3bad6a81ce76f33b8c47d506173b24447b250525975c24254ec1e3130836ec",
+    "__tests__/security-http/canonical-ceph-study-journey.test.ts": "15dab70284cdf27e8d8533bc6692bed4a68f397f7c967968ba5cbbde79cb7aca",
+    "docs/security/staff-cutover/M2_ROUTE_CAPABILITY_MAP.json": "5490e43565a1bc2ae9a95338f76265bd20a287f43888e20b2ac070f363227b99",
+    "docs/security/staff-cutover/inventory.json": "d96be5664612a2482f4709eb9b0e8970ae4b3b19aa8965fbd8cb5671ca69c5be"
+  },
+  "evidence": {
+    "slice34-baseline-serial.log": {
+      "rawSha256": "42930f129441538276c7e6ab74624485cf0e0ea04709487f4587e00eab6a42c0",
+      "publishedSha256": "42930f129441538276c7e6ab74624485cf0e0ea04709487f4587e00eab6a42c0",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice34-pg-first.log": {
+      "rawSha256": "bb022188446db536266352446d94970665f958d43709adf904411831faa1c8ba",
+      "publishedSha256": "bb022188446db536266352446d94970665f958d43709adf904411831faa1c8ba",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "batch-pg-final.log": {
+      "rawSha256": "1b8c72074d951ed8ad2965ecfcf3a64a76d39cf2ad6b3769fe9c770fba590774",
+      "publishedSha256": "1b8c72074d951ed8ad2965ecfcf3a64a76d39cf2ad6b3769fe9c770fba590774",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "batch-http-final.log": {
+      "rawSha256": "9efe7483efc20d6c3e17ca59249122666f4d0f65ad18018a9077db3b13b305b4",
+      "publishedSha256": "9efe7483efc20d6c3e17ca59249122666f4d0f65ad18018a9077db3b13b305b4",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice34-unit-first.log": {
+      "rawSha256": "e0843b1a8f528a2ec1acd09e6f7e27e0f647564c14cc113a9b52846b0013788b",
+      "publishedSha256": "e0843b1a8f528a2ec1acd09e6f7e27e0f647564c14cc113a9b52846b0013788b",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice34-map-tests.log": {
+      "rawSha256": "efc0ceacb64de7d860cae8e3f4d376688219e24805e76dd46116269f5d012370",
+      "publishedSha256": "efc0ceacb64de7d860cae8e3f4d376688219e24805e76dd46116269f5d012370",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice34-build.log": {
+      "rawSha256": "92ca833babaac799633091d6a3266aefb877a6dae82108b43b9c49167a4ea23d",
+      "publishedSha256": "7eecedd58855d6b13a997abce892063ba1037627262eb2e4cde066631527180c",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice34-typecheck-second.log": {
+      "rawSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "publishedSha256": "1e99bfa9dc5a8fd24ee6a4a5fd15918087cb7e39c1874409d792ee356d2dfac0",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice34-lint-first.log": {
+      "rawSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "publishedSha256": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice34-inventory.log": {
+      "rawSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "publishedSha256": "d048cbe1a0fc0a87a951d8e66049c5701db4504923974190a5694c4e2ef3099f",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "slice34-legacy-proof.json": {
+      "rawSha256": "0e9710a3cfc892a244ad77343fbb8d1be8e9ba84ffcd8bf141ba7d38f1909d9f",
+      "publishedSha256": "0e9710a3cfc892a244ad77343fbb8d1be8e9ba84ffcd8bf141ba7d38f1909d9f",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "batch-preflight.log": {
+      "rawSha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "publishedSha256": "570c1c01cf116b4beadbf1bed9ae5807b85cd00f6922a7375db69c88d57d3fba",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "batch-money.log": {
+      "rawSha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "publishedSha256": "5ac6c51e62042fa6da39d12c34f71eeefadf241e1981a459bd4727e5f6f19a15",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "batch-body.log": {
+      "rawSha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "publishedSha256": "f19b6b3a7f5461eb71b5565e86edf21292f86a051f2e813327d3318ab1dfab6b",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "ceph-study-390.png": {
+      "sha256": "cb13c51ee93258264b30c629d97b8d0dc7938c578bda47c3cd39b7310470337e",
+      "synthetic": true,
+      "visuallyInspected": true
+    },
+    "batch-unit-final.log": {
+      "rawSha256": "f84a09fa01a430132f2c52b617b067dcb1fc8770e94be21c057e4878e7954f88",
+      "publishedSha256": "f84a09fa01a430132f2c52b617b067dcb1fc8770e94be21c057e4878e7954f88",
+      "normalization": "trailing whitespace/CR only"
+    },
+    "batch-lint-final.log": {
+      "rawSha256": "0436980a95b60da6cb69412151b9d707e908238083a31792e27b1caf216fa5e4",
+      "publishedSha256": "0436980a95b60da6cb69412151b9d707e908238083a31792e27b1caf216fa5e4",
+      "normalization": "trailing whitespace/CR only"
+    }
+  }
+}

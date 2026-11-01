@@ -30,16 +30,16 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 mapped route/method entries, after slice 33 on WORK)
+### Counts (383 mapped route/method entries, after slice 34 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 292 |
+| existing | 291 |
 | owner-only | 20 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 52 |
+| canonical-done | 53 |
 
 | Record scope | Routes |
 |---|---|
@@ -505,6 +505,15 @@ The queue holds people who are not patients yet (name and phone), so on the cano
 - `ceph-summary` allows id/patientId/status/phase/calendar xrayDate/createdAt/completedAt/imageState/findings only. Excludes discarded studies. Draft first, then createdAt DESC and id DESC; bound 300 plus `hasMore`. No summary counts claiming completeness. Drafts never expose sealed findings; completed values are saved data, not recalculated or rounded replacements. Non-finite stored values reject the whole read.
 - No document IDs, image bytes/URLs/storage paths, notes, device, diagnosis, calibration, finance, current reference names or editor data. On-demand canonical patient panel clears on focus/hide/refresh/denial, retires late replies and times out after eight seconds. The legacy readers and all writes remain unchanged.
 - Evidence: `ceph-canonical-list`, calendar-date regression, `canonical-ceph-list-journey` (portOffset 46), projection/parser and existing ceph UI tests. Source migration is not activation or independent acceptance.
+
+### Slice 34 — one saved cephalometric study
+
+- `GET /api/ceph/[id]`, `read:ceph.study`: independent `clinical.xrays.view` and current patient scope, strict positive safe study ID, no query expansion. Missing/discarded/outside return the same 404. No canonical-to-legacy fallback.
+- One RR READ ONLY snapshot covers admission, study ownership, central patient scope, backing document and optional orthodontic relation, saved calibration, metadata, landmarks, measurements and diagnosis. Foreign backing ownership fails; an owned removed/non-image reference preserves the saved study with an unavailable state, without granting image access.
+- Explicit `ceph-saved-study` projection, no document/case IDs, source titles, image bytes/URLs/storage or finance. Native clinical note/diagnosis and their recorded authors are imaging-study data under this grant. Unknown historical landmark/measurement codes are retained literally instead of silently dropped by a current catalogue. No clinical/reference/calibration engine is run.
+- Whole-study limits are checked before materializing content: 256 landmarks, 256 measurements and 2 MiB stored bytes. Excess/invalid finite numeric data or partial calibration rejects; no history repair or silent truncation. Saved draft measurements remain explicitly `saved-unapproved`; approved values derive only from the recorded completed status. No new clinical decision is made.
+- Read-only on-demand panel inside the study list; no editor/tracer, PATCH/DELETE, image fetch or legacy page link. Scope/identity parser, eight-second timeout, clear-on-refresh/hide/denial and delayed-response retirement. Existing legacy GET/PATCH/DELETE and database writers retain their bodies.
+- Tests: `ceph-canonical-study`, full saved-list/calendar regression, `canonical-ceph-study-journey` (portOffset 47), older ortho/assessment and legacy ceph UI journeys. This is one read contract, not the whole ceph workflow.
 
 ### Single-snapshot guard
 Every canonical patient reader, run as the owner (every source read), must take exactly one pool lease and send zero direct pool queries. The test is in `patients-canonical-directory`. It caught `patientTimelineWith` reading internal-referral events through `getPool()` (fixed in 7def211b), and it fails if that call is restored.
