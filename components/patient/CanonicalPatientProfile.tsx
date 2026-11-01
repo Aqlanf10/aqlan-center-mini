@@ -179,7 +179,8 @@ export function CanonicalPatientProfile({ patientId }: { patientId: string }) {
         ? <CanonicalClinicalPlans key={`${session.username}:${session.patientScope}:${patientId}`} patientId={patientId} /> : null}
       {projection.care ? <ClinicalPanels patientId={patientId} /> : null}
       {session?.isOwner === true || (session?.capabilities?.some(c => ["clinical.plans.view", "clinical.visits.document", "clinical.xrays.view"].includes(c)) && (session.patientScope === "own" || session.patientScope === "all"))
-        ? <CanonicalPatientCases key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId} /> : null}
+        ? <CanonicalPatientCases key={JSON.stringify([session.username, session.patientScope, session.capabilities, patientId])} patientId={patientId}
+          ownerKey={session.username} canEdit={session.isOwner === true || !!session.capabilities?.includes("clinical.plans.edit")} /> : null}
       {projection.care ? <PlannedVisitsPanel patientId={patientId}
         canBook={session?.isOwner === true || (session?.capabilities ?? []).includes("appointments.create")} /> : null}
       <TimelinePanel patientId={patientId} />

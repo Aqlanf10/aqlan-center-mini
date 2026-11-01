@@ -1,0 +1,80 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+(node:193721) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/plan-case-canonical-command.test.ts (22 tests | 3 failed) 16632ms
+   × denies editOnly without changing the link or audit 34ms
+   × two proven overlapping edits with the same comparison admit exactly one audit 10125ms
+   × a committed invoice created while the item lock is held is observed after the wait 1073ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/plan-case-canonical-command.test.ts > denies editOnly without changing the link or audit
+AssertionError: expected [Function] to throw error matching /CAPABILITY_DENIED|RECORD_SCOPE_DENIED…/ but got 'STAFF_OPERATION_PERMISSIONS_STALE'
+
+- Expected:
+/CAPABILITY_DENIED|RECORD_SCOPE_DENIED|PROVIDER|عرض بنود الخطط/
+
++ Received:
+"STAFF_OPERATION_PERMISSIONS_STALE"
+
+ ❯ __tests__/postgres/plan-case-canonical-command.test.ts:49:60
+     47| });
+     48| it.each(["none", "unlinked", "readonly", "editOnly"] as const)("denies…
+     49|   const s = await scenario(); await expect(command(key, s)).rejects.to…
+       |                                                            ^
+     50|   expect(await current(s)).toEqual({ case_id: s.caseId, priority: 3 })…
+     51| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/postgres/plan-case-canonical-command.test.ts > two proven overlapping edits with the same comparison admit exactly one audit
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ vi.waitFor.timeout __tests__/postgres/plan-case-canonical-command.test.ts:107:182
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  __tests__/postgres/plan-case-canonical-command.test.ts > a committed invoice created while the item lock is held is observed after the wait
+AssertionError: expected CanonicalPlanCaseRefusal: تغيّر البند أو … { …(2) } to match object { code: 'plan_case_billed_lock' }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "code": "plan_case_billed_lock",
++ CanonicalPlanCaseRefusal {
++   "code": "plan_case_conflict",
+  }
+
+ ❯ __tests__/postgres/plan-case-canonical-command.test.ts:117:26
+    115|     pending = commands.commandCanonicalPlanItemCase(session, String(s.…
+    116|     expect((await waitForBlockedBy(side, pid, 7000)).length).toBeGreat…
+    117|     await expect(pending).rejects.toMatchObject({ code: "plan_case_bil…
+       |                          ^
+    118|   } finally { await gate.query("ROLLBACK"); gate.release(); if (pendin…
+    119| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  3 failed | 47 passed (50)
+   Start at  05:51:46
+   Duration  25.16s (transform 2.01s, setup 0ms, import 3.00s, tests 21.48s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

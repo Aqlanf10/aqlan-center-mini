@@ -30,23 +30,23 @@ The machine-checked source is [`M2_ROUTE_CAPABILITY_MAP.json`](M2_ROUTE_CAPABILI
 ### Unchanged business rules that still apply
 Cashier shift for money movements, treasury balance rule, signed-visit addenda, capacity override. They are listed in each entry's `note`.
 
-### Counts (383 mapped route/method entries, after slice 37 on WORK)
+### Counts (386 mapped route/method entries, after local slice 41 on WORK)
 
 | Status | Routes |
 |---|---|
-| existing | 288 |
-| owner-only | 20 |
+| existing | 283 |
+| owner-only | 23 |
 | excluded | 12 |
 | entry | 4 |
 | self | 3 |
-| canonical-done | 56 |
+| canonical-done | 61 |
 
 | Record scope | Routes |
 |---|---|
 | patient | 149 |
 | appointment | 13 |
 
-Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 416 route/method entries and 97 pages; it remains `NOT_READY`.
+Counts come from the JSON map, not an acceptance percentage. The wider source inventory contains 420 route/method entries and 97 pages; it remains `NOT_READY`. Local slices 40–41 have not yet passed published-head CI; the published base has 59 canonical-done / 285 existing ordinary entries.
 
 ## 2. Approved capability names (owner decision, Dot 6484846432)
 
@@ -592,3 +592,7 @@ Still open, not inferred: the owner decisions (four owner-only operations; empty
 ### Slice 40 — patient clinical cases and plan dependencies
 
 `GET /api/patients/[id]/cases` uses the existing care record rule and current patient scope in one fenced RR READ ONLY snapshot. Plan items and edges require `clinical.plans.view`; native/bridged orthodontic cases require `clinical.ortho.view`. The exact clinical allowlist excludes financial markers and image/assessment data. All joined references belong to the same patient; missing and outside are identical. The complete graph includes explicitly labelled cancelled-plan endpoints; 1000 cases, 1000 problems, 2000 items, 4000 edges and 2 MiB are hard read bounds, not silent truncation. Cycles, malformed states or foreign references refuse the whole read. No existing writer is activated. See [the acceptance matrix](../../review/work-patient-cases-slice40-20261101.md); local implementation is distinct from final-head CI and independent acceptance.
+
+### Slice 41 — plan-item case and priority
+
+`PUT /api/plan-items/[id]/case` admits the existing `clinical.plans.edit` action, its view prerequisite and current patient scope. Patient/item waits are followed by fresh authority and locked ownership witnesses. Both old/new ortho links require independent ortho visibility. The shared writer preserves retained invoice/agreement attribution, priority-only edits and atomic audit. Exact expected values reject stale requests. The client preserves an uncertain tab intent, verifies current state and requires a new explicit intent; it never automatically replays. This is not a durable receipt. See [the acceptance matrix](../../review/work-plan-case-slice41-20261101.md); source implementation is distinct from exact-head CI and independent review.

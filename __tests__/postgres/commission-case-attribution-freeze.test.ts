@@ -17,6 +17,8 @@ const { session } = vi.hoisted(() => ({
   session: { current: { userId: 1, username: "case-freeze-admin", role: "admin", expiresAt: 4_102_444_800_000 } },
 }));
 vi.mock("../../lib/session", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/session")>()), requireSession: vi.fn(async () => session.current) }));
+// Direct-handler legacy fixture: no Next request cookie context exists here.
+vi.mock("../../lib/staff-session-admission", () => ({ selectRequestStaffEnvelope: vi.fn(async () => ({ kind: "legacy" })) }));
 
 let staffAdmin: SessionPayload;
 

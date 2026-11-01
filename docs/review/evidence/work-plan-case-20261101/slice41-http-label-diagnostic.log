@@ -1,0 +1,32 @@
+
+ RUN  v4.1.12 /workspace/aqlan-main-reconcile
+
+[security-http] الخادم جاهز على http://127.0.0.1:3917 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/canonical-plan-case-command-journey.test.ts (10 tests | 1 failed | 9 skipped) 15964ms
+   × browser: explicit case/priority edit uses canonical authority and preserves the patient workflow 11759ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/canonical-plan-case-command-journey.test.ts > browser: explicit case/priority edit uses canonical authority and preserves the patient workflow
+TimeoutError: locator.selectOption: Timeout 10000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('canonical-patient-cases').getByTestId('canonical-plan-case-editor').getByLabel('بند الخطة', { exact: true })[22m
+
+ ❯ openEditor __tests__/security-http/canonical-plan-case-command-journey.test.ts:73:63
+
+ ❯ __tests__/security-http/canonical-plan-case-command-journey.test.ts:82:60
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  06:02:18
+   Duration  20.26s (transform 134ms, setup 0ms, import 519ms, tests 15.96s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.1 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

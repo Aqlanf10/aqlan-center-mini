@@ -29207,51 +29207,60 @@ export async function getPlanItemPatient(itemId: number): Promise<number | null>
 }
 
 /** ربط بند الخطة بحالةٍ للمريض نفسه وتحديد أولويته — الربط المالي التاريخي لا يُعاد نسبه. */
-export async function setPlanItemCase(input: {
+export interface SetPlanItemCaseInput {
   itemId: number; caseId: number | null; priority: number | null; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "bad_case" | "billed_case_lock" }> {
+}
+export type SetPlanItemCaseResult = { ok: true } | { ok: false; reason: "not_found" | "bad_case" | "billed_case_lock" };
+
+/** Caller-owned transaction; the same retained-source and historical attribution checks as the legacy writer. */
+export async function setPlanItemCaseInTransaction(client: DbClient, input: SetPlanItemCaseInput): Promise<SetPlanItemCaseResult> {
+  const { rows: [owner] } = await client.query<{ patient_id: number }>(
+    `SELECT t.patient_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`, [input.itemId]);
+  if (!owner) { return { ok: false, reason: "not_found" }; }
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
+  const { rows } = await client.query<{ patient_id: number; service_name: string; case_id: number | null; priority: number | null }>(
+    `SELECT t.patient_id, i.service_name, i.case_id, i.priority
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 FOR UPDATE OF i`, [input.itemId]);
+  if (!rows[0]) { return { ok: false, reason: "not_found" }; }
+  if (input.caseId !== null) {
+    const { rows: owned } = await client.query(
+      `SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, rows[0].patient_id]);
+    if (!owned[0]) { return { ok: false, reason: "bad_case" }; }
+  }
+  if (input.caseId !== rows[0].case_id) {
+    // Commission reads this case through the retained invoice source. Check in
+    // a fresh statement AFTER the item lock: a signature that held that lock
+    // may have committed its invoice while we waited. Do not filter cancelled,
+    // refunded or zero-value lines: their historical attribution is retained.
+    // An included installment session has no such source and remains editable.
+    const { rows: [historical] } = await client.query(
+      `SELECT 1 FROM legacy_treatment_agreements WHERE plan_item_id = $1 LIMIT 1`, [input.itemId]);
+    if (historical) { return { ok: false, reason: "billed_case_lock" }; }
+    const { rows: billed } = await client.query(
+      `SELECT 1 FROM invoice_items it
+         LEFT JOIN visit_procedures p ON it.source_type = 'visit_procedure' AND it.source_id = p.id
+        WHERE it.plan_item_id = $1 OR (it.source_type = 'plan_item' AND it.source_id = $1)
+           OR p.plan_item_id = $1 LIMIT 1`, [input.itemId]);
+    if (billed[0]) { return { ok: false, reason: "billed_case_lock" }; }
+  }
+  await client.query(`UPDATE plan_items SET case_id = $2::int, priority = $3::smallint WHERE id = $1`,
+    [input.itemId, input.caseId, input.priority]);
+  await insertAuditRow(client, {
+    action: "plan.item_case", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
+    details: { البند: input.itemId, الحالة_قبل: rows[0].case_id ?? "—", الحالة: input.caseId ?? "—", الأولوية_قبل: rows[0].priority ?? "—", الأولوية: input.priority ?? "—" },
+    actor: input.actor, actorRole: input.actorRole ?? null,
+  });
+  return { ok: true };
+}
+
+export async function setPlanItemCase(input: SetPlanItemCaseInput): Promise<SetPlanItemCaseResult> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [owner] } = await client.query<{ patient_id: number }>(
-      `SELECT t.patient_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`, [input.itemId]);
-    if (!owner) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
-    const { rows } = await client.query<{ patient_id: number; service_name: string; case_id: number | null; priority: number | null }>(
-      `SELECT t.patient_id, i.service_name, i.case_id, i.priority
-         FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 FOR UPDATE OF i`, [input.itemId]);
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (input.caseId !== null) {
-      const { rows: owned } = await client.query(
-        `SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, rows[0].patient_id]);
-      if (!owned[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
-    }
-    if (input.caseId !== rows[0].case_id) {
-      // Commission reads this case through the retained invoice source. Check in
-      // a fresh statement AFTER the item lock: a signature that held that lock
-      // may have committed its invoice while we waited. Do not filter cancelled,
-      // refunded or zero-value lines: their historical attribution is retained.
-      // An included installment session has no such source and remains editable.
-      const { rows: [historical] } = await client.query(
-        `SELECT 1 FROM legacy_treatment_agreements WHERE plan_item_id = $1 LIMIT 1`, [input.itemId]);
-      if (historical) { await client.query("ROLLBACK"); return { ok: false, reason: "billed_case_lock" }; }
-      const { rows: billed } = await client.query(
-        `SELECT 1 FROM invoice_items it
-           LEFT JOIN visit_procedures p ON it.source_type = 'visit_procedure' AND it.source_id = p.id
-          WHERE it.plan_item_id = $1 OR (it.source_type = 'plan_item' AND it.source_id = $1)
-             OR p.plan_item_id = $1 LIMIT 1`, [input.itemId]);
-      if (billed[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "billed_case_lock" }; }
-    }
-    await client.query(`UPDATE plan_items SET case_id = $2::int, priority = $3::smallint WHERE id = $1`,
-      [input.itemId, input.caseId, input.priority]);
-    await insertAuditRow(client, {
-      action: "plan.item_case", entity: "patient", entityId: rows[0].patient_id, entityLabel: rows[0].service_name,
-      details: { البند: input.itemId, الحالة_قبل: rows[0].case_id ?? "—", الحالة: input.caseId ?? "—", الأولوية_قبل: rows[0].priority ?? "—", الأولوية: input.priority ?? "—" },
-      actor: input.actor, actorRole: input.actorRole ?? null,
-    });
-    await client.query("COMMIT");
-    return { ok: true };
+    const result = await setPlanItemCaseInTransaction(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;

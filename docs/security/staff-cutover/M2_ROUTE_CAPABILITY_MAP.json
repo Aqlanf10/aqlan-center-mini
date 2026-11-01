@@ -4427,8 +4427,8 @@
   ],
   "anyOf": [],
   "scope": "patient",
-  "status": "existing",
-  "note": ""
+  "status": "canonical-done",
+  "note": "Slice 41: clinical.plans.edit with its existing plans.view prerequisite; own scope proved before and after patient/item locks. Existing shared writer preserves every retained invoice/agreement attribution guard and atomic audit. Exact current case/priority comparison; no durable request receipt or automatic replay. Native/bridged ortho links independently require clinical.ortho.view for current and target case."
  },
  {
   "route": "/api/plan-items/[id]/dependencies",
