@@ -1,7 +1,7 @@
 {
   "format": "work-ceph-complete-v1",
   "baseRevision": "62bd83aea3d4831060152aec25c4caf4cd954c7b",
-  "sourceCommitStatus": "source hash pinned here; sourceRevision added in later evidence commit",
+  "sourceCommitStatus": "Source hashes refer to the pinned focused commit. Full gates below ran on that unchanged source; they exclude later55/clock corrections.",
   "buildId": "n67K-3X_v-9VQNCoUtvlf",
   "acceptance": {
     "focusedPG": {
@@ -26,13 +26,30 @@
       "passed": 14594,
       "failed": 2,
       "files": 862,
-      "reason": "stale inventory after final UI edits; regenerated from source, entire unchanged suite rerun pending"
+      "reason": "stale inventory after final UI edits; regenerated from source; unchanged full suite rerun passed"
     },
-    "fullPG": "pending",
-    "lintBodyEnvironmentMoneyPreflightRuntime": "pending final batch gates",
+    "fullPG": {
+      "passed": 5331,
+      "files": 408,
+      "skipped": 0
+    },
+    "lintBodyEnvironmentMoneyPreflightRuntime": "passed; lint0errors345warnings",
     "exactHeadCI": "unpublished",
     "independentReview": "pending",
-    "actualDocker": "blocked by previously enforced Alpine destination refusal; no bypass"
+    "actualDocker": "blocked by previously enforced Alpine destination refusal; no bypass",
+    "fullUnitFinal": {
+      "passed": 14596,
+      "files": 862,
+      "skipped": 0
+    },
+    "runtime": {
+      "buildId": "n67K-3X_v-9VQNCoUtvlf",
+      "bracesFiles": 10408,
+      "bracesTraces": 372,
+      "lintTraces": 741,
+      "lintManifests": 86,
+      "limit": "available source maps only, no opaque-code claim"
+    }
   },
   "sourceSha256": {
     "__tests__/canonical-ceph-complete-command.test.ts": "da5ada25744812bbb7c231bdadc0d3dc2ac461c6b710db1c263bcf124645e677",
@@ -53,10 +70,15 @@
   },
   "artifacts": {
     "ceph-complete-390.png": "c686f7cdf82f1e58d63ca796b5ed985ce9dd1d61498bce8f70b802380a359b7e",
+    "lint-tooling-runtime-proof.json.gz": "9d832e5c9768249d27e7ecbbd663052511100d0ada5c7e026f8495c7a0807d4b",
+    "runtime-proof.json.gz": "4e585e0060a94d40dfd5957b2723bedd65d8b248af6d4ad1f298f7ecc6299118",
     "slice54-before-stale-measurement.json": "f8a349fb663fb70c2c786fa4a5c48c99b3d68c015e0c2139ca095d94f5a75040",
     "slice54-before-stale-measurement.log": "f8aff59e7d96f0ac81a0b545da3bb711fe360f6c5afdf99e05550be042e8cdbd",
+    "slice54-body-final.log": "d9dfb25d3b8eaa95ea6c7ec95082f8de22b6c22c0712df82cc485b854cf33796",
+    "slice54-braces-runtime.log": "d0d2b194d752d94c38c2c0f51bc967c85516ee15296a00a24d29892e2afea028",
     "slice54-build-final.log": "660631e645d61a3de58f50729da2a104aaa9656eedc7e265e4dd83cfcc4b9e9b",
     "slice54-build-first.log": "bd551513643f032ae348beec66b3c6c3e2a6ecf2575078538eb58df402fdfd77",
+    "slice54-environment-final.log": "eaa12084b28bb865078f6fe6b0cf89cc598c522e5da95c4e7b2364fcf28b6127",
     "slice54-final-build-id.txt": "caeda6bd0c6957a0a4734dcb709991cb0bf96fefada498f54db28a3b59f1c596",
     "slice54-final-source-freeze.json": "2a7f8985e4991741b91a94886911e8d12f5cebbe2695bd31b48425584c691717",
     "slice54-first-build-id.txt": "1a4d25b509b39437e8fa68105b5b1b891b37efa4aa326e08ed1c866af60085d8",
@@ -65,17 +87,24 @@
     "slice54-inventory-before-final-refresh.json": "a43aa12f4d3f1695a6955a7f89d82af5e67611125197d3eb34568490810ae288",
     "slice54-inventory-final-refresh.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
     "slice54-inventory.log": "7622fa63a0b06eac58429d401d4d6a474608863fe1a1a6e06f070def4c79fbf8",
+    "slice54-lint-final.log": "4ab6d7102221ddd25350aa476573d8f71ca9ec1adfceb3cad3f746d48cb00717",
+    "slice54-lint-runtime.log": "f5b0fc5401c9dd942dcc1a2641c014dc94562ff9d86c71ad94df02efde588f2a",
+    "slice54-money-final.log": "2269b4f0f8ae0cd559683470817ab60c98f0a45696adb3273677f1d077b7671f",
     "slice54-original-completion-witness.ts.txt": "8e94eb123f4e6919f430539a7c1d3133cc43cad77f0112a0b80d12ffd57e0fab",
     "slice54-original-witness-after.log": "c7dc4f30dcf5b4fbafaa4eb18603c521b80bec69dc2464fcbca4f40208e359d1",
     "slice54-original-writer.txt": "d1d588502de142be9b63885b06b3413c7d8c66996ec46f832ff6c9ca307898c5",
     "slice54-pg-final-focused.log": "9122316da92d5e5f0fe0d37319a0bf2ec2e8fa7963286a8d6624d45c77416f8b",
     "slice54-pg-first.log": "b376d7ebfe0be54865ed3fe0330cecc5633435b00f4de3022ba3f0740e2e47fe",
+    "slice54-pg-full.log": "e08e3e998ace73908d1271dd2bfc723b0b357819ae572122acd770940a6d17b2",
+    "slice54-preflight-final.log": "4e3da5c0d4d140f29113569afabd19315c12591c5b6bb504305399b698f0ec4a",
     "slice54-source-proof.json": "2c419b2064b5497cfb4b7ddb5f40381ced1be729ec64260539a5e1daf149b009",
     "slice54-stale-list-before.json": "2665686b915006fff507304dfdee687f4a99f325a21ec52dee8c81fb84a2109c",
     "slice54-tsc-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "slice54-tsc-first.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "slice54-tsc-second.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
+    "slice54-unit-full-refreshed.log": "d6e8d4aa598c351ebafcd6db09e648832dd2dde0869af8d27db877d37058c5e2",
     "slice54-unit-full.log": "73fbfa67e027d17d3e451c8a0a3dc514255a60869644b44af3791496974a5efb",
     "slice54-unit-guards.log": "382f133eaba3ff83c82f99d0b78975b00b0c98cc2f48d587cd1fadd042a0c2cd"
-  }
+  },
+  "sourceRevision": "16999f9c093ba4194503e3e32d7c966881c647b2"
 }

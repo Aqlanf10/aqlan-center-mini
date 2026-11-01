@@ -87,5 +87,6 @@
     "slice55-source-proof.json": "0979bd2b076a89a8298d542ca8fee1ff26842d8369cfb4bf382d416b8d91e549",
     "slice55-tsc-final.log": "0feebaf0acc290aa797c37259256cf21f24ba89ed4058f6bf3dfca3352db1672",
     "slice55-unit-guards.log": "4a05fcbbf283c071dea1c55fd8c213dfc149c395eb67cbf3edeec0112257d258"
-  }
+  },
+  "sourceRevision": "8ffbc6644c5259369cc2a59323399b4d039303c7"
 }

@@ -1,7 +1,7 @@
 {
   "format": "work-clinical-date-labels-v1",
   "baseRevision": "f7ef90b790c1957296061ef6206d7a4586baab90",
-  "sourceCommitStatus": "source hashes pinned; source revision added in a later evidence commit",
+  "sourceCommitStatus": "Source hashes refer to the pinned date correction commit; subsequent evidence updates are separate.",
   "buildId": "z9dm33uOCMXzi0KHgP5Ay",
   "acceptance": {
     "originalWitnessBefore": {
@@ -85,5 +85,6 @@
     "clinical-date-source-proof.json": "d81f92b719775fd3ed0cdbe69d0c971389c5e2e5131f302b87801f89ad47be75",
     "clinical-date-unit-guards-final.log": "b88976c3722ecebf4abf352680acf231f5ee4a672ad0afdc68821c66b2455910",
     "original-seven-component-witnesses.tsx.txt": "4ab3f0b6d2a90196de507492f3674d35ef6569a394084e4700477768b3c7fa4a"
-  }
+  },
+  "sourceRevision": "f4ba8dcb554a9d12637702163d6846796ddc0628"
 }
