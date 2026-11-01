@@ -73,6 +73,23 @@ describe("strict additive lint tooling runtime evidence", () => {
   ])("fails closed on malformed inspected metadata %s", async (file, value) => {
     await json(file, value); await expect(verifyLintToolingRuntime(root)).rejects.toThrow();
   });
+  it.each([0, 7, 8, 16, 24])("refuses a forbidden ancestor at NFT input position %s across bounded read groups", async position => {
+    await json("node_modules/synthetic-safe/package.json", { name: "synthetic-safe", version: "1" });
+    await put("node_modules/synthetic-safe/index.js", "exports.safe = true;");
+    await json("node_modules/renamed/package.json", { name: "@eslint/js", version: "1" });
+    await put("node_modules/renamed/index.js", "exports.disguised = true;");
+    const files = Array.from({ length: 25 }, () => "../../node_modules/synthetic-safe/index.js");
+    files[position] = "../../node_modules/renamed/index.js";
+    await json(".next/server/chunk.js.nft.json", { version: 1, files });
+    await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/tooling trace package/);
+  });
+  it("retains full byte provenance for duplicate safe inputs over multiple read groups", async () => {
+    await json(".next/server/chunk.js.nft.json", { version: 1, files: Array.from({ length: 25 }, () => "chunk.js") });
+    const proof = await verifyLintToolingRuntime(root);
+    expect(proof.traceCount).toBe(2);
+    expect(proof.files[".next/server/chunk.js.nft.json"]).toBe(sha256(await readFile(path.join(root, ".next/server/chunk.js.nft.json"))));
+    expect(proof.files[".next/static/chunk.js"]).toBe(sha256("console.log('client');\n"));
+  });
   it("retains the unchanged alias guard's rejection of unreviewed links", async () => {
     await symlink("../../package.json", path.join(root, ".next/standalone/unknown-link"));
     await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/alias/);

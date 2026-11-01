@@ -1,0 +1,34 @@
+{
+  "buildId": "kjAZTJfRtOflAgY_0Na6p",
+  "traces": 741,
+  "inputOccurrences": 3035401,
+  "uniqueLexicalInputs": 14316,
+  "uniquePhysicalInputs": 14316,
+  "perOccurrenceAncestorLookups": 12000406,
+  "uniqueAncestorManifestPaths": 2602,
+  "existingAncestorManifests": 111,
+  "perOccurrenceExistingManifestReads": 3329436,
+  "meaning": "Diagnostic count of unchanged per-occurrence NFT traversal, no cache or guard behavior modification. Realpath resolved only for this count, not an alternative verifier.",
+  "mostRepeatedPhysicalFiles": [
+    {
+      "file": "node_modules/next/dist/compiled/@opentelemetry/api/index.js",
+      "count": 372
+    },
+    {
+      "file": "node_modules/next/dist/compiled/@opentelemetry/api/package.json",
+      "count": 372
+    },
+    {
+      "file": "node_modules/next/dist/compiled/hash.js/sha256/256.js",
+      "count": 372
+    },
+    {
+      "file": "node_modules/next/dist/compiled/hash.js/sha256/package.json",
+      "count": 372
+    },
+    {
+      "file": "node_modules/next/dist/compiled/source-map/package.json",
+      "count": 372
+    }
+  ]
+}
